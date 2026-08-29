@@ -117,9 +117,6 @@ record, making the current split 503 migrated, zero ready, and 569 pending-fix.
 Commit `aedd462` migrated the four Vim9 non-delimited `is`/`isnot` token
 variants, making the current split 507 migrated, zero ready, and 565
 pending-fix.
-Commit `bf1c397` migrated both E1241 one-byte `:global` separator variants,
-making the authoritative current split 787 migrated, zero ready, and 281
-pending-fix.
 Commit `f036019` migrated both contexts of the spaced callable-call case,
 making the current split 509 migrated, zero ready, and 563 pending-fix.
 Commit `a9e5971` migrated the four computed Dictionary-key bracket cases,
@@ -241,6 +238,9 @@ typed-`for` variants, and the final E1125 declaration variant. The
 authoritative current split is 780 migrated, zero ready, and 288 pending-fix.
 Commit `a12a767` migrated the five E1202 generic-call whitespace variants,
 making the authoritative current split 785 migrated, zero ready, and 283
+pending-fix.
+Commit `bf1c397` migrated both E1241 one-byte `:global` separator variants,
+making the authoritative current split 787 migrated, zero ready, and 281
 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
