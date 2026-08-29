@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 821 (`c035bd3`)
+- Current parser-negative syntax assertions: 825 (`a793234`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -269,6 +269,8 @@ Commit `5433450` migrated the `dsearch` attached-comment tail, making the
 authoritative current split 808 migrated, zero ready, and 260 pending-fix.
 Commit `c035bd3` migrated 13 empty generic-call type lists, making the
 authoritative current split 821 migrated, zero ready, and 247 pending-fix.
+Commit `a793234` migrated four invalid Vim9 try-branch/terminator cases, making
+the authoritative current split 825 migrated, zero ready, and 243 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -859,7 +861,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 6 | 0 | 45 |
+| `C-BLOCK` | 51 | 10 | 0 | 41 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 53 | 0 | 62 |
 | `C-EXPR` | 19 | 5 | 0 | 14 |
@@ -867,7 +869,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **189** | **0** | **180** |
+| **Total** | **369** | **193** | **0** | **176** |
 
 ```text
 C-EXPR
@@ -1091,6 +1093,12 @@ Commit `c035bd3` migrated 13 E1555 call/reference variants at
 An empty closed `<>` now retains an explicit missing type argument in the AST
 and reports the call-site Vim diagnostic; ordinary generic declarations,
 non-empty type lists, and incomplete `<` recovery retain their existing paths.
+
+Commit `a793234` migrated `S:{1532:31072,1535:31245,1536:31288,1537:31369}/def`.
+Vim9 try-block construction now reports E603/E606/E602 for unmatched
+`catch`/`finally`/`endtry`, and E607 for a repeated `finally`, while retaining
+the commands and recovering at later physical lines. Mismatched control-block
+terminators remain separate E170/E171 work.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
