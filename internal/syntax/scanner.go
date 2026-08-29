@@ -2371,6 +2371,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if assignment.Start < 0 {
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
 			diagnoseInvalidClassDeclaration(file, command, declaration)
+			diagnoseVim9DeclarationShape(file, command, declaration, directAggregateMember)
 			command.Declaration = declaration
 			if command.Dialect == Vim9 && command.Canonical == "final" && !directAggregateMember {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{
@@ -3510,6 +3511,28 @@ func diagnoseInvalidClassDeclaration(file *File, command *Command, declaration *
 		Span: Span{Start: start, End: command.Argument.End},
 	})
 	return true
+}
+
+func diagnoseVim9DeclarationShape(file *File, command *Command, declaration *Declaration, aggregate bool) {
+	if declaration == nil || command == nil || command.Dialect != Vim9 || declaration.Assignment.Start < declaration.Assignment.End {
+		return
+	}
+	if command.Canonical == "const" && !aggregate {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1021", Message: "const requires a value", Span: command.Name})
+		return
+	}
+	if declaration.Type.Start < declaration.Type.End || command.Canonical != "var" && (!aggregate || command.Canonical != "final" && command.Canonical != "const") {
+		return
+	}
+	name := file.Text(declaration.Name)
+	if name == "" || strings.ContainsAny(name, ":#") {
+		return
+	}
+	first, _ := utf8.DecodeRuneInString(name)
+	if first != '_' && !unicode.IsLetter(first) {
+		return
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1022", Message: "type or initialization required", Span: command.Name})
 }
 
 func diagnoseClassMemberModifierOrder(file *File, command *Command) {

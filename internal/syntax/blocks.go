@@ -54,6 +54,18 @@ func buildBlocks(file *File) {
 					classBodyCommandDiagnostic(file, command)
 					continue
 				}
+				if command.Canonical == "final" || command.Canonical == "const" {
+					argument := file.Text(command.Argument)
+					start := skipSpace(argument, 0, len(argument))
+					if end := scanWord(argument, start, len(argument)); argument[start:end] == "def" {
+						command.Block = blockIndex
+						if classMethods == nil {
+							classMethods = make(map[int]uint8)
+						}
+						classMethods[blockIndex] = classMethodRecovery
+						continue
+					}
+				}
 				if command.Canonical == "def" {
 					for _, modifier := range command.Modifiers {
 						if modifier.Name == "abstract" {
