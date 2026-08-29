@@ -1321,6 +1321,16 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			})
 		}
 		if dialect == Vim9 {
+			// Vim9 does not permit an Ex range on commands whose argument is
+			// parsed as an expression or a conditional.  Keep the command itself
+			// in the AST, but report E481 and let the normal physical-line
+			// recovery path make the remainder opaque.
+			if commandRange.Start < commandRange.End {
+				switch canonical {
+				case "eval", "if", "echo", "cd":
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E481", Message: "no range allowed", Span: commandRange})
+				}
+			}
 			if builtIn {
 				switch canonical {
 				case "k":
