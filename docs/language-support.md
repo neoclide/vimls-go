@@ -49,7 +49,9 @@ The 1.0 parser must accept and recover across:
 - `import`, `export`, autoload imports, `class`/`endclass`, `abstract class`,
   `interface`/`endinterface`, `enum`/`endenum`, `type` aliases, generics,
   constructors, members, and methods as available in the configured Vim version.
-- Mappings, autocommands, user commands, heredocs, regexp-delimited
+- Mappings, including a dialect-aware expression AST for `<expr>` right-hand
+  sides while retaining every raw right-hand side; autocommands, user commands,
+  heredocs, regexp-delimited
   `global`/`vglobal` and fold-filtered `folddoopen`/`folddoclosed` nested Ex
   command lists; structured `substitute`/`smagic`/`snomagic` and `~` payloads
   with regexp and replacement delimiters, previous-pattern forms, flags,

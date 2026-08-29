@@ -187,6 +187,9 @@ func collectLambdaScopesCommands(result *FileAnalysis, parent *Scope, commands [
 		for _, expression := range command.Expressions {
 			collectLambdaScopes(result, commandScope, expression)
 		}
+		if command.Mapping != nil {
+			collectLambdaScopes(result, commandScope, command.Mapping.RHSExpression)
+		}
 		for _, expression := range command.Targets {
 			collectLambdaScopes(result, commandScope, expression)
 		}
@@ -258,6 +261,9 @@ func collectLambdaDeclarations(result *FileAnalysis, commands []syntax.Command) 
 	for index := range commands {
 		command := &commands[index]
 		collectLambdaDeclarationsExpressions(result, command.Expressions)
+		if command.Mapping != nil {
+			collectLambdaDeclarationsExpression(result, command.Mapping.RHSExpression)
+		}
 		collectLambdaDeclarationsExpressions(result, command.Targets)
 		if command.Declaration != nil {
 			collectLambdaDeclarationsExpression(result, command.Declaration.Initializer)
@@ -461,6 +467,9 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 			}
 		}
 		walkExpression(result, file, expression, scope, skip, false)
+	}
+	if command.Mapping != nil {
+		walkExpression(result, file, command.Mapping.RHSExpression, scope, nil, false)
 	}
 	if command.Canonical != "++" && command.Canonical != "--" {
 		for _, target := range command.Targets {

@@ -432,10 +432,15 @@ func assertFileSpansAt(t *testing.T, file *File, origin string) {
 		if command.Mapping != nil {
 			check("mapping lhs", command.Mapping.LHS)
 			check("mapping rhs", command.Mapping.RHS)
+			assertExpressionSpans(t, file, origin, command.Mapping.RHSExpression)
 			for name, span := range map[string]Span{"mapping lhs": command.Mapping.LHS, "mapping rhs": command.Mapping.RHS} {
 				if span != (Span{}) && (span.Start < command.Argument.Start || span.End > command.Argument.End) {
 					t.Fatalf("%s: %s span %#v is outside argument %#v", origin, name, span, command.Argument)
 				}
+			}
+			if expression := command.Mapping.RHSExpression; expression != nil &&
+				(expression.Span.Start < command.Mapping.RHS.Start || expression.Span.End > command.Mapping.RHS.End) {
+				t.Fatalf("%s: mapping expression span %#v is outside rhs %#v", origin, expression.Span, command.Mapping.RHS)
 			}
 		}
 		if command.Substitute != nil {

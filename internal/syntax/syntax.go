@@ -372,10 +372,13 @@ type Mapping struct {
 	Expr    bool
 	Unique  bool
 
-	LHS   Span
-	RHS   Span
-	Query bool
-	Clear bool
+	LHS Span
+	RHS Span
+	// RHSExpression is populated only for <expr> mappings. RHS remains the
+	// authoritative raw span so callers can preserve Vim's exact mapping text.
+	RHSExpression *Expression
+	Query         bool
+	Clear         bool
 }
 
 type Declaration struct {

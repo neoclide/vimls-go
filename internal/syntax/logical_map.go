@@ -145,6 +145,7 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 	if command.Mapping != nil {
 		command.Mapping.LHS = mapper.optional(command.Mapping.LHS)
 		command.Mapping.RHS = mapper.optional(command.Mapping.RHS)
+		mapper.expression(command.Mapping.RHSExpression)
 	}
 	if command.Substitute != nil {
 		substitute := command.Substitute

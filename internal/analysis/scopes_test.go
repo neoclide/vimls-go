@@ -152,6 +152,48 @@ func TestAnalyzeLegacyLambdaScopeDoesNotLeakParameter(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMappingExprReferencesFunctionAndVariable(t *testing.T) {
+	source := "function Fn()\nendfunction\nlet value = 1\nnmap <expr> lhs Fn(value)\n"
+	result := Analyze(syntax.Parse(source))
+	if len(result.References) != 2 {
+		t.Fatalf("mapping expression references = %#v", result.References)
+	}
+	if result.References[0].Name != "Fn" || result.References[0].Declaration == nil || result.References[0].Declaration.Kind != SymbolKindFunction {
+		t.Fatalf("mapping function reference = %#v", result.References[0])
+	}
+	if result.References[1].Name != "value" || result.References[1].Declaration == nil || result.References[1].Declaration.Name != "value" {
+		t.Fatalf("mapping variable reference = %#v", result.References[1])
+	}
+}
+
+func TestAnalyzeOrdinaryMappingDoesNotCreateReferences(t *testing.T) {
+	source := "function Fn()\nendfunction\nlet value = 1\nnmap lhs Fn(value)\n"
+	result := Analyze(syntax.Parse(source))
+	if len(result.References) != 0 {
+		t.Fatalf("ordinary mapping references = %#v", result.References)
+	}
+}
+
+func TestAnalyzeMappingExprLambdaParameterScope(t *testing.T) {
+	source := "let outer = 1\nnmap <expr> lhs {item -> item + outer}\n"
+	result := Analyze(syntax.Parse(source))
+	if len(result.Scopes) != 2 || result.Scopes[1].Lambda == nil {
+		t.Fatalf("mapping lambda scopes = %#v", result.Scopes)
+	}
+	if len(result.Scopes[1].Declarations) != 1 || result.Scopes[1].Declarations[0].Name != "item" {
+		t.Fatalf("mapping lambda declarations = %#v", result.Scopes[1].Declarations)
+	}
+	if len(result.References) != 2 {
+		t.Fatalf("mapping lambda references = %#v", result.References)
+	}
+	if result.References[0].Name != "item" || result.References[0].Declaration != result.Scopes[1].Declarations[0] {
+		t.Fatalf("mapping lambda parameter reference = %#v", result.References[0])
+	}
+	if result.References[1].Name != "outer" || result.References[1].Declaration != result.Root.Declarations[0] {
+		t.Fatalf("mapping lambda capture reference = %#v", result.References[1])
+	}
+}
+
 func TestAnalyzeLambdaBlockWalksBodyReferencesOnce(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar outer = 1\nvar f = (value: number) => {\n  var local = value + outer\n  return local\n}\n"))
 	if len(result.Scopes) != 2 {

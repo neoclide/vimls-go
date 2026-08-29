@@ -2355,6 +2355,11 @@ func parseMapping(file *File, command *Command) {
 		mapping.Query = true
 	} else if rhsStart < argument.End {
 		mapping.RHS = Span{Start: rhsStart, End: argument.End}
+		if mapping.Expr {
+			var diagnostics []Diagnostic
+			mapping.RHSExpression, diagnostics = parseExpression(file.Source[mapping.RHS.Start:mapping.RHS.End], mapping.RHS.Start, command.Dialect)
+			file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		}
 	} else {
 		mapping.Query = true
 	}

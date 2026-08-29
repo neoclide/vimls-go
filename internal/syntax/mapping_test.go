@@ -2,12 +2,17 @@ package syntax
 
 import "testing"
 
-func TestMappingTypedAST(t *testing.T) {
+// Mapping <expr> semantics follow Vim v9.2.1015 runtime/doc/map.txt and the
+// command handling in src/map.c.  The parser keeps the raw RHS span while
+// exposing its expression only for <expr> mappings.
+
+func TestMappingExprAST(t *testing.T) {
 	tests := []struct {
-		name   string
-		source string
-		index  int
-		check  func(*testing.T, *File, *Mapping)
+		name             string
+		source           string
+		index            int
+		allowDiagnostics bool
+		check            func(*testing.T, *File, *Mapping)
 	}{
 		{
 			name:   "combined modifiers and trailing rhs",
@@ -33,6 +38,103 @@ func TestMappingTypedAST(t *testing.T) {
 				}
 				if file.Text(mapping.LHS) != "bar" || file.Text(mapping.RHS) != "isbar" {
 					t.Fatalf("spans = lhs %q rhs %q", file.Text(mapping.LHS), file.Text(mapping.RHS))
+				}
+			},
+		},
+		{
+			name:   "legacy expr call and binary",
+			source: "nmap <expr> lhs Fn('x') . suffix\n",
+			check: func(t *testing.T, file *File, mapping *Mapping) {
+				if !mapping.Expr || mapping.RHSExpression == nil || mapping.RHSExpression.Kind != ExpressionBinary {
+					t.Fatalf("legacy expression = %#v", mapping.RHSExpression)
+				}
+				if got := file.Text(mapping.RHS); got != "Fn('x') . suffix" {
+					t.Fatalf("rhs = %q", got)
+				}
+				if mapping.RHSExpression.Span != (Span{Start: mapping.RHS.Start, End: mapping.RHS.End}) {
+					t.Fatalf("rhs expression span = %#v, rhs = %#v", mapping.RHSExpression.Span, mapping.RHS)
+				}
+				if mapping.RHSExpression.Children[0].Kind != ExpressionCall || file.Text(mapping.RHSExpression.Children[0].Span) != "Fn('x')" {
+					t.Fatalf("call = %#v", mapping.RHSExpression.Children[0])
+				}
+			},
+		},
+		{
+			name:   "vim9 expr concat",
+			source: "vim9cmd nmap <expr> lhs left .. right\n",
+			check: func(t *testing.T, file *File, mapping *Mapping) {
+				if file.Commands[0].Dialect != Vim9 || mapping.RHSExpression == nil || mapping.RHSExpression.Kind != ExpressionBinary || mapping.RHSExpression.Value != ".." {
+					t.Fatalf("vim9 expression = %#v", mapping.RHSExpression)
+				}
+				if mapping.RHSExpression.Operator != (Span{Start: mapping.RHS.Start + len("left "), End: mapping.RHS.Start + len("left ..")}) {
+					t.Fatalf("operator span = %#v, rhs = %#v", mapping.RHSExpression.Operator, mapping.RHS)
+				}
+				if file.Text(mapping.RHSExpression.Span) != "left .. right" {
+					t.Fatalf("expression span text = %q", file.Text(mapping.RHSExpression.Span))
+				}
+			},
+		},
+		{
+			name:   "legacy modifier selects legacy expression",
+			source: "vim9script\nlegacy nmap <expr> lhs Fn ('x') . suffix\n",
+			index:  1,
+			check: func(t *testing.T, file *File, mapping *Mapping) {
+				if file.Commands[1].Dialect != Legacy || mapping.RHSExpression == nil || mapping.RHSExpression.Kind != ExpressionBinary {
+					t.Fatalf("legacy modifier command=%#v expression=%#v", file.Commands[1], mapping.RHSExpression)
+				}
+				if mapping.RHSExpression.Children[0].Kind != ExpressionCall {
+					t.Fatalf("legacy whitespace call = %#v", mapping.RHSExpression.Children[0])
+				}
+			},
+		},
+		{
+			name:   "vim9 file maps logical expression spans",
+			source: "vim9script\nnmap <expr> lhs left .. right\n",
+			index:  1,
+			check: func(t *testing.T, file *File, mapping *Mapping) {
+				expression := mapping.RHSExpression
+				if file.Commands[1].Dialect != Vim9 || expression == nil || expression.Kind != ExpressionBinary || expression.Value != ".." {
+					t.Fatalf("vim9 mapping command=%#v expression=%#v", file.Commands[1], expression)
+				}
+				if expression.Span != mapping.RHS || file.Text(expression.Span) != "left .. right" || file.Text(expression.Operator) != ".." {
+					t.Fatalf("expression span=%#v operator=%#v rhs=%#v", expression.Span, expression.Operator, mapping.RHS)
+				}
+				if len(expression.Children) != 2 || file.Text(expression.Children[0].Span) != "left" || file.Text(expression.Children[1].Span) != "right" {
+					t.Fatalf("expression children = %#v", expression.Children)
+				}
+			},
+		},
+		{
+			name:   "ordinary mapping keeps opaque rhs",
+			source: "nmap lhs left .. right\n",
+			check: func(t *testing.T, file *File, mapping *Mapping) {
+				if mapping.Expr || mapping.RHSExpression != nil || file.Text(mapping.RHS) != "left .. right" {
+					t.Fatalf("ordinary mapping = %#v rhs=%q", mapping, file.Text(mapping.RHS))
+				}
+			},
+		},
+		{
+			name:   "empty expr rhs remains query without expression",
+			source: "nmap <expr> lhs\n",
+			check: func(t *testing.T, file *File, mapping *Mapping) {
+				if !mapping.Expr || !mapping.Query || mapping.RHS != (Span{}) || mapping.RHSExpression != nil {
+					t.Fatalf("empty expr mapping = %#v", mapping)
+				}
+			},
+		},
+		{
+			name:             "incomplete expr recovers next line",
+			source:           "nmap <expr> lhs Fn(\necho next\n",
+			allowDiagnostics: true,
+			check: func(t *testing.T, file *File, mapping *Mapping) {
+				if mapping.RHSExpression == nil || len(file.Diagnostics) == 0 {
+					t.Fatalf("incomplete expression=%#v diagnostics=%#v", mapping.RHSExpression, file.Diagnostics)
+				}
+				if mapping.RHSExpression.Kind != ExpressionCall || file.Text(mapping.RHSExpression.Span) != "Fn(" {
+					t.Fatalf("partial expression = %#v text=%q", mapping.RHSExpression, file.Text(mapping.RHSExpression.Span))
+				}
+				if len(file.Commands) != 2 || file.Commands[1].Canonical != "echo" || file.Text(file.Commands[1].Argument) != "next" {
+					t.Fatalf("recovery commands = %#v", file.Commands)
 				}
 			},
 		},
@@ -146,7 +248,7 @@ func TestMappingTypedAST(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			file := Parse(test.source)
-			if len(file.Diagnostics) != 0 {
+			if !test.allowDiagnostics && len(file.Diagnostics) != 0 {
 				t.Fatalf("diagnostics = %#v", file.Diagnostics)
 			}
 			if len(file.Commands) <= test.index || file.Commands[test.index].Mapping == nil {
