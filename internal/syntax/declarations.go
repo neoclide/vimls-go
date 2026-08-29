@@ -4,6 +4,8 @@ func parseImport(file *File, command *Command) {
 	source := file.Text(command.Argument)
 	start := skipSpace(source, 0, len(source))
 	importNode := &Import{}
+	invalidAlias := Span{}
+	hasInvalidAlias := false
 	if wordEnd := scanWord(source, start, len(source)); source[start:wordEnd] == "autoload" && wordEnd < len(source) && isSpace(source[wordEnd]) {
 		importNode.Autoload = true
 		start = skipSpace(source, wordEnd, len(source))
@@ -13,14 +15,31 @@ func parseImport(file *File, command *Command) {
 	if aliasKeyword >= 0 {
 		pathEnd = trimSpaceEnd(source, start, aliasKeyword)
 		aliasStart := skipSpace(source, aliasKeyword+2, len(source))
-		aliasEnd := scanWord(source, aliasStart, len(source))
+		aliasEnd := aliasStart
+		if aliasEnd < len(source) && (isASCIIAlpha(source[aliasEnd]) || source[aliasEnd] == '_') {
+			aliasEnd++
+			for aliasEnd < len(source) && (isASCIIAlpha(source[aliasEnd]) || isExpressionDigit(source[aliasEnd]) || source[aliasEnd] == '_') {
+				aliasEnd++
+			}
+		}
 		importNode.Alias = Span{Start: command.Argument.Start + aliasStart, End: command.Argument.Start + aliasEnd}
+		if command.Dialect == Vim9 && (aliasEnd == aliasStart || aliasEnd < len(source) && !isSpace(source[aliasEnd])) {
+			invalidEnd := aliasStart
+			for invalidEnd < len(source) && !isSpace(source[invalidEnd]) {
+				invalidEnd++
+			}
+			invalidAlias = Span{Start: command.Argument.Start + aliasStart, End: command.Argument.Start + invalidEnd}
+			hasInvalidAlias = true
+		}
 	}
 	pathStart := skipSpace(source, start, pathEnd)
 	pathEnd = trimSpaceEnd(source, pathStart, pathEnd)
 	importNode.PathSpan = Span{Start: command.Argument.Start + pathStart, End: command.Argument.Start + pathEnd}
 	if pathStart < pathEnd {
 		importNode.Path, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[pathStart:pathEnd], command.Argument.Start+pathStart, command.Dialect)
+	}
+	if hasInvalidAlias {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1047", Message: "syntax error in import", Span: invalidAlias})
 	}
 	command.Import = importNode
 }
