@@ -370,6 +370,10 @@ func parseSource(source string, initial Dialect) *File {
 	}
 	normalizeVim9SpacedCallDiagnostics(file)
 	for index := range file.Commands {
+		if index+1 < len(file.Commands) {
+			_, closing := closingBlock(file, &file.Commands[index+1])
+			file.Commands[index].hasNextStatement = !closing
+		}
 		if !file.Commands[index].detailsOpaque && (file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute") {
 			parseLogicalCommandDetails(file, &file.Commands[index])
 		}
@@ -2562,14 +2566,14 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 		case diagnostic.Code == "vimls/missing-delimiter" && diagnostic.Message == "expected ]":
 			diagnostic.Code = "vim/E111"
 			diagnostic.Message = "missing ']'"
-			if inDef {
+			if inDef && !command.hasNextStatement {
 				diagnostic.Code = "vim/E1097"
 				diagnostic.Message = "line incomplete"
 			}
 		case diagnostic.Code == "vimls/missing-delimiter" && diagnostic.Message == "expected )":
 			diagnostic.Code = "vim/E110"
 			diagnostic.Message = "missing ')'"
-			if inDef {
+			if inDef && diagnostic.Span.Start == diagnostic.Span.End && !commandCall {
 				diagnostic.Code = "vim/E1097"
 				diagnostic.Message = "line incomplete"
 			}

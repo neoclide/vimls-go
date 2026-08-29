@@ -100,6 +100,7 @@ type Command struct {
 	logical            *logicalCommandView
 	boundaryExpression *expressionBoundary
 	collectedBlockVim9 bool
+	hasNextStatement   bool
 }
 
 // AutocmdCommand is the command-specific syntax of :autocmd. The group and

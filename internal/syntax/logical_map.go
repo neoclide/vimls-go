@@ -17,6 +17,7 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 	temporaryCommand := logical.command
 	temporaryCommand.ScriptVersion = command.ScriptVersion
 	temporaryCommand.Block = command.Block
+	temporaryCommand.hasNextStatement = command.hasNextStatement
 	temporary := &File{
 		Dialect: file.Dialect,
 		Source:  logical.view.Text,

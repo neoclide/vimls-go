@@ -1425,6 +1425,40 @@ func TestVim9InvalidAtomRecovery(t *testing.T) {
 	}
 }
 
+func TestVim9PostfixDelimiterRecovery(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		code   string
+		kind   ExpressionKind
+	}{
+		{name: "wrong parenthesis closer", source: "def F()\necho (123]\necho after\nenddef\n", code: "vim/E110", kind: ExpressionParenthesized},
+		{name: "slice before command", source: "def F()\nvar d = 'asdf'[1 : 2\necho d\nenddef\n", code: "vim/E111", kind: ExpressionSlice},
+		{name: "call missing closer", source: "def F()\necho len('asdf'\necho after\nenddef\n", code: "vim/E110", kind: ExpressionCall},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+				t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+			}
+			var malformed *Expression
+			if test.kind == ExpressionSlice {
+				malformed = file.Commands[1].Declaration.Initializer
+			} else {
+				malformed = file.Commands[1].Expressions[0]
+			}
+			if malformed == nil || malformed.Kind != test.kind {
+				t.Fatalf("malformed expression = %#v, commands = %#v", malformed, file.Commands)
+			}
+			if len(file.Commands) < 4 || file.Commands[2].Canonical != "echo" {
+				t.Fatalf("following command was swallowed: %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestOfficialVim9CallableParenthesisSpacing(t *testing.T) {
 	// Vim v9.2.1015 src/testdir/test_vim9_expr.vim:4480.
 	source := "vim9script\nvar l = [2]\nl->((ll) => add(ll, 8)) ()\nvar after = 1\necho after\n"
