@@ -69,9 +69,11 @@ across production packages below `internal/` and must remain at least 90%.
 The normal offline test gate losslessly includes all 362 `.vim` files below
 Vim v9.2.1015's `src/testdir` (8,558,061 source bytes), plus 3,267 extracted
 official scripts and a classified inventory of all 5,733 `Check*` candidates.
-It parses every source through both independent parser entry points without
-executing it. To additionally compare the committed corpora and copied Vim
-license byte-for-byte with the pinned local checkout, run:
+An explicit 44-file syntax-test allowlist prevents the conformance migration
+from revisiting the other 318 test files. The stability gate still parses every
+source through both independent parser entry points without executing it. To
+additionally compare the committed corpora and copied Vim license byte-for-byte
+with the pinned local checkout, run:
 
 ```sh
 GOPROXY=off GOSUMDB=off make test-official

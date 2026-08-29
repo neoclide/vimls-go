@@ -14,6 +14,10 @@ These files are generated from Vim tag `v9.2.1015`, commit
   the full corpus. It classifies 5,208 qualified `v9.Check*` calls by helper,
   source span, and first-argument shape; every other candidate has an explicit
   out-of-scope reason. This is an extraction ledger, not a parser oracle.
+- `v9.2.1015-parser-files.json` is the reviewed migration allowlist. It includes
+  44 files with direct lexer, parser, command-grammar, or recovery coverage and
+  defaults every other pinned test file to excluded. Migration generators must
+  use this allowlist instead of rescanning all 362 files.
 
 The full-file corpus is a stability and lossless-recovery gate. It does not by
 itself prove that vimls-go accepts and rejects every construct exactly as Vim

@@ -53,7 +53,11 @@ retained source plus ordered, in-bounds command, token, block, and diagnostic
 spans without sourcing or executing the files. A separate helper inventory
 classifies all 5,733 `Check*` candidates, including all 5,208 qualified
 `v9.Check*` calls, so each call can later become a generated conformance case or
-an explicit skip.
+an explicit skip. `v9.2.1015-parser-files.json` is the fixed migration boundary:
+44 syntax-relevant files are included, 24 ambiguous helper-bearing files have
+explicit exclusions, and the remaining 294 files inherit the default exclusion.
+Migration tools must process only the 44 included files; changing the pinned Vim
+version or this reviewed manifest is the only reason to revisit excluded files.
 
 Full-file parsing proves stability, recovery, and span integrity, not exact Vim
 acceptance. The conformance layer must use generated helper expectations and
