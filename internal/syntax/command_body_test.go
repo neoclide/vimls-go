@@ -52,6 +52,35 @@ func TestUserCommandReplacementRecognizesVimBangVariants(t *testing.T) {
 	}
 }
 
+func TestVim9UserCommandCompletionRequiresArguments(t *testing.T) {
+	tests := []struct {
+		source string
+		span   string
+	}{
+		{source: "com! -complete=file DoCmd :", span: "-complete=file"},
+		{source: "com! -nargs=0 -complete=file DoCmd :", span: "-complete=file"},
+	}
+	for _, test := range tests {
+		file := Parse("vim9script\n" + test.source + "\nvar after = 1\n")
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1208" || file.Text(file.Diagnostics[0].Span) != test.span {
+			t.Fatalf("%q diagnostics = %#v", test.source, file.Diagnostics)
+		}
+		if len(file.Commands) != 3 || file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+			t.Fatalf("%q commands = %#v", test.source, file.Commands)
+		}
+	}
+	for _, source := range []string{
+		"vim9script\ncom! -nargs=1 -complete=file DoCmd :\n",
+		"vim9script\ncom! -complete=file -nargs=_ DoCmd :\n",
+		"com! -complete=file DoCmd :\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) != 0 {
+			t.Fatalf("%q diagnostics = %#v", source, file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9UserCommandBlockBody(t *testing.T) {
 	source := "vim9script\ncommand Foo {\n  var value = 1\n  if value == 1\n    echo 'ok'\n  endif\n}\necho done\n"
 	file := Parse(source)

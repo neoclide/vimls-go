@@ -283,6 +283,8 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_tuple.vim:138:3809/def":                  "vim/E1004",
 		"src/testdir/test_tuple.vim:143:3972/vim9-script":          "vim/E1068",
 		"src/testdir/test_tuple.vim:151:4245/vim9-script":          "vim/E1068",
+		"src/testdir/test_usercommands.vim:328:8893/script":        "vim/E1208",
+		"src/testdir/test_usercommands.vim:334:9034/script":        "vim/E1208",
 	}
 
 	corpus := readOfficialParserCases(t)

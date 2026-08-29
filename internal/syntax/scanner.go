@@ -2043,6 +2043,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	if command.Canonical == "command" {
+		diagnoseUserCommandAttributes(file, command)
 		// A Vim9 command block is already represented by the top-level command
 		// stream and its BlockCommand. Attaching a second CommandList would make
 		// semantic consumers visit the same declarations and references twice.
@@ -2459,6 +2460,38 @@ func userCommandBodySpan(source string, argument Span) (Span, bool) {
 		return Span{}, false
 	}
 	return Span{Start: bodyStart, End: argument.End}, true
+}
+
+func diagnoseUserCommandAttributes(file *File, command *Command) {
+	if command.Dialect != Vim9 {
+		return
+	}
+	allowArguments := false
+	complete := Span{}
+	start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+	for start < command.Argument.End && file.Source[start] == '-' {
+		end := start
+		for end < command.Argument.End && !isSpace(file.Source[end]) {
+			end++
+		}
+		attribute := file.Source[start:end]
+		if strings.HasPrefix(attribute, "-nargs=") {
+			switch attribute[len("-nargs="):] {
+			case "1", "_", "*", "?", "+":
+				allowArguments = true
+			case "0":
+				allowArguments = false
+			}
+		} else if strings.HasPrefix(attribute, "-complete=") && len(attribute) > len("-complete=") {
+			complete = Span{Start: start, End: end}
+		}
+		start = skipSpace(file.Source, end, command.Argument.End)
+	}
+	if complete.Start < complete.End && !allowArguments {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1208", Message: "-complete used without allowing arguments", Span: complete,
+		})
+	}
 }
 
 const maxEmbeddedCommandDepth = 32
