@@ -330,7 +330,13 @@ func (p *typeParser) consumeTypeClosing(expected byte) {
 		return
 	}
 	span := p.span(p.offset, p.offset)
-	p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-type-delimiter", Message: "expected " + string(expected), Span: span})
+	code := "vimls/missing-type-delimiter"
+	message := "expected " + string(expected)
+	if expected == ')' {
+		code = "vim/E110"
+		message = "missing ')'"
+	}
+	p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: span})
 }
 
 func isKnownNonListType(node *Type) bool {

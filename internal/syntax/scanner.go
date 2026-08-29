@@ -1654,6 +1654,11 @@ func detectHeredoc(file *File, command *Command) bool {
 		}
 	}
 	if assignmentOffset >= 0 {
+		if command.Dialect == Vim9 && (command.Canonical == "var" || command.Canonical == "const" || command.Canonical == "final") {
+			left := argument[:assignmentOffset]
+			name, _ := declarationSpans(left, command.Argument.Start, Vim9)
+			diagnoseVim9TypeDelimiter(file, left, command.Argument.Start, name)
+		}
 		diagnostics := len(file.Diagnostics)
 		diagnoseVim9AssignmentSpacing(file, command, Span{
 			Start: command.Argument.Start + assignmentOffset,
@@ -3636,7 +3641,7 @@ func parseDeclarationHead(file *File, source string, base int, dialect Dialect) 
 	if dialect == Vim9 {
 		source = maskVim9Comments(source)
 	}
-	name, typeSpan := declarationSpans(source, base)
+	name, typeSpan := declarationSpans(source, base, dialect)
 	if dialect == Vim9 {
 		start := skipSpace(source, 0, len(source))
 		if start < len(source) && source[start] == '@' {
@@ -3647,11 +3652,14 @@ func parseDeclarationHead(file *File, source string, base int, dialect Dialect) 
 		}
 	}
 	declaration := &Declaration{Name: name, Type: typeSpan}
+	if dialect == Vim9 {
+		diagnoseVim9TypeDelimiter(file, source, base, name)
+	}
 	trimmedStart := skipSpace(source, 0, len(source))
 	if trimmedStart < len(source) && source[trimmedStart] == '[' {
 		if close := findMatching(source, trimmedStart, '[', ']'); close >= 0 {
 			declaration.Name = Span{Start: base + trimmedStart, End: base + close + 1}
-			declaration.Bindings = parseBindings(file, source, base, trimmedStart+1, close)
+			declaration.Bindings = parseBindings(file, source, base, trimmedStart+1, close, dialect)
 		}
 	} else if name.Start < name.End {
 		binding := Binding{Name: name, Type: typeSpan}
@@ -3666,7 +3674,7 @@ func parseDeclarationHead(file *File, source string, base int, dialect Dialect) 
 	return declaration
 }
 
-func parseBindings(file *File, source string, base, start, end int) []Binding {
+func parseBindings(file *File, source string, base, start, end int, dialect Dialect) []Binding {
 	var bindings []Binding
 	partStart := start
 	rest := false
@@ -3705,8 +3713,12 @@ func parseBindings(file *File, source string, base, start, end int) []Binding {
 		segmentStart := skipSpace(source, partStart, index)
 		segmentEnd := trimSpaceEnd(source, segmentStart, index)
 		if segmentStart < segmentEnd {
-			name, typeSpan := declarationSpans(source[segmentStart:segmentEnd], base+segmentStart)
+			segment := source[segmentStart:segmentEnd]
+			name, typeSpan := declarationSpans(segment, base+segmentStart, dialect)
 			binding := Binding{Name: name, Type: typeSpan, Rest: rest}
+			if dialect == Vim9 {
+				diagnoseVim9TypeDelimiter(file, segment, base+segmentStart, name)
+			}
 			if typeSpan.Start < typeSpan.End {
 				binding.ParsedType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, file.Source[typeSpan.Start:typeSpan.End], typeSpan.Start)
 			}
@@ -3718,6 +3730,33 @@ func parseBindings(file *File, source string, base, start, end int) []Binding {
 		partStart = index + 1
 	}
 	return bindings
+}
+
+func diagnoseVim9TypeDelimiter(file *File, source string, base int, name Span) {
+	if name.Start < base || name.End < name.Start || name.End > base+len(source) {
+		return
+	}
+	nameEnd := name.End - base
+	position := nameEnd
+	for position < len(source) && isExpressionSpace(source[position]) {
+		position++
+	}
+	if position >= len(source) || source[position] != ':' {
+		return
+	}
+	if position > nameEnd {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1059", Message: "white space is not allowed before ':'",
+			Span: Span{Start: base + nameEnd, End: base + position + 1},
+		})
+		return
+	}
+	if position+1 >= len(source) || !isExpressionSpace(source[position+1]) {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1069", Message: "white space required after ':'",
+			Span: Span{Start: base + position, End: base + position + 1},
+		})
+	}
 }
 
 func parseForLoop(file *File, command *Command) {
@@ -3737,11 +3776,15 @@ func parseForLoop(file *File, command *Command) {
 	leftStart := skipExpressionSpace(source, 0)
 	if leftStart < leftEnd && source[leftStart] == '[' {
 		if close := findMatching(source, leftStart, '[', ']'); close >= 0 {
-			loop.Bindings = parseBindings(file, source, command.Argument.Start, leftStart+1, close)
+			loop.Bindings = parseBindings(file, source, command.Argument.Start, leftStart+1, close, command.Dialect)
 		}
 	} else {
-		name, typeSpan := declarationSpans(source[leftStart:leftEnd], command.Argument.Start+leftStart)
+		segment := source[leftStart:leftEnd]
+		name, typeSpan := declarationSpans(segment, command.Argument.Start+leftStart, command.Dialect)
 		binding := Binding{Name: name, Type: typeSpan}
+		if command.Dialect == Vim9 {
+			diagnoseVim9TypeDelimiter(file, segment, command.Argument.Start+leftStart, name)
+		}
 		if typeSpan.Start < typeSpan.End {
 			binding.ParsedType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, file.Source[typeSpan.Start:typeSpan.End], typeSpan.Start)
 		}
@@ -3808,13 +3851,16 @@ func findAssignment(source string) Span {
 	return Span{Start: -1, End: -1}
 }
 
-func declarationSpans(source string, base int) (Span, Span) {
+func declarationSpans(source string, base int, dialect Dialect) (Span, Span) {
 	start := skipSpace(source, 0, len(source))
 	end := start
 	for end < len(source) {
 		r, size := utf8.DecodeRuneInString(source[end:])
 		if r == ':' {
 			isScope := end == start+1 && strings.ContainsRune("abglstvw", rune(source[start]))
+			if dialect == Vim9 && (source[start] == 'a' || source[start] == 'l') {
+				isScope = false
+			}
 			if isScope && end+size < len(source) {
 				next, _ := utf8.DecodeRuneInString(source[end+size:])
 				isScope = !unicode.IsSpace(next)
@@ -4169,7 +4215,7 @@ func completeVim9TypedDeclaration(command Command, source string) bool {
 		_, diagnostics := parseExpression(source[rightStart:], rightStart, Vim9)
 		return len(diagnostics) == 0
 	}
-	_, typeSpan := declarationSpans(source, 0)
+	_, typeSpan := declarationSpans(source, 0, Vim9)
 	if typeSpan.Start >= typeSpan.End {
 		return false
 	}
