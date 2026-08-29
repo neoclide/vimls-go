@@ -1157,7 +1157,7 @@ func TestOfficialExpressionLiteralForms(t *testing.T) {
 		{"0xBE'EF", ExpressionNumber},
 		{".123", ExpressionNumber},
 		{"1.0E-6", ExpressionNumber},
-		{"#{key: 1, other: 2}", ExpressionDictionary},
+		{"{key: 1, other: 2}", ExpressionDictionary},
 	}
 	for _, test := range tests {
 		expression, diagnostics := (Vim9ExpressionParser{}).Parse(test.source)

@@ -833,6 +833,16 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 			file.Tokens = append(file.Tokens, Token{Kind: TokenComment, Span: Span{Start: start, End: end}})
 			return
 		}
+		if baseDialect == Vim9 && strings.HasPrefix(file.Source[start:end], "#{") && !strings.HasPrefix(file.Source[start:end], "#{{") {
+			// In Vim9 `#{` used to look like a dictionary opener, but it is an
+			// invalid attempt to begin a comment.  Keep the physical line opaque
+			// so recovery resumes with the next command.
+			file.Tokens = append(file.Tokens, Token{Kind: TokenOpaque, Span: Span{Start: start, End: end}})
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1170", Message: "Cannot use #{ to start a comment", Span: Span{Start: start, End: start + 2},
+			})
+			return
+		}
 
 		commandStart := start
 		if file.Source[start] == ':' {

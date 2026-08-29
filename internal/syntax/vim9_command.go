@@ -265,7 +265,11 @@ func scanVim9ExpressionList(source string, start, end int, command *Command) (in
 		}
 		expression, diagnostics, consumed := parseExpressionPrefix(source[position:expressionEnd], position, Vim9)
 		if len(diagnostics) > 0 {
-			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment, nil
+			argumentEnd := trimSpaceEnd(source, start, expressionEnd)
+			if len(diagnostics) == 1 && diagnostics[0].Code == "vim/E1170" {
+				return argumentEnd, Span{}, comment, &expressionBoundary{argument: Span{Start: start, End: argumentEnd}, expression: expression, diagnostics: diagnostics}
+			}
+			return argumentEnd, Span{}, comment, nil
 		}
 		if consumed <= 0 {
 			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment, nil

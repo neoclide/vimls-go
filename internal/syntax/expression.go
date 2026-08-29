@@ -131,8 +131,8 @@ func newExpressionBoundary(argument Span, expression *Expression, diagnostics []
 func appendTrailingExpressionDiagnostic(diagnostics []Diagnostic, base, consumed, length int) []Diagnostic {
 	if consumed < length {
 		for _, diagnostic := range diagnostics {
-			if diagnostic.Code == "vim/E1004" || diagnostic.Code == "vim/E274" {
-				// Vim stops the current expression at these spacing errors.
+			if diagnostic.Code == "vim/E1004" || diagnostic.Code == "vim/E274" || diagnostic.Code == "vim/E1170" {
+				// Vim stops the current expression at these errors.
 				// Keep the remaining bytes opaque instead of reporting a cascade.
 				return diagnostics
 			}
@@ -160,7 +160,23 @@ func mapVim9LambdaTrailingParen(diagnostics []Diagnostic, expression *Expression
 func parseExpressionPrefix(source string, base int, dialect Dialect) (*Expression, []Diagnostic, int) {
 	parser := &expressionParser{source: source, base: base, dialect: dialect, lexer: newExpressionLexer(source, base, dialect)}
 	expression := parser.parse(0)
+	if dialect == Vim9 && parser.current().text == "#{" {
+		token := parser.current()
+		parser.advance()
+		parser.diagnostics = append(parser.diagnostics, Diagnostic{
+			Code: "vim/E1170", Message: "Cannot use #{ to start a comment", Span: token.span,
+		})
+	}
 	diagnostics := parser.diagnostics
+	for index, diagnostic := range diagnostics {
+		if diagnostic.Code == "vim/E1170" {
+			// Vim stops parsing this physical expression after the bad comment
+			// token.  Keep any earlier error, but discard delimiter cascades added
+			// while the partial AST unwinds.
+			diagnostics = diagnostics[:index+1]
+			break
+		}
+	}
 	if len(diagnostics) > 1 && diagnostics[0].Code == "vim/E1004" {
 		// Vim stops at the operator-spacing error instead of also reporting a
 		// missing right-hand expression for the same operator.
@@ -197,7 +213,13 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 		if token.text == "?" && minimumBinding <= 10 {
 			p.validateBinarySpacing(token)
 			p.advance()
+			diagnosticsStart := len(p.diagnostics)
 			whenTrue := p.parse(0)
+			for _, diagnostic := range p.diagnostics[diagnosticsStart:] {
+				if diagnostic.Code == "vim/E1170" {
+					return &Expression{Kind: ExpressionTernary, Span: Span{Start: left.Span.Start, End: whenTrue.Span.End}, Operator: token.span, Children: []*Expression{left, whenTrue}}
+				}
+			}
 			if p.current().text != ":" {
 				code := "vimls/missing-ternary-colon"
 				message := "expected : in ternary expression"
@@ -541,6 +563,13 @@ func (p *expressionParser) parsePrefix() *Expression {
 		}
 		return p.parseDictionaryOrLambda()
 	case "#{":
+		if p.dialect == Vim9 {
+			p.advance()
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1170", Message: "Cannot use #{ to start a comment", Span: token.span,
+			})
+			return &Expression{Kind: ExpressionMissing, Span: token.span}
+		}
 		return p.parseDictionaryOrLambda()
 	}
 	p.advance()
@@ -734,7 +763,11 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 			}
 			p.advance()
 		}
-		end := p.consumeClosing(")", token.span.End)
+		fallback := token.span.End
+		if len(children) > 1 {
+			fallback = children[len(children)-1].Span.End
+		}
+		end := p.consumeClosing(")", fallback)
 		return &Expression{Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: end}, Children: children}
 	case "[":
 		p.advance()
