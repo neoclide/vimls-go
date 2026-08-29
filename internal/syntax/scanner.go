@@ -2409,6 +2409,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 	case "++", "--":
+		if command.Dialect == Vim9 && command.Name.End < command.Argument.Start {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code:    "vim/E1202",
+				Message: "No white space allowed after '" + command.Canonical + "': " + file.Source[command.Name.Start:command.Span.End],
+				Span:    Span{Start: command.Name.End, End: command.Argument.Start},
+			})
+		}
 		target, diagnostics := parseExpression(source, command.Argument.Start, command.Dialect)
 		command.Targets = append(command.Targets, target)
 		command.Expressions = append(command.Expressions, &Expression{Kind: ExpressionUnary, Span: Span{Start: command.Name.Start, End: target.Span.End}, Operator: command.Name, Value: command.Canonical, Children: []*Expression{target}})
