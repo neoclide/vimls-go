@@ -2205,9 +2205,12 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		assignment.Start += command.Argument.Start
 		assignment.End += command.Argument.Start
-		diagnoseVim9AssignmentSpacing(file, command, assignment)
 		left := file.Source[command.Argument.Start:assignment.Start]
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
+		invalidClassDeclaration := diagnoseInvalidClassDeclaration(file, command, declaration)
+		if !invalidClassDeclaration {
+			diagnoseVim9AssignmentSpacing(file, command, assignment)
+		}
 		rightStart := skipSpace(file.Source, assignment.End, command.Argument.End)
 		rhs := Span{Start: rightStart, End: command.Argument.End}
 		expression, diagnostics, reused := takeRecoveringBoundaryExpression(command, rhs)
@@ -2217,7 +2220,6 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		declaration.Target, diagnostics = parseDeclarationTarget(file, command, declaration, left, diagnostics)
 		declaration.Assignment = assignment
 		declaration.Initializer = expression
-		diagnoseInvalidClassDeclaration(file, command, declaration)
 		diagnoseInvalidInterfaceDeclaration(file, command, declaration)
 		command.Declaration = declaration
 		command.Expressions = append(command.Expressions, &Expression{
@@ -3168,9 +3170,9 @@ func parseVariableTargets(file *File, command *Command) {
 	}
 }
 
-func diagnoseInvalidClassDeclaration(file *File, command *Command, declaration *Declaration) {
+func diagnoseInvalidClassDeclaration(file *File, command *Command, declaration *Declaration) bool {
 	if command.Canonical != "var" || declaration == nil || declaration.Name.Start < declaration.Name.End || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockClass {
-		return
+		return false
 	}
 	code := "vim/E1317"
 	message := "invalid object variable declaration"
@@ -3187,6 +3189,7 @@ func diagnoseInvalidClassDeclaration(file *File, command *Command, declaration *
 		Code: code, Message: message,
 		Span: Span{Start: start, End: command.Argument.End},
 	})
+	return true
 }
 
 func diagnoseClassMemberModifierOrder(file *File, command *Command) {
