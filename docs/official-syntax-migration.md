@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 656 (`52e3f5d`)
+- Current parser-negative syntax assertions: 671 (`9727226`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -188,7 +188,9 @@ and 416 pending-fix. Commit `d3d86b1` migrated the two Vim9 member-dot spacing
 cases, making the authoritative current split 654 migrated, zero ready, and
 414 pending-fix. Commit `52e3f5d` migrated both Vim9 increment-spacing
 contexts, making the authoritative current split 656 migrated, zero ready, and
-412 pending-fix.
+412 pending-fix. Commit `9727226` migrated all 15 invalid class-body command
+cases, making the authoritative current split 671 migrated, zero ready, and
+397 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -506,7 +508,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-user-command-arguments` | 2 | 2 | 0 | 0 |
 | `B-class-modifier` | 8 | 8 | 0 | 0 |
 | `B-class-variable` | 6 | 6 | 0 | 0 |
-| `B-class-body-command` | 15 | 0 | 0 | 15 |
+| `B-class-body-command` | 15 | 15 | 0 | 0 |
 | `B-interface-dialect-body` | 3 | 3 | 0 | 0 |
 | `B-new-static-abstract` | 8 | 2 | 0 | 6 |
 | `B-implements` | 2 | 2 | 0 | 0 |
@@ -514,9 +516,9 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **103** | **0** | **88** |
+| **Total** | **191** | **118** | **0** | **73** |
 
-This table reflects the current parser through `52e3f5d`. Revalidation corrected
+This table reflects the current parser through `9727226`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -560,6 +562,13 @@ Commit `52e3f5d` migrated both contexts of `A:3039:74843`. Whitespace after a
 Vim9 `++` or `--` command reports E1202 over the whitespace while retaining the
 target and unary-expression AST. Adjacent operators and legacy commands remain
 unchanged.
+
+Commit `9727226` completed `B-class-body-command`. A command that is not a
+valid direct Vim9 class member now reports E1318 while retaining any expression
+AST. Bare method declarations and invalid abstract-method bodies recover through
+their `enddef`; ordinary invalid lines resume at the next physical command, and
+valid members, modifiers, method bodies, and class terminators keep their prior
+behavior.
 
 ```text
 B-assign-spacing
