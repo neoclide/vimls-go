@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 735 (`1b7b04f`)
+- Current parser-negative syntax assertions: 736 (`4f818a5`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -220,7 +220,9 @@ current split 731 migrated, zero ready, and 337 pending-fix. Commit `87b7f8a`
 migrated both mismatched aggregate closers, making the authoritative current
 split 733 migrated, zero ready, and 335 pending-fix. Commit `1b7b04f` migrated
 both invalid abstract headers, making the authoritative current split 735
-migrated, zero ready, and 333 pending-fix.
+migrated, zero ready, and 333 pending-fix. Commit `4f818a5` completed the final
+trailing-command case, making the authoritative current split 736 migrated,
+zero ready, and 332 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -543,12 +545,12 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-new-static-abstract` | 8 | 8 | 0 | 0 |
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 2 | 0 | 0 |
-| `B-trailing-command` | 5 | 4 | 0 | 1 |
+| `B-trailing-command` | 5 | 5 | 0 | 0 |
 | `B-trailing-characters` | 20 | 18 | 0 | 2 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **177** | **0** | **14** |
+| **Total** | **191** | **178** | **0** | **13** |
 
-This table reflects the current parser through `1b7b04f`. Revalidation corrected
+This table reflects the current parser through `4f818a5`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -662,6 +664,11 @@ Commit `1b7b04f` migrated the two invalid `abstract` headers in
 modifier reports E475 over the complete invalid argument. A recovery-only
 class block pairs the following `endclass` without adding modifier or
 missing-end cascades.
+
+Commit `4f818a5` completed `B-trailing-command`. A top-level Vim9 environment
+declaration now reports E475 while retaining the `$`-prefixed declaration name
+and parsed type. The compiled-def E1016 variant remains outside this parser
+group and is not silently reclassified.
 
 The two pending `B-trailing-characters` cases are the class member separator
 cases `C:{93,102}` and require direct-member scan context. Commit `ffa8e9b`
