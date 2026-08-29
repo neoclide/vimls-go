@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 682 (`7fa8066`)
+- Current parser-negative syntax assertions: 698 (`ae0e2d3`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -194,7 +194,9 @@ cases, making the authoritative current split 671 migrated, zero ready, and
 lists, making the authoritative current split 676 migrated, zero ready, and
 392 pending-fix. Commit `7fa8066` completed the six remaining constructor and
 class-method modifier cases, making the authoritative current split 682
-migrated, zero ready, and 386 pending-fix.
+migrated, zero ready, and 386 pending-fix. Commit `ae0e2d3` completed the 16
+remaining declaration type-delimiter cases, making the authoritative current
+split 698 migrated, zero ready, and 370 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -498,7 +500,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
 | `B-assign-spacing` | 19 | 19 | 0 | 0 |
-| `B-type-delimiter` | 26 | 10 | 0 | 16 |
+| `B-type-delimiter` | 26 | 26 | 0 | 0 |
 | `B-declaration-shape` | 15 | 0 | 0 | 15 |
 | `B-command-abbreviation` | 10 | 10 | 0 | 0 |
 | `B-register-declaration` | 15 | 15 | 0 | 0 |
@@ -520,9 +522,9 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **124** | **0** | **67** |
+| **Total** | **191** | **140** | **0** | **51** |
 
-This table reflects the current parser through `7fa8066`. Revalidation corrected
+This table reflects the current parser through `ae0e2d3`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -581,6 +583,36 @@ signature and return-type AST. Invalid `static` ordering reports E1368, and an
 command remains available to later analysis, while secondary diagnostics from
 the same physical command are suppressed without affecting the following
 class member.
+
+Commit `ae0e2d3` completed `B-type-delimiter`. Vim9 declaration whitespace
+before a type colon reports E1059, missing whitespace after it reports E1069,
+and an unterminated `func(...)` type reports E110. Single-letter `a` and `l`
+declarations retain separate name and type spans instead of being mistaken for
+legacy scope prefixes. Heredoc headers are checked before their bodies become
+opaque, so the diagnostic remains line-local while the heredoc and following
+commands are preserved.
+
+The remaining `B-declaration-shape` implementation contract is fixed by the
+inventory below. A non-class `const` with no initializer is E1021 even when it
+has a type. A Vim9 `var` with neither type nor initializer is E1022; direct
+class/interface `var`, `final`, and `const` members use the same E1022 shape
+rule, but non-class `final` keeps E1125 and invalid aggregate names keep
+E1317/E1329 priority. The declaration, name, type, and following command must
+remain in the AST. The minimal implementation point is the existing declaration
+branch in `parseCommandDetailsDepth()` after the head is parsed and before its
+no-assignment return.
+
+The remaining `B-brace-recovery` inventory must be implemented as two parser
+paths, not one. Eleven cases are interpolated-string or `eval` heredoc recovery:
+E1278 is an unmatched closing brace, E1279 is an unclosed interpolation, and
+the `L:803` plus `A:3284/{def|vim9-script}` cases use E15 for an empty
+interpolation. These contexts must stay separate from command-block, lambda,
+ordinary heredoc, and legacy curly-name braces. Recovery retains the partial
+interpolation AST and stops at its current physical line or heredoc expression.
+The remaining `C:434:11328/script` case is instead a missing object-method call
+argument (`a.Foo(,)`) and belongs in the call-argument parser; the similar
+`C:422:11065/script` missing-member case is already migrated and must not be
+counted again.
 
 ```text
 B-assign-spacing
