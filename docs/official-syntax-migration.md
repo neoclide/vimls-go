@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 807 (`70251bb`)
+- Current parser-negative syntax assertions: 808 (`5433450`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -265,6 +265,8 @@ making the authoritative current split 803 migrated, zero ready, and 265
 pending-fix.
 Commit `70251bb` migrated four invalid Vim9 condition recoveries, making the
 authoritative current split 807 migrated, zero ready, and 261 pending-fix.
+Commit `5433450` migrated the `dsearch` attached-comment tail, making the
+authoritative current split 808 migrated, zero ready, and 260 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -857,13 +859,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 52 | 0 | 63 |
+| `C-EXCMD` | 115 | 53 | 0 | 62 |
 | `C-EXPR` | 19 | 5 | 0 | 14 |
 | `C-GENERIC` | 109 | 42 | 0 | 67 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **175** | **0** | **194** |
+| **Total** | **369** | **176** | **0** | **193** |
 
 ```text
 C-EXPR
@@ -1076,6 +1078,11 @@ headers retain their partial expression AST but no longer leave a false
 unclosed block; delimiter diagnostics use Vim codes and stop at the physical
 line without a trailing-expression cascade. Legacy block recovery remains
 unchanged.
+
+Commit `5433450` migrated E488 at `S:4126:88011/script`. The shared
+`ex_findpat()` command family now recognizes a closed `/pattern/` before
+checking its tail: an attached `#` remains an invalid opaque tail, whitespace
+before `#` starts a Vim9 comment, and a following bar starts the next command.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
