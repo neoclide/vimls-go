@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 494 (`1e10f55`)
+- Current parser-negative syntax assertions: 501 (`f3e1093`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -95,6 +95,8 @@ Commit `191fadb` migrated the final four Dictionary-delimiter variants, making
 the current split 493 migrated, zero ready, and 579 pending-fix.
 Commit `1e10f55` migrated the Vim9 EX_XFILE missing-backtick case, making the
 current split 494 migrated, zero ready, and 578 pending-fix.
+Commit `f3e1093` migrated the seven Vim9 attached-hash comment cases, making
+the current split 501 migrated, zero ready, and 571 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -114,7 +116,7 @@ file prefix produces the exact corpus keys.
 | `vim9-dictionary-missing-value` | `migrated` (`2329653`) | `test_vim9_expr.vim:{3265:97250/def,3266:97290/script,3274:97438/def,3274:97438/vim9-script}` | E723 in `def`, E15 at script level | `vimls/missing-expression` | `runtime/doc/eval.txt:761-790`; `runtime/doc/vim9.txt:70-82`; `src/vim9expr.c:1912-2076` | `internal/syntax/expression.go` plus context mapping in `scanner.go` |
 | `vim9-assignment-missing-rhs` | `migrated` (`3bd2d68`) | `test_vim9_assign.vim:{515:12614/def,581:14074/def}` | E1097 | `vimls/missing-expression` | `runtime/doc/vim9.txt:786-817,903-910`; `src/vim9compile.c:918-945,3190-3238` | command-expression assignment and declaration paths in `scanner.go` |
 | `vim9-assignment-trailing-paren` | `migrated` (`3bd2d68`) | `test_vim9_assign.vim:{1202:28637/def}` | E488 | `vimls/trailing-expression` | `runtime/doc/message.txt:752-757`; `src/vim9compile.c:3750-3810,4312-4320` | assignment recognition in `scanner.go` |
-| `vim9-hash-comment-spacing` | `pending-fix` | `test_vim9_script.vim:{3579:76110/def,3599:76552/def,3635:77305/def,3937:84202/script,4091:87356/script,4098:87482/script,4112:87742/script}` | E488 | `vimls/missing-expression` or `vimls/trailing-expression` | `src/ex_docmd.c:5465-5478,6013-6023`, `src/vim9cmds.c:520-523,1345-1348` | expression diagnostic aggregation in `scanner.go` |
+| `vim9-hash-comment-spacing` | `migrated` (`f3e1093`) | `test_vim9_script.vim:{3579:76110/def,3599:76552/def,3635:77305/def,3937:84202/script,4091:87356/script,4098:87482/script,4112:87742/script}` | E488 | `vimls/missing-expression` or `vimls/trailing-expression` | `runtime/doc/vim9.txt:206-230`; `src/ex_docmd.c:5959-5971` | expression-list recovery in `vim9_command.go` and diagnostic mapping in `scanner.go` |
 | `vim9-for-header-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{3067:64156/vim9-script,3068:64217/vim9-script,3070:64343/vim9-script,3071:64405/def,3071:64405/vim9-script}` | E690 | E690 | `src/vim9cmds.c:941-983` | official failure matrix only |
 | `vim9-delfunction-comment-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{3926:83957/script}` | E488 | E488 | `src/userfunc.c:6260-6282` | official failure matrix only |
 | `vim9-mark-range-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{4851:108739/def,4851:108739/vim9-script}` | E481 | E481 | `src/vim9script.c:145-164` | official failure matrix only |
@@ -387,13 +389,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 2 | 0 | 1 |
-| `C-EXCMD` | 115 | 23 | 0 | 92 |
+| `C-EXCMD` | 115 | 30 | 0 | 85 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 23 | 0 | 86 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
 | `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **105** | **0** | **264** |
+| **Total** | **369** | **112** | **0** | **257** |
 
 ```text
 C-EXPR
@@ -508,6 +510,11 @@ table now retains Vim's EX_XFILE/EX_FILES/EX_FILE1 property, valid filename
 expansions retain each embedded expression in the command AST, and a missing
 closing backtick keeps the same-line tail opaque before recovery resumes on the
 next physical line.
+
+Commit `f3e1093` migrated seven `C-EXCMD` E488 variants. A hash attached to the
+preceding expression is retained as the one-byte trailing token, while the
+valid expression AST remains intact and parsing resumes with the next physical
+line. A hash after whitespace remains an ordinary Vim9 comment.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
