@@ -53,10 +53,15 @@ func (document *navigationDocument) workspaceTarget() (workspaceNavigationTarget
 
 func (s *Server) workspaceNavigationState() (*workspace.PathResolver, *workspace.Index, []string) {
 	s.workspaceMu.Lock()
-	roots := append([]string(nil), s.workspaceRoots...)
+	workspaceRoots := append([]string(nil), s.workspaceRoots...)
+	runtimePaths := append([]string(nil), s.runtimePaths...)
 	index := s.workspaceIndex
 	s.workspaceMu.Unlock()
-	return workspacePathResolver(roots), index, roots
+	searchPaths := runtimePaths
+	if len(searchPaths) == 0 {
+		searchPaths = workspaceRoots
+	}
+	return workspacePathResolver(workspaceRoots, runtimePaths), index, searchPaths
 }
 
 func (s *Server) resolveWorkspaceReference(resolver *workspace.PathResolver, index *workspace.Index, reference workspace.ExternalReferenceFact) (workspaceNavigationTarget, bool) {

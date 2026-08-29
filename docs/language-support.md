@@ -142,9 +142,18 @@ old configuration revision are stale and cannot publish.
 The server currently provides document/workspace symbols, hover, definition,
 declaration, references, document highlights, folding ranges, and selection
 ranges. Workspace files come from initialized workspace folders (or `rootUri`),
-with open snapshots overriding disk content. The language client owns file
-watching and sends `workspace/didChangeWatchedFiles` notifications; the server
-only consumes those notifications and atomically replaces the rebuilt index.
+plus `initializationOptions.runtimepath`, with open snapshots overriding disk
+content. `runtimepath` is an array of filesystem path strings. When the client
+advertises `workspace.didChangeWatchedFiles.dynamicRegistration`, the server
+uses `client/registerCapability` to ask the language client to watch `**/*.vim`
+below every workspace and runtimepath root. The client owns the filesystem
+watchers and sends `workspace/didChangeWatchedFiles`; the server consumes those
+notifications and atomically replaces the rebuilt index.
+
+The custom `vimls/didChangeRuntimepath` notification replaces runtimepath at
+runtime. Its parameters are `{ "runtimepath": string[] }`. The server rebuilds
+the bounded index and, when dynamic registration is supported, unregisters the
+old Vim watcher registration before registering the new roots.
 
 Cross-file navigation resolves statically provable direct members of Vim9 and
 legacy `:import` namespaces, including default filename-derived aliases,
@@ -152,8 +161,8 @@ qualified type names, and `import autoload`. It also resolves legacy
 `foo#bar#Name` autoload references to `autoload/foo/bar.vim`. Only exported
 import targets and unique declarations are authoritative. Dynamic import
 expressions, private or ambiguous items, missing files, unsafe symlink targets,
-and paths outside initialized roots return empty results without executing Vim
-script or guessing runtime state.
+and paths outside initialized workspace/runtimepath roots return empty results
+without executing Vim script or guessing runtime state.
 
 ## Semantics required for 1.0
 

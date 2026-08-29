@@ -115,6 +115,11 @@ instead of letting parser workers mutate the shared index.
 
 The workspace indexes open documents, workspace Vim files, and explicitly
 configured runtimepath roots. It does not scan the entire machine by default.
+The language client owns filesystem watching: after initialization the server
+dynamically registers `**/*.vim` watchers when supported, and consumes the
+resulting `workspace/didChangeWatchedFiles` notifications. Runtimepath is
+initialized through `initializationOptions.runtimepath` and replaced by the
+custom `vimls/didChangeRuntimepath` notification.
 Generated command and builtin metadata pins its upstream Vim tag and must be
 reproducible without requiring Vim at server runtime.
 

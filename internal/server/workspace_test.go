@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -46,6 +49,134 @@ func TestWorkspaceFoldersOverrideRootURIAndBuildSymbolIndex(t *testing.T) {
 	}
 	if symbols := workspaceSymbols(t, instance, "rootOnly"); len(symbols) != 0 {
 		t.Fatalf("rootUri leaked through workspaceFolders precedence: %#v", symbols)
+	}
+}
+
+func TestRuntimepathInitializationAndNotificationReplaceIndex(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	firstRuntime := t.TempDir()
+	secondRuntime := t.TempDir()
+	writeWorkspaceFile(t, firstRuntime, filepath.Join("plugin", "first.vim"), "vim9script\nvar firstRuntimeName = 1\n")
+	writeWorkspaceFile(t, secondRuntime, filepath.Join("autoload", "second.vim"), "vim9script\nexport var secondRuntimeName = 1\n")
+	rootURI := uri.File(workspaceRoot)
+	options, err := json.Marshal(map[string]any{"runtimepath": []string{firstRuntime}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny(options)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	if symbols := workspaceSymbols(t, instance, "firstRuntimeName"); len(symbols) != 1 {
+		t.Fatalf("initialized runtimepath symbols = %#v", symbols)
+	}
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{secondRuntime}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	if symbols := workspaceSymbols(t, instance, "firstRuntimeName"); len(symbols) != 0 {
+		t.Fatalf("old runtimepath symbols = %#v", symbols)
+	}
+	if symbols := workspaceSymbols(t, instance, "secondRuntimeName"); len(symbols) != 1 {
+		t.Fatalf("updated runtimepath symbols = %#v", symbols)
+	}
+}
+
+func TestInitializedRegistersVimWatchersAndRuntimepathRefreshesRegistration(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	firstRuntime := t.TempDir()
+	secondRuntime := t.TempDir()
+	rootURI := uri.File(workspaceRoot)
+	options, err := json.Marshal(map[string]any{"runtimepath": []string{firstRuntime}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dynamic := true
+	relative := true
+	client := &watchRegistrationClient{}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = client
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny(options),
+		Capabilities: protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{
+			DidChangeWatchedFiles: &protocol.DidChangeWatchedFilesClientCapabilities{DynamicRegistration: &dynamic, RelativePatternSupport: &relative},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.watchWG.Wait()
+	if len(client.registrations) != 1 || len(client.registrations[0].Registrations) != 1 {
+		t.Fatalf("registrations = %#v", client.registrations)
+	}
+	assertWatchRegistration(t, client.registrations[0], []string{workspaceRoot, firstRuntime})
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{secondRuntime}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.watchWG.Wait()
+	if len(client.unregistrations) != 1 || len(client.registrations) != 2 {
+		t.Fatalf("registrations = %d, unregistrations = %d", len(client.registrations), len(client.unregistrations))
+	}
+	unregistration := client.unregistrations[0].Unregisterations
+	if len(unregistration) != 1 || unregistration[0].ID != fileWatchRegistrationID || unregistration[0].Method != protocol.MethodWorkspaceDidChangeWatchedFiles {
+		t.Fatalf("unregistration = %#v", unregistration)
+	}
+	assertWatchRegistration(t, client.registrations[1], []string{workspaceRoot, secondRuntime})
+}
+
+func TestVimWatcherRegistrationHonorsClientCapabilities(t *testing.T) {
+	root := t.TempDir()
+	client := &watchRegistrationClient{}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = client
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.watchWG.Wait()
+	if len(client.registrations) != 0 {
+		t.Fatalf("registration without dynamic capability = %#v", client.registrations)
+	}
+
+	watchers := vimFileWatchers([]string{root}, false)
+	wantPattern := protocol.Pattern(filepath.ToSlash(filepath.Join(root, "**", "*.vim")))
+	if len(watchers) != 1 || watchers[0].GlobPattern != wantPattern {
+		t.Fatalf("absolute watcher = %#v, want %q", watchers, wantPattern)
+	}
+}
+
+func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	input := encodeFrames(t,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`,
+		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot),
+		`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`,
+		`{"jsonrpc":"2.0","method":"exit"}`,
+	)
+	var output bytes.Buffer
+	instance := New(&input, &output, io.Discard)
+	if code := instance.Run(context.Background()); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	instance.workspaceMu.Lock()
+	paths := append([]string(nil), instance.runtimePaths...)
+	instance.workspaceMu.Unlock()
+	if len(paths) != 1 || paths[0] != filepath.Clean(runtimeRoot) {
+		t.Fatalf("runtimepath = %#v", paths)
 	}
 }
 
@@ -183,4 +314,43 @@ func writeWorkspaceFile(t *testing.T, root, name, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+type watchRegistrationClient struct {
+	protocol.UnimplementedClient
+	registrations   []*protocol.RegistrationParams
+	unregistrations []*protocol.UnregistrationParams
+}
+
+func (c *watchRegistrationClient) RegisterCapability(_ context.Context, params *protocol.RegistrationParams) error {
+	c.registrations = append(c.registrations, params)
+	return nil
+}
+
+func (c *watchRegistrationClient) UnregisterCapability(_ context.Context, params *protocol.UnregistrationParams) error {
+	c.unregistrations = append(c.unregistrations, params)
+	return nil
+}
+
+func assertWatchRegistration(t *testing.T, params *protocol.RegistrationParams, roots []string) {
+	t.Helper()
+	registration := params.Registrations[0]
+	if registration.ID != fileWatchRegistrationID || registration.Method != protocol.MethodWorkspaceDidChangeWatchedFiles {
+		t.Fatalf("registration = %#v", registration)
+	}
+	var options protocol.DidChangeWatchedFilesRegistrationOptions
+	if err := protocol.Unmarshal(registration.RegisterOptions, &options); err != nil {
+		t.Fatal(err)
+	}
+	if len(options.Watchers) != len(roots) {
+		t.Fatalf("watchers = %#v", options.Watchers)
+	}
+	kind := protocol.WatchKindCreate | protocol.WatchKindChange | protocol.WatchKindDelete
+	wantRoots := normalizeWorkspaceRoots(roots)
+	for index, root := range wantRoots {
+		pattern, ok := options.Watchers[index].GlobPattern.(*protocol.RelativePattern)
+		if !ok || pattern.BaseURI != protocol.URI(uri.File(root)) || pattern.Pattern != protocol.Pattern("**/*.vim") || options.Watchers[index].Kind != kind {
+			t.Fatalf("watcher %d = %#v", index, options.Watchers[index])
+		}
+	}
 }

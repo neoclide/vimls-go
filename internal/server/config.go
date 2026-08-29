@@ -101,6 +101,47 @@ func targetVersionFromOptions(raw any) (TargetVersion, bool, string) {
 	return version, true, ""
 }
 
+func runtimepathFromOptions(raw any) ([]string, string) {
+	if raw == nil {
+		return nil, ""
+	}
+	var options map[string]any
+	switch value := raw.(type) {
+	case map[string]any:
+		options = value
+	case []byte:
+		if len(value) == 0 || string(value) == "null" {
+			return nil, ""
+		}
+		if err := json.Unmarshal(value, &options); err != nil {
+			return nil, "vimls: initializationOptions must be an object; ignoring runtimepath"
+		}
+	default:
+		return nil, "vimls: initializationOptions must be an object; ignoring runtimepath"
+	}
+	rawPaths, exists := options["runtimepath"]
+	if !exists || rawPaths == nil {
+		return nil, ""
+	}
+	var paths []string
+	switch values := rawPaths.(type) {
+	case []string:
+		paths = append(paths, values...)
+	case []any:
+		paths = make([]string, 0, len(values))
+		for _, rawPath := range values {
+			path, ok := rawPath.(string)
+			if !ok {
+				return nil, "vimls: runtimepath must be an array of strings; ignoring runtimepath"
+			}
+			paths = append(paths, path)
+		}
+	default:
+		return nil, "vimls: runtimepath must be an array of strings; ignoring runtimepath"
+	}
+	return normalizeWorkspaceRoots(paths), ""
+}
+
 func targetVersionFromSettings(raw []byte, previous TargetVersion) (TargetVersion, string) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return previous, ""

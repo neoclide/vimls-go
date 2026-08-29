@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -70,6 +71,24 @@ func TestTargetVersionFromOptions(t *testing.T) {
 				t.Fatalf("warning = %q", warning)
 			}
 		})
+	}
+}
+
+func TestRuntimepathFromOptions(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	paths, warning := runtimepathFromOptions([]byte(`{"runtimepath":["` + first + `","` + second + `","` + first + `"]}`))
+	if warning != "" || len(paths) != 2 || paths[0] != filepath.Clean(first) || paths[1] != filepath.Clean(second) {
+		t.Fatalf("runtimepath = %#v, warning = %q", paths, warning)
+	}
+	for _, raw := range []any{
+		[]byte(`{"runtimepath":"` + first + `"}`),
+		[]byte(`{"runtimepath":["` + first + `",1]}`),
+		[]byte(`[]`),
+	} {
+		if paths, warning := runtimepathFromOptions(raw); len(paths) != 0 || warning == "" {
+			t.Fatalf("invalid runtimepath %s = %#v, warning = %q", raw, paths, warning)
+		}
 	}
 }
 

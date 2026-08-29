@@ -15,6 +15,10 @@ import (
 	"go.lsp.dev/uri"
 )
 
+type DidChangeRuntimepathParams struct {
+	Runtimepath []string `json:"runtimepath"`
+}
+
 func workspaceRootsFromInitialize(params *protocol.InitializeParams) []string {
 	if params == nil {
 		return nil
@@ -77,6 +81,17 @@ func (s *Server) setWorkspaceRoots(roots []string) {
 	s.workspaceMu.Unlock()
 }
 
+func (s *Server) setRuntimePaths(paths []string) {
+	s.workspaceMu.Lock()
+	s.runtimePaths = append([]string(nil), paths...)
+	s.workspaceRevision++
+	s.workspaceMu.Unlock()
+}
+
+func workspaceIndexRoots(workspaceRoots, runtimePaths []string) []string {
+	return normalizeWorkspaceRoots(append(append([]string(nil), workspaceRoots...), runtimePaths...))
+}
+
 func (s *Server) scheduleWorkspaceRebuild() {
 	s.workspaceMu.Lock()
 	s.workspaceRevision++
@@ -95,10 +110,12 @@ func (s *Server) workspaceIndexWorker() {
 	for {
 		s.workspaceMu.Lock()
 		revision := s.workspaceRevision
-		roots := append([]string(nil), s.workspaceRoots...)
+		workspaceRoots := append([]string(nil), s.workspaceRoots...)
+		runtimePaths := append([]string(nil), s.runtimePaths...)
 		s.workspaceMu.Unlock()
+		roots := workspaceIndexRoots(workspaceRoots, runtimePaths)
 
-		index, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots)
+		index, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, workspaceRoots, runtimePaths)
 		if s.analysisContext.Err() != nil {
 			s.workspaceMu.Lock()
 			s.workspaceRunning = false
@@ -136,7 +153,7 @@ func (s *Server) workspaceIndexWorker() {
 	}
 }
 
-func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string) (*workspace.Index, map[string]struct{}, []string) {
+func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, workspaceRoots, runtimePaths []string) (*workspace.Index, map[string]struct{}, []string) {
 	index := workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes)
 	diskFiles := make(map[string]struct{})
 	if len(roots) == 0 || ctx.Err() != nil {
@@ -206,7 +223,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string) (*work
 	if ctx.Err() != nil {
 		return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
 	}
-	resolver := workspacePathResolver(roots)
+	resolver := workspacePathResolver(workspaceRoots, runtimePaths)
 	for resolver != nil {
 		if ctx.Err() != nil {
 			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
@@ -295,9 +312,13 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string) (*work
 	return index, diskFiles, warnings
 }
 
-func workspacePathResolver(roots []string) *workspace.PathResolver {
-	for _, root := range roots {
-		resolver, err := workspace.NewPathResolver(root, roots)
+func workspacePathResolver(workspaceRoots, runtimePaths []string) *workspace.PathResolver {
+	searchPaths := runtimePaths
+	if len(searchPaths) == 0 {
+		searchPaths = workspaceRoots
+	}
+	for _, root := range append(append([]string(nil), workspaceRoots...), searchPaths...) {
+		resolver, err := workspace.NewPathResolver(root, searchPaths)
 		if err == nil {
 			return resolver
 		}
@@ -331,7 +352,7 @@ func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) {
 	}
 	s.workspaceMu.Lock()
 	defer s.workspaceMu.Unlock()
-	if !workspacePathInRoots(path, s.workspaceRoots) {
+	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
 		return
 	}
 	if err := s.workspaceIndex.Replace(path, file); err != nil {
@@ -373,7 +394,7 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 	}
 }
 
-func (s *Server) DidChangeWorkspaceFolders(_ context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
+func (s *Server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
 	s.workspaceMu.Lock()
 	roots := append([]string(nil), s.workspaceRoots...)
 	s.workspaceMu.Unlock()
@@ -395,6 +416,17 @@ func (s *Server) DidChangeWorkspaceFolders(_ context.Context, params *protocol.D
 		}
 	}
 	s.setWorkspaceRoots(normalizeWorkspaceRoots(next))
+	s.scheduleFileWatchRegistration()
+	s.scheduleWorkspaceRebuild()
+	return nil
+}
+
+func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRuntimepathParams) error {
+	if params == nil {
+		return nil
+	}
+	s.setRuntimePaths(normalizeWorkspaceRoots(params.Runtimepath))
+	s.scheduleFileWatchRegistration()
 	s.scheduleWorkspaceRebuild()
 	return nil
 }
@@ -406,6 +438,86 @@ func (s *Server) DidChangeWatchedFiles(_ context.Context, params *protocol.DidCh
 		s.scheduleWorkspaceRebuild()
 	}
 	return nil
+}
+
+func (s *Server) scheduleFileWatchRegistration() {
+	s.watchMu.Lock()
+	if s.analysisContext.Err() != nil {
+		s.watchMu.Unlock()
+		return
+	}
+	s.watchWG.Add(1)
+	s.watchMu.Unlock()
+	go func() {
+		defer s.watchWG.Done()
+		s.mu.Lock()
+		registrationEnabled := s.client != nil && s.watchDynamicRegistration && s.initialized
+		s.mu.Unlock()
+		if err := s.refreshFileWatchRegistration(s.analysisContext); err != nil && s.analysisContext.Err() == nil {
+			s.logf("vimls: refresh Vim file watchers: %v", err)
+		}
+		// Scan once more after the registration request completes so a file
+		// change during the unregister/register window cannot leave the index
+		// permanently stale even if the client could not report that event.
+		if registrationEnabled && s.analysisContext.Err() == nil {
+			s.scheduleWorkspaceRebuild()
+		}
+	}()
+}
+
+func (s *Server) refreshFileWatchRegistration(ctx context.Context) error {
+	s.watchMu.Lock()
+	defer s.watchMu.Unlock()
+
+	s.mu.Lock()
+	client := s.client
+	dynamic := s.watchDynamicRegistration
+	relative := s.watchRelativePatterns
+	initialized := s.initialized
+	s.mu.Unlock()
+	if client == nil || !dynamic || !initialized {
+		return nil
+	}
+	if s.watchRegistered {
+		if err := client.UnregisterCapability(ctx, &protocol.UnregistrationParams{Unregisterations: []protocol.Unregistration{{
+			ID: fileWatchRegistrationID, Method: protocol.MethodWorkspaceDidChangeWatchedFiles,
+		}}}); err != nil {
+			return err
+		}
+		s.watchRegistered = false
+	}
+	s.workspaceMu.Lock()
+	roots := workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)
+	s.workspaceMu.Unlock()
+	watchers := vimFileWatchers(roots, relative)
+	options, err := protocol.Marshal(protocol.DidChangeWatchedFilesRegistrationOptions{Watchers: watchers})
+	if err != nil {
+		return err
+	}
+	err = client.RegisterCapability(ctx, &protocol.RegistrationParams{Registrations: []protocol.Registration{{
+		ID: fileWatchRegistrationID, Method: protocol.MethodWorkspaceDidChangeWatchedFiles,
+		RegisterOptions: protocol.LSPAny(options),
+	}}})
+	if err == nil {
+		s.watchRegistered = true
+	}
+	return err
+}
+
+func vimFileWatchers(roots []string, relative bool) []protocol.FileSystemWatcher {
+	kind := protocol.WatchKindCreate | protocol.WatchKindChange | protocol.WatchKindDelete
+	if len(roots) == 0 {
+		return []protocol.FileSystemWatcher{{GlobPattern: protocol.Pattern("**/*.vim"), Kind: kind}}
+	}
+	watchers := make([]protocol.FileSystemWatcher, 0, len(roots))
+	for _, root := range roots {
+		var pattern protocol.GlobPattern = protocol.Pattern(filepath.ToSlash(filepath.Join(root, "**", "*.vim")))
+		if relative {
+			pattern = &protocol.RelativePattern{BaseURI: protocol.URI(uri.File(root)), Pattern: protocol.Pattern("**/*.vim")}
+		}
+		watchers = append(watchers, protocol.FileSystemWatcher{GlobPattern: pattern, Kind: kind})
+	}
+	return watchers
 }
 
 func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolParams) (protocol.WorkspaceSymbolResult, error) {

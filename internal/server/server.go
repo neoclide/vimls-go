@@ -30,6 +30,9 @@ const (
 	maxWorkspaceSymbols       = 200
 )
 
+const MethodDidChangeRuntimepath = "vimls/didChangeRuntimepath"
+const fileWatchRegistrationID = "vimls-watch-vim-files"
+
 type state uint8
 
 const (
@@ -75,11 +78,19 @@ type Server struct {
 	published         map[string]bool
 	workspaceMu       sync.Mutex
 	workspaceRoots    []string
+	runtimePaths      []string
 	workspaceIndex    *workspace.Index
 	workspaceFiles    map[string]struct{}
 	workspaceRevision uint64
 	workspaceRunning  bool
 	workspaceWG       sync.WaitGroup
+
+	watchMu                  sync.Mutex
+	watchDynamicRegistration bool
+	watchRelativePatterns    bool
+	watchRegistered          bool
+	initialized              bool
+	watchWG                  sync.WaitGroup
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {
@@ -249,6 +260,16 @@ func (s *Server) lifecycleHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 		if method == protocol.MethodInitialized && len(request.Params()) == 0 {
 			return nil, s.Initialized(ctx, &protocol.InitializedParams{})
 		}
+		if method == MethodDidChangeRuntimepath {
+			if request.IsCall() {
+				return nil, jsonrpc2.NewError(jsonrpc2.InvalidRequest, "runtimepath changes must be notifications")
+			}
+			var params DidChangeRuntimepathParams
+			if err := protocol.Unmarshal(request.Params(), &params); err != nil {
+				return nil, jsonrpc2.ErrInvalidParams
+			}
+			return nil, s.DidChangeRuntimepath(ctx, &params)
+		}
 		if !implementedMethod(method) {
 			if request.IsCall() {
 				return nil, jsonrpc2.ErrMethodNotFound
@@ -285,7 +306,8 @@ func implementedMethod(method string) bool {
 		protocol.MethodWorkspaceDidChangeConfiguration,
 		protocol.MethodWorkspaceDidChangeWorkspaceFolders,
 		protocol.MethodWorkspaceDidChangeWatchedFiles,
-		protocol.MethodWorkspaceSymbol:
+		protocol.MethodWorkspaceSymbol,
+		MethodDidChangeRuntimepath:
 		return true
 	default:
 		return false
@@ -297,12 +319,25 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	openClose := true
 	includeText := true
 	changeKind := protocol.TextDocumentSyncKindIncremental
+	targetVersion, targetOverride, targetWarning := targetVersionFromOptions([]byte(params.InitializationOptions))
+	runtimePaths, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
+	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
 	s.mu.Lock()
-	s.targetVersion, s.targetOverride, s.pendingWarning = targetVersionFromOptions([]byte(params.InitializationOptions))
+	s.targetVersion = targetVersion
+	s.targetOverride = targetOverride
+	s.pendingWarning = targetWarning
+	if s.pendingWarning == "" {
+		s.pendingWarning = runtimepathWarning
+	} else if runtimepathWarning != "" {
+		s.pendingWarning += "; " + runtimepathWarning
+	}
 	s.encoding = encoding
 	s.state = stateActive
+	s.watchDynamicRegistration = watchDynamic
+	s.watchRelativePatterns = watchRelative
 	s.mu.Unlock()
 	s.setWorkspaceRoots(workspaceRootsFromInitialize(params))
+	s.setRuntimePaths(runtimePaths)
 	workspaceFoldersSupported := true
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
@@ -330,6 +365,10 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 }
 
 func (s *Server) Initialized(ctx context.Context, _ *protocol.InitializedParams) error {
+	s.mu.Lock()
+	s.initialized = true
+	s.mu.Unlock()
+	s.scheduleFileWatchRegistration()
 	s.scheduleWorkspaceRebuild()
 	s.mu.Lock()
 	warning := s.pendingWarning
@@ -347,6 +386,15 @@ func (s *Server) Initialized(ctx context.Context, _ *protocol.InitializedParams)
 		s.logf("vimls: send configuration warning: %v", err)
 	}
 	return err
+}
+
+func watchedFilesCapabilities(workspaceCapabilities *protocol.WorkspaceClientCapabilities) (dynamic, relative bool) {
+	if workspaceCapabilities == nil || workspaceCapabilities.DidChangeWatchedFiles == nil {
+		return false, false
+	}
+	capabilities := workspaceCapabilities.DidChangeWatchedFiles
+	return capabilities.DynamicRegistration != nil && *capabilities.DynamicRegistration,
+		capabilities.RelativePatternSupport != nil && *capabilities.RelativePatternSupport
 }
 
 func (s *Server) Shutdown(context.Context) error {
@@ -821,6 +869,9 @@ func (s *Server) stopAnalysis() {
 	s.workspaceMu.Lock()
 	s.workspaceMu.Unlock()
 	s.workspaceWG.Wait()
+	s.watchMu.Lock()
+	s.watchMu.Unlock()
+	s.watchWG.Wait()
 }
 
 func (s *Server) logf(format string, args ...any) {

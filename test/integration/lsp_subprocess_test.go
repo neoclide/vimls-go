@@ -38,6 +38,13 @@ func TestLSPSubprocess(t *testing.T) {
 	if err := os.WriteFile(workspaceMain, []byte(workspaceMainSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	runtimeRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(runtimeRoot, "plugin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "plugin", "runtime.vim"), []byte("vim9script\nvar runtimeName = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
@@ -58,13 +65,18 @@ func TestLSPSubprocess(t *testing.T) {
 
 	writer := jsonrpc.NewWriter(stdin)
 	reader := jsonrpc.NewReader(stdout)
-	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232"}}}`, uri.File(workspaceRoot)))
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}}},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232","runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
 	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+	registration := readJSON(t, reader)
+	if string(registration["method"]) != `"client/registerCapability"` || !strings.Contains(string(registration["params"]), `"method":"workspace/didChangeWatchedFiles"`) || !strings.Contains(string(registration["params"]), `"pattern":"**/*.vim"`) || !strings.Contains(string(registration["params"]), fmt.Sprintf(`"baseUri":%q`, uri.File(runtimeRoot))) {
+		t.Fatalf("watch registration = %s", registration)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, registration["id"]))
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nvar value: number = 1\nclass Widget\n  def new()\n    if true\n      echo value\n    endif\n  enddef\nendclass\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
 	symbols := readJSON(t, reader)
@@ -119,6 +131,11 @@ func TestLSPSubprocess(t *testing.T) {
 		if time.Now().After(workspaceDeadline) {
 			t.Fatalf("workspace symbols = %s", workspaceSymbols)
 		}
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99999,"method":"workspace/symbol","params":{"query":"runtimeName"}}`)
+	runtimeSymbols := readJSON(t, reader)
+	if string(runtimeSymbols["id"]) != "99999" || !strings.Contains(string(runtimeSymbols["result"]), `"name":"runtimeName"`) || !strings.Contains(string(runtimeSymbols["result"]), fmt.Sprintf(`"uri":%q`, uri.File(filepath.Join(runtimeRoot, "plugin", "runtime.vim")))) {
+		t.Fatalf("runtimepath symbols = %s", runtimeSymbols)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, uri.File(workspaceMain), workspaceMainSource))
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100000,"method":"textDocument/definition","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10}}}`, uri.File(workspaceMain)))
