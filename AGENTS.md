@@ -121,6 +121,13 @@ have disjoint owned paths:
   and their tests.
 - `qa_reviewer`: read-only adversarial review and release evidence.
 
+Official syntax migration research is release-scoped, not implementation-batch
+scoped. Keep the complete classification and rule queue in
+`docs/official-syntax-migration.md`. Refresh it once when the pinned Vim release
+or corpus boundary changes; implementation workers consume non-overlapping
+group IDs from that ledger. Do not repeatedly spawn researchers to rediscover
+small case batches already covered by the ledger.
+
 The primary agent owns integration, public contracts, cross-package changes,
 planning documents, configuration, and final validation. Give write agents an
 approved task brief with explicit allowed and forbidden paths; require them to

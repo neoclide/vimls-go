@@ -72,11 +72,11 @@ official scripts and a classified inventory of all 5,733 `Check*` candidates.
 An explicit 44-file syntax-test allowlist prevents the conformance migration
 from revisiting the other 318 test files. From that boundary, 3,844 helper calls
 produce 5,261 source variants: 1,761 official parser-positive cases and 3,500
-failure cases retained without a parser assertion until their failure phase is
-classified. The stability gate still parses every source through both
-independent parser entry points without executing it. To additionally compare
-the committed corpora and copied Vim license byte-for-byte with the pinned local
-checkout, run:
+failure cases whose reviewed phase and parser-migration status are recorded in
+the official syntax migration ledger. The stability gate still parses every
+source through both independent parser entry points without executing it. To
+additionally compare the committed corpora and copied Vim license byte-for-byte
+with the pinned local checkout, run:
 
 ```sh
 GOPROXY=off GOSUMDB=off make test-official
@@ -84,4 +84,6 @@ GOPROXY=off GOSUMDB=off make test-official
 
 See [the roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
 [language support contract](docs/language-support.md), and
-[test strategy](docs/testing.md).
+[test strategy](docs/testing.md). The pinned Vim failure-phase research and
+implementation queue live in the
+[official syntax migration ledger](docs/official-syntax-migration.md).

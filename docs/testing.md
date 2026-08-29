@@ -62,9 +62,10 @@ The generated parser-case artifact hashes that manifest and accounts for every
 one of the 3,844 selected helper calls. Static source recovery extracts 3,805
 calls into 5,261 dialect-aware variants and records an explicit reason for the
 remaining 39 skips. The 1,761 success variants are parser-positive assertions.
-The 3,500 failure variants retain their Vim error arguments as provenance but
-remain unclassified until parser, compiler, type, name-resolution, and runtime
-failures are separated.
+The artifact keeps its 3,500 failure variants unclassified and retains their Vim
+error arguments as provenance. Their reviewed phase classification and syntax
+implementation status live separately in the official syntax migration ledger,
+so parser progress does not rewrite the pinned generated artifact.
 
 Full-file parsing proves stability, recovery, and span integrity, not exact Vim
 acceptance. The conformance layer must use generated helper expectations and
@@ -76,12 +77,20 @@ broad corpus is not a substitute for those conformance assertions.
 `/Users/chemzqm/lib/vim` without modifying that checkout or accessing the
 network.
 
-#### Focused official failure migration
+#### Official failure migration
 
-Use the committed parser-case artifact to classify a narrow rule family before
-editing the parser. The filter accepts comma-separated substrings and reports
-every matching dialect variant, which prevents a migration from silently
-covering only one generated context:
+Research the complete pinned failure corpus once per Vim release and keep its
+phase classification, syntax rule groups, source references, and migration
+status in [`official-syntax-migration.md`](official-syntax-migration.md). The
+compressed parser-case artifact remains the source of every exact case key and
+input; the ledger must reference it rather than copy fixture source. Do not
+rescan the corpus with a new research task for every implementation batch.
+
+Implementation batches consume one or more non-overlapping ledger group IDs.
+Use the triage filter to verify the parser's current result, not to rediscover
+the batch. The filter accepts comma-separated substrings and reports every
+matching dialect variant, which prevents a migration from silently covering
+only one generated context:
 
 ```sh
 go test -mod=readonly ./internal/syntax \
@@ -105,7 +114,9 @@ go test -mod=readonly ./internal/syntax \
 ```
 
 The default test invocation omits `-official-case` and continues to verify the
-entire committed matrix.
+entire committed matrix. After the focused test and local commit, update the
+ledger status and commit reference; a changed parser result does not require a
+new Vim-source research pass.
 
 ### Semantics
 
