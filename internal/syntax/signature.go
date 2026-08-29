@@ -48,18 +48,51 @@ func parseFunctionSignature(file *File, command *Command) {
 	}
 	if defSignature && offset < len(source) && source[offset] == '<' {
 		end := findMatching(source, offset, '<', '>')
+		recoveredGeneric := false
 		if end < 0 {
-			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-generic-end", Message: "expected > after generic type parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
-			command.Function = function
-			return
+			// Vim recovers a missing generic terminator when the following
+			// parenthesis is an empty argument list.  Keep the type list
+			// bounded to this physical line; a non-empty parenthesis remains
+			// the ordinary missing-terminator case.
+			recovered := -1
+			for index := offset + 1; index < len(source) && source[index] != '\n'; index++ {
+				if source[index] != '(' {
+					continue
+				}
+				close := index + 1
+				for close < len(source) && source[close] != '\n' && isExpressionSpace(source[close]) {
+					close++
+				}
+				if close < len(source) && source[close] == ')' {
+					recovered = index
+				}
+				break
+			}
+			if recovered < 0 {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-generic-end", Message: "expected > after generic type parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
+				command.Function = function
+				return
+			}
+			end = recovered
+			recoveredGeneric = true
 		}
 		var diagnostics []Diagnostic
 		function.TypeParameters, diagnostics = parseFunctionTypeParameters(source, command.Argument.Start, offset, end)
+		if recoveredGeneric && len(diagnostics) == 0 {
+			span := Span{Start: command.Argument.Start + end, End: command.Argument.Start + end + 1}
+			if count := len(function.TypeParameters); count > 0 {
+				span = function.TypeParameters[count-1].Span
+			}
+			diagnostics = append(diagnostics, Diagnostic{Code: "vim/E1553", Message: "missing comma in generic function", Span: span})
+		}
 		if !spaceBeforeGeneric {
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
 			genericInvalid = len(diagnostics) > 0
 		}
 		beforeSpace = end + 1
+		if recoveredGeneric {
+			beforeSpace = end
+		}
 		offset = skipSyntaxSpace(source, beforeSpace, len(source))
 		if !genericInvalid && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
