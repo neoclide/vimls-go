@@ -2373,6 +2373,14 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	if len(command.EnumValues) > 0 {
 		return
 	}
+	if command.Dialect == Vim9 && command.Canonical == "elseif" && command.Argument.Start >= command.Argument.End {
+		code := "vim/E15"
+		if commandInsideBlock(command, file.Blocks, BlockDef) {
+			code = "vim/E1143"
+		}
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: "Invalid expression", Span: command.Name})
+		return
+	}
 	if command.Dialect == Vim9 && len(command.Modifiers) > 0 {
 		switch command.Canonical {
 		case "endif", "endfor", "endwhile", "try", "catch", "finally", "endtry":
@@ -2613,6 +2621,10 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	case "import":
 		parseImport(file, command)
+		return
+	}
+	if command.Canonical == "function" && command.Dialect == Vim9 && !isFunctionDefinition(source) && strings.HasPrefix(strings.TrimSpace(source), "\"") {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E129", Message: "Function name required", Span: command.Argument})
 		return
 	}
 	if command.Canonical == "def" || command.Canonical == "function" && isFunctionDefinition(source) {
