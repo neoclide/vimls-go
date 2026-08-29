@@ -256,6 +256,8 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentDocumentHighlight,
 		protocol.MethodTextDocumentHover,
 		protocol.MethodTextDocumentDocumentSymbol,
+		protocol.MethodTextDocumentFoldingRange,
+		protocol.MethodTextDocumentSelectionRange,
 		protocol.MethodWorkspaceDidChangeConfiguration:
 		return true
 	default:
@@ -282,6 +284,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 			DocumentHighlightProvider: protocol.Boolean(true),
 			HoverProvider:             protocol.Boolean(true),
 			DocumentSymbolProvider:    protocol.Boolean(true),
+			FoldingRangeProvider:      protocol.Boolean(true),
+			SelectionRangeProvider:    protocol.Boolean(true),
 			TextDocumentSync: &protocol.TextDocumentSyncOptions{
 				OpenClose: &openClose,
 				Change:    &changeKind,

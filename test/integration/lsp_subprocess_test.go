@@ -44,20 +44,57 @@ func TestLSPSubprocess(t *testing.T) {
 	reader := jsonrpc.NewReader(stdout)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"initializationOptions":{"targetVersion":"9.1.1232"}}}`)
 	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) {
+	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
-	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nclass Widget\n  def new()\n  enddef\nendclass\n"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nvar value: number = 1\nclass Widget\n  def new()\n    if true\n      echo value\n    endif\n  enddef\nendclass\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
 	symbols := readJSON(t, reader)
-	if string(symbols["id"]) != "2" || !strings.Contains(string(symbols["result"]), `"name":"Widget"`) || !strings.Contains(string(symbols["result"]), `"name":"new"`) {
+	if string(symbols["id"]) != "2" || !strings.Contains(string(symbols["result"]), `"name":"value"`) || !strings.Contains(string(symbols["result"]), `"name":"Widget"`) || !strings.Contains(string(symbols["result"]), `"name":"new"`) {
 		t.Fatalf("document symbols = %s", symbols)
 	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":3,"method":"shutdown"}`)
+
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":3,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
+	definition := readJSON(t, reader)
+	if string(definition["id"]) != "3" || !strings.Contains(string(definition["result"]), `"start":{"line":1,"character":4}`) {
+		t.Fatalf("definition = %s", definition)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":4,"method":"textDocument/declaration","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
+	declaration := readJSON(t, reader)
+	if string(declaration["id"]) != "4" || !strings.Contains(string(declaration["result"]), `"start":{"line":1,"character":4}`) {
+		t.Fatalf("declaration = %s", declaration)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":5,"method":"textDocument/references","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12},"context":{"includeDeclaration":true}}}`)
+	references := readJSON(t, reader)
+	if string(references["id"]) != "5" || !strings.Contains(string(references["result"]), `"line":1,"character":4`) || !strings.Contains(string(references["result"]), `"line":5,"character":11`) {
+		t.Fatalf("references = %s", references)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":6,"method":"textDocument/documentHighlight","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
+	highlights := readJSON(t, reader)
+	if string(highlights["id"]) != "6" || !strings.Contains(string(highlights["result"]), `"line":1,"character":4`) || !strings.Contains(string(highlights["result"]), `"line":5,"character":11`) {
+		t.Fatalf("document highlights = %s", highlights)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":7,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
+	hover := readJSON(t, reader)
+	if string(hover["id"]) != "7" || !strings.Contains(string(hover["result"]), `name: value`) || !strings.Contains(string(hover["result"]), `type: number`) {
+		t.Fatalf("hover = %s", hover)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":8,"method":"textDocument/foldingRange","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
+	folding := readJSON(t, reader)
+	if string(folding["id"]) != "8" || !strings.Contains(string(folding["result"]), `"startLine":2`) || !strings.Contains(string(folding["result"]), `"endLine":8`) {
+		t.Fatalf("folding ranges = %s", folding)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":9,"method":"textDocument/selectionRange","params":{"textDocument":{"uri":"file:///symbols.vim"},"positions":[{"line":5,"character":12}]}}`)
+	selection := readJSON(t, reader)
+	if string(selection["id"]) != "9" || !strings.Contains(string(selection["result"]), `"start":{"line":5,"character":11}`) {
+		t.Fatalf("selection ranges = %s", selection)
+	}
+
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":10,"method":"shutdown"}`)
 	shutdown := readJSON(t, reader)
-	if string(shutdown["id"]) != "3" || string(shutdown["result"]) != "null" {
+	if string(shutdown["id"]) != "10" || string(shutdown["result"]) != "null" {
 		t.Fatalf("shutdown response = %s", shutdown)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
