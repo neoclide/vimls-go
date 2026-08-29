@@ -149,6 +149,14 @@ func TestOfficialVimParserFailures(t *testing.T) {
 	// execution, type-checking, and other unclassified failures out of this
 	// allowlist until their parser phase is proven independently.
 	expected := map[string]string{
+		"src/testdir/test_expr.vim:1051:41636/def":                 "vim/E1004",
+		"src/testdir/test_expr.vim:1051:41636/vim9-script":         "vim/E1004",
+		"src/testdir/test_expr.vim:1052:41709/def":                 "vim/E1004",
+		"src/testdir/test_expr.vim:1052:41709/vim9-script":         "vim/E1004",
+		"src/testdir/test_expr.vim:1053:41782/def":                 "vim/E1004",
+		"src/testdir/test_expr.vim:1053:41782/vim9-script":         "vim/E1004",
+		"src/testdir/test_expr.vim:1054:41855/def":                 "vim/E1004",
+		"src/testdir/test_expr.vim:1054:41855/vim9-script":         "vim/E1004",
 		"src/testdir/test_tuple.vim:62:1444/def":                   "vim/E1008",
 		"src/testdir/test_tuple.vim:62:1444/vim9-script":           "vim/E1008",
 		"src/testdir/test_tuple.vim:67:1600/def":                   "vim/E1008",
