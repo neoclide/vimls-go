@@ -270,6 +270,24 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			}
 			continue
 		}
+		if p.dialect == Vim9 && token.kind == expressionIdentifier && token.span.Start == left.Span.End {
+			next := p.peek(1)
+			if next.text == "(" && next.span.Start == token.span.End {
+				if arrow, ok := p.methodOperator(left); ok {
+					lineEnd := len(p.source)
+					if newline := strings.IndexByte(p.source[token.span.Start-p.base:], '\n'); newline >= 0 {
+						lineEnd = token.span.Start - p.base + newline
+					}
+					tail := &Expression{Kind: ExpressionMissing, Span: Span{Start: token.span.Start, End: p.base + lineEnd}}
+					for p.current().kind != expressionEOF && p.current().span.Start < tail.Span.End {
+						p.advance()
+					}
+					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E15", Message: "invalid expression", Span: Span{Start: arrow.Start, End: tail.Span.End}})
+					left = &Expression{Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: tail.Span.End}, Operator: arrow, Value: "->", Children: []*Expression{left, tail}}
+					continue
+				}
+			}
+		}
 		// Legacy Vim accepts whitespace between a named function and its
 		// argument list (for example, exists ("x")).  Vim9 deliberately
 		// rejects that form; its expression grammar requires adjacency.
@@ -2102,6 +2120,31 @@ func (p *expressionParser) onlyWhitespace(left, right int) bool {
 func (p *expressionParser) isMethod(left *Expression) bool {
 	name := p.peek(1)
 	return p.arrowGap(left.Span.End, p.current().span.Start) && name.kind == expressionIdentifier && p.onlyWhitespace(p.current().span.End, name.span.Start)
+}
+
+func (p *expressionParser) methodOperator(expression *Expression) (Span, bool) {
+	for expression != nil {
+		if expression.Kind == ExpressionCall && expression.Value == "->" {
+			return expression.Operator, true
+		}
+		if expression.Kind == ExpressionMember {
+			start := expression.Operator.Start - p.base
+			end := expression.Operator.End - p.base
+			if start >= 0 && end <= len(p.source) && start < end && p.source[start:end] == "->" {
+				return expression.Operator, true
+			}
+		}
+		switch expression.Kind {
+		case ExpressionCall, ExpressionIndex, ExpressionSlice, ExpressionMember:
+			if len(expression.Children) == 0 {
+				return Span{}, false
+			}
+			expression = expression.Children[0]
+		default:
+			return Span{}, false
+		}
+	}
+	return Span{}, false
 }
 
 func (p *expressionParser) isArrowCallable(left *Expression) bool {

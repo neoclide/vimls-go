@@ -1512,6 +1512,38 @@ func TestVim9PostfixDelimiterRecovery(t *testing.T) {
 	}
 }
 
+func TestVim9MalformedMethodTailRecovery(t *testing.T) {
+	file := Parse("def F()\nconst SetList = [function('len')]\necho 'xx'->SetList[0]x()\necho after\nenddef\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E15" || len(file.Commands[2].Expressions) != 1 || file.Commands[3].Canonical != "echo" {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	method := file.Commands[2].Expressions[0]
+	if method.Kind != ExpressionCall || method.Value != "->" || len(method.Children) != 2 || method.Children[0].Kind != ExpressionIndex || method.Children[1].Kind != ExpressionMissing || file.Text(method.Children[1].Span) != "x()" {
+		t.Fatalf("method = %#v", method)
+	}
+	callable := method.Children[0].Children[0]
+	if callable.Kind != ExpressionMember || callable.Value != "SetList" || len(callable.Children) != 1 || callable.Children[0].Kind != ExpressionString {
+		t.Fatalf("callable = %#v, tail = %#v", callable, method.Children[1])
+	}
+	for _, source := range []string{"value->name()", "value->Xsquare.Square()", "value->(expr)()", "value->((x) => x)()", "value->SetList[0]()", "dict.func(expr)[idx]['func'](expr)->len()"} {
+		if _, diagnostics := (Vim9ExpressionParser{}).Parse(source); len(diagnostics) != 0 {
+			t.Fatalf("%q diagnostics = %#v", source, diagnostics)
+		}
+	}
+	indexed, diagnostics := (Vim9ExpressionParser{}).Parse("value->SetList[0]()")
+	if len(diagnostics) != 0 || indexed.Kind != ExpressionCall || len(indexed.Children) != 1 || indexed.Children[0].Kind != ExpressionIndex || indexed.Children[0].Children[0].Kind != ExpressionMember || indexed.Children[0].Children[0].Value != "SetList" || indexed.Children[0].Children[0].Children[0].Value != "value" {
+		t.Fatalf("indexed callable = %#v, diagnostics = %#v", indexed, diagnostics)
+	}
+	qualified, diagnostics := (Vim9ExpressionParser{}).Parse("value->Xsquare.Square()")
+	if len(diagnostics) != 0 || qualified.Kind != ExpressionCall || len(qualified.Children) != 1 || qualified.Children[0].Kind != ExpressionMember || qualified.Children[0].Value != "Square" || qualified.Children[0].Children[0].Kind != ExpressionMember || qualified.Children[0].Children[0].Value != "Xsquare" || qualified.Children[0].Children[0].Children[0].Value != "value" {
+		t.Fatalf("qualified callable = %#v, diagnostics = %#v", qualified, diagnostics)
+	}
+	if _, diagnostics := (LegacyExpressionParser{}).Parse("'xx'->SetList[0]x()"); len(diagnostics) != 1 || diagnostics[0].Code != "vimls/trailing-expression" {
+		t.Fatalf("legacy diagnostics = %#v", diagnostics)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestOfficialVim9CallableParenthesisSpacing(t *testing.T) {
 	// Vim v9.2.1015 src/testdir/test_vim9_expr.vim:4480.
 	source := "vim9script\nvar l = [2]\nl->((ll) => add(ll, 8)) ()\nvar after = 1\necho after\n"
