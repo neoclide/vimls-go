@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 517 (`63cc8a9`)
+- Current parser-negative syntax assertions: 519 (`7f60a4d`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -110,6 +110,8 @@ Commit `21333d9` migrated the compiled-function missing-call-comma case,
 making the current split 514 migrated, zero ready, and 558 pending-fix.
 Commit `63cc8a9` migrated the three Vim9 missing-member-name variants, making
 the current split 517 migrated, zero ready, and 555 pending-fix.
+Commit `7f60a4d` migrated both missing inline-function brace variants, making
+the current split 519 migrated, zero ready, and 553 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -142,13 +144,13 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-213 migrated and 115 pending-fix.
+215 migrated and 113 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 42 | 0 | 42 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
-| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 11 | 0 | 2 |
+| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
@@ -262,6 +264,12 @@ Commit `63cc8a9` migrated both contexts of
 `4475:129586`. A dot without an adjacent member name retains an incomplete
 member AST and reports E1127 inside `def`; the script-level call reports E116,
 matching Vim, and parsing resumes at the next physical command.
+
+Commit `7f60a4d` completed `expr-operator-structure` with
+`test_vim9_expr.vim:{2855:84948/def,2856:85018/script}`. An inline function
+missing `}` retains its typed lambda, command body, and incomplete block AST,
+reports one E1171, and recovers before the surrounding function terminators or
+the next physical command.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
