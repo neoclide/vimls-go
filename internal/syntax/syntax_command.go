@@ -486,7 +486,10 @@ func (p *syntaxParser) parseInclude(node *SyntaxCommand) {
 		}
 	}
 	pathStart := p.position
-	boundary, malformed := scanSyntaxIncludeFilename(p.source, pathStart, p.end, p.dialect)
+	boundary, _, _, _, malformed := scanXFileArgument(
+		p.source, pathStart, p.end, p.dialect,
+		vimdata.Command{Flags: vimdata.AllowBar | vimdata.NoTrailingComment},
+	)
 	pathEnd := boundary
 	if pathEnd > pathStart {
 		node.Keywords = append(node.Keywords, Span{Start: pathStart, End: pathEnd})
@@ -500,11 +503,13 @@ func (p *syntaxParser) parseInclude(node *SyntaxCommand) {
 	}
 }
 
-// scanSyntaxIncludeFilename returns the first command separator.  It retains
-// all source bytes in the returned span; callers may inspect escaped bars and
-// backtick payloads without losing trivia.  A Ctrl-V protects the following
-// byte exactly as separate_nextcmd() does for EX_XFILE commands.
-func scanSyntaxIncludeFilename(source string, start, end int, dialect Dialect) (int, bool) {
+// scanXFileArgument follows separate_nextcmd() for EX_XFILE payloads while
+// retaining their raw bytes.  The returned expressions are the `=expr`
+// portions of filename expansions; callers keep them for syntax consumers.
+// A malformed expansion owns the remainder of the logical line so a bar in
+// incomplete input cannot become another command.
+func scanXFileArgument(source string, start, end int, dialect Dialect, command vimdata.Command) (int, Span, Span, []*Expression, bool) {
+	var expressions []*Expression
 	for position := start; position < end; {
 		character := source[position]
 		switch character {
@@ -515,15 +520,18 @@ func scanSyntaxIncludeFilename(source string, start, end int, dialect Dialect) (
 			}
 			continue
 		case '|':
-			if position == start || source[position-1] != '\\' {
-				return position, false
+			if command.Flags&vimdata.AllowBar != 0 && (position == start || source[position-1] != '\\') {
+				return position, Span{Start: position, End: position + 1}, Span{}, expressions, false
 			}
 		case '`':
 			if position+1 >= end || source[position+1] != '=' {
-				continue
+				break
 			}
 			expressionStart := position + 2
-			_, diagnostics, consumed := parseExpressionPrefix(source[expressionStart:end], expressionStart, dialect)
+			expression, diagnostics, consumed := parseExpressionPrefix(source[expressionStart:end], expressionStart, dialect)
+			if expression != nil && expression.Kind != ExpressionMissing {
+				expressions = append(expressions, expression)
+			}
 			close := expressionStart + consumed
 			for close < end && isExpressionSpace(source[close]) {
 				close++
@@ -534,7 +542,10 @@ func scanSyntaxIncludeFilename(source string, start, end int, dialect Dialect) (
 			}
 			// Vim's expression expansion cannot safely identify a command
 			// boundary after this point.  Keep the remainder opaque.
-			return end, true
+			return end, Span{}, Span{}, expressions, true
+		}
+		if command.Flags&vimdata.NoTrailingComment == 0 && isCommentStart(source, position, start, end, dialect, command) {
+			return position, Span{}, Span{Start: position, End: end}, expressions, false
 		}
 		if character >= utf8.RuneSelf {
 			next := nextEncodedCharacter(source, position, end)
@@ -549,7 +560,7 @@ func scanSyntaxIncludeFilename(source string, start, end int, dialect Dialect) (
 		}
 		position++
 	}
-	return end, false
+	return end, Span{}, Span{}, expressions, false
 }
 
 func (p *syntaxParser) parseMatch(node *SyntaxCommand) {

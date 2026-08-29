@@ -55,6 +55,24 @@ func scanVim9CommandArgument(source string, start, end int, metadata vimdata.Com
 		argumentEnd, separator, comment := scanEscapedExArgument(source, start, end, Vim9, metadata)
 		return argumentEnd, separator, comment, nil
 	}
+	if metadata.Flags&vimdata.FileArgument != 0 {
+		argumentEnd, separator, comment, expressions, malformed := scanXFileArgument(source, start, end, Vim9, metadata)
+		if parsed != nil && len(expressions) > 0 {
+			parsed.Expressions = append(parsed.Expressions, expressions...)
+			parsed.expressionsParsed = true
+		}
+		if malformed {
+			boundary := &expressionBoundary{
+				argument: Span{Start: start, End: argumentEnd},
+				diagnostics: []Diagnostic{{
+					Code: "vim/E1083", Message: "Missing backtick",
+					Span: Span{Start: argumentEnd, End: argumentEnd},
+				}},
+			}
+			return argumentEnd, Span{}, Span{}, boundary
+		}
+		return trimSourceArgumentEnd(source, start, argumentEnd), separator, comment, nil
+	}
 	if metadata.Name == "source" {
 		argumentEnd, separator, comment := scanSourceArgumentEnd(source, start, end, Vim9)
 		return argumentEnd, separator, comment, nil

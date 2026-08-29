@@ -12,6 +12,7 @@ const (
 	ExpressionArgument
 	NeedArgument
 	ExactInVim9
+	FileArgument
 )
 
 // Command describes one built-in Ex command from the pinned Vim baseline.

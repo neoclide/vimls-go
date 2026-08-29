@@ -442,6 +442,60 @@ func TestSourceUsesExFilenameGrammar(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9XFileBacktickExpressionsAndRecovery(t *testing.T) {
+	// Vim v9.2.1015 src/testdir/test_vim9_cmd.vim Test_edit_wildcards.
+	valid := Parse("vim9script\ndef Func()\n" +
+		"var filename = 'Xtest'\nvar filenr = 77\n" +
+		"edit `=filename`\nedit Xtest`=filenr`\n" +
+		"edit `=filename``=filenr`\nedit X`=filename`xx`=filenr`yy | echo done\nenddef\n")
+	if len(valid.Diagnostics) != 0 {
+		t.Fatalf("valid xfile diagnostics = %#v", valid.Diagnostics)
+	}
+	wantExpressions := [][]string{{"filename"}, {"filenr"}, {"filename", "filenr"}, {"filename", "filenr"}}
+	editIndex := 0
+	for index := range valid.Commands {
+		command := &valid.Commands[index]
+		if command.Canonical != "edit" {
+			continue
+		}
+		if editIndex >= len(wantExpressions) || len(command.Expressions) != len(wantExpressions[editIndex]) {
+			t.Fatalf("edit %d expressions = %#v", editIndex, command.Expressions)
+		}
+		for expressionIndex, want := range wantExpressions[editIndex] {
+			if got := valid.Text(command.Expressions[expressionIndex].Span); got != want {
+				t.Fatalf("edit %d expression %d = %q, want %q", editIndex, expressionIndex, got, want)
+			}
+		}
+		editIndex++
+	}
+	if editIndex != len(wantExpressions) {
+		t.Fatalf("edit count = %d, want %d", editIndex, len(wantExpressions))
+	}
+
+	malformed := Parse("vim9script\ndef Func()\nedit `=\"foo\" | echo hidden\nvar after = 1\nenddef\n")
+	if len(malformed.Diagnostics) != 1 || malformed.Diagnostics[0].Code != "vim/E1083" || malformed.Diagnostics[0].Span.Start != malformed.Diagnostics[0].Span.End {
+		t.Fatalf("malformed xfile diagnostics = %#v", malformed.Diagnostics)
+	}
+	var edit *Command
+	for index := range malformed.Commands {
+		command := &malformed.Commands[index]
+		if command.Canonical == "echo" {
+			t.Fatalf("malformed xfile exposed same-line command: %#v", malformed.Commands)
+		}
+		if command.Canonical == "edit" {
+			edit = command
+		}
+	}
+	if edit == nil || malformed.Text(edit.Argument) != "`=\"foo\" | echo hidden" || len(edit.Expressions) != 1 || malformed.Text(edit.Expressions[0].Span) != "\"foo\"" {
+		t.Fatalf("malformed edit = %#v", edit)
+	}
+	if len(malformed.Commands) < 2 || malformed.Commands[len(malformed.Commands)-2].Canonical != "var" || malformed.Commands[len(malformed.Commands)-1].Canonical != "enddef" {
+		t.Fatalf("malformed xfile recovery commands = %#v", malformed.Commands)
+	}
+	assertFileSpans(t, valid)
+	assertFileSpans(t, malformed)
+}
+
 func TestVariableCommandsSplitAtTopLevelBar(t *testing.T) {
 	file := Parse("if exists('x') | unlet x | endif\n" +
 		"unlet g:items[fn('a|b')] | lockvar 2 g:items[0] | unlockvar g:items[1]\n")

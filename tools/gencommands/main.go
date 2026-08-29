@@ -69,6 +69,8 @@ func main() {
 				selected = append(selected, "NeedArgument")
 			case "EX_WHOLE":
 				selected = append(selected, "ExactInVim9")
+			case "EX_XFILE", "EX_FILES", "EX_FILE1":
+				selected = append(selected, "FileArgument")
 			}
 		}
 		flagExpression := "0"

@@ -2090,6 +2090,14 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		command.boundaryExpression = nil
 		return
 	}
+	if command.Dialect == Vim9 {
+		if metadata, ok := vimdata.Lookup(command.Canonical); ok && metadata.Flags&vimdata.FileArgument != 0 {
+			if boundary := command.boundaryExpression; boundary != nil {
+				file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
+				command.boundaryExpression = nil
+			}
+		}
+	}
 	if command.Argument.Start >= command.Argument.End {
 		if command.Dialect == Vim9 && command.Canonical == "type" {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
