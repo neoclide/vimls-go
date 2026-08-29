@@ -1985,6 +1985,24 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	if command.Dialect == Vim9 && len(command.Modifiers) > 0 {
 		switch command.Canonical {
 		case "endif", "endfor", "endwhile", "try", "catch", "finally", "endtry":
+			allowSilentLoopEnd := command.Canonical == "endfor" || command.Canonical == "endwhile"
+			for _, modifier := range command.Modifiers {
+				if modifier.Name != "silent" && modifier.Name != "unsilent" {
+					allowSilentLoopEnd = false
+					break
+				}
+			}
+			if allowSilentLoopEnd {
+				for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
+					if file.Blocks[block].Kind == BlockDef {
+						allowSilentLoopEnd = false
+						break
+					}
+				}
+			}
+			if allowSilentLoopEnd {
+				break
+			}
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1176", Message: "misplaced command modifier", Span: command.Modifiers[0].Span,
 			})
