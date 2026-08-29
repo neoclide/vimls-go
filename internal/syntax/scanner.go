@@ -2302,14 +2302,26 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 }
 
 func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostics []Diagnostic) []Diagnostic {
-	if command.Dialect == Vim9 && command.Declaration != nil {
-		diagnostics = mapVim9LambdaTrailingParen(diagnostics, command.Declaration.Initializer, file.Source, 0)
-	}
 	inDef := false
 	for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
 		if file.Blocks[block].Kind == BlockDef {
 			inDef = true
 			break
+		}
+	}
+	if command.Dialect == Vim9 && command.Declaration != nil {
+		diagnostics = mapVim9LambdaTrailingParen(diagnostics, command.Declaration.Initializer, file.Source, 0)
+		initializer := command.Declaration.Initializer
+		if len(diagnostics) == 1 && diagnostics[0].Code == "vimls/missing-expression" && initializer != nil {
+			switch initializer.Kind {
+			case ExpressionBinary, ExpressionTernary, ExpressionCast:
+				diagnostics[0].Code = "vim/E15"
+				diagnostics[0].Message = "invalid expression"
+				if inDef {
+					diagnostics[0].Code = "vim/E1097"
+					diagnostics[0].Message = "line incomplete"
+				}
+			}
 		}
 	}
 	for index := range diagnostics {
