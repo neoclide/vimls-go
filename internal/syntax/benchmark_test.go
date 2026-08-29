@@ -222,6 +222,21 @@ func BenchmarkParseDeclarationInitializers(b *testing.B) {
 	}
 }
 
+func BenchmarkParseMalformedVim9DeclarationInitializers(b *testing.B) {
+	statement := "var broken = get(items, [1, 2, 3}\nvar after = 1\n"
+	source := "vim9script\n" + strings.Repeat(statement, 64)
+	file := Parse(source)
+	if len(file.Diagnostics) == 0 || len(file.Commands) != 129 || file.Commands[len(file.Commands)-1].Declaration == nil {
+		b.Fatalf("commands = %d, diagnostics = %#v", len(file.Commands), file.Diagnostics)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(source)))
+	b.ResetTimer()
+	for range b.N {
+		benchmarkParsedFile = Parse(source)
+	}
+}
+
 func BenchmarkParseForIterables(b *testing.B) {
 	statement := "for item in get(g:, 'items', [1, 2, 3])\nendfor\n"
 	tests := []struct {
