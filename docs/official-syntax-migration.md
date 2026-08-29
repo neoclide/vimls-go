@@ -304,7 +304,8 @@ B-structural-block
   T:2019:44596/script*,2029:44739/script*
 ```
 
-Group B expected-map cleanup contains seven non-syntax keys:
+The baseline Group B expected-map cleanup contained seven non-syntax keys,
+removed in `1aff54b`:
 
 - name: `C:19:420/script` (E1314), `I:49:1114/script` (E1343);
 - semantic: `C:1388:32121/script` (E1331), `C:2386:54166/script` (E1352),
@@ -437,10 +438,11 @@ Authority is distributed across `src/eval.c`, `src/vim9expr.c`,
 `src/vim9cmds.c`, `src/vim9compile.c`, `src/vim9generics.c`,
 `src/vim9class.c`, `src/ex_docmd.c`, `src/userfunc.c`, and `src/usercmd.c`.
 
-The Group C expected map has 79 keys: 78 syntax and one semantic key,
-`G:2456:54444/script` (E1561 duplicate generic type variable). Remove that key
-from the parser-negative matrix. The only Group C unknowns are
-`C:2148:44597/script` and `S:5007:112274/{def,vim9-script}`.
+The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
+`G:2456:54444/script` (E1561 duplicate generic type variable). Commit
+`1aff54b` removed that key from the parser-negative matrix. The only Group C
+unknowns are `C:2148:44597/script` and
+`S:5007:112274/{def,vim9-script}`.
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
@@ -558,12 +560,13 @@ Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
 assert runtime text rather than a unique Vim error code.
 
-Group D expected-map cleanup contains eight keys:
+The baseline Group D expected-map cleanup contained eight keys, removed in
+`1aff54b`:
 
 - semantic: `test_vim9_enum.vim:{329:7496/script,339:7706/script}` (E1416),
   `test_vim9_enum.vim:369:8371/script` (E1417), and
   `test_listdict.vim:1532:48170/{legacy,vim9-script}` (E111);
-- type: `test_vim9_func.vim:{2114:47060/def,2883:66057/def}` (E1180);
+- type: `test_vim9_func.vim:{2114:47060/script,2883:66057/def}` (E1180);
 - stale mapping: `test_listdict.vim:523:14052/script` is mapped to E1004,
   while the official failure is E716; E1004 belongs to `529:14207/def`.
 
