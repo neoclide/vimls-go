@@ -1607,6 +1607,20 @@ func (p *expressionParser) consumeDictionaryRemainder() {
 
 func (p *expressionParser) parseDictionaryKey() *Expression {
 	first := p.current()
+	if p.dialect == Vim9 && first.text == "[" {
+		p.advance()
+		key := p.parse(0)
+		end := key.Span.End
+		if p.current().text == "]" {
+			end = p.current().span.End
+			p.advance()
+		} else {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1139", Message: "Missing matching bracket after dict key", Span: p.current().span,
+			})
+		}
+		return &Expression{Kind: ExpressionList, Span: Span{Start: first.span.Start, End: end}, Children: []*Expression{key}}
+	}
 	if first.kind != expressionIdentifier && first.kind != expressionNumber {
 		return p.parse(0)
 	}

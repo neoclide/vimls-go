@@ -522,6 +522,52 @@ func TestOfficialMissingDictionaryValueContextAndRecovery(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9DictionaryKeyMissingBracket(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_expr.vim Test_expr7_dict.
+	source := "vim9script\nvar d = {['a']: 234, ['b': 'x'}\nvar after = 1\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1139" || file.Diagnostics[0].Message != "Missing matching bracket after dict key" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 3 {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	declaration := file.Commands[1].Declaration
+	if declaration == nil || declaration.Initializer == nil || declaration.Initializer.Kind != ExpressionDictionary {
+		t.Fatalf("dictionary declaration = %#v", file.Commands[1])
+	}
+	dictionary := declaration.Initializer
+	if len(dictionary.Children) != 4 {
+		t.Fatalf("dictionary = %#v", dictionary)
+	}
+	if file.Text(dictionary.Children[0].Span) != "['a']" || file.Text(dictionary.Children[1].Span) != "234" || file.Text(dictionary.Children[2].Span) != "['b'" || file.Text(dictionary.Children[3].Span) != "'x'" {
+		t.Fatalf("dictionary children = %#v", dictionary.Children)
+	}
+	if dictionary.Children[0].Kind != ExpressionList || len(dictionary.Children[0].Children) != 1 || dictionary.Children[2].Kind != ExpressionList || len(dictionary.Children[2].Children) != 1 {
+		t.Fatalf("computed keys = %#v", dictionary.Children)
+	}
+	after := file.Commands[2].Declaration
+	if after == nil || file.Text(after.Name) != "after" || file.Text(after.Initializer.Span) != "1" {
+		t.Fatalf("following declaration = %#v", file.Commands[2])
+	}
+	assertFileSpans(t, file)
+}
+
+func TestOfficialVim9DictionaryExpressionKeys(t *testing.T) {
+	expression, diagnostics := (Vim9ExpressionParser{}).Parse("{['a']: 234, [name]: 'x'}")
+	if len(diagnostics) != 0 || expression.Kind != ExpressionDictionary || len(expression.Children) != 4 {
+		t.Fatalf("expression = %#v, diagnostics = %#v", expression, diagnostics)
+	}
+	if expression.Children[0].Kind != ExpressionList || expression.Children[2].Kind != ExpressionList {
+		t.Fatalf("computed keys = %#v", expression.Children)
+	}
+
+	list, diagnostics := (Vim9ExpressionParser{}).Parse("['a': 'x']")
+	if list.Kind != ExpressionList || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E696" {
+		t.Fatalf("list = %#v, diagnostics = %#v", list, diagnostics)
+	}
+}
+
 func TestOfficialVim9SliceColonSpacing(t *testing.T) {
 	// v9.2.1015 runtime/doc/vim9.txt and
 	// src/testdir/test_vim9_assign.vim Test_unlet_list_slice.
