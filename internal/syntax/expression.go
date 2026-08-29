@@ -469,7 +469,23 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 		lineEnd += open
 		argOpen := strings.IndexByte(p.source[open+1:lineEnd], '(')
 		if argOpen < 0 {
-			return nil, false
+			// An adjacent '<' cannot be a valid Vim9 comparison because binary
+			// operators require surrounding whitespace.  Retain it as an
+			// incomplete generic reference and recover at this physical line,
+			// rather than reinterpreting it as a comparison and consuming the
+			// following command.
+			tailEnd := trimExpressionSpaceEnd(p.source, open+1, lineEnd)
+			for p.current().kind != expressionEOF && p.current().span.Start < p.base+lineEnd {
+				p.advance()
+			}
+			operator := Span{Start: p.base + open, End: p.base + tailEnd}
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1554", Message: "missing '>' in generic function", Span: operator,
+			})
+			return &Expression{
+				Kind: ExpressionGenericReference, Span: Span{Start: left.Span.Start, End: operator.End},
+				Operator: operator, Children: []*Expression{left},
+			}, true
 		}
 		argOpen += open + 1
 		cursor := p.lexer

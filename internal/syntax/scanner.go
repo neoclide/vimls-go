@@ -4262,6 +4262,11 @@ func looksLikeVim9Expression(source string, nameStart, nameEnd, end int) bool {
 			if call < end && source[call] == '(' {
 				return true
 			}
+		} else {
+			// A tight, unterminated type list is an incomplete generic
+			// expression.  Route it through expression recovery instead of
+			// classifying a capitalized name as a user command.
+			return true
 		}
 	}
 	if strings.ContainsRune(":([.", rune(source[nameEnd])) {
