@@ -2375,7 +2375,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		assignment := findAssignment(source)
 		if assignment.Start < 0 {
+			diagnosticsStart := len(file.Diagnostics)
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
+			diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 			diagnoseInvalidClassDeclaration(file, command, declaration)
 			diagnoseVim9DeclarationShape(file, command, declaration, directAggregateMember)
 			command.Declaration = declaration
@@ -2389,7 +2391,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		assignment.Start += command.Argument.Start
 		assignment.End += command.Argument.Start
 		left := file.Source[command.Argument.Start:assignment.Start]
+		diagnosticsStart := len(file.Diagnostics)
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
+		diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 		invalidClassDeclaration := diagnoseInvalidClassDeclaration(file, command, declaration)
 		if !invalidClassDeclaration {
 			diagnoseVim9AssignmentSpacing(file, command, assignment)
@@ -2493,6 +2497,36 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			}
 			command.Expressions = append(command.Expressions, expression)
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		}
+	}
+}
+
+// Vim reports a top-level Vim9 object type with multiple arguments as
+// trailing characters, while the type parser itself deliberately remains
+// context-free and reports E1009.  Adjust only the declaration diagnostic;
+// keep the parsed type and its argument nodes intact.
+func diagnoseObjectTypeTail(file *File, command *Command, declaration *Declaration, diagnosticsStart int) {
+	if command == nil || declaration == nil || command.Dialect != Vim9 || command.Block >= 0 {
+		return
+	}
+	typeNode := declaration.ParsedType
+	if typeNode == nil || typeNode.Kind != TypeGeneric || typeNode.Name != "object" || len(typeNode.Arguments) <= 1 {
+		return
+	}
+	firstExtra := typeNode.Arguments[1]
+	lastExtra := typeNode.Arguments[len(typeNode.Arguments)-1]
+	comma := typeNode.Arguments[0].Span.End
+	for comma < firstExtra.Span.Start && file.Source[comma] != ',' {
+		comma++
+	}
+	if comma >= firstExtra.Span.Start {
+		return
+	}
+	for index := diagnosticsStart; index < len(file.Diagnostics); index++ {
+		if file.Diagnostics[index].Code == "vim/E1009" && file.Diagnostics[index].Span == (Span{Start: firstExtra.Span.Start, End: lastExtra.Span.End}) {
+			file.Diagnostics[index].Code = "vim/E488"
+			file.Diagnostics[index].Message = "trailing characters"
+			file.Diagnostics[index].Span = Span{Start: comma, End: typeNode.Span.End}
 		}
 	}
 }
