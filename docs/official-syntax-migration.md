@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 493 (`191fadb`)
+- Current parser-negative syntax assertions: 494 (`1e10f55`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -93,6 +93,8 @@ Commit `347226c` migrated the three malformed special-key expression variants,
 making the current split 489 migrated, zero ready, and 583 pending-fix.
 Commit `191fadb` migrated the final four Dictionary-delimiter variants, making
 the current split 493 migrated, zero ready, and 579 pending-fix.
+Commit `1e10f55` migrated the Vim9 EX_XFILE missing-backtick case, making the
+current split 494 migrated, zero ready, and 578 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -108,7 +110,7 @@ file prefix produces the exact corpus keys.
 | Group ID | Status | Exact cases | Official result | Baseline result | Vim evidence | Implementation location |
 | --- | --- | --- | --- | --- | --- | --- |
 | `vim9-vim9script-arguments` | `migrated` (`c340e30`) | `test_vim9_import.vim:{2972:73136/script,2978:73280/script,2984:73418/script}` | E475, E983, E475 | no diagnostic | `runtime/doc/repeat.txt:416-424`; `src/vim9script.c:103-132` | `internal/syntax/scanner.go` prologue state |
-| `vim9-xfile-missing-backtick` | `pending-fix` | `test_vim9_cmd.vim:{267:6525/def}` | E1083 | no diagnostic | `src/vim9cmds.c:2311-2431` | command metadata generation and `internal/syntax/vim9_command.go` |
+| `vim9-xfile-missing-backtick` | `migrated` (`1e10f55`) | `test_vim9_cmd.vim:{267:6525/def}` | E1083 | no diagnostic | `runtime/doc/editing.txt:418-460`; `src/ex_cmds.h:33,66-67,538-540`; `src/vim9cmds.c:2311-2431` | command metadata generation and `internal/syntax/vim9_command.go` |
 | `vim9-dictionary-missing-value` | `migrated` (`2329653`) | `test_vim9_expr.vim:{3265:97250/def,3266:97290/script,3274:97438/def,3274:97438/vim9-script}` | E723 in `def`, E15 at script level | `vimls/missing-expression` | `runtime/doc/eval.txt:761-790`; `runtime/doc/vim9.txt:70-82`; `src/vim9expr.c:1912-2076` | `internal/syntax/expression.go` plus context mapping in `scanner.go` |
 | `vim9-assignment-missing-rhs` | `migrated` (`3bd2d68`) | `test_vim9_assign.vim:{515:12614/def,581:14074/def}` | E1097 | `vimls/missing-expression` | `runtime/doc/vim9.txt:786-817,903-910`; `src/vim9compile.c:918-945,3190-3238` | command-expression assignment and declaration paths in `scanner.go` |
 | `vim9-assignment-trailing-paren` | `migrated` (`3bd2d68`) | `test_vim9_assign.vim:{1202:28637/def}` | E488 | `vimls/trailing-expression` | `runtime/doc/message.txt:752-757`; `src/vim9compile.c:3750-3810,4312-4320` | assignment recognition in `scanner.go` |
@@ -385,13 +387,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 2 | 0 | 1 |
-| `C-EXCMD` | 115 | 22 | 0 | 93 |
+| `C-EXCMD` | 115 | 23 | 0 | 92 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 23 | 0 | 86 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
 | `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **104** | **0** | **265** |
+| **Total** | **369** | **105** | **0** | **264** |
 
 ```text
 C-EXPR
@@ -500,6 +502,12 @@ C-REDIR
 Authority is distributed across `src/eval.c`, `src/vim9expr.c`,
 `src/vim9cmds.c`, `src/vim9compile.c`, `src/vim9generics.c`,
 `src/vim9class.c`, `src/ex_docmd.c`, `src/userfunc.c`, and `src/usercmd.c`.
+
+Commit `1e10f55` migrated the `C-EXCMD` E1083 variant. The generated command
+table now retains Vim's EX_XFILE/EX_FILES/EX_FILE1 property, valid filename
+expansions retain each embedded expression in the command AST, and a missing
+closing backtick keeps the same-line tail opaque before recovery resumes on the
+next physical line.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
