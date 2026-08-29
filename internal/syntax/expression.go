@@ -309,8 +309,19 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			if (member.kind == expressionIdentifier || member.kind == expressionNumber) && member.span.Start > token.span.End && p.onlyWhitespace(token.span.End, member.span.Start) {
 				p.advance()
 				p.advance()
+				code := "vimls/missing-member"
+				message := "member name cannot follow white space"
+				if !strings.ContainsAny(p.source[token.span.End-p.base:member.span.Start-p.base], "\r\n") {
+					code = "vim/E1202"
+					tailStart := token.span.Start - p.base
+					tailEnd := len(p.source)
+					if newline := strings.IndexByte(p.source[tailStart:], '\n'); newline >= 0 {
+						tailEnd = tailStart + newline
+					}
+					message = "No white space allowed after '.': " + p.source[tailStart:tailEnd]
+				}
 				p.diagnostics = append(p.diagnostics, Diagnostic{
-					Code: "vimls/missing-member", Message: "member name cannot follow white space", Span: Span{Start: token.span.End, End: member.span.Start},
+					Code: code, Message: message, Span: Span{Start: token.span.End, End: member.span.Start},
 				})
 				left = &Expression{
 					Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: member.span.End},
