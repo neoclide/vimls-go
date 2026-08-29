@@ -2430,7 +2430,12 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	if command.Canonical == "command" {
-		diagnoseUserCommandAttributes(file, command)
+		if diagnoseUserCommandAttributes(file, command) {
+			// The name and its immediately attached '#' are one invalid
+			// Vim9 command header.  Keep the remainder opaque so it cannot
+			// produce same-line replacement-command cascades.
+			return
+		}
 		// A Vim9 command block is already represented by the top-level command
 		// stream and its BlockCommand. Attaching a second CommandList would make
 		// semantic consumers visit the same declarations and references twice.
@@ -3221,9 +3226,9 @@ func userCommandBodySpan(source string, argument Span) (Span, bool) {
 	return Span{Start: bodyStart, End: argument.End}, true
 }
 
-func diagnoseUserCommandAttributes(file *File, command *Command) {
+func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 	if command.Dialect != Vim9 {
-		return
+		return false
 	}
 	allowArguments := false
 	complete := Span{}
@@ -3251,6 +3256,14 @@ func diagnoseUserCommandAttributes(file *File, command *Command) {
 			Code: "vim/E1208", Message: "-complete used without allowing arguments", Span: complete,
 		})
 	}
+	nameEnd := scanWord(file.Source, start, command.Argument.End)
+	if nameEnd > start && nameEnd < command.Argument.End && file.Source[nameEnd] == '#' {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E182", Message: "Invalid command name", Span: Span{Start: nameEnd, End: nameEnd + 1},
+		})
+		return true
+	}
+	return false
 }
 
 func collectedCommandStrayClose(source string, collectorEnd int) (Span, bool) {
