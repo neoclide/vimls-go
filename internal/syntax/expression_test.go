@@ -764,7 +764,7 @@ func TestOfficialVim9InlineFunctionMissingBrace(t *testing.T) {
 
 func TestOfficialVim9InlineFunctionMissingHeredocEnd(t *testing.T) {
 	for _, source := range []string{
-		"def Func()\nvar Func = (nr: number): int => {\n    var ll =<< ENDIT\n       nothing\nenddef\ndefcompile\nvar after = 1\n",
+		"def Func()\nvar Func = (nr: number): int => {\n    var ll =<< ENDIT\n       nothing\nenddef\ndefcompile\nlet after = 1\n",
 		"vim9script\nvar Func = (nr: number): int => {\n    var ll =<< ENDIT\n       nothing\nvar after = 1\n",
 	} {
 		file := Parse(source)
