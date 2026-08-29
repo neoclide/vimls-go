@@ -89,6 +89,10 @@ func parseSource(source string, initial Dialect) *File {
 					}
 					active = Vim9
 					vim9Prologue = false
+				} else if len(dialectStack) > 0 {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1038", Message: "vim9script can only be used in a script", Span: command.Name,
+					})
 				} else if initial == Legacy {
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
 						Code: "vim/E1039", Message: "vim9script must be the first command in the file", Span: command.Name,
