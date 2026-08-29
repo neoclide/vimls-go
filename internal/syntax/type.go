@@ -199,12 +199,39 @@ func (p *typeParser) parseType() *Type {
 				})
 			}
 			p.skipSpace()
+			optionalSeen := false
 			for p.offset < len(p.source) && p.source[p.offset] != ')' {
-				node.Arguments = append(node.Arguments, p.parseType())
-				argumentEnd := node.Arguments[len(node.Arguments)-1].Span.End - p.base
+				argument := p.parseType()
+				node.Arguments = append(node.Arguments, argument)
+				if argument.Kind == TypeOptional {
+					optionalSeen = true
+				} else if argument.Kind == TypeVariadic {
+					if len(argument.Arguments) > 0 {
+						member := argument.Arguments[0]
+						switch member.Name {
+						case "any", "bool", "blob", "channel", "dict", "float", "func", "job", "number", "object", "string", "tuple", "void":
+							p.diagnostics = append(p.diagnostics, Diagnostic{
+								Code: "vim/E1180", Message: "variable arguments type must be a list",
+								Span: member.Span,
+							})
+						}
+					}
+				} else if optionalSeen {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E1007", Message: "mandatory argument after optional argument",
+						Span: argument.Span,
+					})
+				}
+				argumentEnd := argument.Span.End - p.base
 				p.skipSpace()
 				spaceBeforeComma := p.offset < len(p.source) && p.source[p.offset] == ',' && p.offset > argumentEnd
-				if spaceBeforeComma {
+				variadicHasFollower := argument.Kind == TypeVariadic && p.offset < len(p.source) && p.source[p.offset] == ','
+				if variadicHasFollower {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E110", Message: "missing ')' after function type arguments",
+						Span: p.span(p.offset, p.offset+1),
+					})
+				} else if spaceBeforeComma {
 					p.diagnostics = append(p.diagnostics, Diagnostic{
 						Code: "vim/E1068", Message: "no white space allowed before ','",
 						Span: p.span(argumentEnd, p.offset+1),
@@ -219,7 +246,7 @@ func (p *typeParser) parseType() *Type {
 					break
 				}
 				p.offset++
-				if !spaceBeforeComma && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
+				if !variadicHasFollower && !spaceBeforeComma && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
 					p.diagnostics = append(p.diagnostics, Diagnostic{
 						Code: "vim/E1069", Message: "white space required after ','",
 						Span: p.span(p.offset-1, p.offset),

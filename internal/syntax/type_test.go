@@ -129,6 +129,42 @@ func TestVim9TypeParserFunctionTypeSpacing(t *testing.T) {
 	}
 }
 
+func TestVim9TypeParserFunctionOptionalAndVariadicArguments(t *testing.T) {
+	valid := []string{
+		"func(?number, ?string): string",
+		"func(number, ...list<string>): number",
+		"func(?number, ...list<string>): number",
+	}
+	for _, source := range valid {
+		t.Run("valid "+source, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(source)
+			if typeNode == nil || typeNode.Kind != TypeFunction || len(typeNode.Arguments) != 2 || len(diagnostics) != 0 {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+
+	invalid := []struct {
+		source     string
+		diagnostic string
+		arguments  int
+	}{
+		{source: "func(?number, string)", diagnostic: "vim/E1007", arguments: 2},
+		{source: "func(...any)", diagnostic: "vim/E1180", arguments: 1},
+		{source: "func(...bool)", diagnostic: "vim/E1180", arguments: 1},
+		{source: "func(...list<number>, string)", diagnostic: "vim/E110", arguments: 2},
+		{source: "func(...list<number>, ?string)", diagnostic: "vim/E110", arguments: 2},
+	}
+	for _, test := range invalid {
+		t.Run("invalid "+test.source, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(test.source)
+			if typeNode == nil || typeNode.Kind != TypeFunction || len(typeNode.Arguments) != test.arguments || len(diagnostics) != 1 || diagnostics[0].Code != test.diagnostic {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9TypeParserTupleWhitespaceAndSeparators(t *testing.T) {
 	tests := []struct {
 		name       string
