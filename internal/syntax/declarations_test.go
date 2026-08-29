@@ -2,6 +2,103 @@ package syntax
 
 import "testing"
 
+func TestLegacyAggregateDialectGate(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		code       string
+		message    string
+		kind       BlockKind
+		header     string
+		aggregate  string
+		terminator string
+	}{
+		{
+			name: "class", source: "class LegacyClass\nendclass\nlet after = 1\n",
+			code: "vim/E1316", message: "Class can only be defined in Vim9 script",
+			kind: BlockClass, header: "class", aggregate: "LegacyClass", terminator: "endclass",
+		},
+		{
+			name: "interface", source: "interface LegacyInterface\nendinterface\nlet after = 1\n",
+			code: "vim/E1342", message: "Interface can only be defined in Vim9 script",
+			kind: BlockInterface, header: "interface", aggregate: "LegacyInterface", terminator: "endinterface",
+		},
+		{
+			name: "enum", source: "enum LegacyEnum\nendenum\nlet after = 1\n",
+			code: "vim/E1414", message: "Enum can only be defined in Vim9 script",
+			kind: BlockEnum, header: "enum", aggregate: "LegacyEnum", terminator: "endenum",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Message != test.message {
+				t.Fatalf("diagnostics = %#v, want %s", file.Diagnostics, test.code)
+			}
+			if file.Text(file.Diagnostics[0].Span) != test.header {
+				t.Fatalf("diagnostic span = %q, want %q", file.Text(file.Diagnostics[0].Span), test.header)
+			}
+			if len(file.Commands) != 3 || file.Commands[0].Canonical != test.header || file.Commands[1].Canonical != test.terminator || file.Commands[2].Canonical != "let" {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			aggregate := file.Commands[0].Aggregate
+			if aggregate == nil || aggregate.Kind != test.kind || file.Text(aggregate.Name) != test.aggregate {
+				t.Fatalf("aggregate = %#v", aggregate)
+			}
+			if len(file.Blocks) != 1 || file.Blocks[0].Kind != test.kind || file.Blocks[0].Header != 0 || file.Blocks[0].End != 1 {
+				t.Fatalf("blocks = %#v", file.Blocks)
+			}
+			if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+				t.Fatalf("following command = %#v", file.Commands[2])
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
+func TestAggregateDialectGateIsContextual(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "vim9 script",
+			source: "vim9script\nclass VimClass\nendclass\nvar after = 1\n",
+		},
+		{
+			name:   "def body",
+			source: "def Build()\n  class Nested\n  endclass\nenddef\nvar after = 1\n",
+		},
+		{
+			name:   "vim9cmd one shot",
+			source: "vim9cmd class OneShot\nendclass\nlet after = 1\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1316" || diagnostic.Code == "vim/E1342" || diagnostic.Code == "vim/E1414" {
+					t.Fatalf("unexpected aggregate dialect diagnostic = %#v", diagnostic)
+				}
+			}
+			found := false
+			for _, command := range file.Commands {
+				if command.Canonical != "class" {
+					continue
+				}
+				found = true
+				if command.Dialect != Vim9 || command.Aggregate == nil || file.Text(command.Aggregate.Name) == "" {
+					t.Fatalf("class command = %#v", command)
+				}
+			}
+			if !found {
+				t.Fatalf("class command not found: %#v", file.Commands)
+			}
+		})
+	}
+}
+
 func TestVim9AggregateDeclarations(t *testing.T) {
 	source := "vim9script\nclass Child extends Base implements One, Two\nendclass\ninterface Item extends Parent\nendinterface\n"
 	file := Parse(source)

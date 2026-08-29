@@ -64,6 +64,21 @@ func findTopLevelKeyword(source string, start, end int, keyword string) int {
 }
 
 func parseAggregate(file *File, command *Command, kind BlockKind) {
+	if command.Dialect == Legacy {
+		diagnostic := Diagnostic{Span: command.Name}
+		switch kind {
+		case BlockClass:
+			diagnostic.Code = "vim/E1316"
+			diagnostic.Message = "Class can only be defined in Vim9 script"
+		case BlockInterface:
+			diagnostic.Code = "vim/E1342"
+			diagnostic.Message = "Interface can only be defined in Vim9 script"
+		case BlockEnum:
+			diagnostic.Code = "vim/E1414"
+			diagnostic.Message = "Enum can only be defined in Vim9 script"
+		}
+		file.Diagnostics = append(file.Diagnostics, diagnostic)
+	}
 	source := maskVim9Comments(file.Text(command.Argument))
 	nameStart := skipEnumSpace(source, 0, len(source))
 	nameEnd := scanWord(source, nameStart, len(source))
@@ -111,7 +126,6 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 	}
 	command.Aggregate = aggregate
 }
-
 func scanClassName(source string, start, end int) int {
 	position := start
 	for position < end {
