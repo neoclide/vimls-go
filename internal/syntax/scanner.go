@@ -369,6 +369,7 @@ func parseSource(source string, initial Dialect) *File {
 			parseLogicalCommandDetails(file, &file.Commands[index])
 		}
 	}
+	buildAggregateMembers(file)
 	suppressInvalidDefMissingEnds(file)
 	normalizeLambdaBodySources(file)
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
@@ -2734,6 +2735,7 @@ func parseEmbeddedCommandList(file *File, span Span, dialect Dialect, depth int)
 			}
 		}
 	}
+	buildAggregateMembers(embedded)
 	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	list.Commands = embedded.Commands
 	list.Blocks = embedded.Blocks
@@ -2797,6 +2799,7 @@ func parseLegacyDoCommandList(file *File, span Span, depth int) *CommandList {
 			parseCommandDetailsDepth(embedded, &embedded.Commands[index], depth+1)
 		}
 	}
+	buildAggregateMembers(embedded)
 	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	list.Commands = embedded.Commands
 	list.Blocks = embedded.Blocks
@@ -2860,6 +2863,7 @@ func parseLegacyAutocmdCommandList(file *File, span Span, depth int) *CommandLis
 				parseCommandDetailsDepth(raw, &raw.Commands[index], depth+1)
 			}
 		}
+		buildAggregateMembers(raw)
 		file.Diagnostics = append(file.Diagnostics, raw.Diagnostics...)
 		list.Commands = raw.Commands
 		list.Blocks = raw.Blocks
@@ -2911,6 +2915,7 @@ func parseLegacyAutocmdCommandList(file *File, span Span, depth int) *CommandLis
 			parseCommandDetailsDepth(embedded, &embedded.Commands[index], depth+1)
 		}
 	}
+	buildAggregateMembers(embedded)
 	rebaseLambdaFile(embedded, file.Source, span.Start)
 	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	list.Commands = embedded.Commands

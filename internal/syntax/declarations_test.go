@@ -18,6 +18,40 @@ func TestVim9AggregateDeclarations(t *testing.T) {
 	}
 }
 
+func TestVim9AggregateMembers(t *testing.T) {
+	source := "vim9script\ninterface One\n  def Read(): string\nendinterface\nclass Two implements One\n  var value: number\n  def Read(): string\n    var local = ''\n    return local\n  enddef\nendclass\nenum Color\n  Red,\n  Green\n  def Name(): string\n    return 'color'\n  enddef\nendenum\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	tests := []struct {
+		command int
+		members []int
+	}{
+		{command: 1, members: []int{2}},
+		{command: 4, members: []int{5, 6}},
+		{command: 11, members: []int{12, 13}},
+	}
+	for _, test := range tests {
+		aggregate := file.Commands[test.command].Aggregate
+		if aggregate == nil || len(aggregate.Members) != len(test.members) {
+			t.Fatalf("command %d aggregate = %#v", test.command, aggregate)
+		}
+		for index, member := range test.members {
+			if aggregate.Members[index] != member {
+				t.Fatalf("command %d members = %#v, want %#v", test.command, aggregate.Members, test.members)
+			}
+		}
+	}
+	if file.Commands[7].Declaration == nil || file.Commands[7].Block < 0 || file.Blocks[file.Commands[7].Block].Kind != BlockDef {
+		t.Fatalf("local declaration = %#v", file.Commands[7])
+	}
+	incomplete := Parse("vim9script\nclass Open\n  var value = 1\n")
+	if aggregate := incomplete.Commands[1].Aggregate; aggregate == nil || len(aggregate.Members) != 1 || aggregate.Members[0] != 2 {
+		t.Fatalf("incomplete aggregate = %#v", aggregate)
+	}
+}
+
 func TestOfficialVimParserMissingImplementsName(t *testing.T) {
 	file := Parse("vim9script\nclass A implements\nendclass\nvar after = 1\n")
 	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1389" || file.Diagnostics[0].Message != "missing name after implements" || file.Text(file.Diagnostics[0].Span) != "implements" {

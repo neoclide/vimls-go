@@ -157,6 +157,51 @@ func buildBlocks(file *File) {
 	}
 }
 
+func buildAggregateMembers(file *File) {
+	for header := range file.Commands {
+		aggregate := file.Commands[header].Aggregate
+		if aggregate == nil {
+			continue
+		}
+		aggregate.Members = aggregate.Members[:0]
+		blockIndex := file.Commands[header].Block
+		if blockIndex < 0 || blockIndex >= len(file.Blocks) || file.Blocks[blockIndex].Header != header {
+			continue
+		}
+		end := len(file.Commands)
+		if file.Blocks[blockIndex].End >= 0 {
+			end = file.Blocks[blockIndex].End
+		}
+		for index := header + 1; index < end; index++ {
+			command := &file.Commands[index]
+			if command.Block == blockIndex {
+				if isDirectAggregateMember(command) {
+					aggregate.Members = append(aggregate.Members, index)
+				}
+				continue
+			}
+			if command.Block >= 0 && command.Block < len(file.Blocks) {
+				block := file.Blocks[command.Block]
+				if block.Kind == BlockDef && block.Parent == blockIndex && block.Header == index {
+					aggregate.Members = append(aggregate.Members, index)
+				}
+			}
+		}
+	}
+}
+
+func isDirectAggregateMember(command *Command) bool {
+	if len(command.EnumValues) > 0 {
+		return true
+	}
+	switch command.Canonical {
+	case "var", "const", "final", "def":
+		return true
+	default:
+		return false
+	}
+}
+
 func suppressInvalidDefMissingEnds(file *File) {
 	var invalid map[Span]bool
 	for _, block := range file.Blocks {

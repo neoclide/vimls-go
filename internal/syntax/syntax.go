@@ -436,6 +436,8 @@ type Aggregate struct {
 	Name       Span
 	Extends    []Span
 	Implements []Span
+	// Members contains indexes in the containing File or CommandList Commands slice.
+	Members []int
 }
 
 type TypeAlias struct {
