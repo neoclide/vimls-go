@@ -2840,6 +2840,16 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
+		if command.Canonical == "defer" && command.Dialect == Vim9 && len(diagnostics) == 0 && expression != nil && expression.Kind != ExpressionCall {
+			name := ""
+			if expression.Kind == ExpressionIdentifier {
+				name = file.Text(expression.Span)
+			}
+			diagnostics = append(diagnostics, Diagnostic{
+				Code: "vim/E107", Message: "Missing parentheses: " + name,
+				Span: Span{Start: expression.Span.End, End: expression.Span.End},
+			})
+		}
 		file.Diagnostics = append(file.Diagnostics, mapVim9AttachedHashDiagnostics(file, command, diagnostics)...)
 	case "echo", "echon", "echomsg", "echoerr", "echoconsole", "echowindow", "execute":
 		if command.expressionsParsed {
