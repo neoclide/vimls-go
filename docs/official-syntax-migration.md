@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 870 (`10f6de7`)
+- Current parser-negative syntax assertions: 886 (`a7b5679`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -294,6 +294,9 @@ Commit `d8741b9` migrated the local Vim9 `func!` case, making the authoritative
 current split 868 migrated, zero ready, and 200 pending-fix.
 Commit `10f6de7` migrated two Vim9 scope-brace cases, making the authoritative
 current split 870 migrated, zero ready, and 198 pending-fix.
+Commits `8735abf` and `a7b5679` migrated 16 built-in Vim9 command-spacing
+cases, making the authoritative current split 886 migrated, zero ready, and
+182 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -886,13 +889,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 35 | 0 | 16 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 65 | 0 | 50 |
+| `C-EXCMD` | 115 | 81 | 0 | 34 |
 | `C-EXPR` | 19 | 7 | 0 | 12 |
 | `C-GENERIC` | 109 | 60 | 0 | 49 |
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **238** | **0** | **131** |
+| **Total** | **369** | **254** | **0** | **115** |
 
 ```text
 C-EXPR
@@ -1180,6 +1183,13 @@ missing-end diagnostic. Explicit global `function! g:Name()` and legacy
 Commit `10f6de7` maps a standalone Vim9 `}` to E1025 and an unclosed scope `{`
 to E1026. The scope block and following physical-line commands remain in the
 AST during recovery.
+
+Commit `8735abf` retains Vim's `EX_NONWHITE_OK` command-table property in the
+pinned generated metadata. Commit `a7b5679` then reports E1144 when a recognized
+built-in Vim9 command is followed by an illegal attached byte, while preserving
+the command and making its details opaque for line recovery. Unknown and future
+commands remain opaque. The external `Comd#`, locally defined `Foo3Bar`, and
+name-dependent `exit_cb:` variants remain outside this parser-only batch.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
