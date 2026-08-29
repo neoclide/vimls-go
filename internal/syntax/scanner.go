@@ -2129,7 +2129,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 						// stored replacement body.
 						kept := file.Diagnostics[:diagnosticsBeforeBody]
 						for _, diagnostic := range file.Diagnostics[diagnosticsBeforeBody:] {
-							if diagnostic.Code == "vimls/missing-delimiter" && diagnostic.Span.Start >= bodyStart && diagnostic.Span.End <= command.Argument.End {
+							if (diagnostic.Code == "vimls/missing-delimiter" || diagnostic.Code == "vim/E723") && diagnostic.Span.Start >= bodyStart && diagnostic.Span.End <= command.Argument.End {
 								continue
 							}
 							kept = append(kept, diagnostic)
