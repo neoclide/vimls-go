@@ -76,6 +76,37 @@ broad corpus is not a substitute for those conformance assertions.
 `/Users/chemzqm/lib/vim` without modifying that checkout or accessing the
 network.
 
+#### Focused official failure migration
+
+Use the committed parser-case artifact to classify a narrow rule family before
+editing the parser. The filter accepts comma-separated substrings and reports
+every matching dialect variant, which prevents a migration from silently
+covering only one generated context:
+
+```sh
+go test -mod=readonly ./internal/syntax \
+  -run '^TestOfficialVimParserFailureTriage$' -count=1 -v \
+  -args -official-case='4170:120710,4171:120781'
+```
+
+`ready` means the parser already produces the official error code, `mapping`
+means it produces one different diagnostic, `missing` means it produces none,
+and `recovery` means it produces multiple diagnostics. `unknown` means the Vim
+helper error argument cannot be mapped unambiguously to its generated variants
+and still needs source inspection.
+
+After adding the selected cases to the parser-failure matrix, run only that
+batch during iteration:
+
+```sh
+go test -mod=readonly ./internal/syntax \
+  -run '^TestOfficialVimParserFailures$' -count=1 \
+  -args -official-case='4170:120710,4171:120781'
+```
+
+The default test invocation omits `-official-case` and continues to verify the
+entire committed matrix.
+
 ### Semantics
 
 Table and workspace fixtures cover scopes, shadowing, closures, imports/exports,

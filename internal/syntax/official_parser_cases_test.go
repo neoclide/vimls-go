@@ -3,10 +3,12 @@ package syntax
 import (
 	"compress/gzip"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -23,6 +25,11 @@ const (
 	officialParserCasesCount         = 5261
 	officialParserCasesAcceptCount   = 1761
 	officialParserCasesUnclassified  = 3500
+)
+
+var (
+	officialParserCaseFilter = flag.String("official-case", "", "comma-separated substrings selecting official parser cases")
+	officialErrorCodePattern = regexp.MustCompile(`E[0-9]+`)
 )
 
 type officialParserCaseCorpus struct {
@@ -324,13 +331,23 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_usercommands.vim:1046:35079/script":      "vim/E1128",
 	}
 
+	selected := 0
+	for key := range expected {
+		if officialParserCaseSelected(key) {
+			selected++
+		}
+	}
+	if selected == 0 {
+		t.Skipf("no migrated official parser failure matches -official-case=%q", *officialParserCaseFilter)
+	}
+
 	corpus := readOfficialParserCases(t)
-	seen := make(map[string]struct{}, len(expected))
+	seen := make(map[string]struct{}, selected)
 	for _, record := range corpus.Records {
 		for _, testCase := range record.Cases {
 			key := record.ID + "/" + testCase.Name
 			code, ok := expected[key]
-			if !ok {
+			if !ok || !officialParserCaseSelected(key) {
 				continue
 			}
 			if testCase.VimOutcome != "failure" || testCase.ParserExpectation != "unclassified" {
@@ -347,16 +364,95 @@ func TestOfficialVimParserFailures(t *testing.T) {
 			seen[key] = struct{}{}
 		}
 	}
-	if len(seen) != len(expected) {
+	if len(seen) != selected {
 		var missing []string
 		for key := range expected {
-			if _, ok := seen[key]; !ok {
+			if officialParserCaseSelected(key) {
+				if _, ok := seen[key]; ok {
+					continue
+				}
 				missing = append(missing, key)
 			}
 		}
 		sort.Strings(missing)
 		t.Fatalf("official parser failures missing from artifact: %v", missing)
 	}
+}
+
+func TestOfficialVimParserFailureTriage(t *testing.T) {
+	if strings.TrimSpace(*officialParserCaseFilter) == "" {
+		t.Skip("use -args -official-case=<path,record,error> to select failure cases")
+	}
+	corpus := readOfficialParserCases(t)
+	counts := map[string]int{"ready": 0, "mapping": 0, "missing": 0, "recovery": 0, "unknown": 0}
+	total := 0
+	for _, record := range corpus.Records {
+		for index, testCase := range record.Cases {
+			key := record.ID + "/" + testCase.Name
+			if !officialParserCaseSelected(key) || testCase.VimOutcome != "failure" || testCase.ParserExpectation != "unclassified" {
+				continue
+			}
+			total++
+			want, known := officialParserExpectedCode(record, index)
+			if !known {
+				counts["unknown"]++
+				t.Logf("%s category=unknown errorArgument=%q source=%q", key, record.ErrorArgument, officialParserSourcePreview(testCase.Source))
+				continue
+			}
+			file := Parse(testCase.Source)
+			got := make([]string, 0, len(file.Diagnostics))
+			for _, diagnostic := range file.Diagnostics {
+				got = append(got, diagnostic.Code)
+			}
+			category := "recovery"
+			switch {
+			case len(got) == 0:
+				category = "missing"
+			case len(got) == 1 && got[0] == want:
+				category = "ready"
+			case len(got) == 1:
+				category = "mapping"
+			}
+			counts[category]++
+			t.Logf("%s category=%s want=%s got=%s source=%q", key, category, want, strings.Join(got, ","), officialParserSourcePreview(testCase.Source))
+		}
+	}
+	if total == 0 {
+		t.Fatalf("no unclassified official failure matches -official-case=%q", *officialParserCaseFilter)
+	}
+	t.Logf("triage total=%d ready=%d mapping=%d missing=%d recovery=%d unknown=%d", total, counts["ready"], counts["mapping"], counts["missing"], counts["recovery"], counts["unknown"])
+}
+
+func officialParserCaseSelected(key string) bool {
+	filter := strings.TrimSpace(*officialParserCaseFilter)
+	if filter == "" {
+		return true
+	}
+	for _, part := range strings.Split(filter, ",") {
+		if part = strings.TrimSpace(part); part != "" && strings.Contains(key, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func officialParserExpectedCode(record officialParserCaseRecord, caseIndex int) (string, bool) {
+	codes := officialErrorCodePattern.FindAllString(record.ErrorArgument, -1)
+	if len(codes) == 1 {
+		return "vim/" + codes[0], true
+	}
+	if len(codes) == len(record.Cases) && caseIndex >= 0 && caseIndex < len(codes) {
+		return "vim/" + codes[caseIndex], true
+	}
+	return "", false
+}
+
+func officialParserSourcePreview(source string) string {
+	const limit = 400
+	if len(source) <= limit {
+		return source
+	}
+	return source[:limit] + "..."
 }
 
 func readOfficialParserCases(t *testing.T) officialParserCaseCorpus {
