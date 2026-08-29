@@ -10,6 +10,10 @@ import (
 // consumers.  It deliberately does not share comment or expression-boundary
 // rules with Vim9 script.
 func scanLegacyCommandArgument(source string, start, end int, metadata vimdata.Command, parsed *Command) (int, Span, Span, *expressionBoundary) {
+	scriptVersion := uint8(1)
+	if parsed != nil && parsed.ScriptVersion != 0 {
+		scriptVersion = parsed.ScriptVersion
+	}
 	if globalCommand(metadata.Name) {
 		argumentEnd := scanGlobalCommandArgument(source, start, end)
 		return argumentEnd, Span{}, Span{}, nil
@@ -66,16 +70,16 @@ func scanLegacyCommandArgument(source string, start, end int, metadata vimdata.C
 		return argumentEnd, separator, comment, nil
 	}
 	if legacyOneExpressionCommand(metadata.Name) {
-		return scanLegacyExpression(source, start, end)
+		return scanLegacyExpression(source, start, end, scriptVersion)
 	}
 	var argumentEnd int
 	var separator, comment Span
 	var boundaryExpression *expressionBoundary
 	switch metadata.Name {
 	case "let", "var", "const", "final":
-		argumentEnd, separator, comment, boundaryExpression = scanLegacyDeclaration(source, start, end, metadata)
+		argumentEnd, separator, comment, boundaryExpression = scanLegacyDeclaration(source, start, end, metadata, scriptVersion)
 	case "for":
-		argumentEnd, separator, comment, boundaryExpression = scanLegacyFor(source, start, end, metadata)
+		argumentEnd, separator, comment, boundaryExpression = scanLegacyFor(source, start, end, metadata, scriptVersion)
 	default:
 		argumentEnd, separator, comment = scanLegacyOpaqueArgument(source, start, end, metadata)
 	}
@@ -119,7 +123,7 @@ func scanLegacyPutExpression(source string, start, end int, command *Command) (i
 		}
 	}
 
-	boundary := scanLegacyPutRHS(source, right, rawEnd)
+	boundary := scanLegacyPutRHS(source, right, rawEnd, command.ScriptVersion)
 	if boundary.expression == nil {
 		return trimSpaceEnd(source, start, parseEnd), separator, comment, nil
 	}
@@ -141,7 +145,7 @@ func scanLegacyPutExpression(source string, start, end int, command *Command) (i
 	}
 }
 
-func scanLegacyPutRHS(source string, start, end int) expressionBoundary {
+func scanLegacyPutRHS(source string, start, end int, scriptVersion uint8) expressionBoundary {
 	if start >= end {
 		return expressionBoundary{}
 	}
@@ -154,7 +158,7 @@ func scanLegacyPutRHS(source string, start, end int) expressionBoundary {
 	}
 	if !hasEscapedDelimiter {
 		argument := Span{Start: start, End: end}
-		expression, diagnostics, consumed := parseExpressionPrefix(source[start:end], start, Legacy)
+		expression, diagnostics, consumed := parseExpressionPrefixWithVersion(source[start:end], start, Legacy, scriptVersion)
 		diagnostics = appendTrailingExpressionDiagnostic(diagnostics, start, consumed, end-start)
 		if legacyPutHasUnclosedQuote(source[start:end]) {
 			diagnostics = append(diagnostics, Diagnostic{
@@ -180,7 +184,7 @@ func scanLegacyPutRHS(source string, start, end int) expressionBoundary {
 		)
 	}
 	view.Text = string(normalized)
-	expression, diagnostics, consumed := parseExpressionPrefix(view.Text, 0, Legacy)
+	expression, diagnostics, consumed := parseExpressionPrefixWithVersion(view.Text, 0, Legacy, scriptVersion)
 	diagnostics = appendTrailingExpressionDiagnostic(diagnostics, 0, consumed, len(view.Text))
 	if legacyPutHasUnclosedQuote(view.Text) {
 		diagnostics = append(diagnostics, Diagnostic{
@@ -254,7 +258,7 @@ func legacyOneExpressionCommand(name string) bool {
 	}
 }
 
-func scanLegacyExpression(source string, start, end int) (int, Span, Span, *expressionBoundary) {
+func scanLegacyExpression(source string, start, end int, scriptVersion uint8) (int, Span, Span, *expressionBoundary) {
 	if start >= end || source[start] == '|' {
 		if start < end {
 			return start, Span{Start: start, End: start + 1}, Span{}, nil
@@ -262,7 +266,7 @@ func scanLegacyExpression(source string, start, end int) (int, Span, Span, *expr
 		return start, Span{}, Span{}, nil
 	}
 
-	expression, diagnostics, consumed := parseExpressionPrefix(source[start:end], start, Legacy)
+	expression, diagnostics, consumed := parseExpressionPrefixWithVersion(source[start:end], start, Legacy, scriptVersion)
 	if len(diagnostics) > 0 {
 		// Once this logical line is known to be malformed, do not guess that a
 		// later bar starts another command.  The next physical line is a much
@@ -305,6 +309,10 @@ func scanLegacyExpressionList(source string, start, end int, command *Command) (
 		command.expressionsParsed = false
 	}
 	var expressions []*Expression
+	scriptVersion := uint8(1)
+	if command != nil && command.ScriptVersion != 0 {
+		scriptVersion = command.ScriptVersion
+	}
 	position := start
 	for position < end {
 		position = skipSpace(source, position, end)
@@ -322,7 +330,7 @@ func scanLegacyExpressionList(source string, start, end int, command *Command) (
 			}
 			return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}, Span{}
 		}
-		expression, diagnostics, consumed := parseExpressionPrefix(source[position:end], position, Legacy)
+		expression, diagnostics, consumed := parseExpressionPrefixWithVersion(source[position:end], position, Legacy, scriptVersion)
 		if len(diagnostics) > 0 {
 			return trimSpaceEnd(source, start, end), Span{}, Span{}
 		}
@@ -343,7 +351,7 @@ func scanLegacyExpressionList(source string, start, end int, command *Command) (
 	return trimSpaceEnd(source, start, end), Span{}, Span{}
 }
 
-func scanLegacyDeclaration(source string, start, end int, command vimdata.Command) (int, Span, Span, *expressionBoundary) {
+func scanLegacyDeclaration(source string, start, end int, command vimdata.Command, scriptVersion uint8) (int, Span, Span, *expressionBoundary) {
 	rawEnd, separator, comment := scanLegacyOpaqueArgument(source, start, end, command)
 	assignment := findAssignment(source[start:rawEnd])
 	if assignment.Start < 0 || assignment.Start+start+3 <= end && source[assignment.Start+start:assignment.Start+start+3] == "=<<" {
@@ -353,21 +361,21 @@ func scanLegacyDeclaration(source string, start, end int, command vimdata.Comman
 	if right < end && source[right] == '|' {
 		return trimSpaceEnd(source, start, end), Span{}, Span{}, nil
 	}
-	argumentEnd, expressionSeparator, expressionComment, boundary := scanLegacyExpression(source, right, end)
+	argumentEnd, expressionSeparator, expressionComment, boundary := scanLegacyExpression(source, right, end, scriptVersion)
 	if boundary == nil || len(boundary.diagnostics) > 0 || boundary.argument != (Span{Start: right, End: trimSpaceEnd(source, right, argumentEnd)}) || boundary.expression == nil {
 		return trimSpaceEnd(source, start, argumentEnd), expressionSeparator, expressionComment, nil
 	}
 	return trimSpaceEnd(source, start, argumentEnd), expressionSeparator, expressionComment, boundary
 }
 
-func scanLegacyFor(source string, start, end int, command vimdata.Command) (int, Span, Span, *expressionBoundary) {
+func scanLegacyFor(source string, start, end int, command vimdata.Command, scriptVersion uint8) (int, Span, Span, *expressionBoundary) {
 	rawEnd, separator, comment := scanLegacyOpaqueArgument(source, start, end, command)
 	in := findTopLevelKeyword(source, start, rawEnd, "in")
 	if in < 0 {
 		return rawEnd, separator, comment, nil
 	}
 	right := skipExpressionSpace(source, in+2)
-	argumentEnd, expressionSeparator, expressionComment, boundary := scanLegacyExpression(source, right, end)
+	argumentEnd, expressionSeparator, expressionComment, boundary := scanLegacyExpression(source, right, end, scriptVersion)
 	if boundary == nil || len(boundary.diagnostics) > 0 || boundary.argument != (Span{Start: right, End: trimSpaceEnd(source, right, argumentEnd)}) || boundary.expression == nil {
 		return trimSpaceEnd(source, start, argumentEnd), expressionSeparator, expressionComment, nil
 	}

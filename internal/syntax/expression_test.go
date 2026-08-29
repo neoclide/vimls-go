@@ -7,10 +7,11 @@ import (
 
 func TestExpressionLexerTokenGolden(t *testing.T) {
 	tests := []struct {
-		name    string
-		dialect Dialect
-		source  string
-		want    []struct {
+		name          string
+		dialect       Dialect
+		scriptVersion uint8
+		source        string
+		want          []struct {
 			kind  expressionTokenKind
 			text  string
 			start int
@@ -18,9 +19,10 @@ func TestExpressionLexerTokenGolden(t *testing.T) {
 		}
 	}{
 		{
-			name:    "legacy comments strings numbers and operators",
-			dialect: Legacy,
-			source:  "prefix\n  \"ignored | #{}\n'a|#{}' 0xFF 1'000 0zAABB isnot# >=#",
+			name:          "legacy comments strings numbers and operators",
+			dialect:       Legacy,
+			scriptVersion: 4,
+			source:        "prefix\n  \"ignored | #{}\n'a|#{}' 0xFF 1'000 0zAABB isnot# >=#",
 			want: []struct {
 				kind  expressionTokenKind
 				text  string
@@ -69,7 +71,7 @@ func TestExpressionLexerTokenGolden(t *testing.T) {
 				label = "base=100"
 			}
 			t.Run(test.name+"/"+label, func(t *testing.T) {
-				tokens := lexExpression(test.source, base, test.dialect)
+				tokens := lexExpressionWithVersion(test.source, base, test.dialect, test.scriptVersion)
 				if len(tokens) != len(test.want)+1 {
 					t.Fatalf("tokens = %#v, want %d tokens", tokens, len(test.want)+1)
 				}

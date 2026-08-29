@@ -356,7 +356,7 @@ func parseSource(source string, initial Dialect) *File {
 			view = readVim9LogicalView(source, offset)
 		}
 		directAggregateMember := len(aggregateStack) > 0 && len(dialectStack) == 0
-		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateMember)
+		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateMember, scriptVersion)
 		loadKeymapCommand, textBodyCommand := applyCommandState(before)
 		if loadKeymapCommand >= 0 {
 			offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, hasOpenVim9CommandBlock(file))
@@ -916,10 +916,10 @@ func vim9ScriptArgumentDiagnostic(source string, argument Span) (string, string,
 }
 
 func scanCommands(file *File, start, end int, baseDialect Dialect) {
-	scanCommandsWithContext(file, start, end, baseDialect, false)
+	scanCommandsWithContext(file, start, end, baseDialect, false, 1)
 }
 
-func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, directAggregateMember bool) {
+func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, directAggregateMember bool, scriptVersion uint8) {
 	for start < end {
 		diagnosticsBeforeCommand := len(file.Diagnostics)
 		start = skipSpaceToken(file, start, end)
@@ -1235,7 +1235,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		parsedCommand := Command{
 			Kind: kind, Dialect: dialect, baseDialect: baseDialect, detailsOpaque: invalidModifierRange || invalidCommandAbbreviation, Span: Span{Start: commandStart, End: nameEnd}, Range: commandRange,
 			Name: nameSpan, TypedName: typedName, Canonical: canonical, Modifiers: parsedModifiers, Bang: bang,
-			Argument: Span{Start: argumentStart, End: end}, Block: -1,
+			Argument: Span{Start: argumentStart, End: end}, Block: -1, ScriptVersion: scriptVersion,
 		}
 		var argumentEnd int
 		var separator, comment Span
@@ -1965,7 +1965,7 @@ func scanEvalHeredoc(file *File, command *Command) {
 			var expression *Expression
 			var diagnostics []Diagnostic
 			if expressionStart < expressionEnd {
-				expression, diagnostics = parseExpression(file.Source[expressionStart:expressionEnd], expressionStart, command.Dialect)
+				expression, diagnostics = parseExpressionWithVersion(file.Source[expressionStart:expressionEnd], expressionStart, command.Dialect, command.ScriptVersion)
 			} else {
 				expression = &Expression{Kind: ExpressionMissing, Span: Span{Start: expressionStart, End: expressionStart}}
 				if close >= 0 {
@@ -2583,16 +2583,16 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				_, typeSpan := declarationSpans(leftSource, command.Argument.Start, command.Dialect)
 				if typeSpan.Start < typeSpan.End {
 					typedDeclaration = parseDeclarationHead(file, leftSource, command.Argument.Start, command.Dialect)
-					left, leftDiagnostics = parseExpression(file.Text(typedDeclaration.Name), typedDeclaration.Name.Start, command.Dialect)
+					left, leftDiagnostics = parseExpressionWithVersion(file.Text(typedDeclaration.Name), typedDeclaration.Name.Start, command.Dialect, command.ScriptVersion)
 					tailStart := skipSpace(file.Source, typedDeclaration.Name.End, typeSpan.Start)
 					leftDiagnostics = append(leftDiagnostics, Diagnostic{
 						Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tailStart, End: command.Argument.End},
 					})
 				} else {
-					left, leftDiagnostics = parseExpression(leftSource, command.Argument.Start, command.Dialect)
+					left, leftDiagnostics = parseExpressionWithVersion(leftSource, command.Argument.Start, command.Dialect, command.ScriptVersion)
 				}
 			} else {
-				left, leftDiagnostics = parseExpression(leftSource, command.Argument.Start, command.Dialect)
+				left, leftDiagnostics = parseExpressionWithVersion(leftSource, command.Argument.Start, command.Dialect, command.ScriptVersion)
 			}
 			if command.Dialect == Vim9 && left != nil && left.Kind == ExpressionIdentifier && strings.HasPrefix(left.Value, "@") {
 				name, size := utf8.DecodeRuneInString(left.Value[1:])
@@ -2624,7 +2624,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			rhs := Span{Start: command.Argument.Start + rightStart, End: command.Argument.End}
 			right, rightDiagnostics, reused := takeValidBoundaryExpression(command, rhs)
 			if !reused {
-				right, rightDiagnostics = parseExpression(source[rightStart:], command.Argument.Start+rightStart, command.Dialect)
+				right, rightDiagnostics = parseExpressionWithVersion(source[rightStart:], command.Argument.Start+rightStart, command.Dialect, command.ScriptVersion)
 			}
 			operator := Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + assignment.End}
 			diagnoseVim9AssignmentSpacing(file, command, operator)
@@ -2644,7 +2644,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		expression, diagnostics, reused := takeBoundaryExpression(command)
 		if !reused {
-			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
+			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
 		genericCallMissingEnd := !commandInsideBlock(command, file.Blocks, BlockDef) && expression != nil && expression.Kind == ExpressionCall && len(expression.TypeArguments) > 0 &&
@@ -2715,7 +2715,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		rhs := Span{Start: rightStart, End: command.Argument.End}
 		expression, diagnostics, reused := takeRecoveringBoundaryExpression(command, rhs)
 		if !reused {
-			expression, diagnostics = parseExpression(file.Source[rightStart:command.Argument.End], rightStart, command.Dialect)
+			expression, diagnostics = parseExpressionWithVersion(file.Source[rightStart:command.Argument.End], rightStart, command.Dialect, command.ScriptVersion)
 		}
 		declaration.Target, diagnostics = parseDeclarationTarget(file, command, declaration, left, diagnostics)
 		declaration.Assignment = assignment
@@ -2733,7 +2733,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		// :delfunction consumes one function-name expression.  Preserve useful
 		// member/index structure while treating any remaining bytes as Vim's
 		// E488 trailing-character error.
-		target, diagnostics, consumed := parseExpressionPrefix(source, command.Argument.Start, command.Dialect)
+		target, diagnostics, consumed := parseExpressionPrefixWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		if target != nil && target.Kind != ExpressionMissing {
 			command.Targets = append(command.Targets, target)
 		}
@@ -2752,7 +2752,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				Span:    Span{Start: command.Name.End, End: command.Argument.Start},
 			})
 		}
-		target, diagnostics := parseExpression(source, command.Argument.Start, command.Dialect)
+		target, diagnostics := parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		command.Targets = append(command.Targets, target)
 		command.Expressions = append(command.Expressions, &Expression{Kind: ExpressionUnary, Span: Span{Start: command.Name.Start, End: target.Span.End}, Operator: command.Name, Value: command.Canonical, Children: []*Expression{target}})
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -2761,7 +2761,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	case "if", "elseif", "while":
 		expression, diagnostics, ok := takeBoundaryExpression(command)
 		if !ok {
-			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
+			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
 		if command.Dialect == Vim9 {
@@ -2771,7 +2771,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	case "return", "throw", "call", "eval", "defer", "caddexpr", "cexpr", "cgetexpr", "laddexpr", "lexpr", "lgetexpr":
 		expression, diagnostics, ok := takeBoundaryExpression(command)
 		if !ok {
-			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
+			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
 		file.Diagnostics = append(file.Diagnostics, mapVim9AttachedHashDiagnostics(file, command, diagnostics)...)
@@ -2788,7 +2788,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			if consumed == len(source) {
 				break
 			}
-			expression, diagnostics, length := parseExpressionPrefix(source[consumed:], command.Argument.Start+consumed, command.Dialect)
+			expression, diagnostics, length := parseExpressionPrefixWithVersion(source[consumed:], command.Argument.Start+consumed, command.Dialect, command.ScriptVersion)
 			command.Expressions = append(command.Expressions, expression)
 			file.Diagnostics = append(file.Diagnostics, mapIncompleteExpressionDiagnostics(file, command, diagnostics)...)
 			if len(diagnostics) > 0 || length <= 0 {
@@ -2816,7 +2816,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				expression, diagnostics, _ = takeRecoveringBoundaryExpression(command, rhs)
 			}
 			if expression == nil {
-				expression, diagnostics = parseExpression(source[start:], command.Argument.Start+start, command.Dialect)
+				expression, diagnostics = parseExpressionWithVersion(source[start:], command.Argument.Start+start, command.Dialect, command.ScriptVersion)
 			}
 			command.Expressions = append(command.Expressions, expression)
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -3242,7 +3242,7 @@ func parseMapping(file *File, command *Command) {
 		mapping.RHS = Span{Start: rhsStart, End: argument.End}
 		if mapping.Expr {
 			var diagnostics []Diagnostic
-			mapping.RHSExpression, diagnostics = parseExpression(file.Source[mapping.RHS.Start:mapping.RHS.End], mapping.RHS.Start, command.Dialect)
+			mapping.RHSExpression, diagnostics = parseExpressionWithVersion(file.Source[mapping.RHS.Start:mapping.RHS.End], mapping.RHS.Start, command.Dialect, command.ScriptVersion)
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		}
 	} else {
@@ -3872,7 +3872,7 @@ func parseVariableTargets(file *File, command *Command) {
 		}
 	}
 	for consumed < len(source) {
-		target, diagnostics, length := parseExpressionPrefix(source[consumed:], command.Argument.Start+consumed, command.Dialect)
+		target, diagnostics, length := parseExpressionPrefixWithVersion(source[consumed:], command.Argument.Start+consumed, command.Dialect, command.ScriptVersion)
 		command.Targets = append(command.Targets, target)
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		if len(diagnostics) > 0 || length <= 0 {
@@ -4031,7 +4031,7 @@ func parseDeclarationTarget(file *File, command *Command, declaration *Declarati
 	if command.Canonical == "let" {
 		start := skipSpace(source, 0, len(source))
 		end := trimSpaceEnd(source, start, len(source))
-		target, targetDiagnostics := parseExpression(source[start:end], command.Argument.Start+start, command.Dialect)
+		target, targetDiagnostics := parseExpressionWithVersion(source[start:end], command.Argument.Start+start, command.Dialect, command.ScriptVersion)
 		return target, append(diagnostics, targetDiagnostics...)
 	}
 	// Preserve a register-shaped Vim9 declaration target instead of losing it
@@ -4064,7 +4064,7 @@ func parseDeclarationTarget(file *File, command *Command, declaration *Declarati
 		nameEnd := declaration.Name.End - command.Argument.Start
 		suffix := skipSpace(source, nameEnd, end)
 		if suffix < end && (source[suffix] == '.' || source[suffix] == '[') {
-			target, targetDiagnostics := parseExpression(source[start:end], command.Argument.Start+start, command.Dialect)
+			target, targetDiagnostics := parseExpressionWithVersion(source[start:end], command.Argument.Start+start, command.Dialect, command.ScriptVersion)
 			diagnostics = append(diagnostics, targetDiagnostics...)
 			diagnostics = append(diagnostics, Diagnostic{Code: "vim/E1087", Message: "Cannot use an object or list for assignment", Span: declaration.Name})
 			return target, diagnostics

@@ -301,18 +301,18 @@ func (view logicalView) byteSpan(index int) Span {
 }
 
 func scanLogicalCommands(file *File, view *logicalView, dialect Dialect) int {
-	return scanLogicalCommandsWithContext(file, view, dialect, false)
+	return scanLogicalCommandsWithContext(file, view, dialect, false, 1)
 }
 
-func scanLogicalCommandsWithContext(file *File, view *logicalView, dialect Dialect, directAggregateMember bool) int {
+func scanLogicalCommandsWithContext(file *File, view *logicalView, dialect Dialect, directAggregateMember bool, scriptVersion uint8) int {
 	if dialect == Legacy && view.identity && !strings.Contains(view.Text, "vim9") && !strings.Contains(view.Text, "def ") && !strings.Contains(view.Text, "def\t") {
 		first := len(file.Commands)
-		scanCommandsWithContext(file, view.Source.Start, view.Source.End, dialect, directAggregateMember)
+		scanCommandsWithContext(file, view.Source.Start, view.Source.End, dialect, directAggregateMember, scriptVersion)
 		file.Tokens = append(file.Tokens, view.Physical...)
 		view.appendPendingNewline(file)
 		return first
 	}
-	first := scanLogicalCommandRangeWithContext(file, view, 0, len(view.Text), dialect, directAggregateMember)
+	first := scanLogicalCommandRangeWithContext(file, view, 0, len(view.Text), dialect, directAggregateMember, scriptVersion)
 	file.Tokens = append(file.Tokens, view.Physical...)
 	view.appendPendingNewline(file)
 	return first
@@ -328,12 +328,12 @@ func (view *logicalView) appendPendingNewline(file *File) {
 }
 
 func scanLogicalCommandRange(file *File, view *logicalView, start, end int, dialect Dialect) int {
-	return scanLogicalCommandRangeWithContext(file, view, start, end, dialect, false)
+	return scanLogicalCommandRangeWithContext(file, view, start, end, dialect, false, 1)
 }
 
-func scanLogicalCommandRangeWithContext(file *File, view *logicalView, start, end int, dialect Dialect, directAggregateMember bool) int {
+func scanLogicalCommandRangeWithContext(file *File, view *logicalView, start, end int, dialect Dialect, directAggregateMember bool, scriptVersion uint8) int {
 	temporary := &File{Dialect: dialect, Source: view.Text}
-	scanCommandsWithContext(temporary, start, end, dialect, directAggregateMember)
+	scanCommandsWithContext(temporary, start, end, dialect, directAggregateMember, scriptVersion)
 	first := len(file.Commands)
 	for index := range temporary.Commands {
 		logical := temporary.Commands[index]

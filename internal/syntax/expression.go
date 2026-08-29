@@ -50,11 +50,18 @@ type Expression struct {
 	LambdaBody     *File
 }
 
-// LegacyExpressionParser parses one legacy Vim expression.
-type LegacyExpressionParser struct{}
+// LegacyExpressionParser parses one legacy Vim expression. ScriptVersion
+// defaults to one, matching a legacy script without :scriptversion.
+type LegacyExpressionParser struct {
+	ScriptVersion uint8
+}
 
-func (LegacyExpressionParser) Parse(source string) (*Expression, []Diagnostic) {
-	return parseExpression(source, 0, Legacy)
+func (parser LegacyExpressionParser) Parse(source string) (*Expression, []Diagnostic) {
+	version := parser.ScriptVersion
+	if version == 0 {
+		version = 1
+	}
+	return parseExpressionWithVersion(source, 0, Legacy, version)
 }
 
 // Vim9ExpressionParser parses one Vim9 expression.
@@ -88,17 +95,19 @@ type expressionToken struct {
 // expression.  The file scanner owns physical-line recovery; this is not a
 // whole-file JavaScript-style token stream.
 type expressionLexer struct {
-	source  string
-	base    int
-	dialect Dialect
-	offset  int
-	current expressionToken
+	source        string
+	base          int
+	dialect       Dialect
+	scriptVersion uint8
+	offset        int
+	current       expressionToken
 }
 
 type expressionParser struct {
 	source         string
 	base           int
 	dialect        Dialect
+	scriptVersion  uint8
 	lexer          expressionLexer
 	diagnostics    []Diagnostic
 	depth          int
@@ -115,7 +124,11 @@ type expressionBoundary struct {
 }
 
 func parseExpression(source string, base int, dialect Dialect) (*Expression, []Diagnostic) {
-	expression, diagnostics, consumed := parseExpressionPrefix(source, base, dialect)
+	return parseExpressionWithVersion(source, base, dialect, 1)
+}
+
+func parseExpressionWithVersion(source string, base int, dialect Dialect, scriptVersion uint8) (*Expression, []Diagnostic) {
+	expression, diagnostics, consumed := parseExpressionPrefixWithVersion(source, base, dialect, scriptVersion)
 	diagnostics = appendTrailingExpressionDiagnostic(diagnostics, base, consumed, len(source))
 	if dialect == Vim9 {
 		diagnostics = mapVim9LambdaTrailingParen(diagnostics, expression, source, base)
@@ -158,7 +171,14 @@ func mapVim9LambdaTrailingParen(diagnostics []Diagnostic, expression *Expression
 }
 
 func parseExpressionPrefix(source string, base int, dialect Dialect) (*Expression, []Diagnostic, int) {
-	parser := &expressionParser{source: source, base: base, dialect: dialect, lexer: newExpressionLexer(source, base, dialect)}
+	return parseExpressionPrefixWithVersion(source, base, dialect, 1)
+}
+
+func parseExpressionPrefixWithVersion(source string, base int, dialect Dialect, scriptVersion uint8) (*Expression, []Diagnostic, int) {
+	parser := &expressionParser{
+		source: source, base: base, dialect: dialect, scriptVersion: scriptVersion,
+		lexer: newExpressionLexerWithVersion(source, base, dialect, scriptVersion),
+	}
 	expression := parser.parse(0)
 	if dialect == Vim9 && parser.current().text == "#{" {
 		token := parser.current()
@@ -884,7 +904,7 @@ func (p *expressionParser) parseInterpolatedString(token expressionToken) *Expre
 		}
 		expressionStart := skipExpressionSpace(p.source, index+1)
 		expressionEnd := trimExpressionSpaceEnd(p.source, expressionStart, close)
-		child, diagnostics := parseExpression(p.source[expressionStart:expressionEnd], p.base+expressionStart, p.dialect)
+		child, diagnostics := parseExpressionWithVersion(p.source[expressionStart:expressionEnd], p.base+expressionStart, p.dialect, p.scriptVersion)
 		node.Children = append(node.Children, child)
 		p.diagnostics = append(p.diagnostics, diagnostics...)
 		index = close
@@ -2379,7 +2399,11 @@ func infixBinding(operator string, dialect Dialect) (int, int, bool) {
 }
 
 func newExpressionLexer(source string, base int, dialect Dialect) expressionLexer {
-	lexer := expressionLexer{source: source, base: base, dialect: dialect}
+	return newExpressionLexerWithVersion(source, base, dialect, 1)
+}
+
+func newExpressionLexerWithVersion(source string, base int, dialect Dialect, scriptVersion uint8) expressionLexer {
+	lexer := expressionLexer{source: source, base: base, dialect: dialect, scriptVersion: scriptVersion}
 	lexer.current = lexer.scan()
 	return lexer
 }
@@ -2455,7 +2479,11 @@ func (lexer *expressionLexer) scan() expressionToken {
 		}
 		if isExpressionDigit(source[index]) || source[index] == '.' && index+1 < len(source) && isExpressionDigit(source[index+1]) {
 			var malformed bool
-			index, malformed = scanExpressionNumber(source, index)
+			index, malformed = scanExpressionNumber(
+				source, index,
+				lexer.dialect == Vim9 || lexer.scriptVersion >= 4,
+				lexer.dialect == Vim9 || lexer.scriptVersion >= 2,
+			)
 			kind := expressionNumber
 			if len(source[start:index]) >= 2 && source[start] == '0' && (source[start+1] == 'z' || source[start+1] == 'Z') {
 				kind = expressionBlob
@@ -2528,7 +2556,11 @@ func (lexer *expressionLexer) finish(kind expressionTokenKind, start, end int) e
 // complete token list.  The expression parser itself advances the lexer on
 // demand and does not allocate this slice.
 func lexExpression(source string, base int, dialect Dialect) []expressionToken {
-	lexer := newExpressionLexer(source, base, dialect)
+	return lexExpressionWithVersion(source, base, dialect, 1)
+}
+
+func lexExpressionWithVersion(source string, base int, dialect Dialect, scriptVersion uint8) []expressionToken {
+	lexer := newExpressionLexerWithVersion(source, base, dialect, scriptVersion)
 	var tokens []expressionToken
 	for {
 		tokens = append(tokens, lexer.current)
@@ -2712,23 +2744,23 @@ func isExpressionLetter(character byte) bool {
 	return character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z'
 }
 
-func scanExpressionNumber(source string, start int) (int, bool) {
+func scanExpressionNumber(source string, start int, digitSeparators, leadingDot bool) (int, bool) {
 	index := start
 	if source[index] == '.' {
 		index++
-		for index < len(source) && (isExpressionDigit(source[index]) || isDigitSeparator(source, index)) {
+		for index < len(source) && (isExpressionDigit(source[index]) || digitSeparators && isDigitSeparator(source, index)) {
 			index++
 		}
-		end := scanExpressionExponent(source, index)
+		end := scanExpressionExponent(source, index, digitSeparators)
 		candidateEnd := scanExpressionNumberSuffix(source, end)
-		return candidateEnd, candidateEnd > end
+		return candidateEnd, !leadingDot || candidateEnd > end
 	}
 	if index+1 < len(source) && source[index] == '0' && strings.ContainsRune("xXbBoOzZ", rune(source[index+1])) {
 		blob := source[index+1] == 'z' || source[index+1] == 'Z'
 		base := source[index+1]
 		malformed := false
 		index += 2
-		for index < len(source) && (isExpressionDigit(source[index]) || isExpressionLetter(source[index]) || isDigitSeparator(source, index) || blob && source[index] == '.') {
+		for index < len(source) && (isExpressionDigit(source[index]) || isExpressionLetter(source[index]) || digitSeparators && isDigitSeparator(source, index) || blob && source[index] == '.') {
 			if !blob && !validPrefixedNumberByte(source, index, base) {
 				malformed = true
 			}
@@ -2736,16 +2768,16 @@ func scanExpressionNumber(source string, start int) (int, bool) {
 		}
 		return index, malformed || !blob && index == start+2
 	}
-	for index < len(source) && (isExpressionDigit(source[index]) || isDigitSeparator(source, index)) {
+	for index < len(source) && (isExpressionDigit(source[index]) || digitSeparators && isDigitSeparator(source, index)) {
 		index++
 	}
 	if index+1 < len(source) && source[index] == '.' && isExpressionDigit(source[index+1]) {
 		index++
-		for index < len(source) && (isExpressionDigit(source[index]) || isDigitSeparator(source, index)) {
+		for index < len(source) && (isExpressionDigit(source[index]) || digitSeparators && isDigitSeparator(source, index)) {
 			index++
 		}
 	}
-	end := scanExpressionExponent(source, index)
+	end := scanExpressionExponent(source, index, digitSeparators)
 	candidateEnd := scanExpressionNumberSuffix(source, end)
 	return candidateEnd, candidateEnd > end
 }
@@ -2776,13 +2808,13 @@ func validPrefixedDigit(character, base byte) bool {
 	}
 }
 
-func scanExpressionExponent(source string, index int) int {
+func scanExpressionExponent(source string, index int, digitSeparators bool) int {
 	if index < len(source) && (source[index] == 'e' || source[index] == 'E') {
 		index++
 		if index < len(source) && (source[index] == '+' || source[index] == '-') {
 			index++
 		}
-		for index < len(source) && (isExpressionDigit(source[index]) || isDigitSeparator(source, index)) {
+		for index < len(source) && (isExpressionDigit(source[index]) || digitSeparators && isDigitSeparator(source, index)) {
 			index++
 		}
 	}

@@ -572,6 +572,9 @@ func TestSyntaxSmallHelpers(t *testing.T) {
 func TestOfficialScriptVersionState(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vimscript.vim Test_scriptversion.
 	file := (LegacyParser{}).Parse("let before = 1\nscriptversion 4\nlet after = 48'879\ndef Modern()\n  var value = .123\nenddef\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
 	want := []uint8{1, 1, 4, 4, 4, 4}
 	if len(file.Commands) != len(want) {
 		t.Fatalf("commands = %#v", file.Commands)
