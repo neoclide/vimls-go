@@ -2342,7 +2342,14 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	switch command.Canonical {
 	case "let", "var", "const", "final":
-		if command.Dialect == Legacy && command.Canonical == "var" {
+		directAggregateMember := false
+		if command.Block >= 0 && command.Block < len(file.Blocks) {
+			switch file.Blocks[command.Block].Kind {
+			case BlockClass, BlockInterface, BlockEnum:
+				directAggregateMember = true
+			}
+		}
+		if command.Dialect == Legacy && command.Canonical == "var" && !directAggregateMember {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1124", Message: `"var" cannot be used in legacy Vim script`, Span: command.Name})
 		}
 		if command.Dialect == Vim9 && command.Canonical == "let" {
@@ -2353,7 +2360,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
 			diagnoseInvalidClassDeclaration(file, command, declaration)
 			command.Declaration = declaration
-			if command.Dialect == Vim9 && command.Canonical == "final" {
+			if command.Dialect == Vim9 && command.Canonical == "final" && !directAggregateMember {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{
 					Code: "vim/E1125", Message: "Final requires a value", Span: command.Name,
 				})
