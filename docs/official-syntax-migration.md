@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 652 (`efb397e`)
+- Current parser-negative syntax assertions: 654 (`d3d86b1`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -184,7 +184,9 @@ The commit chronology above preserves the counts known at each checkpoint.
 After reclassifying E1411, the authoritative current split is 651 migrated,
 zero ready, and 417 pending-fix. Commit `efb397e` migrated the remaining E1127
 member-call recovery case, making the current split 652 migrated, zero ready,
-and 416 pending-fix.
+and 416 pending-fix. Commit `d3d86b1` migrated the two Vim9 member-dot spacing
+cases, making the authoritative current split 654 migrated, zero ready, and
+414 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -495,7 +497,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-assignment-shape` | 3 | 0 | 0 | 3 |
 | `B-incomplete-expression` | 2 | 2 | 0 | 0 |
 | `B-dialect-declaration` | 4 | 4 | 0 | 0 |
-| `B-dot-member-delimiter` | 6 | 1 | 0 | 5 |
+| `B-dot-member-delimiter` | 6 | 3 | 0 | 3 |
 | `B-brace-recovery` | 15 | 3 | 0 | 12 |
 | `B-heredoc` | 2 | 2 | 0 | 0 |
 | `B-hash-comment` | 1 | 1 | 0 | 0 |
@@ -510,9 +512,9 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **99** | **0** | **92** |
+| **Total** | **191** | **101** | **0** | **90** |
 
-This table reflects the current parser through `efb397e`. Revalidation corrected
+This table reflects the current parser through `d3d86b1`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -546,6 +548,11 @@ Commit `efb397e` migrated `C:2848:63764/script`. A missing member in
 `super.()` retains the dot, missing-member AST, and malformed call span while
 reporting one E1127; the same-line tail no longer cascades to E488, and the
 enclosing class/function terminators remain recoverable.
+
+Commit `d3d86b1` migrated `C:{409:10761,1929:44717}/script`. Whitespace after
+a member dot on the same physical line reports E1202 over the whitespace while
+retaining the member and any following call AST. Cross-line loose recovery and
+legacy member access keep their existing behavior.
 
 ```text
 B-assign-spacing
