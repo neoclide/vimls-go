@@ -3581,6 +3581,30 @@ func parseDeclarationTarget(file *File, command *Command, declaration *Declarati
 		target, targetDiagnostics := parseExpression(source[start:end], command.Argument.Start+start, command.Dialect)
 		return target, append(diagnostics, targetDiagnostics...)
 	}
+	// Preserve a register-shaped Vim9 declaration target instead of losing it
+	// in declarationSpans, even though Vim rejects declaring registers.
+	if command.Dialect == Vim9 {
+		start := skipSpace(source, 0, len(source))
+		if start < len(source) && source[start] == '@' {
+			name, size := utf8.DecodeRuneInString(source[start+1:])
+			if size > 0 {
+				span := Span{Start: command.Argument.Start + start, End: command.Argument.Start + start + 1 + size}
+				nameSpan := Span{Start: span.Start + 1, End: span.End}
+				target := &Expression{Kind: ExpressionIdentifier, Span: span, Value: file.Text(span)}
+				readOnly := strings.ContainsRune(".%:~", name) || !validRegisterName(name)
+				registerDiagnostic := Diagnostic{Code: "vim/E1066", Message: "Cannot declare a register: " + string(name), Span: nameSpan}
+				for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
+					if file.Blocks[block].Kind == BlockDef && readOnly {
+						registerDiagnostic.Code = "vim/E354"
+						registerDiagnostic.Message = "Invalid register name: '" + string(name) + "'"
+						break
+					}
+				}
+				diagnostics = append([]Diagnostic{registerDiagnostic}, diagnostics...)
+				return target, diagnostics
+			}
+		}
+	}
 	return &Expression{Kind: ExpressionIdentifier, Span: declaration.Name, Value: file.Text(declaration.Name)}, diagnostics
 }
 
@@ -3589,6 +3613,15 @@ func parseDeclarationHead(file *File, source string, base int, dialect Dialect) 
 		source = maskVim9Comments(source)
 	}
 	name, typeSpan := declarationSpans(source, base)
+	if dialect == Vim9 {
+		start := skipSpace(source, 0, len(source))
+		if start < len(source) && source[start] == '@' {
+			_, size := utf8.DecodeRuneInString(source[start+1:])
+			if size > 0 {
+				name = Span{Start: base + start, End: base + start + 1 + size}
+			}
+		}
+	}
 	declaration := &Declaration{Name: name, Type: typeSpan}
 	trimmedStart := skipSpace(source, 0, len(source))
 	if trimmedStart < len(source) && source[trimmedStart] == '[' {

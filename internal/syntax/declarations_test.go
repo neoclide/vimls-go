@@ -2,6 +2,43 @@ package syntax
 
 import "testing"
 
+func TestVim9RegisterDeclarationPreservesTargetAndInitializer(t *testing.T) {
+	for _, test := range []struct {
+		name, source, code string
+	}{
+		{"def", "def F()\n  var @. = 5\n  var after = 6\nenddef\n", "vim/E354"},
+		{"script", "vim9script\nvar @% = 5\nvar after = 6\n", "vim/E1066"},
+		{"script nested", "vim9script\nif true\n  var @. = 5\nendif\n", "vim/E1066"},
+		{"def writable", "def F()\n  var @a = 5\nenddef\n", "vim/E1066"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			var declarationCommand *Command
+			for index := range file.Commands {
+				if file.Commands[index].Canonical == "var" {
+					declarationCommand = &file.Commands[index]
+					break
+				}
+			}
+			if declarationCommand == nil || declarationCommand.Declaration == nil || declarationCommand.Declaration.Target == nil || declarationCommand.Declaration.Initializer == nil {
+				t.Fatalf("declaration = %#v", declarationCommand)
+			}
+			if file.Text(declarationCommand.Declaration.Target.Span) != file.Text(declarationCommand.Declaration.Name) || file.Text(declarationCommand.Declaration.Target.Span)[:1] != "@" {
+				t.Fatalf("target/name = %q/%q", file.Text(declarationCommand.Declaration.Target.Span), file.Text(declarationCommand.Declaration.Name))
+			}
+			if declarationCommand.Declaration.Initializer.Kind != ExpressionNumber || declarationCommand.Declaration.Initializer.Value != "5" {
+				t.Fatalf("initializer = %#v", declarationCommand.Declaration.Initializer)
+			}
+			if file.Text(file.Diagnostics[0].Span) != file.Text(declarationCommand.Declaration.Name)[1:] {
+				t.Fatalf("diagnostic span = %q", file.Text(file.Diagnostics[0].Span))
+			}
+		})
+	}
+}
+
 func TestLegacyAggregateDialectGate(t *testing.T) {
 	tests := []struct {
 		name       string
