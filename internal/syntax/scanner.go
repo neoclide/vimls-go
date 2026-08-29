@@ -2446,7 +2446,25 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if listDoCommand(command.Canonical) && command.baseDialect == Legacy && strings.Contains(source, "\n") {
 			command.Embedded = parseLegacyDoCommandList(file, command.Argument, depth)
 		} else {
+			diagnosticsStart := len(file.Diagnostics)
 			command.Embedded = parseEmbeddedCommandList(file, command.Argument, command.baseDialect, depth)
+			if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) {
+				for diagnosticIndex := diagnosticsStart; diagnosticIndex < len(file.Diagnostics); diagnosticIndex++ {
+					diagnostic := &file.Diagnostics[diagnosticIndex]
+					if diagnostic.Code != "vimls/missing-end" {
+						continue
+					}
+					for _, block := range command.Embedded.Blocks {
+						if block.Header < 0 || block.Header >= len(command.Embedded.Commands) || command.Embedded.Commands[block.Header].Name != diagnostic.Span {
+							continue
+						}
+						if mapped, ok := vim9MissingBlockEndDiagnostic(block.Kind, diagnostic.Span); ok {
+							*diagnostic = mapped
+						}
+						break
+					}
+				}
+			}
 		}
 		return
 	}
