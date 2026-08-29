@@ -35,6 +35,69 @@ func TestVim9TypeParserRecoversFromIncompleteTypes(t *testing.T) {
 	}
 }
 
+func TestVim9TypeParserRequiresContainerArguments(t *testing.T) {
+	// Vim v9.2.1015 src/vim9type.c parse_type_member(),
+	// parse_type_tuple(), and parse_type_object().
+	for _, name := range []string{"list", "dict", "tuple", "object"} {
+		t.Run(name+" missing argument", func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(name)
+			if typeNode == nil || typeNode.Name != name || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1008" {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+		t.Run(name+" whitespace before opener", func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(name + " <number>")
+			if typeNode == nil || typeNode.Name != name || len(typeNode.Arguments) != 1 || typeNode.Arguments[0].Name != "number" || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1068" {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+
+	// Unlike tuple types, list, dict, and object allow whitespace immediately
+	// inside their angle brackets.
+	for _, name := range []string{"list", "dict", "object"} {
+		t.Run(name+" allows inner whitespace", func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(name + "< number >")
+			if typeNode == nil || typeNode.Name != name || len(typeNode.Arguments) != 1 || typeNode.Arguments[0].Name != "number" || len(diagnostics) != 0 {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+
+	for _, name := range []string{"list", "dict", "tuple", "object"} {
+		t.Run(name+" empty arguments", func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(name + "<>")
+			if typeNode == nil || typeNode.Name != name || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1008" {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+}
+
+func TestVim9TypeParserBareFuncRemainsValid(t *testing.T) {
+	typeNode, diagnostics := (Vim9TypeParser{}).Parse("func")
+	if typeNode == nil || typeNode.Kind != TypeFunction || len(diagnostics) != 0 {
+		t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+	}
+}
+
+func TestVim9TypeParserContainerErrorRecoversNextCommand(t *testing.T) {
+	// Vim v9.2.1015 src/testdir/test_vim9_func.vim checks the same bare list
+	// return type in a :def defined from a legacy script.
+	file := Parse("def Func(): list\n  return []\nenddef\nlet after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1008" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	function := file.Commands[0].Function
+	if function == nil || function.ReturnType == nil || function.ReturnType.Name != "list" {
+		t.Fatalf("function = %#v", function)
+	}
+	last := file.Commands[len(file.Commands)-1]
+	if last.Canonical != "let" || last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+		t.Fatalf("last command = %#v", last)
+	}
+}
+
 func TestOfficialQualifiedOptionalAndVariadicFunctionTypes(t *testing.T) {
 	// v9.2.1015 runtime/doc/vim9.txt *vim9-types* and
 	// src/testdir/test_vim9_func.vim.

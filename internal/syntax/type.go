@@ -103,7 +103,27 @@ func (p *typeParser) parseType() *Type {
 	}
 	name := p.source[nameStart:p.offset]
 	node := &Type{Kind: TypeNamed, Span: p.span(start, p.offset), Name: name}
-	p.skipSpace()
+	containerType := name == "list" || name == "dict" || name == "tuple" || name == "object"
+	// Vim9 does not allow whitespace between a container type name and its
+	// type argument opener.  Whitespace inside the angle brackets is fine,
+	// and retaining the opener lets recovery consume the complete type.
+	if p.offset >= len(p.source) || p.source[p.offset] != '<' {
+		beforeSpace := p.offset
+		p.skipSpace()
+		if p.offset < len(p.source) && p.source[p.offset] == '<' {
+			if containerType {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1068", Message: "no white space allowed before '<'",
+					Span: p.span(beforeSpace, p.offset+1),
+				})
+			}
+		} else if containerType {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1008", Message: "missing <type> after " + name,
+				Span: p.span(nameStart, p.offset),
+			})
+		}
+	}
 	if p.offset < len(p.source) && p.source[p.offset] == '<' {
 		node.Kind = TypeGeneric
 		p.offset++
@@ -116,6 +136,12 @@ func (p *typeParser) parseType() *Type {
 			}
 			p.offset++
 			p.skipSpace()
+		}
+		if containerType && len(node.Arguments) == 0 {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1008", Message: "missing <type> after " + name,
+				Span: p.span(nameStart, p.offset),
+			})
 		}
 		p.consumeTypeClosing('>')
 		node.Span.End = p.base + p.offset
