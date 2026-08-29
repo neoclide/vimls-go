@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 752 (`c03403f`)
+- Current parser-negative syntax assertions: 758 (`807bd22`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -228,7 +228,10 @@ migrated, zero ready, and 321 pending-fix. Commit `162eb64` completed the two
 direct class-member separator cases, making the authoritative current split
 749 migrated, zero ready, and 319 pending-fix. Commit `c03403f` migrated three
 generic declaration terminator recoveries, making the authoritative current
-split 752 migrated, zero ready, and 316 pending-fix.
+split 752 migrated, zero ready, and 316 pending-fix. Commit `e583448` migrated
+the inherited generic-name case, commit `bc08c8c` migrated three attached-hash
+command tails, and commit `807bd22` migrated two generic-call recoveries. The
+authoritative current split is 758 migrated, zero ready, and 310 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -821,13 +824,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 2 | 0 | 1 |
-| `C-EXCMD` | 115 | 30 | 0 | 85 |
+| `C-EXCMD` | 115 | 33 | 0 | 82 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
-| `C-GENERIC` | 109 | 31 | 0 | 78 |
+| `C-GENERIC` | 109 | 34 | 0 | 75 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
 | `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **120** | **0** | **249** |
+| **Total** | **369** | **126** | **0** | **243** |
 
 ```text
 C-EXPR
@@ -946,7 +949,9 @@ next physical line.
 Commit `f3e1093` migrated seven `C-EXCMD` E488 variants. A hash attached to the
 preceding expression is retained as the one-byte trailing token, while the
 valid expression AST remains intact and parsing resumes with the next physical
-line. A hash after whitespace remains an ordinary Vim9 comment.
+line. A hash after whitespace remains an ordinary Vim9 comment. Commit
+`bc08c8c` added the three matching `execute`, `echo`, and `echomsg` official
+variants whose attached hash tails were already diagnosed by that parser path.
 
 Commit `e2f7aba` migrated the five generic-call records at
 `G:{3048:67627,3057:67814,3066:68011,3075:68222,3084:68421}/script`.
@@ -962,6 +967,16 @@ empty parameter list, the parser retains the known type parameters and reports
 E1553 or E1008 at that physical-line boundary. A non-empty parameter list keeps
 the existing loose `vimls/missing-generic-end` recovery instead of being
 reclassified broadly.
+
+Commit `e583448` migrated `G:2626:57847/script`. After each function signature
+is mapped back from its logical-line view, a nested generic `def` checks only
+the type parameters of ancestor `def` blocks. Reusing an inherited name reports
+E1561 at the inner name; sibling functions, top-level functions, ordinary
+parameters, and legacy functions do not share that scope.
+
+Commit `807bd22` migrated the already-supported generic-call recoveries at
+`G:{1971:42622,1982:42856}/script`. Their missing type argument reports E1008
+while preserving the partial call expression and line-local recovery.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
