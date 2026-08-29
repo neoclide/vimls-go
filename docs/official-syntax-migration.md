@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 747 (`4748011`)
+- Current parser-negative syntax assertions: 749 (`162eb64`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -224,7 +224,9 @@ migrated, zero ready, and 333 pending-fix. Commit `4f818a5` completed the final
 trailing-command case, making the authoritative current split 736 migrated,
 zero ready, and 332 pending-fix. Commit `4748011` migrated all eleven eval
 heredoc interpolation failures, making the authoritative current split 747
-migrated, zero ready, and 321 pending-fix.
+migrated, zero ready, and 321 pending-fix. Commit `162eb64` completed the two
+direct class-member separator cases, making the authoritative current split
+749 migrated, zero ready, and 319 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -548,11 +550,11 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 2 | 0 | 0 |
 | `B-trailing-command` | 5 | 5 | 0 | 0 |
-| `B-trailing-characters` | 20 | 18 | 0 | 2 |
+| `B-trailing-characters` | 20 | 20 | 0 | 0 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **189** | **0** | **2** |
+| **Total** | **191** | **191** | **0** | **0** |
 
-This table reflects the current parser through `4748011`. Revalidation corrected
+This table reflects the current parser through `162eb64`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -672,8 +674,12 @@ declaration now reports E475 while retaining the `$`-prefixed declaration name
 and parsed type. The compiled-def E1016 variant remains outside this parser
 group and is not silently reclassified.
 
-The two pending `B-trailing-characters` cases are the class member separator
-cases `C:{93,102}` and require direct-member scan context. Commit `ffa8e9b`
+Commit `162eb64` completed `B-trailing-characters`. Direct class/interface
+member declarations no longer split at a top-level bar: E488 covers the bar
+and same-line tail, the tail stays opaque, and the next physical line recovers.
+The main command stream carries the current aggregate-member context in one
+pass; embedded scanners and method bodies retain their existing behavior.
+Commit `ffa8e9b`
 migrated the typed assignment `A:3105`: the parser retains its name, type,
 assignment target/operator, and RHS AST while E488 spans the official
 `: number = 20` tail. Commit `c608781` migrated both `A:2923`
