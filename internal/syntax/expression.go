@@ -555,6 +555,14 @@ func (p *expressionParser) genericCallWhitespace(open, close, closingEnd int) (S
 }
 
 func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool) []*Type {
+	if closed && end == open+1 {
+		span := Span{Start: p.base + open + 1, End: p.base + open + 1}
+		p.diagnostics = append(p.diagnostics, Diagnostic{
+			Code: "vim/E1555", Message: "empty type list specified for generic function",
+			Span: Span{Start: p.base + open, End: p.base + end + 1},
+		})
+		return []*Type{{Kind: TypeMissing, Span: span}}
+	}
 	var types []*Type
 	reportedMissing := false
 	for index, part := range splitTopLevel(p.source, open+1, end, ',') {
