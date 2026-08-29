@@ -18,6 +18,24 @@ func TestVim9AggregateDeclarations(t *testing.T) {
 	}
 }
 
+func TestOfficialVimParserMissingImplementsName(t *testing.T) {
+	file := Parse("vim9script\nclass A implements\nendclass\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1389" || file.Diagnostics[0].Message != "missing name after implements" || file.Text(file.Diagnostics[0].Span) != "implements" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 4 || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockClass || file.Blocks[0].End != 2 {
+		t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+	}
+	class := file.Commands[1].Aggregate
+	if class == nil || file.Text(class.Name) != "A" || len(class.Implements) != 0 {
+		t.Fatalf("class = %#v", class)
+	}
+	if file.Commands[3].Canonical != "var" || file.Commands[3].Declaration == nil || file.Text(file.Commands[3].Declaration.Name) != "after" {
+		t.Fatalf("following command = %#v", file.Commands[3])
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9EnumValues(t *testing.T) {
 	source := "vim9script\nenum Color\n  Red,\n  RGB(1, 2 + 3, 'blue')\nendenum\n"
 	file := Parse(source)

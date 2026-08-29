@@ -82,11 +82,18 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 		if keyword != "extends" && keyword != "implements" {
 			break
 		}
+		keywordStart := remainder
 		remainder = keywordEnd
 		for {
 			valueStart := skipEnumSpace(source, remainder, len(source))
 			valueEnd := scanClassName(source, valueStart, len(source))
 			if valueEnd == valueStart {
+				if kind == BlockClass && keyword == "implements" {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1389", Message: "missing name after implements",
+						Span: Span{Start: command.Argument.Start + keywordStart, End: command.Argument.Start + keywordEnd},
+					})
+				}
 				break
 			}
 			span := Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + valueEnd}
