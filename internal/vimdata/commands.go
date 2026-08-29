@@ -23,6 +23,14 @@ type Command struct {
 	Flags CommandFlags
 }
 
+// Commands returns the pinned built-in Ex command table in its source order.
+// The returned slice is a copy and may be modified by the caller.
+func Commands() []Command {
+	result := make([]Command, len(commands))
+	copy(result, commands[:])
+	return result
+}
+
 var (
 	commandLookupStart [256]int
 	commandLookupEnd   [256]int

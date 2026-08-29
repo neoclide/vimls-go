@@ -75,6 +75,7 @@ type Index struct {
 	maxFiles       int
 	maxBytes       int
 	bytes          int
+	revision       uint64
 	files          map[string]indexedFile
 	byName         map[string][]SymbolFact
 	byExternalName map[string][]ExternalReferenceFact
@@ -141,6 +142,7 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	for _, name := range referenceNamesIn(references) {
 		sortExternalReferences(i.byExternalName[name])
 	}
+	i.revision++
 	return nil
 }
 
@@ -160,6 +162,7 @@ func (i *Index) Remove(path string) {
 	i.removeExternalReferencesLocked(old.references)
 	delete(i.files, normalized)
 	i.bytes -= old.bytes
+	i.revision++
 }
 
 // LookupFile returns exact-name symbols from one indexed file. Results retain
@@ -196,6 +199,29 @@ func (i *Index) FileSymbols(path string) []SymbolMatch {
 	}
 	i.mu.RUnlock()
 	return matches
+}
+
+// Source returns the immutable source retained for an indexed file. The
+// returned string is safe to keep after a later Replace or Remove.
+func (i *Index) Source(path string) (string, bool) {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil {
+		return "", false
+	}
+	i.mu.RLock()
+	file, ok := i.files[normalized]
+	i.mu.RUnlock()
+	if !ok {
+		return "", false
+	}
+	return file.source, true
+}
+
+// Revision changes after every successful Replace or effective Remove.
+func (i *Index) Revision() uint64 {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.revision
 }
 
 // ExternalReferences returns immutable candidate references in path/span

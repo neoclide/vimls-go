@@ -164,6 +164,26 @@ expressions, private or ambiguous items, missing files, unsafe symlink targets,
 and paths outside initialized workspace/runtimepath roots return empty results
 without executing Vim script or guessing runtime state.
 
+Static Vim9 import paths and direct `:source` filenames become document links
+only when the workspace resolver finds one safe regular file. Completion is
+contextual and bounded: command positions use the pinned Ex command table,
+expression positions use visible declarations and pinned builtin functions,
+and a statically resolved import namespace exposes only exported members.
+Unknown and dynamic contexts return no inferred candidates.
+
+Signature help currently covers statically bound user functions using their
+parsed parameters, defaults, and return type. Rename covers same-file bound
+symbols and cross-file static import members; every spelling must match the
+target declaration, so dynamic, ambiguous, namespace-changing, and autoload
+spellings that require different edits are rejected. Open-file edits carry
+their snapshot versions and closed indexed files use a null version.
+
+Full semantic tokens combine command/modifier/comment syntax with bound symbol
+declarations and references, using the negotiated position encoding. Inlay
+hints expose only already-inferred variable/constant types that were not
+written explicitly. Code actions are limited to a unique, known missing block
+terminator and never execute Vim script.
+
 ## Semantics required for 1.0
 
 - Explicit legacy scopes: `g:`, `b:`, `w:`, `t:`, `s:`, `l:`, `a:`, `v:` and

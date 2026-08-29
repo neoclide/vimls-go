@@ -46,3 +46,23 @@ func TestLookupFunctionMetadata(t *testing.T) {
 		t.Fatalf("BuiltinFunctionCount() = %d, want 591", BuiltinFunctionCount())
 	}
 }
+
+func TestBuiltinFunctionsReturnsOrderedCopy(t *testing.T) {
+	got := BuiltinFunctions()
+	if len(got) != len(builtinFunctions) {
+		t.Fatalf("BuiltinFunctions() length = %d, want %d", len(got), len(builtinFunctions))
+	}
+	for index, function := range builtinFunctions {
+		if got[index] != function {
+			t.Fatalf("BuiltinFunctions()[%d] = %#v, want %#v", index, got[index], function)
+		}
+	}
+
+	got[0] = BuiltinFunction{Name: "changed"}
+	if next := BuiltinFunctions(); next[0] != builtinFunctions[0] {
+		t.Fatalf("BuiltinFunctions() exposed package table: first function = %#v, want %#v", next[0], builtinFunctions[0])
+	}
+	if function, ok := LookupFunction(builtinFunctions[0].Name); !ok || function != builtinFunctions[0] {
+		t.Fatalf("LookupFunction(%q) = %#v, %v after modifying enumeration", builtinFunctions[0].Name, function, ok)
+	}
+}

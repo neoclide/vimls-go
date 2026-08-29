@@ -365,6 +365,30 @@ func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {
 	}
 }
 
+func TestWorkspaceConfigurationRequestOnInitializedAndNullChange(t *testing.T) {
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"targetVersion":"9.2.4"}`))}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = client
+	supported := true
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{Configuration: &supported}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 1 || instance.TargetVersion().String() != "9.2.0004" {
+		t.Fatalf("initialized configuration calls=%d target=%s", client.calls, instance.TargetVersion().String())
+	}
+	client.settings = protocol.LSPAny([]byte(`{"targetVersion":"latest"}`))
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte("null"))}); err != nil {
+		t.Fatal(err)
+	}
+	if client.calls != 2 || instance.TargetVersion().String() != "latest" {
+		t.Fatalf("changed configuration calls=%d target=%s", client.calls, instance.TargetVersion().String())
+	}
+}
+
 func TestDocumentSymbolsUseCurrentSnapshotAndUTF16Ranges(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	defer instance.stopAnalysis()
@@ -706,6 +730,20 @@ func (errorWriter) Write([]byte) (int, error) {
 type diagnosticClient struct {
 	protocol.UnimplementedClient
 	published chan *protocol.PublishDiagnosticsParams
+}
+
+type configurationClient struct {
+	protocol.UnimplementedClient
+	settings protocol.LSPAny
+	calls    int
+}
+
+func (c *configurationClient) Configuration(_ context.Context, params *protocol.ConfigurationParams) ([]protocol.LSPAny, error) {
+	c.calls++
+	if len(params.Items) != 1 || params.Items[0].Section == nil || *params.Items[0].Section != "vimls" {
+		return nil, errors.New("unexpected configuration section")
+	}
+	return []protocol.LSPAny{c.settings}, nil
 }
 
 func (c *diagnosticClient) PublishDiagnostics(_ context.Context, params *protocol.PublishDiagnosticsParams) error {

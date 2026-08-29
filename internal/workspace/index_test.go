@@ -92,6 +92,9 @@ func TestIndexSearchReturnsIndependentFactsAndRetainsCurrentSource(t *testing.T)
 	if err := index.Replace(path, oldFile); err != nil {
 		t.Fatal(err)
 	}
+	if retained, ok := index.Source(path); !ok || retained != oldSource {
+		t.Fatalf("Source() = %q, %v", retained, ok)
+	}
 	oldFile.Source = "var mutated = 2\n"
 	results := index.Search("old", 0)
 	if len(results) != 1 || results[0].Source != oldSource {
@@ -112,11 +115,17 @@ func TestIndexSearchReturnsIndependentFactsAndRetainsCurrentSource(t *testing.T)
 	if index.IndexedBytes() != len(newSource) || len(index.Search("old", 0)) != 0 {
 		t.Fatalf("replacement state: bytes=%d old=%#v", index.IndexedBytes(), index.Search("old", 0))
 	}
+	if retained, ok := index.Source(path); !ok || retained != newSource {
+		t.Fatalf("replacement Source() = %q, %v", retained, ok)
+	}
 	results = index.Search("replacement", 0)
 	if len(results) != 1 || results[0].Source != newSource {
 		t.Fatalf("replacement source = %#v", results)
 	}
 	index.Remove(path)
+	if retained, ok := index.Source(path); ok || retained != "" {
+		t.Fatalf("removed Source() = %q, %v", retained, ok)
+	}
 	if index.IndexedBytes() != 0 || len(index.Search("replacement", 0)) != 0 {
 		t.Fatalf("removal state: bytes=%d results=%#v", index.IndexedBytes(), index.Search("replacement", 0))
 	}
@@ -222,6 +231,36 @@ func TestIndexRemoveFreesCapacity(t *testing.T) {
 	}
 	if err := index.Replace(second, file); err != nil {
 		t.Fatalf("replace after remove: %v", err)
+	}
+}
+
+func TestIndexRevisionTracksSuccessfulChanges(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "entry.vim")
+	file := syntax.Parse("var value = 1\n")
+	index := NewIndex(1, len(file.Source))
+	if got := index.Revision(); got != 0 {
+		t.Fatalf("initial revision = %d", got)
+	}
+	index.Remove(path)
+	if got := index.Revision(); got != 0 {
+		t.Fatalf("no-op remove revision = %d", got)
+	}
+	if err := index.Replace(path, file); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.Revision(); got != 1 {
+		t.Fatalf("replace revision = %d", got)
+	}
+	if err := index.Replace(filepath.Join(root, "other.vim"), file); !errors.Is(err, ErrIndexLimit) {
+		t.Fatalf("rejected replace error = %v", err)
+	}
+	if got := index.Revision(); got != 1 {
+		t.Fatalf("rejected replace revision = %d", got)
+	}
+	index.Remove(path)
+	if got := index.Revision(); got != 2 {
+		t.Fatalf("remove revision = %d", got)
 	}
 }
 

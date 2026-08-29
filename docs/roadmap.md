@@ -130,6 +130,15 @@ Exit gate: completion and signature results are relevant to dialect/scope and
 bounded; rename refuses dynamic/ambiguous symbols and produces non-overlapping,
 version-valid edits; token ranges remain valid for Unicode text.
 
+Current status (2026-08-30): static import/source document links, contextual Ex
+command, visible declaration, builtin function and static import-member
+completion, completion resolve detail, user-function signature help, safe
+same-file/static-import rename, full semantic tokens, inferred-type inlay hints,
+and the deterministic missing-block-end quick fix are implemented. The stdio
+subprocess test exercises these capabilities. M6 remains open for versioned
+modifier/option/event metadata, builtin parameter/documentation metadata,
+import-path completion, and broader stable semantic classifications.
+
 ## M7: compatibility, performance, and 1.0 release
 
 Deliver:

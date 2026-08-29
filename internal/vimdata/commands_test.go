@@ -35,6 +35,26 @@ func TestLookupUsesPinnedVimCommandOrder(t *testing.T) {
 	}
 }
 
+func TestCommandsReturnsOrderedCopy(t *testing.T) {
+	got := Commands()
+	if len(got) != len(commands) {
+		t.Fatalf("Commands() length = %d, want %d", len(got), len(commands))
+	}
+	for index, command := range commands {
+		if got[index] != command {
+			t.Fatalf("Commands()[%d] = %#v, want %#v", index, got[index], command)
+		}
+	}
+
+	got[0] = Command{Name: "changed"}
+	if next := Commands(); next[0] != commands[0] {
+		t.Fatalf("Commands() exposed package table: first command = %#v, want %#v", next[0], commands[0])
+	}
+	if command, ok := Lookup(commands[0].Name); !ok || command != commands[0] {
+		t.Fatalf("Lookup(%q) = %#v, %v after modifying enumeration", commands[0].Name, command, ok)
+	}
+}
+
 func TestLookupMatchesFullOrderedTableForEveryPrefix(t *testing.T) {
 	for _, command := range commands {
 		for length := 1; length <= len(command.Name); length++ {

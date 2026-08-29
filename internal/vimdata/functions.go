@@ -39,6 +39,14 @@ type BuiltinFunction struct {
 	ArgumentChecks []string
 }
 
+// BuiltinFunctions returns the pinned built-in function table in its source
+// order. The returned slice is a copy and may be modified by the caller.
+func BuiltinFunctions() []BuiltinFunction {
+	result := make([]BuiltinFunction, len(builtinFunctions))
+	copy(result, builtinFunctions[:])
+	return result
+}
+
 // LookupFunction resolves a builtin function by its canonical name. Vim
 // function names are case-sensitive and do not use Ex-command abbreviations.
 func LookupFunction(name string) (BuiltinFunction, bool) {

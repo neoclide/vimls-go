@@ -91,6 +91,7 @@ type Server struct {
 	watchRegistered          bool
 	initialized              bool
 	watchWG                  sync.WaitGroup
+	workspaceConfiguration   bool
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {
@@ -303,6 +304,15 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentDocumentSymbol,
 		protocol.MethodTextDocumentFoldingRange,
 		protocol.MethodTextDocumentSelectionRange,
+		protocol.MethodTextDocumentDocumentLink,
+		protocol.MethodTextDocumentCompletion,
+		protocol.MethodCompletionItemResolve,
+		protocol.MethodTextDocumentSignatureHelp,
+		protocol.MethodTextDocumentPrepareRename,
+		protocol.MethodTextDocumentRename,
+		protocol.MethodTextDocumentSemanticTokensFull,
+		protocol.MethodTextDocumentCodeAction,
+		protocol.MethodTextDocumentInlayHint,
 		protocol.MethodWorkspaceDidChangeConfiguration,
 		protocol.MethodWorkspaceDidChangeWorkspaceFolders,
 		protocol.MethodWorkspaceDidChangeWatchedFiles,
@@ -322,6 +332,9 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	targetVersion, targetOverride, targetWarning := targetVersionFromOptions([]byte(params.InitializationOptions))
 	runtimePaths, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
 	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
+	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
+	prepareRename := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.Rename != nil && params.Capabilities.TextDocument.Rename.PrepareSupport != nil && *params.Capabilities.TextDocument.Rename.PrepareSupport
+	codeActionLiterals := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.CodeAction != nil && params.Capabilities.TextDocument.CodeAction.CodeActionLiteralSupport.CodeActionKind.ValueSet != nil
 	s.mu.Lock()
 	s.targetVersion = targetVersion
 	s.targetOverride = targetOverride
@@ -335,10 +348,22 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.state = stateActive
 	s.watchDynamicRegistration = watchDynamic
 	s.watchRelativePatterns = watchRelative
+	s.workspaceConfiguration = workspaceConfiguration
 	s.mu.Unlock()
 	s.setWorkspaceRoots(workspaceRootsFromInitialize(params))
 	s.setRuntimePaths(runtimePaths)
 	workspaceFoldersSupported := true
+	completionResolve := true
+	documentLinkResolve := false
+	renamePrepare := true
+	var renameProvider protocol.RenameProvider = protocol.Boolean(true)
+	if prepareRename {
+		renameProvider = &protocol.RenameOptions{PrepareProvider: &renamePrepare}
+	}
+	var codeActionProvider protocol.CodeActionProvider
+	if codeActionLiterals {
+		codeActionProvider = &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}}
+	}
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
 			PositionEncoding:          protocolEncoding,
@@ -351,6 +376,16 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 			FoldingRangeProvider:      protocol.Boolean(true),
 			SelectionRangeProvider:    protocol.Boolean(true),
 			WorkspaceSymbolProvider:   protocol.Boolean(true),
+			DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &documentLinkResolve},
+			CompletionProvider:        &protocol.CompletionOptions{ResolveProvider: &completionResolve},
+			SignatureHelpProvider:     &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{","}},
+			RenameProvider:            renameProvider,
+			SemanticTokensProvider: &protocol.SemanticTokensOptions{
+				Legend: protocol.SemanticTokensLegend{TokenTypes: append([]string(nil), semanticTokenTypes...), TokenModifiers: append([]string(nil), semanticTokenModifiers...)},
+				Full:   protocol.Boolean(true),
+			},
+			CodeActionProvider: codeActionProvider,
+			InlayHintProvider:  protocol.Boolean(true),
 			Workspace: &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
 				Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
 			}},
@@ -370,6 +405,9 @@ func (s *Server) Initialized(ctx context.Context, _ *protocol.InitializedParams)
 	s.mu.Unlock()
 	s.scheduleFileWatchRegistration()
 	s.scheduleWorkspaceRebuild()
+	if err := s.refreshWorkspaceConfiguration(ctx); err != nil {
+		s.logf("vimls: request workspace configuration: %v", err)
+	}
 	s.mu.Lock()
 	warning := s.pendingWarning
 	s.pendingWarning = ""
@@ -484,10 +522,37 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 }
 
 func (s *Server) DidChangeConfiguration(ctx context.Context, params *protocol.DidChangeConfigurationParams) error {
+	if len(params.Settings) == 0 || string(params.Settings) == "null" {
+		return s.refreshWorkspaceConfiguration(ctx)
+	}
+	return s.applyWorkspaceConfiguration(ctx, []byte(params.Settings))
+}
+
+func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
+	s.mu.Lock()
+	supported := s.workspaceConfiguration
+	client := s.client
+	override := s.targetOverride
+	s.mu.Unlock()
+	if !supported || client == nil || override {
+		return nil
+	}
+	section := "vimls"
+	values, err := client.Configuration(ctx, &protocol.ConfigurationParams{Items: []protocol.ConfigurationItem{{Section: &section}}})
+	if err != nil {
+		return err
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return s.applyWorkspaceConfiguration(ctx, []byte(values[0]))
+}
+
+func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
 	s.mu.Lock()
 	var warning string
 	if !s.targetOverride {
-		s.targetVersion, warning = targetVersionFromSettings([]byte(params.Settings), s.targetVersion)
+		s.targetVersion, warning = targetVersionFromSettings(settings, s.targetVersion)
 	}
 	s.mu.Unlock()
 	s.publishMu.Lock()
