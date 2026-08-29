@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 758 (`807bd22`)
+- Current parser-negative syntax assertions: 780 (`3ab05e0`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -232,6 +232,10 @@ split 752 migrated, zero ready, and 316 pending-fix. Commit `e583448` migrated
 the inherited generic-name case, commit `bc08c8c` migrated three attached-hash
 command tails, and commit `807bd22` migrated two generic-call recoveries. The
 authoritative current split is 758 migrated, zero ready, and 310 pending-fix.
+Commit `3ab05e0` migrated 22 Group C cases already proven ready: all 17 E1100
+single-command variants, two generic-call delimiter variants, both E1059
+typed-`for` variants, and the final E1125 declaration variant. The
+authoritative current split is 780 migrated, zero ready, and 288 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -823,14 +827,14 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
-| `C-DECL` | 3 | 2 | 0 | 1 |
-| `C-EXCMD` | 115 | 33 | 0 | 82 |
+| `C-DECL` | 3 | 3 | 0 | 0 |
+| `C-EXCMD` | 115 | 50 | 0 | 65 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
-| `C-GENERIC` | 109 | 34 | 0 | 75 |
+| `C-GENERIC` | 109 | 38 | 0 | 71 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
 | `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **126** | **0** | **243** |
+| **Total** | **369** | **148** | **0** | **221** |
 
 ```text
 C-EXPR
@@ -872,6 +876,7 @@ C-BLOCK
 C-EXCMD
   E1065 T:55:1659/script
   E1083 C:267:6525/def
+  E1100 S:2043:42762/script,2045:42875/script,2047:42988/script,2049:43102/script,2051:43216/script,2053:43330/script,2055:43444/script,4846:108652/{def|vim9-script},4856:108819/{def|vim9-script},4861:108900/{def|vim9-script},4866:108981/{def|vim9-script},4871:109064/{def|vim9-script}
   E1144 C:1500:31716/script,1508:31863/script; S:3590:76362/script,3610:76804/script,3618:76970/def,3624:77087/script,3629:77194/def,3641:77421/def,3647:77538/script,3660:77800/def,3666:77915/script,3678:78133/script,3724:79220/script,3859:82421/script,3905:83376/script,3997:85329/script,4795:107577/{def|vim9-script},4800:107662/{def|vim9-script}
   E179 C:1865:38529/script,1873:38655/script
   E182 S:3886:82965/script,3890:83060/script
@@ -977,6 +982,11 @@ parameters, and legacy functions do not share that scope.
 Commit `807bd22` migrated the already-supported generic-call recoveries at
 `G:{1971:42622,1982:42856}/script`. Their missing type argument reports E1008
 while preserving the partial call expression and line-local recovery.
+
+Commit `3ab05e0` migrated the 22 ready cases that required no production-code
+change: 17 E1100 one-command forms in `test_vim9_script.vim`, E1069/E1008 at
+`G:{2964:65613,2973:65815}/script`, both E1059 variants at
+`S:3107:65719`, and E1125 at `S:271:6623/def`.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
