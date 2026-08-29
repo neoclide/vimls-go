@@ -1390,14 +1390,39 @@ func (p *expressionParser) parseList() *Expression {
 	open := p.current()
 	p.advance()
 	var children []*Expression
+	end := open.span.End
+	malformed := false
 	for p.current().kind != expressionEOF && p.current().text != "]" {
-		children = append(children, p.parse(0))
+		child := p.parse(0)
+		children = append(children, child)
+		if child.Span.End > end {
+			end = child.Span.End
+		}
 		if p.current().text != "," && p.current().text != ";" {
+			if p.dialect == Vim9 && p.current().kind != expressionEOF && p.current().text != "]" && p.current().text != ")" && p.current().text != "}" {
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E696", Message: "Missing comma in List", Span: p.current().span})
+				malformed = true
+				// Vim stops at the first structural List error.  Keep the
+				// children parsed before it and make the malformed remainder
+				// opaque so it cannot produce a trailing-expression cascade.
+				for p.current().kind != expressionEOF && p.current().text != "]" && p.current().text != ")" && p.current().text != "}" {
+					p.advance()
+				}
+			}
 			break
 		}
 		p.advance()
 	}
-	end := p.consumeClosing("]", open.span.End)
+	if p.dialect != Vim9 {
+		end = p.consumeClosing("]", end)
+		return &Expression{Kind: ExpressionList, Span: Span{Start: open.span.Start, End: end}, Children: children}
+	}
+	if p.current().text == "]" {
+		end = p.current().span.End
+		p.advance()
+	} else if !malformed {
+		p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-list-end", Message: "Missing end of List ']'", Span: p.current().span})
+	}
 	return &Expression{Kind: ExpressionList, Span: Span{Start: open.span.Start, End: end}, Children: children}
 }
 
@@ -1601,6 +1626,17 @@ func (p *expressionParser) consumeClosing(expected string, fallback int) int {
 		end := p.current().span.End
 		p.advance()
 		return end
+	}
+	// If an unterminated List is nested in another unterminated construct,
+	// retain the established delimiter diagnostics for both nesting levels.
+	// The List-specific Vim diagnostic applies when the List itself is the
+	// expression recovery boundary.
+	for index := len(p.diagnostics) - 1; index >= 0; index-- {
+		if p.diagnostics[index].Code == "vimls/missing-list-end" {
+			p.diagnostics[index].Code = "vimls/missing-delimiter"
+			p.diagnostics[index].Message = "expected ]"
+			break
+		}
 	}
 	p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-delimiter", Message: "expected " + expected, Span: p.current().span})
 	return fallback

@@ -2190,6 +2190,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if !reused {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
+		if len(diagnostics) == 1 && diagnostics[0].Code == "vimls/missing-list-end" {
+			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
+		}
 		command.Expressions = append(command.Expressions, expression)
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		return
@@ -2329,6 +2332,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
+		case diagnostic.Code == "vimls/missing-list-end":
+			diagnostic.Code = "vim/E696"
+			diagnostic.Message = "Missing comma in List"
+			if inDef {
+				diagnostic.Code = "vim/E697"
+				diagnostic.Message = "Missing end of List ']'"
+			}
 		case diagnostic.Code == "vimls/missing-member" && diagnostic.Message == "expected member name":
 			diagnostic.Code = "vim/E15"
 			diagnostic.Message = "invalid expression"
