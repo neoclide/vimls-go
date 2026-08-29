@@ -1648,6 +1648,7 @@ func (p *expressionParser) parseList() *Expression {
 	end := open.span.End
 	malformed := false
 	diagnosticsStart := len(p.diagnostics)
+	commaDiagnostic := false
 	for p.current().kind != expressionEOF && p.current().text != "]" {
 		child := p.parse(0)
 		children = append(children, child)
@@ -1667,7 +1668,17 @@ func (p *expressionParser) parseList() *Expression {
 			}
 			break
 		}
+		comma := p.current()
+		commaOffset := comma.span.Start - p.base
+		if p.dialect == Vim9 && comma.text == "," && !commaDiagnostic && commaOffset > 0 && isExpressionSpace(p.source[commaOffset-1]) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1068", Message: "no white space allowed before ','", Span: comma.span})
+			commaDiagnostic = true
+		}
 		p.advance()
+		if p.dialect == Vim9 && comma.text == "," && !commaDiagnostic && p.current().kind != expressionEOF && p.current().text != "]" && (comma.span.End-p.base >= len(p.source) || !isExpressionSpace(p.source[comma.span.End-p.base])) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1069", Message: "white space required after ','", Span: comma.span})
+			commaDiagnostic = true
+		}
 	}
 	if p.dialect != Vim9 {
 		end = p.consumeClosing("]", end)
