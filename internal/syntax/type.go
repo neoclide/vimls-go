@@ -136,16 +136,30 @@ func (p *typeParser) parseType() *Type {
 		}
 		p.skipSpace()
 		for p.offset < len(p.source) && p.source[p.offset] != '>' {
-			node.Arguments = append(node.Arguments, p.parseType())
+			argument := p.parseType()
+			node.Arguments = append(node.Arguments, argument)
 			spaceBeforeComma := false
+			invalidVariadic := false
 			if name == "tuple" {
+				if argument.Kind == TypeVariadic && len(argument.Arguments) > 0 && isKnownNonListType(argument.Arguments[0]) {
+					invalidVariadic = true
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E1539", Message: "variadic tuple must end with a list type",
+						Span: argument.Arguments[0].Span,
+					})
+				}
 				// A tuple type has stricter separator whitespace than the
 				// other generic types.  Keep the argument node's end so a
 				// space before the comma or closing angle is observable.
-				argumentEnd := node.Arguments[len(node.Arguments)-1].Span.End - p.base
+				argumentEnd := argument.Span.End - p.base
 				p.skipSpace()
 				if p.offset < len(p.source) && p.source[p.offset] == ',' {
-					if p.offset > argumentEnd {
+					if argument.Kind == TypeVariadic && !invalidVariadic {
+						p.diagnostics = append(p.diagnostics, Diagnostic{
+							Code: "vim/E1008", Message: "missing <type> after variadic tuple member",
+							Span: p.span(p.offset, p.offset+1),
+						})
+					} else if p.offset > argumentEnd && argument.Kind != TypeVariadic {
 						spaceBeforeComma = true
 						p.diagnostics = append(p.diagnostics, Diagnostic{
 							Code: "vim/E1068", Message: "no white space allowed before ','",
@@ -165,7 +179,7 @@ func (p *typeParser) parseType() *Type {
 				break
 			}
 			p.offset++
-			if name == "tuple" && !spaceBeforeComma && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
+			if name == "tuple" && argument.Kind != TypeVariadic && !spaceBeforeComma && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
 				p.diagnostics = append(p.diagnostics, Diagnostic{
 					Code: "vim/E1069", Message: "white space required after ','",
 					Span: p.span(p.offset-1, p.offset),
@@ -225,15 +239,11 @@ func (p *typeParser) parseType() *Type {
 				if argument.Kind == TypeOptional {
 					optionalSeen = true
 				} else if argument.Kind == TypeVariadic {
-					if len(argument.Arguments) > 0 {
-						member := argument.Arguments[0]
-						switch member.Name {
-						case "any", "bool", "blob", "channel", "dict", "float", "func", "job", "number", "object", "string", "tuple", "void":
-							p.diagnostics = append(p.diagnostics, Diagnostic{
-								Code: "vim/E1180", Message: "variable arguments type must be a list",
-								Span: member.Span,
-							})
-						}
+					if len(argument.Arguments) > 0 && isKnownNonListType(argument.Arguments[0]) {
+						p.diagnostics = append(p.diagnostics, Diagnostic{
+							Code: "vim/E1180", Message: "variable arguments type must be a list",
+							Span: argument.Arguments[0].Span,
+						})
 					}
 				} else if optionalSeen {
 					p.diagnostics = append(p.diagnostics, Diagnostic{
@@ -305,6 +315,17 @@ func (p *typeParser) consumeTypeClosing(expected byte) {
 	}
 	span := p.span(p.offset, p.offset)
 	p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-type-delimiter", Message: "expected " + string(expected), Span: span})
+}
+
+func isKnownNonListType(node *Type) bool {
+	switch node.Name {
+	case "any", "bool", "blob", "channel", "float", "func", "job", "number", "string", "void":
+		return true
+	case "dict", "object", "tuple":
+		return node.Kind == TypeGeneric
+	default:
+		return false
+	}
 }
 
 func (p *typeParser) skipSpace() {

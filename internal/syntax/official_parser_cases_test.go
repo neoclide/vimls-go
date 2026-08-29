@@ -158,6 +158,8 @@ func TestOfficialVimParserTypeFailures(t *testing.T) {
 		"src/testdir/test_tuple.vim:87:2239/def":                   "vim/E1069",
 		"src/testdir/test_tuple.vim:87:2239/vim9-script":           "vim/E1069",
 		"src/testdir/test_tuple.vim:92:2394/def":                   "vim/E1068",
+		"src/testdir/test_tuple.vim:127:3486/def":                  "vim/E1539",
+		"src/testdir/test_tuple.vim:127:3486/vim9-script":          "vim/E1539",
 		"src/testdir/test_vim9_assign.vim:1632:40950/def":          "vim/E1068",
 		"src/testdir/test_vim9_assign.vim:1633:41010/def":          "vim/E1009",
 		"src/testdir/test_vim9_assign.vim:1636:41143/def":          "vim/E1009",

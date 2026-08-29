@@ -204,6 +204,37 @@ func TestVim9TypeParserTupleWhitespaceAndSeparators(t *testing.T) {
 	}
 }
 
+func TestVim9TypeParserTupleVariadicMember(t *testing.T) {
+	for _, source := range []string{
+		"tuple<...list<number>>",
+		"tuple<number, ...list<string>>",
+	} {
+		t.Run("valid "+source, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(source)
+			if typeNode == nil || typeNode.Name != "tuple" || len(diagnostics) != 0 {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+
+	invalid := []struct {
+		source     string
+		diagnostic string
+		arguments  int
+	}{
+		{source: "tuple<number, ...number>", diagnostic: "vim/E1539", arguments: 2},
+		{source: "tuple<number, ...list<string>, bool>", diagnostic: "vim/E1008", arguments: 3},
+	}
+	for _, test := range invalid {
+		t.Run("invalid "+test.source, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(test.source)
+			if typeNode == nil || len(typeNode.Arguments) != test.arguments || len(diagnostics) != 1 || diagnostics[0].Code != test.diagnostic {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9TypeParserContainerErrorRecoversNextCommand(t *testing.T) {
 	// Vim v9.2.1015 src/testdir/test_vim9_func.vim checks the same bare list
 	// return type in a :def defined from a legacy script.
