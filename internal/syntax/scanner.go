@@ -2342,11 +2342,22 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	switch command.Canonical {
 	case "let", "var", "const", "final":
+		if command.Dialect == Legacy && command.Canonical == "var" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1124", Message: `"var" cannot be used in legacy Vim script`, Span: command.Name})
+		}
+		if command.Dialect == Vim9 && command.Canonical == "let" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1126", Message: "Cannot use :let in Vim9 script", Span: command.Name})
+		}
 		assignment := findAssignment(source)
 		if assignment.Start < 0 {
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
 			diagnoseInvalidClassDeclaration(file, command, declaration)
 			command.Declaration = declaration
+			if command.Dialect == Vim9 && command.Canonical == "final" {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1125", Message: "Final requires a value", Span: command.Name,
+				})
+			}
 			return
 		}
 		assignment.Start += command.Argument.Start
