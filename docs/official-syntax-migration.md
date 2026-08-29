@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 619 (`e23b1f2`)
+- Current parser-negative syntax assertions: 627 (`ca95465`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -152,6 +152,8 @@ Commit `7750739` migrated the six malformed Vim9 atom variants, making the
 current split 616 migrated, zero ready, and 453 pending-fix.
 Commit `e23b1f2` migrated the three postfix-closing-delimiter variants, making
 the current split 619 migrated, zero ready, and 450 pending-fix.
+Commit `ca95465` migrated the eight missing-operand variants, making the
+current split 627 migrated, zero ready, and 442 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -184,11 +186,11 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-315 migrated and 10 pending-fix.
+323 migrated and 2 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 75 | 0 | 9 |
+| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 83 | 0 | 1 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 157 | 0 | 0 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
@@ -418,6 +420,13 @@ Commit `e23b1f2` migrated the three closing-delimiter variants at call lines
 for a missing `)`, while a completed slice followed by another statement keeps
 E111 instead of being flattened to def-level E1097. The following statement
 remains a separate recovered command and is never consumed as continuation.
+
+Commit `ca95465` migrated the eight missing-operand variants at call lines 198,
+199, 2600, 2601, 3743, 4310, and 4311. Ternary, index, slice, and
+parenthesized expressions retain an explicit missing operand, report one E1097
+inside a compiled `def` or E15 at Vim9 script level, and recover at the next
+physical statement. Completed expressions continue to use their delimiter- or
+ternary-specific diagnostics, and legacy expression recovery is unchanged.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
