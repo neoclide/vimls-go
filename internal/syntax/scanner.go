@@ -411,7 +411,13 @@ func parseSource(source string, initial Dialect) *File {
 			file.Commands[index].hasNextStatement = !closing
 		}
 		if !file.Commands[index].detailsOpaque && (file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute") {
+			diagnosticsBeforeDetails := len(file.Diagnostics)
 			parseLogicalCommandDetails(file, &file.Commands[index])
+			if len(file.Diagnostics) == diagnosticsBeforeDetails {
+				if diagnostic, ok := nestedGenericTypeParameterDiagnostic(file, &file.Commands[index]); ok {
+					file.Diagnostics = append(file.Diagnostics, diagnostic)
+				}
+			}
 		}
 	}
 	suppressClassBodyCommandDiagnostics(file)

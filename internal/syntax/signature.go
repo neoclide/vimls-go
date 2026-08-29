@@ -243,6 +243,46 @@ func parseFunctionSignature(file *File, command *Command) {
 	command.Function = function
 }
 
+// nestedGenericTypeParameterDiagnostic reports the Vim rule that a nested
+// def may not reuse a type variable declared by an enclosing def.  The block
+// chain is authoritative here: sibling and top-level functions are never
+// considered, and legacy function blocks naturally do not contribute names.
+func nestedGenericTypeParameterDiagnostic(file *File, command *Command) (Diagnostic, bool) {
+	if command == nil || command.Function == nil {
+		return Diagnostic{}, false
+	}
+	parameters := command.Function.TypeParameters
+	if len(parameters) == 0 || command.Block < 0 || command.Block >= len(file.Blocks) {
+		return Diagnostic{}, false
+	}
+	var seen map[string]struct{}
+	for blockIndex := file.Blocks[command.Block].Parent; blockIndex >= 0 && blockIndex < len(file.Blocks); blockIndex = file.Blocks[blockIndex].Parent {
+		block := file.Blocks[blockIndex]
+		if block.Kind != BlockDef || block.Header < 0 || block.Header >= len(file.Commands) {
+			continue
+		}
+		function := file.Commands[block.Header].Function
+		if function == nil {
+			continue
+		}
+		for _, parameter := range function.TypeParameters {
+			if seen == nil {
+				seen = make(map[string]struct{})
+			}
+			seen[parameter.Name] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return Diagnostic{}, false
+	}
+	for _, parameter := range parameters {
+		if _, exists := seen[parameter.Name]; exists {
+			return Diagnostic{Code: "vim/E1561", Message: "duplicate type variable name: " + parameter.Name, Span: parameter.Span}, true
+		}
+	}
+	return Diagnostic{}, false
+}
+
 func parseFunctionTypeParameters(source string, base, open, close int) ([]TypeParameter, []Diagnostic) {
 	var parameters []TypeParameter
 	var diagnostics []Diagnostic
