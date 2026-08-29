@@ -104,6 +104,7 @@ func (p *typeParser) parseType() *Type {
 	name := p.source[nameStart:p.offset]
 	node := &Type{Kind: TypeNamed, Span: p.span(start, p.offset), Name: name}
 	containerType := name == "list" || name == "dict" || name == "tuple" || name == "object"
+	singleMemberContainer := name == "list" || name == "dict" || name == "object"
 	// Vim9 does not allow whitespace between a container type name and its
 	// type argument opener.  Whitespace inside the angle brackets is fine,
 	// and retaining the opener lets recovery consume the complete type.
@@ -178,7 +179,25 @@ func (p *typeParser) parseType() *Type {
 				Span: p.span(nameStart, p.offset),
 			})
 		}
-		p.consumeTypeClosing('>')
+		tooManyMembers := singleMemberContainer && len(node.Arguments) > 1
+		if tooManyMembers {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1009", Message: "missing > after type",
+				Span: Span{Start: node.Arguments[1].Span.Start, End: node.Arguments[len(node.Arguments)-1].Span.End},
+			})
+		}
+		if p.offset < len(p.source) && p.source[p.offset] == '>' {
+			p.offset++
+		} else if singleMemberContainer {
+			if len(node.Arguments) > 0 && !tooManyMembers {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1009", Message: "missing > after type",
+					Span: p.span(p.offset, p.offset),
+				})
+			}
+		} else {
+			p.consumeTypeClosing('>')
+		}
 		node.Span.End = p.base + p.offset
 	}
 	if name == "func" {

@@ -30,7 +30,7 @@ func TestVim9TypeParserCoversContainersTuplesAndFunctions(t *testing.T) {
 
 func TestVim9TypeParserRecoversFromIncompleteTypes(t *testing.T) {
 	typeNode, diagnostics := (Vim9TypeParser{}).Parse("list<dict<number>")
-	if typeNode == nil || len(diagnostics) != 1 || diagnostics[0].Code != "vimls/missing-type-delimiter" {
+	if typeNode == nil || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1009" {
 		t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
 	}
 }
@@ -68,6 +68,23 @@ func TestVim9TypeParserRequiresContainerArguments(t *testing.T) {
 		t.Run(name+" empty arguments", func(t *testing.T) {
 			typeNode, diagnostics := (Vim9TypeParser{}).Parse(name + "<>")
 			if typeNode == nil || typeNode.Name != name || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1008" {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+}
+
+func TestVim9TypeParserSingleMemberContainers(t *testing.T) {
+	for _, name := range []string{"list", "dict", "object"} {
+		t.Run(name+" missing closer", func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(name + "<number")
+			if typeNode == nil || len(typeNode.Arguments) != 1 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1009" {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+		t.Run(name+" rejects a second member", func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(name + "<number, string>")
+			if typeNode == nil || len(typeNode.Arguments) != 2 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1009" {
 				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
 			}
 		})
