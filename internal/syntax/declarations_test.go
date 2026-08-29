@@ -636,3 +636,34 @@ func TestVim9InterfaceMemberInitializer(t *testing.T) {
 		assertFileSpans(t, file)
 	})
 }
+
+func TestVim9EnumEndTrailingCharacters(t *testing.T) {
+	t.Run("trailing payload", func(t *testing.T) {
+		file := Parse("vim9script\nenum Something\nendenum school's out\nvar after = 1\n")
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E488" || file.Diagnostics[0].Message != "trailing characters" || file.Text(file.Diagnostics[0].Span) != "school's out" {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		if len(file.Commands) != 4 || len(file.Blocks) != 1 || file.Commands[1].Aggregate == nil || file.Text(file.Commands[1].Aggregate.Name) != "Something" || file.Blocks[0].Kind != BlockEnum || file.Blocks[0].Header != 1 || file.Blocks[0].End != 2 || file.Commands[2].Canonical != "endenum" || file.Commands[2].Block != 0 {
+			t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+		}
+		if file.Commands[3].Declaration == nil || file.Text(file.Commands[3].Declaration.Name) != "after" {
+			t.Fatalf("recovery command = %#v", file.Commands[3])
+		}
+		assertFileSpans(t, file)
+	})
+
+	t.Run("guards", func(t *testing.T) {
+		valid := Parse("vim9script\nenum Good\nendenum\n")
+		if len(valid.Diagnostics) != 0 {
+			t.Fatalf("valid endenum diagnostics = %#v", valid.Diagnostics)
+		}
+		legacy := Parse("endenum school's out\n")
+		stray := Parse("vim9script\nendenum extra\n")
+		if len(legacy.Diagnostics) != 1 || hasDiagnostic(legacy, "vim/E488") || len(stray.Diagnostics) != 1 || hasDiagnostic(stray, "vim/E488") {
+			t.Fatalf("legacy diagnostics = %#v, Vim9 stray diagnostics = %#v", legacy.Diagnostics, stray.Diagnostics)
+		}
+		assertFileSpans(t, valid)
+		assertFileSpans(t, legacy)
+		assertFileSpans(t, stray)
+	})
+}

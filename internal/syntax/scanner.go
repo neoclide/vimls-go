@@ -1959,6 +1959,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	if len(command.EnumValues) > 0 {
 		return
 	}
+	diagnoseEnumEndTrailingCharacters(file, command)
 	if isMappingCommand(command.Canonical) {
 		parseMapping(file, command)
 		return
@@ -3169,6 +3170,20 @@ func diagnoseInvalidInterfaceDeclaration(file *File, command *Command, declarati
 	file.Diagnostics = append(file.Diagnostics, Diagnostic{
 		Code: "vim/E1344", Message: "Cannot initialize a variable in an interface",
 		Span: Span{Start: command.Name.Start, End: command.Argument.End},
+	})
+}
+
+func diagnoseEnumEndTrailingCharacters(file *File, command *Command) {
+	if command == nil || command.Dialect != Vim9 || command.Canonical != "endenum" || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockEnum {
+		return
+	}
+	start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+	end := trimSpaceEnd(file.Source, start, command.Argument.End)
+	if start >= end {
+		return
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{
+		Code: "vim/E488", Message: "trailing characters", Span: Span{Start: start, End: end},
 	})
 }
 
