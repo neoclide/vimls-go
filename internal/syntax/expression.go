@@ -160,7 +160,17 @@ func mapVim9LambdaTrailingParen(diagnostics []Diagnostic, expression *Expression
 func parseExpressionPrefix(source string, base int, dialect Dialect) (*Expression, []Diagnostic, int) {
 	parser := &expressionParser{source: source, base: base, dialect: dialect, lexer: newExpressionLexer(source, base, dialect)}
 	expression := parser.parse(0)
-	return expression, parser.diagnostics, parser.current().span.Start - base
+	diagnostics := parser.diagnostics
+	if len(diagnostics) > 1 && diagnostics[0].Code == "vim/E1004" {
+		// Vim stops at the operator-spacing error instead of also reporting a
+		// missing right-hand expression for the same operator.
+		diagnostics = diagnostics[:1]
+	}
+	if dialect == Legacy && len(diagnostics) == 1 && diagnostics[0].Code == "vimls/missing-expression" && expression != nil && expression.Kind == ExpressionBinary && len(expression.Children) == 2 && expression.Children[1].Kind == ExpressionMissing {
+		diagnostics[0].Code = "vim/E15"
+		diagnostics[0].Message = "invalid expression"
+	}
+	return expression, diagnostics, parser.current().span.Start - base
 }
 
 func (p *expressionParser) parse(minimumBinding int) *Expression {

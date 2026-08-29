@@ -156,6 +156,9 @@ func TestOfficialVimParserFailures(t *testing.T) {
 	// execution, type-checking, and other unclassified failures out of this
 	// allowlist until their parser phase is proven independently.
 	expected := map[string]string{
+		"src/testdir/test_expr.vim:250:7987/legacy":                "vim/E15",
+		"src/testdir/test_expr.vim:250:7987/def":                   "vim/E1004",
+		"src/testdir/test_expr.vim:250:7987/vim9-script":           "vim/E1004",
 		"src/testdir/test_expr.vim:261:8317/def":                   "vim/E15",
 		"src/testdir/test_expr.vim:261:8317/vim9-script":           "vim/E15",
 		"src/testdir/test_expr.vim:264:8414/def":                   "vim/E15",
