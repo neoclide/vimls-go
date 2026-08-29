@@ -153,3 +153,29 @@ func TestUserCommandMissingBlockEnd(t *testing.T) {
 	}
 	assertFileSpans(t, file)
 }
+
+func TestUserCommandStrayBlockEnd(t *testing.T) {
+	source := "command BadCommand {\n" +
+		"   echo  {\n" +
+		"   'key': 'value',\n" +
+		"    }\n" +
+		"    }\n" +
+		"BadCommand\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1128" || file.Diagnostics[0].Message != "} without {" || file.Text(file.Diagnostics[0].Span) != "}" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 3 || file.Text(file.Commands[0].Argument) != "BadCommand {\n   echo  {\n   'key': 'value',\n    }" || file.Commands[1].Canonical != "}" || file.Commands[2].Canonical != "BadCommand" {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	if file.Commands[1].Span != file.Diagnostics[0].Span || file.Commands[1].Span.End-file.Commands[1].Span.Start != 1 {
+		t.Fatalf("stray close = %#v, diagnostic = %#v", file.Commands[1], file.Diagnostics[0])
+	}
+	legacy := (LegacyParser{}).Parse("}\nlet after = 1\n")
+	for _, diagnostic := range legacy.Diagnostics {
+		if diagnostic.Code == "vim/E1128" {
+			t.Fatalf("legacy stray close diagnostics = %#v", legacy.Diagnostics)
+		}
+	}
+	assertFileSpans(t, file)
+}

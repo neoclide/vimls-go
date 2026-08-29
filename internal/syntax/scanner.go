@@ -2071,12 +2071,30 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			if command.collectedBlockVim9 {
 				open, direct, found := collectedCommandBlockStart(file.Source, command, command.Argument.End)
 				if direct && found {
+					strayClose, hasStrayClose := collectedCommandStrayClose(file.Source, command.Argument.End)
+					diagnosticsBeforeBody := len(file.Diagnostics)
 					bodyStart := autocmdBlockBodyStart(file.Source, open.Start, command.Argument.End, command.Dialect)
 					if closeStart, _, closed := autocmdBlockClose(file.Source, open.End, command.Argument.End); closed {
 						command.Embedded = parseVim9AutocmdBlockCommandList(file, Span{Start: bodyStart, End: closeStart}, depth)
-						return
+					} else {
+						command.Embedded = parseVim9AutocmdBlockCommandList(file, Span{Start: bodyStart, End: command.Argument.End}, depth)
 					}
-					command.Embedded = parseVim9AutocmdBlockCommandList(file, Span{Start: bodyStart, End: command.Argument.End}, depth)
+					if hasStrayClose {
+						// The collector has already consumed the first line-leading }.
+						// A second one is parsed by the command-block reader and is
+						// Vim's E1128, not an incomplete nested expression in the
+						// stored replacement body.
+						kept := file.Diagnostics[:diagnosticsBeforeBody]
+						for _, diagnostic := range file.Diagnostics[diagnosticsBeforeBody:] {
+							if diagnostic.Code == "vimls/missing-delimiter" && diagnostic.Span.Start >= bodyStart && diagnostic.Span.End <= command.Argument.End {
+								continue
+							}
+							kept = append(kept, diagnostic)
+						}
+						file.Diagnostics = append(kept, Diagnostic{
+							Code: "vim/E1128", Message: "} without {", Span: strayClose,
+						})
+					}
 					return
 				}
 			}
@@ -2541,6 +2559,19 @@ func diagnoseUserCommandAttributes(file *File, command *Command) {
 			Code: "vim/E1208", Message: "-complete used without allowing arguments", Span: complete,
 		})
 	}
+}
+
+func collectedCommandStrayClose(source string, collectorEnd int) (Span, bool) {
+	_, lineStart := physicalLineEnd(source, collectorEnd)
+	if lineStart >= len(source) {
+		return Span{}, false
+	}
+	lineEnd, _ := physicalLineEnd(source, lineStart)
+	first := skipSpace(source, lineStart, lineEnd)
+	if first >= lineEnd || source[first] != '}' || skipSpace(source, first+1, lineEnd) != lineEnd {
+		return Span{}, false
+	}
+	return Span{Start: first, End: first + 1}, true
 }
 
 const maxEmbeddedCommandDepth = 32
