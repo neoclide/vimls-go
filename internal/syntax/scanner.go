@@ -2437,6 +2437,11 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 					Span: Span{Start: command.Argument.Start + start, End: command.Argument.Start + start + 1},
 				})
 			}
+			if command.Block < 0 && start < len(source) && source[start] == '$' {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E475", Message: "Invalid argument: " + file.Text(command.Argument), Span: command.Argument,
+				})
+			}
 		}
 		assignment := findAssignment(source)
 		if assignment.Start < 0 {
@@ -4021,6 +4026,16 @@ func findAssignment(source string) Span {
 func declarationSpans(source string, base int, dialect Dialect) (Span, Span) {
 	start := skipSpace(source, 0, len(source))
 	end := start
+	if dialect == Vim9 && start < len(source) && source[start] == '$' {
+		end++
+		for end < len(source) {
+			r, size := utf8.DecodeRuneInString(source[end:])
+			if r != '_' && r != '#' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+				break
+			}
+			end += size
+		}
+	}
 	for end < len(source) {
 		r, size := utf8.DecodeRuneInString(source[end:])
 		if r == ':' {
