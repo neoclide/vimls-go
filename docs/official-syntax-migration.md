@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 606 (`9bc420c`)
+- Current parser-negative syntax assertions: 610 (`d8d82f7`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -146,6 +146,8 @@ Commit `84326e2` migrated all 12 lambda-arrow spacing variants, making the
 current split 599 migrated, zero ready, and 470 pending-fix.
 Commit `9bc420c` migrated the seven unterminated string variants, making the
 current split 606 migrated, zero ready, and 463 pending-fix.
+Commit `d8d82f7` migrated the four missing method-call-parenthesis variants,
+making the current split 610 migrated, zero ready, and 459 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -178,11 +180,11 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-302 migrated and 23 pending-fix.
+306 migrated and 19 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 62 | 0 | 22 |
+| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 66 | 0 | 18 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 157 | 0 | 0 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
@@ -394,6 +396,12 @@ command. Because Vim's failure helpers stop at the first compilation error
 while loose editor parsing continues, the official failure gate now requires
 the first error to match exactly and permits only ordered, non-overlapping
 `vim/E*` diagnostics on later physical lines; same-line cascades still fail.
+
+Commit `d8d82f7` migrated the four E107 variants at call lines 3862 and 4479.
+The method-arrow parser now accepts scoped callable names such as `g:Echo`,
+reports the missing argument list at the line end, retains both callable and
+receiver nodes, and resumes at the next physical command. Parenthesized lambda
+callables keep Vim's distinct `Missing parentheses: lambda` message.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
