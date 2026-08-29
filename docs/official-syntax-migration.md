@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 627 (`ca95465`)
+- Current parser-negative syntax assertions: 629 (`e5173fe`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -154,6 +154,10 @@ Commit `e23b1f2` migrated the three postfix-closing-delimiter variants, making
 the current split 619 migrated, zero ready, and 450 pending-fix.
 Commit `ca95465` migrated the eight missing-operand variants, making the
 current split 627 migrated, zero ready, and 442 pending-fix.
+Commit `e3883d6` migrated the malformed method-tail variant, making the current
+split 628 migrated, zero ready, and 441 pending-fix. Commit `e5173fe` migrated
+the final ready Group A Dictionary case, making the current split 629 migrated,
+zero ready, and 440 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -186,15 +190,15 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-323 migrated and 2 pending-fix.
+325 migrated and zero pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 83 | 0 | 1 |
+| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 84 | 0 | 0 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 157 | 0 | 0 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
-| `expr-dict-delimiter` | E720, E722, E723 | 23 | 22 | 0 | 1 |
+| `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 2 | 0 | 0 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
 | `expr-command-boundary` | E476, E488, E492 | 13 | 13 | 0 | 0 |
@@ -352,8 +356,9 @@ the AST.
 Reconciliation against the exact expected map corrected two pre-existing row
 counts without changing the Group A total. `4328:125740/vim9-script` was
 already migrated as E111, so before the next batch `expr-incomplete-delimiter`
-had 43 migrated and 41 pending variants. `4196:122230/script` remains the one pending
-`expr-dict-delimiter` variant, so that row has 22 migrated and one pending.
+had 43 migrated and 41 pending variants. At that checkpoint,
+`4196:122230/script` was the one pending `expr-dict-delimiter` variant, so that
+row had 22 migrated and one pending.
 
 Commit `0f70449` migrated the 12 `expr-incomplete-delimiter` variants at call
 lines 3776, 3781, 3786, 3791, 3796, and 3801. The existing expression parser
@@ -427,6 +432,18 @@ parenthesized expressions retain an explicit missing operand, report one E1097
 inside a compiled `def` or E15 at Vim9 script level, and recover at the next
 physical statement. Completed expressions continue to use their delimiter- or
 ternary-specific diagnostics, and legacy expression recovery is unchanged.
+
+Commit `e3883d6` completed `expr-incomplete-delimiter` with
+`test_vim9_expr.vim:4023:116670/def`. The expression parser recognizes an
+adjacent identifier-call tail after a method/index chain, retains the valid
+method prefix, records the malformed remainder as one opaque missing node, and
+reports E15 without parsing the rest of that physical line. Valid indexed and
+qualified method call ASTs and legacy parsing remain unchanged.
+
+Commit `e5173fe` completed `expr-dict-delimiter` by migrating the already-ready
+`test_vim9_expr.vim:4196:122230/script` E722 assertion. No production change
+was needed; the partial Dictionary already retained its AST and emitted one
+official diagnostic.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
