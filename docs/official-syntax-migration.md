@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 795 (`ad1edd0`)
+- Current parser-negative syntax assertions: 797 (`608ed48`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -250,6 +250,9 @@ authoritative current split 793 migrated, zero ready, and 275 pending-fix.
 Commit `ad1edd0` migrated the E1043 invalid export command and E1044 invalid
 export argument failures, making the authoritative current split 795 migrated,
 zero ready, and 273 pending-fix.
+Commit `608ed48` migrated both E182 attached user-command comment failures,
+making the authoritative current split 797 migrated, zero ready, and 271
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -842,13 +845,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 50 | 0 | 65 |
+| `C-EXCMD` | 115 | 52 | 0 | 63 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 38 | 0 | 71 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **163** | **0** | **206** |
+| **Total** | **369** | **165** | **0** | **204** |
 
 ```text
 C-EXPR
@@ -1029,6 +1032,12 @@ Commit `ad1edd0` migrated E1043 at `I:1728:42236/script` and E1044 at
 command set from `EX_EXPORT`; non-exportable built-ins are rejected while
 unknown commands keep their normal recovery, and `:function` listing or search
 arguments are rejected without weakening valid exported definitions.
+
+Commit `608ed48` migrated E182 at
+`S:{3886:82965,3890:83060}/script`. A `#` attached directly to a Vim9
+user-command name is now diagnosed before replacement-body parsing, while a
+space-separated comment and legacy command definitions retain their existing
+behavior.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
