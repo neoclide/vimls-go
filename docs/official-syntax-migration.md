@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 437 (`55169af`)
+- Current parser-negative syntax assertions: 447 (`83781bd`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -74,7 +74,9 @@ membership is recorded in the source-group sections below.
 Commit `05d176c` made two invalid class-variable cases ready. Commit `55169af`
 then migrated all 91 cases that were ready in the current parser: Group A 47,
 Group B 16, Group C 23, and Group D 5. The current split is therefore 437
-migrated, zero ready, and 635 pending-fix.
+migrated, zero ready, and 635 pending-fix. Commit `83781bd` implemented and
+migrated the 10 Group A List-delimiter cases, making the current split 447
+migrated, zero ready, and 625 pending-fix.
 
 ## Syntax rule groups
 
@@ -101,14 +103,14 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-169 migrated by `55169af` and 159 pending-fix.
+179 migrated and 149 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 42 | 0 | 42 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 0 | 0 | 13 |
-| `expr-list-delimiter` | E696, E697 | 10 | 0 | 0 | 10 |
+| `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 15 | 0 | 8 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 2 | 0 | 10 |
@@ -167,9 +169,14 @@ expr-comment-token
 ```
 
 Authority: `src/testdir/test_vim9_expr.vim`, `src/vim9expr.c`,
-`src/vim9cmds.c`, `src/ex_docmd.c`, `src/eval.c`, and `src/blob.c`.
+`src/list.c`, `src/vim9cmds.c`, `src/ex_docmd.c`, `src/eval.c`, and `src/blob.c`.
 Implementation paths are `internal/syntax/expression.go`, `scanner.go`,
 `vim9_command.go`, and `syntax_command.go`.
+
+Commit `83781bd` migrated `expr-list-delimiter`. For Vim9 compiled Lists,
+`src/vim9expr.c:1610-1642` distinguishes a missing comma (E696) from a missing
+closing bracket after a comma (E697); the script evaluator follows
+`src/list.c:1728-1767`, and `src/errors.h:1793-1796` defines both messages.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
