@@ -10,6 +10,10 @@ These files are generated from Vim tag `v9.2.1015`, commit
 - `v9.2.1015-parser-corpus.json.gz` contains 3,267 heredoc scripts extracted
   from 17 selected parser and evaluator tests. It retains each upstream origin
   and the statically identifiable success or failure classification.
+- `v9.2.1015-helper-inventory.json.gz` records all 5,733 `Check*` candidates in
+  the full corpus. It classifies 5,208 qualified `v9.Check*` calls by helper,
+  source span, and first-argument shape; every other candidate has an explicit
+  out-of-scope reason. This is an extraction ledger, not a parser oracle.
 
 The full-file corpus is a stability and lossless-recovery gate. It does not by
 itself prove that vimls-go accepts and rejects every construct exactly as Vim

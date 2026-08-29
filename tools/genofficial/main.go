@@ -20,6 +20,8 @@ const (
 	expectedCorpusCount   = 3267
 	expectedTestFileCount = 362
 	expectedTestRawBytes  = 8558061
+	expectedHelperLexemes = 5733
+	expectedHelperCalls   = 5241
 )
 
 type corpus struct {
@@ -46,11 +48,60 @@ type testFileRecord struct {
 	Source []byte `json:"source"`
 }
 
+type helperInventory struct {
+	SchemaVersion int                    `json:"schemaVersion"`
+	Tag           string                 `json:"tag"`
+	Commit        string                 `json:"commit"`
+	HelperNames   []string               `json:"helperNames"`
+	Records       []helperRecord         `json:"records"`
+	Summary       helperInventorySummary `json:"summary"`
+}
+
+type helperRecord struct {
+	Path          string `json:"path"`
+	Line          int    `json:"line"`
+	Offset        int    `json:"offset"`
+	Name          string `json:"name"`
+	Lexeme        string `json:"lexeme"`
+	LexemeStart   int    `json:"lexemeStart"`
+	LexemeEnd     int    `json:"lexemeEnd"`
+	CallStart     int    `json:"callStart"`
+	CallEnd       int    `json:"callEnd"`
+	CallComplete  bool   `json:"callComplete"`
+	Qualification string `json:"qualification"`
+	Kind          string `json:"kind"`
+	FirstArgument string `json:"firstArgumentKind"`
+	Disposition   string `json:"disposition"`
+	Reason        string `json:"reason"`
+}
+
+type helperInventorySummary struct {
+	Lexemes             int `json:"lexemes"`
+	KnownHelperCalls    int `json:"knownHelperCalls"`
+	QualifiedCalls      int `json:"qualifiedCalls"`
+	UtilityBareCalls    int `json:"utilityBareCalls"`
+	KnownDefinitions    int `json:"knownDefinitions"`
+	KnownComments       int `json:"knownComments"`
+	NonV9Calls          int `json:"nonV9Calls"`
+	NonV9Definitions    int `json:"nonV9Definitions"`
+	NonV9Strings        int `json:"nonV9Strings"`
+	NonV9Comments       int `json:"nonV9Comments"`
+	IdentifierArguments int `json:"identifierArguments"`
+	ListArguments       int `json:"listLiteralArguments"`
+	ExpressionArguments int `json:"expressionArguments"`
+	QualifiedIdentifier int `json:"qualifiedIdentifierArguments"`
+	QualifiedList       int `json:"qualifiedListLiteralArguments"`
+	QualifiedExpression int `json:"qualifiedExpressionArguments"`
+	BareIdentifier      int `json:"bareIdentifierArguments"`
+	BareExpression      int `json:"bareExpressionArguments"`
+}
+
 func main() {
 	source := flag.String("vim-source", "/Users/chemzqm/lib/vim", "local Vim git checkout")
 	output := flag.String("output", "testdata/official/v9.2.1015-parser-corpus.json.gz", "generated corpus path")
 	testFilesOutput := flag.String("test-files-output", "testdata/official/v9.2.1015-test-files.json.gz", "lossless official test-file corpus path")
 	licenseOutput := flag.String("license-output", "testdata/official/VIM-LICENSE", "upstream Vim license path")
+	helperOutput := flag.String("helper-inventory-output", "testdata/official/v9.2.1015-helper-inventory.json.gz", "generated Check helper inventory path")
 	flag.Parse()
 
 	commit, err := gitOutput(*source, "rev-list", "-n", "1", vimTag)
@@ -108,6 +159,13 @@ func main() {
 	if err := writeTestFilesCorpus(*testFilesOutput, testCorpus); err != nil {
 		fatal(err)
 	}
+	inventory, err := buildHelperInventory(testCorpus)
+	if err != nil {
+		fatal(err)
+	}
+	if err := writeJSONGzip(*helperOutput, inventory); err != nil {
+		fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(*licenseOutput), 0o755); err != nil {
 		fatal(err)
 	}
@@ -117,6 +175,7 @@ func main() {
 	fmt.Printf("wrote %d scripts from %s (%s) to %s\n", len(result.Cases), result.Tag, result.Commit, *output)
 	fmt.Printf("wrote %d lossless test files (%d bytes) from %s (%s) to %s\n", len(testCorpus.Files), rawBytes, testCorpus.Tag, testCorpus.Commit, *testFilesOutput)
 	fmt.Printf("wrote upstream Vim license to %s\n", *licenseOutput)
+	fmt.Printf("wrote %d Check helper lexemes from %s (%s) to %s\n", len(inventory.Records), inventory.Tag, inventory.Commit, *helperOutput)
 }
 
 func listTestFiles(root string) ([]string, error) {
@@ -348,6 +407,463 @@ func writeTestFilesCorpus(path string, value testFilesCorpus) error {
 	return writeJSONGzip(path, value)
 }
 
+func buildHelperInventory(files testFilesCorpus) (helperInventory, error) {
+	var result helperInventory
+	result.Tag = files.Tag
+	result.Commit = files.Commit
+	result.SchemaVersion = 1
+	for _, file := range files.Files {
+		if file.Path == "src/testdir/util/vim9.vim" {
+			result.HelperNames = exportedCheckHelpers(file.Source)
+			break
+		}
+	}
+	if len(result.HelperNames) != 37 {
+		return result, fmt.Errorf("found %d exported Check helpers, want 37", len(result.HelperNames))
+	}
+	known := make(map[string]struct{}, len(result.HelperNames))
+	for _, name := range result.HelperNames {
+		known[name] = struct{}{}
+	}
+	for _, file := range files.Files {
+		result.Records = append(result.Records, scanHelperFile(file.Path, file.Source, known)...)
+	}
+	if len(result.Records) != expectedHelperLexemes {
+		return result, fmt.Errorf("found %d Check lexemes, want %d from pinned source", len(result.Records), expectedHelperLexemes)
+	}
+	for index := range result.Records {
+		if index > 0 && (result.Records[index-1].Path > result.Records[index].Path ||
+			(result.Records[index-1].Path == result.Records[index].Path && result.Records[index-1].Offset >= result.Records[index].Offset)) {
+			return result, fmt.Errorf("helper records are not strictly ordered at %d", index)
+		}
+		if err := addHelperSummary(&result.Summary, result.Records[index]); err != nil {
+			return result, err
+		}
+	}
+	if result.Summary.KnownHelperCalls != expectedHelperCalls || result.Summary.QualifiedCalls != 5208 || result.Summary.UtilityBareCalls != 33 ||
+		result.Summary.KnownDefinitions != 37 || result.Summary.KnownComments != 10 || result.Summary.NonV9Calls != 341 ||
+		result.Summary.NonV9Definitions != 90 || result.Summary.NonV9Strings != 13 || result.Summary.NonV9Comments != 1 ||
+		result.Summary.IdentifierArguments != 3174 || result.Summary.ListArguments != 2001 || result.Summary.ExpressionArguments != 66 {
+		return result, fmt.Errorf("unexpected Check inventory summary: %+v", result.Summary)
+	}
+	if result.Summary.QualifiedIdentifier != 3156 || result.Summary.QualifiedList != 2001 || result.Summary.QualifiedExpression != 51 || result.Summary.BareIdentifier != 18 || result.Summary.BareExpression != 15 {
+		return result, fmt.Errorf("unexpected Check argument split: %+v", result.Summary)
+	}
+	return result, nil
+}
+
+func exportedCheckHelpers(source []byte) []string {
+	var names []string
+	for _, line := range strings.Split(string(source), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != "export" || (fields[1] != "func" && fields[1] != "def") {
+			continue
+		}
+		name := fields[2]
+		if position := strings.IndexByte(name, '('); position >= 0 {
+			name = name[:position]
+		}
+		if strings.HasPrefix(name, "Check") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+type helperLexState byte
+
+const (
+	helperCode helperLexState = iota
+	helperSingleQuote
+	helperDoubleQuote
+	helperComment
+)
+
+func scanHelperFile(path string, source []byte, known map[string]struct{}) []helperRecord {
+	states := make([]helperLexState, len(source))
+	state := helperCode
+	lineStart := true
+	for index := 0; index < len(source); index++ {
+		character := source[index]
+		states[index] = state
+		switch state {
+		case helperComment:
+			if character == '\n' {
+				state = helperCode
+				lineStart = true
+			}
+		case helperSingleQuote:
+			if character == '\'' {
+				if index+1 < len(source) && source[index+1] == '\'' {
+					states[index+1] = state
+					index++
+				} else {
+					state = helperCode
+				}
+			}
+		case helperDoubleQuote:
+			if character == '\\' && index+1 < len(source) {
+				states[index+1] = state
+				index++
+			} else if character == '"' {
+				state = helperCode
+			}
+		default:
+			if character == '\r' || character == '\n' {
+				lineStart = true
+				continue
+			}
+			if character == ' ' || character == '\t' {
+				continue
+			}
+			if lineStart && (character == '#' || character == '"') {
+				state = helperComment
+				states[index] = state
+				lineStart = false
+				continue
+			}
+			lineStart = false
+			if character == '\'' {
+				state = helperSingleQuote
+				states[index] = state
+			} else if character == '"' {
+				state = helperDoubleQuote
+				states[index] = state
+			}
+		}
+	}
+
+	var records []helperRecord
+	recordLine := 1
+	for index := 0; index < len(source); index++ {
+		if source[index] == '\n' {
+			recordLine++
+		}
+		if !isIdentifierStart(source[index]) || (index > 0 && isIdentifierPart(source[index-1])) {
+			continue
+		}
+		end := index + 5
+		if end > len(source) || string(source[index:end]) != "Check" {
+			continue
+		}
+		for end < len(source) && isIdentifierPart(source[end]) {
+			end++
+		}
+		open := end
+		for open < len(source) && isHelperWhitespace(source[open]) {
+			open++
+		}
+		if open >= len(source) || source[open] != '(' {
+			continue
+		}
+		name := string(source[index:end])
+		qualification := "bare"
+		if qualifiedHelper(source, index) {
+			qualification = "qualified"
+		}
+		kind := "call"
+		if states[index] == helperComment {
+			kind = "comment"
+		} else if states[index] == helperSingleQuote || states[index] == helperDoubleQuote {
+			kind = "string"
+		} else if helperDefinition(source, index) {
+			kind = "definition"
+		}
+		_, isKnown := known[name]
+		utilityCall := path == "src/testdir/util/vim9.vim" && qualification == "bare" && kind == "call" && isKnown
+		if kind == "string" && isKnown && qualification == "qualified" {
+			kind = "call"
+		}
+		if kind == "string" && embeddedHelperCall(path, recordLine) {
+			kind = "call"
+		}
+		genuine := isKnown && kind == "call" && (qualification == "qualified" || utilityCall)
+		firstArgument := ""
+		if genuine {
+			firstArgument = helperFirstArgument(source, open+1)
+		}
+		callEnd, complete := helperCallEnd(source, open)
+		disposition, reason := helperDisposition(path, name, qualification, kind, isKnown, genuine, complete)
+		callStart := index
+		if qualification == "qualified" {
+			callStart = helperQualificationStart(source, index)
+		}
+		records = append(records, helperRecord{
+			Path: path, Line: recordLine, Offset: index, Name: name, Lexeme: string(source[index:end]),
+			LexemeStart: index, LexemeEnd: end, CallStart: callStart, CallEnd: callEnd, CallComplete: complete,
+			Qualification: qualification, Kind: kind, FirstArgument: firstArgument,
+			Disposition: disposition, Reason: reason,
+		})
+		index = end - 1
+	}
+	return records
+}
+
+func isIdentifierStart(character byte) bool {
+	return character >= 'A' && character <= 'Z'
+}
+
+func isHelperWhitespace(character byte) bool {
+	return character == ' ' || character == '\t' || character == '\r' || character == '\n' || character == '\v' || character == '\f'
+}
+
+func isIdentifierPart(character byte) bool {
+	return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
+		(character >= '0' && character <= '9') || character == '_'
+}
+
+func embeddedHelperCall(path string, line int) bool {
+	if path == "src/testdir/test_windows_home.vim" {
+		return false
+	}
+	if path == "src/testdir/test_vim9_script.vim" {
+		if line == 99 || line == 103 {
+			return false
+		}
+	}
+	if path == "src/testdir/test_cmdline.vim" {
+		if line == 1974 || line == 1984 || line == 1985 || line == 1988 {
+			return false
+		}
+	}
+	return true
+}
+
+func qualifiedHelper(source []byte, index int) bool {
+	for index > 0 && isHelperWhitespace(source[index-1]) {
+		index--
+	}
+	return index >= 3 && source[index-1] == '.' && source[index-2] == '9' && source[index-3] == 'v'
+}
+
+func helperQualificationStart(source []byte, index int) int {
+	start := index
+	for start > 0 && isHelperWhitespace(source[start-1]) {
+		start--
+	}
+	if start >= 3 && source[start-1] == '.' && source[start-2] == '9' && source[start-3] == 'v' {
+		return start - 3
+	}
+	return index
+}
+
+func helperDefinition(source []byte, index int) bool {
+	lineStart := index
+	for lineStart > 0 && source[lineStart-1] != '\n' {
+		lineStart--
+	}
+	prefix := strings.TrimLeft(string(source[lineStart:index]), " \t")
+	for _, candidate := range []string{"func ", "func! ", "function ", "function! ", "def ", "export func ", "export def ", "func! s:"} {
+		if strings.HasSuffix(prefix, candidate) || strings.HasSuffix(prefix, "! "+candidate) || strings.HasSuffix(prefix, "static "+candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func helperFirstArgument(source []byte, index int) string {
+	for index < len(source) && isHelperWhitespace(source[index]) {
+		index++
+	}
+	if index >= len(source) || source[index] == ')' {
+		return "empty"
+	}
+	if source[index] == '[' {
+		close, complete := helperMatchingDelimiter(source, index, '[', ']')
+		if !complete {
+			return "expression"
+		}
+		next := close + 1
+		for next < len(source) && isHelperWhitespace(source[next]) {
+			next++
+		}
+		if next >= len(source) || source[next] == ',' || source[next] == ')' {
+			return "list"
+		}
+		return "expression"
+	}
+	if isArgumentIdentifier(source[index]) {
+		end := index + 1
+		for end < len(source) && (isIdentifierPart(source[end]) || source[end] == ':') {
+			end++
+		}
+		next := end
+		for next < len(source) && (source[next] == ' ' || source[next] == '\t' || source[next] == '\r' || source[next] == '\n') {
+			next++
+		}
+		if next >= len(source) || source[next] == ',' || source[next] == ')' {
+			return "identifier"
+		}
+		return "expression"
+	}
+	return "expression"
+}
+
+func isArgumentIdentifier(character byte) bool {
+	return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || character == '_'
+}
+
+func helperCallEnd(source []byte, open int) (int, bool) {
+	depth := 0
+	state := helperCode
+	for index := open; index < len(source); index++ {
+		switch state {
+		case helperSingleQuote:
+			if source[index] == '\'' {
+				if index+1 < len(source) && source[index+1] == '\'' {
+					index++
+					continue
+				}
+				state = helperCode
+			}
+		case helperDoubleQuote:
+			if source[index] == '\\' {
+				index++
+			} else if source[index] == '"' {
+				state = helperCode
+			}
+		default:
+			if source[index] == '\'' {
+				state = helperSingleQuote
+				continue
+			}
+			if source[index] == '"' {
+				state = helperDoubleQuote
+				continue
+			}
+			if source[index] == '(' {
+				depth++
+			}
+			if source[index] == ')' {
+				depth--
+				if depth == 0 {
+					return index + 1, true
+				}
+			}
+		}
+	}
+	return len(source), false
+}
+
+func helperMatchingDelimiter(source []byte, open int, opening, closing byte) (int, bool) {
+	depth := 0
+	state := helperCode
+	for index := open; index < len(source); index++ {
+		switch state {
+		case helperSingleQuote:
+			if source[index] == '\'' {
+				if index+1 < len(source) && source[index+1] == '\'' {
+					index++
+					continue
+				}
+				state = helperCode
+			}
+		case helperDoubleQuote:
+			if source[index] == '\\' {
+				index++
+			} else if source[index] == '"' {
+				state = helperCode
+			}
+		default:
+			if source[index] == '\'' {
+				state = helperSingleQuote
+				continue
+			}
+			if source[index] == '"' {
+				state = helperDoubleQuote
+				continue
+			}
+			if source[index] == opening {
+				depth++
+			}
+			if source[index] == closing {
+				depth--
+				if depth == 0 {
+					return index, true
+				}
+			}
+		}
+	}
+	return len(source), false
+}
+
+func helperDisposition(path, name, qualification, kind string, known, genuine, complete bool) (string, string) {
+	if genuine {
+		if !complete {
+			return "out-of-scope", "incomplete Check helper call"
+		}
+		if qualification == "qualified" {
+			return "pending-extraction", "qualified Vim9 test helper call"
+		}
+		return "out-of-scope", "helper implementation call in util/vim9.vim"
+	}
+	if known {
+		return "out-of-scope", "known helper definition or comment"
+	}
+	if kind == "call" {
+		return "out-of-scope", "non-Vim9 Check helper call"
+	}
+	if kind == "definition" {
+		return "out-of-scope", "non-Vim9 Check helper definition"
+	}
+	if kind == "string" {
+		return "out-of-scope", "non-Vim9 Check text in string"
+	}
+	return "out-of-scope", "non-Vim9 Check text in comment"
+}
+
+func addHelperSummary(summary *helperInventorySummary, record helperRecord) error {
+	summary.Lexemes++
+	if record.Disposition == "pending-extraction" || record.Reason == "helper implementation call in util/vim9.vim" {
+		summary.KnownHelperCalls++
+		if record.Qualification == "qualified" {
+			summary.QualifiedCalls++
+		} else {
+			summary.UtilityBareCalls++
+		}
+		if record.FirstArgument == "identifier" {
+			summary.IdentifierArguments++
+			if record.Qualification == "qualified" {
+				summary.QualifiedIdentifier++
+			} else {
+				summary.BareIdentifier++
+			}
+		}
+		if record.FirstArgument == "list" {
+			summary.ListArguments++
+			if record.Qualification == "qualified" {
+				summary.QualifiedList++
+			}
+		}
+		if record.FirstArgument == "expression" {
+			summary.ExpressionArguments++
+			if record.Qualification == "qualified" {
+				summary.QualifiedExpression++
+			} else {
+				summary.BareExpression++
+			}
+		}
+	}
+	switch record.Reason {
+	case "known helper definition or comment":
+		if record.Kind == "definition" {
+			summary.KnownDefinitions++
+		} else {
+			summary.KnownComments++
+		}
+	case "non-Vim9 Check helper call":
+		summary.NonV9Calls++
+	case "non-Vim9 Check helper definition":
+		summary.NonV9Definitions++
+	case "non-Vim9 Check text in string":
+		summary.NonV9Strings++
+	case "non-Vim9 Check text in comment":
+		summary.NonV9Comments++
+	}
+	return nil
+}
+
 func writeJSONGzip(path string, value any) (err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -375,12 +891,16 @@ func writeJSONGzip(path string, value any) (err error) {
 	encoder.SetEscapeHTML(false)
 	writeErr := encoder.Encode(value)
 	closeGzipErr := compressor.Close()
+	chmodErr := file.Chmod(0o644)
 	closeFileErr := file.Close()
 	if writeErr != nil {
 		return writeErr
 	}
 	if closeGzipErr != nil {
 		return closeGzipErr
+	}
+	if chmodErr != nil {
+		return chmodErr
 	}
 	if closeFileErr != nil {
 		return closeFileErr

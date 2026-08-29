@@ -44,13 +44,16 @@ and incomplete input. Essential ambiguity cases include `|`, quotes versus
 comments, command abbreviations, ranges/modifiers, continuations, heredocs,
 mapping payloads, `vim9cmd`, `legacy`, `def`, and `function`.
 
-The default offline gate also reads two generated v9.2.1015 corpora below
+The default offline gate also reads generated v9.2.1015 artifacts below
 `testdata/official/`. The full-file corpus losslessly contains all 362 tracked
 `.vim` files below Vim's `src/testdir` (8,558,061 source bytes). The embedded
 corpus contains 3,267 cases extracted from 17 official parser and evaluator
 tests. Both feed every source to `LegacyParser` and `Vim9Parser`, asserting
 retained source plus ordered, in-bounds command, token, block, and diagnostic
-spans without sourcing or executing the files.
+spans without sourcing or executing the files. A separate helper inventory
+classifies all 5,733 `Check*` candidates, including all 5,208 qualified
+`v9.Check*` calls, so each call can later become a generated conformance case or
+an explicit skip.
 
 Full-file parsing proves stability, recovery, and span integrity, not exact Vim
 acceptance. The conformance layer must use generated helper expectations and

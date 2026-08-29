@@ -17,6 +17,7 @@ test:
 test-official:
 	@test -d "$(VIM_SOURCE)/.git" || { echo "Vim checkout not found: $(VIM_SOURCE)" >&2; exit 1; }
 	VIM_SOURCE="$(VIM_SOURCE)" $(GO) test $(GO_MOD) ./internal/syntax -run '^TestOfficialVim'
+	$(GO) test $(GO_MOD) ./tools/genofficial -run '^TestPinnedHelperInventoryArtifact$$'
 
 generate-official:
 	$(GO) run $(GO_MOD) ./tools/genofficial -vim-source "$(VIM_SOURCE)"
