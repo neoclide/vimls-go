@@ -238,6 +238,15 @@ func buildBlocks(file *File) {
 						continue
 					}
 				}
+				if command.Dialect == Vim9 && command.Canonical == "catch" {
+					start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+					if start < command.Argument.End && scanGlobalRegexpEnd(file.Source, start+1, command.Argument.End, file.Source[start]) < 0 {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{
+							Code: "vim/E1067", Message: "Separator mismatch: " + file.Source[start:start+1], Span: command.Argument,
+						})
+						recoveryBlocks[blockIndex] = true
+					}
+				}
 				file.Blocks[blockIndex].Branches = append(file.Blocks[blockIndex].Branches, commandIndex)
 				command.Block = blockIndex
 			} else if match := recoverableBranchBlock(file, stack, branchKind, invalidFor); match >= 0 {
