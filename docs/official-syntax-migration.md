@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 780 (`3ab05e0`)
+- Current parser-negative syntax assertions: 785 (`a12a767`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -236,6 +236,9 @@ Commit `3ab05e0` migrated 22 Group C cases already proven ready: all 17 E1100
 single-command variants, two generic-call delimiter variants, both E1059
 typed-`for` variants, and the final E1125 declaration variant. The
 authoritative current split is 780 migrated, zero ready, and 288 pending-fix.
+Commit `a12a767` migrated the five E1202 generic-call whitespace variants,
+making the authoritative current split 785 migrated, zero ready, and 283
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -832,9 +835,9 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 38 | 0 | 71 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
-| `C-MODIFIER` | 57 | 45 | 0 | 12 |
+| `C-MODIFIER` | 57 | 50 | 0 | 7 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **148** | **0** | **221** |
+| **Total** | **369** | **153** | **0** | **216** |
 
 ```text
 C-EXPR
@@ -987,6 +990,11 @@ Commit `3ab05e0` migrated the 22 ready cases that required no production-code
 change: 17 E1100 one-command forms in `test_vim9_script.vim`, E1069/E1008 at
 `G:{2964:65613,2973:65815}/script`, both E1059 variants at
 `S:3107:65719`, and E1125 at `S:271:6623/def`.
+
+Commit `a12a767` migrated all five E1202 generic-call whitespace variants at
+`G:{336:7374,357:7889,365:8067,397:8780,728:15637}/script`. Command-start
+generic calls now enter the expression parser, retain their call/type-argument
+AST, and report only the offending whitespace before physical-line recovery.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
