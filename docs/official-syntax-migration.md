@@ -232,7 +232,11 @@ For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
 returns before switching execution state, but treating the remainder as legacy
 would misparse the user's clearly declared file language while they edit the
-argument.
+argument. Commit `5f30da1` applies the same intent to a misplaced top-level
+`:vim9script`: E1039 remains the primary diagnostic while following physical
+lines use Vim9 syntax. A shortened Vim9 command is retained by canonical name,
+but its invalid same-line argument tail stays opaque so detail parsing cannot
+add a secondary diagnostic.
 
 ## Syntax rule groups
 
