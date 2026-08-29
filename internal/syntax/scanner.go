@@ -1412,6 +1412,10 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if builtIn && metadata.Flags&vimdata.NeedArgument != 0 && argumentStart == argumentEnd && !invalidNonWhite {
 			code := "vimls/missing-argument"
 			message := "command requires an argument"
+			if parsedCommand.Dialect == Vim9 && parsedCommand.Canonical == "throw" {
+				code = "vim/E1143"
+				message = "argument required for throw"
+			}
 			if parsedCommand.Dialect == Vim9 && selfSplittingVariableCommand(parsedCommand.Canonical) {
 				code = "vim/E179"
 				message = "argument required for " + parsedCommand.Canonical

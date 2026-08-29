@@ -150,6 +150,36 @@ func buildBlocks(file *File) {
 				}
 			}
 		}
+		// Vim9 reports loop-control commands outside a loop at the command
+		// itself.  Mark the surrounding recovery blocks so an incomplete if
+		// does not add a cascading missing-end diagnostic.
+		if command.Dialect == Vim9 && (command.Canonical == "break" || command.Canonical == "continue") {
+			inLoop := false
+			for index := len(stack) - 1; index >= 0; index-- {
+				kind := file.Blocks[stack[index]].Kind
+				if kind == BlockFor || kind == BlockWhile {
+					inLoop = true
+					break
+				}
+			}
+			if !inLoop {
+				code, message := "vim/E587", "break outside of loop"
+				if command.Canonical == "continue" {
+					code, message = "vim/E586", "continue outside of loop"
+				}
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
+				if len(stack) > 0 {
+					command.Block = stack[len(stack)-1]
+					for index := len(stack) - 1; index >= 0; index-- {
+						blockIndex := stack[index]
+						if kind := file.Blocks[blockIndex].Kind; kind == BlockDef || kind == BlockFunction {
+							break
+						}
+						recoveryBlocks[blockIndex] = true
+					}
+				}
+			}
+		}
 		if kind, ok := openingBlock(file, command); ok {
 			parent := -1
 			if len(stack) > 0 {
