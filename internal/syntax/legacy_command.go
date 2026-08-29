@@ -14,6 +14,9 @@ func scanLegacyCommandArgument(source string, start, end int, metadata vimdata.C
 		argumentEnd := scanGlobalCommandArgument(source, start, end)
 		return argumentEnd, Span{}, Span{}, nil
 	}
+	if findPatternCommand(metadata.Name) {
+		return scanFindPatternArgument(source, start, end, Legacy, metadata)
+	}
 	if legacyTextCommand(metadata.Name) {
 		argumentEnd, separator, comment := scanLegacyTextCommandArgument(source, start, end, metadata)
 		return argumentEnd, separator, comment, nil

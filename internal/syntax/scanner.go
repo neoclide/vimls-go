@@ -1446,6 +1446,60 @@ func globalCommand(name string) bool {
 	return name == "global" || name == "vglobal"
 }
 
+// These commands share Vim's ex_findpat() argument consumer.  A delimited
+// pattern owns a following bar or trailing comment even though the generated
+// Ex command flags do not include EX_TRLBAR.
+func findPatternCommand(name string) bool {
+	switch name {
+	case "djump", "dlist", "dsearch", "dsplit", "ijump", "ilist", "isearch", "isplit", "psearch":
+		return true
+	default:
+		return false
+	}
+}
+
+func scanFindPatternArgument(source string, start, end int, dialect Dialect, metadata vimdata.Command) (int, Span, Span, *expressionBoundary) {
+	position := start
+	for position < end && source[position] >= '0' && source[position] <= '9' {
+		position++
+	}
+	if position > start {
+		position = skipSpace(source, position, end)
+	}
+	if position >= end || source[position] != '/' {
+		if dialect == Legacy {
+			argumentEnd, separator, comment := scanLegacyOpaqueArgument(source, start, end, metadata)
+			return argumentEnd, separator, comment, nil
+		}
+		argumentEnd, separator, comment := scanVim9OpaqueArgument(source, start, end, metadata)
+		return argumentEnd, separator, comment, nil
+	}
+
+	closing := scanGlobalRegexpEnd(source, position+1, end, '/')
+	if closing < 0 {
+		return trimSpaceEnd(source, start, end), Span{}, Span{}, nil
+	}
+	tail := skipSpace(source, closing+1, end)
+	argumentEnd := trimSpaceEnd(source, start, tail)
+	if tail >= end {
+		return argumentEnd, Span{}, Span{}, nil
+	}
+	if source[tail] == '|' {
+		return argumentEnd, Span{Start: tail, End: tail + 1}, Span{}, nil
+	}
+	if dialect == Legacy && source[tail] == '"' || dialect == Vim9 && isVim9OpaqueCommentStart(source, tail, start, end) {
+		return argumentEnd, Span{}, Span{Start: tail, End: end}, nil
+	}
+
+	argumentEnd = trimSpaceEnd(source, start, end)
+	return argumentEnd, Span{}, Span{}, &expressionBoundary{
+		argument: Span{Start: start, End: argumentEnd},
+		diagnostics: []Diagnostic{{
+			Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tail, End: argumentEnd},
+		}},
+	}
+}
+
 // scanFilterModifier consumes the pattern owned by :filter.  Vim uses the
 // same boundary helper as :vimgrep: an identifier byte starts an
 // undelimited pattern, while every other byte is the regexp delimiter.  The
@@ -2352,6 +2406,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
 		}
 		command.boundaryExpression = nil
+		return
+	}
+	if findPatternCommand(command.Canonical) {
+		if boundary := command.boundaryExpression; boundary != nil {
+			file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
+			command.boundaryExpression = nil
+		}
 		return
 	}
 	if command.Dialect == Vim9 {

@@ -37,6 +37,9 @@ func scanVim9CommandArgument(source string, start, end int, metadata vimdata.Com
 		}
 		return argumentEnd, Span{}, Span{}, nil
 	}
+	if findPatternCommand(metadata.Name) {
+		return scanFindPatternArgument(source, start, end, Vim9, metadata)
+	}
 	if substituteCommand(metadata.Name) {
 		return scanSubstituteArgument(source, start, end, Vim9, parsed)
 	}
