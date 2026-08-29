@@ -4324,6 +4324,11 @@ func diagnoseVim9TypeDelimiter(file *File, source string, base int, name Span) {
 }
 
 func parseForLoop(file *File, command *Command) {
+	if vim9ForHeaderIsComment(file, command) {
+		command.For = &ForLoop{IterableSpan: Span{Start: command.Argument.Start, End: command.Argument.Start}}
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E690", Message: `Missing "in" after :for`, Span: command.Name})
+		return
+	}
 	source := file.Text(command.Argument)
 	in := findTopLevelKeyword(source, 0, len(source), "in")
 	if in < 0 {
@@ -4377,6 +4382,15 @@ func parseForLoop(file *File, command *Command) {
 	file.Diagnostics = append(file.Diagnostics, iterableDiagnostics...)
 	command.For = loop
 	command.Expressions = append(command.Expressions, loop.Iterable)
+}
+
+func vim9ForHeaderIsComment(file *File, command *Command) bool {
+	if command == nil || command.Dialect != Vim9 {
+		return false
+	}
+	lineEnd, _ := physicalLineEnd(file.Source, command.Name.End)
+	start := skipSpace(file.Source, command.Name.End, lineEnd)
+	return start < lineEnd && isCommentStart(file.Source, start, command.Name.End, lineEnd, Vim9, vimdata.Command{})
 }
 
 func appendTypeDiagnostics(diagnostics []Diagnostic, source string, base int) (*Type, []Diagnostic) {
