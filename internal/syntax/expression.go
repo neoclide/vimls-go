@@ -1728,6 +1728,7 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 	// manufacture trailing/missing diagnostics and lose the useful children
 	// already parsed before the error.
 	malformed := false
+	spacingDiagnostic := false
 	for p.current().kind != expressionEOF && p.current().text != "}" {
 		key := p.parseDictionaryKey()
 		children = append(children, key)
@@ -1750,7 +1751,17 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 			trailingComma = true
 			continue
 		}
+		colon := p.current()
+		colonOffset := colon.span.Start - p.base
+		if p.dialect == Vim9 && !spacingDiagnostic && colonOffset > 0 && isExpressionSpace(p.source[colonOffset-1]) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1068", Message: "no white space allowed before ':'", Span: colon.span})
+			spacingDiagnostic = true
+		}
 		p.advance()
+		if p.dialect == Vim9 && !spacingDiagnostic && p.current().kind != expressionEOF && p.current().text != "}" && (colon.span.End-p.base >= len(p.source) || !isExpressionSpace(p.source[colon.span.End-p.base])) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1069", Message: "white space required after ':'", Span: colon.span})
+			spacingDiagnostic = true
+		}
 		diagnosticsBeforeValue := len(p.diagnostics)
 		value := p.parse(0)
 		children = append(children, value)
@@ -1776,8 +1787,18 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 			break
 		}
 		if p.current().text == "," {
+			comma := p.current()
+			commaOffset := comma.span.Start - p.base
+			if p.dialect == Vim9 && !spacingDiagnostic && commaOffset > 0 && isExpressionSpace(p.source[commaOffset-1]) {
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1068", Message: "no white space allowed before ','", Span: comma.span})
+				spacingDiagnostic = true
+			}
 			trailingComma = true
 			p.advance()
+			if p.dialect == Vim9 && !spacingDiagnostic && p.current().kind != expressionEOF && p.current().text != "}" && (comma.span.End-p.base >= len(p.source) || !isExpressionSpace(p.source[comma.span.End-p.base])) {
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1069", Message: "white space required after ','", Span: comma.span})
+				spacingDiagnostic = true
+			}
 		} else {
 			trailingComma = false
 		}

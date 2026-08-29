@@ -386,6 +386,45 @@ func TestVim9LambdaParameterCommaWhitespace(t *testing.T) {
 	}
 }
 
+func TestVim9DictionaryDelimiterWhitespace(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		expr     string
+		code     string
+		children int
+	}{
+		{name: "space before colon", expr: "{a : 8}", code: "vim/E1068", children: 2},
+		{name: "missing space after colon", expr: "{a:8}", code: "vim/E1069", children: 2},
+		{name: "space before comma", expr: "{a: 8 , b: 9}", code: "vim/E1068", children: 4},
+		{name: "missing space after comma", expr: "{a: 1,b: 2}", code: "vim/E1069", children: 4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, source := range []string{
+				"def F()\nvar value = " + test.expr + "\nvar after = 1\nenddef\n",
+				"vim9script\nvar value = " + test.expr + "\nvar after = 1\n",
+			} {
+				file := Parse(source)
+				if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Text(file.Diagnostics[0].Span) != ":" && file.Text(file.Diagnostics[0].Span) != "," {
+					t.Fatalf("diagnostics = %#v", file.Diagnostics)
+				}
+				if len(file.Commands) < 3 || file.Commands[1].Declaration == nil || file.Commands[1].Declaration.Initializer == nil || file.Commands[1].Declaration.Initializer.Kind != ExpressionDictionary || len(file.Commands[1].Declaration.Initializer.Children) != test.children {
+					t.Fatalf("commands = %#v", file.Commands)
+				}
+				if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+					t.Fatalf("following declaration was swallowed: %#v", file.Commands)
+				}
+				assertFileSpans(t, file)
+			}
+			_, diagnostics := (LegacyExpressionParser{}).Parse(test.expr)
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "vim/E1068" || diagnostic.Code == "vim/E1069" {
+					t.Fatalf("legacy diagnostics = %#v", diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestOfficialLegacyTupleExpression(t *testing.T) {
 	// v9.2.1015 src/testdir/test_tuple.vim Test_try_finally_with_tuple_return.
 	for _, source := range []string{"()", "(1, 2)"} {
