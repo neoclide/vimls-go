@@ -362,3 +362,42 @@ func TestOfficialSingleLetterTypedClassMember(t *testing.T) {
 		t.Fatalf("declaration = %#v", file.Commands[2].Declaration)
 	}
 }
+
+func TestVim9ClassMemberMissingName(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		code      string
+		message   string
+		span      string
+		wantType  bool
+		wantValue bool
+	}{
+		{name: "typed", source: "vim9script\nclass Something\n  var: number\nendclass\n", code: "vim/E1317", message: "invalid object variable declaration", span: "var: number", wantType: true},
+		{name: "typed assignment", source: "vim9script\nclass Something\n  var: number = 42\nendclass\n", code: "vim/E1317", message: "invalid object variable declaration", span: "var: number = 42", wantType: true, wantValue: true},
+		{name: "assignment", source: "vim9script\nclass Something\n  var = 42\nendclass\n", code: "vim/E1317", message: "invalid object variable declaration", span: "var = 42", wantValue: true},
+		{name: "static typed", source: "vim9script\n\nclass Something\n  static var: number\nendclass\n", code: "vim/E1329", message: "invalid class variable declaration", span: "static var: number", wantType: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source + "var after = 1\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Message != test.message || file.Text(file.Diagnostics[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+			}
+			if len(file.Commands) != 5 || file.Commands[4].Canonical != "var" || file.Commands[4].Declaration == nil {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			declarationCommand := file.Commands[2]
+			if declarationCommand.Declaration == nil || declarationCommand.Declaration.Name.Start != declarationCommand.Declaration.Name.End || declarationCommand.Block < 0 || file.Blocks[declarationCommand.Block].Kind != BlockClass {
+				t.Fatalf("declaration = %#v, blocks = %#v", declarationCommand, file.Blocks)
+			}
+			if test.wantType && (declarationCommand.Declaration.ParsedType == nil || file.Text(declarationCommand.Declaration.Type) != "number") {
+				t.Fatalf("type = %#v", declarationCommand.Declaration)
+			}
+			if test.wantValue && (declarationCommand.Declaration.Initializer == nil || declarationCommand.Declaration.Target == nil || declarationCommand.Declaration.Initializer.Value != "42") {
+				t.Fatalf("initializer/target = %#v", declarationCommand.Declaration)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}

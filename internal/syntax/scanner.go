@@ -987,9 +987,14 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 			}
 		}
 		nameExpression := false
+		malformedDeclaration := false
+		if dialect == Vim9 && builtIn && canonical == "var" {
+			position := skipSpace(file.Source, nameEnd, end)
+			malformedDeclaration = position < end && (file.Source[position] == ':' || file.Source[position] == '=')
+		}
 		if !builtIn || expressionNameEnd > nameEnd {
 			nameExpression = looksLikeVim9Expression(file.Source, nameStart, expressionNameEnd, end)
-		} else {
+		} else if !malformedDeclaration {
 			nameExpression = (canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && looksLikeImmediateVim9Expression(file.Source, nameEnd, end)) ||
 				(canonical == "substitute" || canonical == "smagic" || canonical == "snomagic") && looksLikeSubstituteVim9Expression(file.Source, typedName, nameEnd, end) ||
 				(canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && canonical != "iput" && canonical != "put" && looksLikeVim9AssignmentAfterName(file.Source, nameEnd, end))
@@ -2111,6 +2116,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		assignment := findAssignment(source)
 		if assignment.Start < 0 {
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
+			diagnoseInvalidClassDeclaration(file, command, declaration)
 			command.Declaration = declaration
 			return
 		}
@@ -2127,6 +2133,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		declaration.Target, diagnostics = parseDeclarationTarget(file, command, declaration, left, diagnostics)
 		declaration.Assignment = assignment
 		declaration.Initializer = expression
+		diagnoseInvalidClassDeclaration(file, command, declaration)
 		command.Declaration = declaration
 		command.Expressions = append(command.Expressions, &Expression{
 			Kind: ExpressionAssignment, Span: Span{Start: declaration.Target.Span.Start, End: expression.Span.End}, Operator: assignment,
@@ -2975,6 +2982,27 @@ func parseVariableTargets(file *File, command *Command) {
 	}
 }
 
+func diagnoseInvalidClassDeclaration(file *File, command *Command, declaration *Declaration) {
+	if command.Canonical != "var" || declaration == nil || declaration.Name.Start < declaration.Name.End || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockClass {
+		return
+	}
+	code := "vim/E1317"
+	message := "invalid object variable declaration"
+	start := command.Name.Start
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == "static" {
+			code = "vim/E1329"
+			message = "invalid class variable declaration"
+			start = modifier.Span.Start
+			break
+		}
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{
+		Code: code, Message: message,
+		Span: Span{Start: start, End: command.Argument.End},
+	})
+}
+
 func parseDeclarationTarget(file *File, command *Command, declaration *Declaration, source string, diagnostics []Diagnostic) (*Expression, []Diagnostic) {
 	if declaration.Name.Start < declaration.Name.End && file.Source[declaration.Name.Start] == '[' {
 		target := &Expression{Kind: ExpressionList, Span: declaration.Name}
@@ -3011,6 +3039,8 @@ func parseDeclarationHead(file *File, source string, base int, dialect Dialect) 
 			declaration.ParsedType = binding.ParsedType
 		}
 		declaration.Bindings = append(declaration.Bindings, binding)
+	} else if typeSpan.Start < typeSpan.End {
+		declaration.ParsedType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, file.Source[typeSpan.Start:typeSpan.End], typeSpan.Start)
 	}
 	return declaration
 }

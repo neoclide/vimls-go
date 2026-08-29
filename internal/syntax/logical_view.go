@@ -330,6 +330,13 @@ func scanLogicalCommandRange(file *File, view *logicalView, start, end int, dial
 	for index := range temporary.Commands {
 		logical := temporary.Commands[index]
 		mapped := logical
+		mapped.Modifiers = append([]Modifier(nil), logical.Modifiers...)
+		for index := range mapped.Modifiers {
+			if logical.Modifiers[index].Filter != nil {
+				filter := *logical.Modifiers[index].Filter
+				mapped.Modifiers[index].Filter = &filter
+			}
+		}
 		mapCommandHeader(view, &mapped)
 		mapped.logical = &logicalCommandView{view: view, command: logical}
 		file.Commands = append(file.Commands, mapped)
