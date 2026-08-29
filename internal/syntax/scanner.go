@@ -900,11 +900,13 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 				start = skipSpaceToken(file, filterEnd, end)
 			}
 		}
+		invalidModifierRange := false
 		if len(parsedModifiers) > 0 {
-			// A command modifier may be followed by a range, with an optional
-			// colon, as in `silent! %foldclose!` or
-			// `silent! :/pattern/delete`.
+			// Legacy permits an optional colon before a range after modifiers.
+			// Vim9 requires the colon unless the bytes start an expression.
+			hasRangeColon := false
 			if start < end && file.Source[start] == ':' {
+				hasRangeColon = true
 				file.Tokens = append(file.Tokens, Token{Kind: TokenColon, Span: Span{Start: start, End: start + 1}})
 				start = skipSpaceToken(file, start+1, end)
 			}
@@ -913,10 +915,16 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 			if start > rangeStart {
 				commandRange = Span{Start: rangeStart, End: start}
 				file.Tokens = append(file.Tokens, Token{Kind: TokenRange, Span: commandRange})
+				if dialect == Vim9 && !hasRangeColon && vim9ModifierRangeRequiresColon(file.Source, rangeStart, start, end) {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1050", Message: "colon required before a range", Span: Span{Start: rangeStart, End: end},
+					})
+					invalidModifierRange = true
+				}
 				start = skipSpaceToken(file, start, end)
 			}
 		}
-		missingVim9ModifierCommand := baseDialect == Vim9 && len(parsedModifiers) > 0 && (start >= end || start < end && isCommentStart(file.Source, start, start, end, Vim9, vimdata.Command{}))
+		missingVim9ModifierCommand := !invalidModifierRange && baseDialect == Vim9 && len(parsedModifiers) > 0 && (start >= end || start < end && isCommentStart(file.Source, start, start, end, Vim9, vimdata.Command{}))
 		emptyPrefix := commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < end && file.Source[commandStart] == ':'
 		if start < end && file.Source[start] == '|' || start >= end && emptyPrefix {
 			if missingVim9ModifierCommand {
@@ -1062,7 +1070,7 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 			scanMetadata.Flags |= vimdata.ExpressionArgument
 		}
 		parsedCommand := Command{
-			Kind: kind, Dialect: dialect, baseDialect: baseDialect, Span: Span{Start: commandStart, End: nameEnd}, Range: commandRange,
+			Kind: kind, Dialect: dialect, baseDialect: baseDialect, detailsOpaque: invalidModifierRange, Span: Span{Start: commandStart, End: nameEnd}, Range: commandRange,
 			Name: nameSpan, TypedName: typedName, Canonical: canonical, Modifiers: parsedModifiers, Bang: bang,
 			Argument: Span{Start: argumentStart, End: end}, Block: -1,
 		}
@@ -4448,6 +4456,27 @@ func scanRange(source string, start, end int) int {
 		}
 	}
 	return index
+}
+
+func vim9ModifierRangeRequiresColon(source string, start, rangeEnd, end int) bool {
+	if rangeEnd <= start || start >= end {
+		return false
+	}
+	// These prefixes are expressions or marks in Vim9, not Ex ranges.
+	if source[start] == '$' || source[start] == '\'' || start+1 < end && (source[start:start+2] == "0z" || source[start:start+2] == "++" || source[start:start+2] == "--") {
+		return false
+	}
+	position := start
+	for position < end && source[position] >= '0' && source[position] <= '9' {
+		position++
+	}
+	if position > start {
+		position = skipSpace(source, position, end)
+		if position+1 < end && source[position:position+2] == "->" {
+			return false
+		}
+	}
+	return true
 }
 
 func scanCommandName(source string, start, end int) int {
