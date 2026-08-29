@@ -13,7 +13,7 @@ import './mod.vim'
 import autoload './auto.vim' as auto
 class Widget
   const ID: number = 1
-  def new(value: number): Widget
+  def new(value: number)
     if value > 0
       var local = value
     endif
@@ -51,7 +51,7 @@ final name = 'x'
 	}
 
 	widget := symbols[2]
-	if widget.Kind != SymbolKindClass || widget.SelectionRange != file.Commands[3].Aggregate.Name || file.Text(widget.Range) != "class Widget\n  const ID: number = 1\n  def new(value: number): Widget\n    if value > 0\n      var local = value\n    endif\n    return this\n  enddef\n  def run()\n  enddef\nendclass" {
+	if widget.Kind != SymbolKindClass || widget.SelectionRange != file.Commands[3].Aggregate.Name || file.Text(widget.Range) != "class Widget\n  const ID: number = 1\n  def new(value: number)\n    if value > 0\n      var local = value\n    endif\n    return this\n  enddef\n  def run()\n  enddef\nendclass" {
 		t.Fatalf("class symbol = %#v, range text = %q", widget, file.Text(widget.Range))
 	}
 	if got, want := names(widget.Children), []string{"ID", "new", "run"}; !equalStrings(got, want) {
@@ -106,9 +106,11 @@ final name = 'x'
 func TestCollectSymbolsSkipsControlBlocksAndKeepsSourceOrder(t *testing.T) {
 	source := `vim9script
 class C
-  if true
-    var inside = 1
-  endif
+  def run()
+    if true
+      var inside = 1
+    endif
+  enddef
 endclass
 var outside = 2
 `
@@ -120,8 +122,11 @@ var outside = 2
 	if len(symbols) != 2 || symbols[0].Name != "C" || symbols[1].Name != "outside" {
 		t.Fatalf("symbols = %#v", symbols)
 	}
-	if len(symbols[0].Children) != 1 || symbols[0].Children[0].Name != "inside" {
+	if len(symbols[0].Children) != 1 || symbols[0].Children[0].Name != "run" {
 		t.Fatalf("control block child = %#v", symbols[0].Children)
+	}
+	if len(symbols[0].Children[0].Children) != 1 || symbols[0].Children[0].Children[0].Name != "inside" {
+		t.Fatalf("nested declaration = %#v", symbols[0].Children[0].Children)
 	}
 }
 
