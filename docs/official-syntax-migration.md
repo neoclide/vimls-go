@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 849 (`1df5bda`)
+- Current parser-negative syntax assertions: 855 (`a79d7f5`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -280,6 +280,8 @@ authoritative current split 844 migrated, zero ready, and 224 pending-fix.
 Commit `1df5bda` migrated five generic-call delimiter cases already accepted by
 the parser, making the authoritative current split 849 migrated, zero ready,
 and 219 pending-fix.
+Commit `a79d7f5` migrated six invalid Vim9 branch/closer cases, making the
+authoritative current split 855 migrated, zero ready, and 213 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -870,7 +872,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 27 | 0 | 24 |
+| `C-BLOCK` | 51 | 33 | 0 | 18 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 53 | 0 | 62 |
 | `C-EXPR` | 19 | 7 | 0 | 12 |
@@ -878,7 +880,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **217** | **0** | **152** |
+| **Total** | **369** | **223** | **0** | **146** |
 
 ```text
 C-EXPR
@@ -1133,6 +1135,13 @@ one call with an attached closing angle after a comma (E1069). These cases use
 the existing generic-expression parser and require no production-code change.
 The E1561 duplicate generic parameter case remains excluded as declaration
 semantics, consistent with the Group C baseline cleanup.
+
+Commit `a79d7f5` maps standalone Vim9 `elseif`, `else`, and `endif` to
+E582/E581/E580, detects a repeated `else` as E583, and maps unmatched `endfor`
+or `endwhile` to E588. Block and later-command AST recovery is unchanged. The
+E584 case remains pending because line-oriented recovery correctly continues
+to the following `else` and exposes a second branch error, while Vim's compile
+helper stops after the first error.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
