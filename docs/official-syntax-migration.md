@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 886 (`a7b5679`)
+- Current parser-negative syntax assertions: 888 (`648ba36`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -297,6 +297,8 @@ current split 870 migrated, zero ready, and 198 pending-fix.
 Commits `8735abf` and `a7b5679` migrated 16 built-in Vim9 command-spacing
 cases, making the authoritative current split 886 migrated, zero ready, and
 182 pending-fix.
+Commit `648ba36` migrated two Vim9 `try` handler cases, making the authoritative
+current split 888 migrated, zero ready, and 180 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -887,7 +889,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 35 | 0 | 16 |
+| `C-BLOCK` | 51 | 37 | 0 | 14 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 81 | 0 | 34 |
 | `C-EXPR` | 19 | 7 | 0 | 12 |
@@ -895,7 +897,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **254** | **0** | **115** |
+| **Total** | **369** | **256** | **0** | **113** |
 
 ```text
 C-EXPR
@@ -1190,6 +1192,10 @@ built-in Vim9 command is followed by an illegal attached byte, while preserving
 the command and making its details opaque for line recovery. Unknown and future
 commands remain opaque. The external `Comd#`, locally defined `Foo3Bar`, and
 name-dependent `exit_cb:` variants remain outside this parser-only batch.
+
+Commit `648ba36` reports E1032 when a closed Vim9 `try` has neither `catch` nor
+`finally`. The block closes normally, so it cannot also produce the E600 used
+for a genuinely missing `endtry`; legacy `try`/`endtry` remains accepted.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
