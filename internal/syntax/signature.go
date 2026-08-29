@@ -103,7 +103,7 @@ func parseFunctionSignature(file *File, command *Command) {
 		if parameter != nil {
 			function.Parameters = append(function.Parameters, *parameter)
 		}
-		if vim9Signature && part.End < close {
+		if command.Canonical == "def" && part.End < close {
 			beforeComma := trimSyntaxSpaceEnd(source, part.Start, part.End)
 			spaceBeforeComma := beforeComma < part.End
 			if spaceBeforeComma {
