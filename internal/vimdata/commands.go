@@ -13,6 +13,7 @@ const (
 	NeedArgument
 	ExactInVim9
 	FileArgument
+	Exportable
 )
 
 // Command describes one built-in Ex command from the pinned Vim baseline.
