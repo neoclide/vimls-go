@@ -2256,8 +2256,8 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				Kind: ExpressionAssignment, Span: Span{Start: left.Span.Start, End: right.Span.End}, Operator: operator,
 				Value: file.Text(operator), Children: []*Expression{left, right},
 			})
-			file.Diagnostics = append(file.Diagnostics, leftDiagnostics...)
-			file.Diagnostics = append(file.Diagnostics, rightDiagnostics...)
+			file.Diagnostics = append(file.Diagnostics, mapIncompleteExpressionDiagnostics(file, command, leftDiagnostics)...)
+			file.Diagnostics = append(file.Diagnostics, mapIncompleteExpressionDiagnostics(file, command, rightDiagnostics)...)
 			return
 		}
 		expression, diagnostics, reused := takeBoundaryExpression(command)
@@ -2388,6 +2388,14 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 			break
 		}
 	}
+	assignmentExpression := false
+	for _, expression := range command.Expressions {
+		if expression != nil && expression.Kind == ExpressionAssignment {
+			assignmentExpression = true
+			break
+		}
+	}
+	hasAssignment := assignmentExpression || command.Declaration != nil && command.Declaration.Assignment.End > command.Declaration.Assignment.Start
 	if command.Dialect == Vim9 && command.Declaration != nil {
 		diagnostics = mapVim9LambdaTrailingParen(diagnostics, command.Declaration.Initializer, file.Source, 0)
 		initializer := command.Declaration.Initializer
@@ -2413,6 +2421,12 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
+		case command.Dialect == Vim9 && inDef && hasAssignment && diagnostic.Code == "vimls/missing-expression":
+			diagnostic.Code = "vim/E1097"
+			diagnostic.Message = "line incomplete"
+		case command.Dialect == Vim9 && inDef && assignmentExpression && diagnostic.Code == "vimls/trailing-expression":
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
 		case diagnostic.Code == "vimls/missing-list-end":
 			diagnostic.Code = "vim/E696"
 			diagnostic.Message = "Missing comma in List"
