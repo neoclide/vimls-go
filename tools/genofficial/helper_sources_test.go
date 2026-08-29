@@ -23,7 +23,7 @@ func TestScanHelperHeredocs(t *testing.T) {
 	if len(heredocs) != 2 {
 		t.Fatalf("heredocs = %#v", heredocs)
 	}
-	if got := heredocs[0]; got.Name != "lines" || !got.Trim || got.Evaluate || !reflect.DeepEqual(got.Lines, []string{"vim9script", "  var value = 1"}) {
+	if got := heredocs[0]; got.Name != "lines" || !got.Trim || got.Evaluate || !got.Complete || !reflect.DeepEqual(got.Lines, []string{"vim9script", "  var value = 1"}) {
 		t.Fatalf("trimmed heredoc = %#v", got)
 	}
 	if got := heredocs[1]; got.Name != "raw" || got.Trim || !got.Evaluate || !reflect.DeepEqual(got.Lines, []string{"one {value}"}) {
@@ -76,9 +76,64 @@ func TestParseHelperHeredocHeaderRejectsMalformedForms(t *testing.T) {
 		"var lines =<< END trailing",
 		"var lines =<<",
 	} {
-		if name, _, _, _, ok := parseHelperHeredocHeader([]byte(source)); ok {
+		if name, _, _, _, ok := parseHelperHeredocHeader([]byte(source), helperLegacy); ok {
 			t.Fatalf("accepted %q as %q", source, name)
 		}
+	}
+}
+
+func TestParseHelperHeredocHeaderUsesDialectRules(t *testing.T) {
+	legacyValid := []byte(`let lines=<< END " comment`)
+	if _, _, _, _, ok := parseHelperHeredocHeader(legacyValid, helperLegacy); !ok {
+		t.Fatal("legacy heredoc was rejected")
+	}
+	vim9Valid := []byte(`var lines =<< END # comment`)
+	if _, _, _, _, ok := parseHelperHeredocHeader(vim9Valid, helperVim9); !ok {
+		t.Fatal("Vim9 heredoc was rejected")
+	}
+	for _, source := range [][]byte{
+		[]byte(`var lines=<< END`),
+		[]byte(`var lines =<<END`),
+		[]byte(`var lines =<< END " not a Vim9 comment`),
+	} {
+		if name, _, _, _, ok := parseHelperHeredocHeader(source, helperVim9); ok {
+			t.Fatalf("accepted invalid Vim9 heredoc %q as %q", source, name)
+		}
+	}
+	if name, _, _, _, ok := parseHelperHeredocHeader([]byte(`let lines =<< END # not a legacy comment`), helperLegacy); ok {
+		t.Fatalf("accepted invalid legacy heredoc as %q", name)
+	}
+	legacyWrapped := []byte(`silent vim9cmd legacy let lines=<< END " comment`)
+	if name, _, _, _, ok := parseHelperHeredocHeader(legacyWrapped, helperCommandDialect(legacyWrapped, helperLegacy)); !ok || name != "lines" {
+		t.Fatalf("modifier-wrapped legacy heredoc = %q, %v", name, ok)
+	}
+	vim9Wrapped := []byte(`noautocmd legacy vim9cmd var lines =<< END # comment`)
+	if name, _, _, _, ok := parseHelperHeredocHeader(vim9Wrapped, helperCommandDialect(vim9Wrapped, helperLegacy)); !ok || name != "lines" {
+		t.Fatalf("modifier-wrapped Vim9 heredoc = %q, %v", name, ok)
+	}
+}
+
+func TestScanHelperHeredocsTracksContextualDialect(t *testing.T) {
+	source := []byte("let before = 1\n" +
+		"vim9script\n" +
+		"let legacy=<< END\nold\nEND\n" +
+		"def Vim9Body()\n" +
+		"  var modern =<< END\nnew\nEND\n" +
+		"enddef\n" +
+		"function! LegacyBody()\n" +
+		"  let old=<< END\nlegacy\nEND\n" +
+		"endfunction\n")
+	heredocs := scanHelperHeredocs(source)
+	if len(heredocs) != 3 || heredocs[0].Name != "legacy" || heredocs[1].Name != "modern" || heredocs[2].Name != "old" {
+		t.Fatalf("contextual heredocs = %#v", heredocs)
+	}
+}
+
+func TestScanHelperHeredocsRecoversUnclosedBodyAtEOF(t *testing.T) {
+	source := []byte("vim9script\nvar lines =<< END\ntext\nother =<< NEXT\nv9.CheckScriptSuccess(lines)\n")
+	heredocs := scanHelperHeredocs(source)
+	if len(heredocs) != 1 || heredocs[0].Complete || heredocs[0].BodyEnd != len(source) || heredocs[0].End != len(source) || !reflect.DeepEqual(heredocs[0].Lines, []string{"text", "other =<< NEXT", "v9.CheckScriptSuccess(lines)"}) {
+		t.Fatalf("heredocs = %#v", heredocs)
 	}
 }
 
@@ -105,7 +160,7 @@ func TestPinnedHelperHeredocScan(t *testing.T) {
 		heredocs := scanHelperHeredocs(sourceFile.Source)
 		heredocsByPath[sourceFile.Path] = heredocs
 		for index, heredoc := range heredocs {
-			if heredoc.HeaderStart < 0 || heredoc.BodyStart < heredoc.HeaderStart || heredoc.BodyEnd < heredoc.BodyStart || heredoc.End <= heredoc.BodyEnd || heredoc.End > len(sourceFile.Source) {
+			if !heredoc.Complete || heredoc.HeaderStart < 0 || heredoc.BodyStart < heredoc.HeaderStart || heredoc.BodyEnd < heredoc.BodyStart || heredoc.End <= heredoc.BodyEnd || heredoc.End > len(sourceFile.Source) {
 				t.Fatalf("%s heredoc %d has invalid spans: %#v", sourceFile.Path, index, heredoc)
 			}
 			if index > 0 && heredocs[index-1].End > heredoc.HeaderStart {
