@@ -2398,6 +2398,15 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if command.Dialect == Vim9 && command.Canonical == "let" {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1126", Message: "Cannot use :let in Vim9 script", Span: command.Name})
 		}
+		if command.Dialect == Vim9 && command.Canonical != "let" {
+			start := skipSpace(source, 0, len(source))
+			if start < len(source) && source[start] >= '0' && source[start] <= '9' {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: Span{Start: command.Argument.Start + start, End: command.Argument.Start + start + 1},
+				})
+			}
+		}
 		assignment := findAssignment(source)
 		if assignment.Start < 0 {
 			diagnosticsStart := len(file.Diagnostics)
