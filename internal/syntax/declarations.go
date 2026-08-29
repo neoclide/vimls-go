@@ -295,6 +295,29 @@ func parseTypeAlias(file *File, command *Command) {
 	source := file.Text(command.Argument)
 	assignment := findAssignment(source)
 	if assignment.Start < 0 {
+		// Keep the alias name in the AST even when Vim9 reports E398.  The
+		// remainder of this physical line is intentionally not interpreted as
+		// a type: it may be incomplete or otherwise unrelated while editing.
+		nameStart := skipSpace(source, 0, len(source))
+		nameEnd := nameStart
+		for nameEnd < len(source) {
+			c := source[nameEnd]
+			if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
+				break
+			}
+			nameEnd++
+		}
+		if nameStart < nameEnd {
+			name := Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E398", Message: "missing type alias assignment", Span: name,
+			})
+			command.TypeAlias = &TypeAlias{
+				Name:       name,
+				Assignment: Span{Start: command.Argument.End, End: command.Argument.End},
+				TypeSpan:   Span{Start: command.Argument.End, End: command.Argument.End},
+			}
+		}
 		return
 	}
 	nameStart := skipSpace(source, 0, assignment.Start)
