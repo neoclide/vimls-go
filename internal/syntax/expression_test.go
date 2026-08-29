@@ -278,6 +278,45 @@ func TestSeparateLegacyAndVim9LambdaSyntax(t *testing.T) {
 	}
 }
 
+func TestVim9CallArgumentCommaWhitespace(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		call   string
+		code   string
+		legacy string
+	}{
+		{name: "space before comma", call: "match(['foo'] , 'foo')", code: "vim/E1068", legacy: "match(['foo'] , 'foo')"},
+		{name: "missing space after comma", call: "CallMe2('yes','no')", code: "vim/E1069", legacy: "CallMe2('yes','no')"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, source := range []string{
+				"def F()\necho " + test.call + "\nvar after = 1\nenddef\n",
+				"vim9script\necho " + test.call + "\nvar after = 1\n",
+			} {
+				file := Parse(source)
+				if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Text(file.Diagnostics[0].Span) != "," {
+					t.Fatalf("diagnostics = %#v", file.Diagnostics)
+				}
+				if len(file.Commands) < 3 || len(file.Commands[1].Expressions) != 1 {
+					t.Fatalf("commands = %#v", file.Commands)
+				}
+				call := file.Commands[1].Expressions[0]
+				if call.Kind != ExpressionCall || len(call.Children) != 3 || call.Children[0].Kind != ExpressionIdentifier || call.Children[1].Kind == ExpressionMissing || call.Children[2].Kind == ExpressionMissing || test.code == "vim/E1068" && call.Children[1].Kind != ExpressionList {
+					t.Fatalf("call = %#v", call)
+				}
+				if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+					t.Fatalf("following declaration was swallowed: %#v", file.Commands)
+				}
+				assertFileSpans(t, file)
+			}
+			legacy, diagnostics := (LegacyExpressionParser{}).Parse(test.legacy)
+			if len(diagnostics) != 0 || legacy.Kind != ExpressionCall || len(legacy.Children) != 3 {
+				t.Fatalf("legacy = %#v, diagnostics = %#v", legacy, diagnostics)
+			}
+		})
+	}
+}
+
 func TestOfficialLegacyTupleExpression(t *testing.T) {
 	// v9.2.1015 src/testdir/test_tuple.vim Test_try_finally_with_tuple_return.
 	for _, source := range []string{"()", "(1, 2)"} {
