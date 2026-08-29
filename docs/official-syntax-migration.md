@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 902 (`937f2d5`)
+- Current parser-negative syntax assertions: 904 (`427a218`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -314,6 +314,9 @@ making the authoritative current split 900 migrated, zero ready, and 168
 pending-fix.
 Commit `937f2d5` migrated two missing Vim9 `for` iterable variants, making the
 authoritative current split 902 migrated, zero ready, and 166 pending-fix.
+Commit `427a218` migrated two nested repeated-`finally` recovery variants,
+making the authoritative current split 904 migrated, zero ready, and 164
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -904,7 +907,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 42 | 0 | 9 |
+| `C-BLOCK` | 51 | 44 | 0 | 7 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 81 | 0 | 34 |
 | `C-EXPR` | 19 | 16 | 0 | 3 |
@@ -912,7 +915,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **270** | **0** | **99** |
+| **Total** | **369** | **272** | **0** | **97** |
 
 ```text
 C-EXPR
