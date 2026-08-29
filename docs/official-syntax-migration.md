@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 797 (`608ed48`)
+- Current parser-negative syntax assertions: 799 (`74ccec2`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -253,6 +253,8 @@ zero ready, and 273 pending-fix.
 Commit `608ed48` migrated both E182 attached user-command comment failures,
 making the authoritative current split 797 migrated, zero ready, and 271
 pending-fix.
+Commit `74ccec2` migrated two E1554 incomplete generic references, making the
+authoritative current split 799 migrated, zero ready, and 269 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -847,11 +849,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 52 | 0 | 63 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
-| `C-GENERIC` | 109 | 38 | 0 | 71 |
+| `C-GENERIC` | 109 | 40 | 0 | 69 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **165** | **0** | **204** |
+| **Total** | **369** | **167** | **0** | **202** |
 
 ```text
 C-EXPR
@@ -1038,6 +1040,11 @@ Commit `608ed48` migrated E182 at
 user-command name is now diagnosed before replacement-body parsing, while a
 space-separated comment and legacy command definitions retain their existing
 behavior.
+
+Commit `74ccec2` migrated E1554 at `G:{280:6221,1706:36532}/script`. A tight
+generic `<` without a closing `>` now retains an incomplete generic-reference
+AST, reports the error on that physical line, and leaves the following
+`enddef` or command available to ordinary recovery.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
