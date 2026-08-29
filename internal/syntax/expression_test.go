@@ -353,6 +353,39 @@ func TestVim9ListCommaWhitespace(t *testing.T) {
 	}
 }
 
+func TestVim9LambdaParameterCommaWhitespace(t *testing.T) {
+	for _, source := range []string{
+		"def F()\nvar value = filter([1], (k,v) => 1)\nvar after = 1\nenddef\n",
+		"vim9script\nvar value = filter([1], (k,v) => 1)\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1069" || file.Text(file.Diagnostics[0].Span) != "," {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		if len(file.Commands) < 3 || file.Commands[1].Declaration == nil {
+			t.Fatalf("commands = %#v", file.Commands)
+		}
+		call := file.Commands[1].Declaration.Initializer
+		if call == nil || call.Kind != ExpressionCall || len(call.Children) != 3 || call.Children[1].Kind != ExpressionList {
+			t.Fatalf("call = %#v", call)
+		}
+		lambda := call.Children[2]
+		if lambda.Kind != ExpressionLambda || len(lambda.Parameters) != 2 || len(lambda.Children) != 3 || lambda.Operator.Start == lambda.Operator.End || lambda.Children[2].Kind != ExpressionNumber {
+			t.Fatalf("lambda = %#v", lambda)
+		}
+		if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+			t.Fatalf("following declaration was swallowed: %#v", file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+	_, diagnostics := (LegacyExpressionParser{}).Parse("{k,v -> 1}")
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "vim/E1068" || diagnostic.Code == "vim/E1069" {
+			t.Fatalf("legacy diagnostics = %#v", diagnostics)
+		}
+	}
+}
+
 func TestOfficialLegacyTupleExpression(t *testing.T) {
 	// v9.2.1015 src/testdir/test_tuple.vim Test_try_finally_with_tuple_return.
 	for _, source := range []string{"()", "(1, 2)"} {

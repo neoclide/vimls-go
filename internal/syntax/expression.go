@@ -977,7 +977,20 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 	}
 
 	lambda := &Expression{Kind: ExpressionLambda, Operator: Span{Start: p.base + position, End: p.base + position + 2}}
-	for _, part := range splitTopLevel(p.source, openOffset+1, closeOffset, ',') {
+	parts := splitTopLevel(p.source, openOffset+1, closeOffset, ',')
+	commaDiagnostic := false
+	for index, part := range parts {
+		if index+1 < len(parts) && !commaDiagnostic {
+			comma := part.End
+			nextStart := skipVim9LambdaSpace(p.source, comma+1)
+			if comma > 0 && isExpressionSpace(p.source[comma-1]) {
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1068", Message: "no white space allowed before ','", Span: Span{Start: p.base + comma, End: p.base + comma + 1}})
+				commaDiagnostic = true
+			} else if nextStart < closeOffset && !isExpressionSpace(p.source[comma+1]) {
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1069", Message: "white space required after ','", Span: Span{Start: p.base + comma, End: p.base + comma + 1}})
+				commaDiagnostic = true
+			}
+		}
 		start := skipVim9LambdaSpace(p.source, part.Start)
 		end := trimExpressionSpaceEnd(p.source, start, part.End)
 		if start >= end {
