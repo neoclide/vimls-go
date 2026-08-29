@@ -1377,7 +1377,13 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		}
 		file.Commands = append(file.Commands, parsedCommand)
 		if builtIn && metadata.Flags&vimdata.NeedArgument != 0 && argumentStart == argumentEnd {
-			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-argument", Message: "command requires an argument", Span: nameSpan})
+			code := "vimls/missing-argument"
+			message := "command requires an argument"
+			if parsedCommand.Dialect == Vim9 && selfSplittingVariableCommand(parsedCommand.Canonical) {
+				code = "vim/E179"
+				message = "argument required for " + parsedCommand.Canonical
+			}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: nameSpan})
 		}
 		if len(file.Diagnostics) > diagnosticsBeforeCommand && separator.Start < separator.End {
 			// A known source error makes the rest of this physical command range
