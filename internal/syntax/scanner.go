@@ -2421,7 +2421,7 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
-		case command.Dialect == Vim9 && inDef && hasAssignment && diagnostic.Code == "vimls/missing-expression":
+		case command.Dialect == Vim9 && inDef && hasAssignment && len(diagnostics) == 1 && diagnostic.Code == "vimls/missing-expression":
 			diagnostic.Code = "vim/E1097"
 			diagnostic.Message = "line incomplete"
 		case command.Dialect == Vim9 && inDef && assignmentExpression && diagnostic.Code == "vimls/trailing-expression":
