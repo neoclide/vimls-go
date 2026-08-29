@@ -2586,7 +2586,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-expression" || diagnostics[0].Code == "vimls/invalid-atom" || diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
+		genericCallMissingEnd := !commandInsideBlock(command, file.Blocks, BlockDef) && expression != nil && expression.Kind == ExpressionCall && len(expression.TypeArguments) > 0 &&
+			len(diagnostics) == 1 && diagnostics[0].Code == "vimls/missing-delimiter" && diagnostics[0].Message == "expected )"
+		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-expression" || diagnostics[0].Code == "vimls/invalid-atom" || diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") || genericCallMissingEnd {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -2945,8 +2947,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 				diagnostic.Message = "line incomplete"
 			}
 		case diagnostic.Code == "vimls/missing-delimiter" && diagnostic.Message == "expected )":
-			diagnostic.Code = "vim/E110"
-			diagnostic.Message = "missing ')'"
+			if command.Dialect == Vim9 && !inDef && parsedExpression != nil && parsedExpression.Kind == ExpressionCall && len(parsedExpression.TypeArguments) > 0 {
+				diagnostic.Code = "vim/E116"
+				diagnostic.Message = "Invalid arguments for function"
+			} else {
+				diagnostic.Code = "vim/E110"
+				diagnostic.Message = "missing ')'"
+			}
 			if inDef && diagnostic.Span.Start == diagnostic.Span.End && !commandCall {
 				diagnostic.Code = "vim/E1097"
 				diagnostic.Message = "line incomplete"
