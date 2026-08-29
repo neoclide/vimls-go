@@ -2412,6 +2412,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			diagnosticsStart := len(file.Diagnostics)
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
 			diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
+			diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
 			diagnoseInvalidClassDeclaration(file, command, declaration)
 			diagnoseVim9DeclarationShape(file, command, declaration, directAggregateMember)
 			command.Declaration = declaration
@@ -2428,6 +2429,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		diagnosticsStart := len(file.Diagnostics)
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
 		diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
+		diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
 		invalidClassDeclaration := diagnoseInvalidClassDeclaration(file, command, declaration)
 		if !invalidClassDeclaration {
 			diagnoseVim9AssignmentSpacing(file, command, assignment)
@@ -2561,6 +2563,22 @@ func diagnoseObjectTypeTail(file *File, command *Command, declaration *Declarati
 			file.Diagnostics[index].Code = "vim/E488"
 			file.Diagnostics[index].Message = "trailing characters"
 			file.Diagnostics[index].Span = Span{Start: comma, End: typeNode.Span.End}
+		}
+	}
+}
+
+// Vim reports an invalid tail on a Vim9 declaration as trailing characters.
+// Keep type parsing context-free, but translate only diagnostics emitted while
+// parsing this declaration head.
+func diagnoseDeclarationTypeTail(file *File, command *Command, declaration *Declaration, diagnosticsStart int) {
+	if command == nil || declaration == nil || declaration.ParsedType == nil || command.Dialect != Vim9 || command.Canonical == "let" {
+		return
+	}
+	for index := diagnosticsStart; index < len(file.Diagnostics); index++ {
+		if file.Diagnostics[index].Code == "vimls/trailing-type" {
+			file.Diagnostics[index].Code = "vim/E488"
+			file.Diagnostics[index].Message = "trailing characters"
+			file.Diagnostics[index].Span.End = declaration.Type.End
 		}
 	}
 }
