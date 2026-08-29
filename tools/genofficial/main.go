@@ -102,6 +102,8 @@ func main() {
 	testFilesOutput := flag.String("test-files-output", "testdata/official/v9.2.1015-test-files.json.gz", "lossless official test-file corpus path")
 	licenseOutput := flag.String("license-output", "testdata/official/VIM-LICENSE", "upstream Vim license path")
 	helperOutput := flag.String("helper-inventory-output", "testdata/official/v9.2.1015-helper-inventory.json.gz", "generated Check helper inventory path")
+	parserFileManifestPath := flag.String("parser-file-manifest", "testdata/official/v9.2.1015-parser-files.json", "reviewed parser test-file allowlist")
+	parserCasesOutput := flag.String("parser-cases-output", "testdata/official/v9.2.1015-parser-cases.json.gz", "generated official parser helper cases")
 	flag.Parse()
 
 	commit, err := gitOutput(*source, "rev-list", "-n", "1", vimTag)
@@ -163,7 +165,21 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+	parserManifest, err := readParserFileManifest(*parserFileManifestPath)
+	if err != nil {
+		fatal(err)
+	}
+	parserCases, err := buildParserCaseCorpus(testCorpus, inventory, parserManifest)
+	if err != nil {
+		fatal(err)
+	}
+	if err := validatePinnedParserCaseCorpus(parserCases); err != nil {
+		fatal(err)
+	}
 	if err := writeJSONGzip(*helperOutput, inventory); err != nil {
+		fatal(err)
+	}
+	if err := writeJSONGzip(*parserCasesOutput, parserCases); err != nil {
 		fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Dir(*licenseOutput), 0o755); err != nil {
@@ -176,6 +192,7 @@ func main() {
 	fmt.Printf("wrote %d lossless test files (%d bytes) from %s (%s) to %s\n", len(testCorpus.Files), rawBytes, testCorpus.Tag, testCorpus.Commit, *testFilesOutput)
 	fmt.Printf("wrote upstream Vim license to %s\n", *licenseOutput)
 	fmt.Printf("wrote %d Check helper lexemes from %s (%s) to %s\n", len(inventory.Records), inventory.Tag, inventory.Commit, *helperOutput)
+	fmt.Printf("wrote %d parser cases from %d allowlisted helper calls to %s\n", parserCases.Summary.Cases, parserCases.Summary.Calls, *parserCasesOutput)
 }
 
 func listTestFiles(root string) ([]string, error) {
