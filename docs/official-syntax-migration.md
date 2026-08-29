@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 793 (`b74d592`)
+- Current parser-negative syntax assertions: 795 (`ad1edd0`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -247,6 +247,9 @@ making the authoritative current split 791 migrated, zero ready, and 277
 pending-fix.
 Commit `b74d592` migrated the two static import-path alias failures, making the
 authoritative current split 793 migrated, zero ready, and 275 pending-fix.
+Commit `ad1edd0` migrated the E1043 invalid export command and E1044 invalid
+export argument failures, making the authoritative current split 795 migrated,
+zero ready, and 273 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -842,10 +845,10 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-EXCMD` | 115 | 50 | 0 | 65 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 38 | 0 | 71 |
-| `C-IMPORT` | 14 | 8 | 0 | 6 |
+| `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **161** | **0** | **208** |
+| **Total** | **369** | **163** | **0** | **206** |
 
 ```text
 C-EXPR
@@ -1020,6 +1023,12 @@ Commit `b74d592` migrated E1261 at `I:591:15641/script` and E1257 at
 only its final path component: `.vim` requires an alias, a normal `name.vim`
 remains valid, and any other suffix requires `as`; dynamic path expressions
 remain conservative while the complete Import AST is retained.
+
+Commit `ad1edd0` migrated E1043 at `I:1728:42236/script` and E1044 at
+`I:1729:42305/script`. Export validation now derives Vim's exact exportable
+command set from `EX_EXPORT`; non-exportable built-ins are rejected while
+unknown commands keep their normal recovery, and `:function` listing or search
+arguments are rejected without weakening valid exported definitions.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
