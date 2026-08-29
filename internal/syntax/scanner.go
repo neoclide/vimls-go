@@ -2601,6 +2601,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	if command.Canonical == "def" || command.Canonical == "function" && isFunctionDefinition(source) {
 		parseFunctionSignature(file, command)
+		if command.Canonical == "function" && command.Dialect == Vim9 && command.Bang.Start < command.Bang.End && command.Function != nil && !strings.HasPrefix(file.Text(command.Function.Name), "g:") {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "no ! allowed", Span: command.Bang})
+		}
 		if command.Function != nil && command.Function.ReturnType != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockClass) {
 			name := file.Text(command.Function.Name)
 			if strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new") {

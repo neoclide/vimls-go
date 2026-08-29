@@ -644,7 +644,9 @@ func suppressInvalidInterfaceInitializers(file *File) {
 func blockHeaderHasVimDiagnostic(file *File, headerIndex int) bool {
 	header := file.Commands[headerIndex]
 	for _, diagnostic := range file.Diagnostics {
-		if strings.HasPrefix(diagnostic.Code, "vim/") && diagnostic.Span.Start >= header.Argument.Start && diagnostic.Span.End <= header.Argument.End {
+		inArgument := diagnostic.Span.Start >= header.Argument.Start && diagnostic.Span.End <= header.Argument.End
+		onBang := header.Bang.Start < header.Bang.End && diagnostic.Span == header.Bang
+		if strings.HasPrefix(diagnostic.Code, "vim/") && (inArgument || onBang) {
 			return true
 		}
 	}
