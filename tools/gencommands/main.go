@@ -73,6 +73,8 @@ func main() {
 				selected = append(selected, "FileArgument")
 			case "EX_EXPORT":
 				selected = append(selected, "Exportable")
+			case "EX_NONWHITE_OK":
+				selected = append(selected, "AllowNonWhite")
 			}
 		}
 		flagExpression := "0"

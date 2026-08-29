@@ -3,7 +3,7 @@ package vimdata
 import "strings"
 
 // CommandFlags are the Ex command properties needed at parse time.
-type CommandFlags uint8
+type CommandFlags uint16
 
 const (
 	AllowBang CommandFlags = 1 << iota
@@ -14,6 +14,7 @@ const (
 	ExactInVim9
 	FileArgument
 	Exportable
+	AllowNonWhite
 )
 
 // Command describes one built-in Ex command from the pinned Vim baseline.
