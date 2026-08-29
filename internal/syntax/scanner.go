@@ -2141,6 +2141,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				right, rightDiagnostics = parseExpression(source[rightStart:], command.Argument.Start+rightStart, command.Dialect)
 			}
 			operator := Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + assignment.End}
+			diagnoseVim9AssignmentSpacing(file, command, operator)
 			command.Expressions = append(command.Expressions, &Expression{
 				Kind: ExpressionAssignment, Span: Span{Start: left.Span.Start, End: right.Span.End}, Operator: operator,
 				Value: file.Text(operator), Children: []*Expression{left, right},
@@ -2168,6 +2169,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		assignment.Start += command.Argument.Start
 		assignment.End += command.Argument.Start
+		diagnoseVim9AssignmentSpacing(file, command, assignment)
 		left := file.Source[command.Argument.Start:assignment.Start]
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
 		rightStart := skipSpace(file.Source, assignment.End, command.Argument.End)
@@ -3204,6 +3206,20 @@ func diagnoseEnumAbstractMember(file *File, command *Command) {
 			return
 		}
 	}
+}
+
+func diagnoseVim9AssignmentSpacing(file *File, command *Command, assignment Span) {
+	if command == nil || command.Dialect != Vim9 || assignment.Start < command.Argument.Start || assignment.End > command.Argument.End {
+		return
+	}
+	spaceBefore := assignment.Start > command.Argument.Start && isExpressionSpace(file.Source[assignment.Start-1])
+	spaceAfter := assignment.End >= command.Argument.End || isExpressionSpace(file.Source[assignment.End])
+	if spaceBefore && spaceAfter {
+		return
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{
+		Code: "vim/E1004", Message: "white space required before and after assignment operator", Span: assignment,
+	})
 }
 
 func parseDeclarationTarget(file *File, command *Command, declaration *Declaration, source string, diagnostics []Diagnostic) (*Expression, []Diagnostic) {
