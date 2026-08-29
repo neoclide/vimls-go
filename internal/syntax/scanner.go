@@ -2459,6 +2459,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 		case command.Dialect == Vim9 && inDef && diagnostic.Code == "vim/E260":
 			diagnostic.Code = "vim/E488"
 			diagnostic.Message = "trailing characters"
+		case command.Dialect == Vim9 && diagnostic.Code == "vimls/missing-call-comma":
+			diagnostic.Code = "vim/E116"
+			diagnostic.Message = "Invalid arguments for function"
+			if inDef {
+				diagnostic.Code = "vim/E1123"
+				diagnostic.Message = "Missing comma before argument"
+			}
 		case diagnostic.Code == "vimls/missing-list-end":
 			diagnostic.Code = "vim/E696"
 			diagnostic.Message = "Missing comma in List"

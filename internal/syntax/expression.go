@@ -696,9 +696,25 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 	case "(":
 		p.advance()
 		children := []*Expression{left}
+		missingComma := false
 		for p.current().kind != expressionEOF && p.current().text != ")" {
-			children = append(children, p.parse(0))
+			argument := p.parse(0)
+			children = append(children, argument)
 			if p.current().text != "," {
+				next := p.current()
+				startsArgument := next.kind == expressionIdentifier || next.kind == expressionNumber || next.kind == expressionString ||
+					next.kind == expressionBlob || next.kind == expressionInterpolatedString ||
+					next.text == "(" || next.text == "[" || next.text == "{" || next.text == "#{" ||
+					next.text == "!" || next.text == "+" || next.text == "-" || next.text == "<"
+				if p.dialect == Vim9 && startsArgument && next.span.Start > argument.Span.End && p.onlyWhitespace(argument.Span.End, next.span.Start) {
+					if !missingComma {
+						p.diagnostics = append(p.diagnostics, Diagnostic{
+							Code: "vimls/missing-call-comma", Message: "missing comma before call argument", Span: next.span,
+						})
+						missingComma = true
+					}
+					continue
+				}
 				break
 			}
 			p.advance()

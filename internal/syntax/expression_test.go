@@ -905,6 +905,62 @@ func TestOfficialVim9CallableParenthesisSpacing(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9CallMissingComma(t *testing.T) {
+	// Vim v9.2.1015 src/testdir/test_vim9_expr.vim:3866.
+	tests := []struct {
+		name   string
+		source string
+		code   string
+	}{
+		{
+			name:   "def",
+			source: "def Func()\n  var Ref = function('len' [1, 2])\n  var after = 1\nenddef\n",
+			code:   "vim/E1123",
+		},
+		{
+			name:   "vim9-script",
+			source: "vim9script\nvar Ref = function('len' [1, 2])\nvar after = 1\n",
+			code:   "vim/E116",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Text(file.Diagnostics[0].Span) != "[" {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			var ref, after *Declaration
+			for index := range file.Commands {
+				declaration := file.Commands[index].Declaration
+				if declaration == nil {
+					continue
+				}
+				switch file.Text(declaration.Name) {
+				case "Ref":
+					ref = declaration
+				case "after":
+					after = declaration
+				}
+			}
+			if ref == nil || ref.Initializer == nil || ref.Initializer.Kind != ExpressionCall || len(ref.Initializer.Children) != 3 {
+				t.Fatalf("Ref declaration = %#v", ref)
+			}
+			if file.Text(ref.Initializer.Span) != "function('len' [1, 2])" || file.Text(ref.Initializer.Children[1].Span) != "'len'" || file.Text(ref.Initializer.Children[2].Span) != "[1, 2]" {
+				t.Fatalf("call = %#v", ref.Initializer)
+			}
+			if after == nil || file.Text(after.Initializer.Span) != "1" {
+				t.Fatalf("following declaration = %#v", after)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	valid := Parse("vim9script\nvar Ref = function('len', [1, 2])\n")
+	if len(valid.Diagnostics) != 0 || valid.Commands[1].Declaration == nil || len(valid.Commands[1].Declaration.Initializer.Children) != 3 {
+		t.Fatalf("valid call = %#v, diagnostics = %#v", valid.Commands, valid.Diagnostics)
+	}
+}
+
 func TestOfficialMultilineMethodOperatorSpacing(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_expr.vim Test_expr9_method_call.
 	for _, source := range []string{
