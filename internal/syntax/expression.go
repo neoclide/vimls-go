@@ -840,13 +840,32 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 		}
 		p.advance()
 		if p.dialect == Vim9 {
-			if tail := strings.IndexAny(member.text, "#:"); tail >= 0 {
-				p.diagnostics = append(p.diagnostics, Diagnostic{
-					Code: "vimls/invalid-member-tail", Message: "member name has trailing characters",
-					Span: Span{Start: member.span.Start + tail, End: member.span.Start + tail + 1},
-				})
+			lineEnd := len(p.source)
+			if newline := strings.IndexByte(p.source[member.span.End-p.base:], '\n'); newline >= 0 {
+				lineEnd = member.span.End - p.base + newline
 			}
-			if p.current().text == ":" && p.current().span.Start == member.span.End {
+			parenthesis := strings.IndexByte(p.source[member.span.End-p.base:lineEnd], '(')
+			if token.text == "->" && parenthesis < 0 {
+				target := strings.TrimSpace(p.source[member.span.Start-p.base : lineEnd])
+				insertion := Span{Start: p.base + lineEnd, End: p.base + lineEnd}
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E107", Message: "Missing parentheses: " + target, Span: insertion,
+				})
+				callable := &Expression{Kind: ExpressionIdentifier, Span: member.span, Value: member.text}
+				return &Expression{
+					Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: member.span.End},
+					Operator: token.span, Value: "->", Children: []*Expression{callable, left},
+				}
+			}
+			if token.text == "." {
+				if tail := strings.IndexAny(member.text, "#:"); tail >= 0 {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vimls/invalid-member-tail", Message: "member name has trailing characters",
+						Span: Span{Start: member.span.Start + tail, End: member.span.Start + tail + 1},
+					})
+				}
+			}
+			if token.text == "." && p.current().text == ":" && p.current().span.Start == member.span.End {
 				tail := p.current()
 				p.advance()
 				end := tail.span.End

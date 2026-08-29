@@ -1317,6 +1317,60 @@ func TestVim9LambdaTailDiagnostics(t *testing.T) {
 	}
 }
 
+func TestVim9MethodCallableMissingParentheses(t *testing.T) {
+	for _, source := range []string{
+		"def F()\nvar x = 'yes'->g:Echo\nvar after = 1\nenddef\n",
+		"vim9script\nvar x = 'yes'->g:Echo\nvar after = 1\n",
+		"def F()\nvar l = [2]\nl->((ll) => add(ll, 8))\nvar after = 1\nenddef\n",
+		"vim9script\nvar l = [2]\nl->((ll) => add(ll, 8))\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		message := "Missing parentheses: lambda"
+		if strings.Contains(source, "g:Echo") {
+			message = "Missing parentheses: g:Echo"
+		}
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E107" || file.Diagnostics[0].Message != message || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End {
+			t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+		}
+		var method *Expression
+		for _, command := range file.Commands {
+			for _, expression := range command.Expressions {
+				if expression.Kind == ExpressionCall && expression.Value == "->" {
+					method = expression
+				}
+			}
+			if command.Declaration != nil && command.Declaration.Initializer != nil && command.Declaration.Initializer.Kind == ExpressionCall && command.Declaration.Initializer.Value == "->" {
+				method = command.Declaration.Initializer
+			}
+		}
+		if method == nil || len(method.Children) != 2 || method.Children[0] == nil || method.Children[1] == nil {
+			t.Fatalf("method = %#v", method)
+		}
+		if strings.Contains(source, "((ll)") && (method.Children[0].Kind != ExpressionParenthesized || len(method.Children[0].Children) != 1 || method.Children[0].Children[0].Kind != ExpressionLambda) {
+			t.Fatalf("lambda callable was not retained: %#v", method)
+		}
+		if strings.Contains(source, "g:Echo") && (method.Children[0].Kind != ExpressionIdentifier || method.Children[0].Value != "g:Echo") {
+			t.Fatalf("named callable was not retained: %#v", method)
+		}
+		foundAfter := false
+		for _, command := range file.Commands {
+			foundAfter = foundAfter || command.Declaration != nil && file.Text(command.Declaration.Name) == "after"
+		}
+		if !foundAfter {
+			t.Fatalf("following declaration was swallowed: %#v", file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+	for _, source := range []string{"'yes'->g:Echo()", "l->((ll) => add(ll, 8))()"} {
+		if _, diagnostics := (Vim9ExpressionParser{}).Parse(source); len(diagnostics) != 0 {
+			t.Fatalf("valid method %q diagnostics = %#v", source, diagnostics)
+		}
+	}
+	if _, diagnostics := (LegacyExpressionParser{}).Parse("'yes'->g:Echo"); len(diagnostics) != 0 {
+		t.Fatalf("legacy diagnostics = %#v", diagnostics)
+	}
+}
+
 func TestOfficialVim9CallableParenthesisSpacing(t *testing.T) {
 	// Vim v9.2.1015 src/testdir/test_vim9_expr.vim:4480.
 	source := "vim9script\nvar l = [2]\nl->((ll) => add(ll, 8)) ()\nvar after = 1\necho after\n"
