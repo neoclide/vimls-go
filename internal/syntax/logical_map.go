@@ -23,6 +23,27 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 		Blocks:  file.Blocks,
 	}
 	parseCommandDetails(temporary, &temporaryCommand)
+	if declaration := temporaryCommand.Declaration; declaration != nil && declaration.Initializer != nil &&
+		declaration.Initializer.Kind == ExpressionList && len(temporary.Diagnostics) == 1 &&
+		(temporary.Diagnostics[0].Code == "vim/E696" || temporary.Diagnostics[0].Code == "vim/E697") &&
+		temporary.Diagnostics[0].Span.Start == temporaryCommand.Argument.End && logical.view.Next < len(file.Source) {
+		end := trimExpressionSpaceEnd(logical.view.Text, temporaryCommand.Argument.Start, temporaryCommand.Argument.End)
+		nextEnd, _ := physicalLineEnd(file.Source, logical.view.Next)
+		nextStart := skipSpace(file.Source, logical.view.Next, nextEnd)
+		if end > temporaryCommand.Argument.Start && logical.view.Text[end-1] == ',' &&
+			startsVim9RecoveryCommand(file.Source, nextStart, nextEnd) {
+			// A following statement ends this incomplete continuation.  Retain
+			// the parsed items, but keep the unterminated List itself on its '['.
+			declaration.Initializer.Span.End = declaration.Initializer.Span.Start + 1
+			for _, expression := range temporaryCommand.Expressions {
+				if expression != nil && expression.Kind == ExpressionAssignment && len(expression.Children) == 2 && expression.Children[1] == declaration.Initializer {
+					expression.Span.End = declaration.Initializer.Span.End
+				}
+			}
+			temporary.Diagnostics[0].Code = "vimls/missing-delimiter"
+			temporary.Diagnostics[0].Message = "expected ] before following command"
+		}
+	}
 	logical.command.boundaryExpression = nil
 	command.boundaryExpression = nil
 	normalizeLambdaBodySources(temporary)
