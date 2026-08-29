@@ -130,6 +130,9 @@ func buildBlocks(file *File) {
 			blockIndex := len(file.Blocks)
 			file.Blocks = append(file.Blocks, Block{Kind: kind, Span: Span{Start: command.Span.Start, End: len(file.Source)}, Header: commandIndex, End: -1, Parent: parent})
 			command.Block = blockIndex
+			if isInvalidAbstractHeader(command) {
+				recoveryBlocks[blockIndex] = true
+			}
 			if kind == BlockFor {
 				argument := file.Text(command.Argument)
 				invalidFor[blockIndex] = findTopLevelKeyword(argument, 0, len(argument), "in") < 0
@@ -297,6 +300,22 @@ func buildBlocks(file *File) {
 			Code: "vimls/missing-end", Message: "block is missing its end command", Span: file.Commands[block.Header].Name,
 		})
 	}
+}
+
+// isInvalidAbstractHeader identifies the Vim9 form where the abstract
+// modifier is followed by neither a declaration nor an aggregate opener.
+// Keeping this predicate shared by scanning and block construction ensures
+// the retained command can still pair its following endclass during recovery.
+func isInvalidAbstractHeader(command *Command) bool {
+	if command == nil || command.Dialect != Vim9 || command.Kind != CommandUnknown {
+		return false
+	}
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == "abstract" {
+			return true
+		}
+	}
+	return false
 }
 
 func stackHasInvalidFor(stack []int, invalidFor map[int]bool) bool {
@@ -516,6 +535,9 @@ func implicitlyClosedByFunction(kind BlockKind) bool {
 }
 
 func openingBlock(file *File, command *Command) (BlockKind, bool) {
+	if isInvalidAbstractHeader(command) {
+		return BlockClass, true
+	}
 	switch command.Canonical {
 	case "if":
 		return BlockIf, true

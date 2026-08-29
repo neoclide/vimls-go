@@ -1186,6 +1186,13 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 		parsedCommand.Span.End = commandEnd
 		parsedCommand.Argument.End = argumentEnd
 		parsedCommand.boundaryExpression = boundaryExpression
+		if isInvalidAbstractHeader(&parsedCommand) {
+			invalid := Span{Start: parsedCommand.Name.Start, End: parsedCommand.Argument.End}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E475", Message: "Invalid argument: " + file.Text(invalid), Span: invalid,
+			})
+			parsedCommand.detailsOpaque = true
+		}
 		// Vim9 aggregate terminators do not accept an argument.  Keep the
 		// terminator command in the stream so block pairing remains intact, but
 		// make the rest of this physical command opaque after reporting E488.
