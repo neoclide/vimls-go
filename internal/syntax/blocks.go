@@ -7,13 +7,35 @@ func buildBlocks(file *File) {
 	enumValuesOpen := make(map[int]bool)
 	invalidFor := make(map[int]bool)
 	recoveryBlocks := make(map[int]bool)
+	interfaceMethod := make(map[int]bool)
+	interfaceMethodInvalid := make(map[int]bool)
 	for commandIndex := range file.Commands {
 		command := &file.Commands[commandIndex]
 		if len(stack) > 0 {
 			blockIndex := stack[len(stack)-1]
-			if file.Blocks[blockIndex].Kind == BlockInterface && command.Canonical == "def" {
-				command.Block = blockIndex
-				continue
+			if file.Blocks[blockIndex].Kind == BlockInterface {
+				if command.Canonical == "def" {
+					command.Block = blockIndex
+					interfaceMethod[blockIndex] = true
+					continue
+				}
+				if interfaceMethod[blockIndex] && command.Canonical == "enddef" {
+					command.Block = blockIndex
+					interfaceMethod[blockIndex] = false
+					interfaceMethodInvalid[blockIndex] = false
+					continue
+				}
+				if interfaceMethod[blockIndex] && interfaceMethodInvalid[blockIndex] {
+					command.Block = blockIndex
+					continue
+				}
+				if interfaceMethod[blockIndex] && command.Canonical != "endinterface" && !isDirectAggregateMember(command) {
+					command.Block = blockIndex
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1345", Message: "Not a valid command in an interface: " + file.Text(Span{Start: command.Name.Start, End: command.Argument.End}), Span: Span{Start: command.Name.Start, End: command.Argument.End}})
+					interfaceMethodInvalid[blockIndex] = true
+					continue
+				}
+				interfaceMethod[blockIndex] = false
 			}
 			if file.Blocks[blockIndex].Kind == BlockEnum && enumValuesOpen[blockIndex] {
 				if closeKind, closing := closingBlock(file, command); !closing || closeKind != BlockEnum {

@@ -637,6 +637,23 @@ func TestVim9InterfaceMemberInitializer(t *testing.T) {
 	})
 }
 
+func TestVim9InterfaceMethodBodyRecovery(t *testing.T) {
+	file := Parse("vim9script\ninterface SomethingWrong\n  def GetCount(): number\n    return 5\n  enddef\nendinterface\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1345" || file.Text(file.Diagnostics[0].Span) != "return 5" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 7 || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockInterface || file.Blocks[0].End != 5 || file.Commands[2].Function == nil || file.Commands[3].Canonical != "return" || file.Commands[4].Canonical != "enddef" || file.Commands[5].Canonical != "endinterface" || file.Commands[6].Declaration == nil || file.Text(file.Commands[6].Declaration.Name) != "after" {
+		t.Fatalf("commands = %#v blocks = %#v", file.Commands, file.Blocks)
+	}
+	assertFileSpans(t, file)
+
+	valid := Parse("vim9script\ninterface Good\n  def First(): number\n  var value: string\n  def Second(): number\nendinterface\nvar after = 1\n")
+	if len(valid.Diagnostics) != 0 || len(valid.Blocks) != 1 || len(valid.Commands[1].Aggregate.Members) != 3 || valid.Commands[6].Declaration == nil {
+		t.Fatalf("valid interface = %#v, diagnostics = %#v", valid.Commands, valid.Diagnostics)
+	}
+	assertFileSpans(t, valid)
+}
+
 func TestVim9EnumEndTrailingCharacters(t *testing.T) {
 	t.Run("trailing payload", func(t *testing.T) {
 		file := Parse("vim9script\nenum Something\nendenum school's out\nvar after = 1\n")
