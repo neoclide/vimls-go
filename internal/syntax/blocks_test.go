@@ -266,7 +266,7 @@ func TestOfficialLegacyFunctionDefinitionAllowsSpaceBeforeParameters(t *testing.
 
 func TestVim9UnmatchedScopeEndRecovers(t *testing.T) {
 	file := (Vim9Parser{}).Parse("}\nvar after = 1\n")
-	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vimls/unexpected-end" || len(file.Commands) != 2 || file.Commands[1].Declaration == nil {
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1025" || len(file.Commands) != 2 || file.Commands[1].Declaration == nil {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}
 }

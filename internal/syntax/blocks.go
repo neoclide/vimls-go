@@ -253,6 +253,10 @@ func buildBlocks(file *File) {
 				}
 			}
 			if !closes {
+				if command.Dialect == Vim9 && command.Canonical == "}" {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1025", Message: "closing } without opening {", Span: command.Name})
+					continue
+				}
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-end", Message: "end command has no matching block", Span: command.Name})
 				continue
 			}
@@ -419,6 +423,12 @@ func buildBlocks(file *File) {
 			continue
 		}
 		block := &file.Blocks[blockIndex]
+		if block.Kind == BlockScope && block.Header >= 0 {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1026", Message: "missing }", Span: file.Commands[block.Header].Name,
+			})
+			continue
+		}
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vimls/missing-end", Message: "block is missing its end command", Span: file.Commands[block.Header].Name,
 		})
@@ -672,6 +682,8 @@ func vim9MissingBlockEndDiagnostic(kind BlockKind, span Span) (Diagnostic, bool)
 		return Diagnostic{Code: "vim/E170", Message: "missing :endwhile", Span: span}, true
 	case BlockTry:
 		return Diagnostic{Code: "vim/E600", Message: "missing :endtry", Span: span}, true
+	case BlockScope:
+		return Diagnostic{Code: "vim/E1026", Message: "missing }", Span: span}, true
 	default:
 		return Diagnostic{}, false
 	}
