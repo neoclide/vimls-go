@@ -483,10 +483,10 @@ func suppressClassBodyCommandDiagnostics(file *File) {
 	file.Diagnostics = kept
 }
 
-func suppressInvalidDefMissingEnds(file *File) {
+func suppressInvalidBlockMissingEnds(file *File) {
 	var invalid map[Span]bool
 	for _, block := range file.Blocks {
-		if block.Kind == BlockDef && block.End < 0 && blockHeaderHasVimDiagnostic(file, block.Header) {
+		if block.End < 0 && (block.Kind == BlockDef || file.Commands[block.Header].Dialect == Vim9) && blockHeaderHasVimDiagnostic(file, block.Header) {
 			if invalid == nil {
 				invalid = make(map[Span]bool)
 			}

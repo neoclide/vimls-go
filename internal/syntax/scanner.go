@@ -438,7 +438,7 @@ func parseSource(source string, initial Dialect) *File {
 	}
 	suppressClassBodyCommandDiagnostics(file)
 	buildAggregateMembers(file)
-	suppressInvalidDefMissingEnds(file)
+	suppressInvalidBlockMissingEnds(file)
 	suppressInvalidInterfaceInitializers(file)
 	normalizeLambdaBodySources(file)
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
@@ -2697,7 +2697,17 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 	case "unlet", "lockvar", "unlockvar":
 		parseVariableTargets(file, command)
-	case "if", "elseif", "while", "return", "throw", "call", "eval", "defer", "caddexpr", "cexpr", "cgetexpr", "laddexpr", "lexpr", "lgetexpr":
+	case "if", "elseif", "while":
+		expression, diagnostics, ok := takeBoundaryExpression(command)
+		if !ok {
+			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
+		}
+		command.Expressions = append(command.Expressions, expression)
+		if command.Dialect == Vim9 {
+			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
+		}
+		file.Diagnostics = append(file.Diagnostics, diagnostics...)
+	case "return", "throw", "call", "eval", "defer", "caddexpr", "cexpr", "cgetexpr", "laddexpr", "lexpr", "lgetexpr":
 		expression, diagnostics, ok := takeBoundaryExpression(command)
 		if !ok {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)

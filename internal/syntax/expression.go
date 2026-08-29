@@ -131,7 +131,7 @@ func newExpressionBoundary(argument Span, expression *Expression, diagnostics []
 func appendTrailingExpressionDiagnostic(diagnostics []Diagnostic, base, consumed, length int) []Diagnostic {
 	if consumed < length {
 		for _, diagnostic := range diagnostics {
-			if diagnostic.Code == "vim/E1004" || diagnostic.Code == "vim/E274" || diagnostic.Code == "vim/E1170" || diagnostic.Code == "vimls/invalid-atom" {
+			if diagnostic.Code == "vim/E1004" || diagnostic.Code == "vim/E109" || diagnostic.Code == "vim/E274" || diagnostic.Code == "vim/E1170" || diagnostic.Code == "vimls/invalid-atom" {
 				// Vim stops the current expression at these errors.
 				// Keep the remaining bytes opaque instead of reporting a cascade.
 				return diagnostics
