@@ -368,6 +368,7 @@ func parseSource(source string, initial Dialect) *File {
 	if truncateAfterDirectFinish(file, scannerDiagnostics) {
 		buildBlocks(file)
 	}
+	normalizeVim9SpacedCallDiagnostics(file)
 	for index := range file.Commands {
 		if !file.Commands[index].detailsOpaque && (file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute") {
 			parseLogicalCommandDetails(file, &file.Commands[index])
@@ -381,6 +382,35 @@ func parseSource(source string, initial Dialect) *File {
 		return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start
 	})
 	return file
+}
+
+func normalizeVim9SpacedCallDiagnostics(file *File) {
+	for diagnosticIndex := range file.Diagnostics {
+		diagnostic := &file.Diagnostics[diagnosticIndex]
+		if diagnostic.Code != "vim/E476" || diagnostic.Message != "invalid command: whitespace before function arguments" {
+			continue
+		}
+		commandIndex := sort.Search(len(file.Commands), func(index int) bool {
+			return file.Commands[index].Name.Start >= diagnostic.Span.Start
+		})
+		if commandIndex == len(file.Commands) || file.Commands[commandIndex].Name != diagnostic.Span {
+			continue
+		}
+		command := &file.Commands[commandIndex]
+		inDef := false
+		for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
+			if file.Blocks[block].Kind == BlockDef {
+				inDef = true
+				break
+			}
+		}
+		if inDef {
+			diagnostic.Message = "Invalid command"
+		} else {
+			diagnostic.Code = "vim/E492"
+			diagnostic.Message = "Not an editor command"
+		}
+	}
 }
 
 // coalesceLegacyEmbeddedBlocks models the source-line callback used by
@@ -1169,12 +1199,11 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 			}
 			if !builtIn && startsUpper(typedName) && spacedVim9Call(file.Source, nameEnd, end) {
 				// At command start Vim still treats this as an Ex command, not
-				// an expression.  In a script the resulting error is E492; in a
-				// compiled def it is E476.  E476 is the syntax-level diagnostic
-				// that remains meaningful without executing or compiling a body.
+				// an expression.  Block construction below determines whether
+				// Vim reports script-level E492 or compiled-def E476.
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{
 					Code: "vim/E476", Message: "invalid command: whitespace before function arguments",
-					Span: Span{Start: nameEnd, End: vim9CallOpen(file.Source, nameEnd, end)},
+					Span: nameSpan,
 				})
 			}
 			if canonical == "call" {

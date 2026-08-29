@@ -676,6 +676,7 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_vim9_expr.vim:4485:129977/def":           "vim/E488",
 		"src/testdir/test_vim9_expr.vim:4485:129977/vim9-script":   "vim/E488",
 		"src/testdir/test_vim9_expr.vim:4487:130048/def":           "vim/E476",
+		"src/testdir/test_vim9_expr.vim:4487:130048/vim9-script":   "vim/E492",
 		"src/testdir/test_listdict.vim:529:14207/def":              "vim/E1004",
 		"src/testdir/test_listdict.vim:1521:47598/legacy":          "vim/E15",
 		"src/testdir/test_listdict.vim:1521:47598/def":             "vim/E1127",

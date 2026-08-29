@@ -240,13 +240,17 @@ func TestOfficialVim9WhitespaceBeforeCallParen(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_expr.vim:4487 and
 	// src/testdir/test_vim9_func.vim:781.  Vim reports E492 for the
 	// top-level unknown command and E476 while compiling a def; the parser
-	// keeps the command opaque and uses the syntax-level E476 diagnostic.
+	// keeps the command opaque in both contexts.
 	bare := Parse("vim9script\nCallMe ('yes')\n")
 	if len(bare.Commands) != 2 || bare.Commands[1].Kind != CommandUser || bare.Commands[1].Canonical != "CallMe" {
 		t.Fatalf("bare call command = %#v", bare.Commands)
 	}
-	if !hasDiagnostic(bare, "vim/E476") {
+	if !hasDiagnostic(bare, "vim/E492") {
 		t.Fatalf("bare call diagnostics = %#v", bare.Diagnostics)
+	}
+	compiled := Parse("def Func()\n  CallMe ('yes')\nenddef\ndefcompile\n")
+	if len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "vim/E476" || compiled.Text(compiled.Diagnostics[0].Span) != "CallMe" {
+		t.Fatalf("compiled call diagnostics = %#v", compiled.Diagnostics)
 	}
 
 	call := Parse("vim9script\ncall Test ('text')\n")
