@@ -1841,7 +1841,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		declaration := parseDeclarationHead(file, left, command.Argument.Start)
 		rightStart := skipSpace(file.Source, assignment.End, command.Argument.End)
 		rhs := Span{Start: rightStart, End: command.Argument.End}
-		expression, diagnostics, reused := takeValidBoundaryExpression(command, rhs)
+		expression, diagnostics, reused := takeRecoveringBoundaryExpression(command, rhs)
 		if !reused {
 			expression, diagnostics = parseExpression(file.Source[rightStart:command.Argument.End], rightStart, command.Dialect)
 		}
@@ -1904,7 +1904,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				expression, diagnostics, _ = takeLegacyPutExpressionBoundary(command, rhs)
 			} else {
 				rhs := Span{Start: command.Argument.Start + start, End: command.Argument.End}
-				expression, diagnostics, _ = takeVim9PutExpressionBoundary(command, rhs)
+				expression, diagnostics, _ = takeRecoveringBoundaryExpression(command, rhs)
 			}
 			if expression == nil {
 				expression, diagnostics = parseExpression(source[start:], command.Argument.Start+start, command.Dialect)
@@ -1933,7 +1933,7 @@ func takeValidBoundaryExpression(command *Command, argument Span) (*Expression, 
 	return boundary.expression, boundary.diagnostics, true
 }
 
-func takeVim9PutExpressionBoundary(command *Command, argument Span) (*Expression, []Diagnostic, bool) {
+func takeRecoveringBoundaryExpression(command *Command, argument Span) (*Expression, []Diagnostic, bool) {
 	boundary := command.boundaryExpression
 	command.boundaryExpression = nil
 	if boundary == nil || boundary.argument != argument || boundary.argument.End <= boundary.argument.Start || boundary.expression == nil {
@@ -2923,9 +2923,9 @@ func completeVim9TypedDeclaration(command Command, source string) bool {
 		}
 		if boundary := command.boundaryExpression; boundary != nil {
 			rhs := Span{Start: argumentStart + rightStart, End: argumentEnd}
-			if boundary.argument == rhs && boundary.argument.End > boundary.argument.Start && boundary.expression != nil && boundary.expression.Span.End > boundary.expression.Span.Start && len(boundary.diagnostics) == 0 {
-				return true
-			}
+			return boundary.argument == rhs && boundary.argument.End > boundary.argument.Start &&
+				boundary.expression != nil && boundary.expression.Span.End > boundary.expression.Span.Start &&
+				len(boundary.diagnostics) == 0
 		}
 		_, diagnostics := parseExpression(source[rightStart:], rightStart, Vim9)
 		return len(diagnostics) == 0

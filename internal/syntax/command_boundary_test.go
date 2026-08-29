@@ -766,6 +766,42 @@ func TestVim9TypedDeclarationBoundaryProbeFallsBackOnMalformedRHS(t *testing.T) 
 	assertFileSpans(t, file)
 }
 
+func TestVim9TypedDeclarationBoundaryProbeMapsMalformedContinuation(t *testing.T) {
+	source := "vim9script\nvar values: list<number> = [\n  1,\n  2,\nvar after = 3\n"
+	file := Parse(source)
+	if len(file.Commands) != 3 || len(file.Diagnostics) != 1 || countTokens(file, TokenContinuation) != 2 {
+		t.Fatalf("commands = %#v, diagnostics = %#v, tokens = %#v", file.Commands, file.Diagnostics, file.Tokens)
+	}
+	broken := file.Commands[1].Declaration
+	if broken == nil || broken.Initializer == nil || broken.Initializer.Kind != ExpressionList || len(broken.Initializer.Children) != 2 {
+		t.Fatalf("malformed declaration = %#v", file.Commands[1])
+	}
+	if file.Text(broken.Initializer.Span) != "[" || file.Text(broken.Initializer.Children[0].Span) != "1" || file.Text(broken.Initializer.Children[1].Span) != "2" {
+		t.Fatalf("initializer = %#v", broken.Initializer)
+	}
+	if diagnostic := file.Diagnostics[0]; diagnostic.Code != "vimls/missing-delimiter" || diagnostic.Span != (Span{Start: 49, End: 49}) {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	if after := file.Commands[2].Declaration; after == nil || file.Text(after.Name) != "after" || file.Text(after.Initializer.Span) != "3" {
+		t.Fatalf("following declaration = %#v", file.Commands[2])
+	}
+	assertFileSpans(t, file)
+}
+
+func TestVim9TypedDeclarationBoundaryProbeOwnsMalformedLine(t *testing.T) {
+	file := Parse("vim9script\nvar broken = [1, 2} | echo hidden\nvar after = 3\n")
+	if len(file.Commands) != 3 || len(file.Diagnostics) != 2 || countTokens(file, TokenSeparator) != 0 {
+		t.Fatalf("commands = %#v, diagnostics = %#v, tokens = %#v", file.Commands, file.Diagnostics, file.Tokens)
+	}
+	if broken := file.Commands[1]; broken.Declaration == nil || broken.Declaration.Initializer == nil || file.Text(broken.Argument) != "broken = [1, 2} | echo hidden" {
+		t.Fatalf("malformed declaration = %#v", broken)
+	}
+	if after := file.Commands[2].Declaration; after == nil || file.Text(after.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands[2])
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9TypedDeclarationBoundaryProbeExcludesHeredoc(t *testing.T) {
 	source := "vim9script\nvar text =<< END\npayload | not a command\nEND\nvar after = 1\n"
 	file := Parse(source)

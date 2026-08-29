@@ -272,7 +272,7 @@ func scanVim9Declaration(source string, start, end int, command vimdata.Command)
 		return trimSpaceEnd(source, start, end), Span{}, Span{}, nil
 	}
 	argumentEnd, expressionSeparator, expressionComment, boundary := scanVim9Expression(source, right, end)
-	if boundary == nil || len(boundary.diagnostics) > 0 || boundary.argument != (Span{Start: right, End: trimSpaceEnd(source, right, argumentEnd)}) || boundary.expression == nil {
+	if boundary == nil || boundary.argument != (Span{Start: right, End: trimSpaceEnd(source, right, argumentEnd)}) || boundary.expression == nil {
 		return trimSpaceEnd(source, start, argumentEnd), expressionSeparator, expressionComment, nil
 	}
 	return trimSpaceEnd(source, start, argumentEnd), expressionSeparator, expressionComment, boundary
