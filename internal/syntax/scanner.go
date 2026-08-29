@@ -1002,6 +1002,14 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 				}
 				return
 			}
+			if file.Source[start] == '{' {
+				file.Tokens = append(file.Tokens, Token{Kind: TokenArgument, Span: Span{Start: start, End: end}})
+				file.Commands = append(file.Commands, Command{
+					Kind: CommandExpression, Dialect: dialect, Span: Span{Start: commandStart, End: end}, Range: commandRange,
+					Modifiers: parsedModifiers, Argument: Span{Start: start, End: end}, Block: -1,
+				})
+				return
+			}
 		}
 
 		nameStart := start
@@ -2264,10 +2272,10 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if !reused {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
-		if len(diagnostics) == 1 && diagnostics[0].Code == "vimls/missing-list-end" {
+		command.Expressions = append(command.Expressions, expression)
+		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vim/E722") {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
 		}
-		command.Expressions = append(command.Expressions, expression)
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		return
 	}
@@ -2396,6 +2404,7 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 		}
 	}
 	hasAssignment := assignmentExpression || command.Declaration != nil && command.Declaration.Assignment.End > command.Declaration.Assignment.Start
+	commandDictionary := len(command.Expressions) == 1 && command.Expressions[0] != nil && command.Expressions[0].Kind == ExpressionDictionary
 	if command.Dialect == Vim9 && command.Declaration != nil {
 		diagnostics = mapVim9LambdaTrailingParen(diagnostics, command.Declaration.Initializer, file.Source, 0)
 		initializer := command.Declaration.Initializer
@@ -2421,6 +2430,9 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
+		case command.Dialect == Vim9 && inDef && !assignmentExpression && commandDictionary && diagnostic.Code == "vim/E722":
+			diagnostic.Code = "vim/E723"
+			diagnostic.Message = "Missing end of Dictionary '}'"
 		case command.Dialect == Vim9 && inDef && hasAssignment && len(diagnostics) == 1 && diagnostic.Code == "vimls/missing-expression":
 			diagnostic.Code = "vim/E1097"
 			diagnostic.Message = "line incomplete"

@@ -784,6 +784,7 @@ func (p *expressionParser) parseParenthesized() *Expression {
 	if len(children) > 0 {
 		fallback = children[len(children)-1].Span.End
 	}
+	innerDictionaryError := len(children) == 1 && children[0].Kind == ExpressionDictionary && len(p.diagnostics) > 0 && p.diagnostics[len(p.diagnostics)-1].Code == "vim/E723"
 	end := fallback
 	if p.current().text == ")" {
 		end = p.current().span.End
@@ -792,7 +793,7 @@ func (p *expressionParser) parseParenthesized() *Expression {
 		if !tupleDiagnostic {
 			reportTupleDiagnostic("vim/E1526", "missing end of tuple ')'", p.current())
 		}
-	} else {
+	} else if !innerDictionaryError {
 		end = p.consumeClosing(")", fallback)
 	}
 	if p.dialect == Vim9 && p.current().text == "=>" {
