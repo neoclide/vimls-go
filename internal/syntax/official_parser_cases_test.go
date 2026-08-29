@@ -182,6 +182,7 @@ func TestOfficialVimParserTypeFailures(t *testing.T) {
 		"src/testdir/test_vim9_func.vim:2883:66057/def":            "vim/E1180",
 		"src/testdir/test_vim9_func.vim:2885:66191/def":            "vim/E1068",
 		"src/testdir/test_vim9_func.vim:2886:66262/def":            "vim/E1069",
+		"src/testdir/test_vim9_func.vim:2887:66332/def":            "vim/E1005",
 		"src/testdir/test_vim9_func.vim:2888:66507/def":            "vim/E1069",
 	}
 

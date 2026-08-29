@@ -246,6 +246,12 @@ func (p *typeParser) parseType() *Type {
 			for p.offset < len(p.source) && p.source[p.offset] != ')' {
 				argument := p.parseType()
 				node.Arguments = append(node.Arguments, argument)
+				if len(node.Arguments) == 20 {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E1005", Message: "too many argument types",
+						Span: argument.Span,
+					})
+				}
 				if argument.Kind == TypeOptional {
 					optionalSeen = true
 				} else if argument.Kind == TypeVariadic {

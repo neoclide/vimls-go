@@ -1,6 +1,9 @@
 package syntax
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestVim9TypeParserCoversContainersTuplesAndFunctions(t *testing.T) {
 	tests := []struct {
@@ -179,6 +182,20 @@ func TestVim9TypeParserFunctionOptionalAndVariadicArguments(t *testing.T) {
 				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
 			}
 		})
+	}
+}
+
+func TestVim9TypeParserFunctionArgumentLimit(t *testing.T) {
+	nineteen := "func(" + strings.Repeat("number, ", 18) + "number)"
+	typeNode, diagnostics := (Vim9TypeParser{}).Parse(nineteen)
+	if typeNode == nil || len(typeNode.Arguments) != 19 || len(diagnostics) != 0 {
+		t.Fatalf("19 arguments: type = %#v, diagnostics = %#v", typeNode, diagnostics)
+	}
+
+	twenty := "func(" + strings.Repeat("number, ", 19) + "number)"
+	typeNode, diagnostics = (Vim9TypeParser{}).Parse(twenty)
+	if typeNode == nil || len(typeNode.Arguments) != 20 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1005" {
+		t.Fatalf("20 arguments: type = %#v, diagnostics = %#v", typeNode, diagnostics)
 	}
 }
 
