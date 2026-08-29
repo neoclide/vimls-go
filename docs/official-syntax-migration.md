@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 736 (`4f818a5`)
+- Current parser-negative syntax assertions: 747 (`4748011`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -222,7 +222,9 @@ split 733 migrated, zero ready, and 335 pending-fix. Commit `1b7b04f` migrated
 both invalid abstract headers, making the authoritative current split 735
 migrated, zero ready, and 333 pending-fix. Commit `4f818a5` completed the final
 trailing-command case, making the authoritative current split 736 migrated,
-zero ready, and 332 pending-fix.
+zero ready, and 332 pending-fix. Commit `4748011` migrated all eleven eval
+heredoc interpolation failures, making the authoritative current split 747
+migrated, zero ready, and 321 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -534,7 +536,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-incomplete-expression` | 2 | 2 | 0 | 0 |
 | `B-dialect-declaration` | 4 | 4 | 0 | 0 |
 | `B-dot-member-delimiter` | 6 | 6 | 0 | 0 |
-| `B-brace-recovery` | 15 | 4 | 0 | 11 |
+| `B-brace-recovery` | 15 | 15 | 0 | 0 |
 | `B-heredoc` | 2 | 2 | 0 | 0 |
 | `B-hash-comment` | 1 | 1 | 0 | 0 |
 | `B-user-command-arguments` | 2 | 2 | 0 | 0 |
@@ -548,9 +550,9 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-trailing-command` | 5 | 5 | 0 | 0 |
 | `B-trailing-characters` | 20 | 18 | 0 | 2 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **178** | **0** | **13** |
+| **Total** | **191** | **189** | **0** | **2** |
 
-This table reflects the current parser through `4f818a5`. Revalidation corrected
+This table reflects the current parser through `4748011`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -627,13 +629,13 @@ E1125 and invalid aggregate names keep E1317/E1329 priority. Malformed
 their `enddef`, so the declaration AST, class terminator, and following command
 remain intact without a secondary E1318.
 
-The remaining `B-brace-recovery` inventory contains eleven interpolated-string
-or `eval` heredoc recovery cases:
-E1278 is an unmatched closing brace, E1279 is an unclosed interpolation, and
-the `L:803` plus `A:3284/{def|vim9-script}` cases use E15 for an empty
-interpolation. These contexts must stay separate from command-block, lambda,
-ordinary heredoc, and legacy curly-name braces. Recovery retains the partial
-interpolation AST and stops at its current physical line or heredoc expression.
+Commit `4748011` completed `B-brace-recovery`. Eval heredocs now retain their
+interpolation expression AST: E1278 reports an unmatched closing brace, E1279
+reports an unclosed interpolation, and the `L:803` plus
+`A:3284/{def|vim9-script}` cases use E15 for an empty interpolation. Ordinary
+heredocs remain opaque. Recovery stops at the current physical line and covers
+normal markers, command-block closure, missing-marker recovery, and EOF without
+parsing the same body twice.
 Commit `a1d50fc` handled the separate `C:434:11328/script` missing
 object-method call argument (`a.Foo(,)`) in the call-argument parser. It reports
 E15 while retaining an `ExpressionMissing` argument and the complete call AST;
