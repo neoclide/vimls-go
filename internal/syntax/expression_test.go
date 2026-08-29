@@ -475,6 +475,53 @@ func TestExpressionCollectionsCallsMethodsAndComparison(t *testing.T) {
 	}
 }
 
+func TestOfficialMissingDictionaryValueContextAndRecovery(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_expr.vim Test_expr7_dict and
+	// runtime/doc/eval.txt: a Dictionary item always requires a value.
+	for _, test := range []struct {
+		name   string
+		source string
+		code   string
+		index  int
+		count  int
+	}{
+		{
+			name:   "script",
+			source: "vim9script\nvar d = {'a':\nvar after = 1\n",
+			code:   "vim/E15",
+			index:  1,
+			count:  3,
+		},
+		{
+			name:   "def",
+			source: "def Func()\n  var d = {'a':\n  var after = 1\nenddef\n",
+			code:   "vim/E723",
+			index:  1,
+			count:  4,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || len(file.Commands) != test.count {
+				t.Fatalf("file = %#v", file)
+			}
+			declaration := file.Commands[test.index].Declaration
+			if declaration == nil || declaration.Initializer == nil || declaration.Initializer.Kind != ExpressionDictionary {
+				t.Fatalf("dictionary declaration = %#v", file.Commands[test.index])
+			}
+			dictionary := declaration.Initializer
+			if len(dictionary.Children) != 2 || dictionary.Children[1].Kind != ExpressionMissing || dictionary.Children[1].Span.Start != dictionary.Children[1].Span.End || dictionary.Span.End != dictionary.Children[1].Span.End {
+				t.Fatalf("dictionary = %#v", dictionary)
+			}
+			after := file.Commands[test.index+1].Declaration
+			if after == nil || file.Text(after.Name) != "after" || file.Text(after.Initializer.Span) != "1" {
+				t.Fatalf("following declaration = %#v", file.Commands[test.index+1])
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestOfficialVim9SliceColonSpacing(t *testing.T) {
 	// v9.2.1015 runtime/doc/vim9.txt and
 	// src/testdir/test_vim9_assign.vim Test_unlet_list_slice.

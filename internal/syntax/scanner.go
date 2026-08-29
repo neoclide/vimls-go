@@ -2400,6 +2400,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 					diagnostics[0].Code = "vim/E1097"
 					diagnostics[0].Message = "line incomplete"
 				}
+			case ExpressionDictionary:
+				diagnostics[0].Code = "vim/E15"
+				diagnostics[0].Message = "invalid expression"
+				if inDef {
+					diagnostics[0].Code = "vim/E723"
+					diagnostics[0].Message = "Missing end of Dictionary '}'"
+				}
 			}
 		}
 	}
