@@ -397,6 +397,15 @@ func buildBlocks(file *File) {
 			file.Blocks[blockIndex].Span.End = command.Span.End
 			file.Blocks[blockIndex].End = commandIndex
 			command.Block = blockIndex
+			// A nested try with a repeated :finally is Vim's recovery point for
+			// the enclosing try as well.  Do not manufacture E600 for that outer
+			// block, but keep this scoped to the actual nested try relationship.
+			if multipleFinally[blockIndex] && file.Blocks[blockIndex].Parent >= 0 {
+				parent := file.Blocks[blockIndex].Parent
+				if file.Blocks[parent].Kind == BlockTry {
+					recoveryBlocks[parent] = true
+				}
+			}
 			if closeKind == BlockFunction && command.Dialect == Legacy && command.Bang.Start < command.Bang.End {
 				// A legacy function definition is collected before its body is
 				// executed.  Vim recognizes `endfunction!` as the terminator there;
