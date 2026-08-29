@@ -73,17 +73,18 @@ artifact.
 | Group | Syntax | Type | Name | Semantic | Runtime | Unknown | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | A | 325 | 270 | 65 | 37 | 45 | 130 | 872 |
-| B | 192 | 238 | 77 | 251 | 69 | 10 | 837 |
+| B | 191 | 239 | 77 | 251 | 69 | 10 | 837 |
 | C | 369 | 78 | 111 | 239 | 52 | 3 | 852 |
 | D | 183 | 484 | 54 | 47 | 166 | 5 | 939 |
-| **Total** | **1,069** | **1,070** | **307** | **574** | **332** | **148** | **3,500** |
+| **Total** | **1,068** | **1,071** | **307** | **574** | **332** | **148** | **3,500** |
 
 The original baseline classification counted 1,072 syntax variants. Review of
 the expression-command boundary group reclassified three value-dependent
-records as runtime, so the corrected baseline split is 346 migrated, 89 ready,
-and 634 pending-fix. The 362-entry expected map therefore contains 346 verified
-syntax keys and 16 cleanup keys that are non-syntax or stale. The cleanup
-membership is recorded in the source-group sections below.
+records as runtime. A later source trace reclassified the E1411 object
+assignment record as type analysis, so the corrected baseline split is 346
+migrated, 89 ready, and 633 pending-fix. The 362-entry expected map therefore
+contains 346 verified syntax keys and 16 cleanup keys that are non-syntax or
+stale. The cleanup membership is recorded in the source-group sections below.
 
 Commit `05d176c` made two invalid class-variable cases ready. Commit `55169af`
 then migrated all 91 cases that were ready in the current parser: Group A 47,
@@ -178,6 +179,10 @@ declaration variants, making the current split 636 migrated, zero ready, and
 433 pending-fix. Commits `51ee4ea` and `89a557d` completed all 15 register
 declaration variants, making the current split 651 migrated, zero ready, and
 418 pending-fix.
+
+The commit chronology above preserves the counts known at each checkpoint.
+After reclassifying E1411, the authoritative current split is 651 migrated,
+zero ready, and 417 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -488,7 +493,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-assignment-shape` | 3 | 0 | 0 | 3 |
 | `B-incomplete-expression` | 2 | 2 | 0 | 0 |
 | `B-dialect-declaration` | 4 | 4 | 0 | 0 |
-| `B-dot-member-delimiter` | 7 | 0 | 0 | 7 |
+| `B-dot-member-delimiter` | 6 | 0 | 0 | 6 |
 | `B-brace-recovery` | 15 | 3 | 0 | 12 |
 | `B-heredoc` | 2 | 2 | 0 | 0 |
 | `B-hash-comment` | 1 | 1 | 0 | 0 |
@@ -503,7 +508,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **192** | **98** | **0** | **94** |
+| **Total** | **191** | **98** | **0** | **93** |
 
 This table reflects the current parser through `89a557d`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
@@ -529,6 +534,11 @@ and E1126 respectively while retaining declaration AST and dialect recovery.
 Commits `51ee4ea` and `89a557d` completed `B-register-declaration`. Register
 targets remain in the declaration AST; Vim9 scripts report E1066, while a
 compiled `def` preserves Vim's E354 priority for read-only register names.
+
+`A:3507:89038/script` (E1411) was removed from the syntax inventory. Vim emits
+it in `compile_load_lhs_with_index()` only after resolving `o` as an object;
+the same `o += 4` syntax is valid when `o` is a number. It belongs to type
+analysis, while syntax retains the complete compound-assignment AST.
 
 ```text
 B-assign-spacing
@@ -571,7 +581,6 @@ B-dot-member-delimiter
   E1127 C:2848:63764/script
   E1202 A:3039:74843/{def|vim9-script}; C:409:10761/script,1929:44717/script
   E1356 C:11074:250574/script
-  E1411 A:3507:89038/script
 
 B-brace-recovery
   E1026 U:1007:34285/script*
