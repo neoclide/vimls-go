@@ -101,12 +101,41 @@ func (r *PathResolver) ResolveImport(from string, file *syntax.File, importNode 
 	if r == nil || file == nil || importNode == nil {
 		return PathResolution{}
 	}
-	raw := file.Text(importNode.PathSpan)
+	return r.ResolveImportPath(from, file.Text(importNode.PathSpan), importNode.Autoload)
+}
+
+// ResolveImportPath resolves the retained path spelling of a parsed import.
+// It is used by workspace index facts after the syntax tree itself has been
+// discarded.
+func (r *PathResolver) ResolveImportPath(from, raw string, autoload bool) PathResolution {
+	if r == nil {
+		return PathResolution{}
+	}
 	spec, ok := decodeStaticPath(raw)
 	if !ok {
 		return PathResolution{Dynamic: true}
 	}
-	candidates := r.importCandidates(from, spec, importNode.Autoload)
+	candidates := r.importCandidates(from, spec, autoload)
+	return r.choose(candidates)
+}
+
+// ResolveAutoload maps a legacy name such as foo#bar#Func to
+// autoload/foo/bar.vim in configured runtime-path order. This follows Vim's
+// autoload_name() rule and never guesses a name without a complete prefix.
+func (r *PathResolver) ResolveAutoload(name string) PathResolution {
+	if r == nil {
+		return PathResolution{}
+	}
+	name = strings.TrimPrefix(name, "g:")
+	separator := strings.LastIndexByte(name, '#')
+	if separator <= 0 || separator == len(name)-1 {
+		return PathResolution{}
+	}
+	prefix := strings.ReplaceAll(name[:separator], "#", string(filepath.Separator)) + ".vim"
+	candidates := make([]string, 0, len(r.runtimePaths))
+	for _, runtimePath := range r.runtimePaths {
+		candidates = append(candidates, filepath.Join(runtimePath, "autoload", prefix))
+	}
 	return r.choose(candidates)
 }
 

@@ -206,6 +206,81 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string) (*work
 	if ctx.Err() != nil {
 		return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
 	}
+	resolver := workspacePathResolver(roots)
+	for resolver != nil {
+		if ctx.Err() != nil {
+			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+		}
+		candidates := make([]string, 0)
+		for position, file := range files {
+			if position%32 == 0 && ctx.Err() != nil {
+				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+			}
+			if file == nil {
+				continue
+			}
+			for commandIndex := range file.Commands {
+				importNode := file.Commands[commandIndex].Import
+				if importNode == nil {
+					continue
+				}
+				resolution := resolver.ResolveImport(indexedPaths[position], file, importNode)
+				if resolution.Path == "" {
+					continue
+				}
+				path := filepath.Clean(resolution.Path)
+				if _, ok := seen[path]; ok {
+					continue
+				}
+				seen[path] = struct{}{}
+				candidates = append(candidates, path)
+			}
+		}
+		if len(candidates) == 0 {
+			break
+		}
+		sort.Strings(candidates)
+		newPaths := make([]string, 0, len(candidates))
+		newSources := make([]string, 0, len(candidates))
+		for _, path := range candidates {
+			if ctx.Err() != nil {
+				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+			}
+			if len(indexedPaths)+len(newPaths) >= maxWorkspaceFiles {
+				warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
+				break
+			}
+			info, err := os.Stat(path)
+			if err != nil || !info.Mode().IsRegular() || info.Size() > maxFileBytes {
+				continue
+			}
+			if info.Size() > int64(maxIndexBytes-indexedBytes) {
+				warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
+				break
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				s.logf("vimls: read imported workspace file %s: %v", path, err)
+				continue
+			}
+			if len(content) > maxIndexBytes-indexedBytes {
+				warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
+				break
+			}
+			indexedBytes += len(content)
+			newPaths = append(newPaths, path)
+			newSources = append(newSources, string(content))
+		}
+		if len(newPaths) == 0 {
+			break
+		}
+		parsed := workspace.ParseSources(ctx, newSources, 0)
+		if ctx.Err() != nil {
+			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+		}
+		indexedPaths = append(indexedPaths, newPaths...)
+		files = append(files, parsed...)
+	}
 	for position, file := range files {
 		if file == nil {
 			continue
@@ -218,6 +293,16 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string) (*work
 		diskFiles[path] = struct{}{}
 	}
 	return index, diskFiles, warnings
+}
+
+func workspacePathResolver(roots []string) *workspace.PathResolver {
+	for _, root := range roots {
+		resolver, err := workspace.NewPathResolver(root, roots)
+		if err == nil {
+			return resolver
+		}
+	}
+	return nil
 }
 
 func appendWarning(warnings []string, warning string) []string {

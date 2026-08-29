@@ -108,6 +108,13 @@ Exit gate: cross-file legacy autoload and Vim9 import navigation works through a
 subprocess LSP test; duplicate, missing, cyclic, symlinked, and out-of-root files
 have deterministic behavior; canceled index work leaves no partial state.
 
+Current status (2026-08-29): the document navigation surface, workspace symbol
+index, open-document overlay, client-driven watched-file refresh, static Vim9
+import navigation, and legacy/Vim9 autoload navigation are implemented. The
+subprocess test covers workspace symbols plus cross-file definition and
+references. M5 remains open for explicitly configured runtimepath roots and
+versioned builtin metadata.
+
 ## M6: completion and safe edits
 
 Deliver:

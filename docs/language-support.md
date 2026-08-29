@@ -137,6 +137,24 @@ increments an internal configuration revision, reparses/reanalyzes every open
 document, and rebuilds version-sensitive workspace metadata. Results from the
 old configuration revision are stale and cannot publish.
 
+## Implemented navigation behavior
+
+The server currently provides document/workspace symbols, hover, definition,
+declaration, references, document highlights, folding ranges, and selection
+ranges. Workspace files come from initialized workspace folders (or `rootUri`),
+with open snapshots overriding disk content. The language client owns file
+watching and sends `workspace/didChangeWatchedFiles` notifications; the server
+only consumes those notifications and atomically replaces the rebuilt index.
+
+Cross-file navigation resolves statically provable direct members of Vim9 and
+legacy `:import` namespaces, including default filename-derived aliases,
+qualified type names, and `import autoload`. It also resolves legacy
+`foo#bar#Name` autoload references to `autoload/foo/bar.vim`. Only exported
+import targets and unique declarations are authoritative. Dynamic import
+expressions, private or ambiguous items, missing files, unsafe symlink targets,
+and paths outside initialized roots return empty results without executing Vim
+script or guessing runtime state.
+
 ## Semantics required for 1.0
 
 - Explicit legacy scopes: `g:`, `b:`, `w:`, `t:`, `s:`, `l:`, `a:`, `v:` and

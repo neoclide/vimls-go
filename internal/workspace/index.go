@@ -27,6 +27,7 @@ type SymbolFact struct {
 	Range          syntax.Span
 	SelectionRange syntax.Span
 	Detail         string
+	Exported       bool
 }
 
 // SymbolMatch is an immutable workspace symbol match. Source is the complete
@@ -36,21 +37,47 @@ type SymbolMatch struct {
 	Source string
 }
 
+type ExternalReferenceKind uint8
+
+const (
+	ExternalReferenceImportMember ExternalReferenceKind = iota + 1
+	ExternalReferenceAutoload
+)
+
+// ExternalReferenceFact is a statically provable cross-file reference. Import
+// members retain the literal import spelling needed by PathResolver. Autoload
+// names are stored without an optional g: prefix.
+type ExternalReferenceFact struct {
+	Path           string
+	Name           string
+	Span           syntax.Span
+	Kind           ExternalReferenceKind
+	ImportPath     string
+	ImportAutoload bool
+}
+
+type ExternalReferenceMatch struct {
+	Fact   ExternalReferenceFact
+	Source string
+}
+
 type indexedFile struct {
-	bytes  int
-	source string
-	facts  []SymbolFact
+	bytes      int
+	source     string
+	facts      []SymbolFact
+	references []ExternalReferenceFact
 }
 
 // Index stores symbols from a bounded set of syntax files. All methods are
 // safe for concurrent use. A non-positive limit means that limit is disabled.
 type Index struct {
-	mu       sync.RWMutex
-	maxFiles int
-	maxBytes int
-	bytes    int
-	files    map[string]indexedFile
-	byName   map[string][]SymbolFact
+	mu             sync.RWMutex
+	maxFiles       int
+	maxBytes       int
+	bytes          int
+	files          map[string]indexedFile
+	byName         map[string][]SymbolFact
+	byExternalName map[string][]ExternalReferenceFact
 }
 
 // NewIndex creates a workspace symbol index with file-count and source-byte
@@ -58,10 +85,11 @@ type Index struct {
 // once for each indexed file.
 func NewIndex(maxFiles, maxBytes int) *Index {
 	return &Index{
-		maxFiles: maxFiles,
-		maxBytes: maxBytes,
-		files:    make(map[string]indexedFile),
-		byName:   make(map[string][]SymbolFact),
+		maxFiles:       maxFiles,
+		maxBytes:       maxBytes,
+		files:          make(map[string]indexedFile),
+		byName:         make(map[string][]SymbolFact),
+		byExternalName: make(map[string][]ExternalReferenceFact),
 	}
 }
 
@@ -75,10 +103,10 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	if err != nil {
 		return err
 	}
-	facts := make([]SymbolFact, 0)
-	collectSymbolFacts(normalized, analysis.CollectSymbols(file), &facts)
+	facts := CollectSymbolFacts(normalized, file)
 	sortFacts(facts)
-	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts}
+	references := CollectExternalReferences(normalized, file)
+	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -97,6 +125,7 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	}
 	if exists {
 		i.removeFactsLocked(old.facts)
+		i.removeExternalReferencesLocked(old.references)
 	}
 	i.files[normalized] = indexed
 	i.bytes = indexedBytes
@@ -105,6 +134,12 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	}
 	for _, name := range namesIn(facts) {
 		sortFacts(i.byName[name])
+	}
+	for _, reference := range references {
+		i.byExternalName[reference.Name] = append(i.byExternalName[reference.Name], reference)
+	}
+	for _, name := range referenceNamesIn(references) {
+		sortExternalReferences(i.byExternalName[name])
 	}
 	return nil
 }
@@ -122,8 +157,64 @@ func (i *Index) Remove(path string) {
 		return
 	}
 	i.removeFactsLocked(old.facts)
+	i.removeExternalReferencesLocked(old.references)
 	delete(i.files, normalized)
 	i.bytes -= old.bytes
+}
+
+// LookupFile returns exact-name symbols from one indexed file. Results retain
+// the immutable source needed to convert their byte spans at the LSP boundary.
+func (i *Index) LookupFile(path, name string) []SymbolMatch {
+	if name == "" {
+		return nil
+	}
+	all := i.FileSymbols(path)
+	matches := make([]SymbolMatch, 0)
+	for _, match := range all {
+		if match.Fact.Name == name {
+			matches = append(matches, match)
+		}
+	}
+	return matches
+}
+
+// FileSymbols returns every symbol from one indexed file in source order.
+func (i *Index) FileSymbols(path string) []SymbolMatch {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil {
+		return nil
+	}
+	i.mu.RLock()
+	file, ok := i.files[normalized]
+	if !ok {
+		i.mu.RUnlock()
+		return nil
+	}
+	matches := make([]SymbolMatch, 0, len(file.facts))
+	for _, fact := range file.facts {
+		matches = append(matches, SymbolMatch{Fact: fact, Source: file.source})
+	}
+	i.mu.RUnlock()
+	return matches
+}
+
+// ExternalReferences returns immutable candidate references in path/span
+// order. The caller must still resolve each import or autoload path and reject
+// candidates that do not identify its target declaration.
+func (i *Index) ExternalReferences(name string) []ExternalReferenceMatch {
+	if name == "" {
+		return nil
+	}
+	i.mu.RLock()
+	facts := i.byExternalName[name]
+	result := make([]ExternalReferenceMatch, 0, len(facts))
+	for _, fact := range facts {
+		if file, ok := i.files[fact.Path]; ok {
+			result = append(result, ExternalReferenceMatch{Fact: fact, Source: file.source})
+		}
+	}
+	i.mu.RUnlock()
+	return result
 }
 
 // Lookup returns exact-name matches sorted by path and source span. The
@@ -222,7 +313,21 @@ func normalizeIndexPath(path string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-func collectSymbolFacts(path string, symbols []*analysis.Symbol, facts *[]SymbolFact) {
+// CollectSymbolFacts returns immutable symbol facts for file. Exported is set
+// only when the declaration-bearing top-level command has an export modifier.
+func CollectSymbolFacts(path string, file *syntax.File) []SymbolFact {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil {
+		return nil
+	}
+	exported := exportedSymbolSpans(file)
+	facts := make([]SymbolFact, 0)
+	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, &facts)
+	sortFacts(facts)
+	return facts
+}
+
+func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[syntax.Span]bool, facts *[]SymbolFact) {
 	for _, symbol := range symbols {
 		if symbol == nil || symbol.Name == "" {
 			continue
@@ -234,9 +339,317 @@ func collectSymbolFacts(path string, symbols []*analysis.Symbol, facts *[]Symbol
 			Range:          symbol.Range,
 			SelectionRange: symbol.SelectionRange,
 			Detail:         strings.Clone(symbol.Detail),
+			Exported:       exported[symbol.SelectionRange],
 		})
-		collectSymbolFacts(path, symbol.Children, facts)
+		collectSymbolFacts(path, symbol.Children, exported, facts)
 	}
+}
+
+func exportedSymbolSpans(file *syntax.File) map[syntax.Span]bool {
+	result := make(map[syntax.Span]bool)
+	if file == nil {
+		return result
+	}
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if !commandHasModifier(command, "export") {
+			continue
+		}
+		if command.Function != nil {
+			result[command.Function.Name] = true
+		}
+		if command.Aggregate != nil {
+			result[command.Aggregate.Name] = true
+		}
+		if command.TypeAlias != nil {
+			result[command.TypeAlias.Name] = true
+		}
+		if command.Declaration != nil {
+			for _, binding := range command.Declaration.Bindings {
+				result[binding.Name] = true
+			}
+		}
+	}
+	return result
+}
+
+func commandHasModifier(command *syntax.Command, name string) bool {
+	if command == nil {
+		return false
+	}
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// CollectExternalReferences returns only references whose target can be
+// decided later without executing Vimscript: a direct member of a proven
+// import alias, or an unresolved legacy autoload name containing '#'.
+func CollectExternalReferences(path string, file *syntax.File) []ExternalReferenceFact {
+	return CollectExternalReferencesFromAnalysis(path, file, analysis.Analyze(file))
+}
+
+// CollectExternalReferencesFromAnalysis reuses an analysis result belonging
+// to file. Callers that already analyzed an open snapshot avoid repeating the
+// semantic pass used to prove import receivers and unresolved autoload names.
+func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, result *analysis.FileAnalysis) []ExternalReferenceFact {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil || result == nil || result.File != file {
+		return nil
+	}
+	references := make(map[syntax.Span]*analysis.Reference, len(result.References))
+	for _, reference := range result.References {
+		if reference != nil {
+			references[reference.Span] = reference
+		}
+	}
+	imports := make(map[syntax.Span]*syntax.Import)
+	var importNodes []*syntax.Import
+	collectImports(file.Commands, imports, &importNodes)
+	importsByName := make(map[string][]*syntax.Import)
+	for _, importNode := range importNodes {
+		name := file.Text(importNode.Alias)
+		if name == "" {
+			name = defaultImportName(file.Text(importNode.PathSpan))
+		}
+		if name != "" {
+			importsByName[name] = append(importsByName[name], importNode)
+		}
+	}
+
+	facts := make([]ExternalReferenceFact, 0)
+	visited := make(map[*syntax.Expression]bool)
+	visitIndexCommands(file.Commands, visited, func(expression *syntax.Expression) {
+		if expression == nil || expression.Kind != syntax.ExpressionMember || len(expression.Children) != 1 || expression.Value == "" {
+			return
+		}
+		receiver := expression.Children[0]
+		if receiver == nil || receiver.Kind != syntax.ExpressionIdentifier {
+			return
+		}
+		alias := strings.TrimPrefix(receiver.Value, "s:")
+		importCandidates := importsByName[alias]
+		if len(importCandidates) != 1 {
+			return
+		}
+		reference := references[receiver.Span]
+		var importNode *syntax.Import
+		if reference != nil && reference.Declaration != nil {
+			if reference.Declaration.Kind != analysis.SymbolKindImport {
+				return
+			}
+			importNode = imports[reference.Declaration.Span]
+			if importNode != importCandidates[0] {
+				return
+			}
+		} else {
+			importNode = importCandidates[0]
+		}
+		member := syntax.Span{Start: expression.Operator.End, End: expression.Span.End}
+		if importNode == nil || !validIndexSpan(file, member) || file.Text(member) != expression.Value || !validIndexSpan(file, importNode.PathSpan) {
+			return
+		}
+		facts = append(facts, ExternalReferenceFact{
+			Path:           normalized,
+			Name:           strings.Clone(expression.Value),
+			Span:           member,
+			Kind:           ExternalReferenceImportMember,
+			ImportPath:     strings.Clone(file.Text(importNode.PathSpan)),
+			ImportAutoload: importNode.Autoload,
+		})
+	})
+	visitedTypes := make(map[*syntax.Type]bool)
+	visitIndexCommandTypes(file, file.Commands, visitedTypes, func(typeNode *syntax.Type) {
+		if typeNode == nil || typeNode.Name == "" {
+			return
+		}
+		separator := strings.IndexByte(typeNode.Name, '.')
+		if separator <= 0 || separator == len(typeNode.Name)-1 {
+			return
+		}
+		alias := typeNode.Name[:separator]
+		importNodes := importsByName[alias]
+		member := syntax.Span{Start: typeNode.Span.Start + separator + 1, End: typeNode.Span.Start + len(typeNode.Name)}
+		if len(importNodes) != 1 || !validIndexSpan(file, member) || file.Text(member) != typeNode.Name[separator+1:] || !validIndexSpan(file, importNodes[0].PathSpan) {
+			return
+		}
+		facts = append(facts, ExternalReferenceFact{
+			Path:           normalized,
+			Name:           strings.Clone(typeNode.Name[separator+1:]),
+			Span:           member,
+			Kind:           ExternalReferenceImportMember,
+			ImportPath:     strings.Clone(file.Text(importNodes[0].PathSpan)),
+			ImportAutoload: importNodes[0].Autoload,
+		})
+	})
+	for _, reference := range result.References {
+		if reference == nil || reference.Declaration != nil {
+			continue
+		}
+		name := strings.TrimPrefix(reference.Name, "g:")
+		separator := strings.LastIndexByte(name, '#')
+		if separator <= 0 || separator == len(name)-1 || !validIndexSpan(file, reference.Span) {
+			continue
+		}
+		facts = append(facts, ExternalReferenceFact{
+			Path: normalized, Name: strings.Clone(name), Span: reference.Span, Kind: ExternalReferenceAutoload,
+		})
+	}
+	sortExternalReferences(facts)
+	return deduplicateExternalReferences(facts)
+}
+
+func collectImports(commands []syntax.Command, imports map[syntax.Span]*syntax.Import, all *[]*syntax.Import) {
+	for index := range commands {
+		command := &commands[index]
+		if command.Import != nil {
+			*all = append(*all, command.Import)
+			if command.Import.Alias.Start < command.Import.Alias.End {
+				imports[command.Import.Alias] = command.Import
+			}
+		}
+		if command.Embedded != nil {
+			collectImports(command.Embedded.Commands, imports, all)
+		}
+	}
+}
+
+func defaultImportName(raw string) string {
+	spec, ok := decodeStaticPath(raw)
+	if !ok {
+		return ""
+	}
+	name := filepath.Base(filepath.FromSlash(spec))
+	extension := strings.Index(name, ".vim")
+	if extension <= 0 || extension+4 != len(name) {
+		return ""
+	}
+	return name[:extension]
+}
+
+func visitIndexCommands(commands []syntax.Command, visited map[*syntax.Expression]bool, visit func(*syntax.Expression)) {
+	for index := range commands {
+		command := &commands[index]
+		for _, expression := range command.Expressions {
+			visitIndexExpression(expression, visited, visit)
+		}
+		for _, expression := range command.Targets {
+			visitIndexExpression(expression, visited, visit)
+		}
+		if command.Mapping != nil {
+			visitIndexExpression(command.Mapping.RHSExpression, visited, visit)
+		}
+		if command.Declaration != nil {
+			visitIndexExpression(command.Declaration.Initializer, visited, visit)
+		}
+		if command.For != nil {
+			visitIndexExpression(command.For.Iterable, visited, visit)
+		}
+		if command.Import != nil {
+			visitIndexExpression(command.Import.Path, visited, visit)
+		}
+		if command.Function != nil {
+			for _, parameter := range command.Function.Parameters {
+				visitIndexExpression(parameter.Default, visited, visit)
+			}
+		}
+		for _, value := range command.EnumValues {
+			visitIndexExpression(value.Initializer, visited, visit)
+			for _, argument := range value.Arguments {
+				visitIndexExpression(argument, visited, visit)
+			}
+		}
+		if command.Embedded != nil {
+			visitIndexCommands(command.Embedded.Commands, visited, visit)
+		}
+	}
+}
+
+func visitIndexExpression(expression *syntax.Expression, visited map[*syntax.Expression]bool, visit func(*syntax.Expression)) {
+	if expression == nil || visited[expression] {
+		return
+	}
+	visited[expression] = true
+	visit(expression)
+	for _, child := range expression.Children {
+		visitIndexExpression(child, visited, visit)
+	}
+	if expression.LambdaBody != nil {
+		visitIndexCommands(expression.LambdaBody.Commands, visited, visit)
+	}
+}
+
+func visitIndexCommandTypes(file *syntax.File, commands []syntax.Command, visited map[*syntax.Type]bool, visit func(*syntax.Type)) {
+	visitedExpressions := make(map[*syntax.Expression]bool)
+	visitIndexCommands(commands, visitedExpressions, func(expression *syntax.Expression) {
+		visitIndexType(expression.CastType, visited, visit)
+		for _, typeArgument := range expression.TypeArguments {
+			visitIndexType(typeArgument, visited, visit)
+		}
+		for _, parameter := range expression.Parameters {
+			visitIndexType(parameter.Type, visited, visit)
+		}
+		visitIndexType(expression.ReturnType, visited, visit)
+		if expression.LambdaBody != nil {
+			visitIndexCommandTypes(file, expression.LambdaBody.Commands, visited, visit)
+		}
+	})
+	for index := range commands {
+		command := &commands[index]
+		if command.Declaration != nil {
+			for _, binding := range command.Declaration.Bindings {
+				visitIndexType(binding.ParsedType, visited, visit)
+			}
+		}
+		if command.For != nil {
+			for _, binding := range command.For.Bindings {
+				visitIndexType(binding.ParsedType, visited, visit)
+			}
+		}
+		if command.Function != nil {
+			for _, parameter := range command.Function.Parameters {
+				visitIndexType(parameter.Type, visited, visit)
+			}
+			visitIndexType(command.Function.ReturnType, visited, visit)
+		}
+		if command.TypeAlias != nil {
+			visitIndexType(command.TypeAlias.Type, visited, visit)
+		}
+		if command.Aggregate != nil {
+			for _, span := range append(append([]syntax.Span(nil), command.Aggregate.Extends...), command.Aggregate.Implements...) {
+				if !validIndexSpan(file, span) {
+					continue
+				}
+				name := file.Text(span)
+				separator := strings.IndexByte(name, '.')
+				if separator > 0 && separator < len(name)-1 {
+					visit(&syntax.Type{Kind: syntax.TypeNamed, Span: span, Name: name})
+				}
+			}
+		}
+		if command.Embedded != nil {
+			visitIndexCommandTypes(file, command.Embedded.Commands, visited, visit)
+		}
+	}
+}
+
+func visitIndexType(typeNode *syntax.Type, visited map[*syntax.Type]bool, visit func(*syntax.Type)) {
+	if typeNode == nil || visited[typeNode] {
+		return
+	}
+	visited[typeNode] = true
+	visit(typeNode)
+	for _, argument := range typeNode.Arguments {
+		visitIndexType(argument, visited, visit)
+	}
+	visitIndexType(typeNode.ReturnType, visited, visit)
+}
+
+func validIndexSpan(file *syntax.File, span syntax.Span) bool {
+	return file != nil && span.Start >= 0 && span.Start < span.End && span.End <= len(file.Source)
 }
 
 func sortFacts(facts []SymbolFact) {
@@ -267,6 +680,9 @@ func factLess(left, right SymbolFact) bool {
 	if left.Kind != right.Kind {
 		return left.Kind < right.Kind
 	}
+	if left.Exported != right.Exported {
+		return !left.Exported
+	}
 	return left.Detail < right.Detail
 }
 
@@ -283,14 +699,70 @@ func namesIn(facts []SymbolFact) []string {
 	return names
 }
 
+func referenceNamesIn(facts []ExternalReferenceFact) []string {
+	seen := make(map[string]struct{}, len(facts))
+	result := make([]string, 0, len(facts))
+	for _, fact := range facts {
+		if _, ok := seen[fact.Name]; ok {
+			continue
+		}
+		seen[fact.Name] = struct{}{}
+		result = append(result, fact.Name)
+	}
+	return result
+}
+
+func sortExternalReferences(facts []ExternalReferenceFact) {
+	sort.SliceStable(facts, func(left, right int) bool {
+		if facts[left].Path != facts[right].Path {
+			return facts[left].Path < facts[right].Path
+		}
+		if facts[left].Span.Start != facts[right].Span.Start {
+			return facts[left].Span.Start < facts[right].Span.Start
+		}
+		if facts[left].Span.End != facts[right].Span.End {
+			return facts[left].Span.End < facts[right].Span.End
+		}
+		return facts[left].Kind < facts[right].Kind
+	})
+}
+
+func deduplicateExternalReferences(facts []ExternalReferenceFact) []ExternalReferenceFact {
+	if len(facts) < 2 {
+		return facts
+	}
+	result := facts[:1]
+	for _, fact := range facts[1:] {
+		if result[len(result)-1] != fact {
+			result = append(result, fact)
+		}
+	}
+	return result
+}
+
 func (i *Index) removeFactsLocked(facts []SymbolFact) {
 	for _, fact := range facts {
 		matches := i.byName[fact.Name]
 		for index, candidate := range matches {
-			if candidate.Path == fact.Path && candidate.Name == fact.Name && candidate.Kind == fact.Kind && candidate.Range == fact.Range && candidate.SelectionRange == fact.SelectionRange && candidate.Detail == fact.Detail {
+			if candidate == fact {
 				i.byName[fact.Name] = append(matches[:index], matches[index+1:]...)
 				if len(i.byName[fact.Name]) == 0 {
 					delete(i.byName, fact.Name)
+				}
+				break
+			}
+		}
+	}
+}
+
+func (i *Index) removeExternalReferencesLocked(facts []ExternalReferenceFact) {
+	for _, fact := range facts {
+		matches := i.byExternalName[fact.Name]
+		for index, candidate := range matches {
+			if candidate == fact {
+				i.byExternalName[fact.Name] = append(matches[:index], matches[index+1:]...)
+				if len(i.byExternalName[fact.Name]) == 0 {
+					delete(i.byExternalName, fact.Name)
 				}
 				break
 			}

@@ -29,6 +29,15 @@ func TestLSPSubprocess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspaceRoot, "workspace.vim"), []byte("vim9script\nvar workspaceName = 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	workspaceLib := filepath.Join(workspaceRoot, "lib.vim")
+	if err := os.WriteFile(workspaceLib, []byte("vim9script\nexport def Run(): number\n  return 1\nenddef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspaceMain := filepath.Join(workspaceRoot, "main.vim")
+	workspaceMainSource := "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n"
+	if err := os.WriteFile(workspaceMain, []byte(workspaceMainSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
@@ -111,10 +120,21 @@ func TestLSPSubprocess(t *testing.T) {
 			t.Fatalf("workspace symbols = %s", workspaceSymbols)
 		}
 	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, uri.File(workspaceMain), workspaceMainSource))
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100000,"method":"textDocument/definition","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10}}}`, uri.File(workspaceMain)))
+	crossDefinition := readJSON(t, reader)
+	if string(crossDefinition["id"]) != "100000" || !strings.Contains(string(crossDefinition["result"]), fmt.Sprintf(`"uri":%q`, uri.File(workspaceLib))) || !strings.Contains(string(crossDefinition["result"]), `"start":{"line":1,"character":11}`) {
+		t.Fatalf("cross-file definition = %s", crossDefinition)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100001,"method":"textDocument/references","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10},"context":{"includeDeclaration":true}}}`, uri.File(workspaceMain)))
+	crossReferences := readJSON(t, reader)
+	if string(crossReferences["id"]) != "100001" || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, uri.File(workspaceLib))) || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, uri.File(workspaceMain))) {
+		t.Fatalf("cross-file references = %s", crossReferences)
+	}
 
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1000,"method":"shutdown"}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100002,"method":"shutdown"}`)
 	shutdown := readJSON(t, reader)
-	if string(shutdown["id"]) != "1000" || string(shutdown["result"]) != "null" {
+	if string(shutdown["id"]) != "100002" || string(shutdown["result"]) != "null" {
 		t.Fatalf("shutdown response = %s", shutdown)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)

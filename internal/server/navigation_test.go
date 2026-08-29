@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -283,6 +285,364 @@ func TestHoverOmitsUnknownType(t *testing.T) {
 	content, ok := hover.Contents.(*protocol.MarkupContent)
 	if !ok || content.Value != "name: value\nkind: variable" {
 		t.Fatalf("hover = %#v", hover)
+	}
+}
+
+func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
+	root := t.TempDir()
+	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\ndef Private()\nenddef\nexport class Box\nendclass\n")
+	mainSource := "vim9script\nimport './lib.vim' as lib\nvar result = lib.Run()\nvar hidden = lib.Private()\nvar path = './lib.vim'\nimport path as dynamic\necho dynamic.Run()\nvar item: lib.Box\n"
+	mainPath := writeWorkspaceFile(t, root, "main.vim", mainSource)
+	otherPath := writeWorkspaceFile(t, root, "other.vim", "vim9script\nimport './lib.vim' as module\necho module.Run()\n")
+	instance := initializeWorkspaceServer(t, root)
+	mainURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: mainURI, Version: 1, Text: mainSource,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForWorkspaceSymbols(t, instance, "lib", 1)
+	position := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI},
+		Position:     protocol.Position{Line: 2, Character: 18},
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitionLocations := definition.(protocol.LocationSlice)
+	if len(definitionLocations) != 1 || definitionLocations[0].URI != uri.File(libPath) || definitionLocations[0].Range != navigationRange(1, 11, 14) {
+		t.Fatalf("cross-file definition = %#v", definition)
+	}
+	declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: position})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarationLocations := declaration.(protocol.LocationSlice)
+	if len(declarationLocations) != 1 || declarationLocations[0] != definitionLocations[0] {
+		t.Fatalf("cross-file declaration = %#v", declaration)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: position,
+		Context:                    protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []protocol.Location{
+		{URI: uri.File(libPath), Range: navigationRange(1, 11, 14)},
+		{URI: mainURI, Range: navigationRange(2, 17, 20)},
+		{URI: uri.File(otherPath), Range: navigationRange(2, 12, 15)},
+	}
+	if len(references) != len(want) {
+		t.Fatalf("cross-file references = %#v", references)
+	}
+	for index := range want {
+		if references[index] != want[index] {
+			t.Errorf("reference %d = %#v, want %#v", index, references[index], want[index])
+		}
+	}
+	withoutDeclaration, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: position,
+		Context:                    protocol.ReferenceContext{IncludeDeclaration: false},
+	})
+	if err != nil || len(withoutDeclaration) != 2 {
+		t.Fatalf("cross-file references without declaration = %#v, error = %v", withoutDeclaration, err)
+	}
+	for _, location := range withoutDeclaration {
+		if location.URI == uri.File(libPath) && location.Range == navigationRange(1, 11, 14) {
+			t.Fatalf("declaration included when disabled: %#v", withoutDeclaration)
+		}
+	}
+	highlights, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: position})
+	if err != nil || len(highlights) != 1 || highlights[0].Range != navigationRange(2, 17, 20) {
+		t.Fatalf("cross-file highlights = %#v, error = %v", highlights, err)
+	}
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Value != "name: Run\nkind: function\ntype: func(): number" || hover.Range == nil || *hover.Range != navigationRange(2, 17, 20) {
+		t.Fatalf("cross-file hover = %#v", hover)
+	}
+
+	unknown, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 3, Character: 19},
+	}})
+	if err != nil || len(unknown.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("private import definition = %#v, error = %v", unknown, err)
+	}
+	dynamic, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 6, Character: 14},
+	}})
+	if err != nil || len(dynamic.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("dynamic import definition = %#v, error = %v", dynamic, err)
+	}
+	typeDefinition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 7, Character: 15},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	typeLocations := typeDefinition.(protocol.LocationSlice)
+	if len(typeLocations) != 1 || typeLocations[0].URI != uri.File(libPath) || typeLocations[0].Range != navigationRange(6, 13, 16) {
+		t.Fatalf("imported type definition = %#v", typeDefinition)
+	}
+	typeReferences, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 7, Character: 15},
+		},
+		Context: protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil || len(typeReferences) != 2 || typeReferences[0].URI != uri.File(libPath) || typeReferences[1].URI != mainURI {
+		t.Fatalf("imported type references = %#v, error = %v", typeReferences, err)
+	}
+	writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Changed()\nenddef\n")
+	if err := instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{Changes: []protocol.FileEvent{{URI: uri.File(libPath), Type: protocol.FileChangeTypeChanged}}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	stale, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil || len(stale.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("definition after client file event = %#v, error = %v", stale, err)
+	}
+}
+
+func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
+	root := t.TempDir()
+	targetPath := writeWorkspaceFile(t, root, filepath.Join("autoload", "foo", "bar.vim"), "function foo#bar#Run()\nendfunction\n")
+	mainPath := writeWorkspaceFile(t, root, "plugin.vim", "call foo#bar#Run()\n")
+	otherPath := writeWorkspaceFile(t, root, "other.vim", "let value = foo#bar#Run()\n")
+	instance := initializeWorkspaceServer(t, root)
+	mainURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: mainURI, Version: 1, Text: "call foo#bar#Run()\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	position := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI},
+		Position:     protocol.Position{Line: 0, Character: 10},
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(0, 9, 20) {
+		t.Fatalf("autoload definition = %#v", definition)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: position,
+		Context:                    protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []protocol.Location{
+		{URI: uri.File(targetPath), Range: navigationRange(0, 9, 20)},
+		{URI: uri.File(otherPath), Range: navigationRange(0, 12, 23)},
+		{URI: mainURI, Range: navigationRange(0, 5, 16)},
+	}
+	sort.SliceStable(want, func(left, right int) bool { return want[left].URI < want[right].URI })
+	if len(references) != len(want) {
+		t.Fatalf("autoload references = %#v", references)
+	}
+	for index := range want {
+		if references[index] != want[index] {
+			t.Errorf("reference %d = %#v, want %#v", index, references[index], want[index])
+		}
+	}
+}
+
+func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
+	root := t.TempDir()
+	targetPath := writeWorkspaceFile(t, root, filepath.Join("autoload", "api.vim"), "vim9script\nexport def Run(): string\n  return 'ok'\nenddef\n")
+	legacyPath := writeWorkspaceFile(t, root, "legacy.vim", "call api#Run()\n")
+	importPath := writeWorkspaceFile(t, root, "plugin.vim", "vim9script\nimport autoload 'api.vim'\necho api.Run()\n")
+	instance := initializeWorkspaceServer(t, root)
+	legacyURI := uri.File(legacyPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: legacyURI, Version: 1, Text: "call api#Run()\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	position := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: legacyURI},
+		Position:     protocol.Position{Line: 0, Character: 8},
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(1, 11, 14) {
+		t.Fatalf("Vim9 autoload definition = %#v", definition)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: position,
+		Context:                    protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []protocol.Location{
+		{URI: uri.File(targetPath), Range: navigationRange(1, 11, 14)},
+		{URI: legacyURI, Range: navigationRange(0, 5, 12)},
+		{URI: uri.File(importPath), Range: navigationRange(2, 9, 12)},
+	}
+	sort.SliceStable(want, func(left, right int) bool { return want[left].URI < want[right].URI })
+	if len(references) != len(want) {
+		t.Fatalf("Vim9 autoload references = %#v", references)
+	}
+	for index := range want {
+		if references[index] != want[index] {
+			t.Errorf("reference %d = %#v, want %#v", index, references[index], want[index])
+		}
+	}
+}
+
+func TestCrossFileNavigationUsesNegotiatedEncodingAndInvalidatesOpenTarget(t *testing.T) {
+	root := t.TempDir()
+	targetSource := "vim9script\nexport def 𐐀Run()\nenddef\n"
+	targetPath := writeWorkspaceFile(t, root, "lib.vim", targetSource)
+	mainSource := "vim9script\nimport './lib.vim' as lib\necho lib.𐐀Run()\n"
+	mainPath := writeWorkspaceFile(t, root, "main.vim", mainSource)
+	rootURI := uri.File(root)
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI: &rootURI,
+		Capabilities: protocol.ClientCapabilities{General: &protocol.GeneralClientCapabilities{
+			PositionEncodings: []protocol.PositionEncodingKind{protocol.PositionEncodingKindUTF8},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	mainURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: mainURI, Version: 1, Text: mainSource}}); err != nil {
+		t.Fatal(err)
+	}
+	position := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI},
+		Position:     protocol.Position{Line: 2, Character: 9},
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(1, 11, 18) {
+		t.Fatalf("UTF-8 cross-file definition = %#v", definition)
+	}
+
+	targetURI := uri.File(targetPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 1, Text: targetSource}}); err != nil {
+		t.Fatal(err)
+	}
+	document, err := instance.navigationAt(context.Background(), mainURI.String(), position.Position)
+	if err != nil || document == nil {
+		t.Fatalf("navigation document = %#v, error = %v", document, err)
+	}
+	target, ok := document.workspaceTarget()
+	if !ok || target.openSnapshot == nil {
+		t.Fatalf("open workspace target = %#v", target)
+	}
+	if _, err := instance.documents.Change(targetURI.String(), 2, text.UTF8, []text.Change{{Text: "vim9script\nexport def Changed()\nenddef\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := document.checkWorkspaceTarget(context.Background(), target); !errors.Is(err, protocol.ErrContentModified) {
+		t.Fatalf("modified target error = %v", err)
+	}
+}
+
+func TestCrossFileNavigationHandlesCyclicAndAmbiguousImports(t *testing.T) {
+	root := t.TempDir()
+	aSource := "vim9script\nimport './b.vim' as b\nexport def A(): number\n  return b.B()\nenddef\n"
+	aPath := writeWorkspaceFile(t, root, "a.vim", aSource)
+	bPath := writeWorkspaceFile(t, root, "b.vim", "vim9script\nimport './a.vim' as a\nexport def B(): number\n  return a.A()\nenddef\n")
+	writeWorkspaceFile(t, root, "duplicate.vim", "vim9script\nexport def Same()\nenddef\nexport def Same()\nenddef\n")
+	duplicateMain := writeWorkspaceFile(t, root, "duplicate-main.vim", "vim9script\nimport './duplicate.vim' as duplicate\necho duplicate.Same()\n")
+	instance := initializeWorkspaceServer(t, root)
+	aURI := uri.File(aPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: aURI, Version: 1, Text: aSource}}); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: aURI}, Position: protocol.Position{Line: 3, Character: 11},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || locations[0].URI != uri.File(bPath) || locations[0].Range != navigationRange(2, 11, 12) {
+		t.Fatalf("cyclic import definition = %#v", definition)
+	}
+
+	duplicateURI := uri.File(duplicateMain)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: duplicateURI, Version: 1, Text: "vim9script\nimport './duplicate.vim' as duplicate\necho duplicate.Same()\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	ambiguous, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: duplicateURI}, Position: protocol.Position{Line: 2, Character: 17},
+	}})
+	if err != nil || len(ambiguous.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("ambiguous import definition = %#v, error = %v", ambiguous, err)
+	}
+}
+
+func TestCrossFileLegacyImportUsesDefaultScriptLocalName(t *testing.T) {
+	root := t.TempDir()
+	targetPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport function Run()\nendfunction\n")
+	mainSource := "import './lib.vim'\ncall s:lib.Run()\n"
+	mainPath := writeWorkspaceFile(t, root, "legacy-import.vim", mainSource)
+	instance := initializeWorkspaceServer(t, root)
+	mainURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: mainURI, Version: 1, Text: mainSource}}); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 1, Character: 12},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(1, 16, 19) {
+		t.Fatalf("legacy default import definition = %#v", definition)
+	}
+}
+
+func TestCrossFileIndexFollowsBoundedStaticImports(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "nested", "vim9script\nexport const Value = 1\n")
+	targetPath := writeWorkspaceFile(t, root, "module", "vim9script\nimport './nested' as nested\nexport def Run(): number\n  return nested.Value\nenddef\n")
+	mainSource := "vim9script\nimport './module' as module\necho module.Run()\n"
+	mainPath := writeWorkspaceFile(t, root, "main.vim", mainSource)
+	instance := initializeWorkspaceServer(t, root)
+	if symbols := workspaceSymbols(t, instance, "Run"); len(symbols) != 1 || symbols[0].Name != "Run" {
+		t.Fatalf("transitively indexed symbols = %#v", symbols)
+	}
+	mainURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: mainURI, Version: 1, Text: mainSource}}); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 2, Character: 13},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(2, 11, 14) {
+		t.Fatalf("transitive import definition = %#v", definition)
 	}
 }
 

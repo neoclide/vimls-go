@@ -122,6 +122,85 @@ func TestIndexSearchReturnsIndependentFactsAndRetainsCurrentSource(t *testing.T)
 	}
 }
 
+func TestIndexCollectsExportedSymbolsAndStaticExternalReferences(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.vim")
+	source := `vim9script
+import './lib.vim' as lib
+var first = lib.Run()
+echo lib.Value
+var typed: lib.Public<number>
+echo unknown.Run()
+export def Public()
+enddef
+def Private()
+enddef
+`
+	file := syntax.Parse(source)
+	facts := CollectSymbolFacts(path, file)
+	exported := make(map[string]bool)
+	for _, fact := range facts {
+		exported[fact.Name] = fact.Exported
+	}
+	if !exported["Public"] || exported["Private"] || exported["first"] {
+		t.Fatalf("exported facts = %#v", facts)
+	}
+	references := CollectExternalReferences(path, file)
+	if len(references) != 3 || references[0].Name != "Run" || references[1].Name != "Value" || references[2].Name != "Public" {
+		t.Fatalf("import references = %#v", references)
+	}
+	for _, reference := range references {
+		if reference.Kind != ExternalReferenceImportMember || reference.ImportPath != "'./lib.vim'" || file.Text(reference.Span) != reference.Name {
+			t.Fatalf("import reference = %#v", reference)
+		}
+	}
+	defaultImport := syntax.Parse("vim9script\nimport autoload 'for/search.vim'\necho search.Run()\n")
+	defaultReferences := CollectExternalReferences(filepath.Join(root, "default.vim"), defaultImport)
+	if len(defaultReferences) != 1 || defaultReferences[0].Name != "Run" || defaultReferences[0].ImportPath != "'for/search.vim'" || !defaultReferences[0].ImportAutoload {
+		t.Fatalf("default import reference = %#v", defaultReferences)
+	}
+	ambiguousImport := syntax.Parse("vim9script\nimport './one.vim' as duplicate\nimport './two.vim' as duplicate\necho duplicate.Run()\n")
+	if ambiguousReferences := CollectExternalReferences(filepath.Join(root, "ambiguous.vim"), ambiguousImport); len(ambiguousReferences) != 0 {
+		t.Fatalf("ambiguous import references = %#v", ambiguousReferences)
+	}
+
+	legacyPath := filepath.Join(root, "legacy.vim")
+	legacySource := "call foo#bar#Run()\nlet value = g:foo#bar#Value\n"
+	legacy := syntax.Parse(legacySource)
+	legacyReferences := CollectExternalReferences(legacyPath, legacy)
+	if len(legacyReferences) != 2 || legacyReferences[0].Name != "foo#bar#Run" || legacyReferences[1].Name != "foo#bar#Value" {
+		t.Fatalf("autoload references = %#v", legacyReferences)
+	}
+	for _, reference := range legacyReferences {
+		if reference.Kind != ExternalReferenceAutoload {
+			t.Fatalf("autoload reference = %#v", reference)
+		}
+	}
+
+	index := NewIndex(10, 10000)
+	if err := index.Replace(path, file); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Replace(legacyPath, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.ExternalReferences("Run"); len(got) != 1 || got[0].Fact.Path != filepath.Clean(path) || got[0].Source != source {
+		t.Fatalf("indexed import references = %#v", got)
+	}
+	if got := index.ExternalReferences("foo#bar#Run"); len(got) != 1 || got[0].Fact.Path != filepath.Clean(legacyPath) || got[0].Source != legacySource {
+		t.Fatalf("indexed autoload references = %#v", got)
+	}
+	if got := index.LookupFile(path, "Public"); len(got) != 1 || !got[0].Fact.Exported || got[0].Source != source {
+		t.Fatalf("file lookup = %#v", got)
+	}
+	if err := index.Replace(path, syntax.Parse("vim9script\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.ExternalReferences("Run"); len(got) != 0 {
+		t.Fatalf("replaced references = %#v", got)
+	}
+}
+
 func TestIndexRemoveFreesCapacity(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.vim")

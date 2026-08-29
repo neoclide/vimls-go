@@ -176,6 +176,9 @@ func waitForWorkspaceSymbols(t *testing.T, instance *Server, query string, count
 func writeWorkspaceFile(t *testing.T, root, name, content string) string {
 	t.Helper()
 	path := filepath.Join(root, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

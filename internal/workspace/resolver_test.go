@@ -59,6 +59,27 @@ func TestPathResolverSearchesRuntimeImportAndAutoloadInOrder(t *testing.T) {
 	}
 }
 
+func TestPathResolverResolvesLegacyAutoloadName(t *testing.T) {
+	root := t.TempDir()
+	first := t.TempDir()
+	second := t.TempDir()
+	target := filepath.Join(second, "autoload", "foo", "bar.vim")
+	writeResolverFile(t, target, "function foo#bar#Run()\nendfunction\n")
+	resolver, err := NewPathResolver(root, []string{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := resolver.ResolveAutoload("g:foo#bar#Run")
+	if result.Dynamic || result.Path != filepath.Clean(target) || len(result.Candidates) != 2 {
+		t.Fatalf("autoload resolution = %#v, want %q", result, target)
+	}
+	for _, name := range []string{"plain", "#Run", "foo#"} {
+		if result := resolver.ResolveAutoload(name); result.Path != "" || len(result.Candidates) != 0 {
+			t.Fatalf("invalid autoload %q = %#v", name, result)
+		}
+	}
+}
+
 func TestPathResolverKeepsCanonicalRuntimePath(t *testing.T) {
 	root := t.TempDir()
 	runtimePath, err := filepath.EvalSymlinks(t.TempDir())
