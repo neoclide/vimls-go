@@ -301,7 +301,7 @@ func (view logicalView) byteSpan(index int) Span {
 }
 
 func scanLogicalCommands(file *File, view *logicalView, dialect Dialect) int {
-	if dialect == Legacy && view.identity && !strings.Contains(view.Text, "vim9") {
+	if dialect == Legacy && view.identity && !strings.Contains(view.Text, "vim9") && !strings.Contains(view.Text, "def ") && !strings.Contains(view.Text, "def\t") {
 		first := len(file.Commands)
 		scanCommands(file, view.Source.Start, view.Source.End, dialect)
 		file.Tokens = append(file.Tokens, view.Physical...)

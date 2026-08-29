@@ -10,8 +10,10 @@ func parseFunctionSignature(file *File, command *Command) {
 	if command.Argument.Start >= command.Argument.End {
 		return
 	}
-	source := file.Text(command.Argument)
-	if command.Dialect == Vim9 {
+	rawSource := file.Text(command.Argument)
+	vim9Signature := command.Dialect == Vim9 || command.Canonical == "def"
+	source := rawSource
+	if vim9Signature {
 		source = maskVim9Comments(source)
 	}
 	offset := skipSyntaxSpace(source, 0, len(source))
@@ -29,7 +31,6 @@ func parseFunctionSignature(file *File, command *Command) {
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
 	beforeSpace := offset
 	offset = skipSyntaxSpace(source, offset, len(source))
-	vim9Signature := command.Dialect == Vim9 || command.Canonical == "def"
 	spaceBeforeGeneric := vim9Signature && offset > beforeSpace && offset < len(source) && source[offset] == '<'
 	genericInvalid := spaceBeforeGeneric
 	if spaceBeforeGeneric {
@@ -67,6 +68,28 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 	}
 	if offset >= len(source) || source[offset] != '(' {
+		if vim9Signature && offset < len(source) {
+			end := trimSyntaxSpaceEnd(source, offset, len(source))
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E488", Message: "trailing characters",
+				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + end},
+			})
+		}
+		command.Function = function
+		return
+	}
+	open := offset
+	if vim9Signature && open+1 < len(rawSource) && rawSource[open+1] == '#' {
+		end := strings.IndexByte(rawSource[open+1:], '\n')
+		if end < 0 {
+			end = len(rawSource)
+		} else {
+			end += open + 1
+		}
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E125", Message: "illegal argument",
+			Span: Span{Start: command.Argument.Start + open + 1, End: command.Argument.Start + end},
+		})
 		command.Function = function
 		return
 	}
@@ -102,9 +125,17 @@ func parseFunctionSignature(file *File, command *Command) {
 	if offset < len(source) && source[offset] == ')' {
 		offset++
 	}
-	offset = skipSyntaxSpace(source, offset, len(source))
-	if offset < len(source) && source[offset] == ':' {
-		if vim9Signature && (offset+1 >= len(source) || !isExpressionSpace(source[offset+1])) {
+	tailStart := offset
+	offset = skipSyntaxSpace(rawSource, offset, len(rawSource))
+	spaceBeforeTail := offset > tailStart
+	if offset < len(rawSource) && rawSource[offset] == ':' {
+		spaceBeforeColon := vim9Signature && spaceBeforeTail
+		if spaceBeforeColon {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1059", Message: "no white space allowed before colon",
+				Span: Span{Start: command.Argument.Start + tailStart, End: command.Argument.Start + offset + 1},
+			})
+		} else if vim9Signature && (offset+1 >= len(source) || !isExpressionSpace(source[offset+1])) {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1069", Message: "white space required after ':'",
 				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + offset + 1},
@@ -114,8 +145,60 @@ func parseFunctionSignature(file *File, command *Command) {
 		typeEnd := trimSyntaxSpaceEnd(source, typeStart, len(source))
 		function.ReturnTypeSpan = Span{Start: command.Argument.Start + typeStart, End: command.Argument.Start + typeEnd}
 		function.ReturnType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, source[typeStart:typeEnd], command.Argument.Start+typeStart)
-	} else if offset < len(source) {
-		function.Attributes = Span{Start: command.Argument.Start + offset, End: command.Argument.End}
+	} else if offset < len(rawSource) {
+		if rawSource[offset] == '#' {
+			validComment := spaceBeforeTail && (command.Canonical == "def" || command.Dialect == Vim9)
+			if !validComment {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End},
+				})
+			}
+		} else if rawSource[offset] == '"' {
+			if command.Canonical == "def" {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End},
+				})
+			}
+		} else if command.Canonical == "def" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E488", Message: "trailing characters",
+				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End},
+			})
+		} else {
+			attributeStart := offset
+			attributeEnd := offset
+			for offset < len(rawSource) {
+				wordEnd := scanWord(rawSource, offset, len(rawSource))
+				word := rawSource[offset:wordEnd]
+				if word != "range" && word != "dict" && word != "abort" && word != "closure" {
+					break
+				}
+				attributeEnd = wordEnd
+				offset = skipSyntaxSpace(rawSource, wordEnd, len(rawSource))
+			}
+			if attributeEnd > attributeStart {
+				function.Attributes = Span{Start: command.Argument.Start + attributeStart, End: command.Argument.Start + attributeEnd}
+			}
+			if offset < len(rawSource) && rawSource[offset] != '"' && !(rawSource[offset] == '#' && command.Dialect == Vim9 && offset > tailStart && isExpressionSpace(rawSource[offset-1])) {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End},
+				})
+			}
+		}
+	} else if command.Canonical == "def" {
+		lineEnd := command.Argument.End
+		for lineEnd < len(file.Source) && file.Source[lineEnd] != '\n' {
+			lineEnd++
+		}
+		trailing := skipSpace(file.Source, command.Argument.End, lineEnd)
+		if trailing < lineEnd && file.Source[trailing] == '"' {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E488", Message: "trailing characters", Span: Span{Start: trailing, End: lineEnd},
+			})
+		}
 	}
 	command.Function = function
 }
@@ -255,7 +338,18 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 	if equals >= 0 {
 		defaultStart := skipSyntaxSpace(source, equals+1, end)
 		parameter.DefaultSpan = Span{Start: command.Argument.Start + defaultStart, End: command.Argument.Start + end}
-		parameter.Default, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[defaultStart:end], command.Argument.Start+defaultStart, command.Dialect)
+		if defaultStart >= end {
+			parameter.Default = &Expression{Kind: ExpressionMissing, Span: parameter.DefaultSpan}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E125", Message: "illegal argument", Span: parameter.DefaultSpan,
+			})
+		} else {
+			dialect := command.Dialect
+			if vim9Signature {
+				dialect = Vim9
+			}
+			parameter.Default, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[defaultStart:end], command.Argument.Start+defaultStart, dialect)
+		}
 	}
 	return parameter
 }

@@ -299,7 +299,7 @@ func parseSource(source string, initial Dialect) *File {
 					heredocRecoveryCommand = enclosingFunctionEnd(active, dialectStack)
 					heredocRecoveryOffset = -1
 				}
-			} else if last >= commandIndex && file.Commands[last].Dialect == Vim9 {
+			} else if last >= commandIndex && usesVim9Continuation(file.Commands[last]) {
 				vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
 				if needsVim9CommandContinuation(file, last, vim9ContinuationState) {
 					vim9Continuation = last
@@ -342,7 +342,7 @@ func parseSource(source string, initial Dialect) *File {
 			}
 		} else if len(file.Commands) > before {
 			last := len(file.Commands) - 1
-			if file.Commands[last].Dialect == Vim9 {
+			if usesVim9Continuation(file.Commands[last]) {
 				vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
 				vim9Continuation = -1
 				if needsVim9CommandContinuation(file, last, vim9ContinuationState) {
@@ -3675,6 +3675,10 @@ func needsVim9CommandContinuation(file *File, commandIndex int, state vim9Contin
 	source := file.Text(command.Argument)
 	in := findTopLevelKeyword(source, 0, len(source), "in")
 	return in < 0 || skipExpressionSpace(source, in+2) == len(source)
+}
+
+func usesVim9Continuation(command Command) bool {
+	return command.Dialect == Vim9 || command.Canonical == "def"
 }
 
 func completeVim9TypedDeclaration(command Command, source string) bool {
