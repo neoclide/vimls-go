@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 799 (`74ccec2`)
+- Current parser-negative syntax assertions: 801 (`77b5e9b`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -255,6 +255,9 @@ making the authoritative current split 797 migrated, zero ready, and 271
 pending-fix.
 Commit `74ccec2` migrated two E1554 incomplete generic references, making the
 authoritative current split 799 migrated, zero ready, and 269 pending-fix.
+Commit `77b5e9b` migrated two additional E1554 typed tails made ready by the
+same recovery, making the authoritative current split 801 migrated, zero ready,
+and 267 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -849,11 +852,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 52 | 0 | 63 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
-| `C-GENERIC` | 109 | 40 | 0 | 69 |
+| `C-GENERIC` | 109 | 42 | 0 | 67 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **167** | **0** | **202** |
+| **Total** | **369** | **169** | **0** | **200** |
 
 ```text
 C-EXPR
@@ -1045,6 +1048,10 @@ Commit `74ccec2` migrated E1554 at `G:{280:6221,1706:36532}/script`. A tight
 generic `<` without a closing `>` now retains an incomplete generic-reference
 AST, reports the error on that physical line, and leaves the following
 `enddef` or command available to ordinary recovery.
+
+Commit `77b5e9b` migrated the same E1554 recovery with partial type tails at
+`G:{1720:36821,1734:37119}/script`; the incomplete operator span retains
+`<number` or `<number,` without generating a same-line diagnostic cascade.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
