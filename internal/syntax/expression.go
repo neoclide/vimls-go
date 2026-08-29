@@ -131,7 +131,7 @@ func newExpressionBoundary(argument Span, expression *Expression, diagnostics []
 func appendTrailingExpressionDiagnostic(diagnostics []Diagnostic, base, consumed, length int) []Diagnostic {
 	if consumed < length {
 		for _, diagnostic := range diagnostics {
-			if diagnostic.Code == "vim/E1004" || diagnostic.Code == "vim/E274" || diagnostic.Code == "vim/E1170" {
+			if diagnostic.Code == "vim/E1004" || diagnostic.Code == "vim/E274" || diagnostic.Code == "vim/E1170" || diagnostic.Code == "vimls/invalid-atom" {
 				// Vim stops the current expression at these errors.
 				// Keep the remaining bytes opaque instead of reporting a cascade.
 				return diagnostics
@@ -298,7 +298,7 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 				continue
 			}
 		}
-		missingMember := token.text == "." && token.span.Start == left.Span.End && p.peek(1).kind == expressionEOF
+		missingMember := token.text == "." && token.span.Start == left.Span.End && (p.peek(1).kind == expressionEOF || p.dialect == Vim9)
 		if (token.text == "(" && (token.span.Start == left.Span.End || legacyCall)) || token.text == "[" && token.span.Start == left.Span.End || token.text == "." && (p.isMember(left) || missingMember) || token.text == "->" && p.isMethod(left) {
 			if 100 < minimumBinding {
 				break
@@ -517,6 +517,9 @@ func (p *expressionParser) parsePrefix() *Expression {
 	switch token.kind {
 	case expressionIdentifier:
 		p.advance()
+		if p.dialect == Vim9 && strings.HasPrefix(token.text, "$") && (len(token.text) == 1 || strings.Trim(token.text, "$") == "") {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/invalid-atom", Message: "invalid atom", Span: token.span})
+		}
 		if p.dialect == Vim9 && strings.HasPrefix(token.text, "@") {
 			if len(token.text) == 1 {
 				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1002", Message: "Syntax error at @", Span: token.span})
@@ -834,9 +837,15 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 		p.advance()
 		member := p.current()
 		if member.kind != expressionIdentifier && member.kind != expressionNumber {
-			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-member", Message: "expected member name", Span: member.span})
+			code := "vimls/missing-member"
+			message := "expected member name"
+			if p.dialect == Vim9 && member.text == "#" {
+				code = "vimls/invalid-atom"
+				message = "invalid atom"
+			}
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: member.span})
 			missing := &Expression{Kind: ExpressionMissing, Span: member.span}
-			return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: token.span.End}, Operator: token.span, Children: []*Expression{left, missing}}
+			return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: max(token.span.End, member.span.End)}, Operator: token.span, Children: []*Expression{left, missing}}
 		}
 		p.advance()
 		if p.dialect == Vim9 {
@@ -2238,6 +2247,11 @@ func (lexer *expressionLexer) scan() expressionToken {
 					break
 				}
 				index += nextSize
+			}
+			if r == '$' && index == start+size {
+				for index < len(source) && source[index] == '$' {
+					index++
+				}
 			}
 			prefix := source[start:index]
 			if index < len(source) && source[index] == ':' && isScopePrefix(prefix) && (scopeNameStartsAt(source, index+1, prefix, lexer.dialect) || scopePrefixIsStandalone(source, index+1) || lexer.dialect == Legacy && index+1 < len(source) && isExpressionSpace(source[index+1])) {

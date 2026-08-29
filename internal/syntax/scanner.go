@@ -2322,7 +2322,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
+		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/invalid-atom" || diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -2505,6 +2505,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
+		case diagnostic.Code == "vimls/invalid-atom":
+			diagnostic.Code = "vim/E15"
+			diagnostic.Message = "invalid expression"
+			if inDef {
+				diagnostic.Code = "vim/E1002"
+				diagnostic.Message = "Syntax error"
+			}
 		case command.Dialect == Vim9 && command.Declaration != nil && diagnostic.Code == "vimls/trailing-expression" && vim9InvalidIsSuffix(file.Source, diagnostic.Span.Start):
 			diagnostic.Code = "vim/E488"
 			diagnostic.Message = "trailing characters"
@@ -3838,6 +3845,9 @@ func looksLikeScopedVim9Assignment(source string, nameEnd, end int) bool {
 // the token boundary strict so an incomplete sigil remains recoverable as an
 // opaque command instead of swallowing the following line.
 func looksLikeVim9SigilExpression(source string, start, end int) bool {
+	if source[start] == '$' && start+1 == end {
+		return true
+	}
 	nameEnd, ok := scanVim9Sigil(source, start, end)
 	if !ok {
 		return false

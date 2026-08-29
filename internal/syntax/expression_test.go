@@ -1371,6 +1371,60 @@ func TestVim9MethodCallableMissingParentheses(t *testing.T) {
 	}
 }
 
+func TestVim9InvalidAtomRecovery(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		code   string
+	}{
+		{name: "def member", source: "def F()\nvar x = g:dict_one.#$!\nvar after = 1\nenddef\n", code: "vim/E1002"},
+		{name: "script member", source: "vim9script\nvar x = g:dict_one.#$!\nvar after = 1\n", code: "vim/E15"},
+		{name: "def dollars", source: "def F()\nvar x = $$$\nvar after = 1\nenddef\n", code: "vim/E1002"},
+		{name: "script dollars", source: "vim9script\nvar x = $$$\nvar after = 1\n", code: "vim/E15"},
+		{name: "def dollar command", source: "def F()\n$\nvar after = 1\nenddef\n", code: "vim/E1002"},
+		{name: "script dollar command", source: "vim9script\n$\nvar after = 1\n", code: "vim/E15"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+				t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+			}
+			_, diagnosticLineEnd := physicalLineEnd(file.Source, file.Diagnostics[0].Span.Start)
+			if diagnosticLineEnd > strings.Index(test.source, "var after") {
+				t.Fatalf("diagnostic crossed recovery line: %#v", file.Diagnostics[0])
+			}
+			var invalid, after *Command
+			for index := range file.Commands {
+				command := &file.Commands[index]
+				if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+					after = command
+				} else if command.Declaration != nil && file.Text(command.Declaration.Name) == "x" || command.Kind == CommandExpression && file.Text(command.Argument) == "$" {
+					invalid = command
+				}
+			}
+			if invalid == nil || after == nil || after.Declaration.Initializer == nil || file.Text(after.Declaration.Initializer.Span) != "1" {
+				t.Fatalf("recovery commands = %#v", file.Commands)
+			}
+			if invalid.Declaration != nil && invalid.Declaration.Initializer == nil || invalid.Kind == CommandExpression && len(invalid.Expressions) != 1 {
+				t.Fatalf("invalid AST was discarded: %#v", invalid)
+			}
+			expression := invalid.Expressions[0]
+			if invalid.Declaration != nil {
+				expression = invalid.Declaration.Initializer
+			}
+			if strings.Contains(test.name, "member") {
+				if expression.Kind != ExpressionMember || len(expression.Children) != 2 || expression.Children[0].Value != "g:dict_one" || expression.Children[1].Kind != ExpressionMissing || file.Text(expression.Span) != "g:dict_one.#" {
+					t.Fatalf("member AST = %#v", expression)
+				}
+			} else if expression.Kind != ExpressionIdentifier || strings.Trim(file.Text(expression.Span), "$") != "" {
+				t.Fatalf("dollar AST = %#v", expression)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestOfficialVim9CallableParenthesisSpacing(t *testing.T) {
 	// Vim v9.2.1015 src/testdir/test_vim9_expr.vim:4480.
 	source := "vim9script\nvar l = [2]\nl->((ll) => add(ll, 8)) ()\nvar after = 1\necho after\n"
