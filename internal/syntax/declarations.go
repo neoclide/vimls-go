@@ -1,5 +1,7 @@
 package syntax
 
+import "strings"
+
 func parseImport(file *File, command *Command) {
 	source := file.Text(command.Argument)
 	start := skipSpace(source, 0, len(source))
@@ -37,6 +39,21 @@ func parseImport(file *File, command *Command) {
 	importNode.PathSpan = Span{Start: command.Argument.Start + pathStart, End: command.Argument.Start + pathEnd}
 	if pathStart < pathEnd {
 		importNode.Path, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[pathStart:pathEnd], command.Argument.Start+pathStart, command.Dialect)
+	}
+	if command.Dialect == Vim9 && aliasKeyword < 0 && importNode.Path != nil && importNode.Path.Kind == ExpressionString {
+		literal := importNode.Path.Value
+		if len(literal) >= 2 && (literal[0] == '\'' || literal[0] == '"') && literal[0] == literal[len(literal)-1] {
+			path := literal[1 : len(literal)-1]
+			tail := path
+			if separator := strings.LastIndexAny(path, "/\\"); separator >= 0 {
+				tail = path[separator+1:]
+			}
+			if tail == ".vim" {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1261", Message: `Cannot import .vim without using "as"`, Span: importNode.PathSpan})
+			} else if !strings.HasSuffix(path, ".vim") {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1257", Message: `Imported script must use "as" or end in .vim: ` + literal, Span: importNode.PathSpan})
+			}
+		}
 	}
 	if hasInvalidAlias {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1047", Message: "syntax error in import", Span: invalidAlias})
