@@ -947,8 +947,15 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			start = skipSpaceToken(file, start+1, end)
 		}
 		rangeStart := start
+		invalidVim9Range := false
 		if baseDialect == Legacy || commandStart < end && file.Source[commandStart] == ':' {
 			start = scanRange(file.Source, start, end)
+		} else if rangeEnd := scanRange(file.Source, start, end); rangeEnd > start && vim9ModifierRangeRequiresColon(file.Source, start, rangeEnd, end) {
+			start = rangeEnd
+			invalidVim9Range = true
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1050", Message: "colon required before a range", Span: Span{Start: rangeStart, End: end},
+			})
 		}
 		commandRange := Span{}
 		if start > rangeStart {
@@ -1046,7 +1053,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				start = skipSpaceToken(file, filterEnd, end)
 			}
 		}
-		invalidModifierRange := false
+		invalidModifierRange := invalidVim9Range
 		if len(parsedModifiers) > 0 {
 			// Legacy permits an optional colon before a range after modifiers.
 			// Vim9 requires the colon unless the bytes start an expression.
