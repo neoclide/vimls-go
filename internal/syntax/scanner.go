@@ -2171,6 +2171,33 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			leftEnd := trimSpaceEnd(source, 0, assignment.Start)
 			rightStart := skipSpace(source, assignment.End, len(source))
 			left, leftDiagnostics := parseExpression(source[:leftEnd], command.Argument.Start, command.Dialect)
+			if command.Dialect == Vim9 && left != nil && left.Kind == ExpressionIdentifier && strings.HasPrefix(left.Value, "@") {
+				name, size := utf8.DecodeRuneInString(left.Value[1:])
+				if size > 0 && 1+size == len(left.Value) {
+					nameSpan := Span{Start: left.Span.Start + 1, End: left.Span.Start + 1 + size}
+					if name == '@' {
+						// @@ is the assignment-only alias for the unnamed register.
+						// Keep it invalid in the ordinary register-read parser.
+						kept := leftDiagnostics[:0]
+						for _, diagnostic := range leftDiagnostics {
+							if diagnostic.Code != "vim/E354" || diagnostic.Span != nameSpan {
+								kept = append(kept, diagnostic)
+							}
+						}
+						leftDiagnostics = kept
+					} else if !validRegisterName(name) || strings.ContainsRune(".%:~", name) {
+						diagnosed := false
+						for _, diagnostic := range leftDiagnostics {
+							diagnosed = diagnosed || diagnostic.Code == "vim/E354" && diagnostic.Span == nameSpan
+						}
+						if !diagnosed {
+							leftDiagnostics = append(leftDiagnostics, Diagnostic{
+								Code: "vim/E354", Message: "Invalid register name: '" + string(name) + "'", Span: nameSpan,
+							})
+						}
+					}
+				}
+			}
 			rhs := Span{Start: command.Argument.Start + rightStart, End: command.Argument.End}
 			right, rightDiagnostics, reused := takeValidBoundaryExpression(command, rhs)
 			if !reused {

@@ -447,6 +447,11 @@ func (p *expressionParser) parsePrefix() *Expression {
 		return &Expression{Kind: ExpressionString, Span: token.span, Value: token.text}
 	case expressionBlob:
 		p.advance()
+		if blobLiteralHasIncompleteByte(token.text) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E973", Message: "Blob literal should have an even number of hex characters", Span: token.span,
+			})
+		}
 		return &Expression{Kind: ExpressionBlob, Span: token.span, Value: token.text}
 	case expressionInterpolatedString:
 		p.advance()
@@ -472,6 +477,19 @@ func (p *expressionParser) parsePrefix() *Expression {
 
 func validRegisterName(name rune) bool {
 	return name >= 'A' && name <= 'Z' || name >= 'a' && name <= 'z' || name >= '0' && name <= '9' || strings.ContainsRune(`"-_/#.%:=*+~`, name)
+}
+
+func blobLiteralHasIncompleteByte(literal string) bool {
+	for index := 2; index < len(literal) && isLiteralDigit(literal[index]); {
+		if index+1 >= len(literal) || !isLiteralDigit(literal[index+1]) {
+			return true
+		}
+		index += 2
+		if index+1 < len(literal) && literal[index] == '.' && isLiteralDigit(literal[index+1]) {
+			index++
+		}
+	}
+	return false
 }
 
 // startsLeadingCurlyName distinguishes a legacy curly-braces variable name
