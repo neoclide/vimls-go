@@ -56,6 +56,98 @@ func TestVim9EnumValuesCanShareAndContinueLines(t *testing.T) {
 	}
 }
 
+func TestVim9EnumValuesRejectUnexpectedPayload(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name:   "colon",
+			source: "vim9script\nenum Foo\n  first,\n  second : 20\nendenum\n",
+			want:   []string{"first", "second"},
+		},
+		{
+			name:   "number",
+			source: "vim9script\nenum Foo\n  first,\n  second = 2\nendenum\n",
+			want:   []string{"first", "second"},
+		},
+		{
+			name:   "string",
+			source: "vim9script\nenum Foo\n  first,\n  second = 'second'\nendenum\ndefcompile\n",
+			want:   []string{"first", "second"},
+		},
+		{
+			name:   "list",
+			source: "vim9script\nenum Foo\n  first,\n  second = []\nendenum\n",
+			want:   []string{"first", "second"},
+		},
+		{
+			name:   "empty-colon",
+			source: "vim9script\nenum Foo\n\n  # first\n  first:\n  second\nendenum\n",
+			want:   []string{"first"},
+		},
+		{
+			name:   "double-equals",
+			source: "vim9script\nenum Foo\n  first == 1\nendenum\ndefcompile\n",
+			want:   []string{"first"},
+		},
+		{
+			name:   "missing-comma",
+			source: "vim9script\nenum Planet\n  mercury venus earth\nendenum\ndefcompile\n",
+			want:   []string{"mercury"},
+		},
+		{
+			name:   "object-variable",
+			source: "vim9script\nenum Foo\n  final n: number = 10\nendenum\n",
+			want:   []string{"final"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1123" {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			var values []string
+			for _, command := range file.Commands {
+				for _, value := range command.EnumValues {
+					values = append(values, file.Text(value.Name))
+				}
+			}
+			if len(values) != len(test.want) {
+				t.Fatalf("enum values = %#v, want %#v; commands = %#v", values, test.want, file.Commands)
+			}
+			for index, want := range test.want {
+				if values[index] != want {
+					t.Fatalf("enum value %d = %q, want %q", index, values[index], want)
+				}
+			}
+			if file.Commands[len(file.Commands)-1].Canonical != "endenum" && file.Commands[len(file.Commands)-2].Canonical != "endenum" {
+				t.Fatalf("endenum was not recovered: commands = %#v", file.Commands)
+			}
+		})
+	}
+}
+
+func TestVim9EnumValuesRejectSpaceBeforeConstructor(t *testing.T) {
+	for _, constructor := range []string{"Orange (20)", "Orange (20"} {
+		t.Run(constructor, func(t *testing.T) {
+			source := "vim9script\nenum Fruit\n  Apple(10),\n  " + constructor + "\n\n  def new(t: number)\n  enddef\nendenum\ndefcompile\n"
+			file := Parse(source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1068" {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) < 2 || len(file.Commands[2].EnumValues) != 2 || file.Text(file.Commands[2].EnumValues[1].Name) != "Orange" {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			if file.Commands[len(file.Commands)-2].Canonical != "endenum" {
+				t.Fatalf("endenum was not recovered: commands = %#v", file.Commands)
+			}
+		})
+	}
+}
+
 func TestOfficialVim9EnumAllowsTrailingComma(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_class.vim
 	// Test_list_type_inference_with_enum_and_object.

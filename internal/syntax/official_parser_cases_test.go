@@ -144,8 +144,8 @@ func TestOfficialVimParserCases(t *testing.T) {
 	}
 }
 
-func TestOfficialVimParserTypeFailures(t *testing.T) {
-	// These failures are statically decided by the v9.2.1015 type parser. Keep
+func TestOfficialVimParserFailures(t *testing.T) {
+	// These failures are statically decided by the v9.2.1015 parser. Keep
 	// execution, type-checking, and other unclassified failures out of this
 	// allowlist until their parser phase is proven independently.
 	expected := map[string]string{
@@ -208,6 +208,16 @@ func TestOfficialVimParserTypeFailures(t *testing.T) {
 		"src/testdir/test_vim9_func.vim:2886:66262/def":            "vim/E1069",
 		"src/testdir/test_vim9_func.vim:2887:66332/def":            "vim/E1005",
 		"src/testdir/test_vim9_func.vim:2888:66507/def":            "vim/E1069",
+		"src/testdir/test_vim9_enum.vim:151:3717/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:161:3943/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:172:4190/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:182:4421/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:194:4637/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:204:4829/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:252:5905/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:378:8621/script":           "vim/E1123",
+		"src/testdir/test_vim9_enum.vim:1527:34659/script":         "vim/E1068",
+		"src/testdir/test_vim9_enum.vim:1541:34927/script":         "vim/E1068",
 	}
 
 	corpus := readOfficialParserCases(t)
@@ -241,7 +251,7 @@ func TestOfficialVimParserTypeFailures(t *testing.T) {
 			}
 		}
 		sort.Strings(missing)
-		t.Fatalf("official container type failures missing from artifact: %v", missing)
+		t.Fatalf("official parser failures missing from artifact: %v", missing)
 	}
 }
 

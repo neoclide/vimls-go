@@ -165,13 +165,26 @@ func parseEnumValues(file *File, command *Command) bool {
 			continue
 		}
 		value := EnumValue{Name: Span{Start: start + valueStart, End: start + nameEnd}}
-		if nameEnd < valueEnd && (source[nameEnd] == '(' || source[nameEnd] == '<') {
-			initializer, diagnostics := parseExpression(source[valueStart:valueEnd], start+valueStart, Vim9)
-			value.Initializer = initializer
-			if initializer.Kind == ExpressionCall && len(initializer.Children) > 1 {
-				value.Arguments = append(value.Arguments, initializer.Children[1:]...)
+		payloadStart := skipEnumSpace(source, nameEnd, valueEnd)
+		if payloadStart < valueEnd {
+			if source[payloadStart] != '(' && source[payloadStart] != '<' {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1123", Message: "missing comma before enum value argument",
+					Span: Span{Start: start + payloadStart, End: start + valueEnd},
+				})
+			} else if payloadStart > nameEnd {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1068", Message: "no white space allowed before '('",
+					Span: Span{Start: start + nameEnd, End: start + payloadStart},
+				})
+			} else {
+				initializer, diagnostics := parseExpression(source[valueStart:valueEnd], start+valueStart, Vim9)
+				value.Initializer = initializer
+				if initializer.Kind == ExpressionCall && len(initializer.Children) > 1 {
+					value.Arguments = append(value.Arguments, initializer.Children[1:]...)
+				}
+				file.Diagnostics = append(file.Diagnostics, diagnostics...)
 			}
-			file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		}
 		command.EnumValues = append(command.EnumValues, value)
 	}
