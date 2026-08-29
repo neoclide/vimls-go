@@ -68,6 +68,16 @@ func (p *typeParser) parseType() *Type {
 	}
 	if strings.HasPrefix(p.source[p.offset:], "...") {
 		p.offset += 3
+		memberStart := p.offset
+		p.skipSpace()
+		if p.offset >= len(p.source) || strings.ContainsRune(",>)", rune(p.source[p.offset])) {
+			missing := &Type{Kind: TypeMissing, Span: p.span(p.offset, p.offset)}
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1010", Message: "type not recognized",
+				Span: p.span(memberStart, p.offset),
+			})
+			return &Type{Kind: TypeVariadic, Span: p.span(start, p.offset), Name: "...", Arguments: []*Type{missing}}
+		}
 		member := p.parseType()
 		return &Type{Kind: TypeVariadic, Span: p.span(start, member.Span.End-p.base), Name: "...", Arguments: []*Type{member}}
 	}

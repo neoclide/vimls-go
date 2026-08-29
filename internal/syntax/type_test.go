@@ -222,6 +222,7 @@ func TestVim9TypeParserTupleVariadicMember(t *testing.T) {
 		diagnostic string
 		arguments  int
 	}{
+		{source: "tuple<number, ...>", diagnostic: "vim/E1010", arguments: 2},
 		{source: "tuple<number, ...number>", diagnostic: "vim/E1539", arguments: 2},
 		{source: "tuple<number, ...list<string>, bool>", diagnostic: "vim/E1008", arguments: 3},
 	}
