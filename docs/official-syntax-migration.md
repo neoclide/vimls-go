@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 585 (`81f9860`)
+- Current parser-negative syntax assertions: 587 (`d29ae92`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -139,6 +139,9 @@ Commit `0814cad` migrated the four lambda-parameter comma-spacing variants,
 making the current split 565 migrated, zero ready, and 504 pending-fix.
 Commit `81f9860` migrated all 20 Dictionary delimiter-spacing variants, making
 the current split 585 migrated, zero ready, and 484 pending-fix.
+Commit `d29ae92` verified and migrated both ternary question-mark spacing
+variants, making the current split 587 migrated, zero ready, and 482
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -171,12 +174,12 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-281 migrated and 44 pending-fix.
+283 migrated and 42 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 55 | 0 | 29 |
-| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 143 | 0 | 14 |
+| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 145 | 0 | 12 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 22 | 0 | 1 |
@@ -368,6 +371,11 @@ Commit `81f9860` migrated the 20 Dictionary variants at call lines 3129-3133,
 the first E1068/E1069 spacing violation while retaining all parseable key/value
 children and following commands. Legacy Dictionary spacing and the independent
 Vim9 `#{` error path remain unchanged.
+
+Commit `d29ae92` migrated both ternary variants at call line 111. Existing
+Vim9 ternary validation already reported one E1004 on the unspaced `?` while
+retaining all three operands and recovery, so no production change or duplicate
+fixture was needed.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
