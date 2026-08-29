@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 909 (`080e7cc`)
+- Current parser-negative syntax assertions: 910 (`54cab6f`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -326,6 +326,9 @@ Commit `b9ca51e` migrated the malformed Vim9 `catch` separator case, making the
 authoritative current split 908 migrated, zero ready, and 160 pending-fix.
 Commit `080e7cc` migrated the Vim9 `for` header stopped by a comment, making
 the authoritative current split 909 migrated, zero ready, and 159 pending-fix.
+Commit `54cab6f` migrated the E584 `elseif` recovery case while retaining the
+valid next-line E583 diagnostic, making the authoritative current split 910
+migrated, zero ready, and 158 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -916,7 +919,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 50 | 0 | 1 |
+| `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 81 | 0 | 34 |
 | `C-EXPR` | 19 | 15 | 0 | 4 |
@@ -924,7 +927,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **277** | **0** | **92** |
+| **Total** | **369** | **278** | **0** | **91** |
 
 ```text
 C-EXPR
