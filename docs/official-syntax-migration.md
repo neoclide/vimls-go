@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 561 (`07be705`)
+- Current parser-negative syntax assertions: 565 (`0814cad`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -135,6 +135,8 @@ Commit `b50bd90` migrated the four function-call comma-spacing variants,
 making the current split 553 migrated, zero ready, and 516 pending-fix.
 Commit `07be705` migrated the eight List comma-spacing variants, making the
 current split 561 migrated, zero ready, and 508 pending-fix.
+Commit `0814cad` migrated the four lambda-parameter comma-spacing variants,
+making the current split 565 migrated, zero ready, and 504 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -167,12 +169,12 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-257 migrated and 68 pending-fix.
+261 migrated and 64 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 55 | 0 | 29 |
-| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 119 | 0 | 38 |
+| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 123 | 0 | 34 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 22 | 0 | 1 |
@@ -352,6 +354,12 @@ Commit `07be705` migrated the eight List variants at call lines 2594, 2595,
 preserving every parsed item; legacy List spacing remains unchanged. The four
 lambda-parameter variants were deliberately left for their separate parser
 path rather than coupling two roots in one change.
+
+Commit `0814cad` migrated those four lambda-parameter variants at call lines
+2779 and 2952. The parameter parser now reports E1069 at a comma without
+following whitespace while retaining both parameters, the arrow and body, and
+the enclosing call. A trailing comma is not misclassified as this spacing
+error, and legacy lambdas remain unchanged.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
