@@ -80,6 +80,23 @@ func parseFunctionSignature(file *File, command *Command) {
 		if parameter != nil {
 			function.Parameters = append(function.Parameters, *parameter)
 		}
+		if vim9Signature && part.End < close {
+			beforeComma := trimSyntaxSpaceEnd(source, part.Start, part.End)
+			spaceBeforeComma := beforeComma < part.End
+			if spaceBeforeComma {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1068", Message: "no white space allowed before ','",
+					Span: Span{Start: command.Argument.Start + beforeComma, End: command.Argument.Start + part.End + 1},
+				})
+			}
+			afterComma := part.End + 1
+			if !spaceBeforeComma && (afterComma >= close || !isExpressionSpace(source[afterComma])) {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1069", Message: "white space required after ','",
+					Span: Span{Start: command.Argument.Start + part.End, End: command.Argument.Start + afterComma},
+				})
+			}
+		}
 	}
 	offset = close
 	if offset < len(source) && source[offset] == ')' {
@@ -87,6 +104,12 @@ func parseFunctionSignature(file *File, command *Command) {
 	}
 	offset = skipSyntaxSpace(source, offset, len(source))
 	if offset < len(source) && source[offset] == ':' {
+		if vim9Signature && (offset+1 >= len(source) || !isExpressionSpace(source[offset+1])) {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1069", Message: "white space required after ':'",
+				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + offset + 1},
+			})
+		}
 		typeStart := skipSyntaxSpace(source, offset+1, len(source))
 		typeEnd := trimSyntaxSpaceEnd(source, typeStart, len(source))
 		function.ReturnTypeSpan = Span{Start: command.Argument.Start + typeStart, End: command.Argument.Start + typeEnd}
@@ -181,6 +204,7 @@ func parseFunctionTypeParameters(source string, base, open, close int) ([]TypePa
 }
 
 func parseParameter(file *File, command *Command, source string, part Span) *Parameter {
+	vim9Signature := command.Dialect == Vim9 || command.Canonical == "def"
 	start := skipSyntaxSpace(source, part.Start, part.End)
 	end := trimSyntaxSpaceEnd(source, start, part.End)
 	if start >= end {
@@ -202,10 +226,16 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 	}
 	nameEnd = trimSyntaxSpaceEnd(source, start, nameEnd)
 	parameter.Name = Span{Start: command.Argument.Start + start, End: command.Argument.Start + nameEnd}
-	if command.Dialect == Vim9 && !parameter.Variadic {
+	if vim9Signature && !parameter.Variadic {
 		parameter.Target = parseConstructorParameterTarget(source, start, nameEnd, command.Argument.Start)
 	}
 	if colon >= 0 && (equals < 0 || colon < equals) {
+		if vim9Signature && (colon+1 >= end || !isExpressionSpace(source[colon+1])) {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1069", Message: "white space required after ':'",
+				Span: Span{Start: command.Argument.Start + colon, End: command.Argument.Start + colon + 1},
+			})
+		}
 		typeStart := skipSyntaxSpace(source, colon+1, end)
 		typeEnd := end
 		if equals >= 0 {

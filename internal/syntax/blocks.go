@@ -157,6 +157,39 @@ func buildBlocks(file *File) {
 	}
 }
 
+func suppressInvalidDefMissingEnds(file *File) {
+	var invalid map[Span]bool
+	for _, block := range file.Blocks {
+		if block.Kind == BlockDef && block.End < 0 && blockHeaderHasVimDiagnostic(file, block.Header) {
+			if invalid == nil {
+				invalid = make(map[Span]bool)
+			}
+			invalid[file.Commands[block.Header].Name] = true
+		}
+	}
+	if len(invalid) == 0 {
+		return
+	}
+	kept := file.Diagnostics[:0]
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vimls/missing-end" && invalid[diagnostic.Span] {
+			continue
+		}
+		kept = append(kept, diagnostic)
+	}
+	file.Diagnostics = kept
+}
+
+func blockHeaderHasVimDiagnostic(file *File, headerIndex int) bool {
+	header := file.Commands[headerIndex]
+	for _, diagnostic := range file.Diagnostics {
+		if strings.HasPrefix(diagnostic.Code, "vim/") && diagnostic.Span.Start >= header.Argument.Start && diagnostic.Span.End <= header.Argument.End {
+			return true
+		}
+	}
+	return false
+}
+
 func implicitlyClosedByFunction(kind BlockKind) bool {
 	switch kind {
 	case BlockIf, BlockFor, BlockWhile, BlockTry:

@@ -157,6 +157,36 @@ func TestOfficialVim9FunctionSignatureRejectsSpaceBeforeParen(t *testing.T) {
 	}
 }
 
+func TestVim9FunctionSignatureTypeAndCommaSpacing(t *testing.T) {
+	valid := Parse("vim9script\ndef Func(a: number, b: string): bool\n  return true\nenddef\n")
+	if len(valid.Diagnostics) != 0 || len(valid.Commands) < 2 || valid.Commands[1].Function == nil {
+		t.Fatalf("valid signature = %#v", valid)
+	}
+
+	invalid := []struct {
+		header     string
+		diagnostic string
+	}{
+		{header: "Func():number", diagnostic: "vim/E1069"},
+		{header: "Func(items:string)", diagnostic: "vim/E1069"},
+		{header: "Func(...items:list<number>)", diagnostic: "vim/E1069"},
+		{header: "Func(a: number , b: number)", diagnostic: "vim/E1068"},
+		{header: "Func(a: number,b: number)", diagnostic: "vim/E1069"},
+	}
+	for _, test := range invalid {
+		t.Run(test.header, func(t *testing.T) {
+			file := Parse("vim9script\ndef " + test.header + "\nenddef\nvar after = 1\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.diagnostic {
+				t.Fatalf("header=%q diagnostics=%#v", test.header, file.Diagnostics)
+			}
+			last := file.Commands[len(file.Commands)-1]
+			if last.Canonical != "var" || last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+				t.Fatalf("header=%q recovery=%#v", test.header, file.Commands)
+			}
+		})
+	}
+}
+
 func TestIncompleteFunctionSignatureRecovers(t *testing.T) {
 	file := (Vim9Parser{}).Parse("def Broken<T(value: list<number>\nvar after = 1\n")
 	found := false
