@@ -290,6 +290,78 @@ func TestVim9OptionAssignmentContinuesWithConcatenation(t *testing.T) {
 	}
 }
 
+func TestVim9SigilExpressionsContinueAsMethodChains(t *testing.T) {
+	tests := []struct {
+		name   string
+		parser func(string) *File
+		source string
+	}{
+		{
+			name:   "legacy file with def",
+			parser: func(source string) *File { return (LegacyParser{}).Parse(source) },
+			source: "let g:before = 1\n" +
+				"def Use()\n" +
+				"  &formatoptions\n" +
+				"    ->split(',')\n" +
+				"  &l:formatoptions\n" +
+				"    ->split(',')\n" +
+				"  $HOME\n" +
+				"    ->tolower()\n" +
+				"  @/\n" +
+				"    ->tolower()\n" +
+				"enddef\n",
+		},
+		{
+			name:   "vim9 script",
+			parser: Parse,
+			source: "vim9script\n" +
+				"&g:formatoptions\n" +
+				"  ->split(',')\n" +
+				"$HOME\n" +
+				"  ->tolower()\n" +
+				"@/\n" +
+				"  ->tolower()\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := test.parser(test.source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+			}
+			var expressions []*Command
+			for index := range file.Commands {
+				command := &file.Commands[index]
+				if command.Kind == CommandExpression {
+					expressions = append(expressions, command)
+				}
+			}
+			wantExpressions := 4
+			if test.name == "vim9 script" {
+				wantExpressions = 3
+			}
+			if len(expressions) != wantExpressions {
+				t.Fatalf("expression commands = %#v", expressions)
+			}
+			for _, command := range expressions {
+				if len(command.Expressions) != 1 || command.Expressions[0].Kind != ExpressionCall {
+					t.Fatalf("command = %#v", command)
+				}
+			}
+			if countTokens(file, TokenContinuation) != wantExpressions {
+				t.Fatalf("continuations = %#v", file.Tokens)
+			}
+		})
+	}
+}
+
+func TestVim9IncompleteSigilDoesNotStartExpression(t *testing.T) {
+	file := (Vim9Parser{}).Parse("def Use()\n  &l:\n  let after = 1\nenddef\n")
+	if len(file.Commands) != 4 || file.Commands[1].Kind == CommandExpression || file.Commands[2].Canonical != "let" || countTokens(file, TokenContinuation) != 0 {
+		t.Fatalf("commands = %#v, tokens = %#v", file.Commands, file.Tokens)
+	}
+}
+
 func TestVim9ScopeDictionaryContinuesWithMethod(t *testing.T) {
 	file := (Vim9Parser{}).Parse("var value: string = g:\n  ->get('settings', {})\n  ->get('value', '')\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 1 {

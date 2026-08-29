@@ -980,7 +980,7 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 				(canonical == "substitute" || canonical == "smagic" || canonical == "snomagic") && looksLikeSubstituteVim9Expression(file.Source, typedName, nameEnd, end) ||
 				(canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && canonical != "iput" && canonical != "put" && looksLikeVim9AssignmentAfterName(file.Source, nameEnd, end))
 		}
-		expressionAtCommandStart := dialect == Vim9 && (looksLikeVim9SigilAssignment(file.Source, nameStart, end) || nameExpression)
+		expressionAtCommandStart := dialect == Vim9 && (looksLikeVim9SigilExpression(file.Source, nameStart, end) || nameExpression)
 		if expressionAtCommandStart {
 			kind = CommandExpression
 			canonical = ""
@@ -3244,15 +3244,33 @@ func looksLikeScopedVim9Assignment(source string, nameEnd, end int) bool {
 	return looksLikeVim9AssignmentAfterName(source, position, end)
 }
 
-func looksLikeVim9SigilAssignment(source string, start, end int) bool {
-	if start >= end {
+// looksLikeVim9SigilExpression recognizes a complete sigil expression before
+// command lookup.  In a Vim9 function, a bare option, environment variable,
+// or register is an expression command even when it has no assignment.  Keep
+// the token boundary strict so an incomplete sigil remains recoverable as an
+// opaque command instead of swallowing the following line.
+func looksLikeVim9SigilExpression(source string, start, end int) bool {
+	nameEnd, ok := scanVim9Sigil(source, start, end)
+	if !ok {
 		return false
 	}
+	position := skipSpace(source, nameEnd, end)
+	if position >= end || source[position] == '#' && (position == start || isSpace(source[position-1])) {
+		return true
+	}
+	return looksLikeVim9AssignmentAfterName(source, nameEnd, end) || looksLikeVim9Expression(source, start, nameEnd, end)
+}
+
+func scanVim9Sigil(source string, start, end int) (int, bool) {
+	if start >= end {
+		return start, false
+	}
 	nameEnd := start + 1
+	nameStart := nameEnd
 	switch source[start] {
 	case '@':
 		if nameEnd >= end || isSpace(source[nameEnd]) {
-			return false
+			return start, false
 		}
 		_, size := utf8.DecodeRuneInString(source[nameEnd:end])
 		nameEnd += size
@@ -3260,13 +3278,26 @@ func looksLikeVim9SigilAssignment(source string, start, end int) bool {
 		if nameEnd+1 < end && (source[nameEnd] == 'g' || source[nameEnd] == 'l') && source[nameEnd+1] == ':' {
 			nameEnd += 2
 		}
+		nameStart = nameEnd
 		nameEnd = scanWord(source, nameEnd, end)
 	case '$':
 		nameEnd = scanWord(source, nameEnd, end)
 	default:
-		return false
+		return start, false
 	}
-	return nameEnd > start+1 && looksLikeVim9AssignmentAfterName(source, nameEnd, end)
+	if nameEnd <= nameStart {
+		return start, false
+	}
+	// @r denotes exactly one register byte/rune.  Without this check an
+	// invalid @name would be accepted as the @n register followed by trailing
+	// text, which defeats the loose-recovery boundary.
+	if source[start] == '@' {
+		_, size := utf8.DecodeRuneInString(source[start+1 : end])
+		if nameEnd != start+1+size {
+			return start, false
+		}
+	}
+	return nameEnd, true
 }
 
 func startsVim9Continuation(source string) bool {
@@ -3292,7 +3323,7 @@ func startsVim9RecoveryCommand(source string, start, end int) bool {
 	case '%':
 		return true
 	case '&', '$', '@':
-		return looksLikeVim9SigilAssignment(source, start, end)
+		return looksLikeVim9SigilExpression(source, start, end)
 	}
 	wordEnd := scanWord(source, start, end)
 	if wordEnd == start {
