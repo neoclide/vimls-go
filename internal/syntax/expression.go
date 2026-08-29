@@ -872,6 +872,17 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 		missingComma := false
 		commaDiagnostic := false
 		for p.current().kind != expressionEOF && p.current().text != ")" {
+			// Vim9 rejects an empty argument before the closing parenthesis.
+			// Keep the comma as the insertion point for the missing argument so
+			// callers retain the complete call shape without cascading the comma
+			// into the generic expression parser.
+			if p.dialect == Vim9 && p.current().text == "," && p.peek(1).text == ")" {
+				comma := p.current()
+				children = append(children, &Expression{Kind: ExpressionMissing, Span: comma.span})
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E15", Message: "invalid expression", Span: comma.span})
+				p.advance()
+				continue
+			}
 			argument := p.parse(0)
 			children = append(children, argument)
 			if p.current().text != "," {
