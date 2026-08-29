@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 910 (`54cab6f`)
+- Current parser-negative syntax assertions: 911 (`b668b6e`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -329,6 +329,9 @@ the authoritative current split 909 migrated, zero ready, and 159 pending-fix.
 Commit `54cab6f` migrated the E584 `elseif` recovery case while retaining the
 valid next-line E583 diagnostic, making the authoritative current split 910
 migrated, zero ready, and 158 pending-fix.
+Commit `b668b6e` migrated the already-supported Vim9 `#{` comment diagnostic,
+making the authoritative current split 911 migrated, zero ready, and 157
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -921,13 +924,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 81 | 0 | 34 |
+| `C-EXCMD` | 115 | 82 | 0 | 33 |
 | `C-EXPR` | 19 | 15 | 0 | 4 |
 | `C-GENERIC` | 109 | 60 | 0 | 49 |
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **278** | **0** | **91** |
+| **Total** | **369** | **279** | **0** | **90** |
 
 ```text
 C-EXPR
