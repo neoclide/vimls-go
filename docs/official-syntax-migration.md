@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 530 (`9024ed1`)
+- Current parser-negative syntax assertions: 532 (`a3d92d2`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -60,14 +60,16 @@ artifact.
 
 | Group | Syntax | Type | Name | Semantic | Runtime | Unknown | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| A | 328 | 270 | 65 | 37 | 42 | 130 | 872 |
+| A | 325 | 270 | 65 | 37 | 45 | 130 | 872 |
 | B | 192 | 238 | 77 | 251 | 69 | 10 | 837 |
 | C | 369 | 78 | 111 | 239 | 52 | 3 | 852 |
 | D | 183 | 484 | 54 | 47 | 166 | 5 | 939 |
-| **Total** | **1,072** | **1,070** | **307** | **574** | **329** | **148** | **3,500** |
+| **Total** | **1,069** | **1,070** | **307** | **574** | **332** | **148** | **3,500** |
 
-At baseline, the 1,072 syntax variants split into 346 migrated, 89 ready, and
-637 pending-fix. The 362-entry expected map therefore contains 346 verified
+The original baseline classification counted 1,072 syntax variants. Review of
+the expression-command boundary group reclassified three value-dependent
+records as runtime, so the corrected baseline split is 346 migrated, 89 ready,
+and 634 pending-fix. The 362-entry expected map therefore contains 346 verified
 syntax keys and 16 cleanup keys that are non-syntax or stale. The cleanup
 membership is recorded in the source-group sections below.
 
@@ -114,6 +116,12 @@ Commit `7f60a4d` migrated both missing inline-function brace variants, making
 the current split 519 migrated, zero ready, and 553 pending-fix.
 Commit `9024ed1` migrated all 11 invalid Vim9 hash-curly comment variants,
 making the current split 530 migrated, zero ready, and 542 pending-fix.
+Commit `a3d92d2` migrated the two compiled-function invalid dot-key variants.
+The same review moved `2402:71062/script`, `3145:94088/vim9-script`, and
+`4188:121761/vim9-script` from syntax to runtime: their outcomes require
+evaluating a string or inspecting a value's runtime type. Historical pending
+totals above predate that correction; the authoritative current split is 532
+migrated, zero ready, and 537 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -145,8 +153,8 @@ duplicate these exact keys.
 ### Group A inventory: `test_vim9_expr.vim`
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
-artifact context carrying that code. This accounts for all 328 syntax variants:
-226 migrated and 102 pending-fix.
+artifact context carrying that code. This accounts for all 325 syntax variants:
+228 migrated and 97 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -157,7 +165,7 @@ artifact context carrying that code. This accounts for all 328 syntax variants:
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
-| `expr-command-boundary` | E476, E488, E492 | 16 | 8 | 0 | 8 |
+| `expr-command-boundary` | E476, E488, E492 | 13 | 10 | 0 | 3 |
 | `expr-comment-token` | E1170 | 11 | 11 | 0 | 0 |
 
 ```text
@@ -204,7 +212,7 @@ expr-literal-register
 
 expr-command-boundary
   E476: 4487
-  E488: 2402,2835,3145,3161,3162,4170,4188,4190,4484,4485
+  E488: 2835,3161,3162,4170,4190,4484,4485
   E492: 4487
 
 expr-comment-token
@@ -277,6 +285,19 @@ Commit `9024ed1` completed `expr-comment-token`. Vim9 `#{` now reports one
 E1170 without being parsed as a legacy Dictionary, while preserving any valid
 expression prefix and recovering at the next physical command. Fold comments
 starting with `#{{` remain valid, and legacy Dictionary syntax is unchanged.
+
+Commit `a3d92d2` migrated the compiled `def` contexts of
+`test_vim9_expr.vim:{3161:94986,3162:95074}`. Member keys containing `#` or
+`:` retain their complete member AST; compiled functions report E488 at the
+invalid suffix, while the paired script contexts remain free of syntax
+diagnostics so runtime analysis can account for E716.
+
+The command-boundary review reclassified three records as runtime rather than
+syntax. `2402:71062/script` fails only after `eval()` decodes and evaluates a
+string containing a newline. `3145:94088/vim9-script` and
+`4188:121761/vim9-script` depend on the value before the member operator; the
+same source shape succeeds for a Dictionary. The syntax parser must not execute
+strings or invent value types merely to reproduce those runtime E488 codes.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
