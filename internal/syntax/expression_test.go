@@ -515,6 +515,57 @@ func TestVim9IncompleteTypeCast(t *testing.T) {
 	}
 }
 
+func TestOfficialIncompleteParenthesizedExpression(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		code   string
+	}{
+		{
+			name:   "def",
+			source: "def Func()\nvar x = (12\nvar after = 1\nenddef\n",
+			code:   "vim/E1097",
+		},
+		{
+			name:   "vim9script",
+			source: "vim9script\nvar x = (12\nvar after = 1\n",
+			code:   "vim/E110",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			var declaration *Declaration
+			for index := range file.Commands {
+				if candidate := file.Commands[index].Declaration; candidate != nil && file.Text(candidate.Name) == "x" {
+					declaration = candidate
+					break
+				}
+			}
+			if declaration == nil || declaration.Initializer == nil || declaration.Initializer.Kind != ExpressionParenthesized || len(declaration.Initializer.Children) != 1 || declaration.Initializer.Children[0].Kind != ExpressionNumber || declaration.Initializer.Children[0].Value != "12" {
+				t.Fatalf("declaration = %#v, commands = %#v", declaration, file.Commands)
+			}
+			if file.Text(declaration.Initializer.Span) != "(12" {
+				t.Fatalf("initializer span = %q (%#v)", file.Text(declaration.Initializer.Span), declaration.Initializer)
+			}
+			var after *Declaration
+			for index := range file.Commands {
+				if candidate := file.Commands[index].Declaration; candidate != nil && file.Text(candidate.Name) == "after" {
+					after = candidate
+					break
+				}
+			}
+			if after == nil || after.Initializer == nil || after.Initializer.Kind != ExpressionNumber || after.Initializer.Value != "1" {
+				t.Fatalf("after declaration = %#v, commands = %#v", after, file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestOfficialListDictRecovery(t *testing.T) {
 	memberTests := []struct {
 		source string

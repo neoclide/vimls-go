@@ -2280,6 +2280,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 				diagnostic.Code = "vim/E1097"
 				diagnostic.Message = "line incomplete"
 			}
+		case diagnostic.Code == "vimls/missing-delimiter" && diagnostic.Message == "expected )":
+			diagnostic.Code = "vim/E110"
+			diagnostic.Message = "missing ')'"
+			if inDef {
+				diagnostic.Code = "vim/E1097"
+				diagnostic.Message = "line incomplete"
+			}
 		}
 	}
 	return diagnostics
