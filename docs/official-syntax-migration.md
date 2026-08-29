@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 460 (`c340e30`)
+- Current parser-negative syntax assertions: 464 (`2329653`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -80,7 +80,9 @@ migrated, zero ready, and 625 pending-fix. Commit `cbe7267` implemented the 10
 remaining Group A Blob/register cases, making the current split 457 migrated,
 zero ready, and 615 pending-fix. Commit `c340e30` implemented the three stable
 Vim 9.1+ `:vim9script [noclear]` argument cases, making the current split 460
-migrated, zero ready, and 612 pending-fix.
+migrated, zero ready, and 612 pending-fix. Commit `2329653` migrated the four
+missing Dictionary-value variants, making the current split 464 migrated, zero
+ready, and 608 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -97,7 +99,7 @@ file prefix produces the exact corpus keys.
 | --- | --- | --- | --- | --- | --- | --- |
 | `vim9-vim9script-arguments` | `migrated` (`c340e30`) | `test_vim9_import.vim:{2972:73136/script,2978:73280/script,2984:73418/script}` | E475, E983, E475 | no diagnostic | `runtime/doc/repeat.txt:416-424`; `src/vim9script.c:103-132` | `internal/syntax/scanner.go` prologue state |
 | `vim9-xfile-missing-backtick` | `pending-fix` | `test_vim9_cmd.vim:{267:6525/def}` | E1083 | no diagnostic | `src/vim9cmds.c:2311-2431` | command metadata generation and `internal/syntax/vim9_command.go` |
-| `vim9-dictionary-missing-value` | `pending-fix` | `test_vim9_expr.vim:{3265:97250/def,3266:97290/script,3274:97438/def,3274:97438/vim9-script}` | E723 in `def`, E15 at script level | `vimls/missing-expression` | `src/vim9expr.c:1912-2076`, `src/dict.c` dictionary evaluator | `internal/syntax/expression.go` plus context mapping in `scanner.go` |
+| `vim9-dictionary-missing-value` | `migrated` (`2329653`) | `test_vim9_expr.vim:{3265:97250/def,3266:97290/script,3274:97438/def,3274:97438/vim9-script}` | E723 in `def`, E15 at script level | `vimls/missing-expression` | `runtime/doc/eval.txt:761-790`; `runtime/doc/vim9.txt:70-82`; `src/vim9expr.c:1912-2076` | `internal/syntax/expression.go` plus context mapping in `scanner.go` |
 | `vim9-assignment-missing-rhs` | `pending-fix` | `test_vim9_assign.vim:{515:12614/def,581:14074/def}` | E1097 | `vimls/missing-expression` | `src/vim9compile.c:918-945,3140-3238` | command-expression assignment and declaration paths in `scanner.go` |
 | `vim9-assignment-trailing-paren` | `pending-fix` | `test_vim9_assign.vim:{1202:28637/def}` | E488 | `vimls/trailing-expression` | `src/vim9compile.c:3819-3867,4312-4320` | assignment recognition in `scanner.go` |
 | `vim9-hash-comment-spacing` | `pending-fix` | `test_vim9_script.vim:{3579:76110/def,3599:76552/def,3635:77305/def,3937:84202/script,4091:87356/script,4098:87482/script,4112:87742/script}` | E488 | `vimls/missing-expression` or `vimls/trailing-expression` | `src/ex_docmd.c:5465-5478,6013-6023`, `src/vim9cmds.c:520-523,1345-1348` | expression diagnostic aggregation in `scanner.go` |
@@ -113,7 +115,7 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-189 migrated and 139 pending-fix.
+193 migrated and 135 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -121,7 +123,7 @@ artifact context carrying that code. This accounts for all 328 syntax variants:
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 0 | 0 | 13 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
-| `expr-dict-delimiter` | E720, E722, E723 | 23 | 15 | 0 | 8 |
+| `expr-dict-delimiter` | E720, E722, E723 | 23 | 19 | 0 | 4 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
 | `expr-command-boundary` | E476, E488, E492 | 16 | 3 | 0 | 13 |
@@ -194,6 +196,10 @@ Commit `cbe7267` completed `expr-literal-register`. Blob bytes follow
 Register reads follow `src/register.c:177-218`; assignment destinations use the
 stricter `src/vim9compile.c:1480-1487,1499-1575`, which rejects the read-only
 registers `.`, `%`, `:`, and `~` but maps `@@` to the unnamed register.
+
+Commit `2329653` migrated the four missing Dictionary-value variants. The AST
+retains the key and a zero-width missing-value node, reports E723 in a compiled
+`def` and E15 at Vim9 script level, then resumes parsing at the next line.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
