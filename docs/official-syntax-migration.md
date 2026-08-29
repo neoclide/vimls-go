@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 676 (`e2f7aba`)
+- Current parser-negative syntax assertions: 682 (`7fa8066`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -192,7 +192,9 @@ contexts, making the authoritative current split 656 migrated, zero ready, and
 cases, making the authoritative current split 671 migrated, zero ready, and
 397 pending-fix. Commit `e2f7aba` migrated five malformed generic-call type
 lists, making the authoritative current split 676 migrated, zero ready, and
-392 pending-fix.
+392 pending-fix. Commit `7fa8066` completed the six remaining constructor and
+class-method modifier cases, making the authoritative current split 682
+migrated, zero ready, and 386 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -512,15 +514,15 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-class-variable` | 6 | 6 | 0 | 0 |
 | `B-class-body-command` | 15 | 15 | 0 | 0 |
 | `B-interface-dialect-body` | 3 | 3 | 0 | 0 |
-| `B-new-static-abstract` | 8 | 2 | 0 | 6 |
+| `B-new-static-abstract` | 8 | 8 | 0 | 0 |
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 0 | 0 | 2 |
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **118** | **0** | **73** |
+| **Total** | **191** | **124** | **0** | **67** |
 
-This table reflects the current parser through `9727226`. Revalidation corrected
+This table reflects the current parser through `7fa8066`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -571,6 +573,14 @@ AST. Bare method declarations and invalid abstract-method bodies recover through
 their `enddef`; ordinary invalid lines resume at the next physical command, and
 valid members, modifiers, method bodies, and class terminators keep their prior
 behavior.
+
+Commit `7fa8066` completed `B-new-static-abstract`. A `new` or `_new`
+constructor with a return type reports E1365 while retaining the function
+signature and return-type AST. Invalid `static` ordering reports E1368, and an
+`abstract` modifier not followed by `def` reports E1371. The invalid member
+command remains available to later analysis, while secondary diagnostics from
+the same physical command are suppressed without affecting the following
+class member.
 
 ```text
 B-assign-spacing
