@@ -1073,6 +1073,59 @@ func TestOfficialIncompleteParenthesizedExpression(t *testing.T) {
 	}
 }
 
+func TestVim9MissingOperandRecovery(t *testing.T) {
+	tests := []struct {
+		name       string
+		statement  string
+		kind       ExpressionKind
+		childCount int
+	}{
+		{name: "ternary", statement: "var value = false ? ", kind: ExpressionTernary, childCount: 2},
+		{name: "index", statement: "var value = g:list_mixed[", kind: ExpressionIndex, childCount: 2},
+		{name: "slice", statement: "var value = 'asdf'[1 :", kind: ExpressionSlice, childCount: 3},
+		{name: "parenthesized", statement: "echo (", kind: ExpressionParenthesized, childCount: 1},
+	}
+	for _, test := range tests {
+		for _, context := range []struct {
+			name   string
+			source string
+			code   string
+		}{
+			{name: "def", source: "vim9script\ndef Broken()\n  " + test.statement + "\n  var after = 1\nenddef\n", code: "vim/E1097"},
+			{name: "script", source: "vim9script\n" + test.statement + "\nvar after = 1\n", code: "vim/E15"},
+		} {
+			t.Run(test.name+"/"+context.name, func(t *testing.T) {
+				file := Parse(context.source)
+				if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != context.code {
+					t.Fatalf("diagnostics = %#v, want one %s", file.Diagnostics, context.code)
+				}
+				var expression *Expression
+				foundAfter := false
+				for index := range file.Commands {
+					command := &file.Commands[index]
+					if command.Declaration != nil {
+						name := file.Text(command.Declaration.Name)
+						if name == "value" {
+							expression = command.Declaration.Initializer
+						}
+						foundAfter = foundAfter || name == "after"
+					}
+					if command.Canonical == "echo" && len(command.Expressions) == 1 {
+						expression = command.Expressions[0]
+					}
+				}
+				if expression == nil || expression.Kind != test.kind || len(expression.Children) != test.childCount || expression.Children[len(expression.Children)-1].Kind != ExpressionMissing {
+					t.Fatalf("expression = %#v", expression)
+				}
+				if !foundAfter {
+					t.Fatalf("parser did not recover to after declaration: %#v", file.Commands)
+				}
+				assertFileSpans(t, file)
+			})
+		}
+	}
+}
+
 func TestOfficialListDictRecovery(t *testing.T) {
 	memberTests := []struct {
 		source string

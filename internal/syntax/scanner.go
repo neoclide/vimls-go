@@ -2326,7 +2326,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/invalid-atom" || diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
+		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-expression" || diagnostics[0].Code == "vimls/invalid-atom" || diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -2471,6 +2471,21 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	hasAssignment := assignmentExpression || command.Declaration != nil && command.Declaration.Assignment.End > command.Declaration.Assignment.Start
 	commandDictionary := len(command.Expressions) == 1 && command.Expressions[0] != nil && command.Expressions[0].Kind == ExpressionDictionary
 	commandCall := len(command.Expressions) == 1 && command.Expressions[0] != nil && command.Expressions[0].Kind == ExpressionCall
+	var parsedExpression *Expression
+	if command.Declaration != nil {
+		parsedExpression = command.Declaration.Initializer
+	} else if len(command.Expressions) > 0 {
+		parsedExpression = command.Expressions[len(command.Expressions)-1]
+	}
+	missingOperand := false
+	if parsedExpression != nil {
+		switch parsedExpression.Kind {
+		case ExpressionTernary, ExpressionIndex, ExpressionSlice:
+			missingOperand = len(parsedExpression.Children) >= 2 && parsedExpression.Children[len(parsedExpression.Children)-1].Kind == ExpressionMissing
+		case ExpressionParenthesized:
+			missingOperand = len(parsedExpression.Children) == 1 && parsedExpression.Children[0].Kind == ExpressionMissing
+		}
+	}
 	kept := diagnostics[:0]
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Code != "vimls/invalid-member-tail" {
@@ -2509,6 +2524,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
+		case command.Dialect == Vim9 && missingOperand && diagnostic.Code == "vimls/missing-expression":
+			diagnostic.Code = "vim/E15"
+			diagnostic.Message = "invalid expression"
+			if inDef {
+				diagnostic.Code = "vim/E1097"
+				diagnostic.Message = "line incomplete"
+			}
 		case diagnostic.Code == "vimls/invalid-atom":
 			diagnostic.Code = "vim/E15"
 			diagnostic.Message = "invalid expression"

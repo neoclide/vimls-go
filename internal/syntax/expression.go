@@ -215,6 +215,9 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			p.advance()
 			diagnosticsStart := len(p.diagnostics)
 			whenTrue := p.parse(0)
+			if p.dialect == Vim9 && whenTrue.Kind == ExpressionMissing && p.current().kind == expressionEOF {
+				return &Expression{Kind: ExpressionTernary, Span: Span{Start: left.Span.Start, End: whenTrue.Span.End}, Operator: token.span, Children: []*Expression{left, whenTrue}}
+			}
 			for _, diagnostic := range p.diagnostics[diagnosticsStart:] {
 				if diagnostic.Code == "vim/E1170" {
 					return &Expression{Kind: ExpressionTernary, Span: Span{Start: left.Span.Start, End: whenTrue.Span.End}, Operator: token.span, Children: []*Expression{left, whenTrue}}
@@ -822,7 +825,7 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 			colon := p.current()
 			p.advance()
 			hasEnd := p.current().text != "]"
-			p.validateSliceSpacing(colon, hasStart, hasEnd)
+			p.validateSliceSpacing(colon, hasStart, hasEnd && p.current().kind != expressionEOF)
 			if hasEnd {
 				children = append(children, p.parse(0))
 			}
@@ -831,7 +834,11 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 		if p.current().span.Start > fallback {
 			fallback = p.current().span.Start
 		}
-		end := p.consumeClosing("]", fallback)
+		end := fallback
+		missingOperand := p.dialect == Vim9 && len(children) > 1 && children[len(children)-1].Kind == ExpressionMissing && p.current().kind == expressionEOF
+		if !missingOperand {
+			end = p.consumeClosing("]", fallback)
+		}
 		return &Expression{Kind: kind, Span: Span{Start: left.Span.Start, End: end}, Children: children}
 	case ".", "->":
 		p.advance()
@@ -968,6 +975,7 @@ func (p *expressionParser) parseParenthesized() *Expression {
 		fallback = children[len(children)-1].Span.End
 	}
 	innerDictionaryError := len(children) == 1 && children[0].Kind == ExpressionDictionary && len(p.diagnostics) > 0 && p.diagnostics[len(p.diagnostics)-1].Code == "vim/E723"
+	missingOperand := p.dialect == Vim9 && len(children) == 1 && children[0].Kind == ExpressionMissing && p.current().kind == expressionEOF
 	end := fallback
 	if p.current().text == ")" {
 		end = p.current().span.End
@@ -976,7 +984,7 @@ func (p *expressionParser) parseParenthesized() *Expression {
 		if !tupleDiagnostic {
 			reportTupleDiagnostic("vim/E1526", "missing end of tuple ')'", p.current())
 		}
-	} else if !innerDictionaryError {
+	} else if !innerDictionaryError && !missingOperand {
 		end = p.consumeClosing(")", fallback)
 	}
 	if p.dialect == Vim9 && p.current().text == "=>" {

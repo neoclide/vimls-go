@@ -233,8 +233,12 @@ func TestOfficialVimRecoveryMatrix(t *testing.T) {
 func TestVim9IncompleteExpressionRecoversAtFollowingStatements(t *testing.T) {
 	source := "vim9script\ndef Broken()\n  var value = (\n  echo 'still parsed'\nenddef\nvar after = 1\n"
 	file := Parse(source)
-	if !hasDiagnostic(file, "vimls/missing-delimiter") || len(file.Commands) != 6 {
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1097" || len(file.Commands) != 6 {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	declaration := file.Commands[2].Declaration
+	if declaration == nil || declaration.Initializer == nil || declaration.Initializer.Kind != ExpressionParenthesized || len(declaration.Initializer.Children) != 1 || declaration.Initializer.Children[0].Kind != ExpressionMissing {
+		t.Fatalf("declaration = %#v", declaration)
 	}
 	if file.Commands[3].Canonical != "echo" || file.Commands[4].Canonical != "enddef" || file.Commands[5].Declaration == nil || file.Text(file.Commands[5].Declaration.Name) != "after" {
 		t.Fatalf("parser did not recover: %#v", file.Commands)
