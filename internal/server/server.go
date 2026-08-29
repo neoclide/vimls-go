@@ -250,6 +250,11 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentDidChange,
 		protocol.MethodTextDocumentDidSave,
 		protocol.MethodTextDocumentDidClose,
+		protocol.MethodTextDocumentDeclaration,
+		protocol.MethodTextDocumentDefinition,
+		protocol.MethodTextDocumentReferences,
+		protocol.MethodTextDocumentDocumentHighlight,
+		protocol.MethodTextDocumentHover,
 		protocol.MethodTextDocumentDocumentSymbol,
 		protocol.MethodWorkspaceDidChangeConfiguration:
 		return true
@@ -270,8 +275,13 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.mu.Unlock()
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			PositionEncoding:       protocolEncoding,
-			DocumentSymbolProvider: protocol.Boolean(true),
+			PositionEncoding:          protocolEncoding,
+			DeclarationProvider:       protocol.Boolean(true),
+			DefinitionProvider:        protocol.Boolean(true),
+			ReferencesProvider:        protocol.Boolean(true),
+			DocumentHighlightProvider: protocol.Boolean(true),
+			HoverProvider:             protocol.Boolean(true),
+			DocumentSymbolProvider:    protocol.Boolean(true),
 			TextDocumentSync: &protocol.TextDocumentSyncOptions{
 				OpenClose: &openClose,
 				Change:    &changeKind,
