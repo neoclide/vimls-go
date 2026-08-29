@@ -58,6 +58,13 @@ an explicit skip. `v9.2.1015-parser-files.json` is the fixed migration boundary:
 explicit exclusions, and the remaining 294 files inherit the default exclusion.
 Migration tools must process only the 44 included files; changing the pinned Vim
 version or this reviewed manifest is the only reason to revisit excluded files.
+The generated parser-case artifact hashes that manifest and accounts for every
+one of the 3,844 selected helper calls. Static source recovery extracts 3,805
+calls into 5,261 dialect-aware variants and records an explicit reason for the
+remaining 39 skips. The 1,761 success variants are parser-positive assertions.
+The 3,500 failure variants retain their Vim error arguments as provenance but
+remain unclassified until parser, compiler, type, name-resolution, and runtime
+failures are separated.
 
 Full-file parsing proves stability, recovery, and span integrity, not exact Vim
 acceptance. The conformance layer must use generated helper expectations and

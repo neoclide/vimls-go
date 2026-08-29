@@ -18,11 +18,19 @@ These files are generated from Vim tag `v9.2.1015`, commit
   44 files with direct lexer, parser, command-grammar, or recovery coverage and
   defaults every other pinned test file to excluded. Migration generators must
   use this allowlist instead of rescanning all 362 files.
+- `v9.2.1015-parser-cases.json.gz` is generated only from that allowlist and is
+  bound to the canonical manifest JSON SHA-256. It accounts for all 3,844
+  selected helper calls: 3,805 are statically extracted into 5,261 source
+  variants and 39 retain an explicit skip reason. The 1,761 success variants are
+  parser-positive tests; the other 3,500 preserve Vim failure provenance but
+  remain unclassified and are not parser-negative assertions.
 
 The full-file corpus is a stability and lossless-recovery gate. It does not by
 itself prove that vimls-go accepts and rejects every construct exactly as Vim
 does. Exact conformance additionally requires focused tests and generated
-official helper expectations.
+official helper expectations. A Vim helper failure may occur during parsing,
+compilation, type checking, name resolution, or execution, so it is promoted to
+a parser-negative case only after its phase is verified separately.
 
 Regenerate them only from the pinned local Vim checkout:
 

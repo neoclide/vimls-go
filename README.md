@@ -70,10 +70,13 @@ The normal offline test gate losslessly includes all 362 `.vim` files below
 Vim v9.2.1015's `src/testdir` (8,558,061 source bytes), plus 3,267 extracted
 official scripts and a classified inventory of all 5,733 `Check*` candidates.
 An explicit 44-file syntax-test allowlist prevents the conformance migration
-from revisiting the other 318 test files. The stability gate still parses every
-source through both independent parser entry points without executing it. To
-additionally compare the committed corpora and copied Vim license byte-for-byte
-with the pinned local checkout, run:
+from revisiting the other 318 test files. From that boundary, 3,844 helper calls
+produce 5,261 source variants: 1,761 official parser-positive cases and 3,500
+failure cases retained without a parser assertion until their failure phase is
+classified. The stability gate still parses every source through both
+independent parser entry points without executing it. To additionally compare
+the committed corpora and copied Vim license byte-for-byte with the pinned local
+checkout, run:
 
 ```sh
 GOPROXY=off GOSUMDB=off make test-official
