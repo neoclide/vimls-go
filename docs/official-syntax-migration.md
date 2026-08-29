@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 868 (`d8741b9`)
+- Current parser-negative syntax assertions: 870 (`10f6de7`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -292,6 +292,8 @@ Commit `1082d53` migrated the attached-hash `menutrans clear` case, making the
 authoritative current split 867 migrated, zero ready, and 201 pending-fix.
 Commit `d8741b9` migrated the local Vim9 `func!` case, making the authoritative
 current split 868 migrated, zero ready, and 200 pending-fix.
+Commit `10f6de7` migrated two Vim9 scope-brace cases, making the authoritative
+current split 870 migrated, zero ready, and 198 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -882,7 +884,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 33 | 0 | 18 |
+| `C-BLOCK` | 51 | 35 | 0 | 16 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 65 | 0 | 50 |
 | `C-EXPR` | 19 | 7 | 0 | 12 |
@@ -890,7 +892,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **236** | **0** | **133** |
+| **Total** | **369** | **238** | **0** | **131** |
 
 ```text
 C-EXPR
@@ -1174,6 +1176,10 @@ Commit `d8741b9` reports E477 for `func!` on a script-local Vim9 function,
 retains the signature and function block, and suppresses the derived EOF
 missing-end diagnostic. Explicit global `function! g:Name()` and legacy
 `function!` definitions remain valid.
+
+Commit `10f6de7` maps a standalone Vim9 `}` to E1025 and an unclosed scope `{`
+to E1026. The scope block and following physical-line commands remain in the
+AST during recovery.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
