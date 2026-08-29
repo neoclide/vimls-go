@@ -1,0 +1,415 @@
+uname -a
+Darwin chemzqms-MBP.local 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:26:23 PDT 2026; root:xnu-12377.121.10~1/RELEASE_X86_64 x86_64
+
+
+VIM - Vi IMproved 9.2 (2026 Feb 14, compiled Aug 28 2026 23:49:37)
+macOS version - x86_64
+Included patches: 1-1015
+Compiled by chemzqm@chemzqms-MBP.local
+Normal version without GUI.  Features included (+) or not (-):
++acl                +float              +mouse_urxvt        +tag_binary
+-arabic             +folding            +mouse_xterm        -tag_old_static
++autochdir          -footer             -mouseshape         -tcl
++autocmd            +fork()             +multi_byte         +termguicolors
+-autoservername     +gettext            +multi_lang         -terminal
+-balloon_eval       -hangul_input       -mzscheme           +terminfo
+-balloon_eval_term  +iconv              +netbeans_intg      +termresponse
+-browse             -image              +num64              +textobjects
+++builtin_terms     -image_cairo        +packages           +textprop
++byte_offset        -image_gdi          -pango              +timers
++channel            -image_gdk          +path_extra         +title
++cindent            -image_kitty        -perl               -toolbar
++clientserver       -image_sixel        +persistent_undo    +user_commands
++clipboard          +insert_expand      +popupwin           -vartabs
++clipboard_provider +ipv6               +postscript         +vertsplit
++cmdline_compl      +job                +printer            +vim9script
++cmdline_hist       +jumplist           -profile            +viminfo
++cmdline_info       -keymap             -python             +virtualedit
++comments           +lambda             -python3            +visual
++conceal            -langmap            +quickfix           +visualextra
++cryptv             +libcall            +reltime            +vreplace
+-cscope             +linebreak          -rightleft          -wayland
++cursorbind         +lispindent         -ruby               -wayland_clipboard
++cursorshape        +listcmds           +scrollbind         +wildignore
++dialog_con         +localmap           +signs              +wildmenu
++diff               -lua                +smartindent        +windows
++digraphs           +menu               +socketserver       +writebackup
+-dnd                +mksession          -sodium             -X11
+-ebcdic             +modify_fname       -sound              -xattr
+-emacs_tags         +mouse              +spell              -xfontset
++eval               +mouse_dec          +startuptime        -xim
++ex_extra           -mouse_gpm          +statusline         -xpm
++extra_search       -mouse_jsbterm      -sun_workshop       -xsmp
+-farsi              +mouse_netterm      +syntax             -xterm_clipboard
++file_in_path       +mouse_sgr          -tabpanel           -xterm_save
++find_in_path       -mouse_sysmouse     -tag_any_white      
+   system vimrc file: "$VIM/vimrc"
+     user vimrc file: "$HOME/.vimrc"
+ 2nd user vimrc file: "~/.vim/vimrc"
+ 3rd user vimrc file: "$XDG_CONFIG_HOME/vim/vimrc"
+      user exrc file: "$HOME/.exrc"
+       defaults file: "$VIMRUNTIME/defaults.vim"
+  fall-back for $VIM: "/usr/local/share/vim"
+Compilation: gcc -c -I. -Iproto -DHAVE_CONFIG_H -DMACOS_X -DMACOS_X_DARWIN -g -O2 -D_REENTRANT -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1 
+Linking: gcc -L/usr/local/lib -o vim -L/usr/local/Cellar/cairo/1.18.4/lib -lcairo -lz -L/usr/local/Cellar/pango/1.56.3/lib -lpangocairo-1.0 -lpango-1.0 -L/usr/local/Cellar/cairo/1.18.4/lib -lcairo -L/usr/local/Cellar/harfbuzz/11.1.0/lib -lharfbuzz -L/usr/local/Cellar/glib/2.84.1/lib -lgobject-2.0 -lglib-2.0 -L/usr/local/opt/gettext/lib -lintl -lm -lncurses -liconv -lintl -framework AppKit 
+--- Directories and Files ---
+$VIM = "/usr/local/share/vim"
+directory "/usr/local/share/vim" exists
+$VIMRUNTIME = "/usr/local/share/vim"
+directory "/usr/local/share/vim" exists
+"/usr/local/share/vim/doc/help.txt" is NOT readable
+"/usr/local/share/vim/doc/tags" is NOT readable
+"/usr/local/share/vim/menu.vim" is NOT readable
+"/usr/local/share/vim/filetype.vim" is NOT readable
+"/usr/local/share/vim/syntax/synload.vim" is NOT readable
+--- Scripts sourced ---
+  1: /usr/local/share/vim/vim91/bugreport.vim
+--- Options ---
+  ambiwidth=single    foldlevel=0       nopreserveindent      tabpagemax=10
+noautochdir           foldlevelstart=-1   previewheight=12    tabstop=8
+noautocomplete        foldmethod=manual   previewpopup=       tagbsearch
+noautoindent          foldminlines=1    nopreviewwindow       tagcase=followic
+noautoread            foldnestmax=20      printdevice=        tagfunc=
+noautowrite           formatexpr=         printencoding=      taglength=0
+noautowriteall        formatoptions=tcq   printfont=courier   tagrelative
+  background=light    formatprg=          printmbcharset=     tags=./tags,tags
+nobackup              fsync               printmbfont=        tagsecure
+  backupcopy=auto   nogdefault            printoptions=       tagstack
+  backupext=~         helpheight=20       prompt              term=
+  belloff=            helplang=           pumborder=          termencoding=
+nobinary            nohidden              pumheight=0       notermguicolors
+nobomb                history=200         pummaxwidth=0       termresize=
+nobreakindent       nohlsearch            pumopt=           notermsync
+  breakindentopt=   noicon                pumwidth=15       noterse
+  bufhidden=          iconstring=         quickfixtextfunc=   textauto
+  buflisted         noignorecase          quoteescape=\     notextmode
+  buftype=            imactivatefunc=   noreadonly            textwidth=0
+nocdhome            noimcmdline           redrawtime=2000     thesaurus=
+  cdpath=,,         noimdisable           regexpengine=0      thesaurusfunc=
+  cedit=^F            iminsert=0        norelativenumber    notildeop
+  charconvert=        imsearch=-1         remap               timeout
+  chistory=10         imstatusfunc=       report=2            timeoutlen=1000
+nocindent             includeexpr=        ruler             notitle
+  cinoptions=       noincsearch           rulerformat=        titlelen=85
+  clipboard=          indentexpr=         scroll=11           titlestring=
+  cmdheight=1       noinfercase         noscrollbind        nottimeout
+  cmdwinheight=7    noinsertmode          scrolljump=1        ttimeoutlen=-1
+  colorcolumn=        isprint=@,161-255   scrolloff=0         ttybuiltin
+  columns=80          joinspaces          scrolloffpad=0      ttyfast
+nocompatible          jumpoptions=      nosecure              ttymouse=
+  completefunc=       key=                selectmode=         ttyscroll=999
+  completepopup=      keymodel=           shellcmdflag=-c     ttytype=
+  completetimeout=0   keywordprg=man      shellquote=         undodir=.
+  concealcursor=      langmenu=           shelltemp         noundofile
+  conceallevel=0      laststatus=1        shellxescape=       undolevels=1000
+noconfirm           nolazyredraw          shellxquote=        undoreload=10000
+nocopyindent          lhistory=10       noshiftround          updatecount=0
+nocursorbind        nolinebreak           shiftwidth=8        updatetime=4000
+nocursorcolumn        lines=24          noshortname           verbose=1
+nocursorline        nolisp                showbreak=          viminfofile=
+  debug=              lispoptions=        showcmd             virtualedit=
+nodelcombine        nolist                showcmdloc=last   novisualbell
+  dictionary=         listchars=eol:$   noshowfulltag         warn
+nodiff              noloadplugins       noshowmatch         noweirdinvert
+  diffanchors=        magic               showmode            whichwrap=b,s
+  diffexpr=           makeef=             showtabline=1       wildchar=<Tab>
+nodigraph             makeencoding=       sidescroll=0        wildcharm=0
+  display=            makeprg=make        sidescrolloff=0     wildignore=
+  eadirection=both    matchtime=5         signcolumn=auto   nowildignorecase
+noedcompatible        maxcombine=2      nosmartcase           wildmenu
+  emoji               maxfuncdepth=100  nosmartindent         wildmode=full
+  encoding=utf-8      maxmapdepth=1000  nosmarttab            wildoptions=
+noendoffile           maxmem=6178528    nosmoothscroll        wincolor=
+  endofline           maxmemtot=6178528   softtabstop=0       window=23
+  equalalways         maxsearchcount=99 nospell             nowinfixbuf
+  equalprg=           menuitems=25        spellfile=        nowinfixheight
+noerrorbells          modeline            spelllang=en      nowinfixwidth
+  esckeys           nomodelineexpr        spelloptions=       winheight=1
+  eventignore=        modelines=5         spellsuggest=best   winhighlight=
+  eventignorewin=     modelinestrict    nosplitbelow          winminheight=1
+noexpandtab           modifiable          splitkeep=cursor    winminwidth=1
+noexrc              nomodified          nosplitright          winwidth=20
+  fileencoding=     nomore                startofline         wrap
+  fileformat=unix     mouse=              statusline=         wrapmargin=0
+  fileignorecase      mousetime=500       statuslineopt=      wrapscan
+  filetype=         nonumber              suffixesadd=        write
+  findfunc=           numberwidth=4       swapfile          nowriteany
+  fixendofline        omnifunc=           swapsync=fsync      writebackup
+  foldclose=          operatorfunc=       switchbuf=          writedelay=0
+  foldcolumn=0      nopaste               synmaxcol=3000      xtermcodes
+  foldenable          pastetoggle=        syntax=
+  foldexpr=0          patchexpr=          tabclose=
+  foldignore=#        patchmode=          tabline=
+  autocompletedelay=0
+  autocompletetimeout=80
+  backspace=indent,eol,start
+  backupdir=.,~/tmp,~/
+  backupskip=/private/tmp/*,/tmp/*
+  breakat= ^I!@*-+;:,./?
+  casemap=internal,keepascii
+  cinkeys=0{,0},0),0],:,0#,!^F,o,O,e
+  cinscopedecls=public,protected,private
+  cinwords=if,else,while,do,for,switch
+  clipmethod=wayland,x11
+  comments=s1:/*,mb:*,ex:*/,://,b:#,:%,:XCOMM,n:>,fb:-
+  commentstring=/* %s */
+  complete=.,w,b,u,t,i
+  completefuzzycollect=
+  completeitemalign=abbr,kind,menu
+  completeopt=menu,preview
+  cpoptions=aABceFsz
+  cryptmethod=blowfish2
+  cursorlineopt=both
+  define=^\s*#\s*define
+  diffopt=internal,filler,closeoff,indent-heuristic,inline:char
+  directory=.,~/tmp,/var/tmp,/tmp
+  errorfile=errors.err
+  errorformat=%*[^"]"%f"%*\D%l: %m,"%f"%*\D%l: %m,%-Gg%\?make[%*\d]: *** [%f:%l:%m,%-Gg%\?make: *** [%f:%l:%m,%-G%f:%l: (Each undeclared identifier is reported only once,%-G%f:%l: for each function it appears in.),%-GIn file included from %f:%l:%c:,%-GIn file included from %f:%l:%c\,,%-GIn file included from %f:%l:%c,%-GIn file included from %f:%l,%-G%*[ ]from %f:%l:%c,%-G%*[ ]from %f:%l:,%-G%*[ ]from %f:%l\,,%-G%*[ ]from %f:%l,%f:%l:%c:%m,%f(%l):%m,%f:%l:%m,"%f"\, line %l%*\D%c%*[^ ] %m,%D%*\a[%*\d]: Entering directory %*[`']%f',%X%*\a[%*\d]: Leaving directory %*[`']%f',%D%*\a: Entering directory %*[`']%f',%X%*\a: Leaving directory %*[`']%f',%DMaking %*\a in %f,%f|%l| %m
+  fileencodings=ucs-bom,utf-8,default,latin1
+  fileformats=unix,dos
+  fillchars=vert:|,fold:-,eob:~,lastline:@
+  foldmarker={{{,}}}
+  foldopen=block,hor,mark,percent,quickfix,search,tag,undo
+  foldtext=foldtext()
+  formatlistpat=^\s*\d\+[\]:.)}\t ]\s*
+  grepformat=%f:%l:%m,%f:%l%m,%f  %l%m
+  grepprg=grep -n $* /dev/null
+  guicursor=n-v-c:block,o:hor50,i-ci:hor15,r-cr:hor30,sm:block
+  helpfile=/usr/local/share/vim/doc/help.txt
+  highlight=8:SpecialKey,~:EndOfBuffer,@:NonText,d:Directory,e:ErrorMsg,i:IncSearch,l:Search,y:CurSearch,m:MoreMsg,M:ModeMsg,n:LineNr,a:LineNrAbove,b:LineNrBelow,N:CursorLineNr,G:CursorLineSign,O:CursorLineFold,r:Question,s:StatusLine,S:StatusLineNC,c:VertSplit,|:VertSplitNC,t:Title,v:Visual,V:VisualNOS,w:WarningMsg,W:WildMenu,f:Folded,F:FoldColumn,A:DiffAdd,C:DiffChange,D:DiffDelete,T:DiffText,E:DiffTextAdd,>:SignColumn,-:Conceal,B:SpellBad,P:SpellCap,R:SpellRare,L:SpellLocal,+:Pmenu,=:PmenuSel,k:PmenuMatch,<:PmenuMatchSel,[:PmenuKind,]:PmenuKindSel,{:PmenuExtra,}:PmenuExtraSel,x:PmenuSbar,X:PmenuThumb,j:PmenuBorder,H:PmenuShadow,p:Popup,J:PopupBorder,Q:PopupTitle,*:TabLine,#:TabLineSel,_:TabLineFill,!:CursorColumn,.:CursorLine,o:ColorColumn,q:QuickFixLine,z:StatusLineTerm,Z:StatusLineTermNC,g:MsgArea,h:ComplMatchIns,%:TabPanel,^:TabPanelSel,&:TabPanelFill,I:PreInsert
+  include=^\s*#\s*include
+  indentkeys=0{,0},0),0],:,0#,!^F,o,O,e
+  isfname=@,48-57,/,.,-,_,+,,,#,$,%,~,=
+  isident=@,48-57,_,192-255
+  iskeyword=@,48-57,_,192-255
+  keyprotocol=kitty:kitty,foot:kitty,ghostty:kitty,wezterm:kitty,xterm:mok2
+  lispwords=defun,define,defmacro,set!,lambda,if,case,let,flet,let*,letrec,do,do*,define-syntax,let-syntax,letrec-syntax,destructuring-bind,defpackage,defparameter,defstruct,deftype,defvar,do-all-symbols,do-external-symbols,do-symbols,dolist,dotimes,ecase,etypecase,eval-when,labels,macrolet,multiple-value-bind,multiple-value-call,multiple-value-prog1,multiple-value-setq,prog1,progv,typecase,unless,unwind-protect,when,with-input-from-string,with-open-file,with-open-stream,with-output-to-string,with-package-iterator,define-condition,handler-bind,handler-case,restart-bind,restart-case,with-simple-restart,store-value,use-value,muffle-warning,abort,continue,with-slots,with-slots*,with-accessors,with-accessors*,defclass,defmethod,print-unreadable-object
+  matchpairs=(:),{:},[:]
+  maxmempattern=1000
+  messagesopt=hit-enter,history:500
+  mkspellmem=460000,2000,500
+  mousemodel=popup_setpos
+  nrformats=bin,octal,hex
+  osctimeoutlen=1000
+  packpath=~/.vim,/usr/local/share/vim/vimfiles,/usr/local/share/vim,/usr/local/share/vim/vimfiles/after,~/.vim/after
+  paragraphs=IPLPPPQPP TPHPLIPpLpItpplpipbp
+  path=.,/usr/include,,
+  printexpr=system('lpr' . (&printdevice == '' ? '' : ' -P' . &printdevice) . ' ' . v:fname_in) . delete(v:fname_in) + v:shell_error
+  printheader=%<%f%h%m%=Page %N
+  runtimepath=~/.vim,/usr/local/share/vim/vimfiles,/usr/local/share/vim,/usr/local/share/vim/vimfiles/after,~/.vim/after
+  scrollopt=ver,jump
+  sections=SHNHH HUnhsh
+  selection=inclusive
+  sessionoptions=blank,buffers,curdir,folds,help,options,tabpages,winsize,terminal
+  shell=/usr/local/bin/fish
+  shellpipe=2>&1| tee
+  shellredir=>%s 2>&1
+  shortmess=filnxtToOS
+  spellcapcheck=[.?!]\_[\])'"^I ]\+
+  suffixes=.bak,~,.o,.h,.info,.swp,.obj
+  titleold=Thanks for flying Vim
+  verbosefile=/dev/stderr
+  viewdir=~/.vim/view
+  viewoptions=folds,options,cursor,curdir
+  viminfo='100,<50,s10,h
+
+--- Terminal codes ---
+  t_AB=               t_Ds=               t_RK=               t_us=
+  t_AF=               t_EC=               t_RS=               t_Us=
+  t_AU=               t_EI=               t_RT=               t_ut=
+  t_AL=               t_fs=               t_RV=               t_vb=
+  t_al=               t_fd=               t_Sb=               t_ve=
+  t_bc=               t_fe=               t_SC=               t_vi=
+  t_BE=               t_GP=               t_se=               t_VS=
+  t_BD=               t_IE=               t_Sf=               t_vs=
+  t_cd=               t_IS=               t_SH=               t_WP=
+  t_ce=               t_ke=               t_SI=               t_WS=
+  t_Ce=               t_ks=               t_Si=               t_XM=
+  t_CF=               t_le=               t_so=               t_xn=
+  t_cl=               t_mb=               t_SR=               t_xs=
+  t_cm=               t_md=               t_sr=               t_ZH=
+  t_Co=               t_me=               t_ST=               t_ZR=
+  t_CS=               t_mr=               t_Te=               t_8f=
+  t_Cs=               t_ms=               t_te=               t_8b=
+  t_cs=               t_nd=               t_TE=               t_8u=
+  t_CV=               t_op=               t_ti=               t_xo=
+  t_da=               t_RF=               t_TI=               t_BS=
+  t_db=               t_RB=               t_Ts=               t_ES=
+  t_DL=               t_RC=               t_ts=
+  t_dl=               t_RI=               t_u7=
+  t_ds=               t_Ri=               t_ue=
+
+--- Autocommands ---
+--- Normal/Visual mode mappings ---
+v  <BS>          "-d
+v  <D-x>         "*d
+v  <D-c>         "*y
+v  <D-v>         "-d"*P
+n  <D-v>         "*P
+--- Insert/Command-line mode mappings ---
+!  <D-v>         <C-R>*
+--- Abbreviations ---
+
+No abbreviation found
+--- Highlighting ---
+SpecialKey     xxx ctermfg=1 guifg=Blue
+EndOfBuffer    xxx links to NonText
+NonText        xxx term=bold ctermfg=9 gui=bold guifg=Blue
+Directory      xxx term=bold ctermfg=1 guifg=Blue
+ErrorMsg       xxx term=standout ctermfg=15 ctermbg=4 guifg=White guibg=Red
+IncSearch      xxx term=bold,underline,reverse cterm=reverse gui=reverse
+Search         xxx term=reverse ctermfg=0 ctermbg=14 guibg=Yellow
+CurSearch      xxx links to Search
+MoreMsg        xxx term=bold ctermfg=2 gui=bold guifg=SeaGreen
+ModeMsg        xxx term=bold cterm=bold gui=bold
+LineNr         xxx ctermfg=6 guifg=Brown
+LineNrAbove    xxx cleared
+LineNrBelow    xxx cleared
+CursorLineNr   xxx term=bold cterm=underline ctermfg=6 gui=bold guifg=Brown
+CursorLineSign xxx links to SignColumn
+CursorLineFold xxx links to FoldColumn
+Question       xxx term=standout ctermfg=2 gui=bold guifg=SeaGreen
+StatusLine     xxx term=bold,reverse cterm=bold,reverse gui=bold,reverse
+StatusLineNC   xxx term=reverse cterm=reverse gui=reverse
+VertSplit      xxx term=reverse cterm=reverse gui=reverse
+VertSplitNC    xxx links to VertSplit
+Title          xxx term=bold ctermfg=5 gui=bold guifg=Magenta
+Visual         xxx term=reverse cterm=reverse guifg=Black guibg=LightGrey
+VisualNOS      xxx term=bold,underline cterm=bold,underline gui=bold,underline
+WarningMsg     xxx term=standout ctermfg=4 guifg=Red
+WildMenu       xxx term=underline ctermfg=0 ctermbg=14 guifg=Black guibg=Yellow
+Folded         xxx term=standout ctermfg=1 ctermbg=7 guifg=DarkBlue
+                   guibg=LightGrey
+FoldColumn     xxx term=standout ctermfg=1 ctermbg=7 guifg=DarkBlue guibg=Grey
+DiffAdd        xxx term=bold ctermfg=0 ctermbg=9 guibg=LightBlue
+DiffChange     xxx term=bold ctermfg=0 ctermbg=13 guibg=LightMagenta
+DiffDelete     xxx term=bold ctermfg=9 ctermbg=11 gui=bold guifg=Blue
+                   guibg=LightCyan
+DiffText       xxx term=reverse cterm=bold ctermfg=0 ctermbg=12 gui=bold
+                   guibg=Red
+DiffTextAdd    xxx links to DiffText
+SignColumn     xxx term=standout ctermfg=1 ctermbg=7 guifg=DarkBlue guibg=Grey
+Conceal        xxx ctermfg=7 ctermbg=8 guifg=LightGrey guibg=DarkGrey
+SpellBad       xxx term=reverse ctermbg=12 gui=undercurl guisp=Red
+SpellCap       xxx term=reverse ctermbg=9 gui=undercurl guisp=Blue
+SpellRare      xxx term=reverse ctermbg=13 gui=undercurl guisp=Magenta
+SpellLocal     xxx term=underline ctermbg=11 gui=undercurl guisp=DarkCyan
+Pmenu          xxx term=reverse ctermfg=0 ctermbg=13 guibg=LightMagenta
+PmenuSel       xxx term=underline ctermfg=0 ctermbg=7 guibg=Grey
+PmenuMatch     xxx links to Pmenu
+PmenuMatchSel  xxx links to PmenuSel
+PmenuKind      xxx links to Pmenu
+PmenuKindSel   xxx links to PmenuSel
+PmenuExtra     xxx links to Pmenu
+PmenuExtraSel  xxx links to PmenuSel
+PmenuSbar      xxx ctermbg=7 guibg=Grey
+PmenuThumb     xxx term=reverse ctermbg=0 guibg=Black
+PmenuBorder    xxx links to Pmenu
+PmenuShadow    xxx ctermfg=8 ctermbg=0 guifg=DarkGrey guibg=Black
+Popup          xxx links to Pmenu
+PopupBorder    xxx links to Pmenu
+PopupTitle     xxx links to Pmenu
+TabLine        xxx term=underline cterm=underline ctermfg=0 ctermbg=7
+                   gui=underline guibg=LightGrey
+TabLineSel     xxx term=bold cterm=bold gui=bold
+TabLineFill    xxx term=reverse cterm=reverse gui=reverse
+CursorColumn   xxx term=reverse ctermbg=7 guibg=Grey90
+CursorLine     xxx term=underline cterm=underline guibg=Grey90
+ColorColumn    xxx term=reverse ctermbg=12 guibg=LightRed
+QuickFixLine   xxx links to Search
+StatusLineTerm xxx cleared
+StatusLineTermNC xxx cleared
+MsgArea        xxx cleared
+ComplMatchIns  xxx cleared
+TabPanel       xxx links to TabLine
+TabPanelSel    xxx links to TabLineSel
+TabPanelFill   xxx links to TabLineFill
+PreInsert      xxx links to Added
+PopupSelected  xxx links to PmenuSel
+MessageWindow  xxx links to WarningMsg
+PopupNotification xxx links to WarningMsg
+Added          xxx cleared
+Normal         xxx cleared
+MatchParen     xxx term=reverse ctermbg=11 guibg=Cyan
+ToolbarLine    xxx term=underline ctermbg=7 guibg=LightGrey
+ToolbarButton  xxx cterm=bold ctermfg=15 ctermbg=8 gui=bold guifg=White
+                   guibg=Grey40
+--- Variables ---
+more_save             #1
+b:changedtick         #2
+v:beval_winid         #0
+v:version             #902
+v:null                 v:null
+v:beval_winnr         #0
+v:errors              []
+v:vim_did_init        #1
+v:versionlong         #9021015
+v:lnum                #0
+v:mouse_winid         #0
+v:hlsearch            #0
+v:t_channel           #9
+v:sizeofint           #4
+v:oldfiles            ['~/vim-dev/vimls-go/bugreport.txt', '~/Downloads/chrome/clash-verge-vless-guide.md', '~/vim-dev/vimls-go/testdata/vim9/basic.vim', '~/work/tank-battle/docs/plans/PHASE_FIFTEEN_A_WAVE_SKELETON_PLAN.md', '~/vim-dev/cocnvim.com/seo-improvement-plan.md', '~/work/tank-battle/.codex/agents/audio_designer.toml', '~/work/tank-battle/.codex/agents/ai_encounter_designer.toml', '~/work/tank-battle/.codex/config.toml', '~/vim-dev/cocnvim.com/dist-server/runtime-data.json', '~/vim-dev/cocnvim.com/.github/workflows/health-monitor.yml', '~/vim-dev/coc-solargraph/test/fixtures/sample.rb', '/usr/local/share/nvim/runtime/plugin/autoread.lua', '~/Documents/temp.md', '~/Library/Mobile Documents/iCloud~md~obsidian/Documents/工作/Finance/个人信息.md', '/private/tmp/fish.J6rjKi/fish_title.fish', '/private/tmp/fish.PTQLGi/cursor_color.fish', '/private/tmp/fish.RnSzGT/cursor_color.fish', '/private/tmp/fish.eoiXxU/cursor_color.fish', '~/vim-dev/coc.nvim/t.vim', '~/vim-dev/coc.nvim/t.md', '~/vim-dev/coc-pairs/a', '~/vim-dev/coc-pairs/c', '~/vim-dev/coc-skills/t.md', '~/.vim/vimrc/abbr.vim', '~/.config/pip/pip.conf', '~/.pip/pip.conf', '~/study/rust/someroject/src/main.rs', '~/vim-dev/coc.nvim/src/plugin.ts', '/private/tmp/coc-5419-real-20260807/src/main.rs', '/usr/local/share/vim/vim91/doc/channel.txt', '/usr/local/share/vim/vim91/doc/message.txt', '~/vim-dev/coc.nvim/src/core/workspaceFolder.ts', '~/vim-dev/coc.nvim/src/workspace.ts', '/private/tmp/vimpager_51602/stdin', '~/vim-dev/coc.nvim/codex-session.log', '/usr/local/share/vim/vim91/doc/textprop.txt', '~/.vim/vimrc/command.vim', '/usr/local/share/vim/vim91/doc/builtin.txt', '/usr/local/share/vim/vim91/doc/autocmd.txt', '/private/tmp/fish.jkuyBf/proxy-on.fish', '/private/tmp/fish.hJZqmj/proxy-off.fish', '/private/tmp/fish.w3hwQy/proxy-off.fish', '/private/tmp/fish.8vzuZH/proxy-on.fish', '~/work/zingexam/vercel.json', '~/work/zingexam/.env.local', '/usr/local/share/vim/vim91/doc/eval.txt', '~/vim-dev/coc-java/lib/index.js', '~/vim-dev/coc.nvim/jest.js', '/private/tmp/fish.wzW8fQ/e.fish', '/private/tmp/fish.w3eViT/e.fish', '~/vim-dev/coc.nvim/t.js', '~/.vim/vimrc/.vimrc', '~/vim-dev/coc.nvim/lua/coc/vtext.lua', '~/vim-dev/coc.nvim/t.ts', '~/Downloads/chrome/prettierrc', '~/vim-dev/coc.nvim/src/__tests__/handler/inline.test.ts', '~/vim/9.0.0438/share/vim/vim90/doc/builtin.txt', '~/vim-dev/coc.nvim/src/handler/inline.ts', '~/vim-dev/coc.nvim/autoload/coc/api.vim', '~/vim/9.0.0438/share/vim/vim90/doc/textprop.txt', '/usr/local/share/vim/vim91/doc/popup.txt', '/usr/local/share/vim/vim91/doc/terminal.txt', '/usr/local/share/vim/vim91/doc/options.txt', '~/vim-dev/coc.nvim/plugin/coc.vim', '~/vim-dev/coc.nvim/autoload/coc/vim9.vim', '~/vim-dev/coc.nvim/autoload/coc/text.vim', '~/vim-dev/coc.nvim/src/__tests__/vim.test.ts', '~/vim-dev/coc.nvim/doc/coc.txt', '~/vim-dev/coc.nvim/src/model/input.ts', '~/vim-dev/coc.nvim/autoload/coc/dialog.vim', '~/vim-dev/coc-java/src/apiManager.ts', '~/vim-dev/coc.nvim/bin/prompt.js', '/usr/local/share/vim/vim91/doc/map.txt', '/private/tmp/vMdULAq/11.fugitiveblame', '/private/tmp/vMdULAq/9.fugitiveblame', '/private/tmp/vMdULAq/7.fugitiveblame', '/private/tmp/vMdULAq/5.fugitiveblame', '~/vim-dev/coc.nvim/src/core/dialogs.ts', '~/vim-dev/coc.nvim/src/window.ts', '/usr/local/share/vim/vim91/doc/vim9class.txt', '/usr/local/share/vim/vim91/doc/vim9.txt', '~/vim-dev/coc.nvim/src/attach.ts', '~/.vim/plugin/test.vim', '/usr/local/share/vim/vim91/doc/pattern.txt', '/usr/local/share/vim/vim91/doc/change.txt', '~/.vim/vimrc/plugin.vim', '~/vim-dev/coc.nvim/src/__tests__/modules/cursors.test.ts', '/usr/local/share/vim/vim91/doc/tagsrch.txt', '~/vim/9.0.0438/share/vim/vim90/doc/autocmd.txt', '~/vim-dev/coc.nvim/test', '~/vim-dev/coc.nvim/tst', '~/vim-dev/coc.nvim/src/handler/refactor/index.ts', '~/vim-dev/coc.nvim/autoload/coc/ui.vim', '~/vim-dev/coc.nvim/src/language-client/client.ts', '~/vim-dev/coc.nvim/autoload/coc/float.vim', '~/vim-dev/coc.nvim/src/core/funcs.ts', '~/vim-dev/coc.nvim/typings/index.d.ts', '~/work/blog/source/_posts/2.md', '~/vim-dev/coc.nvim/src/handler/semanticTokens/buffer.ts', '~/vim-dev/coc.nvim/autoload/coc/notify.vim']
+v:dying               #0
+v:windowid            #0
+v:argv                ['/tmp/vimls-vim-9.2.1015.NQjmiy/src/vim', '-Nu', 'NONE', '-n', '-es', '-V1/dev/stderr', '-c', 'source /usr/local/share/vim/vim91/bugreport.vim', '-c', 'qa!']
+v:lang                 C.UTF-8
+v:t_typealias         #14
+v:t_none              #7
+v:count               #0
+v:progpath             /tmp/vimls-vim-9.2.1015.NQjmiy/src/vim
+v:true                 v:true
+v:t_string            #1
+v:none                 v:none
+v:progname             vim
+v:t_bool              #6
+v:t_number            #0
+v:numbersize          #64
+v:vim_did_enter       #0
+v:echospace           #51
+v:cmdbang             #0
+v:foldlevel           #0
+v:t_func              #2
+v:t_object            #13
+v:ctype                C.UTF-8
+v:t_job               #8
+v:prevcount           #0
+v:sizeoflong          #8
+v:register             "
+v:mouse_win           #0
+v:count1              #0
+v:foldstart           #0
+v:foldend             #0
+v:t_tuple             #17
+v:collate              C.UTF-8
+v:exiting              v:null
+v:profiling           #0
+v:t_class             #12
+v:t_float             #5
+v:beval_col           #0
+v:beval_lnum          #0
+v:mouse_lnum          #0
+v:t_enum              #15
+v:completed_item      {}
+v:numbermin           #-9223372036854775808
+v:sizeofpointer       #8
+v:t_enumvalue         #16
+v:t_blob              #10
+v:clipmethod           none
+v:t_dict              #4
+v:t_list              #3
+v:false                v:false
+v:numbermax           #9223372036854775807
+v:beval_bufnr         #0
+v:shell_error         #0
+v:testing             #0
+v:lc_time              C.UTF-8
+v:clipproviders       {}
+v:searchforward       #1
+v:event               {}
+v:stacktrace          []
+v:python3_version     #0
+v:mouse_col           #0
+v:colornames          {}
+v:statusmsg            No abbreviation found
+v:maxcol              #2147483647

@@ -1,0 +1,170 @@
+package syntax
+
+import "testing"
+
+func TestVim9AggregateDeclarations(t *testing.T) {
+	source := "vim9script\nclass Child extends Base implements One, Two\nendclass\ninterface Item extends Parent\nendinterface\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", file.Diagnostics)
+	}
+	class := file.Commands[1].Aggregate
+	if class == nil || class.Kind != BlockClass || file.Text(class.Name) != "Child" || len(class.Extends) != 1 || file.Text(class.Extends[0]) != "Base" || len(class.Implements) != 2 || file.Text(class.Implements[0]) != "One" || file.Text(class.Implements[1]) != "Two" {
+		t.Fatalf("unexpected class declaration: %#v", class)
+	}
+	interfaceNode := file.Commands[3].Aggregate
+	if interfaceNode == nil || interfaceNode.Kind != BlockInterface || file.Text(interfaceNode.Name) != "Item" || len(interfaceNode.Extends) != 1 || file.Text(interfaceNode.Extends[0]) != "Parent" {
+		t.Fatalf("unexpected interface declaration: %#v", interfaceNode)
+	}
+}
+
+func TestVim9EnumValues(t *testing.T) {
+	source := "vim9script\nenum Color\n  Red,\n  RGB(1, 2 + 3, 'blue')\nendenum\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", file.Diagnostics)
+	}
+	enumNode := file.Commands[1].Aggregate
+	if enumNode == nil || enumNode.Kind != BlockEnum || file.Text(enumNode.Name) != "Color" {
+		t.Fatalf("unexpected enum declaration: %#v", enumNode)
+	}
+	values := file.Commands[2].EnumValues
+	if len(values) != 2 || file.Text(values[0].Name) != "Red" || len(values[0].Arguments) != 0 || file.Text(values[1].Name) != "RGB" || len(values[1].Arguments) != 3 || values[1].Arguments[1].Kind != ExpressionBinary {
+		value := values
+		t.Fatalf("unexpected enum values: %#v", value)
+	}
+}
+
+func TestVim9EnumValuesCanShareAndContinueLines(t *testing.T) {
+	source := "vim9script\nenum Color\n  White,\n  Red, Green,\n  RGB(\n    1, # red\n    2,\n    3\n  )\n  var channel: number\nendenum\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", file.Diagnostics)
+	}
+	values := file.Commands[2].EnumValues
+	if len(values) != 4 {
+		t.Fatalf("enum values = %#v; commands = %#v", values, file.Commands)
+	}
+	want := []string{"White", "Red", "Green", "RGB"}
+	for index, value := range values {
+		if got := file.Text(value.Name); got != want[index] {
+			t.Fatalf("value %d = %q, want %q", index, got, want[index])
+		}
+	}
+	if len(values[3].Arguments) != 3 || file.Commands[3].Declaration == nil {
+		t.Fatalf("RGB = %#v, member = %#v", values[3], file.Commands[3])
+	}
+}
+
+func TestOfficialVim9EnumAllowsTrailingComma(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_class.vim
+	// Test_list_type_inference_with_enum_and_object.
+	file := Parse("vim9script\nenum Color\n  Red,\n  Green,\nendenum\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 4 || file.Commands[3].Canonical != "endenum" || len(file.Commands[2].EnumValues) != 2 {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+}
+
+func TestVim9TypeAlias(t *testing.T) {
+	file := Parse("vim9script\ntype Pair = tuple<number, string>\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", file.Diagnostics)
+	}
+	alias := file.Commands[1].TypeAlias
+	if alias == nil || file.Text(alias.Name) != "Pair" || file.Text(alias.Assignment) != "=" || alias.Type == nil || alias.Type.Kind != TypeGeneric || alias.Type.Name != "tuple" || len(alias.Type.Arguments) != 2 {
+		t.Fatalf("unexpected type alias: %#v", alias)
+	}
+}
+
+func TestImportForms(t *testing.T) {
+	file := Parse("vim9script\nimport 'dir/as-name.vim' as module\nimport autoload $'autoload/{name}.vim' as lazy\nexport def Public()\nenddef\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", file.Diagnostics)
+	}
+	direct := file.Commands[1].Import
+	if direct == nil || direct.Autoload || file.Text(direct.PathSpan) != "'dir/as-name.vim'" || file.Text(direct.Alias) != "module" || direct.Path.Kind != ExpressionString {
+		t.Fatalf("direct import = %#v", direct)
+	}
+	lazy := file.Commands[2].Import
+	if lazy == nil || !lazy.Autoload || file.Text(lazy.PathSpan) != "$'autoload/{name}.vim'" || file.Text(lazy.Alias) != "lazy" {
+		t.Fatalf("autoload import = %#v", lazy)
+	}
+	if len(file.Commands[3].Modifiers) != 1 || file.Commands[3].Modifiers[0].Name != "export" || file.Commands[3].Function == nil {
+		t.Fatalf("exported def = %#v", file.Commands[3])
+	}
+}
+
+func TestDestructuringDeclarationsAndForLoop(t *testing.T) {
+	file := Parse("vim9script\nvar [first: number, second; rest] = values\nfor [key, value] in items\n  echo key value\nendfor\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", file.Diagnostics)
+	}
+	declaration := file.Commands[1].Declaration
+	if declaration == nil || len(declaration.Bindings) != 3 || file.Text(declaration.Bindings[0].Name) != "first" || declaration.Bindings[0].ParsedType == nil || !declaration.Bindings[2].Rest {
+		t.Fatalf("destructuring declaration = %#v", declaration)
+	}
+	loop := file.Commands[2].For
+	if loop == nil || len(loop.Bindings) != 2 || file.Text(loop.Bindings[1].Name) != "value" || loop.Iterable == nil || loop.Iterable.Value != "items" {
+		t.Fatalf("for loop = %#v", loop)
+	}
+}
+
+func TestOfficialLegacyLetAssignmentTargets(t *testing.T) {
+	// v9.2.1015 src/testdir/test_assert.vim and test_changedtick.vim.
+	file := (LegacyParser{}).Parse("let s:values[0].name = 'first'\nlet b:[\"changedtick\"] += 1\nlet &l:tabstop = 4\nlet @a = 'text'\nlet $VIMLS_TEST = 'env'\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	want := []ExpressionKind{ExpressionMember, ExpressionIndex, ExpressionIdentifier, ExpressionIdentifier, ExpressionIdentifier}
+	for index, kind := range want {
+		declaration := file.Commands[index].Declaration
+		if declaration == nil || declaration.Target == nil || declaration.Target.Kind != kind || len(file.Commands[index].Expressions) != 1 || file.Commands[index].Expressions[0].Kind != ExpressionAssignment {
+			t.Fatalf("assignment %d = %#v", index, file.Commands[index])
+		}
+	}
+}
+
+func TestOfficialVariableMutationCommands(t *testing.T) {
+	// v9.2.1015 src/testdir/test_unlet.vim, test_changedtick.vim and
+	// test_vim9_assign.vim.
+	file := (Vim9Parser{}).Parse("unlet! g:first g:items[0]\nlockvar 2 g:first g:items\nunlockvar g:first\n++counter\n--counter\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+	}
+	if len(file.Commands[0].Targets) != 2 || file.Commands[0].Targets[1].Kind != ExpressionIndex || file.Text(file.Commands[1].Count) != "2" || len(file.Commands[1].Targets) != 2 || len(file.Commands[2].Targets) != 1 {
+		t.Fatalf("variable commands = %#v", file.Commands[:3])
+	}
+	for _, command := range file.Commands[3:] {
+		if len(command.Targets) != 1 || len(command.Expressions) != 1 || command.Expressions[0].Kind != ExpressionUnary {
+			t.Fatalf("increment command = %#v", command)
+		}
+	}
+}
+
+func TestOfficialGenericTypedDeclarationEndsAtNewline(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_script.vim
+	// Test_break_in_try_in_for.
+	file := Parse("vim9script\ndef Values(): list<string>\n  var values: list<string>\n  for value in ['x']\n    values += [value]\n  endfor\n  return values\nenddef\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 8 || file.Commands[2].Declaration.ParsedType.Name != "list" || file.Commands[3].Canonical != "for" {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+}
+
+func TestOfficialVim9FoldCommentAfterDeclaration(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_expr.vim Test_expr9_dict.
+	file := Parse("vim9script\nvar first: number #{{ fold\nvar second = 9 #{{ fold\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 3 || countTokens(file, TokenComment) != 2 {
+		t.Fatalf("commands = %#v, diagnostics = %#v, tokens = %#v", file.Commands, file.Diagnostics, file.Tokens)
+	}
+}
+
+func TestOfficialSingleLetterTypedClassMember(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_class.vim Test_final_object_variable.
+	file := Parse("vim9script\nclass A\n  public final l: list<number>\n  def new()\n    this.l = []\n  enddef\nendclass\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 7 || file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "l" || file.Commands[3].Canonical != "def" {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	if file.Commands[2].Declaration.ParsedType == nil || file.Commands[2].Declaration.ParsedType.Name != "list" {
+		t.Fatalf("declaration = %#v", file.Commands[2].Declaration)
+	}
+}

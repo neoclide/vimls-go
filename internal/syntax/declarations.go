@@ -1,0 +1,252 @@
+package syntax
+
+func parseImport(file *File, command *Command) {
+	source := file.Text(command.Argument)
+	start := skipSpace(source, 0, len(source))
+	importNode := &Import{}
+	if wordEnd := scanWord(source, start, len(source)); source[start:wordEnd] == "autoload" && wordEnd < len(source) && isSpace(source[wordEnd]) {
+		importNode.Autoload = true
+		start = skipSpace(source, wordEnd, len(source))
+	}
+	aliasKeyword := findTopLevelKeyword(source, start, len(source), "as")
+	pathEnd := len(source)
+	if aliasKeyword >= 0 {
+		pathEnd = trimSpaceEnd(source, start, aliasKeyword)
+		aliasStart := skipSpace(source, aliasKeyword+2, len(source))
+		aliasEnd := scanWord(source, aliasStart, len(source))
+		importNode.Alias = Span{Start: command.Argument.Start + aliasStart, End: command.Argument.Start + aliasEnd}
+	}
+	pathStart := skipSpace(source, start, pathEnd)
+	pathEnd = trimSpaceEnd(source, pathStart, pathEnd)
+	importNode.PathSpan = Span{Start: command.Argument.Start + pathStart, End: command.Argument.Start + pathEnd}
+	if pathStart < pathEnd {
+		importNode.Path, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[pathStart:pathEnd], command.Argument.Start+pathStart, command.Dialect)
+	}
+	command.Import = importNode
+}
+
+func findTopLevelKeyword(source string, start, end int, keyword string) int {
+	depth := 0
+	quote := byte(0)
+	for index := start; index+len(keyword) <= end; index++ {
+		character := source[index]
+		if quote != 0 {
+			if character == '\\' && quote == '"' {
+				index++
+			} else if character == quote {
+				if quote == '\'' && index+1 < end && source[index+1] == '\'' {
+					index++
+				} else {
+					quote = 0
+				}
+			}
+			continue
+		}
+		if character == '\'' || character == '"' {
+			quote = character
+			continue
+		}
+		switch character {
+		case '(', '[', '{':
+			depth++
+			continue
+		case ')', ']', '}':
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth == 0 && source[index:index+len(keyword)] == keyword && (index == start || isExpressionSpace(source[index-1])) && (index+len(keyword) == end || isExpressionSpace(source[index+len(keyword)])) {
+			return index
+		}
+	}
+	return -1
+}
+
+func parseAggregate(file *File, command *Command, kind BlockKind) {
+	source := maskVim9Comments(file.Text(command.Argument))
+	nameStart := skipEnumSpace(source, 0, len(source))
+	nameEnd := scanWord(source, nameStart, len(source))
+	if nameEnd == nameStart {
+		return
+	}
+	aggregate := &Aggregate{Kind: kind, Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd}}
+	remainder := nameEnd
+	for remainder < len(source) {
+		remainder = skipEnumSpace(source, remainder, len(source))
+		keywordEnd := scanWord(source, remainder, len(source))
+		if keywordEnd == remainder {
+			break
+		}
+		keyword := source[remainder:keywordEnd]
+		if keyword != "extends" && keyword != "implements" {
+			break
+		}
+		remainder = keywordEnd
+		for {
+			valueStart := skipEnumSpace(source, remainder, len(source))
+			valueEnd := scanClassName(source, valueStart, len(source))
+			if valueEnd == valueStart {
+				break
+			}
+			span := Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + valueEnd}
+			if keyword == "extends" {
+				aggregate.Extends = append(aggregate.Extends, span)
+			} else {
+				aggregate.Implements = append(aggregate.Implements, span)
+			}
+			remainder = skipEnumSpace(source, valueEnd, len(source))
+			if remainder >= len(source) || source[remainder] != ',' {
+				break
+			}
+			remainder++
+		}
+	}
+	command.Aggregate = aggregate
+}
+
+func scanClassName(source string, start, end int) int {
+	position := start
+	for position < end {
+		wordEnd := scanWord(source, position, end)
+		if wordEnd == position {
+			break
+		}
+		position = wordEnd
+		if position >= end || source[position] != '.' {
+			break
+		}
+		position++
+	}
+	return position
+}
+
+func parseTypeAlias(file *File, command *Command) {
+	source := file.Text(command.Argument)
+	assignment := findAssignment(source)
+	if assignment.Start < 0 {
+		return
+	}
+	nameStart := skipSpace(source, 0, assignment.Start)
+	nameEnd := trimSpaceEnd(source, nameStart, assignment.Start)
+	typeStart := skipSpace(source, assignment.End, len(source))
+	typeEnd := trimSpaceEnd(source, typeStart, len(source))
+	operator := Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + assignment.End}
+	typeSpan := Span{Start: command.Argument.Start + typeStart, End: command.Argument.Start + typeEnd}
+	typeNode, diagnostics := parseTypeAt(source[typeStart:typeEnd], typeSpan.Start)
+	file.Diagnostics = append(file.Diagnostics, diagnostics...)
+	command.TypeAlias = &TypeAlias{
+		Name:       Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd},
+		Assignment: operator, Type: typeNode, TypeSpan: typeSpan,
+	}
+}
+
+// parseEnumValues parses one logical line at the beginning of an enum. Vim
+// concatenates physical lines while a comma or constructor delimiter is open,
+// so a Command may own several values. The return value says whether more enum
+// value lines are required.
+func parseEnumValues(file *File, command *Command) bool {
+	start := command.Name.Start
+	end := command.Span.End
+	if start >= end {
+		return false
+	}
+	source := maskVim9Comments(file.Source[start:end])
+	trimmedEnd := trimEnumSpaceEnd(source, 0, len(source))
+	more := trimmedEnd > 0 && source[trimmedEnd-1] == ','
+	for _, part := range splitTopLevel(source, 0, trimmedEnd, ',') {
+		valueStart := skipEnumSpace(source, part.Start, part.End)
+		valueEnd := trimEnumSpaceEnd(source, valueStart, part.End)
+		if valueStart >= valueEnd {
+			continue
+		}
+		nameEnd := scanWord(source, valueStart, valueEnd)
+		if nameEnd == valueStart {
+			continue
+		}
+		value := EnumValue{Name: Span{Start: start + valueStart, End: start + nameEnd}}
+		if nameEnd < valueEnd && (source[nameEnd] == '(' || source[nameEnd] == '<') {
+			initializer, diagnostics := parseExpression(source[valueStart:valueEnd], start+valueStart, Vim9)
+			value.Initializer = initializer
+			if initializer.Kind == ExpressionCall && len(initializer.Children) > 1 {
+				value.Arguments = append(value.Arguments, initializer.Children[1:]...)
+			}
+			file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		}
+		command.EnumValues = append(command.EnumValues, value)
+	}
+	return more
+}
+
+func skipEnumSpace(source string, start, end int) int {
+	for start < end {
+		switch source[start] {
+		case ' ', '\t', '\r', '\n':
+			start++
+		case '\\':
+			if isLineLeadingBackslash(source, start) {
+				start++
+				continue
+			}
+			return start
+		default:
+			return start
+		}
+	}
+	return start
+}
+
+func trimEnumSpaceEnd(source string, start, end int) int {
+	for end > start {
+		switch source[end-1] {
+		case ' ', '\t', '\r', '\n':
+			end--
+		default:
+			return end
+		}
+	}
+	return end
+}
+
+func maskVim9Comments(source string) string {
+	masked := []byte(source)
+	quote := byte(0)
+	lineStart := true
+	for index := 0; index < len(masked); index++ {
+		character := masked[index]
+		if quote != 0 {
+			if character == '\\' && quote == '"' && index+1 < len(masked) {
+				index++
+			} else if character == quote {
+				if quote == '\'' && index+1 < len(masked) && masked[index+1] == '\'' {
+					index++
+				} else {
+					quote = 0
+				}
+			}
+			continue
+		}
+		if character == '\n' {
+			lineStart = true
+			continue
+		}
+		if character == '\'' || character == '"' {
+			quote = character
+			lineStart = false
+			continue
+		}
+		if character == '#' {
+			for index < len(masked) && masked[index] != '\n' {
+				masked[index] = ' '
+				index++
+			}
+			index--
+			continue
+		}
+		if lineStart && (character == ' ' || character == '\t' || character == '\r' || character == '\\') {
+			continue
+		}
+		lineStart = false
+	}
+	return string(masked)
+}
