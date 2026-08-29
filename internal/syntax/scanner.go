@@ -56,6 +56,7 @@ func parseSource(source string, initial Dialect) *File {
 		active = Legacy
 	}
 	var dialectStack []Dialect
+	var aggregateStack []BlockKind
 	heredocCommand := -1
 	heredocRecoveryCommand := ""
 	heredocRecoveryOffset := -1
@@ -103,6 +104,22 @@ func parseSource(source string, initial Dialect) *File {
 				if len(dialectStack) > 0 {
 					active = dialectStack[len(dialectStack)-1]
 					dialectStack = dialectStack[:len(dialectStack)-1]
+				}
+			case "class", "interface":
+				if command.Dialect == Vim9 {
+					kind := BlockClass
+					if command.Canonical == "interface" {
+						kind = BlockInterface
+					}
+					aggregateStack = append(aggregateStack, kind)
+				}
+			case "endclass", "endinterface":
+				kind := BlockClass
+				if command.Canonical == "endinterface" {
+					kind = BlockInterface
+				}
+				if command.Dialect == Vim9 && len(aggregateStack) > 0 && aggregateStack[len(aggregateStack)-1] == kind {
+					aggregateStack = aggregateStack[:len(aggregateStack)-1]
 				}
 			case "scriptversion":
 				if command.Dialect == Legacy {
@@ -335,7 +352,8 @@ func parseSource(source string, initial Dialect) *File {
 		} else {
 			view = readVim9LogicalView(source, offset)
 		}
-		before := scanLogicalCommands(file, &view, active)
+		directAggregateMember := len(aggregateStack) > 0 && len(dialectStack) == 0
+		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateMember)
 		loadKeymapCommand, textBodyCommand := applyCommandState(before)
 		if loadKeymapCommand >= 0 {
 			offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, hasOpenVim9CommandBlock(file))
@@ -873,6 +891,10 @@ func vim9ScriptArgumentDiagnostic(source string, argument Span) (string, string,
 }
 
 func scanCommands(file *File, start, end int, baseDialect Dialect) {
+	scanCommandsWithContext(file, start, end, baseDialect, false)
+}
+
+func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, directAggregateMember bool) {
 	for start < end {
 		diagnosticsBeforeCommand := len(file.Diagnostics)
 		start = skipSpaceToken(file, start, end)
@@ -1220,6 +1242,18 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 		if builtIn && canonical == "loadkeymap" && argumentStart < argumentEnd {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E488", Message: "trailing characters", Span: Span{Start: argumentStart, End: argumentEnd},
+			})
+		}
+		// Vim does not split a direct class/interface member declaration at a
+		// bar.  Report the bar as E488 and let the common recovery path retain
+		// the complete tail as opaque.  Function bodies and ordinary script
+		// declarations retain normal separator behavior.
+		if dialect == Vim9 && directAggregateMember &&
+			(canonical == "var" || canonical == "const" || canonical == "final") &&
+			separator.Start < separator.End {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E488", Message: "trailing characters",
+				Span: Span{Start: separator.Start, End: end},
 			})
 		}
 		if dialect == Vim9 {
