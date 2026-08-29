@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"testing"
+)
 
 func TestSelectTestFilesUsesAllPinnedVim9Tests(t *testing.T) {
 	files, err := selectTestFiles([]byte("src/testdir/test_vim9_script.vim\n" +
@@ -49,6 +54,27 @@ func TestSelectTestFilesUsesAllPinnedVim9Tests(t *testing.T) {
 	for index := range want {
 		if files[index] != want[index] {
 			t.Fatalf("file %d = %q, want %q", index, files[index], want[index])
+		}
+	}
+}
+
+func TestSelectAllTestFilesSortsAndDeduplicatesTrackedVimFiles(t *testing.T) {
+	var manifest strings.Builder
+	for index := range expectedTestFileCount {
+		fmt.Fprintf(&manifest, "src/testdir/test_%03d.vim\n", index)
+	}
+	manifest.WriteString("src/testdir/test_000.vim\n")
+	manifest.WriteString("src/testdir/not-vim.txt\n")
+	files, err := selectAllTestFiles([]byte(manifest.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != expectedTestFileCount || !sort.StringsAreSorted(files) {
+		t.Fatalf("files = %#v", files)
+	}
+	for index := 1; index < len(files); index++ {
+		if files[index] == files[index-1] {
+			t.Fatalf("duplicate file %q", files[index])
 		}
 	}
 }

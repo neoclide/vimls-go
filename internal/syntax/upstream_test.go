@@ -1,8 +1,10 @@
 package syntax
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,6 +107,72 @@ func TestOfficialVimEmbeddedCorpusMatchesPinnedSource(t *testing.T) {
 			t.Fatalf("generated corpus case %d differs: generated origin %q, source origin %q", index, generated.Cases[index].Origin, extracted[index].Origin)
 		}
 	}
+}
+
+func TestOfficialVimTestFileCorpusMatchesPinnedSource(t *testing.T) {
+	vimRoot := os.Getenv("VIM_SOURCE")
+	if vimRoot == "" {
+		t.Skip("set VIM_SOURCE to compare the lossless official test-file corpus with the pinned Vim source")
+	}
+	generated := readGeneratedOfficialTestFiles(t)
+	if generated.Tag != officialVimTag || generated.Commit != officialVimCommit {
+		t.Fatalf("generated test-file corpus provenance = tag %q, commit %q; want tag %q, commit %q", generated.Tag, generated.Commit, officialVimTag, officialVimCommit)
+	}
+	commit, err := exec.Command("git", "-C", vimRoot, "rev-list", "-n", "1", officialVimTag).Output()
+	if err != nil {
+		t.Fatalf("resolve pinned Vim tag: %v", err)
+	}
+	if got := strings.TrimSpace(string(commit)); got != generated.Commit {
+		t.Fatalf("Vim tag %s resolves to %s, generated corpus records %s", officialVimTag, got, generated.Commit)
+	}
+
+	paths, err := listAllPinnedVimTestFiles(vimRoot)
+	if err != nil {
+		t.Fatalf("list pinned Vim test files: %v", err)
+	}
+	if len(paths) != officialTestFilesCount || len(generated.Files) != officialTestFilesCount {
+		t.Fatalf("pinned Vim test files = %d, generated records = %d; want %d", len(paths), len(generated.Files), officialTestFilesCount)
+	}
+	for index, path := range paths {
+		if generated.Files[index].Path != path {
+			t.Fatalf("generated test-file %d path = %q, pinned source path = %q", index, generated.Files[index].Path, path)
+		}
+		source, err := exec.Command("git", "-C", vimRoot, "show", officialVimTag+":"+path).Output()
+		if err != nil {
+			t.Fatalf("read pinned Vim test file %s: %v", path, err)
+		}
+		if !bytes.Equal(generated.Files[index].Source, source) {
+			t.Fatalf("generated test file %s differs from %s:%s", path, officialVimTag, path)
+		}
+	}
+
+	licensePath := filepath.Join("..", "..", "testdata", "official", "VIM-LICENSE")
+	license, err := os.ReadFile(licensePath)
+	if err != nil {
+		t.Fatalf("read copied Vim license %s: %v", licensePath, err)
+	}
+	pinnedLicense, err := exec.Command("git", "-C", vimRoot, "show", officialVimTag+":LICENSE").Output()
+	if err != nil {
+		t.Fatalf("read pinned Vim license: %v", err)
+	}
+	if !bytes.Equal(license, pinnedLicense) {
+		t.Fatalf("copied Vim license differs from %s:LICENSE", officialVimTag)
+	}
+}
+
+func listAllPinnedVimTestFiles(vimRoot string) ([]string, error) {
+	output, err := exec.Command("git", "-C", vimRoot, "ls-tree", "-r", "--name-only", officialVimTag, "--", "src/testdir").Output()
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.HasPrefix(path, "src/testdir/") && strings.HasSuffix(path, ".vim") {
+			files = append(files, path)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 func listPinnedVim9TestFiles(vimRoot string) ([]string, error) {

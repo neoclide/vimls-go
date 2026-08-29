@@ -44,15 +44,23 @@ and incomplete input. Essential ambiguity cases include `|`, quotes versus
 comments, command abbreviations, ranges/modifiers, continuations, heredocs,
 mapping payloads, `vim9cmd`, `legacy`, `def`, and `function`.
 
-The default offline gate also reads the generated v9.2.1015 corpus below
-`testdata/official/`. It contains 3,267 cases extracted from 17 official Vim
-test files and feeds every source to both `LegacyParser` and
-`Vim9Parser`, asserting retained source plus ordered, in-bounds command, token,
-block, and diagnostic spans. Focused source-referenced matrices separately
-assert exact AST shapes and recovery diagnostics; the broad corpus is not used
-as a substitute for those semantic assertions. `make test-official` compares
-the generated corpus with the exact tag in `/Users/chemzqm/lib/vim` without
-modifying that checkout or accessing the network.
+The default offline gate also reads two generated v9.2.1015 corpora below
+`testdata/official/`. The full-file corpus losslessly contains all 362 tracked
+`.vim` files below Vim's `src/testdir` (8,558,061 source bytes). The embedded
+corpus contains 3,267 cases extracted from 17 official parser and evaluator
+tests. Both feed every source to `LegacyParser` and `Vim9Parser`, asserting
+retained source plus ordered, in-bounds command, token, block, and diagnostic
+spans without sourcing or executing the files.
+
+Full-file parsing proves stability, recovery, and span integrity, not exact Vim
+acceptance. The conformance layer must use generated helper expectations and
+focused source-referenced matrices to assert accepted or rejected syntax,
+error provenance, AST shape, and recovery diagnostics. Every official helper
+candidate must be extracted or retained in a classified skip manifest; the
+broad corpus is not a substitute for those conformance assertions.
+`make test-official` compares the generated corpora with the exact tag in
+`/Users/chemzqm/lib/vim` without modifying that checkout or accessing the
+network.
 
 ### Semantics
 

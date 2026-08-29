@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	vimTag              = "v9.2.1015"
-	vimCommit           = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
-	expectedFileCount   = 17
-	expectedCorpusCount = 3267
+	vimTag                = "v9.2.1015"
+	vimCommit             = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
+	expectedFileCount     = 17
+	expectedCorpusCount   = 3267
+	expectedTestFileCount = 362
+	expectedTestRawBytes  = 8558061
 )
 
 type corpus struct {
@@ -33,9 +35,22 @@ type corpusCase struct {
 	Outcome string `json:"outcome,omitempty"`
 }
 
+type testFilesCorpus struct {
+	Tag    string           `json:"tag"`
+	Commit string           `json:"commit"`
+	Files  []testFileRecord `json:"files"`
+}
+
+type testFileRecord struct {
+	Path   string `json:"path"`
+	Source []byte `json:"source"`
+}
+
 func main() {
 	source := flag.String("vim-source", "/Users/chemzqm/lib/vim", "local Vim git checkout")
 	output := flag.String("output", "testdata/official/v9.2.1015-parser-corpus.json.gz", "generated corpus path")
+	testFilesOutput := flag.String("test-files-output", "testdata/official/v9.2.1015-test-files.json.gz", "lossless official test-file corpus path")
+	licenseOutput := flag.String("license-output", "testdata/official/VIM-LICENSE", "upstream Vim license path")
 	flag.Parse()
 
 	commit, err := gitOutput(*source, "rev-list", "-n", "1", vimTag)
@@ -47,6 +62,32 @@ func main() {
 		fatal(fmt.Errorf("%s resolves to %s, want pinned commit %s", vimTag, resolvedCommit, vimCommit))
 	}
 	testFiles, err := listTestFiles(*source)
+	if err != nil {
+		fatal(err)
+	}
+	allTestFiles, err := listAllTestFiles(*source)
+	if err != nil {
+		fatal(err)
+	}
+	testCorpus := testFilesCorpus{Tag: vimTag, Commit: resolvedCommit}
+	for _, path := range allTestFiles {
+		contents, err := gitOutput(*source, "show", vimTag+":"+path)
+		if err != nil {
+			fatal(err)
+		}
+		testCorpus.Files = append(testCorpus.Files, testFileRecord{Path: path, Source: append([]byte(nil), contents...)})
+	}
+	if len(testCorpus.Files) != expectedTestFileCount {
+		fatal(fmt.Errorf("read %d official Vim test files, want %d from pinned source", len(testCorpus.Files), expectedTestFileCount))
+	}
+	rawBytes := 0
+	for _, file := range testCorpus.Files {
+		rawBytes += len(file.Source)
+	}
+	if rawBytes != expectedTestRawBytes {
+		fatal(fmt.Errorf("read %d raw bytes from official Vim test files, want %d from pinned source", rawBytes, expectedTestRawBytes))
+	}
+	license, err := gitOutput(*source, "show", vimTag+":LICENSE")
 	if err != nil {
 		fatal(err)
 	}
@@ -64,7 +105,18 @@ func main() {
 	if err := writeCorpus(*output, result); err != nil {
 		fatal(err)
 	}
+	if err := writeTestFilesCorpus(*testFilesOutput, testCorpus); err != nil {
+		fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(*licenseOutput), 0o755); err != nil {
+		fatal(err)
+	}
+	if err := os.WriteFile(*licenseOutput, license, 0o644); err != nil {
+		fatal(err)
+	}
 	fmt.Printf("wrote %d scripts from %s (%s) to %s\n", len(result.Cases), result.Tag, result.Commit, *output)
+	fmt.Printf("wrote %d lossless test files (%d bytes) from %s (%s) to %s\n", len(testCorpus.Files), rawBytes, testCorpus.Tag, testCorpus.Commit, *testFilesOutput)
+	fmt.Printf("wrote upstream Vim license to %s\n", *licenseOutput)
 }
 
 func listTestFiles(root string) ([]string, error) {
@@ -86,6 +138,32 @@ func selectTestFiles(output []byte) ([]string, error) {
 	sort.Strings(files)
 	if len(files) != expectedFileCount {
 		return nil, fmt.Errorf("found %d Vim9 parser test files at %s, want %d", len(files), vimTag, expectedFileCount)
+	}
+	return files, nil
+}
+
+func listAllTestFiles(root string) ([]string, error) {
+	output, err := gitOutput(root, "ls-tree", "-r", "--name-only", vimTag, "--", "src/testdir")
+	if err != nil {
+		return nil, err
+	}
+	return selectAllTestFiles(output)
+}
+
+func selectAllTestFiles(output []byte) ([]string, error) {
+	seen := make(map[string]struct{})
+	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.HasPrefix(path, "src/testdir/") && strings.HasSuffix(path, ".vim") {
+			seen[path] = struct{}{}
+		}
+	}
+	files := make([]string, 0, len(seen))
+	for path := range seen {
+		files = append(files, path)
+	}
+	sort.Strings(files)
+	if len(files) != expectedTestFileCount {
+		return nil, fmt.Errorf("found %d tracked .vim test files at %s, want %d", len(files), vimTag, expectedTestFileCount)
 	}
 	return files, nil
 }
@@ -263,13 +341,29 @@ func trimHeredoc(lines []string) []string {
 }
 
 func writeCorpus(path string, value corpus) error {
+	return writeJSONGzip(path, value)
+}
+
+func writeTestFilesCorpus(path string, value testFilesCorpus) error {
+	return writeJSONGzip(path, value)
+}
+
+func writeJSONGzip(path string, value any) (err error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	file, err := os.Create(path)
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
+	temporaryPath := temporary.Name()
+	removeTemporary := true
+	defer func() {
+		if removeTemporary {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	file := temporary
 	compressor, err := gzip.NewWriterLevel(file, gzip.BestCompression)
 	if err != nil {
 		file.Close()
@@ -288,7 +382,14 @@ func writeCorpus(path string, value corpus) error {
 	if closeGzipErr != nil {
 		return closeGzipErr
 	}
-	return closeFileErr
+	if closeFileErr != nil {
+		return closeFileErr
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return err
+	}
+	removeTemporary = false
+	return nil
 }
 
 func fatal(err error) {

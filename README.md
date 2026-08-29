@@ -66,10 +66,11 @@ make check
 detector, `go vet`, coverage enforcement, and a clean build. Coverage is measured
 across production packages below `internal/` and must remain at least 90%.
 
-The normal offline test gate includes 3,267 scripts extracted from Vim's
-official v9.2.1015 tests and parses every script through both independent parser
-entry points. To additionally compare the committed corpus byte-for-byte with
-the pinned local Vim checkout, run:
+The normal offline test gate losslessly includes all 362 `.vim` files below
+Vim v9.2.1015's `src/testdir` (8,558,061 source bytes), plus 3,267 extracted
+official scripts. It parses every source through both independent parser entry
+points without executing it. To additionally compare the committed corpora and
+copied Vim license byte-for-byte with the pinned local checkout, run:
 
 ```sh
 GOPROXY=off GOSUMDB=off make test-official
