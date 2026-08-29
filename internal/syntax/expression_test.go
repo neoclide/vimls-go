@@ -224,6 +224,44 @@ func TestLegacyExpressionParserMatchesVimPrecedence(t *testing.T) {
 	}
 }
 
+func TestVim9TernarySyntaxDiagnostics(t *testing.T) {
+	expression, diagnostics := (Vim9ExpressionParser{}).Parse("1 ? 'one'")
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E109" || diagnostics[0].Message != "Missing ':' after '?'" || diagnostics[0].Span != (Span{Start: 9, End: 9}) {
+		t.Fatalf("missing colon diagnostics = %#v", diagnostics)
+	}
+	if expression.Kind != ExpressionTernary || len(expression.Children) != 2 || expression.Children[0].Value != "1" || expression.Children[1].Kind != ExpressionString {
+		t.Fatalf("incomplete ternary = %#v", expression)
+	}
+
+	file := Parse("vim9script\nvar x = 1 ? 'one'\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E109" || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End || file.Text(file.Diagnostics[0].Span) != "" || len(file.Commands) != 3 || file.Commands[1].Declaration == nil || file.Commands[1].Declaration.Initializer == nil || file.Commands[1].Declaration.Initializer.Kind != ExpressionTernary || len(file.Commands[1].Declaration.Initializer.Children) != 2 || file.Commands[2].Declaration == nil {
+		t.Fatalf("command recovery = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	assertFileSpans(t, file)
+
+	for _, test := range []struct {
+		source string
+		span   string
+	}{
+		{source: "1? 'one' : 'two'", span: "?"},
+		{source: "1 ?'one' : 'two'", span: "?"},
+		{source: "1?'one' : 'two'", span: "?"},
+		{source: "1 ? 'one': 'two'", span: ":"},
+		{source: "1 ? 'one' :'two'", span: ":"},
+		{source: "1 ? 'one':'two'", span: ":"},
+	} {
+		expression, diagnostics := (Vim9ExpressionParser{}).Parse(test.source)
+		if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1004" || test.source[diagnostics[0].Span.Start:diagnostics[0].Span.End] != test.span || expression.Kind != ExpressionTernary || len(expression.Children) != 3 || expression.Children[0].Value != "1" || expression.Children[1].Kind != ExpressionString || expression.Children[2].Kind != ExpressionString {
+			t.Fatalf("%q = %#v, diagnostics = %#v", test.source, expression, diagnostics)
+		}
+	}
+
+	legacy, diagnostics := (LegacyExpressionParser{}).Parse("1 ? 'one'")
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vimls/missing-ternary-colon" || legacy.Kind != ExpressionTernary || len(legacy.Children) != 2 {
+		t.Fatalf("legacy missing colon = %#v, diagnostics = %#v", legacy, diagnostics)
+	}
+}
+
 func TestSeparateLegacyAndVim9LambdaSyntax(t *testing.T) {
 	legacy, diagnostics := (LegacyExpressionParser{}).Parse(`{key, value -> key .. value}`)
 	if len(diagnostics) != 0 || legacy.Kind != ExpressionLambda || legacy.Value != "" || len(legacy.Parameters) != 2 || len(legacy.Children) != 3 {

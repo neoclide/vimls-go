@@ -162,7 +162,13 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			p.advance()
 			whenTrue := p.parse(0)
 			if p.current().text != ":" {
-				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-ternary-colon", Message: "expected : in ternary expression", Span: p.current().span})
+				code := "vimls/missing-ternary-colon"
+				message := "expected : in ternary expression"
+				if p.dialect == Vim9 {
+					code = "vim/E109"
+					message = "Missing ':' after '?'"
+				}
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: p.current().span})
 				return &Expression{Kind: ExpressionTernary, Span: Span{Start: left.Span.Start, End: whenTrue.Span.End}, Operator: token.span, Children: []*Expression{left, whenTrue}}
 			}
 			p.validateBinarySpacing(p.current())
