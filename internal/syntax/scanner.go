@@ -2329,7 +2329,25 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if assignment := findAssignment(source); assignment.Start >= 0 {
 			leftEnd := trimSpaceEnd(source, 0, assignment.Start)
 			rightStart := skipSpace(source, assignment.End, len(source))
-			left, leftDiagnostics := parseExpression(source[:leftEnd], command.Argument.Start, command.Dialect)
+			leftSource := source[:leftEnd]
+			var left *Expression
+			var leftDiagnostics []Diagnostic
+			var typedDeclaration *Declaration
+			if command.Dialect == Vim9 {
+				_, typeSpan := declarationSpans(leftSource, command.Argument.Start, command.Dialect)
+				if typeSpan.Start < typeSpan.End {
+					typedDeclaration = parseDeclarationHead(file, leftSource, command.Argument.Start, command.Dialect)
+					left, leftDiagnostics = parseExpression(file.Text(typedDeclaration.Name), typedDeclaration.Name.Start, command.Dialect)
+					tailStart := skipSpace(file.Source, typedDeclaration.Name.End, typeSpan.Start)
+					leftDiagnostics = append(leftDiagnostics, Diagnostic{
+						Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tailStart, End: command.Argument.End},
+					})
+				} else {
+					left, leftDiagnostics = parseExpression(leftSource, command.Argument.Start, command.Dialect)
+				}
+			} else {
+				left, leftDiagnostics = parseExpression(leftSource, command.Argument.Start, command.Dialect)
+			}
 			if command.Dialect == Vim9 && left != nil && left.Kind == ExpressionIdentifier && strings.HasPrefix(left.Value, "@") {
 				name, size := utf8.DecodeRuneInString(left.Value[1:])
 				if size > 0 && 1+size == len(left.Value) {
@@ -2364,6 +2382,12 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			}
 			operator := Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + assignment.End}
 			diagnoseVim9AssignmentSpacing(file, command, operator)
+			if typedDeclaration != nil {
+				typedDeclaration.Target = left
+				typedDeclaration.Assignment = operator
+				typedDeclaration.Initializer = right
+				command.Declaration = typedDeclaration
+			}
 			command.Expressions = append(command.Expressions, &Expression{
 				Kind: ExpressionAssignment, Span: Span{Start: left.Span.Start, End: right.Span.End}, Operator: operator,
 				Value: file.Text(operator), Children: []*Expression{left, right},
