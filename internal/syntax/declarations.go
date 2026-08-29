@@ -133,8 +133,17 @@ func parseTypeAlias(file *File, command *Command) {
 	typeEnd := trimSpaceEnd(source, typeStart, len(source))
 	operator := Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + assignment.End}
 	typeSpan := Span{Start: command.Argument.Start + typeStart, End: command.Argument.Start + typeEnd}
-	typeNode, diagnostics := parseTypeAt(source[typeStart:typeEnd], typeSpan.Start)
-	file.Diagnostics = append(file.Diagnostics, diagnostics...)
+	var typeNode *Type
+	if command.Dialect == Vim9 && typeStart == typeEnd {
+		typeNode = &Type{Kind: TypeMissing, Span: typeSpan}
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1398", Message: "missing type alias type", Span: typeSpan,
+		})
+	} else {
+		var diagnostics []Diagnostic
+		typeNode, diagnostics = parseTypeAt(source[typeStart:typeEnd], typeSpan.Start)
+		file.Diagnostics = append(file.Diagnostics, diagnostics...)
+	}
 	command.TypeAlias = &TypeAlias{
 		Name:       Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd},
 		Assignment: operator, Type: typeNode, TypeSpan: typeSpan,

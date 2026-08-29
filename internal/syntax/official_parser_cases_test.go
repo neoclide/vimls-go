@@ -218,6 +218,8 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_vim9_enum.vim:378:8621/script":           "vim/E1123",
 		"src/testdir/test_vim9_enum.vim:1527:34659/script":         "vim/E1068",
 		"src/testdir/test_vim9_enum.vim:1541:34927/script":         "vim/E1068",
+		"src/testdir/test_vim9_typealias.vim:62:1839/script":       "vim/E1397",
+		"src/testdir/test_vim9_typealias.vim:76:2174/script":       "vim/E1398",
 	}
 
 	corpus := readOfficialParserCases(t)

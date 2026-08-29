@@ -168,6 +168,39 @@ func TestVim9TypeAlias(t *testing.T) {
 	}
 }
 
+func TestVim9TypeAliasMissingPartsRecoverNextLine(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		code      string
+		wantAlias bool
+		wantName  string
+		wantType  TypeKind
+	}{
+		{name: "name", source: "vim9script\ntype\nvar after = 1\n", code: "vim/E1397"},
+		{name: "type", source: "vim9script\ntype MyType =\nvar after = 1\n", code: "vim/E1398", wantAlias: true, wantName: "MyType", wantType: TypeMissing},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) != 3 || file.Commands[2].Canonical != "var" || file.Commands[2].Declaration == nil {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			alias := file.Commands[1].TypeAlias
+			if test.wantAlias && (alias == nil || file.Text(alias.Name) != test.wantName || alias.Type == nil || alias.Type.Kind != test.wantType || file.Text(alias.Assignment) != "=") {
+				t.Fatalf("type alias = %#v", alias)
+			}
+			if !test.wantAlias && alias != nil {
+				t.Fatalf("unexpected type alias = %#v", alias)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestImportForms(t *testing.T) {
 	file := Parse("vim9script\nimport 'dir/as-name.vim' as module\nimport autoload $'autoload/{name}.vim' as lazy\nexport def Public()\nenddef\n")
 	if len(file.Diagnostics) != 0 {

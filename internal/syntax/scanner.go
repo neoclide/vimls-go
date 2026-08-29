@@ -1961,6 +1961,11 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	if command.Argument.Start >= command.Argument.End {
+		if command.Dialect == Vim9 && command.Canonical == "type" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1397", Message: "missing type alias name", Span: command.Name,
+			})
+		}
 		if command.Canonical == "autocmd" {
 			command.Autocmd, _, _, _ = parseAutocmdHeader(file.Source, command.Argument, command.Dialect, command.Bang.Start < command.Bang.End)
 		}
