@@ -310,7 +310,7 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		nameEnd = equals
 	}
 	nameEnd = trimSyntaxSpaceEnd(source, start, nameEnd)
-	if vim9Signature && parameter.Variadic && nameEnd == start {
+	if command.Canonical == "def" && parameter.Variadic && nameEnd == start {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1055", Message: "missing name after ...",
 			Span: Span{Start: command.Argument.Start + variadicStart, End: command.Argument.Start + variadicStart + 3},
