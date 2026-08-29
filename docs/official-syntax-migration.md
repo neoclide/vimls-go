@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 519 (`7f60a4d`)
+- Current parser-negative syntax assertions: 530 (`9024ed1`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -112,6 +112,8 @@ Commit `63cc8a9` migrated the three Vim9 missing-member-name variants, making
 the current split 517 migrated, zero ready, and 555 pending-fix.
 Commit `7f60a4d` migrated both missing inline-function brace variants, making
 the current split 519 migrated, zero ready, and 553 pending-fix.
+Commit `9024ed1` migrated all 11 invalid Vim9 hash-curly comment variants,
+making the current split 530 migrated, zero ready, and 542 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -144,7 +146,7 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-215 migrated and 113 pending-fix.
+226 migrated and 102 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -156,7 +158,7 @@ artifact context carrying that code. This accounts for all 328 syntax variants:
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
 | `expr-command-boundary` | E476, E488, E492 | 16 | 8 | 0 | 8 |
-| `expr-comment-token` | E1170 | 11 | 0 | 0 | 11 |
+| `expr-comment-token` | E1170 | 11 | 11 | 0 | 0 |
 
 ```text
 expr-incomplete-delimiter
@@ -270,6 +272,11 @@ Commit `7f60a4d` completed `expr-operator-structure` with
 missing `}` retains its typed lambda, command body, and incomplete block AST,
 reports one E1171, and recovers before the surrounding function terminators or
 the next physical command.
+
+Commit `9024ed1` completed `expr-comment-token`. Vim9 `#{` now reports one
+E1170 without being parsed as a legacy Dictionary, while preserving any valid
+expression prefix and recovering at the next physical command. Fold comments
+starting with `#{{` remain valid, and legacy Dictionary syntax is unchanged.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
