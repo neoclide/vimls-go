@@ -1364,6 +1364,9 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E481", Message: "no range allowed", Span: commandRange})
 				}
 			}
+			if canonical == "echowindow" && commandRange.Start < commandRange.End {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E16", Message: "Invalid range", Span: commandRange})
+			}
 			if builtIn {
 				switch canonical {
 				case "k":
