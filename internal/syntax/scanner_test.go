@@ -288,6 +288,37 @@ func TestVim9CompatibilityGuardRejectsActiveAlternative(t *testing.T) {
 	}
 }
 
+func TestVim9DynamicGuardWithDirectFinish(t *testing.T) {
+	file := Parse("if exists('g:skip_vim9')\n  silent finish\nendif\nvim9script\nvar value = 1\n")
+	if len(file.Diagnostics) != 0 || file.Dialect != Vim9 || len(file.Commands) != 5 {
+		t.Fatalf("file = %#v", file)
+	}
+	for index, want := range []Dialect{Legacy, Legacy, Legacy, Legacy, Vim9} {
+		if file.Commands[index].Dialect != want {
+			t.Fatalf("command %d dialect = %v, want %v", index, file.Commands[index].Dialect, want)
+		}
+	}
+}
+
+func TestVim9DynamicGuardRequiresDirectUnconditionalFinishPath(t *testing.T) {
+	tests := []string{
+		"if g:skip_vim9\n  echo 'active'\nendif\nvim9script\n",
+		"if g:skip_vim9\n  if g:nested\n    finish\n  endif\nendif\nvim9script\n",
+		"if g:skip_vim9\n  finish\nelse\n  echo 'active'\nendif\nvim9script\n",
+		"if g:skip_vim9\n  finish later\nendif\nvim9script\n",
+		"if g:skip_vim9\n  1finish\nendif\nvim9script\n",
+		"if g:skip_vim9\n  finish!\nendif\nvim9script\n",
+		"if g:skip_vim9\n  for item in []\n    finish\n  endfor\nendif\nvim9script\n",
+		"if g:skip_vim9 | for item in [] | finish | endfor | endif\nvim9script\n",
+	}
+	for _, source := range tests {
+		file := Parse(source)
+		if file.Dialect != Legacy || !hasDiagnostic(file, "vim/E1039") {
+			t.Fatalf("source = %q, file = %#v", source, file)
+		}
+	}
+}
+
 func TestDeclarationsAndVim9ExpressionCommands(t *testing.T) {
 	file := Parse("vim9script\nvar total: number = 1 + 2 * 3\ntotal += 4\nResult(total)\necho total 'done'\n")
 	if len(file.Commands) != 5 {

@@ -3947,6 +3947,9 @@ func startsWithVim9Script(source string) bool {
 	file := &File{Source: source}
 	state := 0
 	guardDepth := 0
+	var blockStack []BlockKind
+	dynamicGuard := false
+	directFinish := false
 	for start := 0; start < len(source); {
 		end := strings.IndexByte(source[start:], '\n')
 		if end < 0 {
@@ -3967,23 +3970,54 @@ func startsWithVim9Script(source string) bool {
 				if command.Canonical == "vim9script" {
 					return true
 				}
-				if command.Canonical != "if" || !isVim9CompatibilityGuard(file.Text(command.Argument)) {
+				if command.Canonical != "if" {
 					return false
 				}
+				guardSource := file.Text(command.Argument)
+				if isVim9AlwaysActiveGuard(guardSource) {
+					return false
+				}
+				dynamicGuard = !isVim9CompatibilityGuard(guardSource)
 				state = 1
 				guardDepth = 1
+				blockStack = []BlockKind{BlockIf}
 			case 1:
 				switch command.Canonical {
 				case "if":
 					guardDepth++
+					blockStack = append(blockStack, BlockIf)
 				case "elseif", "else":
 					if guardDepth == 1 {
 						return false
 					}
+				case "finish":
+					if dynamicGuard && guardDepth == 1 && len(blockStack) == 1 && directVim9PrologueFinish(command) {
+						directFinish = true
+					}
 				case "endif":
 					guardDepth--
+					for block := len(blockStack) - 1; block >= 0; block-- {
+						if blockStack[block] == BlockIf {
+							blockStack = blockStack[:block]
+							break
+						}
+					}
 					if guardDepth == 0 {
+						if dynamicGuard && !directFinish {
+							return false
+						}
 						state = 2
+					}
+				default:
+					if kind, opening := openingBlock(file, &command); opening {
+						blockStack = append(blockStack, kind)
+					} else if kind, closing := closingBlock(file, &command); closing {
+						for block := len(blockStack) - 1; block >= 0; block-- {
+							if blockStack[block] == kind {
+								blockStack = blockStack[:block]
+								break
+							}
+						}
 					}
 				}
 			case 2:
@@ -3996,6 +4030,11 @@ func startsWithVim9Script(source string) bool {
 		start = end + 1
 	}
 	return false
+}
+
+func directVim9PrologueFinish(command Command) bool {
+	return command.Canonical == "finish" && command.Argument.Start == command.Argument.End &&
+		command.Range.Start == command.Range.End && command.Bang.Start == command.Bang.End
 }
 
 func isVim9CompatibilityGuard(source string) bool {
@@ -4024,6 +4063,23 @@ func isVim9CompatibilityGuard(source string) bool {
 	// reaching :vim9script.  Thus :vim9script is the first command executed
 	// on every path where sourcing continues.
 	return feature == "nvim"
+}
+
+func isVim9AlwaysActiveGuard(source string) bool {
+	expression, diagnostics := (LegacyExpressionParser{}).Parse(source)
+	if len(diagnostics) != 0 || expression == nil {
+		return false
+	}
+	call := expression
+	if call.Kind != ExpressionCall || len(call.Children) != 2 || call.Children[0].Kind != ExpressionIdentifier || call.Children[1].Kind != ExpressionString {
+		return false
+	}
+	feature := call.Children[1].Value
+	if len(feature) < 2 || feature[0] != feature[len(feature)-1] || feature[0] != '\'' && feature[0] != '"' {
+		return false
+	}
+	feature = feature[1 : len(feature)-1]
+	return call.Children[0].Value == "exists" && feature == "*has" || call.Children[0].Value == "has" && feature == "vim9script"
 }
 
 func lookupModifier(word string) (string, bool) {
