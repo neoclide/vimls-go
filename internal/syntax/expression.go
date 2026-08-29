@@ -870,7 +870,34 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 			}
 			p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: member.span})
 			missing := &Expression{Kind: ExpressionMissing, Span: member.span}
-			return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: max(token.span.End, member.span.End)}, Operator: token.span, Children: []*Expression{left, missing}}
+			end := max(token.span.End, member.span.End)
+			// In Vim9, super.() reports only the missing member name.  Consume
+			// the malformed call tail on this physical line so it cannot be
+			// reparsed as a call and produce a cascading E488.
+			if p.dialect == Vim9 && member.text == "(" {
+				depth := 0
+				lineEnd := len(p.source)
+				if newline := strings.IndexByte(p.source[member.span.Start-p.base:], '\n'); newline >= 0 {
+					lineEnd = member.span.Start - p.base + newline
+				}
+				for p.current().kind != expressionEOF {
+					current := p.current()
+					if current.span.Start-p.base >= lineEnd {
+						break
+					}
+					if current.text == "(" {
+						depth++
+					} else if current.text == ")" {
+						depth--
+					}
+					end = current.span.End
+					p.advance()
+					if depth <= 0 {
+						break
+					}
+				}
+			}
+			return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: end}, Operator: token.span, Children: []*Expression{left, missing}}
 		}
 		p.advance()
 		if p.dialect == Vim9 {

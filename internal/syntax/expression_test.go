@@ -1297,6 +1297,26 @@ func TestOfficialVim9MemberDotRecovery(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9SuperMissingMember(t *testing.T) {
+	file := Parse("vim9script\nclass A\nendclass\nclass B extends A\n  def Fn()\n    var x = super.()\n  enddef\nendclass\ndefcompile\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1127" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	var member *Expression
+	for _, command := range file.Commands {
+		if command.Declaration != nil && command.Declaration.Initializer != nil {
+			member = command.Declaration.Initializer
+		}
+	}
+	if member == nil || member.Kind != ExpressionMember || file.Text(member.Operator) != "." || len(member.Children) != 2 || member.Children[1].Kind != ExpressionMissing || file.Text(member.Span) != "super.()" {
+		t.Fatalf("member = %#v", member)
+	}
+	if len(file.Commands) < 7 || file.Commands[len(file.Commands)-1].Canonical != "defcompile" {
+		t.Fatalf("terminators not retained: %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9LogicalAndOptionExpressions(t *testing.T) {
 	logical, diagnostics := (Vim9ExpressionParser{}).Parse("left == 1 && right == 2")
 	if len(diagnostics) != 0 || logical.Kind != ExpressionBinary || logical.Value != "&&" {
@@ -2083,7 +2103,7 @@ func TestOfficialAdjacentIsOperatorTokenBoundary(t *testing.T) {
 func TestOfficialVim9InvalidDotKeyBoundary(t *testing.T) {
 	for _, suffix := range []string{"#b", ":b"} {
 		for _, source := range []string{
-			"def Func()\nvar x = { 'a" + suffix + "': 1 }\nx.a" + suffix + "\nenddef\ndefcompile\nvar after = 1\n",
+			"def Func()\nvar x = { 'a" + suffix + "': 1 }\nx.a" + suffix + "\nenddef\ndefcompile\nlet after = 1\n",
 			"vim9script\nvar x = { 'a" + suffix + "': 1 }\nx.a" + suffix + "\nvar after = 1\n",
 		} {
 			file := Parse(source)
