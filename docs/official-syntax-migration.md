@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 513 (`a9e5971`)
+- Current parser-negative syntax assertions: 514 (`21333d9`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -106,6 +106,8 @@ Commit `f036019` migrated both contexts of the spaced callable-call case,
 making the current split 509 migrated, zero ready, and 563 pending-fix.
 Commit `a9e5971` migrated the four computed Dictionary-key bracket cases,
 making the current split 513 migrated, zero ready, and 559 pending-fix.
+Commit `21333d9` migrated the compiled-function missing-call-comma case,
+making the current split 514 migrated, zero ready, and 558 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -138,13 +140,13 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-209 migrated and 119 pending-fix.
+210 migrated and 118 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 42 | 0 | 42 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
-| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 7 | 0 | 6 |
+| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 8 | 0 | 5 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
@@ -248,6 +250,10 @@ Commit `a9e5971` migrated the four `3252:96997` and `3260:97154` variants.
 A computed Dictionary key missing its closing bracket reports one E1139,
 retains the valid key/value prefix and incomplete key in the AST, and recovers
 without swallowing its enclosing function or the next physical command.
+
+Commit `21333d9` migrated `test_vim9_expr.vim:3866:112596/def`. The missing
+comma leaves both call arguments in the AST, reports E1123 in a compiled
+function and E116 at Vim9 script level, and recovers at the next declaration.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
