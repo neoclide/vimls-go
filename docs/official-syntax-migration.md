@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 808 (`5433450`)
+- Current parser-negative syntax assertions: 821 (`c035bd3`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -267,6 +267,8 @@ Commit `70251bb` migrated four invalid Vim9 condition recoveries, making the
 authoritative current split 807 migrated, zero ready, and 261 pending-fix.
 Commit `5433450` migrated the `dsearch` attached-comment tail, making the
 authoritative current split 808 migrated, zero ready, and 260 pending-fix.
+Commit `c035bd3` migrated 13 empty generic-call type lists, making the
+authoritative current split 821 migrated, zero ready, and 247 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -861,11 +863,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 53 | 0 | 62 |
 | `C-EXPR` | 19 | 5 | 0 | 14 |
-| `C-GENERIC` | 109 | 42 | 0 | 67 |
+| `C-GENERIC` | 109 | 55 | 0 | 54 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **176** | **0** | **193** |
+| **Total** | **369** | **189** | **0** | **180** |
 
 ```text
 C-EXPR
@@ -1083,6 +1085,12 @@ Commit `5433450` migrated E488 at `S:4126:88011/script`. The shared
 `ex_findpat()` command family now recognizes a closed `/pattern/` before
 checking its tail: an attached `#` remains an invalid opaque tail, whitespace
 before `#` starts a Vim9 comment, and a following bar starts the next command.
+
+Commit `c035bd3` migrated 13 E1555 call/reference variants at
+`G:{256:5703,650:14312,787:17195,969:21961,1139:25810,1214:27205,1298:28752,1479:32151,1557:33623,1692:36240,2919:64579,3030:67202,3536:79340}/script`.
+An empty closed `<>` now retains an explicit missing type argument in the AST
+and reports the call-site Vim diagnostic; ordinary generic declarations,
+non-empty type lists, and incomplete `<` recovery retain their existing paths.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
