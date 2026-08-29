@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 844 (`ccb01cd`)
+- Current parser-negative syntax assertions: 849 (`1df5bda`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -277,6 +277,9 @@ Commit `c8c0f44` migrated 16 missing/mismatched Vim9 block terminators, making
 the authoritative current split 843 migrated, zero ready, and 225 pending-fix.
 Commit `ccb01cd` migrated the embedded `windo if` terminator case, making the
 authoritative current split 844 migrated, zero ready, and 224 pending-fix.
+Commit `1df5bda` migrated five generic-call delimiter cases already accepted by
+the parser, making the authoritative current split 849 migrated, zero ready,
+and 219 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -871,11 +874,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 53 | 0 | 62 |
 | `C-EXPR` | 19 | 7 | 0 | 12 |
-| `C-GENERIC` | 109 | 55 | 0 | 54 |
+| `C-GENERIC` | 109 | 60 | 0 | 49 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **212** | **0** | **157** |
+| **Total** | **369** | **217** | **0** | **152** |
 
 ```text
 C-EXPR
@@ -1124,6 +1127,12 @@ Vim9 `def`: an incomplete `windo if` reports E171 while retaining its embedded
 command and block AST. The top-level incomplete-payload recovery remains the
 generic `vimls/missing-end` diagnostic because it has no compiling `def`
 context.
+
+Commit `1df5bda` migrated four generic calls with a missing type (E1008) and
+one call with an attached closing angle after a comma (E1069). These cases use
+the existing generic-expression parser and require no production-code change.
+The E1561 duplicate generic parameter case remains excluded as declaration
+semantics, consistent with the Group C baseline cleanup.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
