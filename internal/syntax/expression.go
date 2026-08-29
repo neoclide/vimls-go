@@ -96,12 +96,13 @@ type expressionLexer struct {
 }
 
 type expressionParser struct {
-	source      string
-	base        int
-	dialect     Dialect
-	lexer       expressionLexer
-	diagnostics []Diagnostic
-	depth       int
+	source         string
+	base           int
+	dialect        Dialect
+	lexer          expressionLexer
+	diagnostics    []Diagnostic
+	depth          int
+	unaryPairError bool
 }
 
 // expressionBoundary retains the expression already parsed while finding an
@@ -388,6 +389,15 @@ func (p *expressionParser) parsePrefix() *Expression {
 		return &Expression{Kind: ExpressionMissing, Span: token.span}
 	}
 	if token.text == "!" || token.text == "+" || token.text == "-" {
+		if p.dialect == Vim9 && (token.text == "+" || token.text == "-") {
+			next := p.peek(1)
+			if !p.unaryPairError && (next.text == "+" || next.text == "-") {
+				p.unaryPairError = true
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E15", Message: "invalid expression", Span: Span{Start: token.span.Start, End: next.span.End},
+				})
+			}
+		}
 		p.advance()
 		operand := p.parse(90)
 		return &Expression{Kind: ExpressionUnary, Span: Span{Start: token.span.Start, End: operand.Span.End}, Operator: token.span, Value: token.text, Children: []*Expression{operand}}
