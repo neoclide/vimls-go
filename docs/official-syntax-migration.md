@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 843 (`c8c0f44`)
+- Current parser-negative syntax assertions: 844 (`ccb01cd`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -275,6 +275,8 @@ Commit `60be383` migrated two legacy numeric-version cases, making the
 authoritative current split 827 migrated, zero ready, and 241 pending-fix.
 Commit `c8c0f44` migrated 16 missing/mismatched Vim9 block terminators, making
 the authoritative current split 843 migrated, zero ready, and 225 pending-fix.
+Commit `ccb01cd` migrated the embedded `windo if` terminator case, making the
+authoritative current split 844 migrated, zero ready, and 224 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -865,7 +867,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 26 | 0 | 25 |
+| `C-BLOCK` | 51 | 27 | 0 | 24 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 53 | 0 | 62 |
 | `C-EXPR` | 19 | 7 | 0 | 12 |
@@ -873,7 +875,7 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **211** | **0** | **158** |
+| **Total** | **369** | **212** | **0** | **157** |
 
 ```text
 C-EXPR
@@ -1116,6 +1118,12 @@ Commit `c8c0f44` migrated all ten E600 cases plus six E170/E171 variants in
 retaining the incomplete block. A mismatched `endtry` reports the active
 control block's missing terminator once, and invalid condition headers still
 suppress that derived cascade.
+
+Commit `ccb01cd` extends the same mapping to a do-command payload inside a
+Vim9 `def`: an incomplete `windo if` reports E171 while retaining its embedded
+command and block AST. The top-level incomplete-payload recovery remains the
+generic `vimls/missing-end` diagnostic because it has no compiling `def`
+context.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
