@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 671 (`9727226`)
+- Current parser-negative syntax assertions: 676 (`e2f7aba`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -190,7 +190,9 @@ cases, making the authoritative current split 654 migrated, zero ready, and
 contexts, making the authoritative current split 656 migrated, zero ready, and
 412 pending-fix. Commit `9727226` migrated all 15 invalid class-body command
 cases, making the authoritative current split 671 migrated, zero ready, and
-397 pending-fix.
+397 pending-fix. Commit `e2f7aba` migrated five malformed generic-call type
+lists, making the authoritative current split 676 migrated, zero ready, and
+392 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -688,11 +690,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 2 | 0 | 1 |
 | `C-EXCMD` | 115 | 30 | 0 | 85 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
-| `C-GENERIC` | 109 | 23 | 0 | 86 |
+| `C-GENERIC` | 109 | 28 | 0 | 81 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
 | `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **112** | **0** | **257** |
+| **Total** | **369** | **117** | **0** | **252** |
 
 ```text
 C-EXPR
@@ -812,6 +814,14 @@ Commit `f3e1093` migrated seven `C-EXCMD` E488 variants. A hash attached to the
 preceding expression is retained as the one-byte trailing token, while the
 valid expression AST remains intact and parsing resumes with the next physical
 line. A hash after whitespace remains an ordinary Vim9 comment.
+
+Commit `e2f7aba` migrated the five generic-call records at
+`G:{3048:67627,3057:67814,3066:68011,3075:68222,3084:68421}/script`.
+Missing or empty type arguments now report E1008 or E1069 while retaining known
+type arguments, explicit missing nodes, and the following call AST. An absent
+outer `>` recovers only at an argument opener on the same physical line;
+comparisons, legacy expressions, valid generic calls, and existing empty-list
+handling remain unchanged.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
