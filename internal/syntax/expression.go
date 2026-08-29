@@ -304,6 +304,17 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			}
 			break
 		}
+		if p.dialect == Vim9 && token.text == "." && token.span.Start > left.Span.End &&
+			left.Kind == ExpressionIdentifier && left.Value == "super" && p.onlyWhitespace(left.Span.End, token.span.Start) {
+			if 100 < minimumBinding {
+				break
+			}
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1356", Message: `"super" must be followed by a dot`, Span: Span{Start: left.Span.End, End: token.span.Start},
+			})
+			left = p.parsePostfix(left)
+			continue
+		}
 		if p.dialect == Vim9 && token.text == "." && token.span.Start == left.Span.End {
 			member := p.peek(1)
 			if (member.kind == expressionIdentifier || member.kind == expressionNumber) && member.span.Start > token.span.End && p.onlyWhitespace(token.span.End, member.span.Start) {

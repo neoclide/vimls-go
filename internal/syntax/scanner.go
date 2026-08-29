@@ -3625,6 +3625,15 @@ func parseDeclarationTarget(file *File, command *Command, declaration *Declarati
 		for _, binding := range declaration.Bindings {
 			target.Children = append(target.Children, &Expression{Kind: ExpressionIdentifier, Span: binding.Name, Value: file.Text(binding.Name)})
 		}
+		restCount := 0
+		for _, binding := range declaration.Bindings {
+			if binding.Rest {
+				restCount++
+			}
+		}
+		if command.Dialect == Vim9 && restCount > 1 {
+			diagnostics = append(diagnostics, Diagnostic{Code: "vim/E1080", Message: "Invalid assignment", Span: declaration.Name})
+		}
 		return target, diagnostics
 	}
 	if command.Canonical == "let" {
@@ -3655,6 +3664,18 @@ func parseDeclarationTarget(file *File, command *Command, declaration *Declarati
 				diagnostics = append([]Diagnostic{registerDiagnostic}, diagnostics...)
 				return target, diagnostics
 			}
+		}
+	}
+	if command.Dialect == Vim9 && command.Canonical != "let" {
+		start := skipSpace(source, 0, len(source))
+		end := trimSpaceEnd(source, start, len(source))
+		nameEnd := declaration.Name.End - command.Argument.Start
+		suffix := skipSpace(source, nameEnd, end)
+		if suffix < end && (source[suffix] == '.' || source[suffix] == '[') {
+			target, targetDiagnostics := parseExpression(source[start:end], command.Argument.Start+start, command.Dialect)
+			diagnostics = append(diagnostics, targetDiagnostics...)
+			diagnostics = append(diagnostics, Diagnostic{Code: "vim/E1087", Message: "Cannot use an object or list for assignment", Span: declaration.Name})
+			return target, diagnostics
 		}
 	}
 	return &Expression{Kind: ExpressionIdentifier, Span: declaration.Name, Value: file.Text(declaration.Name)}, diagnostics
