@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 791 (`46f565b`)
+- Current parser-negative syntax assertions: 793 (`b74d592`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -245,6 +245,8 @@ pending-fix.
 Commit `46f565b` migrated the four direct Vim9 range-without-colon variants,
 making the authoritative current split 791 migrated, zero ready, and 277
 pending-fix.
+Commit `b74d592` migrated the two static import-path alias failures, making the
+authoritative current split 793 migrated, zero ready, and 275 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -840,10 +842,10 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-EXCMD` | 115 | 50 | 0 | 65 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 38 | 0 | 71 |
-| `C-IMPORT` | 14 | 6 | 0 | 8 |
+| `C-IMPORT` | 14 | 8 | 0 | 6 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **159** | **0** | **210** |
+| **Total** | **369** | **161** | **0** | **208** |
 
 ```text
 C-EXPR
@@ -1012,6 +1014,12 @@ Commit `46f565b` migrated the direct E1050 variants at
 boundary, an Ex range without `:` now retains its range/command structure,
 reports E1050, and recovers at the next physical line; existing automatic
 expression continuations remain handled before command scanning.
+
+Commit `b74d592` migrated E1261 at `I:591:15641/script` and E1257 at
+`I:603:15955/script`. A statically known string import without `as` now checks
+only its final path component: `.vim` requires an alias, a normal `name.vim`
+remains valid, and any other suffix requires `as`; dynamic path expressions
+remain conservative while the complete Import AST is retained.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
