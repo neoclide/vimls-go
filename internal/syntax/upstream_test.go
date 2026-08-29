@@ -621,6 +621,7 @@ func assertParameterSpans(t *testing.T, file *File, origin string, parameter Par
 		}
 	}
 	assertTypeSpans(t, file, origin, parameter.Type)
+	assertExpressionSpans(t, file, origin, parameter.Target)
 	assertExpressionSpans(t, file, origin, parameter.Default)
 }
 

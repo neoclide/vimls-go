@@ -112,6 +112,9 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 	}
 	nameEnd = trimSyntaxSpaceEnd(source, start, nameEnd)
 	parameter.Name = Span{Start: command.Argument.Start + start, End: command.Argument.Start + nameEnd}
+	if command.Dialect == Vim9 && !parameter.Variadic {
+		parameter.Target = parseConstructorParameterTarget(source, start, nameEnd, command.Argument.Start)
+	}
 	if colon >= 0 && (equals < 0 || colon < equals) {
 		typeStart := skipSyntaxSpace(source, colon+1, end)
 		typeEnd := end
@@ -127,6 +130,52 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		parameter.Default, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[defaultStart:end], command.Argument.Start+defaultStart, command.Dialect)
 	}
 	return parameter
+}
+
+// parseConstructorParameterTarget recognizes only the constructor shorthand
+// accepted by Vim9: an ASCII `this.` prefix followed by one ASCII identifier.
+// The incomplete `this.` form is retained as a partial member node so edits do
+// not make the following parameter or line disappear during recovery.
+func parseConstructorParameterTarget(source string, start, end, base int) *Expression {
+	if !strings.HasPrefix(source[start:end], "this.") {
+		return nil
+	}
+	memberStart := start + len("this.")
+	member := source[memberStart:end]
+	if member != "" {
+		for index := 0; index < len(member); index++ {
+			character := member[index]
+			if index == 0 {
+				if !isASCIIIdentifierStart(character) {
+					return nil
+				}
+			} else if !isASCIIIdentifierContinue(character) {
+				return nil
+			}
+		}
+	}
+	return &Expression{
+		Kind:  ExpressionMember,
+		Span:  Span{Start: base + start, End: base + end},
+		Value: member,
+		Operator: Span{
+			Start: base + start + len("this"),
+			End:   base + start + len("this."),
+		},
+		Children: []*Expression{{
+			Kind:  ExpressionIdentifier,
+			Span:  Span{Start: base + start, End: base + start + len("this")},
+			Value: "this",
+		}},
+	}
+}
+
+func isASCIIIdentifierStart(character byte) bool {
+	return character == '_' || character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z'
+}
+
+func isASCIIIdentifierContinue(character byte) bool {
+	return isASCIIIdentifierStart(character) || character >= '0' && character <= '9'
 }
 
 func skipSyntaxSpace(source string, start, end int) int {

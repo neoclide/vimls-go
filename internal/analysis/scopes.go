@@ -336,7 +336,7 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 			addDeclaration(result, declarationScope, file, command.Function.Name, functionKind(file, command, declarationScope), false)
 		}
 		for _, parameter := range command.Function.Parameters {
-			addDeclaration(result, functionScope, file, parameter.Name, SymbolKindVariable, true)
+			addDeclaration(result, functionScope, file, parameterDeclarationSpan(file, parameter), SymbolKindVariable, true)
 		}
 	}
 	if command.Aggregate != nil {
@@ -368,6 +368,19 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 	for _, value := range command.EnumValues {
 		addDeclaration(result, commandScope, file, value.Name, SymbolKindEnumMember, false)
 	}
+}
+
+// parameterDeclarationSpan returns the lexical name introduced by a function
+// parameter.  Vim9 constructor shorthand spells this as this.member, but the
+// local parameter is named member; Target is a declaration target, not an
+// expression reference.
+func parameterDeclarationSpan(file *syntax.File, parameter syntax.Parameter) syntax.Span {
+	if target := parameter.Target; target != nil && target.Kind == syntax.ExpressionMember &&
+		validNameSpan(file, target.Span) && validNameSpan(file, target.Operator) &&
+		target.Operator.Start >= target.Span.Start && target.Operator.End <= target.Span.End {
+		return syntax.Span{Start: target.Operator.End, End: target.Span.End}
+	}
+	return parameter.Name
 }
 
 func declarationParent(scope *Scope) *Scope {

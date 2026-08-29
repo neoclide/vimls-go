@@ -194,6 +194,49 @@ func TestAnalyzeMappingExprLambdaParameterScope(t *testing.T) {
 	}
 }
 
+func TestAnalyzeConstructorParameterTarget(t *testing.T) {
+	source := `vim9script
+class Person
+  var name: string
+  def new(this.name: string)
+    return name
+  enddef
+endclass
+`
+	result := Analyze(syntax.Parse(source))
+	var functionScope *Scope
+	for _, scope := range result.Scopes {
+		if scope.Kind == syntax.BlockDef {
+			functionScope = scope
+			break
+		}
+	}
+	if functionScope == nil {
+		t.Fatalf("missing constructor scope: %#v", result.Scopes)
+	}
+	if len(functionScope.Declarations) != 1 {
+		t.Fatalf("constructor declarations = %#v", functionScope.Declarations)
+	}
+	parameter := functionScope.Declarations[0]
+	if parameter.Name != "name" {
+		t.Fatalf("constructor parameter name = %q, want name", parameter.Name)
+	}
+	if got, want := result.File.Text(parameter.Span), "name"; got != want {
+		t.Fatalf("constructor parameter span text = %q, want %q", got, want)
+	}
+	if parameter.Type.Name != "string" {
+		t.Fatalf("constructor parameter type = %#v, want string", parameter.Type)
+	}
+	if len(result.References) != 1 || result.References[0].Name != "name" || result.References[0].Declaration != parameter {
+		t.Fatalf("constructor parameter reference = %#v, want declaration %#v", result.References, parameter)
+	}
+	for _, declaration := range result.Declarations {
+		if declaration.Name == "this.name" {
+			t.Fatalf("constructor shorthand leaked as declaration: %#v", declaration)
+		}
+	}
+}
+
 func TestAnalyzeLambdaBlockWalksBodyReferencesOnce(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar outer = 1\nvar f = (value: number) => {\n  var local = value + outer\n  return local\n}\n"))
 	if len(result.Scopes) != 2 {

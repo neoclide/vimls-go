@@ -419,7 +419,11 @@ type TypeParameter struct {
 }
 
 type Parameter struct {
-	Name        Span
+	Name Span
+	// Target is populated for Vim9 constructor shorthand parameters in the
+	// exact this.member form. Name remains the complete source span for
+	// compatibility with callers that treat parameters as named spans.
+	Target      *Expression
 	Variadic    bool
 	Type        *Type
 	TypeSpan    Span

@@ -115,3 +115,56 @@ func TestIncompleteFunctionSignatureRecovers(t *testing.T) {
 		t.Fatalf("file = %#v", file)
 	}
 }
+
+func TestVim9ConstructorParameterTarget(t *testing.T) {
+	source := "vim9script\ndef new(\n  this.name,\n  this.age: number = v:none,\n  this.\n)\nenddef\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 || len(file.Commands) < 2 || file.Commands[1].Function == nil {
+		t.Fatalf("file = %#v", file)
+	}
+	parameters := file.Commands[1].Function.Parameters
+	if len(parameters) != 3 {
+		t.Fatalf("parameters = %#v", parameters)
+	}
+	want := []struct {
+		name     string
+		member   string
+		operator string
+	}{
+		{name: "this.name", member: "name", operator: "."},
+		{name: "this.age", member: "age", operator: "."},
+		{name: "this.", member: "", operator: "."},
+	}
+	for index, expected := range want {
+		parameter := parameters[index]
+		if file.Text(parameter.Name) != expected.name || parameter.Target == nil || parameter.Target.Kind != ExpressionMember || file.Text(parameter.Target.Span) != expected.name || parameter.Target.Value != expected.member || file.Text(parameter.Target.Operator) != expected.operator {
+			t.Fatalf("parameter %d = %#v, text=%q", index, parameter, file.Text(parameter.Name))
+		}
+		if len(parameter.Target.Children) != 1 || parameter.Target.Children[0].Kind != ExpressionIdentifier || file.Text(parameter.Target.Children[0].Span) != "this" || parameter.Target.Children[0].Value != "this" {
+			t.Fatalf("parameter %d target children = %#v", index, parameter.Target.Children)
+		}
+	}
+	if parameters[1].Type == nil || file.Text(parameters[1].TypeSpan) != "number" || parameters[1].Default == nil || file.Text(parameters[1].DefaultSpan) != "v:none" {
+		t.Fatalf("typed/default constructor parameter = %#v", parameters[1])
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef new(thisArg, this.a.b)\nenddef\n",
+		"vim9script\ndef new(this.1, this.a-b)\nenddef\n",
+	} {
+		file := Parse(source)
+		if len(file.Commands) < 2 || file.Commands[1].Function == nil {
+			t.Fatalf("source=%q file=%#v", source, file)
+		}
+		for _, parameter := range file.Commands[1].Function.Parameters {
+			if parameter.Target != nil {
+				t.Fatalf("source=%q unexpectedly recognized target=%#v", source, parameter.Target)
+			}
+		}
+	}
+
+	legacy := (LegacyParser{}).Parse("function s:new(this.name)\nendfunction\n")
+	if len(legacy.Diagnostics) != 0 || len(legacy.Commands) == 0 || legacy.Commands[0].Function == nil || legacy.Commands[0].Function.Parameters[0].Target != nil {
+		t.Fatalf("legacy constructor parameter = %#v", legacy)
+	}
+}

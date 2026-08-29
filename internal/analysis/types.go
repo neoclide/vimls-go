@@ -98,7 +98,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 						typ = UnknownValueType
 					}
 					arguments = append(arguments, typ)
-					if parameterDeclaration := state.declarations[parameter.Name]; parameterDeclaration != nil {
+					if parameterDeclaration := state.declarations[parameterDeclarationSpan(file, parameter)]; parameterDeclaration != nil {
 						parameterDeclaration.Type = typ
 					}
 				}

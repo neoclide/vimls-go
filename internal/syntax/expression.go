@@ -826,6 +826,7 @@ func (s *lambdaRebaseState) sourceCommand(command *Command, source string) {
 	}
 	if command.Function != nil {
 		for _, parameter := range command.Function.Parameters {
+			s.sourceExpression(parameter.Target, source)
 			s.sourceExpression(parameter.Default, source)
 		}
 	}
@@ -1088,6 +1089,7 @@ func (s *lambdaRebaseState) parameter(parameter *Parameter, source string, offse
 	parameter.TypeSpan = shiftLambdaOptionalSpan(parameter.TypeSpan, offset)
 	parameter.DefaultSpan = shiftLambdaOptionalSpan(parameter.DefaultSpan, offset)
 	s.typeNode(parameter.Type, source, offset)
+	s.expression(parameter.Target, source, offset)
 	s.expression(parameter.Default, source, offset)
 }
 

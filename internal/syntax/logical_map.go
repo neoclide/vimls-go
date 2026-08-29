@@ -323,6 +323,7 @@ func (mapper *logicalSpanMapper) parameter(parameter *Parameter) {
 	parameter.TypeSpan = mapper.optional(parameter.TypeSpan)
 	parameter.DefaultSpan = mapper.optional(parameter.DefaultSpan)
 	mapper.typeNode(parameter.Type)
+	mapper.expression(parameter.Target)
 	mapper.expression(parameter.Default)
 }
 
