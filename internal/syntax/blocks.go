@@ -14,6 +14,7 @@ func buildBlocks(file *File) {
 	enumValuesOpen := make(map[int]bool)
 	invalidFor := make(map[int]bool)
 	recoveryBlocks := make(map[int]bool)
+	var multipleFinally map[int]bool
 	interfaceMethod := make(map[int]bool)
 	interfaceMethodInvalid := make(map[int]bool)
 	// Vim9 :redir must be terminated before its enclosing :enddef. Keep this
@@ -173,6 +174,25 @@ func buildBlocks(file *File) {
 		if branchKind, ok := branchBlock(command.Canonical); ok {
 			if len(stack) > 0 && file.Blocks[stack[len(stack)-1]].Kind == branchKind {
 				blockIndex := stack[len(stack)-1]
+				if command.Canonical == "finally" {
+					duplicate := false
+					for _, branch := range file.Blocks[blockIndex].Branches {
+						if file.Commands[branch].Canonical == "finally" {
+							duplicate = true
+							break
+						}
+					}
+					if duplicate {
+						file.Blocks[blockIndex].Branches = append(file.Blocks[blockIndex].Branches, commandIndex)
+						command.Block = blockIndex
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E607", Message: "multiple :finally", Span: command.Name})
+						if multipleFinally == nil {
+							multipleFinally = make(map[int]bool)
+						}
+						multipleFinally[blockIndex] = true
+						continue
+					}
+				}
 				file.Blocks[blockIndex].Branches = append(file.Blocks[blockIndex].Branches, commandIndex)
 				command.Block = blockIndex
 			} else if match := recoverableBranchBlock(file, stack, branchKind, invalidFor); match >= 0 {
@@ -185,7 +205,21 @@ func buildBlocks(file *File) {
 				recoveryBlocks[blockIndex] = true
 				stack = stack[:match+1]
 			} else {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-branch", Message: "branch command has no matching block", Span: command.Name})
+				code := "vimls/unexpected-branch"
+				message := "branch command has no matching block"
+				standalone := len(stack) == 0
+				if len(stack) > 0 {
+					top := file.Blocks[stack[len(stack)-1]].Kind
+					standalone = top == BlockDef || top == BlockFunction
+				}
+				if command.Dialect == Vim9 && standalone {
+					if command.Canonical == "catch" {
+						code, message = "vim/E603", ":catch without :try"
+					} else {
+						code, message = "vim/E606", ":finally without :try"
+					}
+				}
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
 			}
 			continue
 		}
@@ -236,7 +270,17 @@ func buildBlocks(file *File) {
 						continue
 					}
 				}
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-end", Message: "end command has no matching block", Span: command.Name})
+				code := "vimls/unexpected-end"
+				message := "end command has no matching block"
+				standalone := len(stack) == 0
+				if len(stack) > 0 {
+					top := file.Blocks[stack[len(stack)-1]].Kind
+					standalone = top == BlockDef || top == BlockFunction
+				}
+				if command.Dialect == Vim9 && command.Canonical == "endtry" && standalone {
+					code, message = "vim/E602", ":endtry without :try"
+				}
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
 				continue
 			}
 			blockIndex := stack[match]
@@ -247,6 +291,10 @@ func buildBlocks(file *File) {
 					continue
 				}
 				block := &file.Blocks[unclosed]
+				if multipleFinally[unclosed] {
+					block.Span.End = command.Span.Start
+					continue
+				}
 				if closeKind == BlockFunction && implicitlyClosedByFunction(block.Kind) {
 					// Vim ends an unfinished control block when :endfunction is
 					// encountered.  Keep the block in the tree and use the
@@ -319,7 +367,7 @@ func buildBlocks(file *File) {
 		}
 	}
 	for _, blockIndex := range stack {
-		if recoveryBlocks[blockIndex] || blockWithinInvalidFor(file, blockIndex, invalidFor) || suppressMissing[blockIndex] {
+		if recoveryBlocks[blockIndex] || multipleFinally[blockIndex] || blockWithinInvalidFor(file, blockIndex, invalidFor) || suppressMissing[blockIndex] {
 			continue
 		}
 		block := &file.Blocks[blockIndex]
