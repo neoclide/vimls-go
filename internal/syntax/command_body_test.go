@@ -137,3 +137,19 @@ func TestVim9UserCommandBlockDoesNotDuplicateDiagnostics(t *testing.T) {
 		t.Fatalf("blocks = %#v, command = %#v", file.Blocks, file.Commands[1])
 	}
 }
+
+func TestUserCommandMissingBlockEnd(t *testing.T) {
+	source := "command DoesNotEnd {\n   echo 'hello'\n"
+	file := (LegacyParser{}).Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1026" || file.Text(file.Diagnostics[0].Span) != "{" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 1 || file.Commands[0].Span.End != len(source) || file.Commands[0].Embedded == nil || len(file.Commands[0].Embedded.Commands) != 1 {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	body := file.Commands[0].Embedded.Commands[0]
+	if body.Dialect != Vim9 || body.Canonical != "echo" || file.Text(body.Argument) != "'hello'" {
+		t.Fatalf("body = %#v", body)
+	}
+	assertFileSpans(t, file)
+}

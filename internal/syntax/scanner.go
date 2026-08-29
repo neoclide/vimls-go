@@ -419,8 +419,8 @@ func coalesceLegacyEmbeddedBlocks(file *File) {
 // coalesceCollectedCommandBlocks models find_cmd_block_start() and the source
 // callback used by legacy :autocmd and :command definitions. A block consumes
 // physical lines up to the first line whose first non-white byte is }. Braces
-// do not nest this collector, and a missing close leaves the ordinary command
-// stream intact for loose recovery.
+// do not nest this collector. A direct user-command block without a close owns
+// the remaining source, matching Vim's getline() collector at EOF.
 func coalesceCollectedCommandBlocks(file *File, limit int) {
 	if file == nil {
 		return
@@ -445,6 +445,23 @@ func coalesceCollectedCommandBlocks(file *File, limit int) {
 		}
 		_, closeEnd, found := findCollectedBlockClose(closes, open.End)
 		if !found {
+			if command.Canonical == "command" && direct {
+				command.Argument.End = limit
+				command.Span.End = limit
+				command.logical = nil
+				command.collectedBlockVim9 = true
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1026", Message: "missing }", Span: open,
+				})
+				kept := file.Commands[:index+1]
+				for _, candidate := range file.Commands[index+1:] {
+					if candidate.Span.Start >= open.End && candidate.Span.End <= limit {
+						continue
+					}
+					kept = append(kept, candidate)
+				}
+				file.Commands = kept
+			}
 			continue
 		}
 		command.Argument.End = closeEnd
@@ -2054,11 +2071,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			if command.collectedBlockVim9 {
 				open, direct, found := collectedCommandBlockStart(file.Source, command, command.Argument.End)
 				if direct && found {
+					bodyStart := autocmdBlockBodyStart(file.Source, open.Start, command.Argument.End, command.Dialect)
 					if closeStart, _, closed := autocmdBlockClose(file.Source, open.End, command.Argument.End); closed {
-						bodyStart := autocmdBlockBodyStart(file.Source, open.Start, command.Argument.End, command.Dialect)
 						command.Embedded = parseVim9AutocmdBlockCommandList(file, Span{Start: bodyStart, End: closeStart}, depth)
 						return
 					}
+					command.Embedded = parseVim9AutocmdBlockCommandList(file, Span{Start: bodyStart, End: command.Argument.End}, depth)
+					return
 				}
 			}
 			command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
