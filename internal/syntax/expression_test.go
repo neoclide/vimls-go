@@ -93,6 +93,24 @@ func TestExpressionLexerTokenGolden(t *testing.T) {
 	}
 }
 
+func TestLongestOperatorSet(t *testing.T) {
+	operators := []string{
+		"isnot#", "isnot?", "isnot", ">=#", ">=?", "<=#", "<=?", "==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?",
+		"->", "=>", "..", "&&", "||", "??", ">#", ">?", "<#", "<?", "<=", ">=", "==", "!=", "=~", "!~", "+=", "-=", "*=", "/=", "%=", "<<", ">>", "**",
+		"is#", "is?", "is", "+", "-", "*", "/", "%", ".", "!", "<", ">", "?", ":", "=",
+	}
+	for _, operator := range operators {
+		if got := longestOperator(operator + "tail"); got != operator {
+			t.Errorf("longestOperator(%q) = %q, want %q", operator+"tail", got, operator)
+		}
+	}
+	for _, source := range []string{"", "@register", "中文"} {
+		if got := longestOperator(source); got != "" {
+			t.Errorf("longestOperator(%q) = %q, want empty", source, got)
+		}
+	}
+}
+
 func TestExpressionParserCursorFixtures(t *testing.T) {
 	tests := []struct {
 		name       string

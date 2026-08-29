@@ -2473,7 +2473,45 @@ func isLineLeadingLegacyComment(source string, index int) bool {
 }
 
 func longestOperator(source string) string {
-	for _, operator := range []string{"isnot#", "isnot?", "isnot", ">=#", ">=?", "<=#", "<=?", "==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?", "->", "=>", "..", "&&", "||", "??", ">#", ">?", "<#", "<?", "<=", ">=", "==", "!=", "=~", "!~", "+=", "-=", "*=", "/=", "%=", "<<", ">>", "**", "is#", "is?", "is", "+", "-", "*", "/", "%", ".", "!", "<", ">", "?", ":", "="} {
+	if source == "" {
+		return ""
+	}
+	var operators []string
+	switch source[0] {
+	case 'i':
+		operators = []string{"isnot#", "isnot?", "isnot", "is#", "is?", "is"}
+	case '>':
+		operators = []string{">=#", ">=?", ">#", ">?", ">=", ">>", ">"}
+	case '<':
+		operators = []string{"<=#", "<=?", "<#", "<?", "<=", "<<", "<"}
+	case '=':
+		operators = []string{"==#", "==?", "=~#", "=~?", "=>", "==", "=~", "="}
+	case '!':
+		operators = []string{"!=#", "!=?", "!~#", "!~?", "!=", "!~", "!"}
+	case '-':
+		operators = []string{"->", "-=", "-"}
+	case '.':
+		operators = []string{"..", "."}
+	case '&':
+		operators = []string{"&&"}
+	case '|':
+		operators = []string{"||"}
+	case '?':
+		operators = []string{"??", "?"}
+	case '+':
+		operators = []string{"+=", "+"}
+	case '*':
+		operators = []string{"*=", "**", "*"}
+	case '/':
+		operators = []string{"/=", "/"}
+	case '%':
+		operators = []string{"%=", "%"}
+	case ':':
+		operators = []string{":"}
+	default:
+		return ""
+	}
+	for _, operator := range operators {
 		if strings.HasPrefix(source, operator) {
 			return operator
 		}
