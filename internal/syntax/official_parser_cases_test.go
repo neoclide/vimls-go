@@ -144,6 +144,62 @@ func TestOfficialVimParserCases(t *testing.T) {
 	}
 }
 
+func TestOfficialVimParserContainerTypeFailures(t *testing.T) {
+	// These failures are statically decided by the v9.2.1015 type parser. Keep
+	// execution, type-checking, and other unclassified failures out of this
+	// allowlist until their parser phase is proven independently.
+	expected := map[string]string{
+		"src/testdir/test_tuple.vim:62:1444/def":                   "vim/E1008",
+		"src/testdir/test_tuple.vim:62:1444/vim9-script":           "vim/E1008",
+		"src/testdir/test_tuple.vim:67:1600/def":                   "vim/E1008",
+		"src/testdir/test_tuple.vim:67:1600/vim9-script":           "vim/E1008",
+		"src/testdir/test_tuple.vim:82:2083/def":                   "vim/E1068",
+		"src/testdir/test_tuple.vim:82:2083/vim9-script":           "vim/E1068",
+		"src/testdir/test_vim9_assign.vim:1632:40950/def":          "vim/E1068",
+		"src/testdir/test_vim9_class.vim:11721:265332/def":         "vim/E1008",
+		"src/testdir/test_vim9_class.vim:11721:265332/vim9-script": "vim/E1008",
+		"src/testdir/test_vim9_class.vim:11726:265505/def":         "vim/E1068",
+		"src/testdir/test_vim9_class.vim:11726:265505/vim9-script": "vim/E1068",
+		"src/testdir/test_vim9_func.vim:2462:55226/script":         "vim/E1008",
+		"src/testdir/test_vim9_func.vim:2464:55349/script":         "vim/E1008",
+		"src/testdir/test_vim9_func.vim:2481:55796/script":         "vim/E1008",
+	}
+
+	corpus := readOfficialParserCases(t)
+	seen := make(map[string]struct{}, len(expected))
+	for _, record := range corpus.Records {
+		for _, testCase := range record.Cases {
+			key := record.ID + "/" + testCase.Name
+			code, ok := expected[key]
+			if !ok {
+				continue
+			}
+			if testCase.VimOutcome != "failure" || testCase.ParserExpectation != "unclassified" {
+				t.Fatalf("%s: official case classification changed: outcome=%q expectation=%q", key, testCase.VimOutcome, testCase.ParserExpectation)
+			}
+			file := Parse(testCase.Source)
+			if file.Source != testCase.Source || len(file.Commands) == 0 {
+				t.Fatalf("%s: parser did not retain and recover the official source", key)
+			}
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != code {
+				t.Fatalf("%s: diagnostics = %#v, want %s", key, file.Diagnostics, code)
+			}
+			assertFileSpansAt(t, file, key)
+			seen[key] = struct{}{}
+		}
+	}
+	if len(seen) != len(expected) {
+		var missing []string
+		for key := range expected {
+			if _, ok := seen[key]; !ok {
+				missing = append(missing, key)
+			}
+		}
+		sort.Strings(missing)
+		t.Fatalf("official container type failures missing from artifact: %v", missing)
+	}
+}
+
 func readOfficialParserCases(t *testing.T) officialParserCaseCorpus {
 	t.Helper()
 	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1015-parser-cases.json.gz")

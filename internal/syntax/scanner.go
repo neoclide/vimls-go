@@ -2091,14 +2091,14 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	case "let", "var", "const", "final":
 		assignment := findAssignment(source)
 		if assignment.Start < 0 {
-			declaration := parseDeclarationHead(file, source, command.Argument.Start)
+			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
 			command.Declaration = declaration
 			return
 		}
 		assignment.Start += command.Argument.Start
 		assignment.End += command.Argument.Start
 		left := file.Source[command.Argument.Start:assignment.Start]
-		declaration := parseDeclarationHead(file, left, command.Argument.Start)
+		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
 		rightStart := skipSpace(file.Source, assignment.End, command.Argument.End)
 		rhs := Span{Start: rightStart, End: command.Argument.End}
 		expression, diagnostics, reused := takeRecoveringBoundaryExpression(command, rhs)
@@ -2958,7 +2958,10 @@ func parseDeclarationTarget(file *File, command *Command, declaration *Declarati
 	return &Expression{Kind: ExpressionIdentifier, Span: declaration.Name, Value: file.Text(declaration.Name)}, diagnostics
 }
 
-func parseDeclarationHead(file *File, source string, base int) *Declaration {
+func parseDeclarationHead(file *File, source string, base int, dialect Dialect) *Declaration {
+	if dialect == Vim9 {
+		source = maskVim9Comments(source)
+	}
 	name, typeSpan := declarationSpans(source, base)
 	declaration := &Declaration{Name: name, Type: typeSpan}
 	trimmedStart := skipSpace(source, 0, len(source))
@@ -3140,7 +3143,7 @@ func declarationSpans(source string, base int) (Span, Span) {
 	typeStart := skipSpace(source, end, len(source))
 	if typeStart < len(source) && source[typeStart] == ':' {
 		typeStart = skipSpace(source, typeStart+1, len(source))
-		typeEnd := trimSpaceEnd(source, typeStart, len(source))
+		typeEnd := trimSyntaxSpaceEnd(source, typeStart, len(source))
 		typeSpan = Span{Start: base + typeStart, End: base + typeEnd}
 	}
 	return name, typeSpan
