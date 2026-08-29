@@ -208,6 +208,8 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_vim9_generics.vim:229:5072/script":       "vim/E1202",
 		"src/testdir/test_vim9_generics.vim:2456:54444/script":     "vim/E1561",
 		"src/testdir/test_vim9_func.vim:1157:24812/script":         "vim/E1069",
+		"src/testdir/test_vim9_func.vim:1689:36926/def":            "vim/E1157",
+		"src/testdir/test_vim9_func.vim:1689:36926/vim9-script":    "vim/E1157",
 		"src/testdir/test_vim9_func.vim:2078:45879/def":            "vim/E1007",
 		"src/testdir/test_vim9_func.vim:2086:46156/def":            "vim/E110",
 		"src/testdir/test_vim9_func.vim:2087:46235/def":            "vim/E110",

@@ -745,7 +745,18 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 	}
 	if returnStart >= 0 {
 		lambda.ReturnTypeSpan = Span{Start: p.base + returnStart, End: p.base + returnEnd}
-		lambda.ReturnType, p.diagnostics = appendTypeDiagnostics(p.diagnostics, p.source[returnStart:returnEnd], p.base+returnStart)
+		if returnStart == returnEnd {
+			// Vim reports a missing return type specifically for a lambda whose
+			// return-type colon is followed immediately by the arrow.  Keep the
+			// missing type in the AST at the zero-width insertion point so the
+			// arrow and body remain available for recovery and tooling.
+			lambda.ReturnType = &Type{Kind: TypeMissing, Span: lambda.ReturnTypeSpan}
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1157", Message: "missing return type", Span: lambda.ReturnTypeSpan,
+			})
+		} else {
+			lambda.ReturnType, p.diagnostics = appendTypeDiagnostics(p.diagnostics, p.source[returnStart:returnEnd], p.base+returnStart)
+		}
 	}
 
 	arrowEnd := p.base + position + 2

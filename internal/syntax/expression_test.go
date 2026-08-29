@@ -329,6 +329,29 @@ func TestVim9TypedLambda(t *testing.T) {
 	}
 }
 
+func TestVim9LambdaMissingReturnType(t *testing.T) {
+	source := "(): => 123"
+	expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)
+	if expression == nil || expression.Kind != ExpressionLambda || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1157" || diagnostics[0].Message != "missing return type" {
+		t.Fatalf("lambda = %#v, diagnostics = %#v", expression, diagnostics)
+	}
+	if expression.Operator != (Span{Start: 4, End: 6}) || expression.ReturnType == nil || expression.ReturnType.Kind != TypeMissing || expression.ReturnTypeSpan != (Span{Start: 4, End: 4}) {
+		t.Fatalf("lambda type and operator = %#v", expression)
+	}
+	if len(expression.Children) != 1 || expression.Children[0].Kind != ExpressionNumber || expression.Children[0].Value != "123" || expression.Children[0].Span != (Span{Start: 7, End: 10}) {
+		t.Fatalf("lambda body = %#v", expression.Children)
+	}
+
+	valid, diagnostics := (Vim9ExpressionParser{}).Parse("(): number => 123")
+	if valid.ReturnType == nil || valid.ReturnType.Name != "number" || len(diagnostics) != 0 {
+		t.Fatalf("valid typed lambda = %#v, diagnostics = %#v", valid, diagnostics)
+	}
+	withoutType, diagnostics := (Vim9ExpressionParser{}).Parse("() => 123")
+	if withoutType.ReturnType != nil || len(diagnostics) != 0 {
+		t.Fatalf("lambda without return type = %#v, diagnostics = %#v", withoutType, diagnostics)
+	}
+}
+
 func TestVim9LambdaCommandBlock(t *testing.T) {
 	expression, diagnostics := (Vim9ExpressionParser{}).Parse("(value: number): number => {\n  if value > 0\n    return value\n  endif\n  return 0\n}")
 	if len(diagnostics) != 0 {
