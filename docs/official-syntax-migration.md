@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 533 (`bca737c`)
+- Current parser-negative syntax assertions: 535 (`a05b752`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -124,6 +124,9 @@ totals above predate that correction; the authoritative current split is 532
 migrated, zero ready, and 537 pending-fix.
 Commit `bca737c` migrated the script-context spaced-call command variant,
 making the current split 533 migrated, zero ready, and 536 pending-fix.
+Commit `a05b752` migrated both contexts of the inline-function same-line
+command case, making the current split 535 migrated, zero ready, and 534
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -156,7 +159,7 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-229 migrated and 96 pending-fix.
+231 migrated and 94 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -167,7 +170,7 @@ artifact context carrying that code. This accounts for all 325 syntax variants:
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
-| `expr-command-boundary` | E476, E488, E492 | 13 | 11 | 0 | 2 |
+| `expr-command-boundary` | E476, E488, E492 | 13 | 13 | 0 | 0 |
 | `expr-comment-token` | E1170 | 11 | 11 | 0 | 0 |
 
 ```text
@@ -305,6 +308,12 @@ Commit `bca737c` migrated `test_vim9_expr.vim:4487:130048/vim9-script`.
 Whitespace before the argument parenthesis keeps `CallMe` in the Ex-command
 path: Vim9 script reports E492 on the command name, while the already-migrated
 compiled context retains E476 and both recover at the next physical command.
+
+Commit `a05b752` completed `expr-command-boundary` with both contexts of
+`test_vim9_expr.vim:2835:84508`. Vim9 requires an inline-function opening `{`
+to end its physical line except for a comment. A same-line command now reports
+E488 at that payload, remains outside `LambdaBody`, and does not swallow the
+following physical command.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
