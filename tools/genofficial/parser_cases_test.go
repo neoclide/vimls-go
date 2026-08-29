@@ -58,6 +58,23 @@ func TestResolveParserHelperSourceUsesSameScopeAndLatestAssignment(t *testing.T)
 	}
 }
 
+func TestResolveParserHelperSourceConcatenatesStaticListsAndBindings(t *testing.T) {
+	source := []byte("def Test()\n" +
+		"  var body =<< trim END\n  echo 'one'\nEND\n" +
+		"  var tail = [\"echo 'two'\"]\n" +
+		"  v9.CheckScriptSuccess(['vim9script', \"echo 'a+b'\"] + body + tail)\n" +
+		"enddef\n")
+	index := buildHelperSourceIndex(source)
+	callStart := strings.Index(string(source), "v9.CheckScriptSuccess")
+	argumentStart := strings.Index(string(source[callStart:]), "(") + callStart + 1
+	argumentEnd := strings.Index(string(source[callStart:]), ")\n") + callStart
+	lines, binding, reason := resolveParserHelperSource(index, helperRecord{CallStart: callStart}, helperArgument{Start: argumentStart, End: argumentEnd})
+	want := []string{"vim9script", "echo 'a+b'", "echo 'one'", "echo 'two'"}
+	if reason != "" || binding.Kind != "list-concat" || !reflect.DeepEqual(lines, want) {
+		t.Fatalf("concat binding = %#v, lines=%#v, reason=%q", binding, lines, reason)
+	}
+}
+
 func TestHelperAssignmentOperatorIgnoresStringsAndComments(t *testing.T) {
 	for _, source := range []string{" 'x=y'", ` "x=y"`, " # x=y"} {
 		if _, operator := helperAssignmentOperator([]byte(source), 0); operator != "" {
@@ -145,6 +162,8 @@ func TestBuildPinnedParserCaseCorpus(t *testing.T) {
 				summary.Heredocs++
 			case "list-assignment":
 				summary.ListAssignments++
+			case "list-concat":
+				summary.ListConcats++
 			default:
 				t.Fatalf("record %d has unknown input kind %q", index, record.InputKind)
 			}

@@ -57,6 +57,7 @@ type parserCaseSummary struct {
 	DirectLists       int `json:"directLists"`
 	Heredocs          int `json:"heredocs"`
 	ListAssignments   int `json:"listAssignments"`
+	ListConcats       int `json:"listConcats"`
 }
 
 type helperSourceScope struct {
@@ -82,9 +83,9 @@ type helperSourceIndex struct {
 
 func validatePinnedParserCaseCorpus(corpus parserCaseCorpus) error {
 	want := parserCaseSummary{
-		Calls: 3844, ExtractedCalls: 3759, SkippedCalls: 85,
-		Cases: 5212, AcceptedCases: 1751, UnclassifiedCases: 3461,
-		DirectLists: 873, Heredocs: 2884, ListAssignments: 2,
+		Calls: 3844, ExtractedCalls: 3805, SkippedCalls: 39,
+		Cases: 5261, AcceptedCases: 1761, UnclassifiedCases: 3500,
+		DirectLists: 873, Heredocs: 2884, ListAssignments: 2, ListConcats: 46,
 	}
 	if corpus.SchemaVersion != 1 || corpus.Tag != vimTag || corpus.Commit != vimCommit || corpus.Manifest != "v9.2.1015-parser-files.json" || corpus.ManifestHash != pinnedParserFileManifestSHA256 || len(corpus.Files) != 44 || len(corpus.Records) != want.Calls || corpus.Summary != want {
 		return fmt.Errorf("unexpected pinned parser case corpus: files=%d records=%d summary=%+v", len(corpus.Files), len(corpus.Records), corpus.Summary)
@@ -169,6 +170,8 @@ func buildParserCaseCorpus(files testFilesCorpus, inventory helperInventory, man
 			result.Summary.Heredocs++
 		case "list-assignment":
 			result.Summary.ListAssignments++
+		case "list-concat":
+			result.Summary.ListConcats++
 		}
 		for _, parserCase := range record.Cases {
 			result.Summary.Cases++
@@ -192,18 +195,37 @@ func parserHelperArguments(source []byte, helper helperRecord) ([]helperArgument
 }
 
 func resolveParserHelperSource(index helperSourceIndex, helper helperRecord, argument helperArgument) ([]string, helperSourceAssignment, string) {
+	return resolveParserHelperExpression(index, helper.CallStart, helperScopeStart(index.Scopes, helper.CallStart), argument)
+}
+
+func resolveParserHelperExpression(index helperSourceIndex, before, scope int, argument helperArgument) ([]string, helperSourceAssignment, string) {
 	if values, ok := decodeStaticStringList(index.Source, argument); ok {
 		return values, helperSourceAssignment{Kind: "direct-list", Start: argument.Start, End: argument.End}, ""
 	}
 	name := strings.TrimSpace(string(index.Source[argument.Start:argument.End]))
-	if !helperArgumentIdentifier(name) {
-		return nil, helperSourceAssignment{}, "first argument is not a static string list or identifier"
+	if helperArgumentIdentifier(name) {
+		return resolveParserHelperIdentifier(index, before, scope, name)
 	}
-	callScope := helperScopeStart(index.Scopes, helper.CallStart)
+	terms, ok := splitHelperListConcat(index.Source, argument)
+	if !ok {
+		return nil, helperSourceAssignment{}, "first argument is not a static string list, identifier, or list concat"
+	}
+	var lines []string
+	for _, term := range terms {
+		values, _, reason := resolveParserHelperExpression(index, before, scope, term)
+		if reason != "" {
+			return nil, helperSourceAssignment{}, "list concat term is not static: " + reason
+		}
+		lines = append(lines, values...)
+	}
+	return lines, helperSourceAssignment{Kind: "list-concat", Start: argument.Start, End: argument.End}, ""
+}
+
+func resolveParserHelperIdentifier(index helperSourceIndex, before, scope int, name string) ([]string, helperSourceAssignment, string) {
 	var best *helperSourceAssignment
 	for assignmentIndex := range index.Assignments {
 		assignment := &index.Assignments[assignmentIndex]
-		if assignment.Name != name || assignment.End > helper.CallStart || assignment.ScopeStart != callScope {
+		if assignment.Name != name || assignment.End > before || assignment.ScopeStart != scope {
 			continue
 		}
 		if best == nil || assignment.Start > best.Start {
@@ -217,6 +239,67 @@ func resolveParserHelperSource(index helperSourceIndex, helper helperRecord, arg
 		return nil, *best, best.Reason
 	}
 	return append([]string(nil), best.Lines...), *best, ""
+}
+
+func splitHelperListConcat(source []byte, argument helperArgument) ([]helperArgument, bool) {
+	if argument.Start < 0 || argument.End > len(source) || argument.Start >= argument.End {
+		return nil, false
+	}
+	start := trimHelperSpace(source, argument.Start, argument.End)
+	end := trimHelperSpaceRight(source, start, argument.End)
+	var delimiters []byte
+	var terms []helperArgument
+	termStart := start
+	for index := start; index < end; {
+		switch source[index] {
+		case '\'', '"':
+			next, ok := skipHelperString(source, index, end)
+			if !ok {
+				return nil, false
+			}
+			index = next
+		case '(', '[', '{':
+			delimiters = append(delimiters, source[index])
+			index++
+		case ')', ']', '}':
+			if len(delimiters) == 0 || !matchingHelperDelimiter(delimiters[len(delimiters)-1], source[index]) {
+				return nil, false
+			}
+			delimiters = delimiters[:len(delimiters)-1]
+			index++
+		case '#':
+			if len(delimiters) == 0 && (index == termStart || isHelperSpace(source[index-1])) {
+				return nil, false
+			}
+			index++
+		case '+':
+			if len(delimiters) != 0 {
+				index++
+				continue
+			}
+			if (index+1 < end && (source[index+1] == '+' || source[index+1] == '=')) || (index > start && source[index-1] == '+') {
+				return nil, false
+			}
+			termEnd := trimHelperSpaceRight(source, termStart, index)
+			if termStart >= termEnd {
+				return nil, false
+			}
+			terms = append(terms, helperArgument{Start: termStart, End: termEnd})
+			termStart = trimHelperSpace(source, index+1, end)
+			index++
+		default:
+			index++
+		}
+	}
+	if len(delimiters) != 0 || len(terms) == 0 {
+		return nil, false
+	}
+	termEnd := trimHelperSpaceRight(source, termStart, end)
+	if termStart >= termEnd {
+		return nil, false
+	}
+	terms = append(terms, helperArgument{Start: termStart, End: termEnd})
+	return terms, true
 }
 
 func helperArgumentIdentifier(name string) bool {
