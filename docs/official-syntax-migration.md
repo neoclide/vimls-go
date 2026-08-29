@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 636 (`37eec08`)
+- Current parser-negative syntax assertions: 651 (`89a557d`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -175,7 +175,9 @@ split 630 migrated, zero ready, and 439 pending-fix. Commit `c05b9ae` migrated
 two already-ready Group B variants, making the current split 632 migrated, zero
 ready, and 437 pending-fix. Commit `37eec08` migrated all four Group B dialect
 declaration variants, making the current split 636 migrated, zero ready, and
-433 pending-fix.
+433 pending-fix. Commits `51ee4ea` and `89a557d` completed all 15 register
+declaration variants, making the current split 651 migrated, zero ready, and
+418 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -482,7 +484,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-type-delimiter` | 26 | 10 | 0 | 16 |
 | `B-declaration-shape` | 15 | 0 | 0 | 15 |
 | `B-command-abbreviation` | 10 | 10 | 0 | 0 |
-| `B-register-declaration` | 15 | 0 | 0 | 15 |
+| `B-register-declaration` | 15 | 15 | 0 | 0 |
 | `B-assignment-shape` | 3 | 0 | 0 | 3 |
 | `B-incomplete-expression` | 2 | 2 | 0 | 0 |
 | `B-dialect-declaration` | 4 | 4 | 0 | 0 |
@@ -501,9 +503,9 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **192** | **83** | **0** | **109** |
+| **Total** | **192** | **98** | **0** | **94** |
 
-This table reflects the current parser through `37eec08`. Revalidation corrected
+This table reflects the current parser through `89a557d`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -524,6 +526,9 @@ the already-ready `A:3123:76907/script` E488 trailing-character case without a
 production change. Commit `37eec08` completed `B-dialect-declaration`: legacy
 `:var`, Vim9 `final` without a value, and Vim9 `:let` now report E1124, E1125,
 and E1126 respectively while retaining declaration AST and dialect recovery.
+Commits `51ee4ea` and `89a557d` completed `B-register-declaration`. Register
+targets remain in the declaration AST; Vim9 scripts report E1066, while a
+compiled `def` preserves Vim's E354 priority for read-only register names.
 
 ```text
 B-assign-spacing
