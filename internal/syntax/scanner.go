@@ -104,6 +104,10 @@ func parseSource(source string, initial Dialect) *File {
 					if version, ok := parseScriptVersion(logicalArgumentText(file, command)); ok {
 						scriptVersion = version
 					}
+				} else {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1040", Message: "cannot use :scriptversion after :vim9script", Span: command.Name,
+					})
 				}
 			case "loadkeymap":
 				// :loadkeymap consumes every following physical line as

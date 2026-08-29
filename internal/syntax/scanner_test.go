@@ -475,6 +475,37 @@ func TestOfficialScriptVersionState(t *testing.T) {
 	}
 }
 
+func TestScriptVersionDialectRules(t *testing.T) {
+	legacyBeforeVim9 := Parse("scriptversion 2\nvim9script\n")
+	if len(legacyBeforeVim9.Diagnostics) != 1 || legacyBeforeVim9.Diagnostics[0].Code != "vim/E1039" {
+		t.Fatalf("scriptversion before vim9script diagnostics = %#v", legacyBeforeVim9.Diagnostics)
+	}
+	if len(legacyBeforeVim9.Commands) != 2 || legacyBeforeVim9.Commands[0].Dialect != Legacy || legacyBeforeVim9.Commands[1].Dialect != Legacy {
+		t.Fatalf("scriptversion before vim9script commands = %#v", legacyBeforeVim9.Commands)
+	}
+
+	vim9ScriptVersion := Parse("vim9script\nscriptversion 2\nvar after = 1\n")
+	if len(vim9ScriptVersion.Diagnostics) != 1 || vim9ScriptVersion.Diagnostics[0].Code != "vim/E1040" {
+		t.Fatalf("scriptversion in Vim9 diagnostics = %#v", vim9ScriptVersion.Diagnostics)
+	}
+	if len(vim9ScriptVersion.Commands) != 3 || vim9ScriptVersion.Commands[1].Dialect != Vim9 || vim9ScriptVersion.Commands[2].ScriptVersion != 1 {
+		t.Fatalf("scriptversion in Vim9 commands = %#v", vim9ScriptVersion.Commands)
+	}
+
+	legacyModifier := Parse("vim9script\nlegacy scriptversion 2\nvar after = 1\n")
+	if len(legacyModifier.Diagnostics) != 0 || len(legacyModifier.Commands) != 3 || legacyModifier.Commands[1].Dialect != Legacy || legacyModifier.Commands[2].ScriptVersion != 2 {
+		t.Fatalf("legacy scriptversion modifier = %#v", legacyModifier)
+	}
+
+	vim9Modifier := Parse("vim9cmd scriptversion 2\nvar after = 1\n")
+	if len(vim9Modifier.Diagnostics) != 1 || vim9Modifier.Diagnostics[0].Code != "vim/E1040" {
+		t.Fatalf("vim9cmd scriptversion diagnostics = %#v", vim9Modifier.Diagnostics)
+	}
+	if len(vim9Modifier.Commands) != 2 || vim9Modifier.Commands[0].Dialect != Vim9 || vim9Modifier.Commands[1].ScriptVersion != 1 {
+		t.Fatalf("vim9cmd scriptversion commands = %#v", vim9Modifier.Commands)
+	}
+}
+
 func countTokens(file *File, kind TokenKind) int {
 	count := 0
 	for _, token := range file.Tokens {
