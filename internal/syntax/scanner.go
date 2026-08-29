@@ -2117,6 +2117,21 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 	case "for":
 		parseForLoop(file, command)
+	case "delfunction":
+		// :delfunction consumes one function-name expression.  Preserve useful
+		// member/index structure while treating any remaining bytes as Vim's
+		// E488 trailing-character error.
+		target, diagnostics, consumed := parseExpressionPrefix(source, command.Argument.Start, command.Dialect)
+		if target != nil && target.Kind != ExpressionMissing {
+			command.Targets = append(command.Targets, target)
+		}
+		if len(diagnostics) == 0 && consumed < len(source) {
+			diagnostics = append(diagnostics, Diagnostic{
+				Code: "vim/E488", Message: "trailing characters",
+				Span: Span{Start: command.Argument.Start + consumed, End: command.Argument.End},
+			})
+		}
+		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 	case "++", "--":
 		target, diagnostics := parseExpression(source, command.Argument.Start, command.Dialect)
 		command.Targets = append(command.Targets, target)
