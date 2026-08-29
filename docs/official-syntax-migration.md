@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 785 (`a12a767`)
+- Current parser-negative syntax assertions: 787 (`bf1c397`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -116,6 +116,9 @@ Commit `91d2277` migrated both contexts of the Vim9 line-ending method-arrow
 record, making the current split 503 migrated, zero ready, and 569 pending-fix.
 Commit `aedd462` migrated the four Vim9 non-delimited `is`/`isnot` token
 variants, making the current split 507 migrated, zero ready, and 565
+pending-fix.
+Commit `bf1c397` migrated both E1241 one-byte `:global` separator variants,
+making the authoritative current split 787 migrated, zero ready, and 281
 pending-fix.
 Commit `f036019` migrated both contexts of the spaced callable-call case,
 making the current split 509 migrated, zero ready, and 563 pending-fix.
@@ -835,9 +838,9 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 38 | 0 | 71 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
-| `C-MODIFIER` | 57 | 50 | 0 | 7 |
+| `C-MODIFIER` | 57 | 52 | 0 | 5 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **153** | **0** | **216** |
+| **Total** | **369** | **155** | **0** | **214** |
 
 ```text
 C-EXPR
@@ -995,6 +998,11 @@ Commit `a12a767` migrated all five E1202 generic-call whitespace variants at
 `G:{336:7374,357:7889,365:8067,397:8780,728:15637}/script`. Command-start
 generic calls now enter the expression parser, retain their call/type-argument
 AST, and report only the offending whitespace before physical-line recovery.
+
+Commit `bf1c397` migrated both E1241 variants at `C:2062:42490`. The Vim9
+global-command scanner now rejects `:`, `-`, and `.` only when they immediately
+follow the one-byte `g` or `v` aliases; full command names, valid regexp
+delimiters, and the existing whitespace E1242 rule remain unchanged.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
