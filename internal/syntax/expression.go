@@ -897,6 +897,18 @@ func (s *lambdaRebaseState) command(command *Command, source string, offset int)
 			modifier.Filter.Flags = shiftLambdaOptionalSpan(modifier.Filter.Flags, offset)
 		}
 	}
+	if command.Autocmd != nil {
+		autocmd := command.Autocmd
+		autocmd.Head = shiftLambdaOptionalSpan(autocmd.Head, offset)
+		autocmd.Group = shiftLambdaOptionalSpan(autocmd.Group, offset)
+		autocmd.Pattern = shiftLambdaOptionalSpan(autocmd.Pattern, offset)
+		for index := range autocmd.Events {
+			autocmd.Events[index] = shiftLambdaSpan(autocmd.Events[index], offset)
+		}
+		for index := range autocmd.Modifiers {
+			autocmd.Modifiers[index].Span = shiftLambdaSpan(autocmd.Modifiers[index].Span, offset)
+		}
+	}
 	if command.Embedded != nil {
 		s.commandList(command.Embedded, source, offset)
 	}

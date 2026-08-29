@@ -56,6 +56,7 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 	command.Syntax = temporaryCommand.Syntax
 	command.Set = temporaryCommand.Set
 	command.Substitute = temporaryCommand.Substitute
+	command.Autocmd = temporaryCommand.Autocmd
 }
 
 type logicalSpanMapper struct {
@@ -206,6 +207,18 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 			option.Name = mapper.optional(option.Name)
 			option.Operator = mapper.optional(option.Operator)
 			option.Value = mapper.optional(option.Value)
+		}
+	}
+	if command.Autocmd != nil {
+		autocmd := command.Autocmd
+		autocmd.Head = mapper.optional(autocmd.Head)
+		autocmd.Group = mapper.optional(autocmd.Group)
+		autocmd.Pattern = mapper.optional(autocmd.Pattern)
+		for index := range autocmd.Events {
+			autocmd.Events[index] = mapper.span(autocmd.Events[index])
+		}
+		for index := range autocmd.Modifiers {
+			autocmd.Modifiers[index].Span = mapper.span(autocmd.Modifiers[index].Span)
 		}
 	}
 }

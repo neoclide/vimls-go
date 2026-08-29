@@ -192,8 +192,11 @@ func openingBlock(file *File, command *Command) (BlockKind, bool) {
 	case "enum":
 		return BlockEnum, true
 	case "command":
-		if command.Dialect == Vim9 && strings.HasSuffix(strings.TrimSpace(file.Text(command.Argument)), "{") {
-			return BlockCommand, true
+		if command.Dialect == Vim9 {
+			_, _, ok := collectedCommandBlockStart(file.Source, command, command.Argument.End)
+			if ok {
+				return BlockCommand, true
+			}
 		}
 	case "{":
 		if command.Dialect == Vim9 {

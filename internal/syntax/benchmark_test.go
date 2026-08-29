@@ -237,6 +237,20 @@ func BenchmarkParseMalformedVim9DeclarationInitializers(b *testing.B) {
 	}
 }
 
+func BenchmarkParseIncompleteAutocmdBlocks(b *testing.B) {
+	source := strings.Repeat("autocmd BufEnter * {\n", 4096)
+	file := (LegacyParser{}).Parse(source)
+	if len(file.Commands) != 4096 {
+		b.Fatalf("commands = %d, diagnostics = %#v", len(file.Commands), file.Diagnostics)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(len(source)))
+	b.ResetTimer()
+	for range b.N {
+		benchmarkParsedFile = (LegacyParser{}).Parse(source)
+	}
+}
+
 func BenchmarkParseForIterables(b *testing.B) {
 	statement := "for item in get(g:, 'items', [1, 2, 3])\nendfor\n"
 	tests := []struct {

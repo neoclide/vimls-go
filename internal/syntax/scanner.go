@@ -354,6 +354,7 @@ func parseSource(source string, initial Dialect) *File {
 		file.Commands[heredocCommand].Heredoc.Incomplete = true
 	}
 	coalesceLegacyEmbeddedBlocks(file)
+	coalesceCollectedCommandBlocks(file, len(file.Source))
 	scannerDiagnostics := len(file.Diagnostics)
 	buildBlocks(file)
 	if truncateAfterDirectFinish(file, scannerDiagnostics) {
@@ -407,6 +408,220 @@ func coalesceLegacyEmbeddedBlocks(file *File) {
 		}
 		file.Commands = kept
 	}
+}
+
+// coalesceCollectedCommandBlocks models find_cmd_block_start() and the source
+// callback used by legacy :autocmd and :command definitions. A block consumes
+// physical lines up to the first line whose first non-white byte is }. Braces
+// do not nest this collector, and a missing close leaves the ordinary command
+// stream intact for loose recovery.
+func coalesceCollectedCommandBlocks(file *File, limit int) {
+	if file == nil {
+		return
+	}
+	if limit > len(file.Source) {
+		limit = len(file.Source)
+	}
+	var closes []collectedBlockClose
+	closesReady := false
+	for index := 0; index < len(file.Commands); index++ {
+		command := &file.Commands[index]
+		if command.Canonical != "autocmd" && (command.Canonical != "command" || command.Dialect == Vim9) {
+			continue
+		}
+		open, direct, ok := collectedCommandBlockStart(file.Source, command, limit)
+		if !ok {
+			continue
+		}
+		if !closesReady {
+			closes = collectBlockCloseLines(file.Source, limit)
+			closesReady = true
+		}
+		_, closeEnd, found := findCollectedBlockClose(closes, open.End)
+		if !found {
+			continue
+		}
+		command.Argument.End = closeEnd
+		command.Span.End = closeEnd
+		command.logical = nil
+		command.collectedBlockVim9 = direct
+		bodyStart := open.End
+		kept := file.Commands[:index+1]
+		for _, candidate := range file.Commands[index+1:] {
+			if candidate.Span.Start >= bodyStart && candidate.Span.End <= closeEnd {
+				continue
+			}
+			kept = append(kept, candidate)
+		}
+		file.Commands = kept
+	}
+}
+
+type collectedBlockClose struct {
+	start int
+	end   int
+}
+
+func collectBlockCloseLines(source string, end int) []collectedBlockClose {
+	var closes []collectedBlockClose
+	for lineStart := 0; lineStart < end; {
+		contentEnd, next := physicalLineEnd(source, lineStart)
+		if contentEnd > end {
+			contentEnd = end
+			next = end
+		}
+		first := skipSpace(source, lineStart, contentEnd)
+		if first < contentEnd && source[first] == '}' {
+			closes = append(closes, collectedBlockClose{start: lineStart, end: contentEnd})
+		}
+		if next <= lineStart || next >= end {
+			break
+		}
+		lineStart = next
+	}
+	return closes
+}
+
+func findCollectedBlockClose(closes []collectedBlockClose, after int) (int, int, bool) {
+	index := sort.Search(len(closes), func(index int) bool { return closes[index].start >= after })
+	if index >= len(closes) {
+		return 0, 0, false
+	}
+	return closes[index].start, closes[index].end, true
+}
+
+func collectedCommandBlockStart(source string, command *Command, limit int) (Span, bool, bool) {
+	if command == nil {
+		return Span{}, false, false
+	}
+	if command.Canonical == "autocmd" {
+		return autocmdBlockStart(source, command.Argument, command.Dialect, limit)
+	}
+	if command.Canonical != "command" {
+		return Span{}, false, false
+	}
+	body, ok := userCommandBodySpan(source, command.Argument)
+	if !ok {
+		return Span{}, false, false
+	}
+	if open, ok := commandBlockOpen(source, body, command.Dialect); ok {
+		return open, true, true
+	}
+	open, ok := nestedCommandBlockOpen(source, body, command.Dialect, limit)
+	return open, false, ok
+}
+
+// autocmdBlockStart mirrors find_cmd_block_start(). The first autocmd may
+// directly own the block, or its command body may begin with another
+// :autocmd or :command whose replacement eventually owns it. Only a direct
+// owner receives Vim9 block syntax; enclosing commands retain their dialect.
+func autocmdBlockStart(source string, argument Span, dialect Dialect, limit int) (Span, bool, bool) {
+	if open, ok := autocmdBlockOpen(source, argument, dialect); ok {
+		return open, true, true
+	}
+	body, ok := autocmdBodyCommandSpan(source, argument, dialect)
+	if !ok {
+		return Span{}, false, false
+	}
+	open, ok := nestedCommandBlockOpen(source, body, dialect, limit)
+	return open, false, ok
+}
+
+func autocmdBlockOpen(source string, argument Span, dialect Dialect) (Span, bool) {
+	start := skipSpace(source, argument.Start, argument.End)
+	if start >= argument.End {
+		return Span{}, false
+	}
+	// Reuse the header scanner so a group, event list, pattern and ordered
+	// ++ modifiers are consumed exactly as they are for ordinary autocmds.
+	_, bodyStart, hasBody, block := scanAutocmdHeader(source, argument, dialect)
+	if block {
+		for position := bodyStart - 1; position >= argument.Start; position-- {
+			if source[position] == '{' {
+				bodyStart = position
+				break
+			}
+		}
+	}
+	if !hasBody || !block || bodyStart < 0 || bodyStart >= argument.End || source[bodyStart] != '{' {
+		return Span{}, false
+	}
+	return Span{Start: bodyStart, End: bodyStart + 1}, true
+}
+
+func autocmdBodyCommandSpan(source string, argument Span, dialect Dialect) (Span, bool) {
+	_, body, hasBody, block := parseAutocmdHeader(source, argument, dialect, false)
+	if !hasBody || block || body.Start >= argument.End {
+		return Span{}, false
+	}
+	return body, true
+}
+
+func nestedCommandBlockOpen(source string, body Span, dialect Dialect, limit int) (Span, bool) {
+	for depth := 0; depth < maxEmbeddedCommandDepth; depth++ {
+		start := skipSpace(source, body.Start, body.End)
+		if start >= body.End || start >= limit {
+			return Span{}, false
+		}
+		nested := &File{Dialect: dialect, Source: source}
+		scanCommands(nested, start, min(body.End, limit), dialect)
+		if len(nested.Commands) == 0 || nested.Commands[0].Span.Start != start {
+			return Span{}, false
+		}
+		command := &nested.Commands[0]
+		switch command.Canonical {
+		case "autocmd":
+			if open, ok := autocmdBlockOpen(source, command.Argument, command.Dialect); ok {
+				return open, true
+			}
+			var ok bool
+			body, ok = autocmdBodyCommandSpan(source, command.Argument, command.Dialect)
+			if !ok {
+				return Span{}, false
+			}
+			dialect = command.Dialect
+		case "command":
+			var ok bool
+			body, ok = userCommandBodySpan(source, command.Argument)
+			if !ok {
+				return Span{}, false
+			}
+			if open, ok := commandBlockOpen(source, body, command.Dialect); ok {
+				return open, true
+			}
+			dialect = command.Dialect
+		default:
+			return Span{}, false
+		}
+	}
+	return Span{}, false
+}
+
+func commandBlockOpen(source string, body Span, dialect Dialect) (Span, bool) {
+	start := skipSpace(source, body.Start, body.End)
+	if start >= body.End || source[start] != '{' || !autocmdBlockLineOnly(source, start, body.End, dialect) {
+		return Span{}, false
+	}
+	return Span{Start: start, End: start + 1}, true
+}
+
+func autocmdBlockClose(source string, start, end int) (int, int, bool) {
+	for lineStart := start; lineStart < end; {
+		contentEnd, next := physicalLineEnd(source, lineStart)
+		if contentEnd > end {
+			contentEnd = end
+			next = end
+		}
+		first := skipSpace(source, lineStart, contentEnd)
+		if first < contentEnd && source[first] == '}' {
+			return lineStart, contentEnd, true
+		}
+		if next <= lineStart || next >= end {
+			break
+		}
+		lineStart = next
+	}
+	return 0, 0, false
 }
 
 func legacyEmbeddedBlockEnd(file *File, outerIndex, bodyStart int) (int, bool) {
@@ -816,7 +1031,9 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 		var argumentEnd int
 		var separator, comment Span
 		var boundaryExpression *expressionBoundary
-		if dialect == Legacy {
+		if canonical == "autocmd" {
+			argumentEnd, separator = scanAutocmdCommandArgument(file.Source, argumentStart, end)
+		} else if dialect == Legacy {
 			argumentEnd, separator, comment, boundaryExpression = scanLegacyCommandArgument(file.Source, argumentStart, end, scanMetadata, &parsedCommand)
 		} else {
 			argumentEnd, separator, comment, boundaryExpression = scanVim9CommandArgument(file.Source, argumentStart, end, scanMetadata, &parsedCommand)
@@ -1743,6 +1960,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	if command.Argument.Start >= command.Argument.End {
+		if command.Canonical == "autocmd" {
+			command.Autocmd, _, _, _ = parseAutocmdHeader(file.Source, command.Argument, command.Dialect, command.Bang.Start < command.Bang.End)
+		}
 		if isEmbeddedCommand(command.Canonical) {
 			command.Embedded = &CommandList{Span: command.Argument}
 		}
@@ -1758,11 +1978,41 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	if command.Canonical == "autocmd" {
-		if body, ok := autocmdBodySpan(file.Source, command.Argument); ok {
-			if command.Dialect == Legacy {
-				command.Embedded = parseLegacyAutocmdCommandList(file, body, depth)
+		autocmd, body, ok, block := parseAutocmdHeader(file.Source, command.Argument, command.Dialect, command.Bang.Start < command.Bang.End)
+		command.Autocmd = autocmd
+		if command.Dialect == Vim9 {
+			for _, modifier := range autocmd.Modifiers {
+				if modifier.Kind == AutocmdNested && file.Text(modifier.Span) == "nested" {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1078", Message: "nested is not supported in Vim9 script; use ++nested", Span: modifier.Span})
+				}
+			}
+		}
+		seenOnce, seenNested, duplicateReported := false, false, false
+		for _, modifier := range autocmd.Modifiers {
+			duplicate := modifier.Kind == AutocmdOnce && seenOnce || modifier.Kind == AutocmdNested && seenNested
+			if modifier.Kind == AutocmdOnce {
+				seenOnce = true
 			} else {
-				command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
+				seenNested = true
+			}
+			if duplicate && !duplicateReported {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E983", Message: "duplicate ++once/++nested", Span: modifier.Span})
+				duplicateReported = true
+			}
+		}
+		if ok {
+			bodyDialect := command.Dialect
+			if block && (command.collectedBlockVim9 || command.Dialect == Vim9) {
+				// Vim collects an autocmd block with the Vim9 command reader even
+				// when the command itself occurs in a legacy script.
+				bodyDialect = Vim9
+			}
+			if bodyDialect == Legacy {
+				command.Embedded = parseLegacyAutocmdCommandList(file, body, depth)
+			} else if block {
+				command.Embedded = parseVim9AutocmdBlockCommandList(file, body, depth)
+			} else {
+				command.Embedded = parseEmbeddedCommandList(file, body, bodyDialect, depth)
 			}
 		}
 		return
@@ -1775,6 +2025,16 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			return
 		}
 		if body, ok := userCommandBodySpan(file.Source, command.Argument); ok {
+			if command.collectedBlockVim9 {
+				open, direct, found := collectedCommandBlockStart(file.Source, command, command.Argument.End)
+				if direct && found {
+					if closeStart, _, closed := autocmdBlockClose(file.Source, open.End, command.Argument.End); closed {
+						bodyStart := autocmdBlockBodyStart(file.Source, open.Start, command.Argument.End, command.Dialect)
+						command.Embedded = parseVim9AutocmdBlockCommandList(file, Span{Start: bodyStart, End: closeStart}, depth)
+						return
+					}
+				}
+			}
 			command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
 		}
 		return
@@ -2212,43 +2472,193 @@ func scanAutocmdWord(source string, start, end int) int {
 	return end
 }
 
-func autocmdBodySpan(source string, argument Span) (Span, bool) {
+// scanAutocmdCommandArgument gives a bar to the outer Ex scanner only when
+// autocmd has no pattern. Once a pattern has started, autocmd.c owns every
+// subsequent bar as command-body text (including a bar adjacent to pattern
+// bytes).
+func scanAutocmdCommandArgument(source string, start, end int) (int, Span) {
+	position := skipSpace(source, start, end)
+	if position >= end {
+		return end, Span{}
+	}
+	if source[position] == '|' {
+		return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}
+	}
+	firstEnd := scanAutocmdWord(source, position, end)
+	if firstEnd == position {
+		return end, Span{}
+	}
+	eventEnd := firstEnd
+	if !isAutocmdEventToken(source[position:firstEnd]) {
+		candidate := skipSpace(source, firstEnd, end)
+		candidateEnd := scanAutocmdWord(source, candidate, end)
+		if candidate < candidateEnd && isAutocmdEventToken(source[candidate:candidateEnd]) {
+			eventEnd = candidateEnd
+		}
+	}
+	patternStart := skipSpace(source, eventEnd, end)
+	if patternStart < end && source[patternStart] == '|' {
+		return trimSpaceEnd(source, start, patternStart), Span{Start: patternStart, End: patternStart + 1}
+	}
+	return end, Span{}
+}
+
+func parseAutocmdHeader(source string, argument Span, dialect Dialect, bang bool) (*AutocmdCommand, Span, bool, bool) {
+	header := &AutocmdCommand{}
 	start := skipSpace(source, argument.Start, argument.End)
 	if start >= argument.End || source[start] == '|' {
-		return Span{}, false
+		if bang {
+			header.Operation = AutocmdClear
+		}
+		return header, Span{}, false, false
 	}
 	firstEnd := scanAutocmdWord(source, start, argument.End)
 	if firstEnd == start {
-		return Span{}, false
+		return header, Span{}, false, false
 	}
+	header.Head = Span{Start: start, End: firstEnd}
 	eventStart := start
 	if !isAutocmdEventToken(source[start:firstEnd]) {
 		candidate := skipSpace(source, firstEnd, argument.End)
 		candidateEnd := scanAutocmdWord(source, candidate, argument.End)
-		if candidate == candidateEnd || !isAutocmdEventToken(source[candidate:candidateEnd]) {
-			return Span{}, false
+		// A known second word is the only static evidence that the first word
+		// is a group. Unknown groups and future events remain ambiguous and are
+		// retained as the event head rather than being diagnosed here.
+		if candidate < candidateEnd && isAutocmdEventToken(source[candidate:candidateEnd]) {
+			header.Group = Span{Start: start, End: firstEnd}
+			eventStart = candidate
+		} else {
+			// A user-defined event and an existing augroup have identical
+			// spelling at this boundary. Without the mutable augroup table,
+			// retaining a guessed pattern/body would create false structure.
+			// Keep the head and the first event token, and leave the remainder
+			// opaque for a later resolver.
+			header.Events = []Span{{Start: start, End: firstEnd}}
+			if bang {
+				header.Operation = AutocmdClear
+			}
+			return header, Span{}, false, false
 		}
-		eventStart = candidate
 	}
 	eventEnd := scanAutocmdWord(source, eventStart, argument.End)
+	for itemStart := eventStart; itemStart < eventEnd; {
+		itemEnd := itemStart
+		for itemEnd < eventEnd && source[itemEnd] != ',' {
+			itemEnd++
+		}
+		if itemEnd > itemStart {
+			header.Events = append(header.Events, Span{Start: itemStart, End: itemEnd})
+		}
+		itemStart = itemEnd + 1
+	}
 	patternStart := skipSpace(source, eventEnd, argument.End)
 	if patternStart >= argument.End || source[patternStart] == '|' {
-		return Span{}, false
+		if bang {
+			header.Operation = AutocmdClear
+		}
+		return header, Span{}, false, false
 	}
 	patternEnd := scanAutocmdWord(source, patternStart, argument.End)
+	header.Pattern = Span{Start: patternStart, End: patternEnd}
 	bodyStart := skipSpace(source, patternEnd, argument.End)
 	for bodyStart < argument.End {
 		modifierEnd := scanAutocmdWord(source, bodyStart, argument.End)
 		modifier := source[bodyStart:modifierEnd]
-		if modifier != "++once" && modifier != "++nested" && modifier != "nested" {
+		kind := AutocmdOnce
+		if modifierEnd >= argument.End || !isSpace(source[modifierEnd]) {
 			break
 		}
+		if modifier == "++nested" || modifier == "nested" && dialect == Legacy {
+			kind = AutocmdNested
+		} else if modifier != "++once" {
+			if modifier == "nested" && dialect == Vim9 {
+				// Vim9 accepts only ++nested. Keep the word in the header so the
+				// following body remains recoverable and report the source error.
+				header.Modifiers = append(header.Modifiers, AutocmdModifier{Kind: AutocmdNested, Span: Span{Start: bodyStart, End: modifierEnd}})
+				bodyStart = skipSpace(source, modifierEnd, argument.End)
+				continue
+			}
+			break
+		}
+		header.Modifiers = append(header.Modifiers, AutocmdModifier{Kind: kind, Span: Span{Start: bodyStart, End: modifierEnd}})
 		bodyStart = skipSpace(source, modifierEnd, argument.End)
 	}
-	if bodyStart >= argument.End || source[bodyStart] == '|' {
-		return Span{}, false
+	if bodyStart >= argument.End {
+		if bang {
+			header.Operation = AutocmdClear
+		} else {
+			header.Operation = AutocmdQuery
+		}
+		return header, Span{}, false, false
 	}
-	return Span{Start: bodyStart, End: argument.End}, true
+	if source[bodyStart] == '|' {
+		if bang {
+			header.Operation = AutocmdReplace
+		} else {
+			header.Operation = AutocmdDefine
+		}
+		bodyStart = skipSpace(source, bodyStart+1, argument.End)
+		return header, Span{Start: bodyStart, End: argument.End}, true, false
+	}
+	if source[bodyStart] == '{' && autocmdBlockLineOnly(source, bodyStart, argument.End, dialect) {
+		if bang {
+			header.Operation = AutocmdReplace
+		} else {
+			header.Operation = AutocmdDefine
+		}
+		bodyStart = autocmdBlockBodyStart(source, bodyStart, argument.End, dialect)
+		if closeStart, _, found := autocmdBlockClose(source, bodyStart, argument.End); found {
+			return header, Span{Start: bodyStart, End: closeStart}, true, true
+		}
+		return header, Span{Start: bodyStart, End: bodyStart}, true, true
+	}
+	if bang {
+		header.Operation = AutocmdReplace
+	} else {
+		header.Operation = AutocmdDefine
+	}
+	return header, Span{Start: bodyStart, End: argument.End}, true, false
+}
+
+func scanAutocmdHeader(source string, argument Span, dialect Dialect) (*AutocmdCommand, int, bool, bool) {
+	header, body, ok, block := parseAutocmdHeader(source, argument, dialect, false)
+	return header, body.Start, ok, block
+}
+
+func autocmdBlockLineOnly(source string, open, end int, dialect Dialect) bool {
+	lineEnd, _ := physicalLineEnd(source, open)
+	if lineEnd > end {
+		lineEnd = end
+	}
+	rest := skipSpace(source, open+1, lineEnd)
+	if rest >= lineEnd || source[rest] == '|' {
+		return true
+	}
+	if dialect == Legacy {
+		return source[rest] == '"'
+	}
+	if source[rest] != '#' || rest == open+1 || !isSpace(source[rest-1]) {
+		return false
+	}
+	return rest+1 >= lineEnd || source[rest+1] != '{' || rest+2 < lineEnd && source[rest+2] == '{'
+}
+
+func autocmdBlockBodyStart(source string, open, end int, dialect Dialect) int {
+	lineEnd, next := physicalLineEnd(source, open)
+	if lineEnd > end {
+		lineEnd = end
+		next = end
+	}
+	rest := skipSpace(source, open+1, lineEnd)
+	if rest >= lineEnd || dialect == Legacy && source[rest] == '"' || dialect == Vim9 && source[rest] == '#' {
+		return next
+	}
+	// A bar is an Ex terminator accepted by ends_excmd2(). Preserve the
+	// following text as same-line block content.
+	if source[rest] == '|' {
+		return skipSpace(source, rest+1, lineEnd)
+	}
+	return open + 1
 }
 
 func parseEmbeddedCommandList(file *File, span Span, dialect Dialect, depth int) *CommandList {
@@ -2261,6 +2671,7 @@ func parseEmbeddedCommandList(file *File, span Span, dialect Dialect, depth int)
 	}
 	embedded := &File{Dialect: dialect, Source: file.Source}
 	scanCommands(embedded, span.Start, span.End, dialect)
+	coalesceCollectedCommandBlocks(embedded, span.End)
 	trimEmbeddedCommandSpans(embedded)
 	buildBlocks(embedded)
 	for index := range embedded.Commands {
@@ -2277,6 +2688,28 @@ func parseEmbeddedCommandList(file *File, span Span, dialect Dialect, depth int)
 			}
 		}
 	}
+	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
+	list.Commands = embedded.Commands
+	list.Blocks = embedded.Blocks
+	return list
+}
+
+// parseVim9AutocmdBlockCommandList uses the regular Vim9 source reader for the
+// collected block body, including automatic continuation and logical views.
+func parseVim9AutocmdBlockCommandList(file *File, span Span, depth int) *CommandList {
+	list := &CommandList{Span: span}
+	if depth >= maxEmbeddedCommandDepth {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vimls/embedded-command-depth", Message: "embedded command nesting exceeds parser limit", Span: span,
+		})
+		return list
+	}
+	// Parse a source slice with the regular Vim9 reader so automatic
+	// continuation, logical views, and nested autocmd owners stay identical to
+	// top-level Vim9 parsing. Rebase the complete result back to the containing
+	// file after parsing.
+	embedded := parseSource(file.Source[span.Start:span.End], Vim9)
+	rebaseLambdaFile(embedded, file.Source, span.Start)
 	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	list.Commands = embedded.Commands
 	list.Blocks = embedded.Blocks
@@ -2366,6 +2799,26 @@ func parseLegacyAutocmdCommandList(file *File, span Span, depth int) *CommandLis
 		})
 		return list
 	}
+	// A legacy autocmd body may itself be an autocmd block. Keep newlines for
+	// find_cmd_block_start() in this case; the normal continuation view below
+	// intentionally replaces newlines with spaces and cannot identify the
+	// line-leading close of that one owning block.
+	raw := &File{Dialect: Legacy, Source: file.Source}
+	scanCommands(raw, span.Start, span.End, Legacy)
+	if legacyAutocmdHasBlock(raw, span.Start, span.End) {
+		coalesceCollectedCommandBlocks(raw, span.End)
+		trimEmbeddedCommandSpans(raw)
+		buildBlocks(raw)
+		for index := range raw.Commands {
+			if raw.Commands[index].Heredoc == nil {
+				parseCommandDetailsDepth(raw, &raw.Commands[index], depth+1)
+			}
+		}
+		file.Diagnostics = append(file.Diagnostics, raw.Diagnostics...)
+		list.Commands = raw.Commands
+		list.Blocks = raw.Blocks
+		return list
+	}
 	// Only the autocmd body needs normalization.  Keeping this view relative
 	// to span avoids copying the complete source file, while the parser result
 	// is rebased below so all public spans remain absolute.
@@ -2404,6 +2857,7 @@ func parseLegacyAutocmdCommandList(file *File, span Span, depth int) *CommandLis
 	}
 	embedded := &File{Dialect: Legacy, Source: string(view)}
 	scanCommands(embedded, 0, len(view), Legacy)
+	coalesceCollectedCommandBlocks(embedded, len(embedded.Source))
 	trimEmbeddedCommandSpans(embedded)
 	buildBlocks(embedded)
 	for index := range embedded.Commands {
@@ -2416,6 +2870,30 @@ func parseLegacyAutocmdCommandList(file *File, span Span, depth int) *CommandLis
 	list.Commands = embedded.Commands
 	list.Blocks = embedded.Blocks
 	return list
+}
+
+func legacyAutocmdHasBlock(file *File, start, end int) bool {
+	start = skipSpace(file.Source, start, end)
+	if len(file.Commands) == 0 || file.Commands[0].Span.Start != start {
+		return false
+	}
+	command := &file.Commands[0]
+	switch command.Canonical {
+	case "autocmd":
+		_, _, ok := autocmdBlockStart(file.Source, command.Argument, command.Dialect, end)
+		return ok
+	case "command":
+		body, ok := userCommandBodySpan(file.Source, command.Argument)
+		if !ok {
+			return false
+		}
+		if _, ok := commandBlockOpen(file.Source, body, command.Dialect); ok {
+			return true
+		}
+		_, ok = nestedCommandBlockOpen(file.Source, body, command.Dialect, end)
+		return ok
+	}
+	return false
 }
 
 func trimEmbeddedCommandSpans(file *File) {

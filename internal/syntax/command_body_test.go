@@ -71,6 +71,34 @@ func TestVim9UserCommandBlockBody(t *testing.T) {
 	}
 }
 
+func TestLegacyUserCommandBlockBody(t *testing.T) {
+	source := "command Foo {\n  var value = 1\n}\nlet after = 1\n"
+	file := (LegacyParser{}).Parse(source)
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 || file.Commands[1].Canonical != "let" {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	owner := &file.Commands[0]
+	if owner.Dialect != Legacy || owner.Embedded == nil || len(owner.Embedded.Commands) != 1 || owner.Embedded.Commands[0].Dialect != Vim9 || owner.Embedded.Commands[0].Declaration == nil || file.Text(owner.Embedded.Commands[0].Declaration.Name) != "value" {
+		t.Fatalf("owner = %#v", owner)
+	}
+}
+
+func TestNestedUserCommandBlockBody(t *testing.T) {
+	source := "command DefineIt command DoNested {\n  var value = 1\n}\nlet after = 1\n"
+	file := (LegacyParser{}).Parse(source)
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 || file.Commands[1].Canonical != "let" {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	outer := &file.Commands[0]
+	if outer.Embedded == nil || len(outer.Embedded.Commands) != 1 {
+		t.Fatalf("outer = %#v", outer)
+	}
+	owner := &outer.Embedded.Commands[0]
+	if owner.Canonical != "command" || owner.Dialect != Legacy || owner.Embedded == nil || len(owner.Embedded.Commands) != 1 || owner.Embedded.Commands[0].Dialect != Vim9 || owner.Embedded.Commands[0].Declaration == nil {
+		t.Fatalf("owner = %#v", owner)
+	}
+}
+
 func TestVim9UserCommandBlockDoesNotDuplicateDiagnostics(t *testing.T) {
 	file := Parse("vim9script\ncommand Foo {\n  if true\n    echo 'missing end'\n}\n")
 	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vimls/missing-end" {

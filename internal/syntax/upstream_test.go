@@ -318,6 +318,29 @@ func assertFileSpansAt(t *testing.T, file *File, origin string) {
 				}
 			}
 		}
+		if command.Autocmd != nil {
+			autocmd := command.Autocmd
+			for name, span := range map[string]Span{
+				"autocmd head": autocmd.Head, "autocmd group": autocmd.Group, "autocmd pattern": autocmd.Pattern,
+			} {
+				check(name, span)
+				if span.Start < span.End && (span.Start < command.Argument.Start || span.End > command.Argument.End) {
+					t.Fatalf("%s: %s span %#v is outside argument %#v", origin, name, span, command.Argument)
+				}
+			}
+			for index, event := range autocmd.Events {
+				check("autocmd event", event)
+				if event.Start < command.Argument.Start || event.End > command.Argument.End {
+					t.Fatalf("%s: autocmd event %d span %#v is outside argument %#v", origin, index, event, command.Argument)
+				}
+			}
+			for index, modifier := range autocmd.Modifiers {
+				check("autocmd modifier", modifier.Span)
+				if modifier.Span.Start < command.Argument.Start || modifier.Span.End > command.Argument.End {
+					t.Fatalf("%s: autocmd modifier %d span %#v is outside argument %#v", origin, index, modifier.Span, command.Argument)
+				}
+			}
+		}
 		if command.Declaration != nil {
 			declaration := command.Declaration
 			check("declaration name", declaration.Name)

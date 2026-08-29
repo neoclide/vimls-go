@@ -95,8 +95,49 @@ type Command struct {
 	Syntax             *SyntaxCommand
 	Set                *SetCommand
 	Substitute         *Substitute
+	Autocmd            *AutocmdCommand
 	logical            *logicalCommandView
 	boundaryExpression *expressionBoundary
+	collectedBlockVim9 bool
+}
+
+// AutocmdCommand is the command-specific syntax of :autocmd. The group and
+// event head is intentionally represented by spans rather than resolved
+// names: Vim decides whether the first word is a group at execution time by
+// consulting its mutable augroup table. Pattern is the raw, unnormalised
+// pattern consumed by autocmd.c.
+type AutocmdCommand struct {
+	Operation AutocmdOperation
+	// Head is the first non-space word after :autocmd. It is the conservative
+	// representation of Vim's runtime group/event ambiguity. Group is a
+	// syntactic candidate only (when the second word is a known event), not a
+	// resolution against Vim's mutable augroup table.
+	Head      Span
+	Group     Span
+	Events    []Span
+	Pattern   Span
+	Modifiers []AutocmdModifier
+}
+
+type AutocmdOperation uint8
+
+const (
+	AutocmdQuery AutocmdOperation = iota
+	AutocmdClear
+	AutocmdDefine
+	AutocmdReplace
+)
+
+type AutocmdModifierKind uint8
+
+const (
+	AutocmdOnce AutocmdModifierKind = iota
+	AutocmdNested
+)
+
+type AutocmdModifier struct {
+	Kind AutocmdModifierKind
+	Span Span
 }
 
 // Highlight is the command-specific syntax of :highlight.  Command.Argument
