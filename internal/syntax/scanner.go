@@ -1061,6 +1061,7 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 		} else if !malformedDeclaration {
 			nameExpression = (canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && looksLikeImmediateVim9Expression(file.Source, nameEnd, end)) ||
 				(canonical == "substitute" || canonical == "smagic" || canonical == "snomagic") && looksLikeSubstituteVim9Expression(file.Source, typedName, nameEnd, end) ||
+				(canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && strings.HasPrefix(file.Source[skipSpace(file.Source, nameEnd, end):end], "->")) ||
 				(canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && canonical != "iput" && canonical != "put" && looksLikeVim9AssignmentAfterName(file.Source, nameEnd, end))
 		}
 		expressionAtCommandStart := dialect == Vim9 && (looksLikeVim9SigilExpression(file.Source, nameStart, end) || nameExpression)
