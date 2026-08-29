@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 725 (`2bdaaf2`)
+- Current parser-negative syntax assertions: 727 (`258f7ef`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -209,6 +209,8 @@ Commit `97fbf9a` migrated the top-level object type tail, making the
 authoritative current split 721 migrated, zero ready, and 347 pending-fix.
 Commit `2bdaaf2` migrated four aggregate terminator tails, making the
 authoritative current split 725 migrated, zero ready, and 343 pending-fix.
+Commit `258f7ef` migrated the two invalid heredoc headers, making the
+authoritative current split 727 migrated, zero ready, and 341 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -532,11 +534,11 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 2 | 0 | 0 |
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
-| `B-trailing-characters` | 20 | 12 | 0 | 8 |
+| `B-trailing-characters` | 20 | 14 | 0 | 6 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **167** | **0** | **24** |
+| **Total** | **191** | **169** | **0** | **22** |
 
-This table reflects the current parser through `2bdaaf2`. Revalidation corrected
+This table reflects the current parser through `258f7ef`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -640,11 +642,13 @@ or E1436 from the existing block-parent chain. The nested aggregate AST and
 block are still built, so its terminator, the outer function terminator, and
 following commands remain available after recovery.
 
-The eight pending `B-trailing-characters` cases split into two implementation
-paths. Six declaration/heredoc cases are
-`A:{2052,2053,2309,2923/{def|vim9-script},3105}`; the two heredoc headers already
-start with E488 but need same-line cascade suppression, while the others are
-missing or map from generic trailing-type/expression diagnostics. The two class
+The six pending `B-trailing-characters` cases split into two implementation
+paths. Four declaration cases are
+`A:{2309,2923/{def|vim9-script},3105}` and are missing or map from generic
+trailing-type/expression diagnostics. Commit `258f7ef` migrated the two
+heredoc headers `A:{2052,2053}`: their recognized marker and heredoc body remain
+attached to the command while ordinary RHS parsing is suppressed, preventing
+same-line diagnostic cascades. The two class
 member separator cases `C:{93,102}` require direct-member scan context. Commit
 `2bdaaf2` migrated the distinct aggregate terminator cases `C:{68,76}` and
 `I:{111,324}` by diagnosing before separator recursion, leaving the same-line
