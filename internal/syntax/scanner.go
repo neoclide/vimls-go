@@ -217,7 +217,8 @@ func parseSource(source string, initial Dialect) *File {
 			// make the following endenum part of the value expression.
 			vim9Continuation = -1
 		}
-		if vim9Continuation >= 0 && len(vim9ContinuationState.lambdaDepth) == 0 && first < contentEnd &&
+		lambdaRecoveryBoundary := len(vim9ContinuationState.lambdaDepth) > 0 && vim9ContinuationState.lambdaBodyStarted
+		if vim9Continuation >= 0 && (len(vim9ContinuationState.lambdaDepth) == 0 || lambdaRecoveryBoundary) && first < contentEnd &&
 			!(source[first] == '}' && vim9ContinuationState.depth > 0) && startsVim9RecoveryCommand(source, first, contentEnd) &&
 			!(vim9ContinuationState.depth > 0 && looksLikeVim9NamedItem(source, first, contentEnd)) &&
 			!continuesVim9FunctionSignature(file, vim9Continuation, vim9ContinuationState, source, first, contentEnd) &&
@@ -4004,17 +4005,18 @@ func completeVim9DefHeader(source string) bool {
 }
 
 type vim9ContinuationScan struct {
-	depth        int
-	quote        byte
-	inComment    bool
-	pendingSpace bool
-	tail         [7]byte
-	tailStart    uint8
-	tailLen      uint8
-	ternaryDepth []int
-	lambdaDepth  []int
-	bracketDepth int
-	braceDepth   int
+	depth             int
+	quote             byte
+	inComment         bool
+	pendingSpace      bool
+	tail              [7]byte
+	tailStart         uint8
+	tailLen           uint8
+	ternaryDepth      []int
+	lambdaDepth       []int
+	lambdaBodyStarted bool
+	bracketDepth      int
+	braceDepth        int
 }
 
 func scanVim9Continuation(source string, state vim9ContinuationScan) vim9ContinuationScan {
@@ -4043,6 +4045,9 @@ func scanVim9Continuation(source string, state vim9ContinuationScan) vim9Continu
 			continue
 		}
 		if character == '@' && index+1 < len(source) && !isExpressionSpace(source[index+1]) {
+			if len(state.lambdaDepth) > 0 {
+				state.lambdaBodyStarted = true
+			}
 			index++
 			// A register name is one expression atom.  Its second byte may be
 			// an operator character (notably @/); it must not make the command
@@ -4058,6 +4063,9 @@ func scanVim9Continuation(source string, state vim9ContinuationScan) vim9Continu
 		if character == ' ' || character == '\t' || character == '\r' || character == '\n' {
 			state.pendingSpace = true
 			continue
+		}
+		if len(state.lambdaDepth) > 0 {
+			state.lambdaBodyStarted = true
 		}
 		state.appendTail(character)
 		if character == '\'' && isDigitSeparator(source, index) {
@@ -4077,6 +4085,9 @@ func scanVim9Continuation(source string, state vim9ContinuationScan) vim9Continu
 			state.depth++
 			state.braceDepth++
 			if vim9LambdaBlockOpen(source, index) {
+				if len(state.lambdaDepth) == 0 {
+					state.lambdaBodyStarted = false
+				}
 				state.lambdaDepth = append(state.lambdaDepth, state.depth)
 			}
 		case ')':

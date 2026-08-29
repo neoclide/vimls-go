@@ -400,6 +400,39 @@ func TestVim9LambdaCommandBlock(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9InlineFunctionMissingBrace(t *testing.T) {
+	for _, source := range []string{
+		"def Func()\nvar Func = (nr: number): int => {\n  return nr\nenddef\ndefcompile\nvar after = 1\n",
+		"vim9script\nvar Func = (nr: number): int => {\n  return nr\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1171" || file.Diagnostics[0].Message != "Missing } after inline function" {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		if len(file.Commands) < 2 || file.Commands[1].Declaration == nil {
+			t.Fatalf("commands = %#v", file.Commands)
+		}
+		lambda := file.Commands[1].Declaration.Initializer
+		if lambda == nil || lambda.Kind != ExpressionLambda || len(lambda.Parameters) != 1 || file.Text(lambda.Parameters[0].Name) != "nr" || lambda.Parameters[0].Type == nil || lambda.Parameters[0].Type.Name != "number" || lambda.ReturnType == nil || lambda.ReturnType.Name != "int" || lambda.Operator.Start == lambda.Operator.End || lambda.LambdaBody == nil || len(lambda.LambdaBody.Commands) != 1 || lambda.LambdaBody.Commands[0].Canonical != "return" || len(lambda.Children) == 0 || lambda.Children[len(lambda.Children)-1].Kind != ExpressionLambdaBlock {
+			t.Fatalf("recovered lambda = %#v", lambda)
+		}
+		foundAfter := false
+		foundEnddef := false
+		foundDefcompile := false
+		for _, command := range file.Commands {
+			foundEnddef = foundEnddef || command.Canonical == "enddef"
+			foundDefcompile = foundDefcompile || command.Canonical == "defcompile"
+			if command.Declaration != nil && command.Declaration.Name.End > command.Declaration.Name.Start && file.Text(command.Declaration.Name) == "after" {
+				foundAfter = true
+			}
+		}
+		if !foundAfter || strings.HasPrefix(source, "def ") && (!foundEnddef || !foundDefcompile) {
+			t.Fatalf("subsequent command was swallowed: %#v", file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+}
+
 func TestVim9LambdaBlockRebasesCompleteSourceAndNestedSpans(t *testing.T) {
 	// Keep a non-ASCII comment before the lambda so byte offsets differ from
 	// rune offsets.  The nested lambda and embedded command list exercise every

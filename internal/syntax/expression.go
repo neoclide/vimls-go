@@ -954,6 +954,31 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 	if p.current().text == "{" {
 		blockStart := p.current().span.Start - p.base
 		blockEnd := findVim9LambdaBlockEnd(p.source, blockStart)
+		if blockEnd < 0 {
+			// A missing inline-function close must not turn the opening brace
+			// into a dictionary.  Parse the commands collected before an outer
+			// function boundary, retain the incomplete block, and leave the
+			// enclosing command stream intact.
+			bodyEnd := len(p.source)
+			body := (Vim9Parser{}).Parse(p.source[blockStart+1 : bodyEnd])
+			bodyOffset, ok := safeLambdaOffset(p.base, blockStart+1)
+			if !ok {
+				bodyOffset = 0
+			}
+			rebaseLambdaFile(body, p.source, bodyOffset)
+			lambda.LambdaBody = body
+			p.diagnostics = append(p.diagnostics, body.Diagnostics...)
+			block := &Expression{Kind: ExpressionLambdaBlock, Span: Span{Start: p.base + blockStart, End: p.base + bodyEnd}}
+			lambda.Children = append(lambda.Children, block)
+			lambda.Span = Span{Start: open.span.Start, End: block.Span.End}
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1171", Message: "Missing } after inline function", Span: Span{Start: p.base + blockStart, End: p.base + blockStart + 1},
+			})
+			for p.current().kind != expressionEOF {
+				p.advance()
+			}
+			return lambda, true
+		}
 		if blockEnd >= 0 {
 			bodyStart := blockStart + 1
 			body := (Vim9Parser{}).Parse(p.source[bodyStart:blockEnd])
