@@ -116,6 +116,8 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 		}
 	}
 	remainder := nameEnd
+	hasExtends := false
+	hasImplements := false
 	for remainder < len(source) {
 		remainder = skipEnumSpace(source, remainder, len(source))
 		if remainder >= len(source) {
@@ -151,26 +153,74 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 			})
 			return
 		}
+		if keyword == "extends" {
+			if command.Dialect == Vim9 && hasExtends {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1352", Message: `Duplicate "extends"`,
+					Span: Span{Start: command.Argument.Start + keywordStart, End: command.Argument.Start + keywordEnd},
+				})
+				return
+			}
+			hasExtends = true
+			valueStart := skipEnumSpace(source, keywordEnd, len(source))
+			valueEnd := scanClassName(source, valueStart, len(source))
+			if command.Dialect == Vim9 && valueEnd < len(source) && !isExpressionSpace(source[valueEnd]) {
+				end := trimEnumSpaceEnd(source, valueStart, len(source))
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1315", Message: "White space required after name: " + file.Source[command.Argument.Start+valueStart:command.Argument.Start+end],
+					Span: Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + end},
+				})
+				return
+			}
+			if valueEnd > valueStart {
+				aggregate.Extends = append(aggregate.Extends, Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + valueEnd})
+			}
+			remainder = valueEnd
+			continue
+		}
+
+		if command.Dialect == Vim9 && hasImplements {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1350", Message: `Duplicate "implements"`,
+				Span: Span{Start: command.Argument.Start + keywordStart, End: command.Argument.Start + keywordEnd},
+			})
+			return
+		}
+		hasImplements = true
 		remainder = keywordEnd
 		for {
 			valueStart := skipEnumSpace(source, remainder, len(source))
 			valueEnd := scanClassName(source, valueStart, len(source))
+			invalidEnd := valueEnd < len(source) && !isExpressionSpace(source[valueEnd]) && source[valueEnd] != ','
+			invalidComma := valueEnd < len(source) && source[valueEnd] == ',' && valueEnd+1 < len(source) && !isExpressionSpace(source[valueEnd+1])
+			if command.Dialect == Vim9 && (invalidEnd || invalidComma) {
+				end := trimEnumSpaceEnd(source, valueStart, len(source))
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1315", Message: "White space required after name: " + file.Source[command.Argument.Start+valueStart:command.Argument.Start+end],
+					Span: Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + end},
+				})
+				return
+			}
 			if valueEnd == valueStart {
-				if kind == BlockClass && keyword == "implements" {
+				if command.Dialect == Vim9 && kind == BlockClass {
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
 						Code: "vim/E1389", Message: "missing name after implements",
 						Span: Span{Start: command.Argument.Start + keywordStart, End: command.Argument.Start + keywordEnd},
 					})
 				}
-				break
+				return
 			}
 			span := Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + valueEnd}
-			if keyword == "extends" {
-				aggregate.Extends = append(aggregate.Extends, span)
-			} else {
-				aggregate.Implements = append(aggregate.Implements, span)
+			for _, existing := range aggregate.Implements {
+				if command.Dialect == Vim9 && file.Source[existing.Start:existing.End] == file.Source[span.Start:span.End] {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1351", Message: `Duplicate interface after "implements": ` + file.Source[span.Start:span.End], Span: span,
+					})
+					return
+				}
 			}
-			remainder = skipEnumSpace(source, valueEnd, len(source))
+			aggregate.Implements = append(aggregate.Implements, span)
+			remainder = valueEnd
 			if remainder >= len(source) || source[remainder] != ',' {
 				break
 			}
@@ -181,15 +231,19 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 func scanClassName(source string, start, end int) int {
 	position := start
 	for position < end {
-		wordEnd := scanWord(source, position, end)
-		if wordEnd == position {
-			break
+		character := source[position]
+		if character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '_' {
+			position++
+			continue
 		}
-		position = wordEnd
-		if position >= end || source[position] != '.' {
-			break
+		if character == '.' && position+1 < end {
+			next := source[position+1]
+			if next >= 'A' && next <= 'Z' || next >= 'a' && next <= 'z' || next >= '0' && next <= '9' || next == '_' {
+				position++
+				continue
+			}
 		}
-		position++
+		break
 	}
 	return position
 }
