@@ -13,6 +13,48 @@ var benchmarkDiagnostics []Diagnostic
 var benchmarkConsumed int
 var benchmarkContinuationState vim9ContinuationScan
 var benchmarkOpaqueEnd int
+var benchmarkLongestOperator string
+
+func BenchmarkLongestOperator(b *testing.B) {
+	inputs := []struct {
+		name   string
+		source string
+	}{
+		{name: "plus", source: "+"},
+		{name: "isnot-hash", source: "isnot# value"},
+		{name: "question-question", source: "?? fallback"},
+		{name: "arrow", source: "->method()"},
+		{name: "miss", source: "@register"},
+		{name: "utf8-miss", source: "中文"},
+		{name: "empty", source: ""},
+	}
+	for _, input := range inputs {
+		b.Run(input.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input.source)))
+			b.ResetTimer()
+			for range b.N {
+				benchmarkLongestOperator = longestOperator(input.source)
+			}
+		})
+	}
+	mixedInputs := make([]string, 256)
+	var mixedBytes int
+	for index := range mixedInputs {
+		mixedInputs[index] = inputs[index%len(inputs)].source
+		mixedBytes += len(mixedInputs[index])
+	}
+	b.Run("mixed-batch", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(mixedBytes))
+		b.ResetTimer()
+		for range b.N {
+			for _, source := range mixedInputs {
+				benchmarkLongestOperator = longestOperator(source)
+			}
+		}
+	})
+}
 
 func BenchmarkScanVim9Continuation(b *testing.B) {
 	source := strings.Repeat("value isnot# other && (items[index] ?? fallback) # comment\n", 32)
