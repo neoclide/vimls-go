@@ -2269,9 +2269,15 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	switch command.Canonical {
 	case "class":
+		if command.Dialect == Vim9 && (commandInsideBlock(command, file.Blocks, BlockDef) || commandInsideBlock(command, file.Blocks, BlockFunction)) {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1429", Message: "Class can only be used in a script", Span: command.Name})
+		}
 		parseAggregate(file, command, BlockClass)
 		return
 	case "interface":
+		if command.Dialect == Vim9 && (commandInsideBlock(command, file.Blocks, BlockDef) || commandInsideBlock(command, file.Blocks, BlockFunction)) {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1436", Message: "Interface can only be used in a script", Span: command.Name})
+		}
 		parseAggregate(file, command, BlockInterface)
 		return
 	case "enum":
