@@ -1207,3 +1207,24 @@ func FuzzVim9ExpressionNeverPanics(f *testing.F) {
 		}
 	})
 }
+
+func TestOfficialAdjacentIsOperatorTokenBoundary(t *testing.T) {
+	for _, suffix := range []string{"is2", "isnot2"} {
+		for _, source := range []string{
+			"def Func()\nvar x = '1'" + suffix + "\nvar after = 1\nenddef\n",
+			"vim9script\nvar x = '1'" + suffix + "\nvar after = 1\n",
+		} {
+			file := Parse(source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E488" {
+				t.Fatalf("%q diagnostics = %#v", source, file.Diagnostics)
+			}
+			if file.Text(file.Diagnostics[0].Span) != "i" || len(file.Commands) < 3 || file.Commands[1].Declaration == nil || file.Commands[1].Declaration.Initializer == nil || file.Commands[1].Declaration.Initializer.Kind != ExpressionString || file.Text(file.Commands[1].Declaration.Initializer.Span) != "'1'" {
+				t.Fatalf("%q recovery = %#v", source, file.Commands)
+			}
+			if file.Commands[2].Declaration == nil {
+				t.Fatalf("%q did not recover next declaration", source)
+			}
+			assertFileSpans(t, file)
+		}
+	}
+}

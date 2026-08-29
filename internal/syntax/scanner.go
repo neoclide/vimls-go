@@ -2443,6 +2443,9 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
+		case command.Dialect == Vim9 && command.Declaration != nil && diagnostic.Code == "vimls/trailing-expression" && vim9InvalidIsSuffix(file.Source, diagnostic.Span.Start):
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
 		case command.Dialect == Vim9 && inDef && !assignmentExpression && commandDictionary && diagnostic.Code == "vim/E722":
 			diagnostic.Code = "vim/E723"
 			diagnostic.Message = "Missing end of Dictionary '}'"
@@ -2486,6 +2489,17 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 		}
 	}
 	return diagnostics
+}
+
+// A non-delimited is/isnot token is an E488 tail, not a binary operator.
+func vim9InvalidIsSuffix(source string, start int) bool {
+	if start < 0 || start >= len(source) || source[start] != 'i' {
+		return false
+	}
+	if strings.HasPrefix(source[start:], "isnot") {
+		return start+5 < len(source) && !isExpressionSpace(source[start+5])
+	}
+	return strings.HasPrefix(source[start:], "is") && start+2 < len(source) && !isExpressionSpace(source[start+2])
 }
 
 func mapVim9AttachedHashDiagnostics(file *File, command *Command, diagnostics []Diagnostic) []Diagnostic {
