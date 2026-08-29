@@ -194,6 +194,50 @@ func TestExpressionParserCursorFixtures(t *testing.T) {
 	}
 }
 
+func TestVim9UnterminatedStrings(t *testing.T) {
+	for _, test := range []struct {
+		expression string
+		code       string
+		kind       ExpressionKind
+	}{
+		{expression: `"abc`, code: "vim/E114", kind: ExpressionString},
+		{expression: `'abc`, code: "vim/E115", kind: ExpressionString},
+		{expression: `$"foo`, code: "vim/E114", kind: ExpressionInterpolatedString},
+		{expression: `$'foo`, code: "vim/E115", kind: ExpressionInterpolatedString},
+	} {
+		for _, source := range []string{
+			"def F()\nvar value = " + test.expression + "\nvar after = 1\nenddef\n",
+			"vim9script\nvar value = " + test.expression + "\nvar after = 1\n",
+		} {
+			file := Parse(source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Text(file.Diagnostics[0].Span) != test.expression {
+				t.Fatalf("expression %q diagnostics = %#v", test.expression, file.Diagnostics)
+			}
+			if len(file.Commands) < 3 || file.Commands[1].Declaration == nil {
+				t.Fatalf("expression %q commands = %#v", test.expression, file.Commands)
+			}
+			initializer := file.Commands[1].Declaration.Initializer
+			if initializer == nil || initializer.Kind != test.kind || file.Text(initializer.Span) != test.expression {
+				t.Fatalf("expression %q initializer = %#v", test.expression, initializer)
+			}
+			if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+				t.Fatalf("expression %q swallowed recovery command: %#v", test.expression, file.Commands)
+			}
+			assertFileSpans(t, file)
+		}
+	}
+	for _, expression := range []string{`"abc"`, `'abc'`, `$"foo"`, `$'foo'`} {
+		if _, diagnostics := (Vim9ExpressionParser{}).Parse(expression); len(diagnostics) != 0 {
+			t.Fatalf("valid Vim9 expression %q diagnostics = %#v", expression, diagnostics)
+		}
+	}
+	for _, expression := range []string{`"abc"`, `'abc'`} {
+		if _, diagnostics := (LegacyExpressionParser{}).Parse(expression); len(diagnostics) != 0 {
+			t.Fatalf("valid legacy expression %q diagnostics = %#v", expression, diagnostics)
+		}
+	}
+}
+
 func TestExpressionContinuationAfterCommentHasAbsoluteSpan(t *testing.T) {
 	source := "value\n  # full line comment\n  .name"
 	expression, diagnostics, consumed := parseExpressionPrefix(source, 100, Vim9)

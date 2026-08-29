@@ -587,6 +587,13 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_vim9_expr.vim:2347:70004/vim9-script":    "vim/E1104",
 		"src/testdir/test_vim9_expr.vim:2445:72344/def":            "vim/E973",
 		"src/testdir/test_vim9_expr.vim:2445:72344/vim9-script":    "vim/E973",
+		"src/testdir/test_vim9_expr.vim:2462:72918/def":            "vim/E114",
+		"src/testdir/test_vim9_expr.vim:2462:72918/vim9-script":    "vim/E114",
+		"src/testdir/test_vim9_expr.vim:2463:72978/def":            "vim/E115",
+		"src/testdir/test_vim9_expr.vim:2463:72978/vim9-script":    "vim/E115",
+		"src/testdir/test_vim9_expr.vim:2464:73038/def":            "vim/E115",
+		"src/testdir/test_vim9_expr.vim:2473:73256/def":            "vim/E114",
+		"src/testdir/test_vim9_expr.vim:2473:73256/vim9-script":    "vim/E114",
 		"src/testdir/test_vim9_expr.vim:2594:77366/def":            "vim/E1069",
 		"src/testdir/test_vim9_expr.vim:2594:77366/vim9-script":    "vim/E1069",
 		"src/testdir/test_vim9_expr.vim:2595:77430/def":            "vim/E1068",
@@ -783,8 +790,16 @@ func TestOfficialVimParserFailures(t *testing.T) {
 			if file.Source != testCase.Source || len(file.Commands) == 0 {
 				t.Fatalf("%s: parser did not retain and recover the official source", key)
 			}
-			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != code {
+			if len(file.Diagnostics) == 0 || file.Diagnostics[0].Code != code {
 				t.Fatalf("%s: diagnostics = %#v, want %s", key, file.Diagnostics, code)
+			}
+			for index := 1; index < len(file.Diagnostics); index++ {
+				previous := file.Diagnostics[index-1]
+				current := file.Diagnostics[index]
+				_, nextLine := physicalLineEnd(file.Source, previous.Span.Start)
+				if current.Span.Start < nextLine || current.Span.Start < previous.Span.End || !strings.HasPrefix(current.Code, "vim/E") {
+					t.Fatalf("%s: non-line-local diagnostic cascade = %#v", key, file.Diagnostics)
+				}
 			}
 			assertFileSpansAt(t, file, key)
 			seen[key] = struct{}{}

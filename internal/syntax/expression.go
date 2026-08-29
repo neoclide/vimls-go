@@ -539,6 +539,15 @@ func (p *expressionParser) parsePrefix() *Expression {
 		return &Expression{Kind: ExpressionNumber, Span: token.span, Value: token.text}
 	case expressionString:
 		p.advance()
+		if token.malformed {
+			code := "vim/E114"
+			message := "Missing double quote"
+			if token.text[0] == '\'' {
+				code = "vim/E115"
+				message = "Missing single quote"
+			}
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: token.span})
+		}
 		return &Expression{Kind: ExpressionString, Span: token.span, Value: token.text}
 	case expressionBlob:
 		p.advance()
@@ -550,6 +559,15 @@ func (p *expressionParser) parsePrefix() *Expression {
 		return &Expression{Kind: ExpressionBlob, Span: token.span, Value: token.text}
 	case expressionInterpolatedString:
 		p.advance()
+		if token.malformed {
+			code := "vim/E114"
+			message := "Missing double quote"
+			if len(token.text) > 1 && token.text[1] == '\'' {
+				code = "vim/E115"
+				message = "Missing single quote"
+			}
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: token.span})
+		}
 		return p.parseInterpolatedString(token)
 	}
 	switch token.text {
@@ -676,7 +694,10 @@ func (p *expressionParser) advancePastSourceEnd(end int) bool {
 func (p *expressionParser) parseInterpolatedString(token expressionToken) *Expression {
 	node := &Expression{Kind: ExpressionInterpolatedString, Span: token.span, Value: token.text}
 	start := token.span.Start - p.base + 2
-	end := token.span.End - p.base - 1
+	end := token.span.End - p.base
+	if !token.malformed {
+		end--
+	}
 	for index := start; index < end; index++ {
 		if p.source[index] == '{' && index+1 < end && p.source[index+1] == '{' {
 			index++
@@ -2142,8 +2163,11 @@ func (lexer *expressionLexer) scan() expressionToken {
 			index++
 			if interpolated {
 				index = scanInterpolatedStringEnd(source, index, quote)
-				return lexer.finish(expressionInterpolatedString, start, index)
+				token := lexer.finish(expressionInterpolatedString, start, index)
+				token.malformed = index <= start || source[index-1] != quote
+				return token
 			}
+			terminated := false
 			for index < len(source) {
 				if quote == '"' && source[index] == '\\' {
 					index += minInt(2, len(source)-index)
@@ -2155,12 +2179,15 @@ func (lexer *expressionLexer) scan() expressionToken {
 						index++
 						continue
 					}
+					terminated = true
 					break
 				}
 				_, size := utf8.DecodeRuneInString(source[index:])
 				index += size
 			}
-			return lexer.finish(expressionString, start, index)
+			token := lexer.finish(expressionString, start, index)
+			token.malformed = !terminated
+			return token
 		}
 		if isExpressionDigit(source[index]) || source[index] == '.' && index+1 < len(source) && isExpressionDigit(source[index+1]) {
 			var malformed bool
