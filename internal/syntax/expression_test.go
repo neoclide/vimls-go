@@ -469,6 +469,76 @@ func TestOfficialVim9InlineFunctionMissingBrace(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9InlineFunctionMissingHeredocEnd(t *testing.T) {
+	for _, source := range []string{
+		"def Func()\nvar Func = (nr: number): int => {\n    var ll =<< ENDIT\n       nothing\nenddef\ndefcompile\nvar after = 1\n",
+		"vim9script\nvar Func = (nr: number): int => {\n    var ll =<< ENDIT\n       nothing\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1145" || file.Diagnostics[0].Message != "missing heredoc end marker: ENDIT" || file.Text(file.Diagnostics[0].Span) != "Func" {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		if len(file.Commands) < 2 || file.Commands[1].Declaration == nil {
+			t.Fatalf("commands = %#v", file.Commands)
+		}
+		lambda := file.Commands[1].Declaration.Initializer
+		if lambda == nil || lambda.Kind != ExpressionLambda || lambda.LambdaBody == nil || len(lambda.LambdaBody.Diagnostics) != 0 {
+			t.Fatalf("lambda = %#v", lambda)
+		}
+		var heredoc *Heredoc
+		var inner *Command
+		for index := range lambda.LambdaBody.Commands {
+			command := &lambda.LambdaBody.Commands[index]
+			if command.Heredoc != nil {
+				heredoc = command.Heredoc
+				inner = command
+				break
+			}
+		}
+		if inner == nil || inner.Canonical != "var" || !strings.HasPrefix(lambda.LambdaBody.Text(inner.Argument), "ll =<< ENDIT") || heredoc == nil || heredoc.Marker != "ENDIT" || !heredoc.Incomplete || heredoc.EndMarker != (Span{}) || lambda.LambdaBody.Text(heredoc.Body) != "nothing" || !strings.Contains(lambda.LambdaBody.Source, "       nothing") {
+			t.Fatalf("heredoc = %#v, body = %q", heredoc, lambda.LambdaBody.Text(heredoc.Body))
+		}
+		foundAfter, foundEnddef, foundDefcompile := false, false, false
+		for _, command := range file.Commands {
+			foundEnddef = foundEnddef || command.Canonical == "enddef"
+			foundDefcompile = foundDefcompile || command.Canonical == "defcompile"
+			foundAfter = foundAfter || command.Declaration != nil && file.Text(command.Declaration.Name) == "after"
+		}
+		if !foundAfter || strings.HasPrefix(source, "def ") && (!foundEnddef || !foundDefcompile) {
+			t.Fatalf("subsequent command was swallowed: %#v", file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+}
+
+func TestVim9InlineFunctionCompleteHeredoc(t *testing.T) {
+	file := Parse("vim9script\nvar Func = (nr: number): int => {\n    var ll =<< ENDIT\n       nothing\n    ENDIT\n}\nvar after = 1\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) < 2 || file.Commands[1].Declaration == nil {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	lambda := file.Commands[1].Declaration.Initializer
+	if lambda == nil || lambda.LambdaBody == nil || len(lambda.LambdaBody.Commands) != 1 {
+		t.Fatalf("lambda = %#v", lambda)
+	}
+	var heredoc *Heredoc
+	var inner *Command
+	for index := range lambda.LambdaBody.Commands {
+		command := &lambda.LambdaBody.Commands[index]
+		if command.Heredoc != nil {
+			heredoc = command.Heredoc
+			inner = command
+			break
+		}
+	}
+	if inner == nil || inner.Canonical != "var" || !strings.HasPrefix(lambda.LambdaBody.Text(inner.Argument), "ll =<< ENDIT") || heredoc == nil || heredoc.Incomplete || lambda.LambdaBody.Text(heredoc.Body) != "nothing" || lambda.LambdaBody.Text(heredoc.EndMarker) != "ENDIT" || !strings.Contains(lambda.LambdaBody.Source, "       nothing") {
+		t.Fatalf("heredoc = %#v, body = %q, end = %q", heredoc, lambda.LambdaBody.Text(heredoc.Body), lambda.LambdaBody.Text(heredoc.EndMarker))
+	}
+	if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+		t.Fatalf("following command was swallowed: %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9LambdaBlockRebasesCompleteSourceAndNestedSpans(t *testing.T) {
 	// Keep a non-ASCII comment before the lambda so byte offsets differ from
 	// rune offsets.  The nested lambda and embedded command list exercise every

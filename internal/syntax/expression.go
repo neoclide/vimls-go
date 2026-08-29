@@ -1021,13 +1021,35 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 			}
 			rebaseLambdaFile(body, p.source, bodyOffset)
 			lambda.LambdaBody = body
+			missingHeredoc := ""
+			for _, command := range body.Commands {
+				if command.Heredoc != nil && command.Heredoc.Incomplete {
+					missingHeredoc = command.Heredoc.Marker
+					break
+				}
+			}
+			if missingHeredoc != "" {
+				kept := body.Diagnostics[:0]
+				for _, diagnostic := range body.Diagnostics {
+					if diagnostic.Code != "vim/E990" {
+						kept = append(kept, diagnostic)
+					}
+				}
+				body.Diagnostics = kept
+			}
 			p.diagnostics = append(p.diagnostics, body.Diagnostics...)
 			block := &Expression{Kind: ExpressionLambdaBlock, Span: Span{Start: p.base + blockStart, End: p.base + bodyEnd}}
 			lambda.Children = append(lambda.Children, block)
 			lambda.Span = Span{Start: open.span.Start, End: block.Span.End}
-			p.diagnostics = append(p.diagnostics, Diagnostic{
-				Code: "vim/E1171", Message: "Missing } after inline function", Span: Span{Start: p.base + blockStart, End: p.base + blockStart + 1},
-			})
+			if missingHeredoc != "" {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1145", Message: "missing heredoc end marker: " + missingHeredoc, Span: Span{Start: p.base + blockStart, End: p.base + blockStart + 1},
+				})
+			} else {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1171", Message: "Missing } after inline function", Span: Span{Start: p.base + blockStart, End: p.base + blockStart + 1},
+				})
+			}
 			for p.current().kind != expressionEOF {
 				p.advance()
 			}

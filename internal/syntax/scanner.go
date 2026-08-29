@@ -2443,6 +2443,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 
 func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostics []Diagnostic) []Diagnostic {
 	diagnostics = mapVim9AttachedHashDiagnostics(file, command, diagnostics)
+	if command.Declaration != nil && command.Declaration.Initializer != nil && command.Declaration.Initializer.Kind == ExpressionLambda {
+		for index := range diagnostics {
+			if diagnostics[index].Code == "vim/E1145" {
+				diagnostics[index].Span = command.Declaration.Name
+			}
+		}
+	}
 	inDef := false
 	for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
 		if file.Blocks[block].Kind == BlockDef {
