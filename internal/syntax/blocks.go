@@ -352,27 +352,54 @@ func classBodyCommandDiagnostic(file *File, command *Command) {
 }
 
 func suppressClassBodyCommandDiagnostics(file *File) {
+	var modifierCommands map[Span]Span
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect != Vim9 || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockClass || len(command.Modifiers) == 0 {
+			continue
+		}
+		if modifierCommands == nil {
+			modifierCommands = make(map[Span]Span)
+		}
+		end := command.Span.End
+		if command.Argument.End > end {
+			end = command.Argument.End
+		}
+		modifierCommands[command.Modifiers[0].Span] = Span{Start: command.Span.Start, End: end}
+	}
+
 	var invalid []Span
 	for _, diagnostic := range file.Diagnostics {
-		if diagnostic.Code == "vim/E1318" {
+		switch diagnostic.Code {
+		case "vim/E1318":
 			invalid = append(invalid, diagnostic.Span)
+		case "vim/E1331", "vim/E1368", "vim/E1371":
+			if command, ok := modifierCommands[diagnostic.Span]; ok {
+				invalid = append(invalid, command)
+			}
 		}
 	}
 	if len(invalid) == 0 {
 		return
 	}
 	sort.Slice(invalid, func(left, right int) bool {
+		if invalid[left].End == invalid[right].End {
+			return invalid[left].Start < invalid[right].Start
+		}
 		return invalid[left].End < invalid[right].End
 	})
 	kept := file.Diagnostics[:0]
 	for _, diagnostic := range file.Diagnostics {
-		if diagnostic.Code != "vim/E1318" {
-			index := sort.Search(len(invalid), func(index int) bool {
-				return invalid[index].End >= diagnostic.Span.End
-			})
-			if index < len(invalid) && diagnostic.Span.Start >= invalid[index].Start {
-				continue
-			}
+		switch diagnostic.Code {
+		case "vim/E1318", "vim/E1331", "vim/E1368", "vim/E1371":
+			kept = append(kept, diagnostic)
+			continue
+		}
+		index := sort.Search(len(invalid), func(index int) bool {
+			return invalid[index].End >= diagnostic.Span.End
+		})
+		if index < len(invalid) && diagnostic.Span.Start >= invalid[index].Start {
+			continue
 		}
 		kept = append(kept, diagnostic)
 	}

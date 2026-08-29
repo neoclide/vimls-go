@@ -2281,6 +2281,12 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	if command.Canonical == "def" || command.Canonical == "function" && isFunctionDefinition(source) {
 		parseFunctionSignature(file, command)
+		if command.Function != nil && command.Function.ReturnType != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockClass) {
+			name := file.Text(command.Function.Name)
+			if strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new") {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1365", Message: `Cannot use a return type with the "new" method`, Span: command.Function.ReturnTypeSpan})
+			}
+		}
 		return
 	}
 	if command.Kind == CommandExpression {
@@ -3520,6 +3526,9 @@ func diagnoseClassMemberModifierOrder(file *File, command *Command) {
 		return
 	}
 	if modifier.Name != "static" {
+		if modifier.Name == "abstract" && command.Canonical != "class" && command.Canonical != "interface" && command.Canonical != "enum" && next != "def" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1371", Message: `Abstract must be followed by "def"`, Span: modifier.Span})
+		}
 		return
 	}
 	valid := next == "var" || next == "def" || next == "final" || next == "const"
