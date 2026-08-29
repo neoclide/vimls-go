@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 479 (`067bb55`)
+- Current parser-negative syntax assertions: 482 (`3bd2d68`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -85,6 +85,8 @@ missing Dictionary-value variants, making the current split 464 migrated, zero
 ready, and 608 pending-fix. Commit `067bb55` migrated all 15 malformed-number
 variants from legacy functions, `def` functions, and Vim9 scripts, making the
 current split 479 migrated, zero ready, and 593 pending-fix.
+Commit `3bd2d68` migrated three Vim9 `def` assignment failures, making the
+current split 482 migrated, zero ready, and 590 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -102,8 +104,8 @@ file prefix produces the exact corpus keys.
 | `vim9-vim9script-arguments` | `migrated` (`c340e30`) | `test_vim9_import.vim:{2972:73136/script,2978:73280/script,2984:73418/script}` | E475, E983, E475 | no diagnostic | `runtime/doc/repeat.txt:416-424`; `src/vim9script.c:103-132` | `internal/syntax/scanner.go` prologue state |
 | `vim9-xfile-missing-backtick` | `pending-fix` | `test_vim9_cmd.vim:{267:6525/def}` | E1083 | no diagnostic | `src/vim9cmds.c:2311-2431` | command metadata generation and `internal/syntax/vim9_command.go` |
 | `vim9-dictionary-missing-value` | `migrated` (`2329653`) | `test_vim9_expr.vim:{3265:97250/def,3266:97290/script,3274:97438/def,3274:97438/vim9-script}` | E723 in `def`, E15 at script level | `vimls/missing-expression` | `runtime/doc/eval.txt:761-790`; `runtime/doc/vim9.txt:70-82`; `src/vim9expr.c:1912-2076` | `internal/syntax/expression.go` plus context mapping in `scanner.go` |
-| `vim9-assignment-missing-rhs` | `pending-fix` | `test_vim9_assign.vim:{515:12614/def,581:14074/def}` | E1097 | `vimls/missing-expression` | `src/vim9compile.c:918-945,3140-3238` | command-expression assignment and declaration paths in `scanner.go` |
-| `vim9-assignment-trailing-paren` | `pending-fix` | `test_vim9_assign.vim:{1202:28637/def}` | E488 | `vimls/trailing-expression` | `src/vim9compile.c:3819-3867,4312-4320` | assignment recognition in `scanner.go` |
+| `vim9-assignment-missing-rhs` | `migrated` (`3bd2d68`) | `test_vim9_assign.vim:{515:12614/def,581:14074/def}` | E1097 | `vimls/missing-expression` | `runtime/doc/vim9.txt:786-817,903-910`; `src/vim9compile.c:918-945,3190-3238` | command-expression assignment and declaration paths in `scanner.go` |
+| `vim9-assignment-trailing-paren` | `migrated` (`3bd2d68`) | `test_vim9_assign.vim:{1202:28637/def}` | E488 | `vimls/trailing-expression` | `runtime/doc/message.txt:752-757`; `src/vim9compile.c:3750-3810,4312-4320` | assignment recognition in `scanner.go` |
 | `vim9-hash-comment-spacing` | `pending-fix` | `test_vim9_script.vim:{3579:76110/def,3599:76552/def,3635:77305/def,3937:84202/script,4091:87356/script,4098:87482/script,4112:87742/script}` | E488 | `vimls/missing-expression` or `vimls/trailing-expression` | `src/ex_docmd.c:5465-5478,6013-6023`, `src/vim9cmds.c:520-523,1345-1348` | expression diagnostic aggregation in `scanner.go` |
 | `vim9-for-header-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{3067:64156/vim9-script,3068:64217/vim9-script,3070:64343/vim9-script,3071:64405/def,3071:64405/vim9-script}` | E690 | E690 | `src/vim9cmds.c:941-983` | official failure matrix only |
 | `vim9-delfunction-comment-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{3926:83957/script}` | E488 | E488 | `src/userfunc.c:6260-6282` | official failure matrix only |
@@ -224,7 +226,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-command-abbreviation` | 10 | 10 | 0 | 0 |
 | `B-register-declaration` | 15 | 0 | 0 | 15 |
 | `B-assignment-shape` | 3 | 0 | 0 | 3 |
-| `B-incomplete-expression` | 2 | 0 | 0 | 2 |
+| `B-incomplete-expression` | 2 | 2 | 0 | 0 |
 | `B-dialect-declaration` | 4 | 0 | 0 | 4 |
 | `B-dot-member-delimiter` | 7 | 0 | 0 | 7 |
 | `B-brace-recovery` | 15 | 3 | 0 | 12 |
@@ -239,16 +241,21 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 0 | 0 | 2 |
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
-| `B-trailing-characters` | 20 | 5 | 0 | 15 |
+| `B-trailing-characters` | 20 | 6 | 0 | 14 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **192** | **73** | **0** | **119** |
+| **Total** | **192** | **76** | **0** | **116** |
 
-This table reflects the current parser after `55169af`. Revalidation corrected
+This table reflects the current parser through `3bd2d68`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
 made `C:{5977:133493,5987:133759}/script` ready, and `55169af` migrated all
 three current cases.
+
+Commit `3bd2d68` migrated `B-incomplete-expression` and the
+`A:1202:28637/def` trailing-character case. Missing RHS expressions remain as
+zero-width AST nodes with E1097, while the stray `)` retains its exact span and
+maps to E488.
 
 ```text
 B-assign-spacing
