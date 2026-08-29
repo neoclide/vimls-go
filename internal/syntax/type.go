@@ -127,14 +127,47 @@ func (p *typeParser) parseType() *Type {
 	if p.offset < len(p.source) && p.source[p.offset] == '<' {
 		node.Kind = TypeGeneric
 		p.offset++
+		if name == "tuple" && p.offset < len(p.source) && isExpressionSpace(p.source[p.offset]) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1010", Message: "type not recognized",
+				Span: p.span(p.offset, p.offset+1),
+			})
+		}
 		p.skipSpace()
 		for p.offset < len(p.source) && p.source[p.offset] != '>' {
 			node.Arguments = append(node.Arguments, p.parseType())
-			p.skipSpace()
+			if name == "tuple" {
+				// A tuple type has stricter separator whitespace than the
+				// other generic types.  Keep the argument node's end so a
+				// space before the comma or closing angle is observable.
+				argumentEnd := node.Arguments[len(node.Arguments)-1].Span.End - p.base
+				p.skipSpace()
+				if p.offset < len(p.source) && p.source[p.offset] == ',' {
+					if p.offset > argumentEnd {
+						p.diagnostics = append(p.diagnostics, Diagnostic{
+							Code: "vim/E1068", Message: "no white space allowed before ','",
+							Span: p.span(argumentEnd, p.offset+1),
+						})
+					}
+				} else if p.offset < len(p.source) && p.source[p.offset] == '>' && p.offset > argumentEnd {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E488", Message: "trailing characters",
+						Span: p.span(argumentEnd, p.offset),
+					})
+				}
+			} else {
+				p.skipSpace()
+			}
 			if p.offset >= len(p.source) || p.source[p.offset] != ',' {
 				break
 			}
 			p.offset++
+			if name == "tuple" && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1069", Message: "white space required after ','",
+					Span: p.span(p.offset-1, p.offset),
+				})
+			}
 			p.skipSpace()
 		}
 		if containerType && len(node.Arguments) == 0 {

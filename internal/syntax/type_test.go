@@ -81,6 +81,28 @@ func TestVim9TypeParserBareFuncRemainsValid(t *testing.T) {
 	}
 }
 
+func TestVim9TypeParserTupleWhitespaceAndSeparators(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		diagnostic string
+		arguments  int
+	}{
+		{name: "space after opener", source: "tuple< number>", diagnostic: "vim/E1010", arguments: 1},
+		{name: "space before closer", source: "tuple<number >", diagnostic: "vim/E488", arguments: 1},
+		{name: "space before comma", source: "tuple<number , string>", diagnostic: "vim/E1068", arguments: 2},
+		{name: "missing space after comma", source: "tuple<number,string>", diagnostic: "vim/E1069", arguments: 2},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(test.source)
+			if typeNode == nil || typeNode.Name != "tuple" || len(typeNode.Arguments) != test.arguments || len(diagnostics) != 1 || diagnostics[0].Code != test.diagnostic {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9TypeParserContainerErrorRecoversNextCommand(t *testing.T) {
 	// Vim v9.2.1015 src/testdir/test_vim9_func.vim checks the same bare list
 	// return type in a :def defined from a legacy script.
