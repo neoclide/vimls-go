@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 866 (`f84432f`)
+- Current parser-negative syntax assertions: 867 (`1082d53`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -288,6 +288,8 @@ Commit `ef49637` migrated eight invalid Vim9 range variants, making the
 authoritative current split 864 migrated, zero ready, and 204 pending-fix.
 Commit `f84432f` migrated two empty Vim9 variable commands, making the
 authoritative current split 866 migrated, zero ready, and 202 pending-fix.
+Commit `1082d53` migrated the attached-hash `menutrans clear` case, making the
+authoritative current split 867 migrated, zero ready, and 201 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -880,13 +882,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 33 | 0 | 18 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 63 | 0 | 52 |
+| `C-EXCMD` | 115 | 64 | 0 | 51 |
 | `C-EXPR` | 19 | 7 | 0 | 12 |
 | `C-GENERIC` | 109 | 60 | 0 | 49 |
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **234** | **0** | **135** |
+| **Total** | **369** | **235** | **0** | **134** |
 
 ```text
 C-EXPR
@@ -1161,6 +1163,10 @@ physical-line recovery makes only the invalid line tail opaque.
 Commit `f84432f` maps empty Vim9 `unlet`, `lockvar`, and `unlockvar` commands
 to E179. Valid targets and counts keep their existing AST, while legacy empty
 commands retain the conservative internal missing-argument diagnostic.
+
+Commit `1082d53` reports E474 for Vim9 `menutrans clear#...`, where the attached
+hash is an invalid argument rather than a comment. `menutrans clear #...` and
+legacy menu-translation payloads remain valid.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
