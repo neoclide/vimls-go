@@ -386,6 +386,52 @@ func TestVim9LambdaParameterCommaWhitespace(t *testing.T) {
 	}
 }
 
+func TestVim9LambdaArrowWhitespace(t *testing.T) {
+	for _, expression := range []string{"(a)=>a + 1", "(a)=> a + 1", "(a) =>a + 1"} {
+		for _, source := range []string{
+			"def F()\nvar value = map([1], " + expression + ")\nvar after = 1\nenddef\n",
+			"vim9script\nvar value = map([1], " + expression + ")\nvar after = 1\n",
+		} {
+			file := Parse(source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1004" || file.Text(file.Diagnostics[0].Span) != "=>" {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) < 3 || file.Commands[1].Declaration == nil {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			call := file.Commands[1].Declaration.Initializer
+			if call == nil || call.Kind != ExpressionCall || len(call.Children) != 3 || call.Children[1].Kind != ExpressionList {
+				t.Fatalf("call = %#v", call)
+			}
+			lambda := call.Children[2]
+			if lambda.Kind != ExpressionLambda || len(lambda.Parameters) != 1 || len(lambda.Children) != 2 || lambda.Operator.Start == lambda.Operator.End || lambda.Children[1].Kind != ExpressionBinary {
+				t.Fatalf("lambda = %#v", lambda)
+			}
+			if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+				t.Fatalf("following declaration was swallowed: %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		}
+	}
+	for _, source := range []string{"(a) => a + 1", "(a) => {\n  return a\n}"} {
+		if _, diagnostics := (Vim9ExpressionParser{}).Parse(source); len(diagnostics) != 0 {
+			t.Fatalf("valid lambda %q diagnostics = %#v", source, diagnostics)
+		}
+	}
+	_, diagnostics := (Vim9ExpressionParser{}).Parse("(a) =>")
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "vim/E1004" {
+			t.Fatalf("incomplete arrow diagnostics = %#v", diagnostics)
+		}
+	}
+	_, diagnostics = (LegacyExpressionParser{}).Parse("{a -> a + 1}")
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "vim/E1004" {
+			t.Fatalf("legacy diagnostics = %#v", diagnostics)
+		}
+	}
+}
+
 func TestVim9DictionaryDelimiterWhitespace(t *testing.T) {
 	for _, test := range []struct {
 		name     string

@@ -975,6 +975,11 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 			Code: "vim/E488", Message: "line break is not allowed in Vim9 lambda arguments", Span: Span{Start: open.span.Start, End: p.base + position + 2},
 		})
 	}
+	if position == 0 || !isExpressionSpace(p.source[position-1]) || position+2 < len(p.source) && !isExpressionSpace(p.source[position+2]) {
+		p.diagnostics = append(p.diagnostics, Diagnostic{
+			Code: "vim/E1004", Message: "white space required before and after =>", Span: Span{Start: p.base + position, End: p.base + position + 2},
+		})
+	}
 
 	lambda := &Expression{Kind: ExpressionLambda, Operator: Span{Start: p.base + position, End: p.base + position + 2}}
 	parts := splitTopLevel(p.source, openOffset+1, closeOffset, ',')
