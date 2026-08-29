@@ -832,6 +832,33 @@ func TestVim9LambdaTailDiagnostics(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9CallableParenthesisSpacing(t *testing.T) {
+	// Vim v9.2.1015 src/testdir/test_vim9_expr.vim:4480.
+	source := "vim9script\nvar l = [2]\nl->((ll) => add(ll, 8)) ()\nvar after = 1\necho after\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E274" || file.Diagnostics[0].Message != "No white space allowed before parenthesis" || file.Text(file.Diagnostics[0].Span) != " " {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	if len(file.Commands) != 5 {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	call := file.Commands[2].Expressions[0]
+	if call.Kind != ExpressionCall || call.Value != "->" || file.Text(call.Span) != "l->((ll) => add(ll, 8))" || len(call.Children) != 2 || call.Children[0].Kind != ExpressionParenthesized || len(call.Children[0].Children) != 1 || call.Children[0].Children[0].Kind != ExpressionLambda {
+		t.Fatalf("call = %#v", call)
+	}
+	if file.Text(file.Commands[2].Argument) != "l->((ll) => add(ll, 8)) ()" || file.Commands[3].Declaration == nil || file.Commands[4].Canonical != "echo" {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	for _, expressionSource := range []string{"callable()", "[1, 2]", "l -> ((ll) => add(ll, 8))()"} {
+		_, diagnostics := (Vim9ExpressionParser{}).Parse(expressionSource)
+		if len(diagnostics) != 0 {
+			t.Fatalf("%q diagnostics = %#v", expressionSource, diagnostics)
+		}
+	}
+}
+
 func TestOfficialMultilineMethodOperatorSpacing(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_expr.vim Test_expr9_method_call.
 	for _, source := range []string{

@@ -131,8 +131,8 @@ func newExpressionBoundary(argument Span, expression *Expression, diagnostics []
 func appendTrailingExpressionDiagnostic(diagnostics []Diagnostic, base, consumed, length int) []Diagnostic {
 	if consumed < length {
 		for _, diagnostic := range diagnostics {
-			if diagnostic.Code == "vim/E1004" {
-				// Vim stops the current expression at an operator-spacing error.
+			if diagnostic.Code == "vim/E1004" || diagnostic.Code == "vim/E274" {
+				// Vim stops the current expression at these spacing errors.
 				// Keep the remaining bytes opaque instead of reporting a cascade.
 				return diagnostics
 			}
@@ -249,6 +249,18 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 		// argument list (for example, exists ("x")).  Vim9 deliberately
 		// rejects that form; its expression grammar requires adjacency.
 		legacyCall := p.dialect == Legacy && legacyNamedCallable(left) && p.onlyWhitespace(left.Span.End, token.span.Start)
+		if p.dialect == Vim9 && token.text == "(" && token.span.Start > left.Span.End && p.onlyWhitespace(left.Span.End, token.span.Start) && left.Kind == ExpressionCall {
+			reported := false
+			for _, diagnostic := range p.diagnostics {
+				reported = reported || diagnostic.Code == "vim/E274"
+			}
+			if !reported {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E274", Message: "No white space allowed before parenthesis", Span: Span{Start: left.Span.End, End: token.span.Start},
+				})
+			}
+			break
+		}
 		missingMember := token.text == "." && token.span.Start == left.Span.End && p.peek(1).kind == expressionEOF
 		if (token.text == "(" && (token.span.Start == left.Span.End || legacyCall)) || token.text == "[" && token.span.Start == left.Span.End || token.text == "." && (p.isMember(left) || missingMember) || token.text == "->" && p.isMethod(left) {
 			if 100 < minimumBinding {
@@ -303,6 +315,12 @@ func (p *expressionParser) parseArrowCallable(left *Expression) *Expression {
 	arrow := p.current()
 	p.advance()
 	callable := p.parsePrefix()
+	if p.dialect == Vim9 && p.current().text == "(" && p.current().span.Start > callable.Span.End && p.onlyWhitespace(callable.Span.End, p.current().span.Start) {
+		p.diagnostics = append(p.diagnostics, Diagnostic{
+			Code: "vim/E274", Message: "No white space allowed before parenthesis", Span: Span{Start: callable.Span.End, End: p.current().span.Start},
+		})
+		return &Expression{Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: callable.Span.End}, Operator: arrow.span, Value: "->", Children: []*Expression{callable, left}}
+	}
 	if p.current().text != "(" || p.current().span.Start != callable.Span.End {
 		code := "vimls/missing-method-call"
 		message := "expected argument list after callable"
