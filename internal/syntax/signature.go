@@ -30,29 +30,36 @@ func parseFunctionSignature(file *File, command *Command) {
 	beforeSpace := offset
 	offset = skipSyntaxSpace(source, offset, len(source))
 	vim9Signature := command.Dialect == Vim9 || command.Canonical == "def"
+	spaceBeforeGeneric := vim9Signature && offset > beforeSpace && offset < len(source) && source[offset] == '<'
+	genericInvalid := spaceBeforeGeneric
+	if spaceBeforeGeneric {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1068", Message: "no white space allowed before '<'",
+			Span: Span{Start: command.Argument.Start + beforeSpace, End: command.Argument.Start + offset},
+		})
+	}
 	if vim9Signature && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1068", Message: "no white space allowed before function arguments",
 			Span: Span{Start: command.Argument.Start + beforeSpace, End: command.Argument.Start + offset},
 		})
 	}
-	if offset < len(source) && source[offset] == '<' {
+	if vim9Signature && offset < len(source) && source[offset] == '<' {
 		end := findMatching(source, offset, '<', '>')
 		if end < 0 {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-generic-end", Message: "expected > after generic type parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
 			command.Function = function
 			return
 		}
-		for _, part := range splitTopLevel(source, offset+1, end, ',') {
-			start := skipSyntaxSpace(source, part.Start, part.End)
-			finish := trimSyntaxSpaceEnd(source, start, part.End)
-			if start < finish {
-				function.TypeParameters = append(function.TypeParameters, TypeParameter{Name: source[start:finish], Span: Span{Start: command.Argument.Start + start, End: command.Argument.Start + finish}})
-			}
+		var diagnostics []Diagnostic
+		function.TypeParameters, diagnostics = parseFunctionTypeParameters(source, command.Argument.Start, offset, end)
+		if !spaceBeforeGeneric {
+			file.Diagnostics = append(file.Diagnostics, diagnostics...)
+			genericInvalid = len(diagnostics) > 0
 		}
 		beforeSpace = end + 1
 		offset = skipSyntaxSpace(source, beforeSpace, len(source))
-		if vim9Signature && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
+		if vim9Signature && !genericInvalid && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1068", Message: "no white space allowed before function arguments",
 				Span: Span{Start: command.Argument.Start + beforeSpace, End: command.Argument.Start + offset},
@@ -88,6 +95,89 @@ func parseFunctionSignature(file *File, command *Command) {
 		function.Attributes = Span{Start: command.Argument.Start + offset, End: command.Argument.End}
 	}
 	command.Function = function
+}
+
+func parseFunctionTypeParameters(source string, base, open, close int) ([]TypeParameter, []Diagnostic) {
+	var parameters []TypeParameter
+	var diagnostics []Diagnostic
+	report := func(code, message string, start, end int) {
+		if len(diagnostics) == 0 {
+			diagnostics = append(diagnostics, Diagnostic{Code: code, Message: message, Span: Span{Start: base + start, End: base + end}})
+		}
+	}
+	if open+1 == close {
+		report("vim/E1555", "empty type list for generic function", open, close+1)
+		return parameters, diagnostics
+	}
+
+	offset := open + 1
+	if offset < close && isExpressionSpace(source[offset]) {
+		report("vim/E1202", "no white space allowed after '<'", offset, offset+1)
+		offset = skipSyntaxSpace(source, offset, close)
+	}
+	seen := make(map[string]struct{})
+	for offset < close {
+		if source[offset] == ',' {
+			report("vim/E1008", "missing type after ','", offset, offset+1)
+			offset++
+			offset = skipSyntaxSpace(source, offset, close)
+			continue
+		}
+
+		nameStart := offset
+		if source[offset] < 'A' || source[offset] > 'Z' {
+			if source[offset] >= 'a' && source[offset] <= 'z' {
+				report("vim/E1552", "type variable name must start with an uppercase letter", offset, offset+1)
+			} else {
+				report("vim/E1008", "missing generic type", offset, offset+1)
+			}
+		}
+		for offset < close && isASCIIIdentifierContinue(source[offset]) {
+			offset++
+		}
+		if offset == nameStart {
+			offset++
+			continue
+		}
+		name := source[nameStart:offset]
+		parameter := TypeParameter{Name: name, Span: Span{Start: base + nameStart, End: base + offset}}
+		parameters = append(parameters, parameter)
+		if _, exists := seen[name]; exists {
+			report("vim/E1561", "duplicate type variable name", nameStart, offset)
+		}
+		seen[name] = struct{}{}
+
+		if offset < close && isExpressionSpace(source[offset]) {
+			report("vim/E1202", "no white space allowed after generic type name", offset, offset+1)
+			offset = skipSyntaxSpace(source, offset, close)
+		}
+		if offset >= close {
+			break
+		}
+		if source[offset] != ',' {
+			report("vim/E1553", "missing comma in generic function", offset, offset+1)
+			for offset < close && source[offset] != ',' {
+				offset++
+			}
+		}
+		if offset >= close {
+			break
+		}
+		offset++
+		if offset >= close {
+			report("vim/E1069", "white space required after ','", offset-1, offset)
+			break
+		}
+		if !isExpressionSpace(source[offset]) {
+			report("vim/E1069", "white space required after ','", offset-1, offset)
+		} else {
+			offset = skipSyntaxSpace(source, offset, close)
+			if offset >= close {
+				report("vim/E1008", "missing generic type after ','", close, close)
+			}
+		}
+	}
+	return parameters, diagnostics
 }
 
 func parseParameter(file *File, command *Command, source string, part Span) *Parameter {

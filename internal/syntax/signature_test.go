@@ -19,6 +19,58 @@ func TestParsesVim9GenericFunctionSignature(t *testing.T) {
 	}
 }
 
+func TestVim9GenericFunctionTypeParameterGrammar(t *testing.T) {
+	for _, signature := range []string{
+		"Fn<A, B>()",
+		"Fn<MyType1, My_Type2>()",
+	} {
+		t.Run("valid "+signature, func(t *testing.T) {
+			file := Parse("vim9script\ndef " + signature + "\nenddef\n")
+			if len(file.Diagnostics) != 0 || len(file.Commands) < 2 || file.Commands[1].Function == nil || len(file.Commands[1].Function.TypeParameters) != 2 {
+				t.Fatalf("signature=%q file=%#v", signature, file)
+			}
+		})
+	}
+
+	invalid := []struct {
+		signature  string
+		diagnostic string
+	}{
+		{signature: "Fn <A>()", diagnostic: "vim/E1068"},
+		{signature: "Fn <A> ()", diagnostic: "vim/E1068"},
+		{signature: "Fn<A> ()", diagnostic: "vim/E1068"},
+		{signature: "Fn< A>()", diagnostic: "vim/E1202"},
+		{signature: "Fn<A >()", diagnostic: "vim/E1202"},
+		{signature: "Fn<A,>()", diagnostic: "vim/E1069"},
+		{signature: "Fn<A, >()", diagnostic: "vim/E1008"},
+		{signature: "Fn<, A>()", diagnostic: "vim/E1008"},
+		{signature: "Fn<,A>()", diagnostic: "vim/E1008"},
+		{signature: "Fn< , A>()", diagnostic: "vim/E1202"},
+		{signature: "Fn<A,B>()", diagnostic: "vim/E1069"},
+		{signature: "Fn<A , B>()", diagnostic: "vim/E1202"},
+		{signature: "Fn<t>()", diagnostic: "vim/E1552"},
+		{signature: "Fn<My-type>()", diagnostic: "vim/E1553"},
+		{signature: "Fn<>()", diagnostic: "vim/E1555"},
+		{signature: "Fn<T, A, T>()", diagnostic: "vim/E1561"},
+	}
+	for _, test := range invalid {
+		t.Run("invalid "+test.signature, func(t *testing.T) {
+			source := "vim9script\ndef " + test.signature + "\nenddef\nvar after = 1\n"
+			file := Parse(source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.diagnostic {
+				t.Fatalf("signature=%q diagnostics=%#v", test.signature, file.Diagnostics)
+			}
+			if len(file.Commands) == 0 || file.Commands[1].Function == nil {
+				t.Fatalf("signature=%q function recovery=%#v", test.signature, file.Commands)
+			}
+			last := file.Commands[len(file.Commands)-1]
+			if last.Canonical != "var" || last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+				t.Fatalf("signature=%q next command=%#v", test.signature, last)
+			}
+		})
+	}
+}
+
 func TestParsesLegacyFunctionSignatureAndAttributes(t *testing.T) {
 	file := (LegacyParser{}).Parse("function! s:Collect(items, ...) abort dict\nendfunction\n")
 	if len(file.Diagnostics) != 0 {
