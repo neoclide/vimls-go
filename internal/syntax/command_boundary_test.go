@@ -1057,6 +1057,145 @@ func TestVim9CommandBoundaryHashComment(t *testing.T) {
 	}
 }
 
+func TestVim9OpaqueHashCommentBoundaries(t *testing.T) {
+	tests := []struct {
+		name        string
+		source      string
+		commands    int
+		separators  int
+		comments    int
+		argument    string
+		first, last string
+	}{
+		{
+			name:       "adjacent hash",
+			source:     "colorscheme foo#bar | colorscheme after\n",
+			commands:   2,
+			separators: 1,
+			argument:   "foo#bar",
+			first:      "colorscheme",
+			last:       "colorscheme",
+		},
+		{
+			name:       "escaped hash",
+			source:     "colorscheme foo\\#bar | colorscheme after\n",
+			commands:   2,
+			separators: 1,
+			argument:   "foo\\#bar",
+			first:      "colorscheme",
+			last:       "colorscheme",
+		},
+		{
+			name:     "whitespace hash comment",
+			source:   "colorscheme foo #bar | same-line\ncolorscheme after\n",
+			commands: 2,
+			comments: 1,
+			argument: "foo",
+			first:    "colorscheme",
+			last:     "colorscheme",
+		},
+		{
+			name:       "ctrl-v protects hash",
+			source:     "colorscheme foo\x16#bar | colorscheme after\n",
+			commands:   2,
+			separators: 1,
+			argument:   "foo\x16#bar",
+			first:      "colorscheme",
+			last:       "colorscheme",
+		},
+		{
+			name:     "ctrl-v leaves raw whitespace before hash",
+			source:   "colorscheme foo\x16 #bar | same-line\ncolorscheme after\n",
+			commands: 2,
+			comments: 1,
+			argument: "foo\x16",
+			first:    "colorscheme",
+			last:     "colorscheme",
+		},
+		{
+			name:       "hash dictionary opener",
+			source:     "colorscheme #{key} | colorscheme after\n",
+			commands:   2,
+			separators: 1,
+			argument:   "#{key}",
+			first:      "colorscheme",
+			last:       "colorscheme",
+		},
+		{
+			name:     "hash fold comment",
+			source:   "colorscheme #{{ fold | same-line\ncolorscheme after\n",
+			commands: 2,
+			comments: 1,
+			argument: "",
+			first:    "colorscheme",
+			last:     "colorscheme",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := (Vim9Parser{}).Parse(test.source)
+			if len(file.Diagnostics) != 0 || len(file.Commands) != test.commands || countTokens(file, TokenSeparator) != test.separators || countTokens(file, TokenComment) != test.comments {
+				t.Fatalf("commands = %#v, diagnostics = %#v, tokens = %#v", file.Commands, file.Diagnostics, file.Tokens)
+			}
+			commentToken, separatorToken := false, false
+			for _, token := range file.Tokens {
+				switch token.Kind {
+				case TokenComment:
+					commentToken = true
+					if text := file.Text(token.Span); len(text) == 0 || text[0] != '#' {
+						t.Fatalf("comment token = %#v, text = %q", token, text)
+					}
+				case TokenSeparator:
+					separatorToken = true
+					if file.Text(token.Span) != "|" {
+						t.Fatalf("separator token = %#v, text = %q", token, file.Text(token.Span))
+					}
+				}
+			}
+			if commentToken != (test.comments > 0) || separatorToken != (test.separators > 0) {
+				t.Fatalf("comment token = %v, separator token = %v", commentToken, separatorToken)
+			}
+			if file.Commands[0].Canonical != test.first || file.Commands[len(file.Commands)-1].Canonical != test.last || file.Text(file.Commands[0].Argument) != test.argument {
+				t.Fatalf("first command = %#v, last command = %#v, argument = %q", file.Commands[0], file.Commands[len(file.Commands)-1], file.Text(file.Commands[0].Argument))
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
+func TestVim9OpaqueCommentInContinuedContainers(t *testing.T) {
+	source := "var values = [\n" +
+		"  1, # comment } | echo hidden\n" +
+		"  2]\n" +
+		"var mapping = {\n" +
+		"  'one': 1, # comment } | echo hidden\n" +
+		"  'two': 2}\n" +
+		"var after = 3\n"
+	file := (Vim9Parser{}).Parse(source)
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+	}
+	if len(file.Commands) != 3 || countTokens(file, TokenSeparator) != 0 || countTokens(file, TokenComment) != 2 {
+		t.Fatalf("commands = %#v, tokens = %#v", file.Commands, file.Tokens)
+	}
+	if file.Commands[0].Declaration == nil || file.Commands[1].Declaration == nil || file.Commands[2].Declaration == nil {
+		t.Fatalf("declarations = %#v", file.Commands)
+	}
+	if file.Text(file.Commands[0].Declaration.Name) != "values" || file.Text(file.Commands[1].Declaration.Name) != "mapping" || file.Text(file.Commands[2].Declaration.Name) != "after" {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	if len(file.Commands[0].Expressions) != 1 || len(file.Commands[1].Expressions) != 1 {
+		t.Fatalf("expressions = %#v", file.Commands)
+	}
+	if file.Commands[0].Expressions[0].Kind != ExpressionAssignment || file.Commands[0].Expressions[0].Children[1].Kind != ExpressionList || len(file.Commands[0].Expressions[0].Children[1].Children) != 2 {
+		t.Fatalf("list expression = %#v", file.Commands[0].Expressions)
+	}
+	if file.Commands[1].Expressions[0].Kind != ExpressionAssignment || file.Commands[1].Expressions[0].Children[1].Kind != ExpressionDictionary || len(file.Commands[1].Expressions[0].Children[1].Children) != 4 {
+		t.Fatalf("dict expression = %#v", file.Commands[1].Expressions)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9CommandBoundaryLogicalOrIsNotSeparator(t *testing.T) {
 	file := (Vim9Parser{}).Parse("if left || right | echo 'done' | endif\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 3 || countTokens(file, TokenSeparator) != 2 {

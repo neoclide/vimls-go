@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	"github.com/chemzqm/vimls-go/internal/vimdata"
@@ -315,6 +316,12 @@ func scanVim9OpaqueArgument(source string, start, end int, command vimdata.Comma
 			index += size
 			continue
 		}
+		if character == 0x16 { // CTRL-V protects the following encoded character.
+			if index+1 < end {
+				index = nextEncodedCharacter(source, index+1, end) - 1
+			}
+			continue
+		}
 		if character == '\\' {
 			index++
 			continue
@@ -338,7 +345,14 @@ func scanVim9OpaqueArgument(source string, start, end int, command vimdata.Comma
 				depth--
 			}
 		case '#':
-			if findVim9Comment(source, index, end) == index {
+			if isVim9OpaqueCommentStart(source, index, start, end) {
+				if newline := strings.IndexByte(source[index:], '\n'); newline >= 0 {
+					// The comment body is not Ex syntax.  Skip it in one jump so
+					// braces and bars in the body cannot affect the argument's
+					// nesting or command boundary; continue with the next line.
+					index += newline
+					continue
+				}
 				return trimSpaceEnd(source, start, index), Span{}, Span{Start: index, End: end}
 			}
 		case '|':
@@ -348,6 +362,18 @@ func scanVim9OpaqueArgument(source string, start, end int, command vimdata.Comma
 		}
 	}
 	return trimSpaceEnd(source, start, end), Span{}, Span{}
+}
+
+// isVim9OpaqueCommentStart is the local equivalent of Vim's ends_excmd2()
+// check for a generic Ex argument.  The scanner has already ruled out quotes,
+// interpolated strings and escapes, so this must remain an O(1) predicate. In
+// particular, the comment boundary is relative to the original argument start,
+// not the current hash position.
+func isVim9OpaqueCommentStart(source string, index, argumentStart, end int) bool {
+	if source[index] != '#' || index+1 < end && source[index+1] == '{' && (index+2 >= end || source[index+2] != '{') {
+		return false
+	}
+	return index == argumentStart || index > 0 && isSpace(source[index-1])
 }
 
 func findVim9Comment(source string, start, end int) int {

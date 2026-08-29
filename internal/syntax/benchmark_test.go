@@ -3,6 +3,8 @@ package syntax
 import (
 	"strings"
 	"testing"
+
+	"github.com/chemzqm/vimls-go/internal/vimdata"
 )
 
 var benchmarkParsedFile *File
@@ -10,6 +12,7 @@ var benchmarkExpression *Expression
 var benchmarkDiagnostics []Diagnostic
 var benchmarkConsumed int
 var benchmarkContinuationState vim9ContinuationScan
+var benchmarkOpaqueEnd int
 
 func BenchmarkScanVim9Continuation(b *testing.B) {
 	source := strings.Repeat("value isnot# other && (items[index] ?? fallback) # comment\n", 32)
@@ -18,6 +21,17 @@ func BenchmarkScanVim9Continuation(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		benchmarkContinuationState = scanVim9Continuation(source, vim9ContinuationScan{})
+	}
+}
+
+func BenchmarkVim9OpaqueHash(b *testing.B) {
+	source := "colorscheme " + strings.Repeat("foo#{key}bar#adjacent ", 4096)
+	start := len("colorscheme ")
+	b.ReportAllocs()
+	b.SetBytes(int64(len(source) - start))
+	b.ResetTimer()
+	for range b.N {
+		benchmarkOpaqueEnd, _, _ = scanVim9OpaqueArgument(source, start, len(source), vimdata.Command{})
 	}
 }
 
