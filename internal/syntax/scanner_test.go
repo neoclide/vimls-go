@@ -606,10 +606,10 @@ func TestScriptVersionDialectRules(t *testing.T) {
 	}
 
 	vim9Modifier := Parse("vim9cmd scriptversion 2\nvar after = 1\n")
-	if len(vim9Modifier.Diagnostics) != 1 || vim9Modifier.Diagnostics[0].Code != "vim/E1040" {
+	if len(vim9Modifier.Diagnostics) != 2 || vim9Modifier.Diagnostics[0].Code != "vim/E1040" || vim9Modifier.Diagnostics[1].Code != "vim/E1124" {
 		t.Fatalf("vim9cmd scriptversion diagnostics = %#v", vim9Modifier.Diagnostics)
 	}
-	if len(vim9Modifier.Commands) != 2 || vim9Modifier.Commands[0].Dialect != Vim9 || vim9Modifier.Commands[1].ScriptVersion != 1 {
+	if len(vim9Modifier.Commands) != 2 || vim9Modifier.Commands[0].Dialect != Vim9 || vim9Modifier.Commands[1].Dialect != Legacy || vim9Modifier.Commands[1].ScriptVersion != 1 {
 		t.Fatalf("vim9cmd scriptversion commands = %#v", vim9Modifier.Commands)
 	}
 }

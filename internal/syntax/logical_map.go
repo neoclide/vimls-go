@@ -57,6 +57,7 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 		files:       make(map[*File]bool),
 		lists:       make(map[*CommandList]bool),
 	}
+	temporaryCommand.Count = mapper.optional(temporaryCommand.Count)
 	mapper.commandDetails(&temporaryCommand)
 	for index := range temporary.Diagnostics {
 		temporary.Diagnostics[index].Span = logical.view.mapSpan(temporary.Diagnostics[index].Span)
@@ -94,7 +95,6 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 	if command == nil {
 		return
 	}
-	command.Count = mapper.optional(command.Count)
 	mapper.commandList(command.Embedded)
 	if command.Declaration != nil {
 		declaration := command.Declaration

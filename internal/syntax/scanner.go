@@ -410,7 +410,23 @@ func parseSource(source string, initial Dialect) *File {
 			_, closing := closingBlock(file, &file.Commands[index+1])
 			file.Commands[index].hasNextStatement = !closing
 		}
-		if !file.Commands[index].detailsOpaque && (file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute") {
+		if file.Commands[index].detailsOpaque {
+			command := &file.Commands[index]
+			if logical := command.logical; logical != nil {
+				mapper := logicalSpanMapper{
+					view: logical.view, source: file.Source,
+					expressions: make(map[*Expression]bool), types: make(map[*Type]bool),
+					files: make(map[*File]bool), lists: make(map[*CommandList]bool),
+				}
+				mapper.commandDetails(command)
+				if command.Heredoc != nil {
+					command.Heredoc.Body = mapper.optional(command.Heredoc.Body)
+					command.Heredoc.EndMarker = mapper.optional(command.Heredoc.EndMarker)
+				}
+			}
+			continue
+		}
+		if file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute" {
 			diagnosticsBeforeDetails := len(file.Diagnostics)
 			parseLogicalCommandDetails(file, &file.Commands[index])
 			if len(file.Diagnostics) == diagnosticsBeforeDetails {
@@ -951,6 +967,15 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			name, ok := lookupModifier(file.Source[start:wordEnd])
 			if !ok || name != "filter" && wordEnd < end && !isSpace(file.Source[wordEnd]) && file.Source[wordEnd] != '!' {
 				break
+			}
+			if name == "hide" {
+				next := skipSpace(file.Source, wordEnd, end)
+				if next >= end || file.Source[next] == '|' || isCommentStart(file.Source, next, next, end, dialect, vimdata.Command{}) {
+					// Like Vim's parse_command_modifiers(), keep :hide and
+					// :hide | cmd as the Ex command. It is a modifier only
+					// when another command follows it.
+					break
+				}
 			}
 			if dialect == Vim9 && looksLikeVim9AssignmentAfterName(file.Source, wordEnd, end) {
 				break

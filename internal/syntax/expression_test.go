@@ -695,7 +695,7 @@ func TestVim9LambdaCommandBlockKeepsNestedBlocks(t *testing.T) {
 
 func TestOfficialVim9InlineFunctionSameLinePayload(t *testing.T) {
 	for _, source := range []string{
-		"def Func()\nmap([1, 2], (k, v) => { redrawt })\nenddef\ndefcompile\nvar after = 1\n",
+		"def Func()\nmap([1, 2], (k, v) => { redrawt })\nenddef\ndefcompile\nlet after = 1\n",
 		"vim9script\nmap([1, 2], (k, v) => { redrawt })\nvar after = 1\n",
 	} {
 		file := Parse(source)
@@ -731,7 +731,7 @@ func TestOfficialVim9InlineFunctionSameLinePayload(t *testing.T) {
 
 func TestOfficialVim9InlineFunctionMissingBrace(t *testing.T) {
 	for _, source := range []string{
-		"def Func()\nvar Func = (nr: number): int => {\n  return nr\nenddef\ndefcompile\nvar after = 1\n",
+		"def Func()\nvar Func = (nr: number): int => {\n  return nr\nenddef\ndefcompile\nlet after = 1\n",
 		"vim9script\nvar Func = (nr: number): int => {\n  return nr\nvar after = 1\n",
 	} {
 		file := Parse(source)
