@@ -175,6 +175,57 @@ func TestOfficialVim9EnumAllowsTrailingComma(t *testing.T) {
 	}
 }
 
+func TestVim9EnumValueCommaSpacing(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		code      string
+		spanText  string
+		expectErr bool
+	}{
+		{
+			name:      "space before comma",
+			source:    "vim9script\nenum Planet\n  mercury ,\n  venus\nendenum\n",
+			code:      "vim/E1068",
+			spanText:  " ,",
+			expectErr: true,
+		},
+		{
+			name:      "missing space after comma",
+			source:    "vim9script\nenum Planet\n  mercury,venus\nendenum\n",
+			code:      "vim/E1069",
+			spanText:  ",",
+			expectErr: true,
+		},
+		{
+			name:   "trailing comma",
+			source: "vim9script\nenum Planet\n  mercury,\nendenum\n",
+		},
+		{
+			name:   "comment after comma",
+			source: "vim9script\nenum Planet\n  mercury, # comment\n  venus\nendenum\n",
+		},
+		{
+			name:   "constructor comma",
+			source: "vim9script\nenum Planet\n  mercury(1, 2), venus\nendenum\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if test.expectErr {
+				if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Text(file.Diagnostics[0].Span) != test.spanText {
+					t.Fatalf("diagnostics = %#v, want %s over %q", file.Diagnostics, test.code, test.spanText)
+				}
+				return
+			}
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("unexpected diagnostics: %#v", file.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9TypeAlias(t *testing.T) {
 	file := Parse("vim9script\ntype Pair = tuple<number, string>\n")
 	if len(file.Diagnostics) != 0 {

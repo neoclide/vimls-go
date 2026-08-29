@@ -246,6 +246,8 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_vim9_enum.vim:378:8621/script":           "vim/E1123",
 		"src/testdir/test_vim9_enum.vim:1527:34659/script":         "vim/E1068",
 		"src/testdir/test_vim9_enum.vim:1541:34927/script":         "vim/E1068",
+		"src/testdir/test_vim9_enum.vim:233:5465/script":           "vim/E1068",
+		"src/testdir/test_vim9_enum.vim:242:5659/script":           "vim/E1069",
 		"src/testdir/test_vim9_typealias.vim:62:1839/script":       "vim/E1397",
 		"src/testdir/test_vim9_typealias.vim:76:2174/script":       "vim/E1398",
 		"src/testdir/test_vim9_script.vim:1810:37557/script":       "vim/E1039",

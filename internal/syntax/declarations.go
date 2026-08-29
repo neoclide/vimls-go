@@ -170,7 +170,29 @@ func parseEnumValues(file *File, command *Command) bool {
 	source := maskVim9Comments(file.Source[start:end])
 	trimmedEnd := trimEnumSpaceEnd(source, 0, len(source))
 	more := trimmedEnd > 0 && source[trimmedEnd-1] == ','
-	for _, part := range splitTopLevel(source, 0, trimmedEnd, ',') {
+	parts := splitTopLevel(source, 0, trimmedEnd, ',')
+	commaDiagnosticReported := false
+	for _, part := range parts {
+		if !commaDiagnosticReported && part.End < trimmedEnd {
+			comma := part.End
+			afterComma := comma + 1
+			if afterComma < trimmedEnd && !isExpressionSpace(source[afterComma]) {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1069", Message: "white space required after ','",
+					Span: Span{Start: start + comma, End: start + afterComma},
+				})
+				commaDiagnosticReported = true
+			} else if comma > part.Start && isExpressionSpace(source[comma-1]) {
+				beforeComma := trimEnumSpaceEnd(source, part.Start, comma)
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1068", Message: "no white space allowed before ','",
+					Span: Span{Start: start + beforeComma, End: start + afterComma},
+				})
+				commaDiagnosticReported = true
+			}
+		}
+	}
+	for _, part := range parts {
 		valueStart := skipEnumSpace(source, part.Start, part.End)
 		valueEnd := trimEnumSpaceEnd(source, valueStart, part.End)
 		if valueStart >= valueEnd {
