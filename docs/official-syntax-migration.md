@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 731 (`ffa8e9b`)
+- Current parser-negative syntax assertions: 733 (`87b7f8a`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -216,7 +216,9 @@ authoritative current split 728 migrated, zero ready, and 340 pending-fix.
 Commit `c608781` migrated both declaration type-tail variants, making the
 authoritative current split 730 migrated, zero ready, and 338 pending-fix.
 Commit `ffa8e9b` migrated the typed assignment tail, making the authoritative
-current split 731 migrated, zero ready, and 337 pending-fix.
+current split 731 migrated, zero ready, and 337 pending-fix. Commit `87b7f8a`
+migrated both mismatched aggregate closers, making the authoritative current
+split 733 migrated, zero ready, and 335 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -539,12 +541,12 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-new-static-abstract` | 8 | 8 | 0 | 0 |
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 2 | 0 | 0 |
-| `B-trailing-command` | 5 | 0 | 0 | 5 |
+| `B-trailing-command` | 5 | 2 | 0 | 3 |
 | `B-trailing-characters` | 20 | 18 | 0 | 2 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **173** | **0** | **18** |
+| **Total** | **191** | **175** | **0** | **16** |
 
-This table reflects the current parser through `ffa8e9b`. Revalidation corrected
+This table reflects the current parser through `87b7f8a`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -647,6 +649,11 @@ Commit `a535cff` completed `B-class-interface-scope`. A Vim9 `class` or
 or E1436 from the existing block-parent chain. The nested aggregate AST and
 block are still built, so its terminator, the outer function terminator, and
 following commands remain available after recovery.
+
+Commit `87b7f8a` migrated the two aggregate closer mismatches in
+`B-trailing-command`. An `endinterface` while a class is active, or `endclass`
+while an interface is active, reports E476 with the expected closer. The active
+aggregate is retained and its eventual missing-end cascade is suppressed.
 
 The two pending `B-trailing-characters` cases are the class member separator
 cases `C:{93,102}` and require direct-member scan context. Commit `ffa8e9b`
