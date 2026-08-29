@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 749 (`162eb64`)
+- Current parser-negative syntax assertions: 752 (`c03403f`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -226,7 +226,9 @@ zero ready, and 332 pending-fix. Commit `4748011` migrated all eleven eval
 heredoc interpolation failures, making the authoritative current split 747
 migrated, zero ready, and 321 pending-fix. Commit `162eb64` completed the two
 direct class-member separator cases, making the authoritative current split
-749 migrated, zero ready, and 319 pending-fix.
+749 migrated, zero ready, and 319 pending-fix. Commit `c03403f` migrated three
+generic declaration terminator recoveries, making the authoritative current
+split 752 migrated, zero ready, and 316 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -821,11 +823,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 2 | 0 | 1 |
 | `C-EXCMD` | 115 | 30 | 0 | 85 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
-| `C-GENERIC` | 109 | 28 | 0 | 81 |
+| `C-GENERIC` | 109 | 31 | 0 | 78 |
 | `C-IMPORT` | 14 | 6 | 0 | 8 |
 | `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **117** | **0** | **252** |
+| **Total** | **369** | **120** | **0** | **249** |
 
 ```text
 C-EXPR
@@ -953,6 +955,13 @@ type arguments, explicit missing nodes, and the following call AST. An absent
 outer `>` recovers only at an argument opener on the same physical line;
 comparisons, legacy expressions, valid generic calls, and existing empty-list
 handling remain unchanged.
+
+Commit `c03403f` migrated the generic declaration recoveries at
+`G:{54:1052,62:1232,2605:57388}/script`. When a missing `>` is followed by an
+empty parameter list, the parser retains the known type parameters and reports
+E1553 or E1008 at that physical-line boundary. A non-empty parameter list keeps
+the existing loose `vimls/missing-generic-end` recovery instead of being
+reclassified broadly.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
