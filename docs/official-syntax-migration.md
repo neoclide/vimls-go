@@ -13,6 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
+- Current parser-negative syntax assertions: 437 (`55169af`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -65,10 +66,15 @@ artifact.
 | D | 183 | 484 | 54 | 47 | 166 | 5 | 939 |
 | **Total** | **1,072** | **1,070** | **307** | **574** | **329** | **148** | **3,500** |
 
-At baseline, the 1,072 syntax variants split into 346 migrated, 90 ready, and
-636 pending-fix. The 362-entry expected map therefore contains 346 verified
+At baseline, the 1,072 syntax variants split into 346 migrated, 89 ready, and
+637 pending-fix. The 362-entry expected map therefore contains 346 verified
 syntax keys and 16 cleanup keys that are non-syntax or stale. The cleanup
 membership is recorded in the source-group sections below.
+
+Commit `05d176c` made two invalid class-variable cases ready. Commit `55169af`
+then migrated all 91 cases that were ready in the current parser: Group A 47,
+Group B 16, Group C 23, and Group D 5. The current split is therefore 437
+migrated, zero ready, and 635 pending-fix.
 
 ## Syntax rule groups
 
@@ -83,9 +89,9 @@ file prefix produces the exact corpus keys.
 | `vim9-assignment-missing-rhs` | `pending-fix` | `test_vim9_assign.vim:{515:12614/def,581:14074/def}` | E1097 | `vimls/missing-expression` | `src/vim9compile.c:918-945,3140-3238` | command-expression assignment and declaration paths in `scanner.go` |
 | `vim9-assignment-trailing-paren` | `pending-fix` | `test_vim9_assign.vim:{1202:28637/def}` | E488 | `vimls/trailing-expression` | `src/vim9compile.c:3819-3867,4312-4320` | assignment recognition in `scanner.go` |
 | `vim9-hash-comment-spacing` | `pending-fix` | `test_vim9_script.vim:{3579:76110/def,3599:76552/def,3635:77305/def,3937:84202/script,4091:87356/script,4098:87482/script,4112:87742/script}` | E488 | `vimls/missing-expression` or `vimls/trailing-expression` | `src/ex_docmd.c:5465-5478,6013-6023`, `src/vim9cmds.c:520-523,1345-1348` | expression diagnostic aggregation in `scanner.go` |
-| `vim9-for-header-ready` | `ready` | `test_vim9_script.vim:{3067:64156/vim9-script,3068:64217/vim9-script,3070:64343/vim9-script,3071:64405/def,3071:64405/vim9-script}` | E690 | E690 | `src/vim9cmds.c:941-983` | official failure matrix only |
-| `vim9-delfunction-comment-ready` | `ready` | `test_vim9_script.vim:{3926:83957/script}` | E488 | E488 | `src/userfunc.c:6260-6282` | official failure matrix only |
-| `vim9-mark-range-ready` | `ready` | `test_vim9_script.vim:{4851:108739/def,4851:108739/vim9-script}` | E481 | E481 | `src/vim9script.c:145-164` | official failure matrix only |
+| `vim9-for-header-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{3067:64156/vim9-script,3068:64217/vim9-script,3070:64343/vim9-script,3071:64405/def,3071:64405/vim9-script}` | E690 | E690 | `src/vim9cmds.c:941-983` | official failure matrix only |
+| `vim9-delfunction-comment-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{3926:83957/script}` | E488 | E488 | `src/userfunc.c:6260-6282` | official failure matrix only |
+| `vim9-mark-range-ready` | `migrated` (`55169af`) | `test_vim9_script.vim:{4851:108739/def,4851:108739/vim9-script}` | E481 | E481 | `src/vim9script.c:145-164` | official failure matrix only |
 
 These 9 groups account for 26 syntax variants already verified before the
 full source-file partition. Source-group reports may add groups, but must not
@@ -95,18 +101,18 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-122 migrated, 47 ready, and 159 pending-fix.
+169 migrated by `55169af` and 159 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 20 | 22 | 42 |
-| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 92 | 15 | 50 |
+| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 42 | 0 | 42 |
+| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 0 | 0 | 13 |
 | `expr-list-delimiter` | E696, E697 | 10 | 0 | 0 | 10 |
-| `expr-dict-delimiter` | E720, E722, E723 | 23 | 6 | 9 | 8 |
+| `expr-dict-delimiter` | E720, E722, E723 | 23 | 15 | 0 | 8 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 2 | 0 | 10 |
-| `expr-command-boundary` | E476, E488, E492 | 16 | 2 | 1 | 13 |
+| `expr-command-boundary` | E476, E488, E492 | 16 | 3 | 0 | 13 |
 | `expr-comment-token` | E1170 | 11 | 0 | 0 | 11 |
 
 ```text
@@ -183,27 +189,34 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-assign-spacing` | 19 | 19 | 0 | 0 |
 | `B-type-delimiter` | 26 | 10 | 0 | 16 |
 | `B-declaration-shape` | 15 | 0 | 0 | 15 |
-| `B-command-abbreviation` | 10 | 3 | 7 | 0 |
+| `B-command-abbreviation` | 10 | 10 | 0 | 0 |
 | `B-register-declaration` | 15 | 0 | 0 | 15 |
 | `B-assignment-shape` | 3 | 0 | 0 | 3 |
 | `B-incomplete-expression` | 2 | 0 | 0 | 2 |
 | `B-dialect-declaration` | 4 | 0 | 0 | 4 |
 | `B-dot-member-delimiter` | 7 | 0 | 0 | 7 |
-| `B-brace-recovery` | 15 | 2 | 1 | 12 |
+| `B-brace-recovery` | 15 | 3 | 0 | 12 |
 | `B-heredoc` | 2 | 2 | 0 | 0 |
 | `B-hash-comment` | 1 | 0 | 0 | 1 |
 | `B-user-command-arguments` | 2 | 2 | 0 | 0 |
-| `B-class-modifier` | 8 | 7 | 1 | 0 |
-| `B-class-variable` | 6 | 4 | 0 | 2 |
+| `B-class-modifier` | 8 | 8 | 0 | 0 |
+| `B-class-variable` | 6 | 6 | 0 | 0 |
 | `B-class-body-command` | 15 | 0 | 0 | 15 |
 | `B-interface-dialect-body` | 3 | 2 | 0 | 1 |
-| `B-new-static-abstract` | 8 | 1 | 2 | 5 |
+| `B-new-static-abstract` | 8 | 2 | 0 | 6 |
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 0 | 0 | 2 |
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
-| `B-trailing-characters` | 20 | 1 | 4 | 15 |
+| `B-trailing-characters` | 20 | 5 | 0 | 15 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **192** | **57** | **15** | **120** |
+| **Total** | **192** | **73** | **0** | **119** |
+
+This table reflects the current parser after `55169af`. Revalidation corrected
+the original `B-new-static-abstract` ready count: only
+`C:5957:132958/script` was ready; `C:5937:132470/script` and
+`C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
+made `C:{5977:133493,5987:133759}/script` ready, and `55169af` migrated all
+three current cases.
 
 ```text
 B-assign-spacing
@@ -320,15 +333,15 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 
 | Group ID | Variants | Migrated | Ready | Pending-fix |
 | --- | ---: | ---: | ---: | ---: |
-| `C-BLOCK` | 51 | 1 | 5 | 45 |
+| `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 2 | 0 | 1 |
-| `C-EXCMD` | 115 | 16 | 4 | 95 |
+| `C-EXCMD` | 115 | 20 | 0 | 95 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
-| `C-GENERIC` | 109 | 11 | 12 | 86 |
+| `C-GENERIC` | 109 | 23 | 0 | 86 |
 | `C-IMPORT` | 14 | 5 | 0 | 9 |
-| `C-MODIFIER` | 57 | 43 | 2 | 12 |
+| `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **78** | **23** | **268** |
+| **Total** | **369** | **101** | **0** | **268** |
 
 ```text
 C-EXPR
@@ -446,9 +459,9 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 89 migrated, 5 ready, and 89
-pending-fix. In the exact inventory below, `M`, `R`, and `P` mean those three
-statuses. `test_blob.vim` has no syntax failure variants.
+Group D contains 183 syntax variants: 94 migrated by `55169af` and 89
+pending-fix. In the exact inventory below, `M` and `P` mean those two statuses.
+`test_blob.vim` has no syntax failure variants.
 
 #### `test_expr.vim` (30)
 
@@ -490,7 +503,7 @@ E1539 M ready: 127:3486/{def|vim9-script}
 #### `test_vim9_enum.vim` (34)
 
 ```text
-E1065 R ready: 60:1409/script,68:1610/script,76:1834/script
+E1065 M ready: 60:1409/script,68:1610/script,76:1834/script
 E1068 M ready: 233:5465/script,1527:34659/script,1541:34927/script
 E1069 M ready: 242:5659/script
 E1123 M ready: 151:3717/script,161:3943/script,172:4190/script,182:4421/script,194:4637/script,204:4829/script,252:5905/script,378:8621/script
@@ -506,7 +519,7 @@ E1435 P missing: 1706:39098/script
 E488 M ready: 108:2615/script
 E488 P missing: 116:2820/script
 E488 P recovery: 123:3013/script
-E488 R ready: 132:3226/script
+E488 M ready: 132:3226/script
 E492 P mapping: 44:1002/script,52:1215/script,92:2227/script
 ```
 
@@ -522,7 +535,7 @@ E1010 P recovery: 2077:45815/def
 E1055 M ready: 2482:55906/script
 E1057 P mapping: 408:8674/script,2466:55472/script
 E1059 M ready: 2448:54929/script,2455:55077/script
-E1065 R ready: 398:8465/script
+E1065 M ready: 398:8465/script
 E1068 M ready: 426:8986/script,434:9120/script,441:9237/script,2495:56457/script,2885:66191/def
 E1068 P recovery: 781:16158/vim9-script
 E1069 M ready: 1157:24812/script,2441:54782/script,2483:56005/script,2485:56148/script,2505:56703/script,2886:66262/def,2888:66507/def
