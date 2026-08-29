@@ -211,8 +211,10 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		return nil
 	}
 	parameter := &Parameter{}
+	variadicStart := -1
 	if strings.HasPrefix(source[start:end], "...") {
 		parameter.Variadic = true
+		variadicStart = start
 		start += 3
 		start = skipSyntaxSpace(source, start, end)
 	}
@@ -225,6 +227,12 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		nameEnd = equals
 	}
 	nameEnd = trimSyntaxSpaceEnd(source, start, nameEnd)
+	if vim9Signature && parameter.Variadic && nameEnd == start {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1055", Message: "missing name after ...",
+			Span: Span{Start: command.Argument.Start + variadicStart, End: command.Argument.Start + variadicStart + 3},
+		})
+	}
 	parameter.Name = Span{Start: command.Argument.Start + start, End: command.Argument.Start + nameEnd}
 	if vim9Signature && !parameter.Variadic {
 		parameter.Target = parseConstructorParameterTarget(source, start, nameEnd, command.Argument.Start)
