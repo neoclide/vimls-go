@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 507 (`aedd462`)
+- Current parser-negative syntax assertions: 509 (`f036019`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -102,6 +102,8 @@ record, making the current split 503 migrated, zero ready, and 569 pending-fix.
 Commit `aedd462` migrated the four Vim9 non-delimited `is`/`isnot` token
 variants, making the current split 507 migrated, zero ready, and 565
 pending-fix.
+Commit `f036019` migrated both contexts of the spaced callable-call case,
+making the current split 509 migrated, zero ready, and 563 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -134,13 +136,13 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-203 migrated and 125 pending-fix.
+205 migrated and 123 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 42 | 0 | 42 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
-| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 1 | 0 | 12 |
+| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 3 | 0 | 10 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
@@ -234,6 +236,11 @@ Commit `aedd462` migrated the four `4484:129910` and `4485:129977`
 `expr-command-boundary` variants. Non-delimited `is2` and `isnot2` remain
 opaque trailing bytes after the string initializer, report E488 at their first
 byte, and recover at the next physical declaration.
+
+Commit `f036019` migrated `test_vim9_expr.vim:4480:129784` in both contexts.
+Whitespace between the parenthesized method callable and its argument list
+reports E274 while preserving the legal method-call prefix and recovering at
+the next physical command.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
