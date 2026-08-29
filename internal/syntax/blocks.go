@@ -16,9 +16,36 @@ func buildBlocks(file *File) {
 	recoveryBlocks := make(map[int]bool)
 	interfaceMethod := make(map[int]bool)
 	interfaceMethodInvalid := make(map[int]bool)
+	// Vim9 :redir must be terminated before its enclosing :enddef. Keep this
+	// state per definition so nested definitions do not affect one another.
+	var redirOpen map[int]bool
 	var classMethods map[int]uint8
 	for commandIndex := range file.Commands {
 		command := &file.Commands[commandIndex]
+		defBlock := -1
+		for index := len(stack) - 1; index >= 0; index-- {
+			if file.Blocks[stack[index]].Kind == BlockDef {
+				defBlock = stack[index]
+				break
+			}
+		}
+		if defBlock >= 0 && command.Dialect == Vim9 && command.Canonical == "redir" {
+			argument := strings.TrimSpace(file.Text(command.Argument))
+			if argument == "END" {
+				delete(redirOpen, defBlock)
+			} else if strings.HasPrefix(argument, "=>") {
+				if redirOpen == nil {
+					redirOpen = make(map[int]bool)
+				}
+				redirOpen[defBlock] = true
+			}
+		}
+		if command.Dialect == Vim9 && command.Canonical == "enddef" && defBlock >= 0 && redirOpen[defBlock] {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1185", Message: "Missing :redir END", Span: command.Name,
+			})
+			delete(redirOpen, defBlock)
+		}
 		if len(stack) > 0 {
 			blockIndex := stack[len(stack)-1]
 			if file.Blocks[blockIndex].Kind == BlockClass && command.Dialect == Vim9 {
