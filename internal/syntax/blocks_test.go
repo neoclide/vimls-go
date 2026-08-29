@@ -168,6 +168,55 @@ func TestBlockRecoveryKeepsLaterCommands(t *testing.T) {
 	}
 }
 
+func TestVim9BareForRecovery(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		wantTryEnd int
+	}{
+		{name: "unfinished try", source: "vim9script\ntry\nfor\nif\nendwhile\nif\nfinally\n", wantTryEnd: -1},
+		{name: "closed try", source: "vim9script\ntry\nfor\nif\nendwhile\nif\nendtry\n", wantTryEnd: 6},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E690" || file.Diagnostics[0].Message != `Missing "in" after :for` || file.Text(file.Diagnostics[0].Span) != "for" {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) != 7 {
+				t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+			}
+			last := "finally"
+			if test.wantTryEnd >= 0 {
+				last = "endtry"
+			}
+			for index, want := range []string{"vim9script", "try", "for", "if", "endwhile", "if", last} {
+				if file.Commands[index].Canonical != want {
+					t.Fatalf("command %d = %#v, want %q", index, file.Commands[index], want)
+				}
+			}
+			loopCommand := file.Commands[2]
+			if loopCommand.For == nil || len(loopCommand.For.Bindings) != 0 || loopCommand.For.Iterable != nil || loopCommand.For.IterableSpan.Start != loopCommand.Argument.End || loopCommand.For.IterableSpan.End != loopCommand.Argument.End {
+				t.Fatalf("for loop = %#v", loopCommand.For)
+			}
+			if len(file.Blocks) != 4 || loopCommand.Block != 1 || file.Blocks[1].Kind != BlockFor || file.Blocks[1].Parent != 0 || file.Blocks[1].Span.End != file.Commands[6].Span.Start {
+				t.Fatalf("for block = %#v, blocks = %#v", file.Blocks[1], file.Blocks)
+			}
+			if file.Blocks[0].Kind != BlockTry || file.Blocks[0].End != test.wantTryEnd {
+				t.Fatalf("outer try block = %#v", file.Blocks)
+			}
+			if test.wantTryEnd < 0 {
+				if file.Commands[6].Canonical != "finally" || file.Commands[6].Block != 0 {
+					t.Fatalf("finally recovery = %#v", file.Commands[6])
+				}
+			} else if file.Commands[6].Canonical != "endtry" || file.Commands[6].Block != 0 {
+				t.Fatalf("endtry recovery = %#v", file.Commands[6])
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestVim9ClassMemberPrefixesExposeUnderlyingSyntax(t *testing.T) {
 	file := (Vim9Parser{}).Parse("abstract class Shape\n  public static final Count: number = 1\n  abstract def Draw()\nendclass\n")
 	if len(file.Diagnostics) != 0 || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockClass {

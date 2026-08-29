@@ -2002,6 +2002,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				Code: "vim/E1397", Message: "missing type alias name", Span: command.Name,
 			})
 		}
+		if command.Canonical == "for" {
+			parseForLoop(file, command)
+		}
 		if command.Canonical == "autocmd" {
 			command.Autocmd, _, _, _ = parseAutocmdHeader(file.Source, command.Argument, command.Dialect, command.Bang.Start < command.Bang.End)
 		}
@@ -3258,6 +3261,10 @@ func parseForLoop(file *File, command *Command) {
 	source := file.Text(command.Argument)
 	in := findTopLevelKeyword(source, 0, len(source), "in")
 	if in < 0 {
+		command.For = &ForLoop{IterableSpan: Span{Start: command.Argument.End, End: command.Argument.End}}
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E690", Message: `Missing "in" after :for`, Span: command.Name,
+		})
 		return
 	}
 	leftEnd := trimExpressionSpaceEnd(source, 0, in)

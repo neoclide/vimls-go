@@ -5,6 +5,8 @@ import "strings"
 func buildBlocks(file *File) {
 	var stack []int
 	enumValuesOpen := make(map[int]bool)
+	invalidFor := make(map[int]bool)
+	recoveryBlocks := make(map[int]bool)
 	for commandIndex := range file.Commands {
 		command := &file.Commands[commandIndex]
 		if len(stack) > 0 {
@@ -29,6 +31,10 @@ func buildBlocks(file *File) {
 			blockIndex := len(file.Blocks)
 			file.Blocks = append(file.Blocks, Block{Kind: kind, Span: Span{Start: command.Span.Start, End: len(file.Source)}, Header: commandIndex, End: -1, Parent: parent})
 			command.Block = blockIndex
+			if kind == BlockFor {
+				argument := file.Text(command.Argument)
+				invalidFor[blockIndex] = findTopLevelKeyword(argument, 0, len(argument), "in") < 0
+			}
 			stack = append(stack, blockIndex)
 			if kind == BlockEnum {
 				enumValuesOpen[blockIndex] = true
@@ -40,6 +46,15 @@ func buildBlocks(file *File) {
 				blockIndex := stack[len(stack)-1]
 				file.Blocks[blockIndex].Branches = append(file.Blocks[blockIndex].Branches, commandIndex)
 				command.Block = blockIndex
+			} else if match := recoverableBranchBlock(file, stack, branchKind, invalidFor); match >= 0 {
+				blockIndex := stack[match]
+				file.Blocks[blockIndex].Branches = append(file.Blocks[blockIndex].Branches, commandIndex)
+				command.Block = blockIndex
+				for _, recovered := range stack[match+1:] {
+					file.Blocks[recovered].Span.End = command.Span.Start
+				}
+				recoveryBlocks[blockIndex] = true
+				stack = stack[:match+1]
 			} else {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-branch", Message: "branch command has no matching block", Span: command.Name})
 			}
@@ -69,11 +84,20 @@ func buildBlocks(file *File) {
 				}
 			}
 			if match < 0 {
+				if stackHasInvalidFor(stack, invalidFor) {
+					command.Block = stack[len(stack)-1]
+					continue
+				}
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-end", Message: "end command has no matching block", Span: command.Name})
 				continue
 			}
 			blockIndex := stack[match]
+			recovering := stackHasInvalidFor(stack[match+1:], invalidFor)
 			for _, unclosed := range stack[match+1:] {
+				if recovering {
+					file.Blocks[unclosed].Span.End = command.Span.Start
+					continue
+				}
 				block := &file.Blocks[unclosed]
 				if closeKind == BlockFunction && implicitlyClosedByFunction(block.Kind) {
 					// Vim ends an unfinished control block when :endfunction is
@@ -147,7 +171,7 @@ func buildBlocks(file *File) {
 		}
 	}
 	for _, blockIndex := range stack {
-		if suppressMissing[blockIndex] {
+		if recoveryBlocks[blockIndex] || blockWithinInvalidFor(file, blockIndex, invalidFor) || suppressMissing[blockIndex] {
 			continue
 		}
 		block := &file.Blocks[blockIndex]
@@ -155,6 +179,38 @@ func buildBlocks(file *File) {
 			Code: "vimls/missing-end", Message: "block is missing its end command", Span: file.Commands[block.Header].Name,
 		})
 	}
+}
+
+func stackHasInvalidFor(stack []int, invalidFor map[int]bool) bool {
+	for _, blockIndex := range stack {
+		if invalidFor[blockIndex] {
+			return true
+		}
+	}
+	return false
+}
+
+func blockWithinInvalidFor(file *File, blockIndex int, invalidFor map[int]bool) bool {
+	for blockIndex >= 0 {
+		if invalidFor[blockIndex] {
+			return true
+		}
+		blockIndex = file.Blocks[blockIndex].Parent
+	}
+	return false
+}
+
+func recoverableBranchBlock(file *File, stack []int, kind BlockKind, invalidFor map[int]bool) int {
+	for index := len(stack) - 1; index >= 0; index-- {
+		if file.Blocks[stack[index]].Kind != kind {
+			continue
+		}
+		if stackHasInvalidFor(stack[index:], invalidFor) {
+			return index
+		}
+		break
+	}
+	return -1
 }
 
 func buildAggregateMembers(file *File) {
