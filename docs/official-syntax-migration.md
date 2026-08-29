@@ -59,17 +59,16 @@ artifact.
 
 | Group | Syntax | Type | Name | Semantic | Runtime | Unknown | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| A | 290 | 270 | 65 | 37 | 42 | 168 | 872 |
+| A | 328 | 270 | 65 | 37 | 42 | 130 | 872 |
 | B | 192 | 238 | 77 | 251 | 69 | 10 | 837 |
 | C | 369 | 78 | 111 | 239 | 52 | 3 | 852 |
 | D | 183 | 484 | 54 | 47 | 166 | 5 | 939 |
-| **Total** | **1,034** | **1,070** | **307** | **574** | **329** | **186** | **3,500** |
+| **Total** | **1,072** | **1,070** | **307** | **574** | **329** | **148** | **3,500** |
 
-At baseline, the 1,034 syntax variants split into 308 migrated, 90 ready, and
-636 pending-fix. The 362-entry expected map therefore contains 308 verified
-syntax keys and 54 cleanup keys that are non-syntax, lack a unique official
-code, or are stale. The cleanup membership is recorded in the source-group
-sections below.
+At baseline, the 1,072 syntax variants split into 346 migrated, 90 ready, and
+636 pending-fix. The 362-entry expected map therefore contains 346 verified
+syntax keys and 16 cleanup keys that are non-syntax or stale. The cleanup
+membership is recorded in the source-group sections below.
 
 ## Syntax rule groups
 
@@ -95,13 +94,13 @@ duplicate these exact keys.
 ### Group A inventory: `test_vim9_expr.vim`
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
-artifact context carrying that code. This accounts for all 290 syntax variants:
-84 migrated, 47 ready, and 159 pending-fix.
+artifact context carrying that code. This accounts for all 328 syntax variants:
+122 migrated, 47 ready, and 159 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `expr-incomplete-delimiter` | E15, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 82 | 18 | 22 | 42 |
-| `expr-operator-whitespace` | E1004, E1068, E1069 | 121 | 56 | 15 | 50 |
+| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 20 | 22 | 42 |
+| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 92 | 15 | 50 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 0 | 0 | 13 |
 | `expr-list-delimiter` | E696, E697 | 10 | 0 | 0 | 10 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 6 | 9 | 8 |
@@ -115,6 +114,7 @@ expr-incomplete-delimiter
   E15: 199,201,681,985,1720,1721,1722,1723,1874,1894,1899,1904,2142,2345,2601,3266,3362,3610,3611,3743,3776,3781,3786,3791,3796,3801,4023,4311
   E1002: 3362,3610,3611,4162
   E107: 3862,4171,4479
+  E109: 169
   E1097: 198,200,680,984,2141,2343,2600,2602,3743,4153,4310,4321
   E110: 3744,4154,4495
   E1104: 2347
@@ -123,7 +123,7 @@ expr-incomplete-delimiter
   E115: 2463,2464
 
 expr-operator-whitespace
-  E1004: 111,116,121,126,131,180,191,520,661,666,671,705,804,809,814,827,1654,1659,1664,1669,1674,1679,1910,1914,1919,1924,1929,1934,1941,1977,2209,2214,2219,2624,2626,2627,2772,2773,2774,2944,2945,2946
+  E1004: 111,116,121,126,131,172,173,174,180,183,184,185,191,520,661,666,671,705,804,809,814,827,1654,1659,1664,1669,1674,1679,1701,1702,1703,1706,1707,1708,1711,1712,1713,1716,1717,1718,1910,1914,1919,1924,1929,1934,1941,1977,2209,2214,2219,2624,2626,2627,2772,2773,2774,2944,2945,2946
   E1068: 2346,2595,2665,3130,3131,3132,3217,3227,3867
   E1069: 2594,2660,2779,2952,3129,3133,3207,3212,3222,4489
 
@@ -165,19 +165,12 @@ Authority: `src/testdir/test_vim9_expr.vim`, `src/vim9expr.c`,
 Implementation paths are `internal/syntax/expression.go`, `scanner.go`,
 `vim9_command.go`, and `syntax_command.go`.
 
-The baseline expected map has 122 Group A keys. Only 84 have a unique official
-syntax code. Thirty-six use an upstream `msg` variable without a unique code,
-and two are manually inferred E109 ternary mappings; those 38 remain research
-unknown rather than verified syntax migrations.
-
-The 36 `msg` keys are both `/def` and `/vim9-script` contexts for
-`line:offset` values `172:4463`, `173:4536`, `174:4609`, `183:4941`,
-`184:5014`, `185:5087`, `1701:48086`, `1702:48146`, `1703:48207`,
-`1706:48326`, `1707:48387`, `1708:48449`, `1711:48569`, `1712:48634`,
-`1713:48700`, `1716:48827`, `1717:48895`, and `1718:48964`. The two inferred
-E109 keys are `169:4320/{def,vim9-script}`. They form an expected-map cleanup
-queue and must not be counted as migrated syntax until the official code is
-proven separately.
+The baseline expected map has 122 Group A keys, all with a unique official
+syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
+line 169, and `src/errors.h:2647` defines E1004 for the whitespace message
+passed through `msg` by the listed call lines. Both helpers run those cases in
+`/def` and `/vim9-script`, so all 122 keys are verified syntax migrations.
+Group A has no expected-map cleanup entries.
 
 ### Group B inventory: declarations, classes, and small files
 
@@ -585,16 +578,13 @@ without correcting this ledger.
 
 ### Unknown exact membership
 
-Group A has 168 unknown variants. The following 82 `line:offset` selectors for
+Group A has 130 unknown variants. The following 63 `line:offset` selectors for
 `test_vim9_expr.vim` each expand to both `/def` and `/vim9-script`:
 
 ```text
-169:4320,172:4463,173:4536,174:4609,183:4941,184:5014,185:5087,
 512:14208,513:14282,514:14356,676:18331,677:18387,678:18444,
 819:22367,820:22423,821:22480,1643:46651,1648:46774,
-1701:48086,1702:48146,1703:48207,1706:48326,1707:48387,
-1708:48449,1711:48569,1712:48634,1713:48700,1716:48827,
-1717:48895,1718:48964,1725:49309,1726:49406,1727:49503,
+1725:49309,1726:49406,1727:49503,
 1728:49606,1730:49710,1731:49807,1732:49905,1733:50002,
 1734:50100,1735:50198,1736:50296,1737:50390,1739:50491,
 1740:50591,1741:50697,1742:50790,1743:50889,1744:50981,
@@ -644,7 +634,7 @@ test_vim9_func.vim:2407:53889/script
 test_vim9_func.vim:2413:54060/script
 ```
 
-Together these sets contain `168 + 10 + 3 + 5 = 186` variants.
+Together these sets contain `130 + 10 + 3 + 5 = 148` variants.
 
 ## Updating the ledger
 
