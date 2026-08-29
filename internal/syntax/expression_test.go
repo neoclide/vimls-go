@@ -736,6 +736,55 @@ func TestOfficialArrowCallableLambda(t *testing.T) {
 	}
 }
 
+func TestVim9LambdaTailDiagnostics(t *testing.T) {
+	t.Run("trailing parenthesis", func(t *testing.T) {
+		source := "() => 123)"
+		expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)
+		if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E488" || diagnostics[0].Message != "trailing characters" || source[diagnostics[0].Span.Start:diagnostics[0].Span.End] != ")" {
+			t.Fatalf("diagnostics = %#v", diagnostics)
+		}
+		if expression.Kind != ExpressionLambda || len(expression.Children) != 1 || expression.Children[0].Value != "123" {
+			t.Fatalf("lambda = %#v", expression)
+		}
+
+		file := Parse("vim9script\nvar X = () => 123)\nvar after = 1\n")
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E488" || file.Text(file.Diagnostics[0].Span) != ")" || len(file.Commands) != 3 || file.Commands[1].Declaration == nil || file.Commands[1].Declaration.Initializer == nil || file.Commands[1].Declaration.Initializer.Kind != ExpressionLambda || file.Commands[2].Declaration == nil {
+			t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+		}
+		assertFileSpans(t, file)
+	})
+
+	t.Run("missing lambda call", func(t *testing.T) {
+		source := "123->((x) => x + 5)"
+		expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)
+		if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E107" || diagnostics[0].Message != "Missing parentheses: lambda" || diagnostics[0].Span != (Span{Start: len(source), End: len(source)}) {
+			t.Fatalf("diagnostics = %#v", diagnostics)
+		}
+		if expression.Kind != ExpressionCall || expression.Value != "->" || len(expression.Children) != 2 || expression.Children[0].Kind != ExpressionParenthesized || len(expression.Children[0].Children) != 1 || expression.Children[0].Children[0].Kind != ExpressionLambda || expression.Children[1].Value != "123" {
+			t.Fatalf("arrow lambda = %#v", expression)
+		}
+
+		file := Parse("vim9script\nvar x = 123->((x) => x + 5)\nvar after = 1\n")
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E107" || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End || len(file.Commands) != 3 || file.Commands[1].Declaration == nil || file.Commands[1].Declaration.Initializer == nil || file.Commands[1].Declaration.Initializer.Kind != ExpressionCall || file.Commands[2].Declaration == nil {
+			t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+		}
+		assertFileSpans(t, file)
+	})
+
+	valid, diagnostics := (Vim9ExpressionParser{}).Parse("123->((x) => x + 5)()")
+	if len(diagnostics) != 0 || valid.Kind != ExpressionCall {
+		t.Fatalf("valid arrow lambda = %#v, diagnostics = %#v", valid, diagnostics)
+	}
+	named, diagnostics := (Vim9ExpressionParser{}).Parse("123->(Func)")
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vimls/missing-method-call" || named.Kind != ExpressionCall {
+		t.Fatalf("named callable = %#v, diagnostics = %#v", named, diagnostics)
+	}
+	other, diagnostics := (Vim9ExpressionParser{}).Parse("'1'is2")
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vimls/trailing-expression" || other.Kind != ExpressionString {
+		t.Fatalf("other trailing expression = %#v, diagnostics = %#v", other, diagnostics)
+	}
+}
+
 func TestOfficialMultilineMethodOperatorSpacing(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_expr.vim Test_expr9_method_call.
 	for _, source := range []string{

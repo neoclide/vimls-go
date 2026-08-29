@@ -2262,6 +2262,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 }
 
 func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostics []Diagnostic) []Diagnostic {
+	if command.Dialect == Vim9 && command.Declaration != nil {
+		diagnostics = mapVim9LambdaTrailingParen(diagnostics, command.Declaration.Initializer, file.Source, 0)
+	}
 	inDef := false
 	for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
 		if file.Blocks[block].Kind == BlockDef {

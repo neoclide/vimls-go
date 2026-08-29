@@ -115,6 +115,9 @@ type expressionBoundary struct {
 func parseExpression(source string, base int, dialect Dialect) (*Expression, []Diagnostic) {
 	expression, diagnostics, consumed := parseExpressionPrefix(source, base, dialect)
 	diagnostics = appendTrailingExpressionDiagnostic(diagnostics, base, consumed, len(source))
+	if dialect == Vim9 {
+		diagnostics = mapVim9LambdaTrailingParen(diagnostics, expression, source, base)
+	}
 	return expression, diagnostics
 }
 
@@ -126,6 +129,21 @@ func newExpressionBoundary(argument Span, expression *Expression, diagnostics []
 func appendTrailingExpressionDiagnostic(diagnostics []Diagnostic, base, consumed, length int) []Diagnostic {
 	if consumed < length {
 		diagnostics = append(diagnostics, Diagnostic{Code: "vimls/trailing-expression", Message: "unexpected text after expression", Span: Span{Start: base + consumed, End: base + consumed + 1}})
+	}
+	return diagnostics
+}
+
+func mapVim9LambdaTrailingParen(diagnostics []Diagnostic, expression *Expression, source string, base int) []Diagnostic {
+	if expression == nil || expression.Kind != ExpressionLambda {
+		return diagnostics
+	}
+	for index := range diagnostics {
+		diagnostic := &diagnostics[index]
+		offset := diagnostic.Span.Start - base
+		if diagnostic.Code == "vimls/trailing-expression" && diagnostic.Span.End == diagnostic.Span.Start+1 && offset >= 0 && offset < len(source) && source[offset] == ')' {
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
+		}
 	}
 	return diagnostics
 }
@@ -251,7 +269,13 @@ func (p *expressionParser) parseArrowCallable(left *Expression) *Expression {
 	p.advance()
 	callable := p.parsePrefix()
 	if p.current().text != "(" || p.current().span.Start != callable.Span.End {
-		p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-method-call", Message: "expected argument list after callable", Span: p.current().span})
+		code := "vimls/missing-method-call"
+		message := "expected argument list after callable"
+		if p.dialect == Vim9 && callable.Kind == ExpressionParenthesized && len(callable.Children) == 1 && callable.Children[0].Kind == ExpressionLambda {
+			code = "vim/E107"
+			message = "Missing parentheses: lambda"
+		}
+		p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: p.current().span})
 		return &Expression{Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: callable.Span.End}, Operator: arrow.span, Value: "->", Children: []*Expression{callable, left}}
 	}
 	open := p.current()
