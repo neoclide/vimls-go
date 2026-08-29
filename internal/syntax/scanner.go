@@ -1961,6 +1961,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	diagnoseEnumEndTrailingCharacters(file, command)
+	diagnoseEnumAbstractMember(file, command)
 	if isMappingCommand(command.Canonical) {
 		parseMapping(file, command)
 		return
@@ -3189,6 +3190,20 @@ func diagnoseEnumEndTrailingCharacters(file *File, command *Command) {
 	file.Diagnostics = append(file.Diagnostics, Diagnostic{
 		Code: "vim/E488", Message: "trailing characters", Span: Span{Start: start, End: end},
 	})
+}
+
+func diagnoseEnumAbstractMember(file *File, command *Command) {
+	if command == nil || command.Dialect != Vim9 || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockEnum {
+		return
+	}
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == "abstract" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1417", Message: "Abstract cannot be used in an Enum", Span: modifier.Span,
+			})
+			return
+		}
+	}
 }
 
 func parseDeclarationTarget(file *File, command *Command, declaration *Declaration, source string, diagnostics []Diagnostic) (*Expression, []Diagnostic) {

@@ -146,6 +146,13 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 			break
 		}
 		keywordStart := remainder
+		if command.Dialect == Vim9 && kind == BlockEnum && keyword == "extends" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1416", Message: "Enum cannot extend a class or enum",
+				Span: Span{Start: command.Argument.Start + keywordStart, End: command.Argument.Start + keywordEnd},
+			})
+			return
+		}
 		if command.Dialect == Vim9 && kind == BlockInterface && keyword == "implements" {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1381", Message: `Interface cannot use "implements"`,
