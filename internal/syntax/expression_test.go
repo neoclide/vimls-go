@@ -250,6 +250,48 @@ func TestOfficialLegacyTupleExpression(t *testing.T) {
 	}
 }
 
+func TestVim9TupleValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		code   string
+		items  int
+	}{
+		{name: "missing space after comma", source: "('a','b')", code: "vim/E1069", items: 2},
+		{name: "missing space after later comma", source: "('a', 'b','c')", code: "vim/E1069", items: 3},
+		{name: "space before comma", source: "('a', 'b' , 'c')", code: "vim/E1068", items: 3},
+		{name: "empty item", source: "('a', , 'b',)", code: "vim/E1068", items: 2},
+		{name: "empty trailing item", source: "('a', 'b', ,)", code: "vim/E1068", items: 2},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			expression, diagnostics := (Vim9ExpressionParser{}).Parse(test.source)
+			if expression.Kind != ExpressionTuple || len(expression.Children) != test.items || len(diagnostics) != 1 || diagnostics[0].Code != test.code {
+				t.Fatalf("expression = %#v, diagnostics = %#v", expression, diagnostics)
+			}
+		})
+	}
+}
+
+func TestTupleValue(t *testing.T) {
+	for _, dialect := range []Dialect{Legacy, Vim9} {
+		t.Run(dialect.String(), func(t *testing.T) {
+			missingComma, diagnostics := parseExpression("('a', 'b' 'c')", 0, dialect)
+			if missingComma.Kind != ExpressionTuple || len(missingComma.Children) != 2 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1527" {
+				t.Fatalf("missing comma = %#v, diagnostics = %#v", missingComma, diagnostics)
+			}
+
+			unclosed, diagnostics := parseExpression("('a', 'b',", 0, dialect)
+			if unclosed.Kind != ExpressionTuple || len(unclosed.Children) != 2 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1526" {
+				t.Fatalf("unclosed tuple = %#v, diagnostics = %#v", unclosed, diagnostics)
+			}
+			if unclosed.Span.End != len("('a', 'b'") {
+				t.Fatalf("unclosed tuple span = %#v", unclosed.Span)
+			}
+		})
+	}
+}
+
 func TestOfficialLegacyLambdaExpressionInsideVim9(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_func.vim Test_abort_even_with_silent.
 	expression, diagnostics := (Vim9ExpressionParser{}).Parse("{-> ''}() .. {}['X']")

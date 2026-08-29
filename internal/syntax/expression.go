@@ -611,13 +611,49 @@ func (p *expressionParser) parseParenthesized() *Expression {
 	p.advance()
 	var children []*Expression
 	hadComma := false
+	tupleDiagnostic := false
+	reportTupleDiagnostic := func(code, message string, token expressionToken) {
+		if tupleDiagnostic {
+			return
+		}
+		tupleDiagnostic = true
+		p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: token.span})
+	}
 	if p.current().text != ")" {
 		children = append(children, p.parse(0))
-		for p.current().text == "," {
+		for {
+			if p.current().text != "," {
+				if hadComma && p.current().kind != expressionEOF && p.current().text != ")" {
+					reportTupleDiagnostic("vim/E1527", "missing comma in tuple", p.current())
+					for p.current().kind != expressionEOF && p.current().text != ")" {
+						p.advance()
+					}
+				}
+				break
+			}
 			hadComma = true
+			comma := p.current()
+			commaOffset := comma.span.Start - p.base
+			if p.dialect == Vim9 && commaOffset > 0 && isExpressionSpace(p.source[commaOffset-1]) {
+				reportTupleDiagnostic("vim/E1068", "no white space allowed before ','", comma)
+			}
 			p.advance()
+			if p.current().text == "," {
+				// A second comma denotes an empty tuple item.  Consume it so
+				// recovery can continue with the next value or closing paren.
+				if p.dialect == Vim9 {
+					reportTupleDiagnostic("vim/E1068", "no white space allowed before ','", p.current())
+				}
+				p.advance()
+			}
 			if p.current().text == ")" {
 				break
+			}
+			if p.current().kind == expressionEOF {
+				break
+			}
+			if p.dialect == Vim9 && (comma.span.End-p.base >= len(p.source) || !isExpressionSpace(p.source[comma.span.End-p.base])) {
+				reportTupleDiagnostic("vim/E1069", "white space required after ','", comma)
 			}
 			children = append(children, p.parse(0))
 		}
@@ -626,7 +662,17 @@ func (p *expressionParser) parseParenthesized() *Expression {
 	if len(children) > 0 {
 		fallback = children[len(children)-1].Span.End
 	}
-	end := p.consumeClosing(")", fallback)
+	end := fallback
+	if p.current().text == ")" {
+		end = p.current().span.End
+		p.advance()
+	} else if hadComma {
+		if !tupleDiagnostic {
+			reportTupleDiagnostic("vim/E1526", "missing end of tuple ')'", p.current())
+		}
+	} else {
+		end = p.consumeClosing(")", fallback)
+	}
 	if p.dialect == Vim9 && p.current().text == "=>" {
 		arrow := p.current()
 		p.advance()
