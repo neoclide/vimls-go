@@ -448,21 +448,40 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 	open := p.current().span.Start - p.base
 	close := findGenericTypeEnd(p.source, open)
 	if close < 0 {
-		return nil, false
+		// Recover an unterminated generic list only when its call argument
+		// opener is on this physical line.  Do not let a missing '>' consume
+		// later lines (or turn a comparison into a generic call).
+		lineEnd := strings.IndexByte(p.source[open:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(p.source) - open
+		}
+		lineEnd += open
+		argOpen := strings.IndexByte(p.source[open+1:lineEnd], '(')
+		if argOpen < 0 {
+			return nil, false
+		}
+		argOpen += open + 1
+		cursor := p.lexer
+		for cursor.current.kind != expressionEOF && cursor.current.span.Start < p.base+argOpen {
+			cursor.advance()
+		}
+		if cursor.current.span.Start != p.base+argOpen {
+			return nil, false
+		}
+		p.lexer = cursor
+		types := p.parseGenericTypeArguments(open, argOpen, false)
+		operator := Span{Start: p.base + open, End: p.base + argOpen}
+		call := p.parsePostfix(left)
+		call.Operator = operator
+		call.TypeArguments = types
+		return call, true
 	}
 	closingEnd := p.base + close + 1
 	if !p.advancePastSourceEnd(closingEnd) {
 		return nil, false
 	}
 
-	var types []*Type
-	for _, part := range splitTopLevel(p.source, open+1, close, ',') {
-		start := skipSpace(p.source, part.Start, part.End)
-		end := trimSpaceEnd(p.source, start, part.End)
-		typeNode, diagnostics := parseTypeAt(p.source[start:end], p.base+start)
-		types = append(types, typeNode)
-		p.diagnostics = append(p.diagnostics, diagnostics...)
-	}
+	types := p.parseGenericTypeArguments(open, close, true)
 	operator := Span{Start: p.base + open, End: closingEnd}
 	if p.current().text != "(" || p.current().span.Start != closingEnd {
 		return &Expression{
@@ -474,6 +493,49 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 	call.Operator = operator
 	call.TypeArguments = types
 	return call, true
+}
+
+func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool) []*Type {
+	var types []*Type
+	reportedMissing := false
+	for index, part := range splitTopLevel(p.source, open+1, end, ',') {
+		start := skipSpace(p.source, part.Start, part.End)
+		typeEnd := trimSpaceEnd(p.source, start, part.End)
+		// Keep the pre-existing explicit empty-list behavior for Fn<>.  This
+		// recovery only owns a missing first type in an unterminated call, or a
+		// missing type after a comma.
+		missing := start == typeEnd && (!closed || index > 0)
+		if missing {
+			code := "vim/E1008"
+			messageEnd := trimSpaceEnd(p.source, open+1, part.End)
+			message := "Missing <type> after " + p.source[open:messageEnd]
+			diagnosticSpan := Span{Start: p.base + start, End: p.base + typeEnd}
+			if index > 0 && part.Start == part.End {
+				code = "vim/E1069"
+				message = "White space required after ','"
+				diagnosticSpan = Span{Start: p.base + part.Start - 1, End: p.base + part.Start}
+				if !closed {
+					lineEnd := len(p.source)
+					if newline := strings.IndexByte(p.source[open:], '\n'); newline >= 0 {
+						lineEnd = open + newline
+					}
+					message += ": " + p.source[open:lineEnd]
+				}
+			} else if closed {
+				message = "Missing <type> after " + p.source[open:end+1]
+			}
+			if !reportedMissing {
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: diagnosticSpan})
+				reportedMissing = true
+			}
+			types = append(types, &Type{Kind: TypeMissing, Span: Span{Start: p.base + start, End: p.base + typeEnd}})
+			continue
+		}
+		typeNode, diagnostics := parseTypeAt(p.source[start:typeEnd], p.base+start)
+		types = append(types, typeNode)
+		p.diagnostics = append(p.diagnostics, diagnostics...)
+	}
+	return types
 }
 
 func findGenericTypeEnd(source string, open int) int {
