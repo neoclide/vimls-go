@@ -21,7 +21,7 @@ go work init \
 cd /path/to/vimls-go/tools/benchlegacy
 GOMAXPROCS=1 GOPROXY=off GOSUMDB=off GOWORK="$bench_work/go.work" \
   go test -run '^$' -bench '^BenchmarkLegacyParsers/(vimls-go|go-vimlparser)-common$' \
-  -benchmem -benchtime=1x -count=20 -args \
+  -benchmem -benchtime=1x -count=5 -args \
   -root "$vim_source/runtime"
 ```
 
@@ -32,7 +32,7 @@ path separately:
 GOMAXPROCS=4 GOPROXY=off GOSUMDB=off GOWORK="$bench_work/go.work" \
   go test -run '^$' \
   -bench '^BenchmarkLegacyParsers/vimls-go-all-workers-(1|2|4)$' \
-  -benchmem -benchtime=1x -count=20 -args \
+  -benchmem -benchtime=1x -count=5 -args \
   -root "$vim_source/runtime"
 ```
 

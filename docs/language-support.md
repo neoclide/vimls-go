@@ -176,10 +176,11 @@ authoritative.
 
 ## Primary references
 
-- [Vim 9.1 `vim9.txt`](https://github.com/vim/vim/blob/v9.1.0000/runtime/doc/vim9.txt)
-- [Vim 9.1 `eval.txt`](https://github.com/vim/vim/blob/v9.1.0000/runtime/doc/eval.txt)
+- [Vim v9.2.1015 source and tests](https://github.com/vim/vim/tree/v9.2.1015/src/testdir)
+- [Vim v9.2.1015 `vim9.txt`](https://github.com/vim/vim/blob/v9.2.1015/runtime/doc/vim9.txt)
+- [Vim v9.2.1015 `eval.txt`](https://github.com/vim/vim/blob/v9.2.1015/runtime/doc/eval.txt)
+- [Vim v9.1.0000 compatibility baseline](https://github.com/vim/vim/tree/v9.1.0000)
 - [Vim 9.1 `runtime/filetype.vim`](https://github.com/vim/vim/blob/v9.1.0000/runtime/filetype.vim)
-- [Official Vim source and tests](https://github.com/vim/vim/tree/v9.1.0000/src/testdir)
 - [Enum tests at 9.1.0219](https://github.com/vim/vim/blob/v9.1.0219/src/testdir/test_vim9_enum.vim)
 - [Tuple types at 9.1.1232](https://github.com/vim/vim/blob/v9.1.1232/runtime/doc/vim9.txt)
 - [Generic functions at 9.1.1577](https://github.com/vim/vim/blob/v9.1.1577/runtime/doc/vim9.txt)

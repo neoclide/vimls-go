@@ -57,21 +57,9 @@ Deliver the remaining syntax in `language-support.md`, including functions,
 classes, interfaces, enums, type aliases, generics, imports/exports, complex
 expressions, mappings, autocommands, and embedded payload preservation.
 
-Current verified command-specific slices include mappings, heredocs and text
-bodies, `global`/`vglobal`, `folddoopen`/`folddoclosed`, the `filter[!]`
-modifier, and structured substitute commands with recovering `\=expr`
-replacements, plus structured `:highlight` list/query/clear/link/default and
-attribute forms, and structured `:syntax keyword`, `:syntax match`, and
-`:syntax region` items, plus repeated `contains`/`add`/`remove` operations for
-`:syntax cluster` and query/set forms for `:syntax case`, `:syntax conceal`, and
-`:syntax spell`, and `:syntax include` with an optional cluster and unexpanded
-filename payload, plus explicit/implicit `:syntax list` and `:syntax clear`
-group operands, plus `:syntax sync` settings, `linecont`, clear, match, and
-region forms, `:syntax iskeyword` and `:syntax foldlevel`, and the
-`on`/`enable`/`manual`/`off`/`reset` runtime modes without executing sourced
-scripts, plus structured `:set`, `:setlocal`, and `:setglobal` option items and
-Vim9 line-local recovery. M3 remains open until the complete language-support
-contract is covered.
+Current verified syntax is recorded once in `language-support.md` and in focused
+package tests. M3 remains open until every required form has equivalent legacy,
+Vim9, mixed-dialect, incomplete-input, and version-boundary evidence.
 
 Exit gate: every required construct has positive, negative, mixed-dialect, and
 version-boundary evidence. Parser fuzz seeds and the selected official Vim

@@ -147,12 +147,11 @@ The standing parser-performance corpus is only the official Vim runtime tree
 from the pinned `v9.2.1015` checkout. Do not append a personal runtimepath or
 plugin collection to routine A/B runs. A personal runtimepath may be used as an
 occasional correctness smoke, but it is not a performance gate. Runtime A/B
-runs use the same root, file order, `GOMAXPROCS`, worker count, warmup, and sample
-count, retain the complete AST, and report median and p95 separately from
-discovery and I/O. Historical all-RTP measurements remain provenance, not the
-current comparison corpus. Unexpected corpus diagnostics must be classified
-against Vim and the reference parsers; the benchmark must not suppress them to
-improve its success count.
+runs use five samples with the same root, file order, `GOMAXPROCS`, worker count,
+and warmup. Retain the complete AST and report median time, bytes, and
+allocations separately from discovery and I/O. Unexpected corpus diagnostics
+must be classified against Vim and the reference parsers; the benchmark must
+not suppress them to improve its success count.
 
 When profiling parser internals, use the nested module's explicitly enabled
 `TestProfileVimlsBatch` instead of top-level `-cpuprofile` or `-memprofile`.
