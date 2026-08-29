@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 501 (`f3e1093`)
+- Current parser-negative syntax assertions: 503 (`91d2277`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -97,6 +97,8 @@ Commit `1e10f55` migrated the Vim9 EX_XFILE missing-backtick case, making the
 current split 494 migrated, zero ready, and 578 pending-fix.
 Commit `f3e1093` migrated the seven Vim9 attached-hash comment cases, making
 the current split 501 migrated, zero ready, and 571 pending-fix.
+Commit `91d2277` migrated both contexts of the Vim9 line-ending method-arrow
+record, making the current split 503 migrated, zero ready, and 569 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -129,18 +131,18 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-197 migrated and 131 pending-fix.
+199 migrated and 129 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 42 | 0 | 42 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
-| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 0 | 0 | 13 |
+| `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 1 | 0 | 12 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
-| `expr-command-boundary` | E476, E488, E492 | 16 | 3 | 0 | 13 |
+| `expr-command-boundary` | E476, E488, E492 | 16 | 4 | 0 | 12 |
 | `expr-comment-token` | E1170 | 11 | 0 | 0 | 11 |
 
 ```text
@@ -219,6 +221,11 @@ Commit `191fadb` completed `expr-dict-delimiter`. Missing closing braces retain
 the partial Dictionary AST and report one E723 without adding a redundant outer
 parenthesis diagnostic; command-start Dictionaries remain expressions rather
 than being mistaken for Vim9 scope blocks.
+
+Commit `91d2277` migrated `test_vim9_expr.vim:4190:121912` in both contexts.
+A line-ending `->` retains the left expression, operator, and zero-width
+missing callable without consuming the next physical line; Vim9 script reports
+E260, while the compiled `def` context reports E488.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
