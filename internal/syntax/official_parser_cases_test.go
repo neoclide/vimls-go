@@ -144,7 +144,7 @@ func TestOfficialVimParserCases(t *testing.T) {
 	}
 }
 
-func TestOfficialVimParserContainerTypeFailures(t *testing.T) {
+func TestOfficialVimParserTypeFailures(t *testing.T) {
 	// These failures are statically decided by the v9.2.1015 type parser. Keep
 	// execution, type-checking, and other unclassified failures out of this
 	// allowlist until their parser phase is proven independently.
@@ -166,6 +166,9 @@ func TestOfficialVimParserContainerTypeFailures(t *testing.T) {
 		"src/testdir/test_vim9_func.vim:2462:55226/script":         "vim/E1008",
 		"src/testdir/test_vim9_func.vim:2464:55349/script":         "vim/E1008",
 		"src/testdir/test_vim9_func.vim:2481:55796/script":         "vim/E1008",
+		"src/testdir/test_vim9_func.vim:2885:66191/def":            "vim/E1068",
+		"src/testdir/test_vim9_func.vim:2886:66262/def":            "vim/E1069",
+		"src/testdir/test_vim9_func.vim:2888:66507/def":            "vim/E1069",
 	}
 
 	corpus := readOfficialParserCases(t)

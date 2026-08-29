@@ -136,6 +136,7 @@ func (p *typeParser) parseType() *Type {
 		p.skipSpace()
 		for p.offset < len(p.source) && p.source[p.offset] != '>' {
 			node.Arguments = append(node.Arguments, p.parseType())
+			spaceBeforeComma := false
 			if name == "tuple" {
 				// A tuple type has stricter separator whitespace than the
 				// other generic types.  Keep the argument node's end so a
@@ -144,6 +145,7 @@ func (p *typeParser) parseType() *Type {
 				p.skipSpace()
 				if p.offset < len(p.source) && p.source[p.offset] == ',' {
 					if p.offset > argumentEnd {
+						spaceBeforeComma = true
 						p.diagnostics = append(p.diagnostics, Diagnostic{
 							Code: "vim/E1068", Message: "no white space allowed before ','",
 							Span: p.span(argumentEnd, p.offset+1),
@@ -162,7 +164,7 @@ func (p *typeParser) parseType() *Type {
 				break
 			}
 			p.offset++
-			if name == "tuple" && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
+			if name == "tuple" && !spaceBeforeComma && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
 				p.diagnostics = append(p.diagnostics, Diagnostic{
 					Code: "vim/E1069", Message: "white space required after ','",
 					Span: p.span(p.offset-1, p.offset),
@@ -201,7 +203,8 @@ func (p *typeParser) parseType() *Type {
 				node.Arguments = append(node.Arguments, p.parseType())
 				argumentEnd := node.Arguments[len(node.Arguments)-1].Span.End - p.base
 				p.skipSpace()
-				if p.offset < len(p.source) && p.source[p.offset] == ',' && p.offset > argumentEnd {
+				spaceBeforeComma := p.offset < len(p.source) && p.source[p.offset] == ',' && p.offset > argumentEnd
+				if spaceBeforeComma {
 					p.diagnostics = append(p.diagnostics, Diagnostic{
 						Code: "vim/E1068", Message: "no white space allowed before ','",
 						Span: p.span(argumentEnd, p.offset+1),
@@ -216,7 +219,7 @@ func (p *typeParser) parseType() *Type {
 					break
 				}
 				p.offset++
-				if p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset]) {
+				if !spaceBeforeComma && (p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset])) {
 					p.diagnostics = append(p.diagnostics, Diagnostic{
 						Code: "vim/E1069", Message: "white space required after ','",
 						Span: p.span(p.offset-1, p.offset),
