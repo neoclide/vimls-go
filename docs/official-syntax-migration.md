@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 537 (`b5cf4fb`)
+- Current parser-negative syntax assertions: 549 (`0f70449`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -129,6 +129,8 @@ command case, making the current split 535 migrated, zero ready, and 534
 pending-fix.
 Commit `b5cf4fb` migrated both missing inline-lambda heredoc-marker contexts,
 making the current split 537 migrated, zero ready, and 532 pending-fix.
+Commit `0f70449` verified and migrated all 12 invalid unary-chain variants,
+making the current split 549 migrated, zero ready, and 520 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -161,11 +163,11 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-233 migrated and 92 pending-fix.
+245 migrated and 80 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 43 | 0 | 41 |
+| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 55 | 0 | 29 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
@@ -326,9 +328,15 @@ the AST.
 
 Reconciliation against the exact expected map corrected two pre-existing row
 counts without changing the Group A total. `4328:125740/vim9-script` was
-already migrated as E111, so `expr-incomplete-delimiter` has 43 migrated and
-41 pending variants. `4196:122230/script` remains the one pending
+already migrated as E111, so before the next batch `expr-incomplete-delimiter`
+had 43 migrated and 41 pending variants. `4196:122230/script` remains the one pending
 `expr-dict-delimiter` variant, so that row has 22 migrated and one pending.
+
+Commit `0f70449` migrated the 12 `expr-incomplete-delimiter` variants at call
+lines 3776, 3781, 3786, 3791, 3796, and 3801. The existing expression parser
+already reports one E15 for each invalid `++`, `--`, and mixed or separated
+unary-sign chain in both compiled and script contexts, so no production change
+or duplicate fixture was needed.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
