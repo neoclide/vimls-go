@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 718 (`a1d50fc`)
+- Current parser-negative syntax assertions: 720 (`a535cff`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -203,6 +203,8 @@ completed the three assignment-shape cases and the remaining member-dot case,
 making the authoritative current split 717 migrated, zero ready, and 351
 pending-fix. Commit `a1d50fc` migrated the missing call-argument case, making
 the authoritative current split 718 migrated, zero ready, and 350 pending-fix.
+Commit `a535cff` completed the two aggregate placement cases, making the
+authoritative current split 720 migrated, zero ready, and 348 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -524,13 +526,13 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-interface-dialect-body` | 3 | 3 | 0 | 0 |
 | `B-new-static-abstract` | 8 | 8 | 0 | 0 |
 | `B-implements` | 2 | 2 | 0 | 0 |
-| `B-class-interface-scope` | 2 | 0 | 0 | 2 |
+| `B-class-interface-scope` | 2 | 2 | 0 | 0 |
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **160** | **0** | **31** |
+| **Total** | **191** | **162** | **0** | **29** |
 
-This table reflects the current parser through `a1d50fc`. Revalidation corrected
+This table reflects the current parser through `a535cff`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -627,6 +629,12 @@ member and index targets report E1087 while retaining their expression-shaped
 target and initializer AST. `super .ToString()` reports E1356 from the current
 expression position, while retaining the member, call, concatenation tail, and
 enclosing method; no file-wide text search is used.
+
+Commit `a535cff` completed `B-class-interface-scope`. A Vim9 `class` or
+`interface` nested anywhere inside a `def` or legacy `function` reports E1429
+or E1436 from the existing block-parent chain. The nested aggregate AST and
+block are still built, so its terminator, the outer function terminator, and
+following commands remain available after recovery.
 
 The 13 pending `B-trailing-characters` cases split into three implementation
 paths. Six declaration/heredoc cases are
