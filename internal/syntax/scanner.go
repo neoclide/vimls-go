@@ -1974,6 +1974,15 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	if len(command.EnumValues) > 0 {
 		return
 	}
+	if command.Dialect == Vim9 && len(command.Modifiers) > 0 {
+		switch command.Canonical {
+		case "endif", "endfor", "endwhile", "try", "catch", "finally", "endtry":
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1176", Message: "misplaced command modifier", Span: command.Modifiers[0].Span,
+			})
+			return
+		}
+	}
 	diagnoseEnumEndTrailingCharacters(file, command)
 	diagnoseEnumAbstractMember(file, command)
 	if isMappingCommand(command.Canonical) {
