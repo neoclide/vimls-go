@@ -84,13 +84,13 @@ func buildBlocks(file *File) {
 						classModifierExpression = true
 					}
 				}
-				if command.Canonical != "endclass" && !isDirectAggregateMember(command) && !classModifierExpression {
+				if command.Canonical != "endclass" && command.Canonical != "endinterface" && !isDirectAggregateMember(command) && !classModifierExpression {
 					command.Block = blockIndex
 					classBodyCommandDiagnostic(file, command)
 					continue
 				}
 			}
-			if file.Blocks[blockIndex].Kind == BlockInterface {
+			if file.Blocks[blockIndex].Kind == BlockInterface && command.Canonical != "endclass" {
 				if command.Canonical == "def" {
 					command.Block = blockIndex
 					interfaceMethod[blockIndex] = true
@@ -186,6 +186,25 @@ func buildBlocks(file *File) {
 				if stackHasInvalidFor(stack, invalidFor) {
 					command.Block = stack[len(stack)-1]
 					continue
+				}
+				// Vim9 reports a mismatched aggregate closer as E476 while
+				// retaining the active aggregate. Ordinary unmatched closers keep
+				// the generic recovery diagnostic.
+				if command.Dialect == Vim9 && len(stack) > 0 {
+					topKind := file.Blocks[stack[len(stack)-1]].Kind
+					if (topKind == BlockClass && closeKind == BlockInterface) ||
+						(topKind == BlockInterface && closeKind == BlockClass) {
+						expected := "endclass"
+						if topKind == BlockInterface {
+							expected = "endinterface"
+						}
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{
+							Code: "vim/E476", Message: "Invalid command: " + command.Canonical + ", expected " + expected, Span: command.Name,
+						})
+						command.Block = stack[len(stack)-1]
+						recoveryBlocks[stack[len(stack)-1]] = true
+						continue
+					}
 				}
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-end", Message: "end command has no matching block", Span: command.Name})
 				continue
