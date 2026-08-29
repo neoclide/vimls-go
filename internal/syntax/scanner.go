@@ -1981,6 +1981,11 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	if globalCommand(command.Canonical) {
+		if boundary := command.boundaryExpression; boundary != nil && len(boundary.diagnostics) > 0 {
+			file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
+			command.boundaryExpression = nil
+			return
+		}
 		if body, ok := globalCommandBodySpan(file.Source, command.Argument.Start, command.Argument.End); ok {
 			command.Embedded = parseEmbeddedCommandList(file, body, command.baseDialect, depth)
 		}
