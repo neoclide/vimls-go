@@ -128,6 +128,13 @@ func newExpressionBoundary(argument Span, expression *Expression, diagnostics []
 
 func appendTrailingExpressionDiagnostic(diagnostics []Diagnostic, base, consumed, length int) []Diagnostic {
 	if consumed < length {
+		for _, diagnostic := range diagnostics {
+			if diagnostic.Code == "vim/E1004" {
+				// Vim stops the current expression at an operator-spacing error.
+				// Keep the remaining bytes opaque instead of reporting a cascade.
+				return diagnostics
+			}
+		}
 		diagnostics = append(diagnostics, Diagnostic{Code: "vimls/trailing-expression", Message: "unexpected text after expression", Span: Span{Start: base + consumed, End: base + consumed + 1}})
 	}
 	return diagnostics
