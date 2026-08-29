@@ -93,6 +93,9 @@ func parseSource(source string, initial Dialect) *File {
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
 						Code: "vim/E1039", Message: "vim9script must be the first command in the file", Span: command.Name,
 					})
+					if len(dialectStack) == 0 {
+						active = Vim9
+					}
 				}
 			case "def":
 				dialectStack = append(dialectStack, active)
@@ -1154,7 +1157,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			builtIn = false
 			metadata = vimdata.Command{Flags: vimdata.ExpressionArgument}
 		}
-		if builtIn && dialect == Vim9 && metadata.Flags&vimdata.ExactInVim9 != 0 && typedName != canonical {
+		invalidCommandAbbreviation := builtIn && dialect == Vim9 && metadata.Flags&vimdata.ExactInVim9 != 0 && typedName != canonical
+		if invalidCommandAbbreviation {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1065", Message: "command cannot be shortened in Vim9 script", Span: Span{Start: nameStart, End: nameEnd}})
 		}
 		nameSpan := Span{Start: nameStart, End: nameEnd}
@@ -1191,7 +1195,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			scanMetadata.Flags |= vimdata.ExpressionArgument
 		}
 		parsedCommand := Command{
-			Kind: kind, Dialect: dialect, baseDialect: baseDialect, detailsOpaque: invalidModifierRange, Span: Span{Start: commandStart, End: nameEnd}, Range: commandRange,
+			Kind: kind, Dialect: dialect, baseDialect: baseDialect, detailsOpaque: invalidModifierRange || invalidCommandAbbreviation, Span: Span{Start: commandStart, End: nameEnd}, Range: commandRange,
 			Name: nameSpan, TypedName: typedName, Canonical: canonical, Modifiers: parsedModifiers, Bang: bang,
 			Argument: Span{Start: argumentStart, End: end}, Block: -1,
 		}
