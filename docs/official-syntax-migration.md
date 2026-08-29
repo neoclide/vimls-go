@@ -332,6 +332,9 @@ migrated, zero ready, and 158 pending-fix.
 Commit `b668b6e` migrated the already-supported Vim9 `#{` comment diagnostic,
 making the authoritative current split 911 migrated, zero ready, and 157
 pending-fix.
+Commit `57432be` migrated the two Vim9 type-alias forms missing `=`, making
+the authoritative current split 913 migrated, zero ready, and 155
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -924,13 +927,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 82 | 0 | 33 |
+| `C-EXCMD` | 115 | 84 | 0 | 31 |
 | `C-EXPR` | 19 | 15 | 0 | 4 |
 | `C-GENERIC` | 109 | 60 | 0 | 49 |
 | `C-IMPORT` | 14 | 11 | 0 | 3 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **279** | **0** | **90** |
+| **Total** | **369** | **281** | **0** | **88** |
 
 ```text
 C-EXPR
