@@ -51,8 +51,7 @@ func parseSource(source string, initial Dialect) *File {
 	file := &File{Dialect: initial, Source: source}
 	active := initial
 	scriptVersion := uint8(1)
-	prologue, hasVim9Prologue := findVim9ScriptPrologue(source)
-	vim9Prologue := initial == Vim9 && hasVim9Prologue && vim9ScriptArgumentsValid(source, prologue.Argument)
+	vim9Prologue := initial == Vim9 && startsWithVim9Script(source)
 	if vim9Prologue {
 		active = Legacy
 	}
@@ -81,15 +80,10 @@ func parseSource(source string, initial Dialect) *File {
 			}
 			switch command.Canonical {
 			case "vim9script":
-				if code, message, span, valid := vim9ScriptArgumentDiagnostic(file.Source, command.Argument); !valid {
-					if hasVim9Prologue && command.Name == prologue.Name {
+				if vim9Prologue {
+					if code, message, span, valid := vim9ScriptArgumentDiagnostic(file.Source, command.Argument); !valid {
 						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
-					} else {
-						file.Diagnostics = append(file.Diagnostics, Diagnostic{
-							Code: "vim/E1039", Message: "vim9script must be the first command in the file", Span: command.Name,
-						})
 					}
-				} else if vim9Prologue {
 					active = Vim9
 					vim9Prologue = false
 				} else if initial == Legacy {
@@ -825,11 +819,6 @@ func vim9ScriptArgumentDiagnostic(source string, argument Span) (string, string,
 		start = skipSpace(source, start, end)
 	}
 	return "", "", Span{}, true
-}
-
-func vim9ScriptArgumentsValid(source string, argument Span) bool {
-	_, _, _, valid := vim9ScriptArgumentDiagnostic(source, argument)
-	return valid
 }
 
 func scanCommands(file *File, start, end int, baseDialect Dialect) {
@@ -4389,8 +4378,8 @@ func expressionCommand(name string) bool {
 }
 
 func startsWithVim9Script(source string) bool {
-	command, found := findVim9ScriptPrologue(source)
-	return found && vim9ScriptArgumentsValid(source, command.Argument)
+	_, found := findVim9ScriptPrologue(source)
+	return found
 }
 
 func findVim9ScriptPrologue(source string) (Command, bool) {

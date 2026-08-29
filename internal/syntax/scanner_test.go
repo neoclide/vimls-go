@@ -59,15 +59,15 @@ func TestVim9ScriptArgumentsAndRecovery(t *testing.T) {
 	for _, test := range tests {
 		source := "vim9script " + test.argument + "\nvar after = 1\n"
 		file := Parse(source)
-		if file.Dialect != Legacy || len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+		if file.Dialect != Vim9 || len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
 			t.Fatalf("invalid vim9script %q, file = %#v", test.argument, file)
 		}
 		diagnostic := file.Diagnostics[0]
 		if diagnostic.Span != (Span{Start: test.start, End: test.start + len(test.span)}) || file.Text(diagnostic.Span) != test.span {
 			t.Fatalf("invalid vim9script %q diagnostic span = %#v (%q), want %q", test.argument, diagnostic.Span, file.Text(diagnostic.Span), test.span)
 		}
-		if len(file.Commands) != 2 || file.Commands[0].Dialect != Legacy || file.Commands[1].Canonical != "var" || file.Commands[1].Dialect != Legacy {
-			t.Fatalf("invalid vim9script %q did not recover in legacy mode: %#v", test.argument, file.Commands)
+		if len(file.Commands) != 2 || file.Commands[0].Dialect != Legacy || file.Commands[1].Canonical != "var" || file.Commands[1].Dialect != Vim9 {
+			t.Fatalf("invalid vim9script %q did not recover in Vim9 mode: %#v", test.argument, file.Commands)
 		}
 	}
 
@@ -77,7 +77,7 @@ func TestVim9ScriptArgumentsAndRecovery(t *testing.T) {
 	}
 
 	guarded := Parse("if !has('vim9script')\n  finish\nendif\nvim9script noclears\nvar after = 1\n")
-	if guarded.Dialect != Legacy || len(guarded.Diagnostics) != 1 || guarded.Diagnostics[0].Code != "vim/E475" || len(guarded.Commands) != 5 || guarded.Commands[4].Dialect != Legacy {
+	if guarded.Dialect != Vim9 || len(guarded.Diagnostics) != 1 || guarded.Diagnostics[0].Code != "vim/E475" || len(guarded.Commands) != 5 || guarded.Commands[4].Dialect != Vim9 {
 		t.Fatalf("invalid guarded vim9script recovery = %#v", guarded)
 	}
 }
