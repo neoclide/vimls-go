@@ -2796,6 +2796,15 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 	case "unlet", "lockvar", "unlockvar":
 		parseVariableTargets(file, command)
+	case "menutranslate":
+		if command.Dialect == Vim9 {
+			start := skipSpace(source, 0, len(source))
+			if strings.HasPrefix(source[start:], "clear#") {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E474", Message: "invalid argument", Span: Span{Start: command.Argument.Start + start + len("clear"), End: command.Argument.End},
+				})
+			}
+		}
 	case "if", "elseif", "while":
 		expression, diagnostics, ok := takeBoundaryExpression(command)
 		if !ok {
