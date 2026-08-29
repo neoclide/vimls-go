@@ -893,8 +893,13 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 				start = skipSpaceToken(file, start, end)
 			}
 		}
+		missingVim9ModifierCommand := baseDialect == Vim9 && len(parsedModifiers) > 0 && (start >= end || start < end && isCommentStart(file.Source, start, start, end, Vim9, vimdata.Command{}))
 		emptyPrefix := commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < end && file.Source[commandStart] == ':'
 		if start < end && file.Source[start] == '|' || start >= end && emptyPrefix {
+			if missingVim9ModifierCommand {
+				last := parsedModifiers[len(parsedModifiers)-1]
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
+			}
 			file.Commands = append(file.Commands, Command{
 				Kind: CommandEmpty, Dialect: dialect, baseDialect: baseDialect, Span: Span{Start: commandStart, End: start}, Range: commandRange, Modifiers: parsedModifiers, Block: -1,
 			})
@@ -906,9 +911,13 @@ func scanCommands(file *File, start, end int, baseDialect Dialect) {
 			}
 			return
 		}
-		if start < end && isCommentStart(file.Source, start, start, end, dialect, vimdata.Command{}) {
+		if start < end && (isCommentStart(file.Source, start, start, end, dialect, vimdata.Command{}) || missingVim9ModifierCommand) {
 			file.Tokens = append(file.Tokens, Token{Kind: TokenComment, Span: Span{Start: start, End: end}})
 			if commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < start {
+				if missingVim9ModifierCommand {
+					last := parsedModifiers[len(parsedModifiers)-1]
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
+				}
 				file.Commands = append(file.Commands, Command{
 					Kind: CommandEmpty, Dialect: dialect, Span: Span{Start: commandStart, End: start},
 					Range: commandRange, Modifiers: parsedModifiers, Block: -1,
