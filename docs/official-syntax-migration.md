@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 802 (`c48d396`)
+- Current parser-negative syntax assertions: 803 (`7cbd3f2`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -260,6 +260,9 @@ same recovery, making the authoritative current split 801 migrated, zero ready,
 and 267 pending-fix.
 Commit `c48d396` migrated the E1185 unterminated redirection failure, making the
 authoritative current split 802 migrated, zero ready, and 266 pending-fix.
+Commit `7cbd3f2` migrated the E116 incomplete generic-call argument failure,
+making the authoritative current split 803 migrated, zero ready, and 265
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -853,12 +856,12 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 52 | 0 | 63 |
-| `C-EXPR` | 19 | 0 | 0 | 19 |
+| `C-EXPR` | 19 | 1 | 0 | 18 |
 | `C-GENERIC` | 109 | 42 | 0 | 67 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **170** | **0** | **199** |
+| **Total** | **369** | **171** | **0** | **198** |
 
 ```text
 C-EXPR
@@ -1059,6 +1062,11 @@ Commit `c48d396` migrated E1185 at `C:1990:41128/def`. Block construction now
 tracks an open `redir =>` or `redir =>>` in the nearest Vim9 `def`, clears it on
 `redir END`, and reports the missing terminator at `enddef` without affecting
 top-level or legacy redirection.
+
+Commit `7cbd3f2` migrated E116 at `G:304:6695/script`. The retained
+`ExpressionCall` and generic type arguments now make the missing call delimiter
+unambiguous, so top-level Vim9 recovery maps it to E116 while ordinary missing
+parentheses retain their existing E110 behavior.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
