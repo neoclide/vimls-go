@@ -400,6 +400,42 @@ func TestVim9LambdaCommandBlock(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9InlineFunctionSameLinePayload(t *testing.T) {
+	for _, source := range []string{
+		"def Func()\nmap([1, 2], (k, v) => { redrawt })\nenddef\ndefcompile\nvar after = 1\n",
+		"vim9script\nmap([1, 2], (k, v) => { redrawt })\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E488" || file.Diagnostics[0].Message != "trailing characters" || !strings.HasPrefix(file.Text(file.Diagnostics[0].Span), "redrawt") {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		var call *Expression
+		for _, command := range file.Commands {
+			if len(command.Expressions) == 1 && command.Expressions[0].Kind == ExpressionCall {
+				call = command.Expressions[0]
+				break
+			}
+		}
+		if call == nil || len(call.Children) != 3 || call.Children[1].Kind != ExpressionList {
+			t.Fatalf("call = %#v", call)
+		}
+		lambda := call.Children[2]
+		if lambda.Kind != ExpressionLambda || len(lambda.Parameters) != 2 || lambda.Parameters[0].Name.Start == lambda.Parameters[0].Name.End || lambda.Operator.Start == lambda.Operator.End || lambda.LambdaBody == nil || len(lambda.LambdaBody.Commands) != 0 || len(lambda.Children) == 0 || lambda.Children[len(lambda.Children)-1].Kind != ExpressionLambdaBlock {
+			t.Fatalf("lambda = %#v", lambda)
+		}
+		foundAfter := false
+		for _, command := range file.Commands {
+			if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+				foundAfter = true
+			}
+		}
+		if !foundAfter {
+			t.Fatalf("following command was swallowed: %#v", file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+}
+
 func TestOfficialVim9InlineFunctionMissingBrace(t *testing.T) {
 	for _, source := range []string{
 		"def Func()\nvar Func = (nr: number): int => {\n  return nr\nenddef\ndefcompile\nvar after = 1\n",

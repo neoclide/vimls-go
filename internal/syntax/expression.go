@@ -1035,6 +1035,37 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 		}
 		if blockEnd >= 0 {
 			bodyStart := blockStart + 1
+			lineEnd := bodyStart
+			for lineEnd < len(p.source) && p.source[lineEnd] != '\n' {
+				lineEnd++
+			}
+			payloadStart := bodyStart
+			for payloadStart < lineEnd && (p.source[payloadStart] == ' ' || p.source[payloadStart] == '\t' || p.source[payloadStart] == '\r') {
+				payloadStart++
+			}
+			if payloadStart < lineEnd && p.source[payloadStart] != '#' {
+				// An inline-function block may only have a comment after its
+				// opening brace.  Keep an empty block and leave this same-line
+				// payload opaque instead of treating it as a lambda command.
+				body := (Vim9Parser{}).Parse("")
+				bodyOffset, ok := safeLambdaOffset(p.base, bodyStart)
+				if !ok {
+					bodyOffset = 0
+				}
+				rebaseLambdaFile(body, p.source, bodyOffset)
+				lambda.LambdaBody = body
+				block := &Expression{Kind: ExpressionLambdaBlock, Span: Span{Start: p.base + blockStart, End: p.base + payloadStart}}
+				lambda.Children = append(lambda.Children, block)
+				lambda.Span = Span{Start: open.span.Start, End: block.Span.End}
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters", Span: Span{Start: p.base + payloadStart, End: p.base + blockEnd},
+				})
+				closingEnd := p.base + blockEnd + 1
+				for p.current().kind != expressionEOF && p.current().span.End <= closingEnd {
+					p.advance()
+				}
+				return lambda, true
+			}
 			body := (Vim9Parser{}).Parse(p.source[bodyStart:blockEnd])
 			// Vim9Parser parses the block slice independently.  Rebase the
 			// complete result once before exposing it: commands, tokens, blocks,
