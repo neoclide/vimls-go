@@ -386,6 +386,7 @@ func parseSource(source string, initial Dialect) *File {
 			parseLogicalCommandDetails(file, &file.Commands[index])
 		}
 	}
+	suppressClassBodyCommandDiagnostics(file)
 	buildAggregateMembers(file)
 	suppressInvalidDefMissingEnds(file)
 	suppressInvalidInterfaceInitializers(file)

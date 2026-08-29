@@ -1,18 +1,83 @@
 package syntax
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 func buildBlocks(file *File) {
+	const (
+		classMethodAbstract uint8 = iota + 1
+		classMethodRecovery
+	)
 	var stack []int
 	enumValuesOpen := make(map[int]bool)
 	invalidFor := make(map[int]bool)
 	recoveryBlocks := make(map[int]bool)
 	interfaceMethod := make(map[int]bool)
 	interfaceMethodInvalid := make(map[int]bool)
+	var classMethods map[int]uint8
 	for commandIndex := range file.Commands {
 		command := &file.Commands[commandIndex]
 		if len(stack) > 0 {
 			blockIndex := stack[len(stack)-1]
+			if file.Blocks[blockIndex].Kind == BlockClass && command.Dialect == Vim9 {
+				classMethod := classMethods[blockIndex]
+				if classMethod == classMethodRecovery {
+					command.Block = blockIndex
+					if command.Canonical == "endclass" {
+						delete(classMethods, blockIndex)
+						// Let the ordinary closer pop the class block.
+					} else {
+						if command.Canonical == "enddef" {
+							delete(classMethods, blockIndex)
+						}
+						continue
+					}
+				}
+				if classMethod == classMethodAbstract {
+					if command.Canonical == "endclass" || isDirectAggregateMember(command) {
+						delete(classMethods, blockIndex)
+					} else {
+						classMethods[blockIndex] = classMethodRecovery
+						classBodyCommandDiagnostic(file, command)
+						command.Block = blockIndex
+						continue
+					}
+				}
+				if command.Canonical == "def" && command.Argument.Start == command.Argument.End {
+					command.Block = blockIndex
+					if classMethods == nil {
+						classMethods = make(map[int]uint8)
+					}
+					classMethods[blockIndex] = classMethodRecovery
+					classBodyCommandDiagnostic(file, command)
+					continue
+				}
+				if command.Canonical == "def" {
+					for _, modifier := range command.Modifiers {
+						if modifier.Name == "abstract" {
+							if classMethods == nil {
+								classMethods = make(map[int]uint8)
+							}
+							classMethods[blockIndex] = classMethodAbstract
+							break
+						}
+					}
+				}
+				classModifierExpression := false
+				if command.Kind == CommandExpression && len(command.Modifiers) > 0 {
+					switch command.Modifiers[0].Name {
+					case "abstract", "public", "static":
+						classModifierExpression = true
+					}
+				}
+				if command.Canonical != "endclass" && !isDirectAggregateMember(command) && !classModifierExpression {
+					command.Block = blockIndex
+					classBodyCommandDiagnostic(file, command)
+					continue
+				}
+			}
 			if file.Blocks[blockIndex].Kind == BlockInterface {
 				if command.Canonical == "def" {
 					command.Block = blockIndex
@@ -278,6 +343,40 @@ func isDirectAggregateMember(command *Command) bool {
 	default:
 		return false
 	}
+}
+
+func classBodyCommandDiagnostic(file *File, command *Command) {
+	start := command.Span.Start
+	end := command.Span.End
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1318", Message: "Not a valid command in a class: " + file.Source[start:end], Span: Span{Start: start, End: end}})
+}
+
+func suppressClassBodyCommandDiagnostics(file *File) {
+	var invalid []Span
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1318" {
+			invalid = append(invalid, diagnostic.Span)
+		}
+	}
+	if len(invalid) == 0 {
+		return
+	}
+	sort.Slice(invalid, func(left, right int) bool {
+		return invalid[left].End < invalid[right].End
+	})
+	kept := file.Diagnostics[:0]
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code != "vim/E1318" {
+			index := sort.Search(len(invalid), func(index int) bool {
+				return invalid[index].End >= diagnostic.Span.End
+			})
+			if index < len(invalid) && diagnostic.Span.Start >= invalid[index].Start {
+				continue
+			}
+		}
+		kept = append(kept, diagnostic)
+	}
+	file.Diagnostics = kept
 }
 
 func suppressInvalidDefMissingEnds(file *File) {
