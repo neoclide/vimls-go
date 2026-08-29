@@ -355,13 +355,33 @@ func (p *expressionParser) parsePrefix() *Expression {
 	}
 	if p.dialect == Vim9 && token.text == "<" {
 		openOffset := token.span.Start - p.base
-		closeOffset := findGenericTypeEnd(p.source, openOffset)
-		if closeOffset > openOffset+1 && p.advancePastSourceEnd(p.base+closeOffset+1) {
-			typeStart := openOffset + 1
-			typeNode, diagnostics := parseTypeAt(p.source[typeStart:closeOffset], p.base+typeStart)
-			p.diagnostics = append(p.diagnostics, diagnostics...)
-			value := p.parse(90)
-			return &Expression{Kind: ExpressionCast, Span: Span{Start: token.span.Start, End: value.Span.End}, Operator: Span{Start: token.span.Start, End: p.base + closeOffset + 1}, Value: typeNode.Name, CastType: typeNode, Children: []*Expression{value}}
+		typeStart := openOffset + 1
+		if typeStart < len(p.source) {
+			first, _ := utf8.DecodeRuneInString(p.source[typeStart:])
+			if first == '_' || unicode.IsLetter(first) {
+				typeParser := typeParser{source: p.source[typeStart:], base: p.base + typeStart}
+				typeNode := typeParser.parseType()
+				p.diagnostics = append(p.diagnostics, typeParser.diagnostics...)
+				closeOffset := typeStart + typeParser.offset
+				if closeOffset < len(p.source) && p.source[closeOffset] == '>' && typeNode.Span.End == p.base+closeOffset && p.advancePastSourceEnd(p.base+closeOffset+1) {
+					value := p.parse(90)
+					return &Expression{Kind: ExpressionCast, Span: Span{Start: token.span.Start, End: value.Span.End}, Operator: Span{Start: token.span.Start, End: p.base + closeOffset + 1}, Value: typeNode.Name, CastType: typeNode, Children: []*Expression{value}}
+				}
+				code := "vim/E1104"
+				message := "missing >"
+				diagnosticSpan := Span{Start: typeNode.Span.End, End: typeNode.Span.End}
+				if closeOffset < len(p.source) && p.source[closeOffset] == '>' {
+					code = "vim/E1068"
+					message = "no white space allowed before '>'"
+					diagnosticSpan = Span{Start: typeNode.Span.End, End: p.base + closeOffset + 1}
+				}
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: diagnosticSpan})
+				for p.current().kind != expressionEOF {
+					p.advance()
+				}
+				operator := Span{Start: token.span.Start, End: typeNode.Span.End}
+				return &Expression{Kind: ExpressionCast, Span: operator, Operator: operator, Value: typeNode.Name, CastType: typeNode}
+			}
 		}
 	}
 	switch token.kind {

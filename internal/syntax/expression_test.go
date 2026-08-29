@@ -487,6 +487,34 @@ func TestVim9ExpressionSourceRules(t *testing.T) {
 	}
 }
 
+func TestVim9IncompleteTypeCast(t *testing.T) {
+	expression, diagnostics := (Vim9ExpressionParser{}).Parse(`<number 123`)
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1104" || diagnostics[0].Span != (Span{Start: 7, End: 7}) {
+		t.Fatalf("diagnostics = %#v", diagnostics)
+	}
+	if expression.Kind != ExpressionCast || expression.CastType == nil || expression.CastType.Kind != TypeNamed || expression.CastType.Name != "number" || expression.Operator != (Span{Start: 0, End: 7}) || len(expression.Children) != 0 {
+		t.Fatalf("expression = %#v", expression)
+	}
+
+	file := Parse("vim9script\nvar x = <number 123\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1104" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 3 || file.Commands[1].Declaration == nil || file.Commands[1].Declaration.Initializer == nil || file.Commands[1].Declaration.Initializer.Kind != ExpressionCast || file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	_, diagnostics = (Vim9ExpressionParser{}).Parse(`<number >123`)
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1068" {
+		t.Fatalf("space before > diagnostics = %#v", diagnostics)
+	}
+	legacy, diagnostics := (LegacyExpressionParser{}).Parse(`<number 123`)
+	if legacy.Kind == ExpressionCast || len(diagnostics) == 0 {
+		t.Fatalf("legacy = %#v, diagnostics = %#v", legacy, diagnostics)
+	}
+}
+
 func TestVim9LogicalAndOptionExpressions(t *testing.T) {
 	logical, diagnostics := (Vim9ExpressionParser{}).Parse("left == 1 && right == 2")
 	if len(diagnostics) != 0 || logical.Kind != ExpressionBinary || logical.Value != "&&" {
