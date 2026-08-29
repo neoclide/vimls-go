@@ -53,6 +53,18 @@ Implementation work consumes stable rule-group IDs from this ledger. It may
 combine groups that touch the same parser path, but it must not start a new
 source-research pass for cases already classified here.
 
+After changing the expected map, run the migration report instead of counting
+keys or source groups by hand:
+
+```sh
+go test -mod=readonly ./internal/syntax \
+  -run '^TestOfficialVimParserMigrationReport$' -count=1 -v
+```
+
+The report validates that every migrated key still exists in the pinned
+artifact and prints the authoritative total plus Group A-D counts in one
+machine-readable line.
+
 ## Phase accounting
 
 The four source-group reports account for every failure variant in the pinned
