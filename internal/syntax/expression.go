@@ -261,6 +261,21 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			}
 			break
 		}
+		if p.dialect == Vim9 && token.text == "." && token.span.Start == left.Span.End {
+			member := p.peek(1)
+			if (member.kind == expressionIdentifier || member.kind == expressionNumber) && member.span.Start > token.span.End && p.onlyWhitespace(token.span.End, member.span.Start) {
+				p.advance()
+				p.advance()
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vimls/missing-member", Message: "member name cannot follow white space", Span: Span{Start: token.span.End, End: member.span.Start},
+				})
+				left = &Expression{
+					Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: member.span.End},
+					Operator: token.span, Value: member.text, Children: []*Expression{left},
+				}
+				continue
+			}
+		}
 		missingMember := token.text == "." && token.span.Start == left.Span.End && p.peek(1).kind == expressionEOF
 		if (token.text == "(" && (token.span.Start == left.Span.End || legacyCall)) || token.text == "[" && token.span.Start == left.Span.End || token.text == "." && (p.isMember(left) || missingMember) || token.text == "->" && p.isMethod(left) {
 			if 100 < minimumBinding {
@@ -1485,6 +1500,7 @@ func (p *expressionParser) parseList() *Expression {
 	var children []*Expression
 	end := open.span.End
 	malformed := false
+	diagnosticsStart := len(p.diagnostics)
 	for p.current().kind != expressionEOF && p.current().text != "]" {
 		child := p.parse(0)
 		children = append(children, child)
@@ -1514,7 +1530,13 @@ func (p *expressionParser) parseList() *Expression {
 		end = p.current().span.End
 		p.advance()
 	} else if !malformed {
-		p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-list-end", Message: "Missing end of List ']'", Span: p.current().span})
+		missingMember := false
+		for _, diagnostic := range p.diagnostics[diagnosticsStart:] {
+			missingMember = missingMember || diagnostic.Code == "vimls/missing-member"
+		}
+		if !missingMember {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-list-end", Message: "Missing end of List ']'", Span: p.current().span})
+		}
 	}
 	return &Expression{Kind: ExpressionList, Span: Span{Start: open.span.Start, End: end}, Children: children}
 }

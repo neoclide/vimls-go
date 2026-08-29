@@ -749,6 +749,69 @@ func TestOfficialListDictRecovery(t *testing.T) {
 	}
 }
 
+func TestOfficialVim9MemberDotRecovery(t *testing.T) {
+	// Vim v9.2.1015 src/testdir/test_vim9_expr.vim:2617 and 4475.
+	list := Parse("vim9script\ndef Main()\n  var values = ['x'.\nenddef\nvar after = 1\n")
+	if len(list.Diagnostics) != 1 || list.Diagnostics[0].Code != "vim/E1127" {
+		t.Fatalf("list diagnostics = %#v", list.Diagnostics)
+	}
+	values := list.Commands[2].Declaration
+	if values == nil || values.Initializer == nil || values.Initializer.Kind != ExpressionList || len(values.Initializer.Children) != 1 {
+		t.Fatalf("values = %#v", values)
+	}
+	member := values.Initializer.Children[0]
+	if member.Kind != ExpressionMember || len(member.Children) != 2 || member.Children[1].Kind != ExpressionMissing || list.Text(member.Operator) != "." {
+		t.Fatalf("incomplete member = %#v", member)
+	}
+	if after := list.Commands[4].Declaration; after == nil || list.Text(after.Name) != "after" || list.Text(after.Initializer.Span) != "1" {
+		t.Fatalf("following declaration = %#v", list.Commands[4])
+	}
+	assertFileSpans(t, list)
+
+	tests := []struct {
+		name   string
+		source string
+		code   string
+	}{
+		{
+			name:   "def",
+			source: "vim9script\ndef Main()\n  assert_equal(33, d.\n        one)\nenddef\nvar after = 1\n",
+			code:   "vim/E1127",
+		},
+		{
+			name:   "vim9-script",
+			source: "vim9script\nassert_equal(33, d.\n      one)\nvar after = 1\n",
+			code:   "vim/E116",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			var call *Expression
+			var after *Declaration
+			for index := range file.Commands {
+				command := &file.Commands[index]
+				if len(command.Expressions) == 1 && command.Expressions[0].Kind == ExpressionCall {
+					call = command.Expressions[0]
+				}
+				if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+					after = command.Declaration
+				}
+			}
+			if call == nil || len(call.Children) != 3 || call.Children[2].Kind != ExpressionMember || call.Children[2].Value != "one" || !strings.Contains(file.Text(call.Children[2].Span), "d.\n") {
+				t.Fatalf("call = %#v", call)
+			}
+			if after == nil || file.Text(after.Initializer.Span) != "1" {
+				t.Fatalf("following declaration = %#v", after)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestVim9LogicalAndOptionExpressions(t *testing.T) {
 	logical, diagnostics := (Vim9ExpressionParser{}).Parse("left == 1 && right == 2")
 	if len(diagnostics) != 0 || logical.Kind != ExpressionBinary || logical.Value != "&&" {

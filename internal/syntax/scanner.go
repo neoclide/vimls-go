@@ -2282,7 +2282,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
+		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -2419,6 +2419,7 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	}
 	hasAssignment := assignmentExpression || command.Declaration != nil && command.Declaration.Assignment.End > command.Declaration.Assignment.Start
 	commandDictionary := len(command.Expressions) == 1 && command.Expressions[0] != nil && command.Expressions[0].Kind == ExpressionDictionary
+	commandCall := len(command.Expressions) == 1 && command.Expressions[0] != nil && command.Expressions[0].Kind == ExpressionCall
 	if command.Dialect == Vim9 && command.Declaration != nil {
 		diagnostics = mapVim9LambdaTrailingParen(diagnostics, command.Declaration.Initializer, file.Source, 0)
 		initializer := command.Declaration.Initializer
@@ -2472,6 +2473,17 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 			if inDef {
 				diagnostic.Code = "vim/E697"
 				diagnostic.Message = "Missing end of List ']'"
+			}
+		case command.Dialect == Vim9 && diagnostic.Code == "vimls/missing-member" && diagnostic.Message == "member name cannot follow white space":
+			diagnostic.Code = "vim/E15"
+			diagnostic.Message = "invalid expression"
+			if commandCall {
+				diagnostic.Code = "vim/E116"
+				diagnostic.Message = "Invalid arguments for function"
+			}
+			if inDef {
+				diagnostic.Code = "vim/E1127"
+				diagnostic.Message = "Missing name after dot"
 			}
 		case diagnostic.Code == "vimls/missing-member" && diagnostic.Message == "expected member name":
 			diagnostic.Code = "vim/E15"
