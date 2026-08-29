@@ -190,7 +190,8 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 		// argument list (for example, exists ("x")).  Vim9 deliberately
 		// rejects that form; its expression grammar requires adjacency.
 		legacyCall := p.dialect == Legacy && legacyNamedCallable(left) && p.onlyWhitespace(left.Span.End, token.span.Start)
-		if (token.text == "(" && (token.span.Start == left.Span.End || legacyCall)) || token.text == "[" && token.span.Start == left.Span.End || token.text == "." && p.isMember(left) || token.text == "->" && p.isMethod(left) {
+		missingMember := token.text == "." && token.span.Start == left.Span.End && p.peek(1).kind == expressionEOF
+		if (token.text == "(" && (token.span.Start == left.Span.End || legacyCall)) || token.text == "[" && token.span.Start == left.Span.End || token.text == "." && (p.isMember(left) || missingMember) || token.text == "->" && p.isMethod(left) {
 			if 100 < minimumBinding {
 				break
 			}
@@ -593,14 +594,19 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 				children = append(children, p.parse(0))
 			}
 		}
-		end := p.consumeClosing("]", token.span.End)
+		fallback := token.span.End
+		if p.current().span.Start > fallback {
+			fallback = p.current().span.Start
+		}
+		end := p.consumeClosing("]", fallback)
 		return &Expression{Kind: kind, Span: Span{Start: left.Span.Start, End: end}, Children: children}
 	case ".", "->":
 		p.advance()
 		member := p.current()
 		if member.kind != expressionIdentifier && member.kind != expressionNumber {
 			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/missing-member", Message: "expected member name", Span: member.span})
-			return left
+			missing := &Expression{Kind: ExpressionMissing, Span: member.span}
+			return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: token.span.End}, Operator: token.span, Children: []*Expression{left, missing}}
 		}
 		p.advance()
 		return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: member.span.End}, Operator: token.span, Value: member.text, Children: []*Expression{left}}

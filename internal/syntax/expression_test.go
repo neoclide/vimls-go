@@ -515,6 +515,58 @@ func TestVim9IncompleteTypeCast(t *testing.T) {
 	}
 }
 
+func TestOfficialListDictRecovery(t *testing.T) {
+	memberTests := []struct {
+		source string
+		code   string
+	}{
+		{source: "func Func()\nlet d = {\"k\": 10}\necho d.\nendfunc\ncall Func()\n", code: "vim/E15"},
+		{source: "def Func()\n# comment\nvar d = {\"k\": 10}\necho d.\n#comment\nenddef\n", code: "vim/E1127"},
+		{source: "vim9script\nvar d = {\"k\": 10}\necho d.\n", code: "vim/E15"},
+	}
+	for _, test := range memberTests {
+		file := Parse(test.source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End {
+			t.Fatalf("%s diagnostics = %#v", test.code, file.Diagnostics)
+		}
+		var member *Expression
+		for index := range file.Commands {
+			if file.Commands[index].Canonical == "echo" && len(file.Commands[index].Expressions) == 1 {
+				member = file.Commands[index].Expressions[0]
+			}
+		}
+		if member == nil || member.Kind != ExpressionMember || file.Text(member.Operator) != "." || len(member.Children) != 2 || member.Children[1].Kind != ExpressionMissing {
+			t.Fatalf("%s member = %#v, commands = %#v", test.code, member, file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+
+	sliceTests := []struct {
+		source string
+		code   string
+	}{
+		{source: "func Func()\nlet v = range(5)[2 : 3\nendfunc\ncall Func()\n", code: "vim/E111"},
+		{source: "def Func()\n# comment\nvar v = range(5)[2 : 3\n#comment\nenddef\n", code: "vim/E1097"},
+		{source: "vim9script\nvar v = range(5)[2 : 3\n", code: "vim/E111"},
+	}
+	for _, test := range sliceTests {
+		file := Parse(test.source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End {
+			t.Fatalf("%s diagnostics = %#v", test.code, file.Diagnostics)
+		}
+		var slice *Expression
+		for index := range file.Commands {
+			if declaration := file.Commands[index].Declaration; declaration != nil && declaration.Initializer != nil {
+				slice = declaration.Initializer
+			}
+		}
+		if slice == nil || slice.Kind != ExpressionSlice || len(slice.Children) != 3 || slice.Children[1].Value != "2" || slice.Children[2].Value != "3" {
+			t.Fatalf("%s slice = %#v, commands = %#v", test.code, slice, file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+}
+
 func TestVim9LogicalAndOptionExpressions(t *testing.T) {
 	logical, diagnostics := (Vim9ExpressionParser{}).Parse("left == 1 && right == 2")
 	if len(diagnostics) != 0 || logical.Kind != ExpressionBinary || logical.Value != "&&" {

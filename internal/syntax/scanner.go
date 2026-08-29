@@ -2160,7 +2160,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			Kind: ExpressionAssignment, Span: Span{Start: declaration.Target.Span.Start, End: expression.Span.End}, Operator: assignment,
 			Value: file.Text(assignment), Children: []*Expression{declaration.Target, expression},
 		})
-		file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		file.Diagnostics = append(file.Diagnostics, mapIncompleteExpressionDiagnostics(file, command, diagnostics)...)
 	case "for":
 		parseForLoop(file, command)
 	case "delfunction":
@@ -2203,7 +2203,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			}
 			expression, diagnostics, length := parseExpressionPrefix(source[consumed:], command.Argument.Start+consumed, command.Dialect)
 			command.Expressions = append(command.Expressions, expression)
-			file.Diagnostics = append(file.Diagnostics, diagnostics...)
+			file.Diagnostics = append(file.Diagnostics, mapIncompleteExpressionDiagnostics(file, command, diagnostics)...)
 			if len(diagnostics) > 0 || length <= 0 {
 				break
 			}
@@ -2235,6 +2235,36 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		}
 	}
+}
+
+func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostics []Diagnostic) []Diagnostic {
+	inDef := false
+	for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
+		if file.Blocks[block].Kind == BlockDef {
+			inDef = true
+			break
+		}
+	}
+	for index := range diagnostics {
+		diagnostic := &diagnostics[index]
+		switch {
+		case diagnostic.Code == "vimls/missing-member" && diagnostic.Message == "expected member name":
+			diagnostic.Code = "vim/E15"
+			diagnostic.Message = "invalid expression"
+			if inDef {
+				diagnostic.Code = "vim/E1127"
+				diagnostic.Message = "missing name after dot"
+			}
+		case diagnostic.Code == "vimls/missing-delimiter" && diagnostic.Message == "expected ]":
+			diagnostic.Code = "vim/E111"
+			diagnostic.Message = "missing ']'"
+			if inDef {
+				diagnostic.Code = "vim/E1097"
+				diagnostic.Message = "line incomplete"
+			}
+		}
+	}
+	return diagnostics
 }
 
 func takeBoundaryExpression(command *Command) (*Expression, []Diagnostic, bool) {
