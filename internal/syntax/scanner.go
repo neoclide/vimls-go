@@ -4354,6 +4354,15 @@ func parseForLoop(file *File, command *Command) {
 		}
 		loop.Bindings = append(loop.Bindings, binding)
 	}
+	if command.Dialect == Vim9 && rightStart >= len(source) {
+		code, message := "vim/E15", "invalid expression"
+		if commandInsideBlock(command, file.Blocks, BlockDef) {
+			code, message = "vim/E1097", "line incomplete"
+		}
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: iterableSpan})
+		command.For = loop
+		return
+	}
 	var iterableDiagnostics []Diagnostic
 	loop.Iterable, iterableDiagnostics, _ = takeValidBoundaryExpression(command, iterableSpan)
 	if loop.Iterable == nil {

@@ -193,7 +193,8 @@ func buildBlocks(file *File) {
 			}
 			if kind == BlockFor {
 				argument := file.Text(command.Argument)
-				invalidFor[blockIndex] = findTopLevelKeyword(argument, 0, len(argument), "in") < 0
+				in := findTopLevelKeyword(argument, 0, len(argument), "in")
+				invalidFor[blockIndex] = in < 0 || command.Dialect == Vim9 && strings.TrimSpace(argument[in+2:]) == ""
 			}
 			stack = append(stack, blockIndex)
 			if kind == BlockEnum {
