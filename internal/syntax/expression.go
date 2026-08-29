@@ -78,9 +78,10 @@ const (
 )
 
 type expressionToken struct {
-	kind expressionTokenKind
-	span Span
-	text string
+	kind      expressionTokenKind
+	span      Span
+	text      string
+	malformed bool
 }
 
 // expressionLexer advances within one command argument or normalized logical
@@ -441,6 +442,9 @@ func (p *expressionParser) parsePrefix() *Expression {
 		return &Expression{Kind: ExpressionIdentifier, Span: token.span, Value: token.text}
 	case expressionNumber:
 		p.advance()
+		if token.malformed {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E15", Message: "invalid expression", Span: token.span})
+		}
 		return &Expression{Kind: ExpressionNumber, Span: token.span, Value: token.text}
 	case expressionString:
 		p.advance()
@@ -1855,12 +1859,15 @@ func (lexer *expressionLexer) scan() expressionToken {
 			return lexer.finish(expressionString, start, index)
 		}
 		if isExpressionDigit(source[index]) || source[index] == '.' && index+1 < len(source) && isExpressionDigit(source[index+1]) {
-			index = scanExpressionNumber(source, index)
+			var malformed bool
+			index, malformed = scanExpressionNumber(source, index)
 			kind := expressionNumber
 			if len(source[start:index]) >= 2 && source[start] == '0' && (source[start+1] == 'z' || source[start+1] == 'Z') {
 				kind = expressionBlob
 			}
-			return lexer.finish(kind, start, index)
+			token := lexer.finish(kind, start, index)
+			token.malformed = malformed
+			return token
 		}
 		if strings.HasPrefix(source[index:], "#{") {
 			return lexer.finish(expressionPunctuation, start, index+2)
@@ -2067,33 +2074,68 @@ func isExpressionLetter(character byte) bool {
 	return character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z'
 }
 
-func scanExpressionNumber(source string, start int) int {
+func scanExpressionNumber(source string, start int) (int, bool) {
 	index := start
 	if source[index] == '.' {
 		index++
 		for index < len(source) && (isExpressionDigit(source[index]) || isDigitSeparator(source, index)) {
 			index++
 		}
-		return scanExpressionExponent(source, index)
+		end := scanExpressionExponent(source, index)
+		candidateEnd := scanExpressionNumberSuffix(source, end)
+		return candidateEnd, candidateEnd > end
 	}
 	if index+1 < len(source) && source[index] == '0' && strings.ContainsRune("xXbBoOzZ", rune(source[index+1])) {
 		blob := source[index+1] == 'z' || source[index+1] == 'Z'
+		base := source[index+1]
+		malformed := false
 		index += 2
-		for index < len(source) && (isExpressionDigit(source[index]) || isExpressionLetter(source[index]) || source[index] == '_' || isDigitSeparator(source, index) || blob && source[index] == '.') {
+		for index < len(source) && (isExpressionDigit(source[index]) || isExpressionLetter(source[index]) || isDigitSeparator(source, index) || blob && source[index] == '.') {
+			if !blob && !validPrefixedNumberByte(source, index, base) {
+				malformed = true
+			}
 			index++
 		}
-		return index
+		return index, malformed || !blob && index == start+2
 	}
-	for index < len(source) && (isExpressionDigit(source[index]) || source[index] == '_' || isDigitSeparator(source, index)) {
+	for index < len(source) && (isExpressionDigit(source[index]) || isDigitSeparator(source, index)) {
 		index++
 	}
 	if index+1 < len(source) && source[index] == '.' && isExpressionDigit(source[index+1]) {
 		index++
-		for index < len(source) && (isExpressionDigit(source[index]) || source[index] == '_' || isDigitSeparator(source, index)) {
+		for index < len(source) && (isExpressionDigit(source[index]) || isDigitSeparator(source, index)) {
 			index++
 		}
 	}
-	return scanExpressionExponent(source, index)
+	end := scanExpressionExponent(source, index)
+	candidateEnd := scanExpressionNumberSuffix(source, end)
+	return candidateEnd, candidateEnd > end
+}
+
+func scanExpressionNumberSuffix(source string, index int) int {
+	for index < len(source) && (isExpressionDigit(source[index]) || isExpressionLetter(source[index])) {
+		index++
+	}
+	return index
+}
+
+func validPrefixedNumberByte(source string, index int, base byte) bool {
+	character := source[index]
+	if character == '\'' {
+		return index > 1 && index+1 < len(source) && validPrefixedDigit(source[index-1], base) && validPrefixedDigit(source[index+1], base)
+	}
+	return validPrefixedDigit(character, base)
+}
+
+func validPrefixedDigit(character, base byte) bool {
+	switch base {
+	case 'x', 'X':
+		return isLiteralDigit(character)
+	case 'o', 'O':
+		return character >= '0' && character <= '7'
+	default:
+		return character == '0' || character == '1'
+	}
 }
 
 func scanExpressionExponent(source string, index int) int {

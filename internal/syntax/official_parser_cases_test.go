@@ -156,6 +156,21 @@ func TestOfficialVimParserFailures(t *testing.T) {
 	// execution, type-checking, and other unclassified failures out of this
 	// allowlist until their parser phase is proven independently.
 	expected := map[string]string{
+		"src/testdir/test_expr.vim:770:31551/legacy":               "vim/E15",
+		"src/testdir/test_expr.vim:770:31551/def":                  "vim/E15",
+		"src/testdir/test_expr.vim:770:31551/vim9-script":          "vim/E15",
+		"src/testdir/test_expr.vim:771:31625/legacy":               "vim/E15",
+		"src/testdir/test_expr.vim:771:31625/def":                  "vim/E15",
+		"src/testdir/test_expr.vim:771:31625/vim9-script":          "vim/E15",
+		"src/testdir/test_expr.vim:772:31701/legacy":               "vim/E15",
+		"src/testdir/test_expr.vim:772:31701/def":                  "vim/E15",
+		"src/testdir/test_expr.vim:772:31701/vim9-script":          "vim/E15",
+		"src/testdir/test_expr.vim:773:31760/legacy":               "vim/E15",
+		"src/testdir/test_expr.vim:773:31760/def":                  "vim/E15",
+		"src/testdir/test_expr.vim:773:31760/vim9-script":          "vim/E15",
+		"src/testdir/test_expr.vim:774:31836/legacy":               "vim/E15",
+		"src/testdir/test_expr.vim:774:31836/def":                  "vim/E15",
+		"src/testdir/test_expr.vim:774:31836/vim9-script":          "vim/E15",
 		"src/testdir/test_expr.vim:1051:41636/def":                 "vim/E1004",
 		"src/testdir/test_expr.vim:1051:41636/vim9-script":         "vim/E1004",
 		"src/testdir/test_expr.vim:1052:41709/def":                 "vim/E1004",
