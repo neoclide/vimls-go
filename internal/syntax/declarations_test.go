@@ -532,3 +532,60 @@ func TestVim9ClassMemberMissingName(t *testing.T) {
 		})
 	}
 }
+
+func TestVim9ClassMemberModifierOrder(t *testing.T) {
+	tests := []struct {
+		name        string
+		source      string
+		code        string
+		message     string
+		span        string
+		wantName    string
+		wantValue   string
+		declaration bool
+	}{
+		{
+			name:      "public expression",
+			source:    "vim9script\nclass Something\n  public val = 1\n  public var good = 2\nendclass\nvar after = 3\n",
+			code:      "vim/E1331",
+			message:   `public must be followed by "var" or "static" or "final" or "const"`,
+			span:      "public",
+			wantName:  "val",
+			wantValue: "1",
+		},
+		{
+			name:        "static public",
+			source:      "vim9script\nclass Something\n  static public var val = 1\n  public var good = 2\nendclass\nvar after = 3\n",
+			code:        "vim/E1368",
+			message:     `Static must be followed by "var" or "def" or "final" or "const"`,
+			span:        "static",
+			wantName:    "val",
+			wantValue:   "1",
+			declaration: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Message != test.message || file.Text(file.Diagnostics[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+			}
+			if len(file.Commands) < 4 {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			command := file.Commands[2]
+			if test.declaration {
+				if command.Declaration == nil || file.Text(command.Declaration.Name) != test.wantName || command.Declaration.Initializer == nil || command.Declaration.Initializer.Value != test.wantValue {
+					t.Fatalf("declaration = %#v, commands = %#v", command.Declaration, file.Commands)
+				}
+			} else if len(command.Expressions) != 1 || command.Expressions[0].Kind != ExpressionAssignment || command.Expressions[0].Children[0].Value != test.wantName || command.Expressions[0].Children[1].Value != test.wantValue {
+				t.Fatalf("expression = %#v, commands = %#v", command.Expressions, file.Commands)
+			}
+			last := file.Commands[len(file.Commands)-1]
+			if last.Canonical != "var" || last.Declaration == nil {
+				t.Fatalf("recovery command = %#v", last)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}

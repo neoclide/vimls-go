@@ -2011,6 +2011,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	source := file.Text(command.Argument)
+	diagnoseClassMemberModifierOrder(file, command)
 	if isEmbeddedCommand(command.Canonical) {
 		if listDoCommand(command.Canonical) && command.baseDialect == Legacy && strings.Contains(source, "\n") {
 			command.Embedded = parseLegacyDoCommandList(file, command.Argument, depth)
@@ -3126,6 +3127,35 @@ func diagnoseInvalidClassDeclaration(file *File, command *Command, declaration *
 		Code: code, Message: message,
 		Span: Span{Start: start, End: command.Argument.End},
 	})
+}
+
+func diagnoseClassMemberModifierOrder(file *File, command *Command) {
+	if command == nil || command.Dialect != Vim9 || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockClass || len(command.Modifiers) == 0 {
+		return
+	}
+	modifier := command.Modifiers[0]
+	next := command.Canonical
+	if len(command.Modifiers) > 1 {
+		next = command.Modifiers[1].Name
+	}
+	if modifier.Name == "public" {
+		valid := next == "var" || next == "static" || next == "final" || next == "const"
+		if !valid {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1331", Message: `public must be followed by "var" or "static" or "final" or "const"`, Span: modifier.Span,
+			})
+		}
+		return
+	}
+	if modifier.Name != "static" {
+		return
+	}
+	valid := next == "var" || next == "def" || next == "final" || next == "const"
+	if !valid {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1368", Message: `Static must be followed by "var" or "def" or "final" or "const"`, Span: modifier.Span,
+		})
+	}
 }
 
 func parseDeclarationTarget(file *File, command *Command, declaration *Declaration, source string, diagnostics []Diagnostic) (*Expression, []Diagnostic) {
