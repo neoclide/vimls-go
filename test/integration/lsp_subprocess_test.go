@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -15,17 +17,22 @@ import (
 	"time"
 
 	"github.com/chemzqm/vimls-go/internal/jsonrpc"
+	"go.lsp.dev/uri"
 )
 
 func TestLSPSubprocess(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "workspace.vim"), []byte("vim9script\nvar workspaceName = 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
-	command.Dir = root
+	command.Dir = repositoryRoot
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -42,9 +49,9 @@ func TestLSPSubprocess(t *testing.T) {
 
 	writer := jsonrpc.NewWriter(stdin)
 	reader := jsonrpc.NewReader(stdout)
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"initializationOptions":{"targetVersion":"9.1.1232"}}}`)
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232"}}}`, uri.File(workspaceRoot)))
 	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) {
+	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
@@ -92,9 +99,22 @@ func TestLSPSubprocess(t *testing.T) {
 		t.Fatalf("selection ranges = %s", selection)
 	}
 
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":10,"method":"shutdown"}`)
+	workspaceDeadline := time.Now().Add(5 * time.Second)
+	var workspaceSymbols map[string]json.RawMessage
+	for requestID := 10; ; requestID++ {
+		writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"workspace/symbol","params":{"query":"workspaceName"}}`, requestID))
+		workspaceSymbols = readJSON(t, reader)
+		if strings.Contains(string(workspaceSymbols["result"]), `"name":"workspaceName"`) {
+			break
+		}
+		if time.Now().After(workspaceDeadline) {
+			t.Fatalf("workspace symbols = %s", workspaceSymbols)
+		}
+	}
+
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1000,"method":"shutdown"}`)
 	shutdown := readJSON(t, reader)
-	if string(shutdown["id"]) != "10" || string(shutdown["result"]) != "null" {
+	if string(shutdown["id"]) != "1000" || string(shutdown["result"]) != "null" {
 		t.Fatalf("shutdown response = %s", shutdown)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)

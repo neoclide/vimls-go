@@ -22,8 +22,12 @@ const (
 	Name                      = "vimls"
 	Version                   = "dev"
 	maxFileBytes              = 4 << 20
+	maxPendingRequests        = 128
 	maxParallelAnalysis       = 4
 	maxDiagnosticsPerDocument = 200
+	maxWorkspaceFiles         = 20000
+	maxIndexBytes             = 256 << 20
+	maxWorkspaceSymbols       = 200
 )
 
 type state uint8
@@ -46,29 +50,36 @@ type Server struct {
 	output io.Writer
 	log    io.Writer
 
-	mu              sync.Mutex
-	state           state
-	targetVersion   TargetVersion
-	targetOverride  bool
-	pendingWarning  string
-	client          protocol.Client
-	cancellations   map[jsonrpc2.ID]context.CancelFunc
-	documents       *workspace.Documents
-	encoding        text.Encoding
-	exitOnce        sync.Once
-	exitCode        chan int
-	analysisMu      sync.Mutex
-	analysisContext context.Context
-	analysisCancel  context.CancelFunc
-	analysisStopped bool
-	analysisWG      sync.WaitGroup
-	analysisWake    chan struct{}
-	analysisPending map[string]struct{}
-	analysisRunning map[string]struct{}
-	analysisWorkers int
-	publishMu       sync.Mutex
-	parsed          map[string]parsedDocument
-	published       map[string]bool
+	mu                sync.Mutex
+	state             state
+	targetVersion     TargetVersion
+	targetOverride    bool
+	pendingWarning    string
+	client            protocol.Client
+	cancellations     map[jsonrpc2.ID]context.CancelFunc
+	documents         *workspace.Documents
+	encoding          text.Encoding
+	exitOnce          sync.Once
+	exitCode          chan int
+	analysisMu        sync.Mutex
+	analysisContext   context.Context
+	analysisCancel    context.CancelFunc
+	analysisStopped   bool
+	analysisWG        sync.WaitGroup
+	analysisWake      chan struct{}
+	analysisPending   map[string]struct{}
+	analysisRunning   map[string]struct{}
+	analysisWorkers   int
+	publishMu         sync.Mutex
+	parsed            map[string]parsedDocument
+	published         map[string]bool
+	workspaceMu       sync.Mutex
+	workspaceRoots    []string
+	workspaceIndex    *workspace.Index
+	workspaceFiles    map[string]struct{}
+	workspaceRevision uint64
+	workspaceRunning  bool
+	workspaceWG       sync.WaitGroup
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {
@@ -90,6 +101,8 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		analysisRunning: make(map[string]struct{}),
 		parsed:          make(map[string]parsedDocument),
 		published:       make(map[string]bool),
+		workspaceIndex:  workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes),
+		workspaceFiles:  make(map[string]struct{}),
 	}
 }
 
@@ -166,9 +179,10 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 		base, cancel := context.WithCancel(jsonrpc2.DetachContext(ctx))
 		requestCtx := valueContext{Context: base, values: ctx}
 		id := request.ID()
-		s.mu.Lock()
-		s.cancellations[id] = cancel
-		s.mu.Unlock()
+		if !s.registerCancellation(id, cancel) {
+			cancel()
+			return nil, jsonrpc2.NewError(jsonrpc2.JSONRPCReservedErrorRangeEnd, "too many pending requests")
+		}
 		defer func() {
 			s.mu.Lock()
 			delete(s.cancellations, id)
@@ -177,6 +191,16 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 		}()
 		return next(requestCtx, request)
 	}
+}
+
+func (s *Server) registerCancellation(id jsonrpc2.ID, cancel context.CancelFunc) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.cancellations) >= maxPendingRequests {
+		return false
+	}
+	s.cancellations[id] = cancel
+	return true
 }
 
 func (s *Server) lifecycleHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
@@ -258,7 +282,10 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentDocumentSymbol,
 		protocol.MethodTextDocumentFoldingRange,
 		protocol.MethodTextDocumentSelectionRange,
-		protocol.MethodWorkspaceDidChangeConfiguration:
+		protocol.MethodWorkspaceDidChangeConfiguration,
+		protocol.MethodWorkspaceDidChangeWorkspaceFolders,
+		protocol.MethodWorkspaceDidChangeWatchedFiles,
+		protocol.MethodWorkspaceSymbol:
 		return true
 	default:
 		return false
@@ -275,6 +302,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.encoding = encoding
 	s.state = stateActive
 	s.mu.Unlock()
+	s.setWorkspaceRoots(workspaceRootsFromInitialize(params))
+	workspaceFoldersSupported := true
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
 			PositionEncoding:          protocolEncoding,
@@ -286,6 +315,10 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 			DocumentSymbolProvider:    protocol.Boolean(true),
 			FoldingRangeProvider:      protocol.Boolean(true),
 			SelectionRangeProvider:    protocol.Boolean(true),
+			WorkspaceSymbolProvider:   protocol.Boolean(true),
+			Workspace: &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
+				Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
+			}},
 			TextDocumentSync: &protocol.TextDocumentSyncOptions{
 				OpenClose: &openClose,
 				Change:    &changeKind,
@@ -297,6 +330,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 }
 
 func (s *Server) Initialized(ctx context.Context, _ *protocol.InitializedParams) error {
+	s.scheduleWorkspaceRebuild()
 	s.mu.Lock()
 	warning := s.pendingWarning
 	s.pendingWarning = ""
@@ -325,7 +359,8 @@ func (s *Server) Shutdown(context.Context) error {
 func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocumentParams) error {
 	document := params.TextDocument
 	s.publishMu.Lock()
-	s.documents.Open(document.URI.String(), document.Version, document.Text)
+	snapshot := s.documents.Open(document.URI.String(), document.Version, document.Text)
+	s.removeWorkspaceURI(snapshot.URI())
 	s.publishMu.Unlock()
 	s.startAnalysis(document.URI.String())
 	return nil
@@ -354,7 +389,10 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 	encoding := s.encoding
 	s.mu.Unlock()
 	s.publishMu.Lock()
-	_, err := s.documents.Change(params.TextDocument.URI.String(), params.TextDocument.Version, encoding, changes)
+	snapshot, err := s.documents.Change(params.TextDocument.URI.String(), params.TextDocument.Version, encoding, changes)
+	if err == nil {
+		s.removeWorkspaceURI(snapshot.URI())
+	}
 	s.publishMu.Unlock()
 	if err != nil {
 		s.logf("vimls: ignored content change for %s: %v", params.TextDocument.URI, err)
@@ -366,7 +404,10 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 
 func (s *Server) DidSave(_ context.Context, params *protocol.DidSaveTextDocumentParams) error {
 	s.publishMu.Lock()
-	_, err := s.documents.Save(params.TextDocument.URI.String(), params.Text)
+	snapshot, err := s.documents.Save(params.TextDocument.URI.String(), params.Text)
+	if err == nil {
+		s.removeWorkspaceURI(snapshot.URI())
+	}
 	s.publishMu.Unlock()
 	if err != nil {
 		s.logf("vimls: ignored save for %s: %v", params.TextDocument.URI, err)
@@ -383,6 +424,7 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	s.analysisMu.Unlock()
 	s.publishMu.Lock()
 	s.documents.Close(documentURI)
+	s.restoreWorkspaceDocument(documentURI)
 	delete(s.parsed, documentURI)
 	clearDiagnostics := s.published[documentURI]
 	delete(s.published, documentURI)
@@ -697,6 +739,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File) {
 	}
 	documentURI := analysis.Snapshot.URI()
 	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: file}
+	s.replaceWorkspaceFile(documentURI, file)
 	diagnostics := make([]protocol.Diagnostic, 0, len(file.Diagnostics))
 	for _, item := range file.Diagnostics {
 		start, startError := analysis.Snapshot.Position(item.Span.Start, encoding)
@@ -773,6 +816,11 @@ func (s *Server) stopAnalysis() {
 	s.analysisCancel()
 	s.analysisMu.Unlock()
 	s.analysisWG.Wait()
+	// Synchronize with a rebuild that may have checked analysisContext just
+	// before cancellation, so its WaitGroup.Add completes before Wait starts.
+	s.workspaceMu.Lock()
+	s.workspaceMu.Unlock()
+	s.workspaceWG.Wait()
 }
 
 func (s *Server) logf(format string, args ...any) {

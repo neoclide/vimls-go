@@ -57,6 +57,71 @@ func TestIndexLookupOrdersSameNamesAndReplaceRemovesOldSymbols(t *testing.T) {
 	}
 }
 
+func TestIndexSearchRanksSubsequencesAndLimitsResults(t *testing.T) {
+	index := NewIndex(10, 10000)
+	root := t.TempDir()
+	path := filepath.Join(root, "symbols.vim")
+	source := "var Exact = 1\nvar exactly = 2\nvar e_x_a_c_t = 3\nvar unrelated = 4\n"
+	if err := index.Replace(path, syntax.Parse(source)); err != nil {
+		t.Fatal(err)
+	}
+	results := index.Search("EXACT", 0)
+	if len(results) != 3 {
+		t.Fatalf("search result count = %d, want 3: %#v", len(results), results)
+	}
+	if got := []string{results[0].Fact.Name, results[1].Fact.Name, results[2].Fact.Name}; got[0] != "Exact" || got[1] != "exactly" || got[2] != "e_x_a_c_t" {
+		t.Fatalf("search ranking = %#v", got)
+	}
+	if results[0].Source != source || results[1].Source != source || results[2].Source != source {
+		t.Fatalf("search source = %#v", results)
+	}
+	if got := index.Search("x_a_c", 1); len(got) != 1 || got[0].Fact.Name != "e_x_a_c_t" {
+		t.Fatalf("subsequence or limit result = %#v", got)
+	}
+	if got := index.Search("", -1); len(got) != 4 {
+		t.Fatalf("empty query result count = %d", len(got))
+	}
+}
+
+func TestIndexSearchReturnsIndependentFactsAndRetainsCurrentSource(t *testing.T) {
+	index := NewIndex(10, 10000)
+	root := t.TempDir()
+	path := filepath.Join(root, "source.vim")
+	oldSource := "var old = 1\n"
+	oldFile := syntax.Parse(oldSource)
+	if err := index.Replace(path, oldFile); err != nil {
+		t.Fatal(err)
+	}
+	oldFile.Source = "var mutated = 2\n"
+	results := index.Search("old", 0)
+	if len(results) != 1 || results[0].Source != oldSource {
+		t.Fatalf("retained source = %#v", results)
+	}
+	results[0].Fact.Name = "changed"
+	results[0].Fact.Range.Start = 999
+	results[0].Source = "changed"
+	results = index.Search("old", 0)
+	if len(results) != 1 || results[0].Fact.Name != "old" || results[0].Fact.Range.Start == 999 || results[0].Source != oldSource {
+		t.Fatalf("search leaked mutable result: %#v", results)
+	}
+
+	newSource := "var replacement = 123\n"
+	if err := index.Replace(path, syntax.Parse(newSource)); err != nil {
+		t.Fatal(err)
+	}
+	if index.IndexedBytes() != len(newSource) || len(index.Search("old", 0)) != 0 {
+		t.Fatalf("replacement state: bytes=%d old=%#v", index.IndexedBytes(), index.Search("old", 0))
+	}
+	results = index.Search("replacement", 0)
+	if len(results) != 1 || results[0].Source != newSource {
+		t.Fatalf("replacement source = %#v", results)
+	}
+	index.Remove(path)
+	if index.IndexedBytes() != 0 || len(index.Search("replacement", 0)) != 0 {
+		t.Fatalf("removal state: bytes=%d results=%#v", index.IndexedBytes(), index.Search("replacement", 0))
+	}
+}
+
 func TestIndexRemoveFreesCapacity(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.vim")
@@ -159,6 +224,7 @@ func TestIndexConcurrentOperations(t *testing.T) {
 				file := syntax.Parse("var shared = 1\n")
 				_ = index.Replace(path, file)
 				_ = index.Lookup("shared")
+				_ = index.Search("sha", 0)
 				if iteration%3 == 0 {
 					index.Remove(path)
 				}

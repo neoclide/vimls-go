@@ -116,6 +116,21 @@ func (d *Documents) Snapshot(uri string) (*text.Snapshot, bool) {
 	return current.snapshot, true
 }
 
+// Snapshots returns the current immutable open snapshots in URI lexical order.
+// The returned slice is independent of the document store.
+func (d *Documents) Snapshots() []*text.Snapshot {
+	d.mu.RLock()
+	snapshots := make([]*text.Snapshot, 0, len(d.documents))
+	for _, current := range d.documents {
+		snapshots = append(snapshots, current.snapshot)
+	}
+	d.mu.RUnlock()
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].URI() < snapshots[j].URI()
+	})
+	return snapshots
+}
+
 func (d *Documents) BeginAnalysis(ctx context.Context, uri string) (Analysis, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

@@ -29,9 +29,17 @@ type SymbolFact struct {
 	Detail         string
 }
 
+// SymbolMatch is an immutable workspace symbol match. Source is the complete
+// source retained for the indexed file containing Fact.
+type SymbolMatch struct {
+	Fact   SymbolFact
+	Source string
+}
+
 type indexedFile struct {
-	bytes int
-	facts []SymbolFact
+	bytes  int
+	source string
+	facts  []SymbolFact
 }
 
 // Index stores symbols from a bounded set of syntax files. All methods are
@@ -46,8 +54,8 @@ type Index struct {
 }
 
 // NewIndex creates a workspace symbol index with file-count and source-byte
-// limits. The source byte count is len(file.Source), and source text itself is
-// not retained by the index.
+// limits. The source byte count is len(file.Source), and the source is retained
+// once for each indexed file.
 func NewIndex(maxFiles, maxBytes int) *Index {
 	return &Index{
 		maxFiles: maxFiles,
@@ -70,7 +78,7 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	facts := make([]SymbolFact, 0)
 	collectSymbolFacts(normalized, analysis.CollectSymbols(file), &facts)
 	sortFacts(facts)
-	indexed := indexedFile{bytes: len(file.Source), facts: facts}
+	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -128,6 +136,65 @@ func (i *Index) Lookup(name string) []SymbolFact {
 	facts := append([]SymbolFact(nil), i.byName[name]...)
 	i.mu.RUnlock()
 	return facts
+}
+
+// Search returns symbols whose names contain query as a case-insensitive
+// ordered subsequence. Exact matches rank before prefixes, followed by other
+// subsequence matches; ties use the index's stable fact ordering. An empty
+// query matches every symbol. A positive limit caps the result count.
+func (i *Index) Search(query string, limit int) []SymbolMatch {
+	queryFolded := strings.ToLower(query)
+	i.mu.RLock()
+	matches := make([]SymbolMatch, 0)
+	for _, file := range i.files {
+		for _, fact := range file.facts {
+			_, ok := searchRank(query, queryFolded, fact.Name)
+			if !ok {
+				continue
+			}
+			matches = append(matches, SymbolMatch{Fact: fact, Source: file.source})
+		}
+	}
+	i.mu.RUnlock()
+	sort.SliceStable(matches, func(left, right int) bool {
+		leftRank, _ := searchRank(query, queryFolded, matches[left].Fact.Name)
+		rightRank, _ := searchRank(query, queryFolded, matches[right].Fact.Name)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return factLess(matches[left].Fact, matches[right].Fact)
+	})
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches
+}
+
+func searchRank(query, foldedQuery, name string) (int, bool) {
+	if query == "" {
+		return 0, true
+	}
+	foldedName := strings.ToLower(name)
+	if foldedName == foldedQuery {
+		return 0, true
+	}
+	if strings.HasPrefix(foldedName, foldedQuery) {
+		return 1, true
+	}
+	queryRunes := []rune(foldedQuery)
+	if len(queryRunes) == 0 {
+		return 0, true
+	}
+	queryIndex := 0
+	for _, nameRune := range []rune(foldedName) {
+		if nameRune == queryRunes[queryIndex] {
+			queryIndex++
+			if queryIndex == len(queryRunes) {
+				return 2, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // FileCount reports the number of indexed paths.

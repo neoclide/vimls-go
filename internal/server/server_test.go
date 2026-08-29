@@ -75,10 +75,16 @@ func TestServerDocumentSynchronization(t *testing.T) {
 		t.Fatalf("target version = %q", got)
 	}
 	messages := decodeFrames(t, &output)
-	if len(messages) != 2 {
-		t.Fatalf("responses = %d, want 2", len(messages))
+	responses := make([]map[string]json.RawMessage, 0, 2)
+	for _, message := range messages {
+		if _, ok := message["id"]; ok {
+			responses = append(responses, message)
+		}
 	}
-	if result := messages[0]["result"]; !bytes.Contains(result, []byte(`"positionEncoding":"utf-8"`)) || !bytes.Contains(result, []byte(`"change":2`)) {
+	if len(responses) != 2 {
+		t.Fatalf("responses = %d, want 2; messages = %#v", len(responses), messages)
+	}
+	if result := responses[0]["result"]; !bytes.Contains(result, []byte(`"positionEncoding":"utf-8"`)) || !bytes.Contains(result, []byte(`"change":2`)) {
 		t.Fatalf("initialize result = %s", result)
 	}
 	if logs.Len() != 0 {
@@ -457,6 +463,21 @@ func TestServerLifecycleErrors(t *testing.T) {
 		if got := errorCode(t, messages[i]); got != want {
 			t.Fatalf("response %d code = %d, want %d: %s", i, got, want, messages[i])
 		}
+	}
+}
+
+func TestServerLimitsPendingRequests(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	for index := 0; index < maxPendingRequests; index++ {
+		_, cancel := context.WithCancel(context.Background())
+		if !instance.registerCancellation(jsonrpc2.NewNumberID(int64(index)), cancel) {
+			t.Fatalf("request %d was rejected before the limit", index)
+		}
+	}
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if instance.registerCancellation(jsonrpc2.NewNumberID(maxPendingRequests), cancel) {
+		t.Fatal("request above the pending limit was accepted")
 	}
 }
 

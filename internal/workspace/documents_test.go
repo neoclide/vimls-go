@@ -110,3 +110,29 @@ func TestDocumentsCancelAndRejectStaleAnalysis(t *testing.T) {
 		t.Fatal("missing snapshot exists")
 	}
 }
+
+func TestDocumentsSnapshotsAreSortedAndIndependent(t *testing.T) {
+	documents := NewDocuments()
+	documents.Open("file:///z.vim", 1, "z")
+	documents.Open("file:///a.vim", 1, "a")
+	snapshots := documents.Snapshots()
+	if len(snapshots) != 2 || snapshots[0].URI() != "file:///a.vim" || snapshots[1].URI() != "file:///z.vim" {
+		t.Fatalf("snapshot order = %#v", snapshots)
+	}
+	if _, err := documents.Change("file:///z.vim", 2, text.UTF8, []text.Change{{Text: "updated"}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshots[0] = nil
+	current, ok := documents.Snapshot("file:///a.vim")
+	if !ok || current == nil || current.Text() != "a" || current.Revision() != 2 {
+		t.Fatalf("snapshot slice changed document state: %#v", current)
+	}
+	current, ok = documents.Snapshot("file:///z.vim")
+	if !ok || current.Text() != "updated" || current.Revision() != 3 {
+		t.Fatalf("changed snapshot = %#v", current)
+	}
+	snapshots = documents.Snapshots()
+	if snapshots[1].URI() != "file:///z.vim" || snapshots[1].Text() != "updated" || snapshots[1].Revision() != 3 {
+		t.Fatalf("current snapshots = %#v", snapshots)
+	}
+}
