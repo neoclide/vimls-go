@@ -203,6 +203,7 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_vim9_class.vim:5967:133218/script":       "vim/E1329",
 		"src/testdir/test_vim9_interface.vim:553:12767/script":     "vim/E1389",
 		"src/testdir/test_vim9_interface.vim:29:581/script":        "vim/E1342",
+		"src/testdir/test_vim9_interface.vim:59:1387/script":       "vim/E1344",
 		"src/testdir/test_trycatch.vim:2019:44596/script":          "vim/E690",
 		"src/testdir/test_trycatch.vim:2029:44739/script":          "vim/E690",
 		"src/testdir/test_vim9_cmd.vim:1275:27368/def":             "vim/E1082",

@@ -589,3 +589,50 @@ func TestVim9ClassMemberModifierOrder(t *testing.T) {
 		})
 	}
 }
+
+func TestVim9InterfaceMemberInitializer(t *testing.T) {
+	t.Run("initializer", func(t *testing.T) {
+		file := Parse("vim9script\ninterface SomethingWrong\n  var value: string\n  var count = 7\n  def GetCount(): number\nendinterface\nvar after = 1\n")
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1344" || file.Diagnostics[0].Message != "Cannot initialize a variable in an interface" || file.Text(file.Diagnostics[0].Span) != "var count = 7" {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		if len(file.Commands) != 7 || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockInterface || file.Blocks[0].Header != 1 || file.Blocks[0].End != 5 {
+			t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+		}
+		declaration := file.Commands[3].Declaration
+		if declaration == nil || file.Text(declaration.Name) != "count" || file.Text(declaration.Assignment) != "=" || declaration.Target == nil || file.Text(declaration.Target.Span) != "count" || declaration.Initializer == nil || declaration.Initializer.Value != "7" || file.Commands[3].Block != 0 {
+			t.Fatalf("declaration = %#v, command = %#v", declaration, file.Commands[3])
+		}
+		if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "value" || file.Commands[4].Canonical != "def" || file.Commands[4].Function == nil || file.Commands[4].Block != 0 || file.Commands[5].Canonical != "endinterface" || file.Commands[5].Block != 0 {
+			t.Fatalf("interface members = %#v", file.Commands)
+		}
+		if file.Commands[6].Canonical != "var" || file.Commands[6].Declaration == nil || file.Text(file.Commands[6].Declaration.Name) != "after" || file.Commands[6].Block != -1 {
+			t.Fatalf("recovery command = %#v", file.Commands[6])
+		}
+		assertFileSpans(t, file)
+	})
+
+	t.Run("incomplete initializer", func(t *testing.T) {
+		file := Parse("vim9script\ninterface Broken\n  var count =\nendinterface\nvar after = 1\n")
+		if !hasDiagnostic(file, "vim/E1344") || len(file.Commands) != 5 || file.Commands[2].Declaration == nil || file.Commands[2].Declaration.Assignment.Start >= file.Commands[2].Declaration.Assignment.End || file.Commands[2].Declaration.Initializer == nil || file.Commands[4].Declaration == nil {
+			t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+		}
+		assertFileSpans(t, file)
+	})
+
+	t.Run("valid interface and class", func(t *testing.T) {
+		file := Parse("vim9script\ninterface Good\n  var value: string\nendinterface\nclass GoodClass\n  var count = 7\nendclass\n")
+		if len(file.Diagnostics) != 0 || len(file.Commands) != 7 {
+			t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+		}
+		assertFileSpans(t, file)
+	})
+
+	t.Run("legacy interface", func(t *testing.T) {
+		file := Parse("interface Legacy\n  var count = 7\nendinterface\n")
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1342" || file.Text(file.Diagnostics[0].Span) != "interface" {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		assertFileSpans(t, file)
+	})
+}

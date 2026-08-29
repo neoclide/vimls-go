@@ -2177,6 +2177,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		declaration.Assignment = assignment
 		declaration.Initializer = expression
 		diagnoseInvalidClassDeclaration(file, command, declaration)
+		diagnoseInvalidInterfaceDeclaration(file, command, declaration)
 		command.Declaration = declaration
 		command.Expressions = append(command.Expressions, &Expression{
 			Kind: ExpressionAssignment, Span: Span{Start: declaration.Target.Span.Start, End: expression.Span.End}, Operator: assignment,
@@ -3159,6 +3160,16 @@ func diagnoseClassMemberModifierOrder(file *File, command *Command) {
 			Code: "vim/E1368", Message: `Static must be followed by "var" or "def" or "final" or "const"`, Span: modifier.Span,
 		})
 	}
+}
+
+func diagnoseInvalidInterfaceDeclaration(file *File, command *Command, declaration *Declaration) {
+	if command == nil || command.Dialect != Vim9 || command.Canonical != "var" || declaration == nil || declaration.Assignment.Start >= declaration.Assignment.End || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockInterface {
+		return
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{
+		Code: "vim/E1344", Message: "Cannot initialize a variable in an interface",
+		Span: Span{Start: command.Name.Start, End: command.Argument.End},
+	})
 }
 
 func parseDeclarationTarget(file *File, command *Command, declaration *Declaration, source string, diagnostics []Diagnostic) (*Expression, []Diagnostic) {
