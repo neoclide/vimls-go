@@ -492,9 +492,26 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 		return nil, false
 	}
 
+	diagnosticsBeforeTypes := len(p.diagnostics)
 	types := p.parseGenericTypeArguments(open, close, true)
 	operator := Span{Start: p.base + open, End: closingEnd}
-	if p.current().text != "(" || p.current().span.Start != closingEnd {
+	// Vim9 generic calls require the type-list delimiters and call opener to
+	// be tight. Keep the parsed type list (and therefore useful partial AST)
+	// while reporting the first whitespace violation as the line-local Vim
+	// diagnostic. Do not report multiple violations for one malformed call.
+	hasWhitespaceDiagnostic := false
+	for _, diagnostic := range p.diagnostics[diagnosticsBeforeTypes:] {
+		if diagnostic.Code == "vim/E1202" {
+			hasWhitespaceDiagnostic = true
+			break
+		}
+	}
+	if whitespace, ok := p.genericCallWhitespace(open, close, closingEnd); !hasWhitespaceDiagnostic && ok {
+		p.diagnostics = append(p.diagnostics, Diagnostic{
+			Code: "vim/E1202", Message: "No white space allowed in generic call", Span: whitespace,
+		})
+	}
+	if p.current().text != "(" || p.current().span.Start != closingEnd && !p.onlyWhitespace(closingEnd, p.current().span.Start) {
 		return &Expression{
 			Kind: ExpressionGenericReference, Span: Span{Start: left.Span.Start, End: closingEnd},
 			Operator: operator, Children: []*Expression{left}, TypeArguments: types,
@@ -504,6 +521,21 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 	call.Operator = operator
 	call.TypeArguments = types
 	return call, true
+}
+
+func (p *expressionParser) genericCallWhitespace(open, close, closingEnd int) (Span, bool) {
+	first := skipExpressionSpace(p.source, open+1)
+	if first > open+1 && first < close {
+		return Span{Start: p.base + open + 1, End: p.base + first}, true
+	}
+	last := trimExpressionSpaceEnd(p.source, first, close)
+	if last < close && last > first && p.source[last-1] != ',' {
+		return Span{Start: p.base + last, End: p.base + close}, true
+	}
+	if p.current().text == "(" && p.current().span.Start > closingEnd && p.onlyWhitespace(closingEnd, p.current().span.Start) {
+		return Span{Start: closingEnd, End: p.current().span.Start}, true
+	}
+	return Span{}, false
 }
 
 func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool) []*Type {
@@ -543,6 +575,13 @@ func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool)
 			continue
 		}
 		typeNode, diagnostics := parseTypeAt(p.source[start:typeEnd], p.base+start)
+		for diagnosticIndex := range diagnostics {
+			if diagnostics[diagnosticIndex].Code == "vimls/trailing-type" && diagnostics[diagnosticIndex].Span.Start > typeNode.Span.End && p.onlyWhitespace(typeNode.Span.End, diagnostics[diagnosticIndex].Span.Start) {
+				diagnostics[diagnosticIndex].Code = "vim/E1202"
+				diagnostics[diagnosticIndex].Message = "No white space allowed in generic call"
+				diagnostics[diagnosticIndex].Span = Span{Start: typeNode.Span.End, End: diagnostics[diagnosticIndex].Span.Start}
+			}
+		}
 		types = append(types, typeNode)
 		p.diagnostics = append(p.diagnostics, diagnostics...)
 	}

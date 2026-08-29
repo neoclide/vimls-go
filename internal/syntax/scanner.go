@@ -4218,6 +4218,14 @@ func looksLikeVim9Expression(source string, nameStart, nameEnd, end int) bool {
 	if nameEnd >= end {
 		return false
 	}
+	if source[nameEnd] == '<' {
+		if close := findGenericTypeEnd(source[:end], nameEnd); close >= 0 {
+			call := skipSpace(source, close+1, end)
+			if call < end && source[call] == '(' {
+				return true
+			}
+		}
+	}
 	if strings.ContainsRune(":([.", rune(source[nameEnd])) {
 		return true
 	}
