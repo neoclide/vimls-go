@@ -64,6 +64,8 @@ func parseSource(source string, initial Dialect) *File {
 	heredocRecoveryTokenCount := 0
 	vim9Continuation := -1
 	var vim9ContinuationState vim9ContinuationScan
+	lambdaCloseCommand := -1
+	lambdaCloseOffset := -1
 	offset := 0
 	if strings.HasPrefix(source, "\ufeff") {
 		offset = len("\ufeff")
@@ -218,8 +220,14 @@ func parseSource(source string, initial Dialect) *File {
 			vim9Continuation = -1
 		}
 		lambdaRecoveryBoundary := len(vim9ContinuationState.lambdaDepth) > 0 && vim9ContinuationState.lambdaBodyStarted
+		if lambdaRecoveryBoundary && (lambdaCloseCommand != vim9Continuation || lambdaCloseOffset >= 0 && first > lambdaCloseOffset) {
+			lambdaCloseCommand = vim9Continuation
+			lambdaCloseOffset = findVim9LambdaRecoveryClose(source, nextOffset)
+		}
+		lambdaBodyCommand := lambdaRecoveryBoundary && lambdaCloseOffset >= 0
 		if vim9Continuation >= 0 && (len(vim9ContinuationState.lambdaDepth) == 0 || lambdaRecoveryBoundary) && first < contentEnd &&
 			!(source[first] == '}' && vim9ContinuationState.depth > 0) && startsVim9RecoveryCommand(source, first, contentEnd) &&
+			!lambdaBodyCommand &&
 			!(vim9ContinuationState.depth > 0 && looksLikeVim9NamedItem(source, first, contentEnd)) &&
 			!continuesVim9FunctionSignature(file, vim9Continuation, vim9ContinuationState, source, first, contentEnd) &&
 			!(source[first] == ':' && (len(vim9ContinuationState.ternaryDepth) > 0 || vim9ContinuationState.bracketDepth > 0)) {
@@ -3968,6 +3976,32 @@ func startsVim9RecoveryCommand(source string, start, end int) bool {
 	default:
 		return false
 	}
+}
+
+// findVim9LambdaRecoveryClose performs one forward scan for the active
+// continuation. Its result is reused until that close is consumed, making
+// nested block-lambda recovery linear in the number of physical lines.
+func findVim9LambdaRecoveryClose(source string, offset int) int {
+	for offset < len(source) {
+		end, next := physicalLineEnd(source, offset)
+		first := skipSpace(source, offset, end)
+		closeStart := first
+		if closeStart < end && source[closeStart] == ':' {
+			closeStart = skipSpace(source, closeStart+1, end)
+		}
+		if closeStart < end && source[closeStart] == '}' {
+			return closeStart
+		}
+		wordEnd := scanWord(source, first, end)
+		if wordEnd > first {
+			switch source[first:wordEnd] {
+			case "endclass", "enddef", "endenum", "endfunction", "endinterface", "finish":
+				return -1
+			}
+		}
+		offset = next
+	}
+	return -1
 }
 
 func allowsVim9AutomaticContinuation(file *File, commandIndex int) bool {

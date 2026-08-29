@@ -637,6 +637,44 @@ func TestVim9LambdaCommandBlock(t *testing.T) {
 	}
 }
 
+func TestVim9LambdaCommandBlockKeepsDeclarations(t *testing.T) {
+	file := Parse("vim9script\nvar Func = (): number => {\n  var first = 1\n  var second = 2\n  return first + second\n}\nvar after = Func()\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 3 {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	lambda := file.Commands[1].Declaration.Initializer
+	if lambda == nil || lambda.LambdaBody == nil || len(lambda.LambdaBody.Commands) != 3 {
+		t.Fatalf("lambda = %#v", lambda)
+	}
+	first := lambda.LambdaBody.Commands[0].Declaration
+	second := lambda.LambdaBody.Commands[1].Declaration
+	if first == nil || second == nil || lambda.LambdaBody.Text(first.Name) != "first" || lambda.LambdaBody.Text(second.Name) != "second" {
+		t.Fatalf("lambda body commands = %#v", lambda.LambdaBody.Commands)
+	}
+	if after := file.Commands[2].Declaration; after == nil || file.Text(after.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands[2])
+	}
+	assertFileSpans(t, file)
+}
+
+func TestVim9LambdaCommandBlockKeepsNestedBlocks(t *testing.T) {
+	file := Parse("vim9script\nvar Outer = () => {\n  var First = () => {\n    return 1\n  }\n  var Second = () => {\n    return 2\n  }\n  return First() + Second()\n}\nvar after = Outer()\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 3 {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	outer := file.Commands[1].Declaration.Initializer
+	if outer == nil || outer.LambdaBody == nil || len(outer.LambdaBody.Commands) != 3 {
+		t.Fatalf("outer lambda = %#v", outer)
+	}
+	for index := 0; index < 2; index++ {
+		declaration := outer.LambdaBody.Commands[index].Declaration
+		if declaration == nil || declaration.Initializer == nil || declaration.Initializer.LambdaBody == nil {
+			t.Fatalf("nested lambda %d = %#v", index, outer.LambdaBody.Commands[index])
+		}
+	}
+	assertFileSpans(t, file)
+}
+
 func TestOfficialVim9InlineFunctionSameLinePayload(t *testing.T) {
 	for _, source := range []string{
 		"def Func()\nmap([1, 2], (k, v) => { redrawt })\nenddef\ndefcompile\nvar after = 1\n",
