@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 
+	"github.com/chemzqm/vimls-go/internal/syntax"
 	"github.com/chemzqm/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -131,6 +134,155 @@ func TestNavigationUsesNegotiatedPositionEncoding(t *testing.T) {
 				t.Fatalf("locations = %#v", locations)
 			}
 		})
+	}
+}
+
+func TestNavigationReturnsEmptyForUnavailableTargets(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho dynamic\n")
+	unknown := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 1, Character: 6},
+	}
+
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: unknown})
+	definitionLocations, ok := definition.(protocol.LocationSlice)
+	if err != nil || !ok || len(definitionLocations) != 0 {
+		t.Fatalf("unknown definition = %#v, error = %v", definition, err)
+	}
+	declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: unknown})
+	declarationLocations, ok := declaration.(protocol.LocationSlice)
+	if err != nil || !ok || len(declarationLocations) != 0 {
+		t.Fatalf("unknown declaration = %#v, error = %v", declaration, err)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: unknown})
+	if err != nil || len(references) != 0 {
+		t.Fatalf("unknown references = %#v, error = %v", references, err)
+	}
+	highlights, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: unknown})
+	if err != nil || len(highlights) != 0 {
+		t.Fatalf("unknown highlights = %#v, error = %v", highlights, err)
+	}
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: unknown})
+	if err != nil || hover != nil {
+		t.Fatalf("unknown hover = %#v, error = %v", hover, err)
+	}
+
+	for name, params := range map[string]protocol.TextDocumentPositionParams{
+		"missing document": {
+			TextDocument: protocol.TextDocumentIdentifier{URI: uri.MustParse("file:///missing.vim")},
+		},
+		"line past end": {
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 20},
+		},
+		"character past end": {
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 1, Character: 200},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: params})
+			locations, ok := result.(protocol.LocationSlice)
+			if err != nil || !ok || len(locations) != 0 {
+				t.Fatalf("definition = %#v, error = %v", result, err)
+			}
+		})
+	}
+	t.Run("middle of UTF-16 surrogate pair", func(t *testing.T) {
+		unicode, unicodeURI := openNavigationDocument(t, text.UTF16, "vim9script\necho '𐐀' | echo value\n")
+		result, err := unicode.Definition(context.Background(), &protocol.DefinitionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: unicodeURI},
+				Position:     protocol.Position{Line: 1, Character: 7},
+			},
+		})
+		locations, ok := result.(protocol.LocationSlice)
+		if err != nil || !ok || len(locations) != 0 {
+			t.Fatalf("definition = %#v, error = %v", result, err)
+		}
+	})
+
+	large, largeURI := openNavigationDocument(t, text.UTF16, strings.Repeat("x", maxFileBytes+1))
+	result, err := large.Definition(context.Background(), &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: largeURI}},
+	})
+	locations, ok := result.(protocol.LocationSlice)
+	if err != nil || !ok || len(locations) != 0 {
+		t.Fatalf("large definition = %#v, error = %v", result, err)
+	}
+}
+
+func TestNavigationCancellationAndSnapshotInvalidation(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
+	params := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 2, Character: 6},
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := instance.Hover(canceled, &protocol.HoverParams{TextDocumentPositionParams: params}); !errors.Is(err, protocol.ErrRequestCancelled) {
+		t.Fatalf("canceled hover error = %v", err)
+	}
+
+	document, err := instance.navigationAt(context.Background(), documentURI.String(), params.Position)
+	if err != nil || document == nil {
+		t.Fatalf("navigation document = %#v, error = %v", document, err)
+	}
+	version := int32(2)
+	if _, err := instance.documents.Change(documentURI.String(), version, text.UTF16, []text.Change{{Text: "vim9script\nvar changed = 1\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := document.checkCurrent(context.Background()); !errors.Is(err, protocol.ErrContentModified) {
+		t.Fatalf("modified snapshot error = %v", err)
+	}
+
+	document, err = instance.navigationAt(context.Background(), documentURI.String(), protocol.Position{Line: 1, Character: 5})
+	if err != nil || document == nil {
+		t.Fatalf("changed navigation document = %#v, error = %v", document, err)
+	}
+	instance.documents.Close(documentURI.String())
+	if err := document.checkCurrent(context.Background()); !errors.Is(err, protocol.ErrContentModified) {
+		t.Fatalf("closed snapshot error = %v", err)
+	}
+}
+
+func TestNavigationReusesCurrentParsedDocument(t *testing.T) {
+	source := "vim9script\nvar value = 1\necho value\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	snapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok {
+		t.Fatal("document snapshot is missing")
+	}
+	cached := syntax.Parse(source)
+	instance.parsed[documentURI.String()] = parsedDocument{revision: snapshot.Revision(), file: cached}
+
+	document, err := instance.navigationAt(context.Background(), documentURI.String(), protocol.Position{Line: 2, Character: 6})
+	if err != nil || document == nil || document.analysis.File != cached {
+		t.Fatalf("navigation analysis = %#v, error = %v", document, err)
+	}
+
+	stale := syntax.Parse("vim9script\necho missing\n")
+	instance.parsed[documentURI.String()] = parsedDocument{revision: snapshot.Revision() + 1, file: stale}
+	document, err = instance.navigationAt(context.Background(), documentURI.String(), protocol.Position{Line: 2, Character: 6})
+	if err != nil || document == nil || document.analysis.File == stale || document.declaration == nil {
+		t.Fatalf("stale navigation analysis = %#v, error = %v", document, err)
+	}
+}
+
+func TestHoverOmitsUnknownType(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = UnknownCall()\necho value\n")
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 2, Character: 6},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Value != "name: value\nkind: variable" {
+		t.Fatalf("hover = %#v", hover)
 	}
 }
 
