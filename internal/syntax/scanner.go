@@ -4328,8 +4328,14 @@ func parseForLoop(file *File, command *Command) {
 	in := findTopLevelKeyword(source, 0, len(source), "in")
 	if in < 0 {
 		command.For = &ForLoop{IterableSpan: Span{Start: command.Argument.End, End: command.Argument.End}}
+		code, message := "vim/E690", `Missing "in" after :for`
+		lineEnd, _ := physicalLineEnd(file.Source, command.Name.End)
+		header := strings.TrimSpace(file.Source[command.Name.End:lineEnd])
+		if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) && scanWord(header, 0, len(header)) == len(header) {
+			code, message = "vim/E1097", "line incomplete"
+		}
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
-			Code: "vim/E690", Message: `Missing "in" after :for`, Span: command.Name,
+			Code: code, Message: message, Span: command.Name,
 		})
 		return
 	}
