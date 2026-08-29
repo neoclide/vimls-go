@@ -2516,6 +2516,22 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		} else {
 			diagnosticsStart := len(file.Diagnostics)
 			command.Embedded = parseEmbeddedCommandList(file, command.Argument, command.baseDialect, depth)
+			if command.Dialect == Vim9 && (command.Canonical == "folddoopen" || command.Canonical == "folddoclosed") {
+				for diagnosticIndex := diagnosticsStart; diagnosticIndex < len(file.Diagnostics); diagnosticIndex++ {
+					diagnostic := &file.Diagnostics[diagnosticIndex]
+					if diagnostic.Code != "vimls/unexpected-token" || diagnostic.Span.Start >= len(file.Source) || file.Source[diagnostic.Span.Start] != '`' {
+						continue
+					}
+					for embeddedIndex := range command.Embedded.Commands {
+						embedded := &command.Embedded.Commands[embeddedIndex]
+						if embedded.Canonical == "echo" && diagnostic.Span.Start >= embedded.Argument.Start && diagnostic.Span.End <= embedded.Argument.End {
+							diagnostic.Code = "vim/E15"
+							diagnostic.Message = "Invalid expression"
+							break
+						}
+					}
+				}
+			}
 			if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) {
 				for diagnosticIndex := diagnosticsStart; diagnosticIndex < len(file.Diagnostics); diagnosticIndex++ {
 					diagnostic := &file.Diagnostics[diagnosticIndex]
