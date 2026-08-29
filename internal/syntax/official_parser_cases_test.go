@@ -442,6 +442,8 @@ func officialParserExpectedFailures() map[string]string {
 		"src/testdir/test_vim9_cmd.vim:2128:44136/vim9-script":     "vim/E1242",
 		"src/testdir/test_vim9_cmd.vim:2132:44231/def":             "vim/E1242",
 		"src/testdir/test_vim9_cmd.vim:2132:44231/vim9-script":     "vim/E1242",
+		"src/testdir/test_vim9_cmd.vim:2062:42490/def":             "vim/E1241",
+		"src/testdir/test_vim9_cmd.vim:2062:42490/vim9-script":     "vim/E1241",
 		"src/testdir/test_vim9_generics.vim:22:376/script":         "vim/E1552",
 		"src/testdir/test_vim9_generics.vim:30:565/script":         "vim/E1555",
 		"src/testdir/test_vim9_generics.vim:38:743/script":         "vim/E1008",

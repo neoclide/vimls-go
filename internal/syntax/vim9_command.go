@@ -13,15 +13,27 @@ import (
 func scanVim9CommandArgument(source string, start, end int, metadata vimdata.Command, parsed *Command) (int, Span, Span, *expressionBoundary) {
 	if globalCommand(metadata.Name) {
 		argumentEnd := scanGlobalCommandArgument(source, start, end)
-		if parsed != nil && (parsed.TypedName == "g" || parsed.TypedName == "v") && parsed.Name.End < start {
-			boundary := &expressionBoundary{
-				argument: Span{Start: start, End: argumentEnd},
-				diagnostics: []Diagnostic{{
-					Code: "vim/E1242", Message: "no white space allowed before separator",
-					Span: Span{Start: parsed.Name.End, End: start},
-				}},
+		if parsed != nil && (parsed.TypedName == "g" || parsed.TypedName == "v") {
+			if parsed.Name.End < start {
+				boundary := &expressionBoundary{
+					argument: Span{Start: start, End: argumentEnd},
+					diagnostics: []Diagnostic{{
+						Code: "vim/E1242", Message: "no white space allowed before separator",
+						Span: Span{Start: parsed.Name.End, End: start},
+					}},
+				}
+				return argumentEnd, Span{}, Span{}, boundary
 			}
-			return argumentEnd, Span{}, Span{}, boundary
+			if start < argumentEnd && strings.ContainsRune(":-.", rune(source[start])) {
+				boundary := &expressionBoundary{
+					argument: Span{Start: start, End: argumentEnd},
+					diagnostics: []Diagnostic{{
+						Code: "vim/E1241", Message: "separator not supported",
+						Span: Span{Start: start, End: start + 1},
+					}},
+				}
+				return argumentEnd, Span{}, Span{}, boundary
+			}
 		}
 		return argumentEnd, Span{}, Span{}, nil
 	}
