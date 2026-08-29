@@ -181,24 +181,67 @@ func (p *typeParser) parseType() *Type {
 	}
 	if name == "func" {
 		node.Kind = TypeFunction
-		p.skipSpace()
+		nameEnd := node.Span.End - p.base
+		if p.offset > nameEnd && p.offset < len(p.source) && (p.source[p.offset] == '(' || p.source[p.offset] == ':') {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E488", Message: "trailing characters",
+				Span: p.span(nameEnd, p.offset),
+			})
+		}
 		if p.offset < len(p.source) && p.source[p.offset] == '(' {
 			p.offset++
+			if p.offset < len(p.source) && isExpressionSpace(p.source[p.offset]) {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1010", Message: "type not recognized",
+					Span: p.span(p.offset, p.offset+1),
+				})
+			}
 			p.skipSpace()
 			for p.offset < len(p.source) && p.source[p.offset] != ')' {
 				node.Arguments = append(node.Arguments, p.parseType())
+				argumentEnd := node.Arguments[len(node.Arguments)-1].Span.End - p.base
 				p.skipSpace()
+				if p.offset < len(p.source) && p.source[p.offset] == ',' && p.offset > argumentEnd {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E1068", Message: "no white space allowed before ','",
+						Span: p.span(argumentEnd, p.offset+1),
+					})
+				} else if p.offset < len(p.source) && p.source[p.offset] == ')' && p.offset > argumentEnd {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E488", Message: "trailing characters",
+						Span: p.span(argumentEnd, p.offset),
+					})
+				}
 				if p.offset >= len(p.source) || p.source[p.offset] != ',' {
 					break
 				}
 				p.offset++
+				if p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset]) {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E1069", Message: "white space required after ','",
+						Span: p.span(p.offset-1, p.offset),
+					})
+				}
 				p.skipSpace()
 			}
 			p.consumeTypeClosing(')')
 		}
+		beforeSpace := p.offset
 		p.skipSpace()
 		if p.offset < len(p.source) && p.source[p.offset] == ':' {
+			if p.offset > beforeSpace {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: p.span(beforeSpace, p.offset),
+				})
+			}
 			p.offset++
+			if p.offset >= len(p.source) || !isExpressionSpace(p.source[p.offset]) {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1069", Message: "white space required after ':'",
+					Span: p.span(p.offset-1, p.offset),
+				})
+			}
 			node.ReturnType = p.parseType()
 		}
 		node.Span.End = p.base + p.offset

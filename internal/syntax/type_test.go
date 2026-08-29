@@ -81,6 +81,54 @@ func TestVim9TypeParserBareFuncRemainsValid(t *testing.T) {
 	}
 }
 
+func TestVim9TypeParserFunctionTypeSpacing(t *testing.T) {
+	// Vim v9.2.1015 src/vim9type.c parse_type_func().
+	valid := []struct {
+		source     string
+		arguments  int
+		returnType string
+	}{
+		{source: "func"},
+		{source: "func()"},
+		{source: "func(): void", returnType: "void"},
+		{source: "func: number", returnType: "number"},
+		{source: "func(number, string): bool", arguments: 2, returnType: "bool"},
+	}
+	for _, test := range valid {
+		t.Run("valid "+test.source, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(test.source)
+			if typeNode == nil || typeNode.Kind != TypeFunction || len(typeNode.Arguments) != test.arguments || len(diagnostics) != 0 {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+			if test.returnType == "" && typeNode.ReturnType != nil || test.returnType != "" && (typeNode.ReturnType == nil || typeNode.ReturnType.Name != test.returnType) {
+				t.Fatalf("return type = %#v", typeNode.ReturnType)
+			}
+		})
+	}
+
+	invalid := []struct {
+		source     string
+		diagnostic string
+	}{
+		{source: "func ()", diagnostic: "vim/E488"},
+		{source: "func : void", diagnostic: "vim/E488"},
+		{source: "func() : void", diagnostic: "vim/E488"},
+		{source: "func( number)", diagnostic: "vim/E1010"},
+		{source: "func(number )", diagnostic: "vim/E488"},
+		{source: "func(number,string)", diagnostic: "vim/E1069"},
+		{source: "func(number , string)", diagnostic: "vim/E1068"},
+		{source: "func(number):void", diagnostic: "vim/E1069"},
+	}
+	for _, test := range invalid {
+		t.Run("invalid "+test.source, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(test.source)
+			if typeNode == nil || typeNode.Kind != TypeFunction || len(diagnostics) != 1 || diagnostics[0].Code != test.diagnostic {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9TypeParserTupleWhitespaceAndSeparators(t *testing.T) {
 	tests := []struct {
 		name       string
