@@ -140,6 +140,9 @@ func parseSource(source string, initial Dialect) *File {
 				// before it is executed and explicitly does not understand
 				// heredocs. Its first line-leading } closes the definition even
 				// when the stored command later reports a missing marker.
+				// The closing brace remains part of the stored deferred body for
+				// compatibility, but it is not evaluated as heredoc interpolation.
+				scanEvalHeredoc(file, command)
 				command.Heredoc.Body.End = contentEnd
 				command.Span.End = contentEnd
 				command.Heredoc.Incomplete = true
@@ -147,6 +150,7 @@ func parseSource(source string, initial Dialect) *File {
 				heredocRecoveryCommand = ""
 				heredocRecoveryOffset = -1
 			} else if heredocEndMarkerMatches(source, command, offset, contentEnd) {
+				scanEvalHeredoc(file, command)
 				command.Heredoc.EndMarker = Span{Start: offset, End: contentEnd}
 				command.Span.End = contentEnd
 				file.Tokens = append(file.Tokens, Token{Kind: TokenHeredoc, Span: command.Heredoc.EndMarker})
@@ -179,6 +183,7 @@ func parseSource(source string, initial Dialect) *File {
 					command.Heredoc.Incomplete = true
 					command.Span.End = heredocRecoverySpanEnd
 					file.Tokens = file.Tokens[:heredocRecoveryTokenCount]
+					scanEvalHeredoc(file, command)
 					heredocCommand = -1
 					heredocRecoveryCommand = ""
 					offset = heredocRecoveryOffset
@@ -367,7 +372,9 @@ func parseSource(source string, initial Dialect) *File {
 		offset = view.Next
 	}
 	if heredocCommand >= 0 {
-		file.Commands[heredocCommand].Heredoc.Incomplete = true
+		command := &file.Commands[heredocCommand]
+		command.Heredoc.Incomplete = true
+		scanEvalHeredoc(file, command)
 	}
 	coalesceLegacyEmbeddedBlocks(file)
 	coalesceCollectedCommandBlocks(file, len(file.Source))
@@ -1764,6 +1771,78 @@ func heredocEndMarkerMatches(source string, command *Command, lineStart, lineEnd
 		}
 	}
 	return source[markerStart:lineEnd] == command.Heredoc.Marker
+}
+
+// scanEvalHeredoc parses the interpolation expressions in an eval heredoc.
+// The body is deliberately processed a physical line at a time: an incomplete
+// expression cannot make the following line part of the same expression.
+func scanEvalHeredoc(file *File, command *Command) {
+	if command == nil || command.Heredoc == nil || !command.Heredoc.Eval {
+		return
+	}
+	start, end := command.Heredoc.Body.Start, command.Heredoc.Body.End
+	if start >= end || start < 0 || end > len(file.Source) {
+		return
+	}
+	for line := start; line < end; {
+		lineEnd, next := physicalLineEnd(file.Source, line)
+		if lineEnd > end {
+			lineEnd = end
+		}
+		for index := line; index < lineEnd; {
+			if file.Source[index] == '}' {
+				if index+1 < lineEnd && file.Source[index+1] == '}' {
+					index += 2
+					continue
+				}
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1278", Message: "Stray '}' without a matching '{'", Span: Span{Start: index, End: index + 1}})
+				break
+			}
+			if file.Source[index] != '{' {
+				index++
+				continue
+			}
+			if index+1 < lineEnd && file.Source[index+1] == '{' {
+				index += 2
+				continue
+			}
+			close := findInterpolationEnd(file.Source, index, lineEnd)
+			expressionStart := skipExpressionSpace(file.Source, index+1)
+			expressionEnd := lineEnd
+			if close >= 0 {
+				expressionEnd = trimExpressionSpaceEnd(file.Source, expressionStart, close)
+			} else {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1279", Message: "Missing '}'", Span: Span{Start: index, End: index + 1}})
+			}
+			var expression *Expression
+			var diagnostics []Diagnostic
+			if expressionStart < expressionEnd {
+				expression, diagnostics = parseExpression(file.Source[expressionStart:expressionEnd], expressionStart, command.Dialect)
+			} else {
+				expression = &Expression{Kind: ExpressionMissing, Span: Span{Start: expressionStart, End: expressionStart}}
+				if close >= 0 {
+					diagnostics = append(diagnostics, Diagnostic{Code: "vim/E15", Message: "Invalid expression", Span: Span{Start: index, End: close + 1}})
+				}
+			}
+			command.Expressions = append(command.Expressions, expression)
+			// A missing closer is the primary line-local error. Keep the partial
+			// expression tree, but suppress secondary diagnostics from its tail.
+			if close >= 0 {
+				file.Diagnostics = append(file.Diagnostics, diagnostics...)
+			}
+			if close < 0 {
+				break
+			}
+			if len(diagnostics) > 0 {
+				break
+			}
+			index = close + 1
+		}
+		if next <= line || next >= end {
+			break
+		}
+		line = next
+	}
 }
 
 // detectExecuteHeredoc recognizes only a statically visible heredoc marker in
