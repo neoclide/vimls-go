@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 503 (`91d2277`)
+- Current parser-negative syntax assertions: 507 (`aedd462`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -99,6 +99,9 @@ Commit `f3e1093` migrated the seven Vim9 attached-hash comment cases, making
 the current split 501 migrated, zero ready, and 571 pending-fix.
 Commit `91d2277` migrated both contexts of the Vim9 line-ending method-arrow
 record, making the current split 503 migrated, zero ready, and 569 pending-fix.
+Commit `aedd462` migrated the four Vim9 non-delimited `is`/`isnot` token
+variants, making the current split 507 migrated, zero ready, and 565
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -131,7 +134,7 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-199 migrated and 129 pending-fix.
+203 migrated and 125 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -142,7 +145,7 @@ artifact context carrying that code. This accounts for all 328 syntax variants:
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
-| `expr-command-boundary` | E476, E488, E492 | 16 | 4 | 0 | 12 |
+| `expr-command-boundary` | E476, E488, E492 | 16 | 8 | 0 | 8 |
 | `expr-comment-token` | E1170 | 11 | 0 | 0 | 11 |
 
 ```text
@@ -226,6 +229,11 @@ Commit `91d2277` migrated `test_vim9_expr.vim:4190:121912` in both contexts.
 A line-ending `->` retains the left expression, operator, and zero-width
 missing callable without consuming the next physical line; Vim9 script reports
 E260, while the compiled `def` context reports E488.
+
+Commit `aedd462` migrated the four `4484:129910` and `4485:129977`
+`expr-command-boundary` variants. Non-delimited `is2` and `isnot2` remain
+opaque trailing bytes after the string initializer, report E488 at their first
+byte, and recover at the next physical declaration.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
