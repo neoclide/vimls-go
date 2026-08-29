@@ -32,6 +32,56 @@ func TestParseRequiresFirstEffectiveVim9ScriptCommand(t *testing.T) {
 	}
 }
 
+func TestVim9ScriptArgumentsAndRecovery(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\nvar value = 1\n",
+		"vim9script noclear\nvar value = 1\n",
+	} {
+		file := Parse(source)
+		if file.Dialect != Vim9 || len(file.Diagnostics) != 0 || len(file.Commands) != 2 {
+			t.Fatalf("valid vim9script source = %q, file = %#v", source, file)
+		}
+		if file.Commands[0].Canonical != "vim9script" || file.Commands[0].Dialect != Legacy || file.Commands[1].Dialect != Vim9 {
+			t.Fatalf("valid vim9script commands = %#v", file.Commands)
+		}
+	}
+
+	tests := []struct {
+		argument string
+		code     string
+		span     string
+		start    int
+	}{
+		{argument: "autoload", code: "vim/E475", span: "autoload", start: 11},
+		{argument: "noclears", code: "vim/E475", span: "noclears", start: 11},
+		{argument: "noclear noclear", code: "vim/E983", span: "noclear", start: 19},
+	}
+	for _, test := range tests {
+		source := "vim9script " + test.argument + "\nvar after = 1\n"
+		file := Parse(source)
+		if file.Dialect != Legacy || len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+			t.Fatalf("invalid vim9script %q, file = %#v", test.argument, file)
+		}
+		diagnostic := file.Diagnostics[0]
+		if diagnostic.Span != (Span{Start: test.start, End: test.start + len(test.span)}) || file.Text(diagnostic.Span) != test.span {
+			t.Fatalf("invalid vim9script %q diagnostic span = %#v (%q), want %q", test.argument, diagnostic.Span, file.Text(diagnostic.Span), test.span)
+		}
+		if len(file.Commands) != 2 || file.Commands[0].Dialect != Legacy || file.Commands[1].Canonical != "var" || file.Commands[1].Dialect != Legacy {
+			t.Fatalf("invalid vim9script %q did not recover in legacy mode: %#v", test.argument, file.Commands)
+		}
+	}
+
+	duplicate := Parse("vim9script noclear noclear\nvar after = 1\n")
+	if duplicate.Text(duplicate.Commands[0].Argument) != "noclear noclear" {
+		t.Fatalf("vim9script argument = %q", duplicate.Text(duplicate.Commands[0].Argument))
+	}
+
+	guarded := Parse("if !has('vim9script')\n  finish\nendif\nvim9script noclears\nvar after = 1\n")
+	if guarded.Dialect != Legacy || len(guarded.Diagnostics) != 1 || guarded.Diagnostics[0].Code != "vim/E475" || len(guarded.Commands) != 5 || guarded.Commands[4].Dialect != Legacy {
+		t.Fatalf("invalid guarded vim9script recovery = %#v", guarded)
+	}
+}
+
 func TestIndependentLegacyAndVim9Parsers(t *testing.T) {
 	source := "echo 'value' # dialect comment\n"
 	legacy := (LegacyParser{}).Parse(source)

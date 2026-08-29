@@ -51,7 +51,8 @@ func parseSource(source string, initial Dialect) *File {
 	file := &File{Dialect: initial, Source: source}
 	active := initial
 	scriptVersion := uint8(1)
-	vim9Prologue := initial == Vim9 && startsWithVim9Script(source)
+	prologue, hasVim9Prologue := findVim9ScriptPrologue(source)
+	vim9Prologue := initial == Vim9 && hasVim9Prologue && vim9ScriptArgumentsValid(source, prologue.Argument)
 	if vim9Prologue {
 		active = Legacy
 	}
@@ -80,7 +81,15 @@ func parseSource(source string, initial Dialect) *File {
 			}
 			switch command.Canonical {
 			case "vim9script":
-				if vim9Prologue {
+				if code, message, span, valid := vim9ScriptArgumentDiagnostic(file.Source, command.Argument); !valid {
+					if hasVim9Prologue && command.Name == prologue.Name {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
+					} else {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{
+							Code: "vim/E1039", Message: "vim9script must be the first command in the file", Span: command.Name,
+						})
+					}
+				} else if vim9Prologue {
 					active = Vim9
 					vim9Prologue = false
 				} else if initial == Legacy {
@@ -790,6 +799,37 @@ func parseScriptVersion(source string) (uint8, bool) {
 		return 0, false
 	}
 	return source[0] - '0', true
+}
+
+// vim9ScriptArgumentDiagnostic mirrors ex_vim9script()'s small argument
+// parser.  The command accepts no argument or one whitespace-delimited ASCII
+// word, "noclear".  Keep the offending word span so diagnostics remain useful
+// while the caller can recover at the next physical line.
+func vim9ScriptArgumentDiagnostic(source string, argument Span) (string, string, Span, bool) {
+	start, end := argument.Start, argument.End
+	foundNoClear := false
+	for start < end {
+		wordStart := start
+		for start < end && !isSpace(source[start]) {
+			start++
+		}
+		word := source[wordStart:start]
+		if word == "noclear" {
+			if foundNoClear {
+				return "vim/E983", "duplicate argument: noclear", Span{Start: wordStart, End: start}, false
+			}
+			foundNoClear = true
+		} else {
+			return "vim/E475", "invalid argument: " + source[argument.Start:argument.End], Span{Start: wordStart, End: start}, false
+		}
+		start = skipSpace(source, start, end)
+	}
+	return "", "", Span{}, true
+}
+
+func vim9ScriptArgumentsValid(source string, argument Span) bool {
+	_, _, _, valid := vim9ScriptArgumentDiagnostic(source, argument)
+	return valid
 }
 
 func scanCommands(file *File, start, end int, baseDialect Dialect) {
@@ -4349,6 +4389,11 @@ func expressionCommand(name string) bool {
 }
 
 func startsWithVim9Script(source string) bool {
+	command, found := findVim9ScriptPrologue(source)
+	return found && vim9ScriptArgumentsValid(source, command.Argument)
+}
+
+func findVim9ScriptPrologue(source string) (Command, bool) {
 	file := &File{Source: source}
 	state := 0
 	guardDepth := 0
@@ -4373,14 +4418,14 @@ func startsWithVim9Script(source string) bool {
 			switch state {
 			case 0:
 				if command.Canonical == "vim9script" {
-					return true
+					return command, true
 				}
 				if command.Canonical != "if" {
-					return false
+					return Command{}, false
 				}
 				guardSource := file.Text(command.Argument)
 				if isVim9AlwaysActiveGuard(guardSource) {
-					return false
+					return Command{}, false
 				}
 				dynamicGuard = !isVim9CompatibilityGuard(guardSource)
 				state = 1
@@ -4393,7 +4438,7 @@ func startsWithVim9Script(source string) bool {
 					blockStack = append(blockStack, BlockIf)
 				case "elseif", "else":
 					if guardDepth == 1 {
-						return false
+						return Command{}, false
 					}
 				case "finish":
 					if dynamicGuard && guardDepth == 1 && len(blockStack) == 1 && directVim9PrologueFinish(command) {
@@ -4409,7 +4454,7 @@ func startsWithVim9Script(source string) bool {
 					}
 					if guardDepth == 0 {
 						if dynamicGuard && !directFinish {
-							return false
+							return Command{}, false
 						}
 						state = 2
 					}
@@ -4426,7 +4471,10 @@ func startsWithVim9Script(source string) bool {
 					}
 				}
 			case 2:
-				return command.Canonical == "vim9script"
+				if command.Canonical == "vim9script" {
+					return command, true
+				}
+				return Command{}, false
 			}
 		}
 		if end == len(source) {
@@ -4434,7 +4482,7 @@ func startsWithVim9Script(source string) bool {
 		}
 		start = end + 1
 	}
-	return false
+	return Command{}, false
 }
 
 func directVim9PrologueFinish(command Command) bool {
