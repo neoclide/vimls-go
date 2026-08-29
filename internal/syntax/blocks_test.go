@@ -163,7 +163,7 @@ func TestBlockRecoveryKeepsLaterCommands(t *testing.T) {
 	for _, diagnostic := range file.Diagnostics {
 		codes[diagnostic.Code]++
 	}
-	if codes["vimls/missing-end"] != 1 || codes["vimls/unexpected-end"] != 1 {
+	if codes["vimls/missing-end"] != 1 || codes["vim/E588"] != 1 {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 }

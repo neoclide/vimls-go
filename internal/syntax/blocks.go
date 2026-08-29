@@ -174,6 +174,20 @@ func buildBlocks(file *File) {
 		if branchKind, ok := branchBlock(command.Canonical); ok {
 			if len(stack) > 0 && file.Blocks[stack[len(stack)-1]].Kind == branchKind {
 				blockIndex := stack[len(stack)-1]
+				if command.Dialect == Vim9 && branchKind == BlockIf {
+					seenElse := false
+					for _, branch := range file.Blocks[blockIndex].Branches {
+						if file.Commands[branch].Canonical == "else" {
+							seenElse = true
+							break
+						}
+					}
+					if seenElse && command.Canonical == "else" {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E583", Message: "multiple :else", Span: command.Name})
+					} else if seenElse && command.Canonical == "elseif" {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E584", Message: ":elseif after :else", Span: command.Name})
+					}
+				}
 				if command.Canonical == "finally" {
 					duplicate := false
 					for _, branch := range file.Blocks[blockIndex].Branches {
@@ -213,10 +227,15 @@ func buildBlocks(file *File) {
 					standalone = top == BlockDef || top == BlockFunction
 				}
 				if command.Dialect == Vim9 && standalone {
-					if command.Canonical == "catch" {
+					switch command.Canonical {
+					case "catch":
 						code, message = "vim/E603", ":catch without :try"
-					} else {
+					case "finally":
 						code, message = "vim/E606", ":finally without :try"
+					case "elseif":
+						code, message = "vim/E582", ":elseif without :if"
+					case "else":
+						code, message = "vim/E581", ":else without :if"
 					}
 				}
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
@@ -286,8 +305,17 @@ func buildBlocks(file *File) {
 					top := file.Blocks[stack[len(stack)-1]].Kind
 					standalone = top == BlockDef || top == BlockFunction
 				}
-				if command.Dialect == Vim9 && command.Canonical == "endtry" && standalone {
-					code, message = "vim/E602", ":endtry without :try"
+				if command.Dialect == Vim9 && standalone {
+					switch command.Canonical {
+					case "endif":
+						code, message = "vim/E580", ":endif without :if"
+					case "endfor":
+						code, message = "vim/E588", ":endfor without :for"
+					case "endwhile":
+						code, message = "vim/E588", ":endwhile without :while"
+					case "endtry":
+						code, message = "vim/E602", ":endtry without :try"
+					}
 				}
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
 				continue
