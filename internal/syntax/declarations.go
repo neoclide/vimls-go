@@ -86,18 +86,71 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 		return
 	}
 	aggregate := &Aggregate{Kind: kind, Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd}}
+	command.Aggregate = aggregate
+	if command.Dialect == Vim9 {
+		if source[nameStart] < 'A' || source[nameStart] > 'Z' {
+			diagnostic := Diagnostic{Span: aggregate.Name}
+			argumentEnd := trimEnumSpaceEnd(source, nameStart, len(source))
+			argument := file.Source[command.Argument.Start+nameStart : command.Argument.Start+argumentEnd]
+			switch kind {
+			case BlockClass:
+				diagnostic.Code = "vim/E1314"
+				diagnostic.Message = "Class name must start with an uppercase letter: " + argument
+			case BlockInterface:
+				diagnostic.Code = "vim/E1343"
+				diagnostic.Message = "Interface name must start with an uppercase letter: " + argument
+			case BlockEnum:
+				diagnostic.Code = "vim/E1415"
+				diagnostic.Message = "Enum name must start with an uppercase letter: " + argument
+			}
+			file.Diagnostics = append(file.Diagnostics, diagnostic)
+			return
+		}
+		if nameEnd < len(source) && !isExpressionSpace(source[nameEnd]) {
+			argumentEnd := trimEnumSpaceEnd(source, nameStart, len(source))
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1315", Message: "White space required after name: " + file.Source[command.Argument.Start+nameStart:command.Argument.Start+argumentEnd],
+				Span: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + argumentEnd},
+			})
+			return
+		}
+	}
 	remainder := nameEnd
 	for remainder < len(source) {
 		remainder = skipEnumSpace(source, remainder, len(source))
+		if remainder >= len(source) {
+			break
+		}
 		keywordEnd := scanWord(source, remainder, len(source))
 		if keywordEnd == remainder {
+			if command.Dialect == Vim9 {
+				end := trimEnumSpaceEnd(source, remainder, len(source))
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: Span{Start: command.Argument.Start + remainder, End: command.Argument.Start + end},
+				})
+			}
 			break
 		}
 		keyword := source[remainder:keywordEnd]
 		if keyword != "extends" && keyword != "implements" {
+			if command.Dialect == Vim9 {
+				end := trimEnumSpaceEnd(source, remainder, len(source))
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: Span{Start: command.Argument.Start + remainder, End: command.Argument.Start + end},
+				})
+			}
 			break
 		}
 		keywordStart := remainder
+		if command.Dialect == Vim9 && kind == BlockInterface && keyword == "implements" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1381", Message: `Interface cannot use "implements"`,
+				Span: Span{Start: command.Argument.Start + keywordStart, End: command.Argument.Start + keywordEnd},
+			})
+			return
+		}
 		remainder = keywordEnd
 		for {
 			valueStart := skipEnumSpace(source, remainder, len(source))
@@ -124,7 +177,6 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 			remainder++
 		}
 	}
-	command.Aggregate = aggregate
 }
 func scanClassName(source string, start, end int) int {
 	position := start
@@ -214,7 +266,11 @@ func parseEnumValues(file *File, command *Command) bool {
 		}
 		nameEnd := scanWord(source, valueStart, valueEnd)
 		if nameEnd == valueStart {
-			continue
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1418", Message: "Invalid enum value declaration: " + file.Source[start+valueStart:start+valueEnd],
+				Span: Span{Start: start + valueStart, End: start + valueEnd},
+			})
+			return false
 		}
 		value := EnumValue{Name: Span{Start: start + valueStart, End: start + nameEnd}}
 		payloadStart := skipEnumSpace(source, nameEnd, valueEnd)

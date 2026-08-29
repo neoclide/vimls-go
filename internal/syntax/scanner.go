@@ -371,6 +371,7 @@ func parseSource(source string, initial Dialect) *File {
 	}
 	buildAggregateMembers(file)
 	suppressInvalidDefMissingEnds(file)
+	suppressInvalidAggregateBodyDiagnostics(file)
 	normalizeLambdaBodySources(file)
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
 		return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start

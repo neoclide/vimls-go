@@ -281,6 +281,45 @@ func suppressInvalidDefMissingEnds(file *File) {
 	file.Diagnostics = kept
 }
 
+// Vim stops reading an aggregate body when its declaration header fails. Keep
+// the structurally recovered block and its AST, but do not expose diagnostics
+// from body text that Vim never parsed in that context.
+func suppressInvalidAggregateBodyDiagnostics(file *File) {
+	var invalid []Block
+	for _, block := range file.Blocks {
+		if block.Kind != BlockClass && block.Kind != BlockInterface && block.Kind != BlockEnum {
+			continue
+		}
+		header := file.Commands[block.Header]
+		for _, diagnostic := range file.Diagnostics {
+			if strings.HasPrefix(diagnostic.Code, "vim/") && diagnostic.Span.Start >= header.Span.Start && diagnostic.Span.End <= header.Span.End {
+				invalid = append(invalid, block)
+				break
+			}
+		}
+	}
+	if len(invalid) == 0 {
+		return
+	}
+	kept := file.Diagnostics[:0]
+	for _, diagnostic := range file.Diagnostics {
+		suppress := false
+		for _, block := range invalid {
+			header := file.Commands[block.Header]
+			inBody := diagnostic.Span.Start >= header.Span.End && diagnostic.Span.End <= block.Span.End
+			missingEnd := diagnostic.Code == "vimls/missing-end" && diagnostic.Span == header.Name
+			if inBody || missingEnd {
+				suppress = true
+				break
+			}
+		}
+		if !suppress {
+			kept = append(kept, diagnostic)
+		}
+	}
+	file.Diagnostics = kept
+}
+
 func blockHeaderHasVimDiagnostic(file *File, headerIndex int) bool {
 	header := file.Commands[headerIndex]
 	for _, diagnostic := range file.Diagnostics {
