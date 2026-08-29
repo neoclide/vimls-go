@@ -2350,9 +2350,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		file.Diagnostics = append(file.Diagnostics, mapVim9AttachedHashDiagnostics(file, command, diagnostics)...)
 	case "echo", "echon", "echomsg", "echoerr", "echoconsole", "echowindow", "execute":
 		if command.expressionsParsed {
+			if boundary := command.boundaryExpression; boundary != nil {
+				file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
+				command.boundaryExpression = nil
+			}
 			return
 		}
 		for consumed := 0; consumed < len(source); {
@@ -2397,6 +2401,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 }
 
 func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostics []Diagnostic) []Diagnostic {
+	diagnostics = mapVim9AttachedHashDiagnostics(file, command, diagnostics)
 	inDef := false
 	for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
 		if file.Blocks[block].Kind == BlockDef {
@@ -2475,6 +2480,21 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 				diagnostic.Code = "vim/E1097"
 				diagnostic.Message = "line incomplete"
 			}
+		}
+	}
+	return diagnostics
+}
+
+func mapVim9AttachedHashDiagnostics(file *File, command *Command, diagnostics []Diagnostic) []Diagnostic {
+	if command.Dialect != Vim9 {
+		return diagnostics
+	}
+	for index := range diagnostics {
+		diagnostic := &diagnostics[index]
+		if diagnostic.Code == "vimls/trailing-expression" && diagnostic.Span.End == diagnostic.Span.Start+1 &&
+			diagnostic.Span.Start >= 0 && diagnostic.Span.End <= len(file.Source) && file.Source[diagnostic.Span.Start] == '#' {
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
 		}
 	}
 	return diagnostics

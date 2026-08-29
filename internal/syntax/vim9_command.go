@@ -84,8 +84,7 @@ func scanVim9CommandArgument(source string, start, end int, metadata vimdata.Com
 		return scanVim9PutExpression(source, start, end)
 	}
 	if allowsMultipleExpressionArguments(metadata.Name) {
-		argumentEnd, separator, comment := scanVim9ExpressionList(source, start, end, parsed)
-		return argumentEnd, separator, comment, nil
+		return scanVim9ExpressionList(source, start, end, parsed)
 	}
 	if vim9OneExpressionCommand(metadata.Name) {
 		return scanVim9Expression(source, start, end)
@@ -220,7 +219,7 @@ func scanVim9Expression(source string, start, end int) (int, Span, Span, *expres
 	return argumentEnd, Span{}, comment, newExpressionBoundary(argument, expression, diagnostics, consumed)
 }
 
-func scanVim9ExpressionList(source string, start, end int, command *Command) (int, Span, Span) {
+func scanVim9ExpressionList(source string, start, end int, command *Command) (int, Span, Span, *expressionBoundary) {
 	if command != nil {
 		command.Expressions = nil
 		command.expressionsParsed = false
@@ -241,25 +240,39 @@ func scanVim9ExpressionList(source string, start, end int, command *Command) (in
 				command.Expressions = expressions
 				command.expressionsParsed = true
 			}
-			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment
+			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment, nil
 		}
 		if source[position] == '|' {
 			if command != nil {
 				command.Expressions = expressions
 				command.expressionsParsed = true
 			}
-			return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}, Span{}
+			return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}, Span{}, nil
+		}
+		if source[position] == '#' && !(position+1 < expressionEnd && source[position+1] == '{' && (position+2 >= expressionEnd || source[position+2] != '{')) {
+			if command != nil {
+				command.Expressions = expressions
+				command.expressionsParsed = true
+			}
+			argumentEnd := trimSpaceEnd(source, start, expressionEnd)
+			return argumentEnd, Span{}, Span{}, &expressionBoundary{
+				argument: Span{Start: start, End: argumentEnd},
+				diagnostics: []Diagnostic{{
+					Code: "vim/E488", Message: "trailing characters",
+					Span: Span{Start: position, End: position + 1},
+				}},
+			}
 		}
 		expression, diagnostics, consumed := parseExpressionPrefix(source[position:expressionEnd], position, Vim9)
 		if len(diagnostics) > 0 {
-			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment
+			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment, nil
 		}
 		if consumed <= 0 {
-			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment
+			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment, nil
 		}
 		next := position + consumed
 		if next <= position || next > expressionEnd {
-			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment
+			return trimSpaceEnd(source, start, expressionEnd), Span{}, comment, nil
 		}
 		expressions = append(expressions, expression)
 		position = next
@@ -268,7 +281,7 @@ func scanVim9ExpressionList(source string, start, end int, command *Command) (in
 		command.Expressions = expressions
 		command.expressionsParsed = true
 	}
-	return trimSpaceEnd(source, start, expressionEnd), Span{}, comment
+	return trimSpaceEnd(source, start, expressionEnd), Span{}, comment, nil
 }
 
 func scanVim9CommandExpression(source string, start, end int, command vimdata.Command) (int, Span, Span, *expressionBoundary) {
