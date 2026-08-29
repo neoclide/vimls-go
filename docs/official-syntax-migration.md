@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 587 (`d29ae92`)
+- Current parser-negative syntax assertions: 599 (`84326e2`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -142,6 +142,8 @@ the current split 585 migrated, zero ready, and 484 pending-fix.
 Commit `d29ae92` verified and migrated both ternary question-mark spacing
 variants, making the current split 587 migrated, zero ready, and 482
 pending-fix.
+Commit `84326e2` migrated all 12 lambda-arrow spacing variants, making the
+current split 599 migrated, zero ready, and 470 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -174,12 +176,12 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-283 migrated and 42 pending-fix.
+295 migrated and 30 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 55 | 0 | 29 |
-| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 145 | 0 | 12 |
+| `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 157 | 0 | 0 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 22 | 0 | 1 |
@@ -376,6 +378,12 @@ Commit `d29ae92` migrated both ternary variants at call line 111. Existing
 Vim9 ternary validation already reported one E1004 on the unspaced `?` while
 retaining all three operands and recovery, so no production change or duplicate
 fixture was needed.
+
+Commit `84326e2` completed `expr-operator-whitespace` with the 12 lambda-arrow
+variants at call lines 2772-2774 and 2944-2946. An unspaced `=>` now reports
+one E1004 at the arrow while retaining the full lambda and enclosing expression
+AST. Valid expression/block lambdas, incomplete bodies, and legacy lambdas keep
+their prior behavior.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
