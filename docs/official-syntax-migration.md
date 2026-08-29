@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 464 (`2329653`)
+- Current parser-negative syntax assertions: 479 (`067bb55`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -82,7 +82,9 @@ zero ready, and 615 pending-fix. Commit `c340e30` implemented the three stable
 Vim 9.1+ `:vim9script [noclear]` argument cases, making the current split 460
 migrated, zero ready, and 612 pending-fix. Commit `2329653` migrated the four
 missing Dictionary-value variants, making the current split 464 migrated, zero
-ready, and 608 pending-fix.
+ready, and 608 pending-fix. Commit `067bb55` migrated all 15 malformed-number
+variants from legacy functions, `def` functions, and Vim9 scripts, making the
+current split 479 migrated, zero ready, and 593 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -489,8 +491,8 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 94 migrated by `55169af` and 89
-pending-fix. In the exact inventory below, `M` and `P` mean those two statuses.
+Group D contains 183 syntax variants: 109 migrated and 74 pending-fix. In the
+exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
 #### `test_expr.vim` (30)
@@ -499,8 +501,15 @@ pending-fix. In the exact inventory below, `M` and `P` mean those two statuses.
 E1004 M ready: 1051:41636/{def|vim9-script},1052:41709/{def|vim9-script},1053:41782/{def|vim9-script},1054:41855/{def|vim9-script}
 E1004 P recovery: 250:7987/{def|vim9-script}
 E15 P mapping: 250:7987/legacy
-E15 P missing: 261:8317/{def|vim9-script},264:8414/{def|vim9-script},770:31551/{legacy|def|vim9-script},771:31625/{legacy|def|vim9-script},772:31701/{legacy|def|vim9-script},773:31760/{legacy|def|vim9-script},774:31836/{legacy|def|vim9-script}
+E15 P missing: 261:8317/{def|vim9-script},264:8414/{def|vim9-script}
+E15 M broken-number: 770:31551/{legacy|def|vim9-script},771:31625/{legacy|def|vim9-script},772:31701/{legacy|def|vim9-script},773:31760/{legacy|def|vim9-script},774:31836/{legacy|def|vim9-script}
 ```
+
+Commit `067bb55` migrated the 15 broken-number variants. The lexer retains each
+malformed literal as one Number node with its complete byte span, reports E15,
+and resumes parsing at the next physical line. The grammar comes from
+`runtime/doc/eval.txt:1705-1741`; `src/charset.c:2341-2533` supplies the strict
+alphanumeric-suffix behavior used by Vim's evaluator.
 
 #### `test_listdict.vim` (7)
 
