@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 489 (`347226c`)
+- Current parser-negative syntax assertions: 493 (`191fadb`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -91,6 +91,8 @@ Commit `f411f1a` migrated the four Vim9 adjacent-unary-sign variants, making
 the current split 486 migrated, zero ready, and 586 pending-fix.
 Commit `347226c` migrated the three malformed special-key expression variants,
 making the current split 489 migrated, zero ready, and 583 pending-fix.
+Commit `191fadb` migrated the final four Dictionary-delimiter variants, making
+the current split 493 migrated, zero ready, and 579 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -123,7 +125,7 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-193 migrated and 135 pending-fix.
+197 migrated and 131 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -131,7 +133,7 @@ artifact context carrying that code. This accounts for all 328 syntax variants:
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 0 | 0 | 13 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
-| `expr-dict-delimiter` | E720, E722, E723 | 23 | 19 | 0 | 4 |
+| `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
 | `expr-command-boundary` | E476, E488, E492 | 16 | 3 | 0 | 13 |
@@ -208,6 +210,11 @@ registers `.`, `%`, `:`, and `~` but maps `@@` to the unnamed register.
 Commit `2329653` migrated the four missing Dictionary-value variants. The AST
 retains the key and a zero-width missing-value node, reports E723 in a compiled
 `def` and E15 at Vim9 script level, then resumes parsing at the next line.
+
+Commit `191fadb` completed `expr-dict-delimiter`. Missing closing braces retain
+the partial Dictionary AST and report one E723 without adding a redundant outer
+parenthesis diagnostic; command-start Dictionaries remain expressions rather
+than being mistaken for Vim9 scope blocks.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
