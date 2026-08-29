@@ -1408,20 +1408,99 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 	}
 	p.advance()
 	var children []*Expression
+	last := open.span.End
+	hadValue := false
+	trailingComma := false
+	// Keep the first dictionary error as the recovery point.  Vim reports one
+	// structural error for a malformed dictionary and stops compiling that
+	// expression; continuing to parse the rest of the physical line would
+	// manufacture trailing/missing diagnostics and lose the useful children
+	// already parsed before the error.
+	malformed := false
 	for p.current().kind != expressionEOF && p.current().text != "}" {
 		key := p.parseDictionaryKey()
 		children = append(children, key)
-		if p.current().text == ":" {
-			p.advance()
-			children = append(children, p.parse(0))
+		if key.Span.End > last {
+			last = key.Span.End
 		}
-		if p.current().text != "," {
-			break
+		if p.current().text != ":" {
+			if p.dialect == Vim9 {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E720", Message: "Missing colon in Dictionary", Span: p.current().span,
+				})
+				malformed = true
+				p.consumeDictionaryRemainder()
+				break
+			}
+			if p.current().text != "," {
+				break
+			}
+			p.advance()
+			trailingComma = true
+			continue
 		}
 		p.advance()
+		diagnosticsBeforeValue := len(p.diagnostics)
+		value := p.parse(0)
+		children = append(children, value)
+		hadValue = true
+		if value.Span.End > last {
+			last = value.Span.End
+		}
+		if len(p.diagnostics) > diagnosticsBeforeValue && p.dialect == Vim9 {
+			// A malformed nested value already owns the diagnostic.  Retain its
+			// AST and avoid adding a second dictionary-level error.
+			malformed = true
+			p.consumeDictionaryRemainder()
+			break
+		}
+		if p.current().text != "," && p.current().text != "}" {
+			if p.dialect == Vim9 {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E722", Message: "Missing comma in Dictionary", Span: p.current().span,
+				})
+				malformed = true
+				p.consumeDictionaryRemainder()
+			}
+			break
+		}
+		if p.current().text == "," {
+			trailingComma = true
+			p.advance()
+		} else {
+			trailingComma = false
+		}
 	}
-	end := p.consumeClosing("}", open.span.End)
+	if p.dialect != Vim9 {
+		end := p.consumeClosing("}", open.span.End)
+		return &Expression{Kind: ExpressionDictionary, Span: Span{Start: open.span.Start, End: end}, Children: children}
+	}
+	end := last
+	if p.current().text == "}" {
+		end = p.current().span.End
+		p.advance()
+	} else if !malformed && p.dialect == Vim9 {
+		// A value followed by a missing separator is E722.  A trailing comma,
+		// or an empty/incomplete dictionary, is instead the missing-end case.
+		code := "vim/E723"
+		message := "Missing end of Dictionary '}'"
+		if hadValue && !trailingComma {
+			code = "vim/E722"
+			message = "Missing comma in Dictionary"
+		}
+		p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: p.current().span})
+	}
 	return &Expression{Kind: ExpressionDictionary, Span: Span{Start: open.span.Start, End: end}, Children: children}
+}
+
+// consumeDictionaryRemainder makes a malformed dictionary opaque through the
+// end of the current expression.  It deliberately does not consume a valid
+// closing delimiter belonging to an enclosing expression when one is absent;
+// callers still retain all children parsed before the error.
+func (p *expressionParser) consumeDictionaryRemainder() {
+	for p.current().kind != expressionEOF && p.current().text != "}" {
+		p.advance()
+	}
 }
 
 func (p *expressionParser) parseDictionaryKey() *Expression {
