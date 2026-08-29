@@ -325,6 +325,11 @@ func buildBlocks(file *File) {
 				continue
 			}
 			blockIndex := stack[match]
+			if command.Dialect == Vim9 && closeKind == BlockTry && match == len(stack)-1 && len(file.Blocks[blockIndex].Branches) == 0 {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1032", Message: "missing :catch or :finally", Span: command.Name,
+				})
+			}
 			recovering := stackHasInvalidFor(stack[match+1:], invalidFor)
 			for _, unclosed := range stack[match+1:] {
 				if recovering {
