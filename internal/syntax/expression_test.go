@@ -632,12 +632,47 @@ func TestVim9LogicalAndOptionExpressions(t *testing.T) {
 func TestOfficialRegisterExpressions(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_assign.vim
 	// Test_assignment_vim9script.
-	for _, source := range []string{"@/", "@0", "@9", "@-", "@*", "@+", "@\""} {
+	for _, source := range []string{"@/", "@0", "@9", "@-", "@_", "@#", "@.", "@%", "@:", "@=", "@*", "@+", "@\""} {
 		expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)
 		if len(diagnostics) != 0 || expression.Kind != ExpressionIdentifier || expression.Value != source {
 			t.Fatalf("%q = %#v, diagnostics = %#v", source, expression, diagnostics)
 		}
 	}
+}
+
+func TestVim9InvalidRegisterAtoms(t *testing.T) {
+	tests := []struct {
+		source string
+		code   string
+		span   string
+	}{
+		{source: "@", code: "vim/E1002", span: "@"},
+		{source: "@<", code: "vim/E354", span: "<"},
+	}
+	for _, test := range tests {
+		expression, diagnostics := (Vim9ExpressionParser{}).Parse(test.source)
+		if len(diagnostics) != 1 || diagnostics[0].Code != test.code || test.source[diagnostics[0].Span.Start:diagnostics[0].Span.End] != test.span {
+			t.Fatalf("%q expression = %#v, diagnostics = %#v", test.source, expression, diagnostics)
+		}
+		if expression.Kind != ExpressionIdentifier || expression.Value != test.source || expression.Span != (Span{Start: 0, End: len(test.source)}) {
+			t.Fatalf("%q expression = %#v", test.source, expression)
+		}
+	}
+
+	file := Parse("vim9script\ndef Test()\n  var broken = @<\n  var after = 1\nenddef\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E354" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 5 || file.Commands[2].Declaration == nil || file.Commands[2].Declaration.Initializer == nil || file.Commands[2].Declaration.Initializer.Value != "@<" || file.Commands[3].Declaration == nil || file.Text(file.Commands[3].Declaration.Name) != "after" {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	for _, source := range []string{"@", "@<"} {
+		expression, diagnostics := (LegacyExpressionParser{}).Parse(source)
+		if len(diagnostics) != 0 || expression.Kind != ExpressionIdentifier || expression.Value != source {
+			t.Fatalf("legacy %q expression = %#v, diagnostics = %#v", source, expression, diagnostics)
+		}
+	}
+	assertFileSpans(t, file)
 }
 
 func TestOfficialUnnamedRegisterBesideDoubleQuotedString(t *testing.T) {

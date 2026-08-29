@@ -388,6 +388,19 @@ func (p *expressionParser) parsePrefix() *Expression {
 	switch token.kind {
 	case expressionIdentifier:
 		p.advance()
+		if p.dialect == Vim9 && strings.HasPrefix(token.text, "@") {
+			if len(token.text) == 1 {
+				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1002", Message: "Syntax error at @", Span: token.span})
+			} else {
+				name, size := utf8.DecodeRuneInString(token.text[1:])
+				if !validRegisterName(name) {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E354", Message: "Invalid register name: '" + string(name) + "'",
+						Span: Span{Start: token.span.Start + 1, End: token.span.Start + 1 + size},
+					})
+				}
+			}
+		}
 		return &Expression{Kind: ExpressionIdentifier, Span: token.span, Value: token.text}
 	case expressionNumber:
 		p.advance()
@@ -418,6 +431,10 @@ func (p *expressionParser) parsePrefix() *Expression {
 	p.advance()
 	p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/unexpected-token", Message: "unexpected token in expression", Span: token.span})
 	return &Expression{Kind: ExpressionMissing, Span: token.span}
+}
+
+func validRegisterName(name rune) bool {
+	return name >= 'A' && name <= 'Z' || name >= 'a' && name <= 'z' || name >= '0' && name <= '9' || strings.ContainsRune(`"-_/#.%:=*+~`, name)
 }
 
 // startsLeadingCurlyName distinguishes a legacy curly-braces variable name
