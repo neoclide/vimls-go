@@ -11,9 +11,10 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	rawSource := file.Text(command.Argument)
-	vim9Signature := command.Dialect == Vim9 || command.Canonical == "def"
+	defSignature := command.Canonical == "def"
+	vim9Context := command.Dialect == Vim9 || defSignature
 	source := rawSource
-	if vim9Signature {
+	if vim9Context {
 		source = maskVim9Comments(source)
 	}
 	offset := skipSyntaxSpace(source, 0, len(source))
@@ -31,7 +32,7 @@ func parseFunctionSignature(file *File, command *Command) {
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
 	beforeSpace := offset
 	offset = skipSyntaxSpace(source, offset, len(source))
-	spaceBeforeGeneric := vim9Signature && offset > beforeSpace && offset < len(source) && source[offset] == '<'
+	spaceBeforeGeneric := defSignature && offset > beforeSpace && offset < len(source) && source[offset] == '<'
 	genericInvalid := spaceBeforeGeneric
 	if spaceBeforeGeneric {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
@@ -39,13 +40,13 @@ func parseFunctionSignature(file *File, command *Command) {
 			Span: Span{Start: command.Argument.Start + beforeSpace, End: command.Argument.Start + offset},
 		})
 	}
-	if vim9Signature && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
+	if vim9Context && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1068", Message: "no white space allowed before function arguments",
 			Span: Span{Start: command.Argument.Start + beforeSpace, End: command.Argument.Start + offset},
 		})
 	}
-	if vim9Signature && offset < len(source) && source[offset] == '<' {
+	if defSignature && offset < len(source) && source[offset] == '<' {
 		end := findMatching(source, offset, '<', '>')
 		if end < 0 {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-generic-end", Message: "expected > after generic type parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
@@ -60,7 +61,7 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 		beforeSpace = end + 1
 		offset = skipSyntaxSpace(source, beforeSpace, len(source))
-		if vim9Signature && !genericInvalid && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
+		if !genericInvalid && offset > beforeSpace && offset < len(source) && source[offset] == '(' {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1068", Message: "no white space allowed before function arguments",
 				Span: Span{Start: command.Argument.Start + beforeSpace, End: command.Argument.Start + offset},
@@ -68,7 +69,13 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 	}
 	if offset >= len(source) || source[offset] != '(' {
-		if vim9Signature && offset < len(source) {
+		if command.Canonical == "function" && offset < len(source) && source[offset] == '<' {
+			end := trimSyntaxSpaceEnd(source, offset, len(source))
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E124", Message: "missing '('",
+				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + end},
+			})
+		} else if vim9Context && offset < len(source) {
 			end := trimSyntaxSpaceEnd(source, offset, len(source))
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E488", Message: "trailing characters",
@@ -79,7 +86,7 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	open := offset
-	if vim9Signature && open+1 < len(rawSource) && rawSource[open+1] == '#' {
+	if vim9Context && open+1 < len(rawSource) && rawSource[open+1] == '#' {
 		end := strings.IndexByte(rawSource[open+1:], '\n')
 		if end < 0 {
 			end = len(rawSource)
@@ -128,14 +135,14 @@ func parseFunctionSignature(file *File, command *Command) {
 	tailStart := offset
 	offset = skipSyntaxSpace(rawSource, offset, len(rawSource))
 	spaceBeforeTail := offset > tailStart
-	if offset < len(rawSource) && rawSource[offset] == ':' {
-		spaceBeforeColon := vim9Signature && spaceBeforeTail
+	if defSignature && offset < len(rawSource) && rawSource[offset] == ':' {
+		spaceBeforeColon := spaceBeforeTail
 		if spaceBeforeColon {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1059", Message: "no white space allowed before colon",
 				Span: Span{Start: command.Argument.Start + tailStart, End: command.Argument.Start + offset + 1},
 			})
-		} else if vim9Signature && (offset+1 >= len(source) || !isExpressionSpace(source[offset+1])) {
+		} else if offset+1 >= len(source) || !isExpressionSpace(source[offset+1]) {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1069", Message: "white space required after ':'",
 				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + offset + 1},
@@ -147,7 +154,7 @@ func parseFunctionSignature(file *File, command *Command) {
 		function.ReturnType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, source[typeStart:typeEnd], command.Argument.Start+typeStart)
 	} else if offset < len(rawSource) {
 		if rawSource[offset] == '#' {
-			validComment := spaceBeforeTail && (command.Canonical == "def" || command.Dialect == Vim9)
+			validComment := spaceBeforeTail && vim9Context
 			if !validComment {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{
 					Code: "vim/E488", Message: "trailing characters",
@@ -287,7 +294,7 @@ func parseFunctionTypeParameters(source string, base, open, close int) ([]TypePa
 }
 
 func parseParameter(file *File, command *Command, source string, part Span) *Parameter {
-	vim9Signature := command.Dialect == Vim9 || command.Canonical == "def"
+	defSignature := command.Canonical == "def"
 	start := skipSyntaxSpace(source, part.Start, part.End)
 	end := trimSyntaxSpaceEnd(source, start, part.End)
 	if start >= end {
@@ -303,25 +310,32 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 	}
 	colon := findTopLevelByte(source, start, end, ':')
 	equals := findTopLevelByte(source, start, end, '=')
+	typed := colon >= 0 && (equals < 0 || colon < equals)
 	nameEnd := end
-	if colon >= 0 && (equals < 0 || colon < equals) {
+	if typed {
 		nameEnd = colon
 	} else if equals >= 0 {
 		nameEnd = equals
 	}
 	nameEnd = trimSyntaxSpaceEnd(source, start, nameEnd)
-	if command.Canonical == "def" && parameter.Variadic && nameEnd == start {
+	if defSignature && parameter.Variadic && nameEnd == start {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1055", Message: "missing name after ...",
 			Span: Span{Start: command.Argument.Start + variadicStart, End: command.Argument.Start + variadicStart + 3},
 		})
 	}
 	parameter.Name = Span{Start: command.Argument.Start + start, End: command.Argument.Start + nameEnd}
-	if vim9Signature && !parameter.Variadic {
+	if typed && !defSignature {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E475", Message: "invalid argument",
+			Span: Span{Start: command.Argument.Start + colon, End: command.Argument.Start + end},
+		})
+	}
+	if defSignature && !parameter.Variadic {
 		parameter.Target = parseConstructorParameterTarget(source, start, nameEnd, command.Argument.Start)
 	}
-	if colon >= 0 && (equals < 0 || colon < equals) {
-		if vim9Signature && (colon+1 >= end || !isExpressionSpace(source[colon+1])) {
+	if defSignature && typed {
+		if colon+1 >= end || !isExpressionSpace(source[colon+1]) {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1069", Message: "white space required after ':'",
 				Span: Span{Start: command.Argument.Start + colon, End: command.Argument.Start + colon + 1},
@@ -344,8 +358,8 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 				Code: "vim/E125", Message: "illegal argument", Span: parameter.DefaultSpan,
 			})
 		} else {
-			dialect := command.Dialect
-			if vim9Signature {
+			dialect := Legacy
+			if defSignature {
 				dialect = Vim9
 			}
 			parameter.Default, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[defaultStart:end], command.Argument.Start+defaultStart, dialect)

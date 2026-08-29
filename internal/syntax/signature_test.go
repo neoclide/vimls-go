@@ -82,6 +82,45 @@ func TestParsesLegacyFunctionSignatureAndAttributes(t *testing.T) {
 	}
 }
 
+func TestLegacyFunctionSignatureGrammarInVim9Script(t *testing.T) {
+	// v9.2.1015 runtime/doc/vim9.txt says :function keeps legacy syntax in a
+	// Vim9 script.  The official suite covers comma spacing and anonymous ...;
+	// src/userfunc.c keeps types and generic parameters exclusive to :def.
+	valid := Parse("vim9script\nfunc Legacy(first,second = {x -> x},...) \" comment\nendfunc\n")
+	if len(valid.Diagnostics) != 0 || len(valid.Commands) != 3 || valid.Commands[1].Function == nil {
+		t.Fatalf("valid legacy signature = %#v", valid)
+	}
+	parameters := valid.Commands[1].Function.Parameters
+	if len(parameters) != 3 || parameters[1].Default == nil || parameters[1].Default.Kind != ExpressionLambda || !parameters[2].Variadic || parameters[2].Name.Start != parameters[2].Name.End {
+		t.Fatalf("parameters = %#v", parameters)
+	}
+
+	for _, test := range []struct {
+		name   string
+		header string
+		code   string
+	}{
+		{name: "parameter type", header: "Typed(value: number)", code: "vim/E475"},
+		{name: "return type", header: "Returns(): number", code: "vim/E488"},
+		{name: "generic parameters", header: "Generic<T>()", code: "vim/E124"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse("vim9script\nfunc " + test.header + "\nendfunc\nvar after = 1\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || len(file.Commands) != 4 || file.Commands[1].Function == nil {
+				t.Fatalf("header=%q file=%#v", test.header, file)
+			}
+			function := file.Commands[1].Function
+			if len(function.TypeParameters) != 0 || function.ReturnType != nil {
+				t.Fatalf("header=%q function=%#v", test.header, function)
+			}
+			last := file.Commands[len(file.Commands)-1]
+			if last.Canonical != "var" || last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+				t.Fatalf("header=%q recovery=%#v", test.header, file.Commands)
+			}
+		})
+	}
+}
+
 func TestOfficialMultilineVim9FunctionHeader(t *testing.T) {
 	// v9.2.1015 runtime/doc/vim9.txt *vim9-line-continuation* and
 	// src/testdir/test_vim9_func.vim.
