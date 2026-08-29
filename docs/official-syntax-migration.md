@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 535 (`a05b752`)
+- Current parser-negative syntax assertions: 537 (`b5cf4fb`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -127,6 +127,8 @@ making the current split 533 migrated, zero ready, and 536 pending-fix.
 Commit `a05b752` migrated both contexts of the inline-function same-line
 command case, making the current split 535 migrated, zero ready, and 534
 pending-fix.
+Commit `b5cf4fb` migrated both missing inline-lambda heredoc-marker contexts,
+making the current split 537 migrated, zero ready, and 532 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -159,16 +161,16 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 325 syntax variants:
-231 migrated and 94 pending-fix.
+233 migrated and 92 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 42 | 0 | 42 |
+| `expr-incomplete-delimiter` | E15, E109, E1002, E107, E1097, E110, E1104, E111, E114, E115 | 84 | 43 | 0 | 41 |
 | `expr-operator-whitespace` | E1004, E1068, E1069 | 157 | 107 | 0 | 50 |
 | `expr-operator-structure` | E260, E274, E1123, E1127, E1139, E1171 | 13 | 13 | 0 | 0 |
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
-| `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
-| `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
+| `expr-dict-delimiter` | E720, E722, E723 | 23 | 22 | 0 | 1 |
+| `expr-heredoc-end` | E1145 | 2 | 2 | 0 | 0 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
 | `expr-command-boundary` | E476, E488, E492 | 13 | 13 | 0 | 0 |
 | `expr-comment-token` | E1170 | 11 | 11 | 0 | 0 |
@@ -314,6 +316,19 @@ Commit `a05b752` completed `expr-command-boundary` with both contexts of
 to end its physical line except for a comment. A same-line command now reports
 E488 at that payload, remains outside `LambdaBody`, and does not swallow the
 following physical command.
+
+Commit `b5cf4fb` completed `expr-heredoc-end` with
+`test_vim9_expr.vim:{2863:85195/def,2864:85270/script}`. When an unfinished
+inline function contains an unfinished heredoc, the outer declaration owns one
+E1145 rather than leaking the nested E990 and an additional E1171. The lambda,
+body command, incomplete heredoc, and following physical commands remain in
+the AST.
+
+Reconciliation against the exact expected map corrected two pre-existing row
+counts without changing the Group A total. `4328:125740/vim9-script` was
+already migrated as E111, so `expr-incomplete-delimiter` has 43 migrated and
+41 pending variants. `4196:122230/script` remains the one pending
+`expr-dict-delimiter` variant, so that row has 22 migrated and one pending.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
