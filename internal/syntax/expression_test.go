@@ -847,6 +847,56 @@ func TestOfficialMultilineMethodOperatorSpacing(t *testing.T) {
 	}
 }
 
+func TestOfficialTrailingMethodArrowStopsAtPhysicalLine(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		code   string
+	}{
+		{
+			name:   "def",
+			source: "def Func()\n# comment\n'yes'->\nEcho()\n#comment\nenddef\ndefcompile\n",
+			code:   "vim/E488",
+		},
+		{
+			name:   "vim9-script",
+			source: "vim9script\n'yes'->\nEcho()\n",
+			code:   "vim/E260",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Span != (Span{Start: strings.Index(test.source, "->"), End: strings.Index(test.source, "->") + 2}) {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) < 3 {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			arrow := file.Commands[1]
+			if arrow.Kind != CommandExpression || len(arrow.Expressions) != 1 {
+				t.Fatalf("arrow command = %#v", arrow)
+			}
+			expression := arrow.Expressions[0]
+			if expression.Kind != ExpressionCall || expression.Value != "->" || expression.Operator != file.Diagnostics[0].Span || len(expression.Children) != 2 {
+				t.Fatalf("arrow expression = %#v", expression)
+			}
+			missing := expression.Children[0]
+			if missing.Kind != ExpressionMissing || missing.Span != (Span{Start: expression.Operator.End, End: expression.Operator.End}) || expression.Children[1].Kind != ExpressionString || file.Text(expression.Children[1].Span) != "'yes'" {
+				t.Fatalf("incomplete arrow children = %#v", expression.Children)
+			}
+			next := file.Commands[2]
+			if next.Kind != CommandExpression || len(next.Expressions) != 1 || next.Expressions[0].Kind != ExpressionCall || file.Text(next.Argument) != "Echo()" {
+				t.Fatalf("recovered next command = %#v", next)
+			}
+			if test.name == "def" && (len(file.Commands) != 5 || file.Commands[3].Canonical != "enddef" || file.Commands[4].Canonical != "defcompile") {
+				t.Fatalf("def recovery commands = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestOfficialQualifiedImportedMethodCall(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_expr.vim
 	// Test_expr9_method_call_import.

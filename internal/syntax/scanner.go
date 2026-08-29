@@ -2281,7 +2281,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vim/E722") {
+		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -2450,6 +2450,9 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 			diagnostic.Code = "vim/E1097"
 			diagnostic.Message = "line incomplete"
 		case command.Dialect == Vim9 && inDef && assignmentExpression && diagnostic.Code == "vimls/trailing-expression":
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
+		case command.Dialect == Vim9 && inDef && diagnostic.Code == "vim/E260":
 			diagnostic.Code = "vim/E488"
 			diagnostic.Message = "trailing characters"
 		case diagnostic.Code == "vimls/missing-list-end":
@@ -4164,7 +4167,13 @@ func (state vim9ContinuationScan) needsContinuation() bool {
 			}
 		}
 	}
-	for _, suffix := range []string{"==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?", ">=#", ">=?", "<=#", "<=?", "..", "&&", "||", "??", "->", "=>", "==", "!=", "=~", "!~", ">=", "<=", "<<", ">>", "+", "-", "*", "/", "%", ">", "<", "=", ",", "?", ":"} {
+	for _, suffix := range []string{"==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?", ">=#", ">=?", "<=#", "<=?", "..", "&&", "||", "??", "=>", "==", "!=", "=~", "!~", ">=", "<=", "<<", ">>", "+", "-", "*", "/", "%", ">", "<", "=", ",", "?", ":"} {
+		// The greater-than operator is also a suffix of the method
+		// operator. A line ending in "->" is not a legal automatic
+		// continuation; Vim reports E260/E488 before reading the next line.
+		if suffix == ">" && state.tailHasSuffix("->") {
+			continue
+		}
 		if state.tailHasSuffix(suffix) {
 			return true
 		}

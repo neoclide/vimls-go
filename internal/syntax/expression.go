@@ -229,6 +229,22 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			left = p.parseArrowCallable(left)
 			continue
 		}
+		if token.text == "->" && p.peek(1).kind == expressionEOF {
+			// Vim does not allow a line break immediately after a method
+			// operator. Keep the operator in the AST, but represent the
+			// missing callable at its insertion point so callers can recover
+			// without consuming a following physical line.
+			p.advance()
+			missing := &Expression{Kind: ExpressionMissing, Span: Span{Start: token.span.End, End: token.span.End}}
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E260", Message: "Missing name after ->", Span: token.span,
+			})
+			left = &Expression{
+				Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: token.span.End},
+				Operator: token.span, Value: "->", Children: []*Expression{missing, left},
+			}
+			continue
+		}
 		// Legacy Vim accepts whitespace between a named function and its
 		// argument list (for example, exists ("x")).  Vim9 deliberately
 		// rejects that form; its expression grammar requires adjacency.
