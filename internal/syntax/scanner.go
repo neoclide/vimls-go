@@ -1720,7 +1720,15 @@ func detectHeredoc(file *File, command *Command) bool {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E488", Message: "trailing characters", Span: Span{Start: command.Argument.Start + trailing, End: command.Argument.End},
 		})
-		return false
+		if command.Dialect != Vim9 {
+			return false
+		}
+		// The header is still a heredoc even though Vim rejects its trailing
+		// characters.  Keep the marker so the physical body and END marker are
+		// consumed, while preventing the normal RHS parser from adding cascades.
+		command.Heredoc = &Heredoc{Marker: marker, Trim: trim, Eval: eval}
+		command.detailsOpaque = true
+		return true
 	}
 	if !scriptGet && marker[0] >= 'a' && marker[0] <= 'z' {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
