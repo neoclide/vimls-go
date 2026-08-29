@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 447 (`83781bd`)
+- Current parser-negative syntax assertions: 457 (`cbe7267`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -76,7 +76,9 @@ then migrated all 91 cases that were ready in the current parser: Group A 47,
 Group B 16, Group C 23, and Group D 5. The current split is therefore 437
 migrated, zero ready, and 635 pending-fix. Commit `83781bd` implemented and
 migrated the 10 Group A List-delimiter cases, making the current split 447
-migrated, zero ready, and 625 pending-fix.
+migrated, zero ready, and 625 pending-fix. Commit `cbe7267` implemented the 10
+remaining Group A Blob/register cases, making the current split 457 migrated,
+zero ready, and 615 pending-fix.
 
 ## Syntax rule groups
 
@@ -103,7 +105,7 @@ duplicate these exact keys.
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
 artifact context carrying that code. This accounts for all 328 syntax variants:
-179 migrated and 149 pending-fix.
+189 migrated and 139 pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -113,7 +115,7 @@ artifact context carrying that code. This accounts for all 328 syntax variants:
 | `expr-list-delimiter` | E696, E697 | 10 | 10 | 0 | 0 |
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 15 | 0 | 8 |
 | `expr-heredoc-end` | E1145 | 2 | 0 | 0 | 2 |
-| `expr-literal-register` | E354, E973 | 12 | 2 | 0 | 10 |
+| `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
 | `expr-command-boundary` | E476, E488, E492 | 16 | 3 | 0 | 13 |
 | `expr-comment-token` | E1170 | 11 | 0 | 0 | 11 |
 
@@ -169,7 +171,8 @@ expr-comment-token
 ```
 
 Authority: `src/testdir/test_vim9_expr.vim`, `src/vim9expr.c`,
-`src/list.c`, `src/vim9cmds.c`, `src/ex_docmd.c`, `src/eval.c`, and `src/blob.c`.
+`src/list.c`, `src/register.c`, `src/vim9compile.c`, `src/typval.c`,
+`src/vim9cmds.c`, `src/ex_docmd.c`, `src/eval.c`, and `src/blob.c`.
 Implementation paths are `internal/syntax/expression.go`, `scanner.go`,
 `vim9_command.go`, and `syntax_command.go`.
 
@@ -177,6 +180,12 @@ Commit `83781bd` migrated `expr-list-delimiter`. For Vim9 compiled Lists,
 `src/vim9expr.c:1610-1642` distinguishes a missing comma (E696) from a missing
 closing bracket after a comma (E697); the script evaluator follows
 `src/list.c:1728-1767`, and `src/errors.h:1793-1796` defines both messages.
+
+Commit `cbe7267` completed `expr-literal-register`. Blob bytes follow
+`src/typval.c:2386-2478`, including E973 for an incomplete hex pair.
+Register reads follow `src/register.c:177-218`; assignment destinations use the
+stricter `src/vim9compile.c:1480-1487,1499-1575`, which rejects the read-only
+registers `.`, `%`, `:`, and `~` but maps `@@` to the unnamed register.
 
 The baseline expected map has 122 Group A keys, all with a unique official
 syntax code. `src/errors.h:269` defines E109 for the missing colon used by call
