@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 803 (`7cbd3f2`)
+- Current parser-negative syntax assertions: 807 (`70251bb`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -263,6 +263,8 @@ authoritative current split 802 migrated, zero ready, and 266 pending-fix.
 Commit `7cbd3f2` migrated the E116 incomplete generic-call argument failure,
 making the authoritative current split 803 migrated, zero ready, and 265
 pending-fix.
+Commit `70251bb` migrated four invalid Vim9 condition recoveries, making the
+authoritative current split 807 migrated, zero ready, and 261 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -856,12 +858,12 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 52 | 0 | 63 |
-| `C-EXPR` | 19 | 1 | 0 | 18 |
+| `C-EXPR` | 19 | 5 | 0 | 14 |
 | `C-GENERIC` | 109 | 42 | 0 | 67 |
 | `C-IMPORT` | 14 | 10 | 0 | 4 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **171** | **0** | **198** |
+| **Total** | **369** | **175** | **0** | **194** |
 
 ```text
 C-EXPR
@@ -1067,6 +1069,13 @@ Commit `7cbd3f2` migrated E116 at `G:304:6695/script`. The retained
 `ExpressionCall` and generic type arguments now make the missing call delimiter
 unambiguous, so top-level Vim9 recovery maps it to E116 while ordinary missing
 parentheses retain their existing E110 behavior.
+
+Commit `70251bb` migrated E114, E115, E110, and E109 at
+`S:{2320:47969,2321:48021,2322:48073,2323:48121}/def`. Invalid Vim9 condition
+headers retain their partial expression AST but no longer leave a false
+unclosed block; delimiter diagnostics use Vim codes and stop at the physical
+line without a trailing-expression cascade. Legacy block recovery remains
+unchanged.
 
 The baseline Group C expected map had 79 keys: 78 syntax and one semantic key,
 `G:2456:54444/script` (E1561 duplicate generic type variable). Commit
