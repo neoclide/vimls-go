@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 457 (`cbe7267`)
+- Current parser-negative syntax assertions: 460 (`c340e30`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -78,7 +78,15 @@ migrated, zero ready, and 635 pending-fix. Commit `83781bd` implemented and
 migrated the 10 Group A List-delimiter cases, making the current split 447
 migrated, zero ready, and 625 pending-fix. Commit `cbe7267` implemented the 10
 remaining Group A Blob/register cases, making the current split 457 migrated,
-zero ready, and 615 pending-fix.
+zero ready, and 615 pending-fix. Commit `c340e30` implemented the three stable
+Vim 9.1+ `:vim9script [noclear]` argument cases, making the current split 460
+migrated, zero ready, and 612 pending-fix.
+
+For editor recovery, `eece91f` intentionally keeps an invalid first
+`:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
+returns before switching execution state, but treating the remainder as legacy
+would misparse the user's clearly declared file language while they edit the
+argument.
 
 ## Syntax rule groups
 
@@ -87,7 +95,7 @@ file prefix produces the exact corpus keys.
 
 | Group ID | Status | Exact cases | Official result | Baseline result | Vim evidence | Implementation location |
 | --- | --- | --- | --- | --- | --- | --- |
-| `vim9-vim9script-arguments` | `pending-fix` | `test_vim9_import.vim:{2972:73136/script,2978:73280/script,2984:73418/script}` | E475, E983, E475 | no diagnostic | `src/vim9script.c:82-145` | `internal/syntax/scanner.go` prologue state |
+| `vim9-vim9script-arguments` | `migrated` (`c340e30`) | `test_vim9_import.vim:{2972:73136/script,2978:73280/script,2984:73418/script}` | E475, E983, E475 | no diagnostic | `runtime/doc/repeat.txt:416-424`; `src/vim9script.c:103-132` | `internal/syntax/scanner.go` prologue state |
 | `vim9-xfile-missing-backtick` | `pending-fix` | `test_vim9_cmd.vim:{267:6525/def}` | E1083 | no diagnostic | `src/vim9cmds.c:2311-2431` | command metadata generation and `internal/syntax/vim9_command.go` |
 | `vim9-dictionary-missing-value` | `pending-fix` | `test_vim9_expr.vim:{3265:97250/def,3266:97290/script,3274:97438/def,3274:97438/vim9-script}` | E723 in `def`, E15 at script level | `vimls/missing-expression` | `src/vim9expr.c:1912-2076`, `src/dict.c` dictionary evaluator | `internal/syntax/expression.go` plus context mapping in `scanner.go` |
 | `vim9-assignment-missing-rhs` | `pending-fix` | `test_vim9_assign.vim:{515:12614/def,581:14074/def}` | E1097 | `vimls/missing-expression` | `src/vim9compile.c:918-945,3140-3238` | command-expression assignment and declaration paths in `scanner.go` |
@@ -351,13 +359,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 6 | 0 | 45 |
 | `C-DECL` | 3 | 2 | 0 | 1 |
-| `C-EXCMD` | 115 | 20 | 0 | 95 |
+| `C-EXCMD` | 115 | 22 | 0 | 93 |
 | `C-EXPR` | 19 | 0 | 0 | 19 |
 | `C-GENERIC` | 109 | 23 | 0 | 86 |
-| `C-IMPORT` | 14 | 5 | 0 | 9 |
+| `C-IMPORT` | 14 | 6 | 0 | 8 |
 | `C-MODIFIER` | 57 | 45 | 0 | 12 |
 | `C-REDIR` | 1 | 0 | 0 | 1 |
-| **Total** | **369** | **101** | **0** | **268** |
+| **Total** | **369** | **104** | **0** | **265** |
 
 ```text
 C-EXPR
