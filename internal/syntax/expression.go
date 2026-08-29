@@ -803,6 +803,27 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 			return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: token.span.End}, Operator: token.span, Children: []*Expression{left, missing}}
 		}
 		p.advance()
+		if p.dialect == Vim9 {
+			if tail := strings.IndexAny(member.text, "#:"); tail >= 0 {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vimls/invalid-member-tail", Message: "member name has trailing characters",
+					Span: Span{Start: member.span.Start + tail, End: member.span.Start + tail + 1},
+				})
+			}
+			if p.current().text == ":" && p.current().span.Start == member.span.End {
+				tail := p.current()
+				p.advance()
+				end := tail.span.End
+				if p.current().kind == expressionIdentifier && p.current().span.Start == tail.span.End {
+					end = p.current().span.End
+					p.advance()
+				}
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vimls/invalid-member-tail", Message: "member name has trailing characters", Span: tail.span,
+				})
+				return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: end}, Operator: token.span, Value: p.source[member.span.Start-p.base : end-p.base], Children: []*Expression{left}}
+			}
+		}
 		return &Expression{Kind: ExpressionMember, Span: Span{Start: left.Span.Start, End: member.span.End}, Operator: token.span, Value: member.text, Children: []*Expression{left}}
 	default:
 		return left

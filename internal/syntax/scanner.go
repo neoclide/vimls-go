@@ -2293,7 +2293,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpression(source, command.Argument.Start, command.Dialect)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
+		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -2431,6 +2431,19 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	hasAssignment := assignmentExpression || command.Declaration != nil && command.Declaration.Assignment.End > command.Declaration.Assignment.Start
 	commandDictionary := len(command.Expressions) == 1 && command.Expressions[0] != nil && command.Expressions[0].Kind == ExpressionDictionary
 	commandCall := len(command.Expressions) == 1 && command.Expressions[0] != nil && command.Expressions[0].Kind == ExpressionCall
+	kept := diagnostics[:0]
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != "vimls/invalid-member-tail" {
+			kept = append(kept, diagnostic)
+			continue
+		}
+		if inDef {
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
+			kept = append(kept, diagnostic)
+		}
+	}
+	diagnostics = kept
 	if command.Dialect == Vim9 && command.Declaration != nil {
 		diagnostics = mapVim9LambdaTrailingParen(diagnostics, command.Declaration.Initializer, file.Source, 0)
 		initializer := command.Declaration.Initializer

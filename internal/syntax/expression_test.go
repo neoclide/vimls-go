@@ -1453,3 +1453,35 @@ func TestOfficialAdjacentIsOperatorTokenBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestOfficialVim9InvalidDotKeyBoundary(t *testing.T) {
+	for _, suffix := range []string{"#b", ":b"} {
+		for _, source := range []string{
+			"def Func()\nvar x = { 'a" + suffix + "': 1 }\nx.a" + suffix + "\nenddef\ndefcompile\nvar after = 1\n",
+			"vim9script\nvar x = { 'a" + suffix + "': 1 }\nx.a" + suffix + "\nvar after = 1\n",
+		} {
+			file := Parse(source)
+			inDef := strings.HasPrefix(source, "def ")
+			if inDef && (len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E488" || file.Text(file.Diagnostics[0].Span) != suffix[:1]) {
+				t.Fatalf("%q diagnostics = %#v", source, file.Diagnostics)
+			}
+			if !inDef && len(file.Diagnostics) != 0 {
+				t.Fatalf("%q diagnostics = %#v", source, file.Diagnostics)
+			}
+			member := file.Commands[2].Expressions[0]
+			if member == nil || member.Kind != ExpressionMember || file.Text(member.Operator) != "." || !strings.HasPrefix(member.Value, "a") {
+				t.Fatalf("%q member = %#v", source, member)
+			}
+			foundAfter := false
+			for _, command := range file.Commands {
+				if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+					foundAfter = true
+				}
+			}
+			if !foundAfter {
+				t.Fatalf("%q did not recover next command: %#v", source, file.Commands)
+			}
+			assertFileSpans(t, file)
+		}
+	}
+}
