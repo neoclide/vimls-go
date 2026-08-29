@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 698 (`ae0e2d3`)
+- Current parser-negative syntax assertions: 713 (`dbb1db6`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -196,7 +196,9 @@ lists, making the authoritative current split 676 migrated, zero ready, and
 class-method modifier cases, making the authoritative current split 682
 migrated, zero ready, and 386 pending-fix. Commit `ae0e2d3` completed the 16
 remaining declaration type-delimiter cases, making the authoritative current
-split 698 migrated, zero ready, and 370 pending-fix.
+split 698 migrated, zero ready, and 370 pending-fix. Commit `dbb1db6`
+completed all 15 declaration-shape cases, making the authoritative current
+split 713 migrated, zero ready, and 355 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -501,7 +503,7 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `B-assign-spacing` | 19 | 19 | 0 | 0 |
 | `B-type-delimiter` | 26 | 26 | 0 | 0 |
-| `B-declaration-shape` | 15 | 0 | 0 | 15 |
+| `B-declaration-shape` | 15 | 15 | 0 | 0 |
 | `B-command-abbreviation` | 10 | 10 | 0 | 0 |
 | `B-register-declaration` | 15 | 15 | 0 | 0 |
 | `B-assignment-shape` | 3 | 0 | 0 | 3 |
@@ -522,9 +524,9 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
 | `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **191** | **140** | **0** | **51** |
+| **Total** | **191** | **155** | **0** | **36** |
 
-This table reflects the current parser through `ae0e2d3`. Revalidation corrected
+This table reflects the current parser through `dbb1db6`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -592,15 +594,14 @@ legacy scope prefixes. Heredoc headers are checked before their bodies become
 opaque, so the diagnostic remains line-local while the heredoc and following
 commands are preserved.
 
-The remaining `B-declaration-shape` implementation contract is fixed by the
-inventory below. A non-class `const` with no initializer is E1021 even when it
-has a type. A Vim9 `var` with neither type nor initializer is E1022; direct
-class/interface `var`, `final`, and `const` members use the same E1022 shape
-rule, but non-class `final` keeps E1125 and invalid aggregate names keep
-E1317/E1329 priority. The declaration, name, type, and following command must
-remain in the AST. The minimal implementation point is the existing declaration
-branch in `parseCommandDetailsDepth()` after the head is parsed and before its
-no-assignment return.
+Commit `dbb1db6` completed `B-declaration-shape`. A non-class `const` with no
+initializer reports E1021 even when it has a type. A Vim9 `var` with neither
+type nor initializer reports E1022; direct class/interface `var`, `final`, and
+`const` members use the same E1022 shape rule, while non-class `final` keeps
+E1125 and invalid aggregate names keep E1317/E1329 priority. Malformed
+`final/const def` members enter a bounded class-method recovery state through
+their `enddef`, so the declaration AST, class terminator, and following command
+remain intact without a secondary E1318.
 
 The remaining `B-brace-recovery` inventory must be implemented as two parser
 paths, not one. Eleven cases are interpolated-string or `eval` heredoc recovery:
@@ -613,6 +614,26 @@ The remaining `C:434:11328/script` case is instead a missing object-method call
 argument (`a.Foo(,)`) and belongs in the call-argument parser; the similar
 `C:422:11065/script` missing-member case is already migrated and must not be
 counted again.
+
+The next small Group B paths are fixed for implementation. `B-assignment-shape`
+contains one invalid semicolon destructuring target (`A:1571`, E1080) and two
+declaration member/index targets (`A:2311` and `A:2312`, E1087); all three must
+retain their declaration target and initializer AST. The only remaining
+`B-dot-member-delimiter` case is `C:11074`, where `super .ToString()` reports
+E1356 but retains the member, call, concatenation tail, and enclosing method.
+These are separate declaration and expression parser changes even if delivered
+in one small commit.
+
+The 13 pending `B-trailing-characters` cases split into three implementation
+paths. Six declaration/heredoc cases are
+`A:{2052,2053,2309,2923/{def|vim9-script},3105}`; the two heredoc headers already
+start with E488 but need same-line cascade suppression, while the others are
+missing or map from generic trailing-type/expression diagnostics. Six aggregate
+cases are `C:{68,76,93,102}` and `I:{111,324}` and require class/interface
+header, member, or terminator argument validation. `C:11742` is the remaining
+type-parser case: `object<any,any>` is E488 in this script context, not the
+current E1009. Each path preserves the successfully parsed prefix and recovers
+at the next logical command.
 
 ```text
 B-assign-spacing
