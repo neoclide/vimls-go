@@ -251,6 +251,15 @@ func buildBlocks(file *File) {
 					command.Block = stack[len(stack)-1]
 					continue
 				}
+				if command.Dialect == Vim9 && command.Canonical == "endtry" && len(stack) > 0 {
+					blockIndex := stack[len(stack)-1]
+					if diagnostic, ok := vim9MissingBlockEndDiagnostic(file.Blocks[blockIndex].Kind, command.Name); ok {
+						file.Diagnostics = append(file.Diagnostics, diagnostic)
+						command.Block = blockIndex
+						recoveryBlocks[blockIndex] = true
+						continue
+					}
+				}
 				// Vim9 reports a mismatched aggregate closer as E476 while
 				// retaining the active aggregate. Ordinary unmatched closers keep
 				// the generic recovery diagnostic.
@@ -291,6 +300,10 @@ func buildBlocks(file *File) {
 					continue
 				}
 				block := &file.Blocks[unclosed]
+				if recoveryBlocks[unclosed] && closeKind == BlockDef {
+					block.Span.End = command.Span.Start
+					continue
+				}
 				if multipleFinally[unclosed] {
 					block.Span.End = command.Span.Start
 					continue
@@ -304,7 +317,14 @@ func buildBlocks(file *File) {
 					block.End = commandIndex
 					continue
 				}
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-end", Message: "block is missing its end command", Span: file.Commands[block.Header].Name})
+				span := file.Commands[block.Header].Name
+				if command.Dialect == Vim9 && (closeKind == BlockDef || command.Canonical == "endtry") {
+					if diagnostic, ok := vim9MissingBlockEndDiagnostic(block.Kind, span); ok {
+						file.Diagnostics = append(file.Diagnostics, diagnostic)
+						continue
+					}
+				}
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-end", Message: "block is missing its end command", Span: span})
 			}
 			file.Blocks[blockIndex].Span.End = command.Span.End
 			file.Blocks[blockIndex].End = commandIndex
@@ -546,8 +566,11 @@ func suppressInvalidBlockMissingEnds(file *File) {
 	}
 	kept := file.Diagnostics[:0]
 	for _, diagnostic := range file.Diagnostics {
-		if diagnostic.Code == "vimls/missing-end" && invalid[diagnostic.Span] {
-			continue
+		if invalid[diagnostic.Span] {
+			switch diagnostic.Code {
+			case "vimls/missing-end", "vim/E170", "vim/E171", "vim/E600":
+				continue
+			}
 		}
 		kept = append(kept, diagnostic)
 	}
@@ -606,6 +629,21 @@ func implicitlyClosedByFunction(kind BlockKind) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func vim9MissingBlockEndDiagnostic(kind BlockKind, span Span) (Diagnostic, bool) {
+	switch kind {
+	case BlockIf:
+		return Diagnostic{Code: "vim/E171", Message: "missing :endif", Span: span}, true
+	case BlockFor:
+		return Diagnostic{Code: "vim/E170", Message: "missing :endfor", Span: span}, true
+	case BlockWhile:
+		return Diagnostic{Code: "vim/E170", Message: "missing :endwhile", Span: span}, true
+	case BlockTry:
+		return Diagnostic{Code: "vim/E600", Message: "missing :endtry", Span: span}, true
+	default:
+		return Diagnostic{}, false
 	}
 }
 
