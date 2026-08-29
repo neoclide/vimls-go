@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 629 (`e5173fe`)
+- Current parser-negative syntax assertions: 632 (`c05b9ae`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -158,6 +158,10 @@ Commit `e3883d6` migrated the malformed method-tail variant, making the current
 split 628 migrated, zero ready, and 441 pending-fix. Commit `e5173fe` migrated
 the final ready Group A Dictionary case, making the current split 629 migrated,
 zero ready, and 440 pending-fix.
+Commit `a56cd10` migrated the interface method-body variant, making the current
+split 630 migrated, zero ready, and 439 pending-fix. Commit `c05b9ae` migrated
+two already-ready Group B variants, making the current split 632 migrated, zero
+ready, and 437 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -471,21 +475,21 @@ Aliases are `A=test_vim9_assign.vim`, `C=test_vim9_class.vim`,
 | `B-dot-member-delimiter` | 7 | 0 | 0 | 7 |
 | `B-brace-recovery` | 15 | 3 | 0 | 12 |
 | `B-heredoc` | 2 | 2 | 0 | 0 |
-| `B-hash-comment` | 1 | 0 | 0 | 1 |
+| `B-hash-comment` | 1 | 1 | 0 | 0 |
 | `B-user-command-arguments` | 2 | 2 | 0 | 0 |
 | `B-class-modifier` | 8 | 8 | 0 | 0 |
 | `B-class-variable` | 6 | 6 | 0 | 0 |
 | `B-class-body-command` | 15 | 0 | 0 | 15 |
-| `B-interface-dialect-body` | 3 | 2 | 0 | 1 |
+| `B-interface-dialect-body` | 3 | 3 | 0 | 0 |
 | `B-new-static-abstract` | 8 | 2 | 0 | 6 |
 | `B-implements` | 2 | 2 | 0 | 0 |
 | `B-class-interface-scope` | 2 | 0 | 0 | 2 |
 | `B-trailing-command` | 5 | 0 | 0 | 5 |
-| `B-trailing-characters` | 20 | 6 | 0 | 14 |
+| `B-trailing-characters` | 20 | 7 | 0 | 13 |
 | `B-structural-block` | 2 | 2 | 0 | 0 |
-| **Total** | **192** | **76** | **0** | **116** |
+| **Total** | **192** | **79** | **0** | **113** |
 
-This table reflects the current parser through `3bd2d68`. Revalidation corrected
+This table reflects the current parser through `c05b9ae`. Revalidation corrected
 the original `B-new-static-abstract` ready count: only
 `C:5957:132958/script` was ready; `C:5937:132470/script` and
 `C:5947:132721/script` both had recovery diagnostics. Separately, `05d176c`
@@ -496,6 +500,14 @@ Commit `3bd2d68` migrated `B-incomplete-expression` and the
 `A:1202:28637/def` trailing-character case. Missing RHS expressions remain as
 zero-width AST nodes with E1097, while the stray `)` retains its exact span and
 maps to E488.
+
+Commit `a56cd10` completed `B-interface-dialect-body` with
+`I:71:1672/script`. An interface method signature remains a direct aggregate
+member, while an illegal body reports one E1345 on its first command and stays
+in recovery through `enddef`; `endinterface` and the following top-level
+command remain intact. Commit `c05b9ae` completed `B-hash-comment` and migrated
+the already-ready `A:3123:76907/script` E488 trailing-character case without a
+production change.
 
 ```text
 B-assign-spacing
