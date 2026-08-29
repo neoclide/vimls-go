@@ -187,6 +187,24 @@ func TestBuildPinnedParserCaseCorpus(t *testing.T) {
 	}
 }
 
+func TestPinnedParserCaseArtifact(t *testing.T) {
+	var artifact parserCaseCorpus
+	readPinnedGzipJSON(t, "v9.2.1015-parser-cases.json.gz", &artifact)
+	files := readPinnedTestFiles(t)
+	inventory := readPinnedHelperInventory(t)
+	manifest, err := readParserFileManifest(filepath.Join("..", "..", "testdata", "official", "v9.2.1015-parser-files.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := buildParserCaseCorpus(files, inventory, manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(artifact, want) {
+		t.Fatal("generated parser-case artifact is stale; run make generate-official")
+	}
+}
+
 func readPinnedTestFiles(t *testing.T) testFilesCorpus {
 	t.Helper()
 	var corpus testFilesCorpus
