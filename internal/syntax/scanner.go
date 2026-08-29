@@ -112,18 +112,24 @@ func parseSource(source string, initial Dialect) *File {
 					active = dialectStack[len(dialectStack)-1]
 					dialectStack = dialectStack[:len(dialectStack)-1]
 				}
-			case "class", "interface":
+			case "class", "interface", "enum":
 				if command.Dialect == Vim9 {
 					kind := BlockClass
 					if command.Canonical == "interface" {
 						kind = BlockInterface
 					}
+					if command.Canonical == "enum" {
+						kind = BlockEnum
+					}
 					aggregateStack = append(aggregateStack, kind)
 				}
-			case "endclass", "endinterface":
+			case "endclass", "endinterface", "endenum":
 				kind := BlockClass
 				if command.Canonical == "endinterface" {
 					kind = BlockInterface
+				}
+				if command.Canonical == "endenum" {
+					kind = BlockEnum
 				}
 				if command.Dialect == Vim9 && len(aggregateStack) > 0 && aggregateStack[len(aggregateStack)-1] == kind {
 					aggregateStack = aggregateStack[:len(aggregateStack)-1]
@@ -1193,6 +1199,17 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				(canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && canonical != "iput" && canonical != "put" && looksLikeVim9AssignmentAfterName(file.Source, nameEnd, end))
 		}
 		expressionAtCommandStart := dialect == Vim9 && (looksLikeVim9SigilExpression(file.Source, nameStart, end) || nameExpression)
+		if dialect == Vim9 && !expressionAtCommandStart && nameEnd < end && file.Source[nameEnd] == '#' {
+			// Autoload function calls use # in the name and are expressions even
+			// though the Ex command scanner stops at the first #.
+			callStart := nameEnd
+			for callStart < end && (isVimIdentifierByte(file.Source[callStart]) || file.Source[callStart] == '#') {
+				callStart++
+			}
+			if callStart > nameEnd && callStart < end && file.Source[callStart] == '(' {
+				expressionAtCommandStart = true
+			}
+		}
 		if expressionAtCommandStart {
 			kind = CommandExpression
 			canonical = ""
