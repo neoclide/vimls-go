@@ -1200,6 +1200,22 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			metadata = vimdata.Command{Flags: vimdata.ExpressionArgument}
 		}
 		invalidCommandAbbreviation := builtIn && dialect == Vim9 && metadata.Flags&vimdata.ExactInVim9 != 0 && typedName != canonical
+		// ++/-- are expression operators at the start of a Vim9 command,
+		// :var&option is a declaration form, and a comma belongs to a direct
+		// enum value; none is an Ex command followed by an attached argument.
+		vim9ExpressionPrefix := canonical == "++" || canonical == "--" || canonical == "var" && nameEnd < end &&
+			(file.Source[nameEnd] == '&' || file.Source[nameEnd] == ':' || file.Source[nameEnd] == '=') ||
+			directAggregateMember && nameEnd < end && file.Source[nameEnd] == ','
+		nextIsWhite := nameEnd < end && (isSpace(file.Source[nameEnd]) || file.Source[nameEnd] == '\r' || file.Source[nameEnd] == '\n')
+		invalidNonWhite := dialect == Vim9 && builtIn && !invalidCommandAbbreviation && !expressionAtCommandStart && !vim9ExpressionPrefix && nameEnd < end && !nextIsWhite &&
+			file.Source[nameEnd] != '!' && file.Source[nameEnd] != '|' &&
+			metadata.Flags&vimdata.AllowNonWhite == 0
+		if invalidNonWhite {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1144", Message: "Command \"" + typedName + "\" is not followed by white space: " + file.Source[nameStart:end],
+				Span: Span{Start: nameEnd, End: nameEnd},
+			})
+		}
 		if invalidCommandAbbreviation {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1065", Message: "command cannot be shortened in Vim9 script", Span: Span{Start: nameStart, End: nameEnd}})
 		}
@@ -1237,7 +1253,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			scanMetadata.Flags |= vimdata.ExpressionArgument
 		}
 		parsedCommand := Command{
-			Kind: kind, Dialect: dialect, baseDialect: baseDialect, detailsOpaque: invalidModifierRange || invalidCommandAbbreviation, Span: Span{Start: commandStart, End: nameEnd}, Range: commandRange,
+			Kind: kind, Dialect: dialect, baseDialect: baseDialect, detailsOpaque: invalidModifierRange || invalidCommandAbbreviation || invalidNonWhite, Span: Span{Start: commandStart, End: nameEnd}, Range: commandRange,
 			Name: nameSpan, TypedName: typedName, Canonical: canonical, Modifiers: parsedModifiers, Bang: bang,
 			Argument: Span{Start: argumentStart, End: end}, Block: -1, ScriptVersion: scriptVersion,
 		}
@@ -1376,7 +1392,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			dynamicHeredoc = detectExecuteHeredoc(file, &parsedCommand)
 		}
 		file.Commands = append(file.Commands, parsedCommand)
-		if builtIn && metadata.Flags&vimdata.NeedArgument != 0 && argumentStart == argumentEnd {
+		if builtIn && metadata.Flags&vimdata.NeedArgument != 0 && argumentStart == argumentEnd && !invalidNonWhite {
 			code := "vimls/missing-argument"
 			message := "command requires an argument"
 			if parsedCommand.Dialect == Vim9 && selfSplittingVariableCommand(parsedCommand.Canonical) {
