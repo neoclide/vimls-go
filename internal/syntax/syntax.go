@@ -65,6 +65,7 @@ type Command struct {
 	// baseDialect is the enclosing context before legacy/vim9cmd modifiers.
 	// Recursive do_cmdline() payloads re-enter this context.
 	baseDialect        Dialect
+	detailsOpaque      bool
 	expressionsParsed  bool
 	ScriptVersion      uint8
 	Span               Span

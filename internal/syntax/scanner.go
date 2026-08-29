@@ -365,7 +365,7 @@ func parseSource(source string, initial Dialect) *File {
 		buildBlocks(file)
 	}
 	for index := range file.Commands {
-		if file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute" {
+		if !file.Commands[index].detailsOpaque && (file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute") {
 			parseLogicalCommandDetails(file, &file.Commands[index])
 		}
 	}
@@ -1524,12 +1524,14 @@ func scanMetadataForParsedCommand(command Command) vimdata.Command {
 func detectHeredoc(file *File, command *Command) bool {
 	argument := file.Text(command.Argument)
 	suffixOffset := -1
+	assignmentOffset := -1
 	scriptGet := false
 	if command.Kind == CommandExpression {
 		index := findHeredocAssignment(argument)
 		if index < 0 {
 			return false
 		}
+		assignmentOffset = index
 		suffixOffset = index + 3
 	}
 	switch command.Canonical {
@@ -1538,6 +1540,7 @@ func detectHeredoc(file *File, command *Command) bool {
 		if index < 0 {
 			return false
 		}
+		assignmentOffset = index
 		suffixOffset = index + 3
 	case "python", "py3", "python3", "pyx", "pythonx", "ruby", "perl", "lua", "mzscheme", "tcl":
 		index := strings.Index(argument, "<<")
@@ -1548,6 +1551,17 @@ func detectHeredoc(file *File, command *Command) bool {
 		scriptGet = true
 	default:
 		if suffixOffset < 0 {
+			return false
+		}
+	}
+	if assignmentOffset >= 0 {
+		diagnostics := len(file.Diagnostics)
+		diagnoseVim9AssignmentSpacing(file, command, Span{
+			Start: command.Argument.Start + assignmentOffset,
+			End:   command.Argument.Start + assignmentOffset + 3,
+		})
+		if len(file.Diagnostics) > diagnostics {
+			command.detailsOpaque = true
 			return false
 		}
 	}
