@@ -151,11 +151,11 @@ func TestOfficialVimParserCases(t *testing.T) {
 	}
 }
 
-func TestOfficialVimParserFailures(t *testing.T) {
+func officialParserExpectedFailures() map[string]string {
 	// These failures are statically decided by the v9.2.1015 parser. Keep
 	// execution, type-checking, and other unclassified failures out of this
 	// allowlist until their parser phase is proven independently.
-	expected := map[string]string{
+	return map[string]string{
 		"src/testdir/test_expr.vim:250:7987/legacy":                "vim/E15",
 		"src/testdir/test_expr.vim:250:7987/def":                   "vim/E1004",
 		"src/testdir/test_expr.vim:250:7987/vim9-script":           "vim/E1004",
@@ -789,6 +789,10 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		"src/testdir/test_usercommands.vim:1007:34285/script":      "vim/E1026",
 		"src/testdir/test_usercommands.vim:1046:35079/script":      "vim/E1128",
 	}
+}
+
+func TestOfficialVimParserFailures(t *testing.T) {
+	expected := officialParserExpectedFailures()
 
 	selected := 0
 	for key := range expected {
@@ -844,6 +848,62 @@ func TestOfficialVimParserFailures(t *testing.T) {
 		sort.Strings(missing)
 		t.Fatalf("official parser failures missing from artifact: %v", missing)
 	}
+}
+
+func TestOfficialVimParserMigrationReport(t *testing.T) {
+	expected := officialParserExpectedFailures()
+	groups := map[string]string{
+		"src/testdir/test_vim9_expr.vim":      "A",
+		"src/testdir/test_vim9_class.vim":     "B",
+		"src/testdir/test_vim9_assign.vim":    "B",
+		"src/testdir/test_vim9_interface.vim": "B",
+		"src/testdir/test_eval_stuff.vim":     "B",
+		"src/testdir/test_user_func.vim":      "B",
+		"src/testdir/test_usercommands.vim":   "B",
+		"src/testdir/test_let.vim":            "B",
+		"src/testdir/test_trycatch.vim":       "B",
+		"src/testdir/test_autocmd.vim":        "B",
+		"src/testdir/test_vim9_script.vim":    "C",
+		"src/testdir/test_vim9_generics.vim":  "C",
+		"src/testdir/test_vim9_cmd.vim":       "C",
+		"src/testdir/test_vim9_import.vim":    "C",
+		"src/testdir/test_vim9_typealias.vim": "C",
+		"src/testdir/test_tuple.vim":          "D",
+		"src/testdir/test_vim9_func.vim":      "D",
+		"src/testdir/test_expr.vim":           "D",
+		"src/testdir/test_blob.vim":           "D",
+		"src/testdir/test_listdict.vim":       "D",
+		"src/testdir/test_vim9_enum.vim":      "D",
+	}
+	corpus := readOfficialParserCases(t)
+	checkOfficialParserCaseCorpus(t, corpus)
+	counts := map[string]int{"A": 0, "B": 0, "C": 0, "D": 0}
+	seen := make(map[string]struct{}, len(expected))
+	for _, record := range corpus.Records {
+		for _, testCase := range record.Cases {
+			key := record.ID + "/" + testCase.Name
+			if _, ok := expected[key]; !ok {
+				continue
+			}
+			group, ok := groups[record.Path]
+			if !ok {
+				t.Fatalf("%s: migrated case is outside source groups A-D", key)
+			}
+			counts[group]++
+			seen[key] = struct{}{}
+		}
+	}
+	if len(seen) != len(expected) {
+		stale := make([]string, 0, len(expected)-len(seen))
+		for key := range expected {
+			if _, ok := seen[key]; !ok {
+				stale = append(stale, key)
+			}
+		}
+		sort.Strings(stale)
+		t.Fatalf("migration migrated=%d A=%d B=%d C=%d D=%d stale=%d keys=%v", len(expected), counts["A"], counts["B"], counts["C"], counts["D"], len(stale), stale)
+	}
+	t.Logf("migration migrated=%d A=%d B=%d C=%d D=%d stale=0", len(expected), counts["A"], counts["B"], counts["C"], counts["D"])
 }
 
 func TestOfficialVimParserFailureTriage(t *testing.T) {
