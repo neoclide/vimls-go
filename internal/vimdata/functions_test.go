@@ -1,6 +1,9 @@
 package vimdata
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestLookupFunctionMetadata(t *testing.T) {
 	if BuiltinVimTag != "v9.2.1015" || BuiltinVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" {
@@ -53,16 +56,16 @@ func TestBuiltinFunctionsReturnsOrderedCopy(t *testing.T) {
 		t.Fatalf("BuiltinFunctions() length = %d, want %d", len(got), len(builtinFunctions))
 	}
 	for index, function := range builtinFunctions {
-		if got[index] != function {
+		if !reflect.DeepEqual(got[index], function) {
 			t.Fatalf("BuiltinFunctions()[%d] = %#v, want %#v", index, got[index], function)
 		}
 	}
 
 	got[0] = BuiltinFunction{Name: "changed"}
-	if next := BuiltinFunctions(); next[0] != builtinFunctions[0] {
+	if next := BuiltinFunctions(); !reflect.DeepEqual(next[0], builtinFunctions[0]) {
 		t.Fatalf("BuiltinFunctions() exposed package table: first function = %#v, want %#v", next[0], builtinFunctions[0])
 	}
-	if function, ok := LookupFunction(builtinFunctions[0].Name); !ok || function != builtinFunctions[0] {
+	if function, ok := LookupFunction(builtinFunctions[0].Name); !ok || !reflect.DeepEqual(function, builtinFunctions[0]) {
 		t.Fatalf("LookupFunction(%q) = %#v, %v after modifying enumeration", builtinFunctions[0].Name, function, ok)
 	}
 }
