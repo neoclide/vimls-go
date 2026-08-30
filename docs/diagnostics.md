@@ -1334,6 +1334,34 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   parameter with a List type and documents optional arguments separately.
 - `src/errors.h:2977-2978` defines the exact E1160 message.
 
+## Destructuring element type mismatch: E1163
+
+Analysis reports E1163 for the first statically provable element type mismatch
+in a fixed-target Vim9 List or Tuple destructuring assignment. The diagnostic
+uses Vim's exact `Variable N: type mismatch, expected T but got U` form and
+counts ignored `_` targets in the one-based variable index. A concrete literal
+selects the mismatching element; a known typed List or Tuple expression selects
+the complete right-hand side.
+
+Typed destructuring declarations use the same rule and do not also receive the
+ordinary E1012 assignment diagnostic. The check applies at script level and in
+compiled `def` and lambda bodies, including a `def` retained in a Legacy-root
+file. Cardinality, container-kind, void-value, invalid-target, and incomplete
+input diagnostics keep their existing ownership. Unknown and `any` values,
+inferred declaration targets, Legacy destructuring, and final rest targets
+remain conservative.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:3289-3315,3416-3430` associates each unpacked assignment
+  item with its one-based variable index before checking the target type.
+- `src/testdir/test_vim9_assign.vim:542-566` expects E1163 for fixed-target
+  assignments and identifies the first mismatching variable.
+- `src/testdir/test_vim9_assign.vim:1045-1055` covers typed destructuring
+  declarations and both literal and named List inputs.
+- `src/vim9type.c:1107-1138` formats variable-index type mismatches.
+- `src/errors.h:2983-2986` defines the exact E1163 message templates.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

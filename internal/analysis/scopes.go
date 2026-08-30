@@ -3105,6 +3105,10 @@ func collectDeclarationTypeMismatchDiagnostic(result *FileAnalysis, command *syn
 	if command.Block >= 0 && command.Block < len(result.File.Blocks) && result.File.Blocks[command.Block].Kind == syntax.BlockClass {
 		return
 	}
+	if declaration.Target != nil && (declaration.Target.Kind == syntax.ExpressionList || declaration.Target.Kind == syntax.ExpressionTuple) {
+		appendDestructuringTypeMismatchDiagnostic(result, nil, declaration.Target, declaration.Initializer, declaration.Bindings)
+		return
+	}
 	for index, binding := range declaration.Bindings {
 		expected := convertSyntaxType(binding.ParsedType)
 		if isUnknownType(expected) {
@@ -3176,6 +3180,9 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 		target := expression.Children[0]
+		if (target.Kind == syntax.ExpressionList || target.Kind == syntax.ExpressionTuple) && appendDestructuringTypeMismatchDiagnostic(result, scope, target, expression.Children[1], nil) {
+			return
+		}
 		if target != nil && target.Kind == syntax.ExpressionIndex && len(target.Children) > 0 && resolvedExpressionType(result, scope, target.Children[0]).Name == "tuple" {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1532", Message: "Cannot modify a tuple", Span: target.Span,
@@ -3215,6 +3222,60 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	for _, child := range expression.Children {
 		collectAssignmentTypeMismatchDiagnostics(result, scope, child)
 	}
+}
+
+func appendDestructuringTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, target, rhs *syntax.Expression, bindings []syntax.Binding) bool {
+	if result == nil || result.File == nil || target == nil || rhs == nil || expressionContainsMissing(target) || expressionContainsMissing(rhs) {
+		return false
+	}
+	rhsType := result.TypeOf(rhs)
+	literal := rhs.Kind == syntax.ExpressionList || rhs.Kind == syntax.ExpressionTuple
+	rest := strings.Contains(result.File.Text(target.Span), ";")
+	fixed := len(target.Children)
+	if rest {
+		fixed--
+	}
+	if literal && (rest && len(rhs.Children) < fixed || !rest && len(target.Children) != len(rhs.Children)) {
+		return false
+	}
+	if !literal && (isUnknownType(rhsType) || rhsType.Name != "list" && rhsType.Name != "tuple") {
+		return false
+	}
+	if !literal && rhsType.Name == "tuple" && (rest && len(rhsType.Arguments) < fixed || !rest && len(target.Children) != len(rhsType.Arguments)) {
+		return false
+	}
+	for index, targetItem := range target.Children {
+		if rest && index == fixed {
+			break
+		}
+		if targetItem == nil || targetItem.Kind == syntax.ExpressionIdentifier && targetItem.Value == "_" {
+			continue
+		}
+		expected := UnknownValueType
+		if len(bindings) > index && bindings[index].ParsedType != nil {
+			expected = convertSyntaxType(bindings[index].ParsedType)
+		} else if scope != nil {
+			expected = assignmentTargetType(result, scope, targetItem)
+		}
+		actual := UnknownValueType
+		span := rhs.Span
+		if literal {
+			actual = result.TypeOf(rhs.Children[index])
+			span = rhs.Children[index].Span
+		} else if rhsType.Name == "list" && len(rhsType.Arguments) > 0 {
+			actual = rhsType.Arguments[0]
+		} else if rhsType.Name == "tuple" && index < len(rhsType.Arguments) {
+			actual = rhsType.Arguments[index]
+		}
+		if isUnknownType(expected) || isUnknownType(actual) || assignmentTypesCompatible(expected, actual) {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1163", Message: "Variable " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: span,
+		})
+		return true
+	}
+	return false
 }
 
 func collectConditionTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, command *syntax.Command) {

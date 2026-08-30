@@ -1844,6 +1844,67 @@ func TestAnalyzeFlattenVim9Diagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDestructuringElementTypeDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span, message string
+	}{
+		{"Vim9 script official assignment", "vim9script\nvar x: number\nvar y: number\nvar z: string\n[x, y, z] = [1, 2, 3]\n", "3", "Variable 3: type mismatch, expected string but got number"},
+		{"compiled def official assignment", "vim9script\ndef Func()\n  var x: number\n  var y: number\n  var z: string\n  [x, y, z] = [1, 2, 3]\nenddef\n", "3", "Variable 3: type mismatch, expected string but got number"},
+		{"typed declaration heterogeneous literal", "vim9script\nvar [x: number, y: string] = [1, 2]\n", "2", "Variable 2: type mismatch, expected string but got number"},
+		{"first mismatch and underscore", "vim9script\nvar x: string\nvar y: string\n[x, _, y] = [1, 2, 3]\n", "1", "Variable 1: type mismatch, expected string but got number"},
+		{"known list member", "vim9script\nvar values: list<number> = [1]\nvar target: string\n[target] = values\n", "values", "Variable 1: type mismatch, expected string but got number"},
+		{"known tuple member", "vim9script\nvar values: tuple<number, number> = (1, 2)\nvar first: number\nvar second: string\n[first, second] = values\n", "values", "Variable 2: type mismatch, expected string but got number"},
+		{"Legacy-root def", "def Func()\n  var value: string\n  [value] = [1]\nenddef\n", "1", "Variable 1: type mismatch, expected string but got number"},
+		{"Vim9 block lambda", "vim9script\nvar Callback = () => {\n  var value: string\n  [value] = [1]\n}\n", "1", "Variable 1: type mismatch, expected string but got number"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1163" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1012" {
+					t.Fatalf("E1163 source retained E1012: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1163 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"compatible and number to float", "vim9script\nvar value: float\n[value] = [1]\n", ""},
+		{"any unknown incomplete and rest", "vim9script\nvar value: number\nvar rest: string\nvar anything: any\n[value] = anything\n[value; rest] = [1, 2]\n[value] = [\n", ""},
+		{"Legacy script and function", "let value = ''\nlet [value] = [1]\nfunction Legacy()\n  let [value] = [1]\nendfunction\n", ""},
+		{"typed literal cardinality", "vim9script\nvar [value: string, other: string] = [1]\n", "vim/E1093"},
+		{"noncontainer", "vim9script\nvar value: string\n[value] = 1\n", "vim/E1535"},
+		{"void", "vim9script\ndef Void()\nenddef\nvar value: string\n[value] = Void()\n", "vim/E1031"},
+		{"known Tuple cardinality", "vim9script\nvar values: tuple<number> = (1,)\nvar first: string\nvar second: string\n[first, second] = values\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			found := test.want == ""
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1163" || diagnostic.Code == "vim/E1012" {
+					t.Fatalf("source unexpectedly received %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("diagnostics = %#v, want %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
