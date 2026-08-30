@@ -621,7 +621,7 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 			}
 			operator := Span{Start: p.base + open, End: p.base + tailEnd}
 			p.diagnostics = append(p.diagnostics, Diagnostic{
-				Code: "vim/E1554", Message: "missing '>' in generic function", Span: operator,
+				Code: "vim/E1554", Message: "Missing '>' in generic function: " + p.source[open:tailEnd], Span: operator,
 			})
 			return &Expression{
 				Kind: ExpressionGenericReference, Span: Span{Start: left.Span.Start, End: operator.End},

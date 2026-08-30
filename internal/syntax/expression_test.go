@@ -2183,6 +2183,31 @@ func TestVim9GenericReferenceMissingCloseDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9GenericReferenceMissingAngleBracketDiagnostic(t *testing.T) {
+	tests := []struct {
+		name string
+		use  string
+		tail string
+	}{
+		{name: "missing type and close", use: "Fn<", tail: "<"},
+		{name: "missing close", use: "Fn<number", tail: "<number"},
+		{name: "nested type", use: "disassemble Fn<number, dict<number>", tail: "<number, dict<number>"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\ndef Fn<A, B>()\nenddef\n" + test.use + "\nvar after = 1\n"
+			file := Parse(source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1554" || file.Diagnostics[0].Message != "Missing '>' in generic function: "+test.tail || file.Text(file.Diagnostics[0].Span) != test.tail {
+				t.Fatalf("diagnostics = %#v, want E1554 on %q", file.Diagnostics, test.tail)
+			}
+			last := file.Commands[len(file.Commands)-1]
+			if last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+}
+
 func TestOfficialVim9GenericFunctionReference(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_generics.vim
 	// Test_get_generic_funcref_using_function.
