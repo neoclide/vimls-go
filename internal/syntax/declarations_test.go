@@ -1177,6 +1177,36 @@ func TestVim9InterfaceConstReportsE1410(t *testing.T) {
 	}
 }
 
+func TestVim9InterfaceFinalReportsE1408(t *testing.T) {
+	file := Parse("vim9script\ninterface A\n  final foo: number = 10\nendinterface\n")
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1408" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Final variable not supported in an interface" || file.Text(got[0].Span) != "final" {
+		t.Fatalf("E1408 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+	}
+	if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockInterface || file.Blocks[0].End < 0 || file.Commands[2].Block != 0 || file.Commands[2].Declaration != nil {
+		t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+	}
+	assertFileSpans(t, file)
+
+	for name, source := range map[string]string{
+		"interface var":          "vim9script\ninterface A\n  var foo: number\nendinterface\n",
+		"class final":            "vim9script\nclass A\n  final foo: number = 10\nendclass\n",
+		"interface static final": "vim9script\ninterface A\n  static final foo: number = 10\nendinterface\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			valid := Parse(source)
+			if hasDiagnostic(valid, "vim/E1408") {
+				t.Fatalf("diagnostics = %#v", valid.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
