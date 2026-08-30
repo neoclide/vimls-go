@@ -62,7 +62,7 @@ func TestVim9UserCommandCompletionRequiresArguments(t *testing.T) {
 	}
 	for _, test := range tests {
 		file := Parse("vim9script\n" + test.source + "\nvar after = 1\n")
-		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1208" || file.Text(file.Diagnostics[0].Span) != test.span {
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1208" || file.Diagnostics[0].Message != "-complete used without allowing arguments" || file.Text(file.Diagnostics[0].Span) != test.span {
 			t.Fatalf("%q diagnostics = %#v", test.source, file.Diagnostics)
 		}
 		if len(file.Commands) != 3 || file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {

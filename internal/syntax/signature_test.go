@@ -243,7 +243,7 @@ func TestVim9FunctionSignatureTypeAndCommaSpacing(t *testing.T) {
 
 func TestVim9FunctionSignatureMissingVariadicName(t *testing.T) {
 	file := Parse("def Func4(...)\necho \"a\"\nenddef\n")
-	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1055" || file.Diagnostics[0].Message != "missing name after ..." {
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1055" || file.Diagnostics[0].Message != "Missing name after ..." || file.Text(file.Diagnostics[0].Span) != "..." {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 	if len(file.Commands) != 3 || file.Commands[0].Function == nil || len(file.Commands[0].Function.Parameters) != 1 {
@@ -255,6 +255,17 @@ func TestVim9FunctionSignatureMissingVariadicName(t *testing.T) {
 	}
 	if file.Commands[1].Canonical != "echo" || file.Commands[2].Canonical != "enddef" || len(file.Blocks) != 1 {
 		t.Fatalf("recovery commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+	}
+	for _, source := range []string{
+		"def Valid(...items: list<any>)\nenddef\n",
+		"function Legacy(...)\nendfunction\n",
+	} {
+		valid := Parse(source)
+		for _, diagnostic := range valid.Diagnostics {
+			if diagnostic.Code == "vim/E1055" {
+				t.Fatalf("valid source reported E1055: %#v\n%s", diagnostic, source)
+			}
+		}
 	}
 }
 
