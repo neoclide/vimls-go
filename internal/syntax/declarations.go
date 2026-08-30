@@ -40,7 +40,13 @@ func parseImport(file *File, command *Command) {
 	if pathStart < pathEnd {
 		importNode.Path, file.Diagnostics = appendExpressionDiagnostics(file.Diagnostics, source[pathStart:pathEnd], command.Argument.Start+pathStart, command.Dialect)
 	}
-	if command.Dialect == Vim9 && aliasKeyword < 0 && importNode.Path != nil && importNode.Path.Kind == ExpressionString {
+	invalidPath := command.Dialect == Vim9 && invalidImportPath(importNode.Path)
+	if invalidPath {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1071", Message: "Invalid string for :import: " + source[start:], Span: importNode.PathSpan,
+		})
+	}
+	if !invalidPath && command.Dialect == Vim9 && aliasKeyword < 0 && importNode.Path != nil && importNode.Path.Kind == ExpressionString {
 		literal := importNode.Path.Value
 		if len(literal) >= 2 && (literal[0] == '\'' || literal[0] == '"') && literal[0] == literal[len(literal)-1] {
 			path := literal[1 : len(literal)-1]
@@ -56,10 +62,28 @@ func parseImport(file *File, command *Command) {
 			}
 		}
 	}
-	if hasInvalidAlias {
+	if hasInvalidAlias && !invalidPath {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1047", Message: "Syntax error in import: " + file.Text(invalidAlias), Span: invalidAlias})
 	}
 	command.Import = importNode
+}
+
+func invalidImportPath(expression *Expression) bool {
+	if expression == nil {
+		return false
+	}
+	switch expression.Kind {
+	case ExpressionString:
+		return expression.Value == `''` || expression.Value == `""`
+	case ExpressionNumber, ExpressionList, ExpressionDictionary, ExpressionLambda, ExpressionLambdaBlock, ExpressionBlob, ExpressionTuple:
+		return true
+	case ExpressionParenthesized:
+		return len(expression.Children) == 1 && invalidImportPath(expression.Children[0])
+	case ExpressionCall:
+		return len(expression.Children) == 1 && expression.Children[0].Kind == ExpressionIdentifier && expression.Children[0].Value == "test_null_string"
+	default:
+		return false
+	}
 }
 
 func findTopLevelKeyword(source string, start, end int, keyword string) int {

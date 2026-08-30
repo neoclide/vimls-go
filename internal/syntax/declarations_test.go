@@ -588,6 +588,9 @@ func TestVim9ImportPathDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, code, message, path string
 	}{
+		{"empty import string", "vim9script\nimport \"\" as abc\nvar after = 1\n", "vim/E1071", `Invalid string for :import: "" as abc`, `""`},
+		{"non string import value", "vim9script\nimport [] as abc\nvar after = 1\n", "vim/E1071", `Invalid string for :import: [] as abc`, `[]`},
+		{"null import string", "vim9script\nimport test_null_string() as abc\nvar after = 1\n", "vim/E1071", `Invalid string for :import: test_null_string() as abc`, `test_null_string()`},
 		{"vim script requires alias", "vim9script\nimport './Ximport/.vim'\nvar after = 1\n", "vim/E1261", `Cannot import .vim without using "as"`, "'./Ximport/.vim'"},
 		{"non vim script requires alias or suffix", "vim9script\nimport './module'\nvar after = 1\n", "vim/E1257", `Imported script must use "as" or end in .vim: module`, "'./module'"},
 	}
@@ -605,11 +608,13 @@ func TestVim9ImportPathDiagnostics(t *testing.T) {
 	}
 	for _, source := range []string{
 		"import './module.vim'\nlet after = 1\n",
+		"import [] as abc\nlet after = 1\n",
 		"vim9script\nlegacy import './module.vim'\nvar after = 1\n",
 		"vim9script\nimport './module.vim' as module\nvar after = 1\n",
+		"vim9script\nimport dynamic_path as module\nvar after = 1\n",
 	} {
 		file := Parse(source)
-		if hasDiagnostic(file, "vim/E1257") || hasDiagnostic(file, "vim/E1261") {
+		if hasDiagnostic(file, "vim/E1071") || hasDiagnostic(file, "vim/E1257") || hasDiagnostic(file, "vim/E1261") {
 			t.Fatalf("unexpected import diagnostic = %#v", file.Diagnostics)
 		}
 	}

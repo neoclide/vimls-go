@@ -1116,3 +1116,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   evaluation semantics.
 - `src/vim9expr.c:137-320` routes the statically compiled form to E1107.
 - `src/errors.h:2773-2774` defines the exact message.
+
+## Invalid import string: E1071
+
+E1071 means `Invalid string for :import: {text}`. Vim evaluates the import
+path expression before resolving a file and requires a non-null, non-empty
+String. Syntax analysis reports E1071 when that failure is statically certain:
+an empty string literal, a literal value whose type is not String, or Vim's
+zero-argument `test_null_string()` builtin. The diagnostic selects the path
+expression, while its message retains the remaining import text exactly as Vim
+does.
+
+Dynamic expressions remain unknown because normal language-server analysis
+does not execute Vim script. Legacy-root recovery also stays quiet; retaining
+an `import` command there does not apply Vim9 import evaluation semantics.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:610-616` asserts the exact E1071 message
+  for an empty String, an empty List, and the null String returned by
+  `test_null_string()`.
+- `src/vim9script.c:399-443` evaluates the path, then rejects a non-String,
+  null String, or empty String before attempting file resolution.
+- `runtime/doc/testing.txt:362-365` defines `test_null_string()` as the
+  zero-argument test builtin that returns a null String.
+- `src/errors.h:2791-2792` defines the exact message.
