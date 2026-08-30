@@ -54,38 +54,43 @@ type Server struct {
 	log    io.Writer
 	logMu  sync.Mutex
 
-	mu                sync.Mutex
-	state             state
-	targetVersion     TargetVersion
-	targetOverride    bool
-	pendingWarning    string
-	client            protocol.Client
-	cancellations     map[jsonrpc2.ID]context.CancelFunc
-	documents         *workspace.Documents
-	encoding          text.Encoding
-	exitOnce          sync.Once
-	exitCode          chan int
-	analysisMu        sync.Mutex
-	analysisContext   context.Context
-	analysisCancel    context.CancelFunc
-	analysisStopped   bool
-	analysisWG        sync.WaitGroup
-	analysisWake      chan struct{}
-	analysisPending   map[string]struct{}
-	analysisRunning   map[string]struct{}
-	analysisWorkers   int
-	publishMu         sync.Mutex
-	parsed            map[string]parsedDocument
-	published         map[string]bool
-	workspaceMu       sync.Mutex
-	workspaceRoots    []string
-	runtimePaths      []string
-	workspaceIndex    *workspace.Index
-	workspaceResolver *workspace.PathResolver
-	workspaceFiles    map[string]struct{}
-	workspaceRevision uint64
-	workspaceRunning  bool
-	workspaceWG       sync.WaitGroup
+	mu                  sync.Mutex
+	state               state
+	targetVersion       TargetVersion
+	targetOverride      bool
+	pendingWarning      string
+	client              protocol.Client
+	cancellations       map[jsonrpc2.ID]context.CancelFunc
+	documents           *workspace.Documents
+	encoding            text.Encoding
+	exitOnce            sync.Once
+	exitCode            chan int
+	analysisMu          sync.Mutex
+	analysisContext     context.Context
+	analysisCancel      context.CancelFunc
+	analysisStopped     bool
+	analysisWG          sync.WaitGroup
+	analysisWake        chan struct{}
+	analysisPending     map[string]struct{}
+	analysisRunning     map[string]struct{}
+	analysisWorkers     int
+	publishMu           sync.Mutex
+	parsed              map[string]parsedDocument
+	published           map[string]bool
+	workspaceMu         sync.Mutex
+	workspaceRoots      []string
+	runtimePaths        []string
+	workspaceIndex      *workspace.Index
+	workspaceGraph      *workspace.ImportGraph
+	workspaceGraphView  workspace.ImportGraphSnapshot
+	workspaceResolver   *workspace.PathResolver
+	workspaceFiles      map[string]struct{}
+	workspacePending    map[string]struct{}
+	workspaceDependents map[string]struct{}
+	workspaceBuilt      bool
+	workspaceRevision   uint64
+	workspaceRunning    bool
+	workspaceWG         sync.WaitGroup
 
 	watchMu                  sync.Mutex
 	watchDynamicRegistration bool
@@ -99,24 +104,29 @@ type Server struct {
 func New(input io.Reader, output, logOutput io.Writer) *Server {
 	target, _ := ParseTargetVersion(DefaultTargetVersion)
 	analysisContext, analysisCancel := context.WithCancel(context.Background())
+	graph := workspace.NewImportGraph()
 	return &Server{
-		input:           input,
-		output:          output,
-		log:             logOutput,
-		targetVersion:   target,
-		cancellations:   make(map[jsonrpc2.ID]context.CancelFunc),
-		documents:       workspace.NewDocuments(),
-		encoding:        text.UTF16,
-		exitCode:        make(chan int, 1),
-		analysisContext: analysisContext,
-		analysisCancel:  analysisCancel,
-		analysisWake:    make(chan struct{}, maxParallelAnalysis),
-		analysisPending: make(map[string]struct{}),
-		analysisRunning: make(map[string]struct{}),
-		parsed:          make(map[string]parsedDocument),
-		published:       make(map[string]bool),
-		workspaceIndex:  workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes),
-		workspaceFiles:  make(map[string]struct{}),
+		input:               input,
+		output:              output,
+		log:                 logOutput,
+		targetVersion:       target,
+		cancellations:       make(map[jsonrpc2.ID]context.CancelFunc),
+		documents:           workspace.NewDocuments(),
+		encoding:            text.UTF16,
+		exitCode:            make(chan int, 1),
+		analysisContext:     analysisContext,
+		analysisCancel:      analysisCancel,
+		analysisWake:        make(chan struct{}, maxParallelAnalysis),
+		analysisPending:     make(map[string]struct{}),
+		analysisRunning:     make(map[string]struct{}),
+		parsed:              make(map[string]parsedDocument),
+		published:           make(map[string]bool),
+		workspaceIndex:      workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes),
+		workspaceGraph:      graph,
+		workspaceGraphView:  graph.Snapshot(),
+		workspaceFiles:      make(map[string]struct{}),
+		workspacePending:    make(map[string]struct{}),
+		workspaceDependents: make(map[string]struct{}),
 	}
 }
 
@@ -858,7 +868,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File) {
 	}
 	documentURI := analysis.Snapshot.URI()
 	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: file}
-	s.replaceWorkspaceFile(documentURI, file)
+	s.startWorkspaceDependents(s.replaceWorkspaceFile(documentURI, file))
 	diagnostics := make([]protocol.Diagnostic, 0, len(file.Diagnostics))
 	for _, item := range file.Diagnostics {
 		start, startError := analysis.Snapshot.Position(item.Span.Start, encoding)

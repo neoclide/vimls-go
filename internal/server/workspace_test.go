@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -237,6 +238,107 @@ func TestOpenDocumentsOverrideDiskAndClientFileEventsRebuild(t *testing.T) {
 	}
 }
 
+func TestWorkspaceImportGraphBuildsDirectedReadySnapshot(t *testing.T) {
+	root := t.TempDir()
+	a := writeWorkspaceFile(t, root, "a.vim", "vim9script\nimport './b.vim' as B\nimport './c.vim' as C\n")
+	b := writeWorkspaceFile(t, root, "b.vim", "vim9script\nimport './d.vim' as D\n")
+	c := writeWorkspaceFile(t, root, "c.vim", "vim9script\nimport autoload './d.vim' as D\n")
+	d := writeWorkspaceFile(t, root, "d.vim", "vim9script\nimport './a.vim' as A\n")
+	a, b, c, d = mustWorkspaceCanonicalPath(t, a), mustWorkspaceCanonicalPath(t, b), mustWorkspaceCanonicalPath(t, c), mustWorkspaceCanonicalPath(t, d)
+	instance := initializeWorkspaceServer(t, root)
+
+	instance.workspaceMu.Lock()
+	graph := instance.workspaceGraphView
+	instance.workspaceMu.Unlock()
+	if !graph.Ready() || graph.Revision() == 0 {
+		t.Fatalf("graph state: ready=%t revision=%d", graph.Ready(), graph.Revision())
+	}
+	if outgoing := graph.Outgoing(a); len(outgoing) != 2 || outgoing[0].Alias != "B" || outgoing[1].Alias != "C" {
+		t.Fatalf("A outgoing = %#v", outgoing)
+	}
+	if incoming := graph.Incoming(d); len(incoming) != 2 || !sameWorkspacePath(incoming[0].Importer, b) || !sameWorkspacePath(incoming[1].Importer, c) || !incoming[1].Autoload {
+		t.Fatalf("D incoming = %#v", incoming)
+	}
+	if incoming := graph.Incoming(a); len(incoming) != 1 || !sameWorkspacePath(incoming[0].Importer, d) {
+		t.Fatalf("cycle incoming(A) = %#v", incoming)
+	}
+}
+
+func TestWorkspaceImportGraphTracksOpenDocumentChanges(t *testing.T) {
+	root := t.TempDir()
+	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './one.vim' as Lib\n")
+	onePath := writeWorkspaceFile(t, root, "one.vim", "vim9script\nexport var One = 1\n")
+	twoPath := writeWorkspaceFile(t, root, "two.vim", "vim9script\nexport var Two = 2\n")
+	mainPath, onePath, twoPath = mustWorkspaceCanonicalPath(t, mainPath), mustWorkspaceCanonicalPath(t, onePath), mustWorkspaceCanonicalPath(t, twoPath)
+	instance := initializeWorkspaceServer(t, root)
+	initial := currentImportGraph(instance)
+	if outgoing := initial.Outgoing(mainPath); len(outgoing) != 1 || !sameWorkspacePath(outgoing[0].Target, onePath) {
+		t.Fatalf("initial imports = %#v", outgoing)
+	}
+	documentURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\nimport './two.vim' as Lib\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	opened := waitForImportGraph(t, instance, func(graph workspace.ImportGraphSnapshot) bool {
+		outgoing := graph.Outgoing(mainPath)
+		return graph.Ready() && len(outgoing) == 1 && sameWorkspacePath(outgoing[0].Target, twoPath)
+	})
+	if opened.Revision() <= initial.Revision() {
+		t.Fatalf("open revision = %d, initial = %d", opened.Revision(), initial.Revision())
+	}
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{Text: "vim9script\nvar local = 1\n"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changed := waitForImportGraph(t, instance, func(graph workspace.ImportGraphSnapshot) bool {
+		return graph.Ready() && len(graph.Outgoing(mainPath)) == 0 && graph.Revision() > opened.Revision()
+	})
+	if len(changed.Incoming(twoPath)) != 0 {
+		t.Fatalf("changed graph retained reverse edge = %#v", changed.Incoming(twoPath))
+	}
+	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	restored := currentImportGraph(instance)
+	if outgoing := restored.Outgoing(mainPath); !restored.Ready() || restored.Revision() <= changed.Revision() || len(outgoing) != 1 || !sameWorkspacePath(outgoing[0].Target, onePath) {
+		t.Fatalf("restored graph: ready=%t revision=%d outgoing=%#v", restored.Ready(), restored.Revision(), outgoing)
+	}
+}
+
+func TestWorkspaceImportGraphResolvesOpenOnlyTarget(t *testing.T) {
+	root := t.TempDir()
+	instance := initializeWorkspaceServer(t, root)
+	targetPath := mustWorkspaceCanonicalPath(t, filepath.Join(root, "openlib.vim"))
+	targetURI := uri.File(targetPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: targetURI, Version: 1, Text: "vim9script\nexport var Value = 1\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForImportGraph(t, instance, func(graph workspace.ImportGraphSnapshot) bool {
+		return graph.Ready() && graph.Has(targetPath)
+	})
+	importerPath := mustWorkspaceCanonicalPath(t, filepath.Join(root, "main.vim"))
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: uri.File(importerPath), Version: 1, Text: "vim9script\nimport './openlib.vim' as Lib\necho Lib.Value\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	graph := waitForImportGraph(t, instance, func(graph workspace.ImportGraphSnapshot) bool {
+		outgoing := graph.Outgoing(importerPath)
+		return graph.Ready() && len(outgoing) == 1 && sameWorkspacePath(outgoing[0].Target, targetPath)
+	})
+	if incoming := graph.Incoming(targetPath); len(incoming) != 1 || !sameWorkspacePath(incoming[0].Importer, importerPath) {
+		t.Fatalf("open-only target incoming = %#v", incoming)
+	}
+}
+
 func TestWorkspaceFolderChangesReplaceIndexAtomically(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
@@ -333,6 +435,27 @@ func waitForWorkspaceSymbols(t *testing.T, instance *Server, query string, count
 	}
 }
 
+func currentImportGraph(instance *Server) workspace.ImportGraphSnapshot {
+	instance.workspaceMu.Lock()
+	defer instance.workspaceMu.Unlock()
+	return instance.workspaceGraphView
+}
+
+func waitForImportGraph(t *testing.T, instance *Server, ready func(workspace.ImportGraphSnapshot) bool) workspace.ImportGraphSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		graph := currentImportGraph(instance)
+		if ready(graph) {
+			return graph
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("import graph did not reach expected state: ready=%t revision=%d", graph.Ready(), graph.Revision())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func writeWorkspaceFile(t *testing.T, root, name, content string) string {
 	t.Helper()
 	path := filepath.Join(root, name)
@@ -343,6 +466,15 @@ func writeWorkspaceFile(t *testing.T, root, name, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func mustWorkspaceCanonicalPath(t *testing.T, path string) string {
+	t.Helper()
+	canonical, err := workspace.CanonicalPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical
 }
 
 type watchRegistrationClient struct {

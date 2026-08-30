@@ -443,10 +443,7 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 	collectImports(file.Commands, imports, &importNodes)
 	importsByName := make(map[string][]*syntax.Import)
 	for _, importNode := range importNodes {
-		name := file.Text(importNode.Alias)
-		if name == "" {
-			name = defaultImportName(file.Text(importNode.PathSpan))
-		}
+		name := ImportAlias(file, importNode)
 		if name != "" {
 			importsByName[name] = append(importsByName[name], importNode)
 		}
@@ -560,6 +557,19 @@ func defaultImportName(raw string) string {
 		return ""
 	}
 	return name[:extension]
+}
+
+// ImportAlias returns the explicit or filename-derived name introduced by an
+// import. Dynamic paths without an explicit alias have no statically known
+// name.
+func ImportAlias(file *syntax.File, importNode *syntax.Import) string {
+	if file == nil || importNode == nil {
+		return ""
+	}
+	if name := file.Text(importNode.Alias); name != "" {
+		return name
+	}
+	return defaultImportName(file.Text(importNode.PathSpan))
 }
 
 func visitIndexCommands(commands []syntax.Command, visited map[*syntax.Expression]bool, visit func(*syntax.Expression)) {

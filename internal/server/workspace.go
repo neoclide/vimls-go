@@ -100,6 +100,7 @@ func (s *Server) setWorkspaceRoots(roots []string) {
 	s.workspaceMu.Lock()
 	s.workspaceRoots = append([]string(nil), roots...)
 	s.workspaceResolver = nil
+	s.resetWorkspaceGraphLocked()
 	s.workspaceRevision++
 	s.workspaceMu.Unlock()
 }
@@ -108,8 +109,19 @@ func (s *Server) setRuntimePaths(paths []string) {
 	s.workspaceMu.Lock()
 	s.runtimePaths = append([]string(nil), paths...)
 	s.workspaceResolver = nil
+	s.resetWorkspaceGraphLocked()
 	s.workspaceRevision++
 	s.workspaceMu.Unlock()
+}
+
+func (s *Server) resetWorkspaceGraphLocked() {
+	graph := workspace.NewImportGraph()
+	graph.AdvanceRevision(s.workspaceGraphView.Revision())
+	s.workspaceGraph = graph
+	s.workspaceGraphView = graph.Snapshot()
+	s.workspacePending = make(map[string]struct{})
+	s.workspaceDependents = make(map[string]struct{})
+	s.workspaceBuilt = false
 }
 
 func workspaceIndexRoots(workspaceRoots, runtimePaths []string) []string {
@@ -156,29 +168,14 @@ func (s *Server) workspaceIndexWorker() {
 		if resolver == nil {
 			resolver = workspacePathResolver(workspaceRoots, runtimePaths)
 		}
+		openSnapshots := s.documents.Snapshots()
 
-		index, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, resolver)
+		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, resolver, openSnapshots)
 		if s.analysisContext.Err() != nil {
 			s.workspaceMu.Lock()
 			s.workspaceRunning = false
 			s.workspaceMu.Unlock()
 			return
-		}
-
-		openSnapshots := s.documents.Snapshots()
-		for _, snapshot := range openSnapshots {
-			path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
-			if !ok || !workspacePathInRoots(path, roots) {
-				continue
-			}
-			if snapshot.ByteLen() > maxFileBytes {
-				index.Remove(path)
-				continue
-			}
-			if err := index.Replace(path, syntax.Parse(snapshot.Text())); err != nil {
-				index.Remove(path)
-				warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
-			}
 		}
 
 		s.publishMu.Lock()
@@ -192,14 +189,23 @@ func (s *Server) workspaceIndexWorker() {
 			s.publishMu.Unlock()
 			continue
 		}
+		graph.AdvanceRevision(s.workspaceGraphView.Revision())
 		s.workspaceIndex = index
+		s.workspaceGraph = graph
+		s.workspaceGraphView = graph.Snapshot()
 		s.workspaceResolver = resolver
 		s.workspaceFiles = diskFiles
+		s.workspacePending = make(map[string]struct{})
+		s.workspaceDependents = make(map[string]struct{})
+		s.workspaceBuilt = true
 		s.workspaceRunning = false
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
 		for _, warning := range warnings {
 			_ = s.sendWarning(s.analysisContext, warning)
+		}
+		for _, snapshot := range openSnapshots {
+			s.startAnalysis(snapshot.URI())
 		}
 		return
 	}
@@ -217,15 +223,18 @@ func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
 	return true
 }
 
-func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolver *workspace.PathResolver) (*workspace.Index, map[string]struct{}, []string) {
+func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
 	index := workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes)
+	graph := workspace.NewImportGraph()
 	diskFiles := make(map[string]struct{})
 	if len(roots) == 0 || ctx.Err() != nil {
-		return index, diskFiles, nil
+		graph.SetReady(ctx.Err() == nil)
+		return index, graph, diskFiles, nil
 	}
 
 	paths := make([]string, 0)
 	seen := make(map[string]struct{})
+	openByPath := make(map[string]*text.Snapshot, len(openSnapshots))
 	var warnings []string
 	for _, root := range roots {
 		remaining := maxWorkspaceFiles - len(paths)
@@ -254,73 +263,82 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 			break
 		}
 	}
+	for _, snapshot := range openSnapshots {
+		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
+		if !ok || !workspacePathInRoots(path, roots) || snapshot.ByteLen() > maxFileBytes {
+			continue
+		}
+		openByPath[path] = snapshot
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
 	sort.Strings(paths)
 
 	indexedPaths := make([]string, 0, len(paths))
 	sources := make([]string, 0, len(paths))
+	indexedDiskFiles := make([]bool, 0, len(paths))
 	indexedBytes := 0
-	for _, path := range paths {
-		if ctx.Err() != nil {
-			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+	readSource := func(path string) (string, bool, bool) {
+		info, statErr := os.Stat(path)
+		diskFile := statErr == nil && info.Mode().IsRegular()
+		if snapshot := openByPath[path]; snapshot != nil {
+			return snapshot.Text(), diskFile, true
 		}
-		info, err := os.Stat(path)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		if info.Size() > maxFileBytes {
-			continue
-		}
-		if info.Size() > int64(maxIndexBytes-indexedBytes) {
-			warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
-			break
+		if !diskFile || info.Size() > maxFileBytes {
+			return "", false, false
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			s.logf("vimls: read workspace file %s: %v", path, err)
+			return "", false, false
+		}
+		return string(content), true, true
+	}
+	for _, path := range paths {
+		if ctx.Err() != nil {
+			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
+		}
+		source, diskFile, ok := readSource(path)
+		if !ok {
 			continue
 		}
-		if len(content) > maxIndexBytes-indexedBytes {
+		if len(source) > maxIndexBytes-indexedBytes {
 			warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 			break
 		}
-		indexedBytes += len(content)
+		indexedBytes += len(source)
 		indexedPaths = append(indexedPaths, path)
-		sources = append(sources, string(content))
+		sources = append(sources, source)
+		indexedDiskFiles = append(indexedDiskFiles, diskFile)
 	}
 	files := workspace.ParseSources(ctx, sources, 0)
 	if ctx.Err() != nil {
-		return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+		return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
 	}
-	for resolver != nil {
+	for {
 		if ctx.Err() != nil {
-			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
 		candidates := make([]string, 0)
 		for position, file := range files {
 			if position%32 == 0 && ctx.Err() != nil {
-				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
 			}
 			if file == nil {
 				continue
 			}
-			for commandIndex := range file.Commands {
-				importNode := file.Commands[commandIndex].Import
-				if importNode == nil {
+			for _, fact := range collectWorkspaceImportFacts(indexedPaths[position], file, resolver, openByPath) {
+				if fact.Target == "" {
 					continue
 				}
-				resolution := resolver.ResolveImport(indexedPaths[position], file, importNode)
-				if resolution.Path == "" {
+				if _, ok := seen[fact.Target]; ok {
 					continue
 				}
-				path, err := workspace.CanonicalPath(resolution.Path)
-				if err != nil {
-					continue
-				}
-				if _, ok := seen[path]; ok {
-					continue
-				}
-				seen[path] = struct{}{}
-				candidates = append(candidates, path)
+				seen[fact.Target] = struct{}{}
+				candidates = append(candidates, fact.Target)
 			}
 		}
 		if len(candidates) == 0 {
@@ -329,43 +347,37 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 		sort.Strings(candidates)
 		newPaths := make([]string, 0, len(candidates))
 		newSources := make([]string, 0, len(candidates))
+		newDiskFiles := make([]bool, 0, len(candidates))
 		for _, path := range candidates {
 			if ctx.Err() != nil {
-				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
 			}
 			if len(indexedPaths)+len(newPaths) >= maxWorkspaceFiles {
 				warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
 				break
 			}
-			info, err := os.Stat(path)
-			if err != nil || !info.Mode().IsRegular() || info.Size() > maxFileBytes {
+			source, diskFile, ok := readSource(path)
+			if !ok {
 				continue
 			}
-			if info.Size() > int64(maxIndexBytes-indexedBytes) {
+			if len(source) > maxIndexBytes-indexedBytes {
 				warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 				break
 			}
-			content, err := os.ReadFile(path)
-			if err != nil {
-				s.logf("vimls: read imported workspace file %s: %v", path, err)
-				continue
-			}
-			if len(content) > maxIndexBytes-indexedBytes {
-				warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
-				break
-			}
-			indexedBytes += len(content)
+			indexedBytes += len(source)
 			newPaths = append(newPaths, path)
-			newSources = append(newSources, string(content))
+			newSources = append(newSources, source)
+			newDiskFiles = append(newDiskFiles, diskFile)
 		}
 		if len(newPaths) == 0 {
 			break
 		}
 		parsed := workspace.ParseSources(ctx, newSources, 0)
 		if ctx.Err() != nil {
-			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
+			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
 		indexedPaths = append(indexedPaths, newPaths...)
+		indexedDiskFiles = append(indexedDiskFiles, newDiskFiles...)
 		files = append(files, parsed...)
 	}
 	for position, file := range files {
@@ -377,9 +389,56 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 			warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 			break
 		}
-		diskFiles[path] = struct{}{}
+		if err := graph.Replace(path, collectWorkspaceImportFacts(path, file, resolver, openByPath)); err != nil {
+			index.Remove(path)
+			continue
+		}
+		if indexedDiskFiles[position] {
+			diskFiles[path] = struct{}{}
+		}
 	}
-	return index, diskFiles, warnings
+	graph.SetReady(true)
+	return index, graph, diskFiles, warnings
+}
+
+func collectWorkspaceImportFacts(importer string, file *syntax.File, resolver *workspace.PathResolver, openByPath map[string]*text.Snapshot) []workspace.ImportFact {
+	if file == nil {
+		return nil
+	}
+	facts := make([]workspace.ImportFact, 0)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.Import != nil {
+				importNode := command.Import
+				resolution := workspace.PathResolution{Dynamic: true}
+				if resolver != nil {
+					resolution = resolver.ResolveImport(importer, file, importNode)
+				}
+				target := resolution.Path
+				if target == "" && !resolution.Dynamic {
+					for _, candidate := range resolution.Candidates {
+						if openByPath[candidate] != nil {
+							target = candidate
+							break
+						}
+					}
+				}
+				facts = append(facts, workspace.ImportFact{
+					Target: target, ImportPath: strings.Clone(file.Text(importNode.PathSpan)), PathSpan: importNode.PathSpan,
+					Alias: strings.Clone(workspace.ImportAlias(file, importNode)), AliasSpan: importNode.Alias,
+					Autoload: importNode.Autoload, Dynamic: resolution.Dynamic,
+					Missing: !resolution.Dynamic && target == "" && len(resolution.Candidates) > 0,
+				})
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	return facts
 }
 
 func workspacePathResolver(workspaceRoots, runtimePaths []string) *workspace.PathResolver {
@@ -415,20 +474,39 @@ func workspacePathInRoots(path string, roots []string) bool {
 	return false
 }
 
-func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) {
+func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []string {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
 	if !ok || file == nil {
-		return
+		return nil
+	}
+	openByPath := make(map[string]*text.Snapshot)
+	for _, snapshot := range s.documents.Snapshots() {
+		if openPath, valid := workspaceURIPath(uri.URI(snapshot.URI())); valid && snapshot.ByteLen() <= maxFileBytes {
+			openByPath[openPath] = snapshot
+		}
 	}
 	s.workspaceMu.Lock()
-	defer s.workspaceMu.Unlock()
 	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
-		return
+		s.workspaceMu.Unlock()
+		return nil
 	}
 	if err := s.workspaceIndex.Replace(path, file); err != nil {
 		s.workspaceIndex.Remove(path)
 		s.logf("vimls: workspace index limit reached for %s: %v", path, err)
 	}
+	if _, pending := s.workspacePending[path]; pending {
+		if err := s.workspaceGraph.Replace(path, collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath)); err != nil {
+			s.logf("vimls: update import graph for %s: %v", path, err)
+		}
+		delete(s.workspacePending, path)
+	}
+	if s.workspaceBuilt && len(s.workspacePending) == 0 {
+		s.workspaceGraph.SetReady(true)
+	}
+	s.workspaceGraphView = s.workspaceGraph.Snapshot()
+	dependents := s.readyWorkspaceDependentsLocked()
+	s.workspaceMu.Unlock()
+	return dependents
 }
 
 func (s *Server) removeWorkspaceURI(documentURI string) {
@@ -437,7 +515,18 @@ func (s *Server) removeWorkspaceURI(documentURI string) {
 		return
 	}
 	s.workspaceMu.Lock()
+	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
+		s.workspaceMu.Unlock()
+		return
+	}
 	s.workspaceIndex.Remove(path)
+	s.queueWorkspaceDependentsLocked(path)
+	if err := s.workspaceGraph.Replace(path, nil); err == nil {
+		s.workspaceGraph.SetReady(false)
+		s.workspaceGraphView = s.workspaceGraph.Snapshot()
+		s.workspacePending[path] = struct{}{}
+		s.workspaceRevision++
+	}
 	s.workspaceMu.Unlock()
 }
 
@@ -448,19 +537,82 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 	}
 	s.workspaceMu.Lock()
 	_, knownDiskFile := s.workspaceFiles[path]
-	index := s.workspaceIndex
 	s.workspaceMu.Unlock()
+	var file *syntax.File
 	if !knownDiskFile {
-		index.Remove(path)
+		file = nil
+	} else if content, err := os.ReadFile(path); err == nil && len(content) <= maxFileBytes {
+		file = syntax.Parse(string(content))
+	}
+	openByPath := make(map[string]*text.Snapshot)
+	for _, snapshot := range s.documents.Snapshots() {
+		if openPath, valid := workspaceURIPath(uri.URI(snapshot.URI())); valid && snapshot.ByteLen() <= maxFileBytes {
+			openByPath[openPath] = snapshot
+		}
+	}
+	s.workspaceMu.Lock()
+	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
+		s.workspaceMu.Unlock()
 		return
 	}
-	content, err := os.ReadFile(path)
-	if err != nil || len(content) > maxFileBytes {
-		index.Remove(path)
+	s.queueWorkspaceDependentsLocked(path)
+	if file == nil {
+		s.workspaceIndex.Remove(path)
+		s.workspaceGraph.Remove(path)
+	} else {
+		if err := s.workspaceIndex.Replace(path, file); err != nil {
+			s.workspaceIndex.Remove(path)
+		}
+		if err := s.workspaceGraph.Replace(path, collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath)); err != nil {
+			s.logf("vimls: restore import graph for %s: %v", path, err)
+		}
+	}
+	delete(s.workspacePending, path)
+	if s.workspaceBuilt && len(s.workspacePending) == 0 {
+		s.workspaceGraph.SetReady(true)
+	}
+	s.workspaceGraphView = s.workspaceGraph.Snapshot()
+	s.workspaceRevision++
+	dependents := s.readyWorkspaceDependentsLocked()
+	s.workspaceMu.Unlock()
+	s.startWorkspaceDependents(dependents)
+}
+
+func (s *Server) queueWorkspaceDependentsLocked(path string) {
+	for _, dependent := range s.workspaceGraphView.ReverseDependents(path) {
+		s.workspaceDependents[dependent] = struct{}{}
+	}
+}
+
+func (s *Server) readyWorkspaceDependentsLocked() []string {
+	if !s.workspaceGraphView.Ready() || len(s.workspaceDependents) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(s.workspaceDependents))
+	for path := range s.workspaceDependents {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	s.workspaceDependents = make(map[string]struct{})
+	return paths
+}
+
+func (s *Server) startWorkspaceDependents(paths []string) {
+	if len(paths) == 0 {
 		return
 	}
-	if err := index.Replace(path, syntax.Parse(string(content))); err != nil {
-		index.Remove(path)
+	wanted := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		wanted[path] = struct{}{}
+	}
+	for _, snapshot := range s.documents.Snapshots() {
+		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
+		if !ok {
+			continue
+		}
+		if _, ok := wanted[path]; ok {
+			s.startAnalysis(snapshot.URI())
+		}
 	}
 }
 
