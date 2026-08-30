@@ -2672,6 +2672,57 @@ func TestAnalyzeUnknownFunctionDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeNonCallableFunctionDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, text string
+		wantE1085          bool
+	}{
+		{
+			name: "official number variable in def",
+			source: "vim9script\ndef Test()\n" +
+				"  var Ref: number\n  Ref()\nenddef\n",
+			text:      "Ref",
+			wantE1085: true,
+		},
+		{
+			name: "official string variable in def",
+			source: "vim9script\ndef Test()\n" +
+				"  var Ref: string\n  var res = Ref()\nenddef\n",
+			text:      "Ref",
+			wantE1085: true,
+		},
+		{
+			name:   "unknown and any remain conservative",
+			source: "vim9script\ndef Test()\n  var Unknown: func\n  Unknown()\n  var Value: any\n  Value()\nenddef\n",
+		},
+		{
+			name: "function value continues to arity diagnostics",
+			source: "vim9script\ndef Test()\n  def Ref(value: number)\n  enddef\n" +
+				"  Ref()\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var e1085 []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1085" {
+					e1085 = append(e1085, diagnostic)
+				}
+			}
+			if test.wantE1085 {
+				if len(e1085) != 1 || e1085[0].Message != "Not a callable type: "+test.text || file.Text(e1085[0].Span) != test.text {
+					t.Fatalf("E1085 diagnostics = %#v, want one on %q; syntax diagnostics = %#v", e1085, test.text, file.Diagnostics)
+				}
+				return
+			}
+			if len(e1085) != 0 {
+				t.Fatalf("E1085 diagnostics = %#v, want none; syntax diagnostics = %#v", e1085, file.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestAnalyzeUserFunctionArityDiagnostics(t *testing.T) {
 	type wantDiagnostic struct {
 		code, message, text string

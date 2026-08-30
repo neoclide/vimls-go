@@ -5458,6 +5458,11 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 		}
 		callable = declaration.Type
 	}
+	if checkTypes && callable.Name != "func" && !isUnknownType(callable) {
+		name, span := functionDiagnosticTarget(result.File, callee)
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1085", Message: "Not a callable type: " + name, Span: span})
+		return
+	}
 	if callable.Name != "func" || !callable.ArgumentCountKnown {
 		return
 	}

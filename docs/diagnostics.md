@@ -115,6 +115,20 @@ Representative source evidence:
 - `src/testdir/test_vim9_expr.vim:4498-4499` distinguishes the long-name
   E1011/E117 pair and covers an ordinary missing function.
 
+## Non-callable values: E1085
+
+Vim reports `E1085: Not a callable type: {name}` when compiling a Vim9 call
+whose callee has a statically known non-`func` type. The analyzer reports this
+for the callee span and stops call diagnostics for that expression. Unknown
+and `any` callees remain conservative `unknown`; known `func` values continue
+through the existing argument-count and argument-type diagnostics.
+
+Representative source evidence, pinned to Vim 9.2.1015:
+
+- `src/vim9instr.c` `generate_PCALL` selects E1085 for a non-callable type.
+- `src/testdir/test_vim9_script.vim:210-211` covers number and string variable
+  calls compiled in a `def`.
+
 ## Runtime sign lookup: E155
 
 E155 means `Unknown sign: {name}`. The language server does not emit it from
