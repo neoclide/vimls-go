@@ -462,6 +462,8 @@ authoritative syntax split is therefore 999 migrated, zero ready, and 23
 pending-fix.
 Commit `87f805d` migrated the variadic-default variant. The authoritative
 syntax split is therefore 1000 migrated, zero ready, and 22 pending-fix.
+Commit `07b6abc` migrated both lambda-default variants. The authoritative
+syntax split is therefore 1002 migrated, zero ready, and 20 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1537,7 +1539,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 151 migrated and 22 pending-fix. In the
+Group D contains 173 syntax variants: 153 migrated and 20 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1705,7 +1707,7 @@ E1152 M recovery: 382:8151/script
 E1157 M ready: 1689:36926/{def|vim9-script}
 E1160 M missing: 2034:44861/script
 E1170 M ready: 73:1788/def
-E1172 P missing: 1626:35394/{def|vim9-script}
+E1172 M missing: 1626:35394/{def|vim9-script}
 E1173 M missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/script,2388:53495/script
 E125 M ready: 948:20577/script,955:20687/script
 E126 M mapping: 416:8808/script
@@ -1780,6 +1782,11 @@ Commit `87f805d` migrates `2034:44861/script`. A default on a Vim9 variadic
 `def` parameter reports E1160 from its `=` through the retained default
 expression; the Parameter remains variadic and keeps its complete Default AST.
 Legacy function arguments are unchanged.
+
+Commit `07b6abc` migrates `1626:35394/{def,vim9-script}`. A Vim9 lambda
+parameter default reports one E1172 while retaining its name, optional type,
+DefaultSpan, and parsed Default expression. The arrow, body, and following
+physical command remain available after recovery.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
