@@ -395,6 +395,9 @@ A command/name-resolution audit then removed the three one-letter
 and the text is reinterpreted as `append`, `change`, or `insert`. The
 authoritative parser split is therefore 955 migrated, zero ready, and 77
 pending-fix.
+Commit `fc03b57` migrated the three illegal Vim9 declaration and compiled-loop
+binding variants. The authoritative parser split is therefore 958 migrated,
+zero ready, and 74 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -987,13 +990,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 106 | 96 | 0 | 10 |
+| `C-EXCMD` | 106 | 99 | 0 | 7 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **333** | **323** | **0** | **10** |
+| **Total** | **333** | **326** | **0** | **7** |
 
 ```text
 C-EXPR
@@ -1181,6 +1184,13 @@ replacement expression now owns and diagnoses an unmatched expression tail as
 E488 while retaining its parsed expression. A numeric tail after that
 replacement is likewise E488 instead of being misclassified as a substitute
 count; ordinary and legacy counts remain unchanged.
+
+Commit `fc03b57` migrated `I:3151:77235/script` and
+`S:{3131:66338,3139:66506}/def`. Declaration comment masking now distinguishes
+an attached `#` in an illegal name from a whitespace-delimited Vim9 comment.
+Compiled `for` member and index targets report E461 while retaining both the
+base binding and the complete target expression AST; parsing continues with
+the iterable and following physical lines.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
