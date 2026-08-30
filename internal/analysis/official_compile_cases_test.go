@@ -165,7 +165,7 @@ E481 E518 E580 E581 E582 E583 E584 E586 E587 E588 E600 E602 E603
 E606 E607 E611 E689 E690 E696 E697 E701 E703 E704 E716 E720 E721 E722 E723 E728 E729 E730 E731 E734 E745 E804 E805 E806 E896 E908 E973 E974 E976 E996 E1001 E1002 E1003 E1004
 E1005 E1006 E1007 E1008 E1009 E1010 E1011 E1012 E1013 E1015 E1016 E1017 E1018 E1019 E1020
 E1021 E1022 E1023 E1024 E1025 E1026 E1027 E1030 E1031 E1032 E1033 E1034 E1035 E1036 E1037 E1038 E1039 E1040 E1043
-E1041 E1042 E1044 E1047 E1048 E1049 E1050 E1051 E1052 E1053 E1054 E1055 E1056 E1057 E1058 E1059 E1060 E1062 E1065 E1066 E1067 E1068 E1069 E1071 E1072 E1073 E1075 E1077 E1080 E1082 E1083 E1087 E1089
+E1041 E1042 E1044 E1047 E1048 E1049 E1050 E1051 E1052 E1053 E1054 E1055 E1056 E1057 E1058 E1059 E1060 E1062 E1065 E1066 E1067 E1068 E1069 E1071 E1072 E1073 E1074 E1075 E1077 E1080 E1082 E1083 E1087 E1089
 E1093 E1097 E1100 E1104 E1123 E1125 E1126 E1127 E1128 E1139 E1143 E1144 E1145 E1151 E1152 E1157
 E1170 E1171 E1172 E1173 E1174 E1176 E1180 E1185 E1202 E1206 E1208 E1241 E1242 E1257 E1261 E1267 E1278
 E1279 E1316 E1317 E1329 E1331 E1342 E1344 E1345 E1368 E1389 E1397 E1398
@@ -173,7 +173,7 @@ E1414 E1526 E1527 E1539 E1552 E1553 E1555 E1561
 `
 
 const officialCompilePendingCodes = `
-E1074 E1081 E1085 E1088
+E1081 E1085 E1088
 E1090 E1092 E1094 E1095 E1096 E1101 E1105 E1106 E1107 E1117
 E1135 E1138 E1141 E1153 E1158 E1160 E1163 E1164 E1165 E1166
 E1167 E1168 E1177 E1178 E1181 E1182 E1183 E1186 E1189 E1190 E1207
@@ -268,8 +268,7 @@ func analyzeOfficialCompileSource(t *testing.T, testCase officialCompileCase) []
 	if file.Source != source || len(file.Commands) == 0 {
 		t.Fatalf("%s: parser did not retain official compile source", testCase.ID)
 	}
-	diagnostics := append([]syntax.Diagnostic(nil), file.Diagnostics...)
-	diagnostics = append(diagnostics, Analyze(file).Diagnostics...)
+	diagnostics := CombinedDiagnostics(file, Analyze(file))
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(source) {
 			t.Fatalf("%s: out-of-bounds diagnostic %#v", testCase.ID, diagnostic)
@@ -355,6 +354,24 @@ func officialCompileRepresentativeCases(corpus officialCompileCorpus, include fu
 		{
 			ID: "src/testdir/test_vim9_import.vim:615-616/E1071-null", Context: "script", Code: "vim/E1071",
 			Source: "vim9script\nimport test_null_string() as abc\n",
+		},
+	} {
+		if include(testCase) {
+			byCode[testCase.Code] = append(byCode[testCase.Code], testCase)
+		}
+	}
+	for _, testCase := range []officialCompileCase{
+		{
+			ID: "src/testdir/test_vim9_import.vim:161-168/E1074-line-break", Context: "script", Code: "vim/E1074",
+			Source: "vim9script\nimport './Xexport.vim' as expo\ng:exported = expo.\n  exported\n",
+		},
+		{
+			ID: "src/testdir/test_vim9_import.vim:202-211/E1074-def", Context: "def", Code: "vim/E1074",
+			Source: "vim9script\nimport './Xexport.vim' as Export\ndef Func()\n  var imported = Export . exported\nenddef\ndefcompile\n",
+		},
+		{
+			ID: "src/testdir/test_vim9_import.vim:231-237/E1074-script", Context: "script", Code: "vim/E1074",
+			Source: "vim9script\nimport './Xexport.vim' as Export\ng:imported_script = Export. exported\n",
 		},
 	} {
 		if include(testCase) {

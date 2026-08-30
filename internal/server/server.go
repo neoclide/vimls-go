@@ -857,7 +857,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		file = syntax.Parse(work.Snapshot.Text())
 		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
 		fileAnalysis = analysis.Analyze(file)
-		file.Diagnostics = append(file.Diagnostics, fileAnalysis.Diagnostics...)
+		file.Diagnostics = analysis.CombinedDiagnostics(file, fileAnalysis)
 		if work.Context.Err() != nil {
 			return
 		}

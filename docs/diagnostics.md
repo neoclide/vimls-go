@@ -1059,19 +1059,20 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 ## Import alias requires a dot: E1060
 
 E1060 means `Expected dot after name: {text}`. A Vim9 import alias names a
-namespace rather than a value, so analysis reports E1060 whenever a resolved
-alias reference is not immediately followed by `.`. The diagnostic selects
-the alias. Expression uses preserve the source tail that Vim includes in the
-message, while a compound assignment target retains the alias alone. This
-covers bare values, arithmetic, compound assignment targets and operands, and
-a line break or space before the dot. Direct assignment uses its own E1094 or
-E1236 rule instead of E1060.
+namespace rather than a value, so analysis reports E1060 when a resolved alias
+reference does not reach its namespace dot. The diagnostic selects the alias.
+Expression uses preserve the source tail that Vim includes in the message,
+while a compound assignment target retains the alias alone. This covers bare
+values, arithmetic, compound assignment targets and operands, and a line break
+before the dot. Script evaluation also rejects a space before the dot. Direct
+assignment uses its own E1094 or E1236 rule instead of E1060.
 
 A contiguous member access such as `module.Export` does not receive E1060 and
-does not require resolving the imported file first. Whitespace or a line break
-after the dot has already satisfied the E1060 check and uses E1074 instead.
-Legacy-root recovery remains conservative and does not apply Vim9 import
-namespace semantics merely because it retained an `import` command.
+does not require resolving the imported file first. The compiled `def` lookup
+also skips same-line horizontal space before the dot; script evaluation does
+not. Once the applicable lookup recognizes a dot, whitespace or a line break
+after it uses E1074 instead. Legacy-dialect recovery remains conservative,
+while an explicit `vim9cmd` command uses Vim9 import namespace semantics.
 
 Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 
@@ -1083,8 +1084,7 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   `Export exported` message tail.
 - `src/testdir/test_vim9_import.vim:507-525` covers a bare alias and compound
   assignment on both sides.
-- `runtime/doc/vim9.txt:3567-3576` requires the namespace dot without
-  surrounding whitespace.
+- `runtime/doc/vim9.txt:3567-3576` documents the namespace-dot form.
 - `src/vim9expr.c:650-696`, `src/eval.c:7660-7675`, and
   `src/evalvars.c:3180-3205` implement the compiled and evaluated checks.
 - `src/errors.h:2769-2770` defines the exact message.
@@ -1170,3 +1170,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/typval.c:1619-1629,2016-2023` applies the corresponding Vim9 runtime
   checks.
 - `src/errors.h:2793-2794` defines the exact message.
+
+## Import member whitespace after dot: E1074
+
+E1074 means `No white space allowed after dot`. After resolving a Vim9 import
+alias and recognizing its namespace dot, Vim requires the exported member name
+to start immediately. Analysis reports E1074 for a same-line space or a
+continued line break after that dot and selects the intervening whitespace.
+
+This is not the generic member-access E1202 rule. Name resolution determines
+whether the receiver is an import alias, and diagnostic composition removes
+the provisional generic spacing or missing-member diagnostic before exposing
+E1074. If script evaluation sees whitespace before the dot, it reports E1060
+instead. A compiled `def` skips same-line horizontal whitespace before the dot,
+so `Export . exported` reaches E1074. A contiguous `Export.` with no member
+uses E1048, and Legacy-dialect member access remains unchanged.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:151-168` distinguishes E1060 for a line
+  break before the dot from E1074 for a line break after it.
+- `src/testdir/test_vim9_import.vim:202-211` reports E1074 from a compiled
+  `def` whose import dot has whitespace on both sides.
+- `src/testdir/test_vim9_import.vim:231-250` distinguishes script-level E1074
+  after the dot from E1048 when the member name is absent.
+- A clean Vim v9.2.1015 oracle confirms that script evaluation rejects
+  `Export .Member` with E1060, while a compiled `def` accepts it and reports
+  E1074 only when whitespace also follows the dot.
+- `src/vim9expr.c:665-696` implements the compiled import-member lookup.
+- `src/eval.c:7656-7676` implements the corresponding evaluated lookup.
+- `src/errors.h:2797-2798` defines the exact message.

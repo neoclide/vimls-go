@@ -435,6 +435,69 @@ func TestAnalyzeE1060ImportAliasRequiresDot(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1074ImportWhitespaceAfterDot(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "script",
+			source: "vim9script\nimport './Xfoo.vim' as Export\ng:value = Export. exported\n",
+		},
+		{
+			name:   "line break",
+			source: "vim9script\nimport './Xfoo.vim' as expo\ng:value = expo.\n  exported\n",
+		},
+		{
+			name: "compiled def",
+			source: "vim9script\nimport './Xfoo.vim' as Export\ndef Func()\n" +
+				"  var imported = Export . exported\nenddef\ndefcompile\n",
+		},
+		{
+			name:   "vim9cmd",
+			source: "vim9cmd import './Xfoo.vim' as Export\nvim9cmd echo Export. exported\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			diagnostics := CombinedDiagnostics(file, Analyze(file))
+			var got []syntax.Diagnostic
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "vim/E1074" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1202" || diagnostic.Code == "vimls/missing-member" {
+					t.Fatalf("provisional member diagnostic was not suppressed: %#v", diagnostics)
+				}
+			}
+			if len(diagnostics) != 1 || len(got) != 1 || got[0].Message != "No white space allowed after dot" || strings.Trim(file.Text(got[0].Span), " \t\r\n") != "" {
+				t.Fatalf("E1074 diagnostics = %#v; all diagnostics = %#v", got, diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nimport './Xfoo.vim' as Export\ng:value = Export . exported\n",
+		"vim9script\nimport './Xfoo.vim' as Export\ng:value = Export.member\n",
+		"vim9script\nimport './Xfoo.vim' as Export\ndef Func()\n  var value = Export .member\nenddef\n",
+		"vim9script\nimport './Xfoo.vim' as Export\ndef Func()\n  var value = Export.\nenddef\n",
+		"vim9script\nvar value = {key: 1}\necho value. key\n",
+		"import './Xfoo.vim' as Export\necho Export. exported\n",
+	} {
+		file := syntax.Parse(source)
+		for _, diagnostic := range CombinedDiagnostics(file, Analyze(file)) {
+			if diagnostic.Code == "vim/E1074" {
+				t.Fatalf("source %q unexpectedly received E1074", source)
+			}
+		}
+	}
+
+	file := syntax.Parse("vim9script\nimport './Xfoo.vim' as Export\ng:value = Export . exported\n")
+	diagnostics := CombinedDiagnostics(file, Analyze(file))
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1060" {
+		t.Fatalf("script space-before-dot diagnostics = %#v, want only E1060", diagnostics)
+	}
+}
+
 func TestAnalyzeE1062CannotIndexNumber(t *testing.T) {
 	for _, test := range []struct {
 		name, source, span string

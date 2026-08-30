@@ -25,6 +25,9 @@ type FileAnalysis struct {
 	lambdaScopes    map[*syntax.Expression]*Scope
 	lambdaBodies    map[*syntax.Expression]bool
 	unknownOptions  map[syntax.Span]bool
+	// suppressedSyntaxDiagnostics contains provisional parser diagnostics that
+	// Vim replaces after resolving an import namespace.
+	suppressedSyntaxDiagnostics map[syntax.Diagnostic]bool
 }
 
 // Scope is a lexical region. Root has Block == -1 and an empty Kind. Other
@@ -66,13 +69,15 @@ type Reference struct {
 	Name        string
 	Span        syntax.Span
 	Declaration *Declaration
+	scope       *Scope
+	dialect     syntax.Dialect
 }
 
 // Analyze collects lexical scopes, declarations, and same-file references.
 // It deliberately does not report undefined names: an unresolved reference
 // is a valid result for dynamic legacy Vim script and for incomplete input.
 func Analyze(file *syntax.File) *FileAnalysis {
-	result := &FileAnalysis{File: file}
+	result := &FileAnalysis{File: file, suppressedSyntaxDiagnostics: make(map[syntax.Diagnostic]bool)}
 	root := &Scope{Block: -1}
 	if file != nil {
 		root.Span = syntax.Span{End: len(file.Source)}
@@ -133,19 +138,61 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	return result
 }
 
+// CombinedDiagnostics returns parser and semantic diagnostics with the narrow
+// semantic replacements that require resolved names. It does not mutate file.
+func CombinedDiagnostics(file *syntax.File, result *FileAnalysis) []syntax.Diagnostic {
+	if file == nil {
+		return nil
+	}
+	diagnostics := make([]syntax.Diagnostic, 0, len(file.Diagnostics))
+	for _, diagnostic := range file.Diagnostics {
+		if result != nil && result.suppressedSyntaxDiagnostics[diagnostic] {
+			continue
+		}
+		diagnostics = append(diagnostics, diagnostic)
+	}
+	if result != nil {
+		diagnostics = append(diagnostics, result.Diagnostics...)
+	}
+	return diagnostics
+}
+
 func collectImportNamespaceDiagnostics(result *FileAnalysis) {
-	if result == nil || result.File == nil || result.File.Dialect != syntax.Vim9 {
+	if result == nil || result.File == nil {
 		return
 	}
 	source := result.File.Source
 	seen := make(map[syntax.Span]bool)
 	for _, reference := range result.References {
-		if reference == nil || reference.Declaration == nil || reference.Declaration.Kind != SymbolKindImport || seen[reference.Span] {
+		if reference == nil || reference.dialect != syntax.Vim9 || reference.Declaration == nil || reference.Declaration.Kind != SymbolKindImport || seen[reference.Span] {
 			continue
 		}
 		seen[reference.Span] = true
-		if reference.Span.End < len(source) && source[reference.Span.End] == '.' {
+		dot := reference.Span.End
+		if scopeUsesDefTypeRules(reference.scope) {
+			for dot < len(source) && (source[dot] == ' ' || source[dot] == '\t') {
+				dot++
+			}
+		}
+		if dot < len(source) && source[dot] == '.' {
+			if diagnostic, ok := importMemberWhitespaceSyntaxDiagnostic(result.File, dot); ok {
+				result.suppressedSyntaxDiagnostics[diagnostic] = true
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1074", Message: "No white space allowed after dot", Span: importMemberWhitespaceSpan(source, dot),
+				})
+			}
 			continue
+		}
+		// Script evaluation does not skip white space before the namespace dot,
+		// so E1060 wins over a provisional generic member-spacing diagnostic.
+		spacedDot := reference.Span.End
+		for spacedDot < len(source) && (source[spacedDot] == ' ' || source[spacedDot] == '\t') {
+			spacedDot++
+		}
+		if spacedDot > reference.Span.End && spacedDot < len(source) && source[spacedDot] == '.' {
+			if diagnostic, ok := importMemberWhitespaceSyntaxDiagnostic(result.File, spacedDot); ok {
+				result.suppressedSyntaxDiagnostics[diagnostic] = true
+			}
 		}
 		end := reference.Span.End
 		for end < len(source) && source[end] != '\n' && source[end] != '\r' {
@@ -169,6 +216,52 @@ func collectImportNamespaceDiagnostics(result *FileAnalysis) {
 			Code: "vim/E1060", Message: "Expected dot after name: " + tail, Span: reference.Span,
 		})
 	}
+}
+
+func importMemberWhitespaceSyntaxDiagnostic(file *syntax.File, dot int) (syntax.Diagnostic, bool) {
+	if file == nil || dot < 0 || dot+1 >= len(file.Source) || file.Source[dot] != '.' || !strings.ContainsRune(" \t\r\n", rune(file.Source[dot+1])) {
+		return syntax.Diagnostic{}, false
+	}
+	afterDot := dot + 1
+	for _, diagnostic := range file.Diagnostics {
+		switch diagnostic.Code {
+		case "vim/E15", "vim/E116", "vim/E1202", "vim/E1127", "vimls/missing-member":
+			if diagnostic.Span.Start == afterDot && diagnostic.Span.End >= afterDot &&
+				(diagnostic.Span.End > afterDot && strings.Trim(file.Text(diagnostic.Span), " \t\r\n") == "" ||
+					diagnostic.Span.End == afterDot && continuedImportMember(file.Source, afterDot)) {
+				return diagnostic, true
+			}
+		case "vim/E488", "vimls/trailing-expression":
+			if diagnostic.Span.Start == dot && diagnostic.Span.End == dot+1 {
+				return diagnostic, true
+			}
+		}
+	}
+	return syntax.Diagnostic{}, false
+}
+
+func importMemberWhitespaceSpan(source string, dot int) syntax.Span {
+	span := syntax.Span{Start: dot + 1, End: dot + 1}
+	for span.End < len(source) && strings.ContainsRune(" \t\r\n", rune(source[span.End])) {
+		span.End++
+	}
+	return span
+}
+
+func continuedImportMember(source string, start int) bool {
+	if start >= len(source) || source[start] != '\r' && source[start] != '\n' {
+		return false
+	}
+	if source[start] == '\r' && start+1 < len(source) && source[start+1] == '\n' {
+		start++
+	}
+	start++
+	indented := false
+	for start < len(source) && (source[start] == ' ' || source[start] == '\t') {
+		indented = true
+		start++
+	}
+	return indented && start < len(source) && (source[start] == '_' || source[start] >= 'A' && source[start] <= 'Z' || source[start] >= 'a' && source[start] <= 'z')
 }
 
 func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []syntax.Command, blocks []syntax.Block) {
@@ -2401,7 +2494,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			declaration := resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped)
 			result.References = append(result.References, &Reference{
 				Name: expression.Value, Span: expression.Span,
-				Declaration: declaration,
+				Declaration: declaration, scope: scope, dialect: dialect,
 			})
 			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
 			unknownVimVariable := isUnknownVimVariable(expression.Value)
@@ -2480,7 +2573,9 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
 			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, false, skipped)
-			result.References = append(result.References, &Reference{Name: expression.Value, Span: expression.Span, Declaration: declaration})
+			result.References = append(result.References, &Reference{
+				Name: expression.Value, Span: expression.Span, Declaration: declaration, scope: scope, dialect: dialect,
+			})
 			if dialect == syntax.Vim9 && (vim9UnsupportedNamespace(expression.Value) || declaration == nil && isUnknownVimVariable(expression.Value)) {
 				appendVim9UnresolvedReadDiagnostic(result, scope, expression.Value, expression.Span)
 			} else if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && assignmentTargetNeedsDeclaration(expression.Value) && declaration == nil {
