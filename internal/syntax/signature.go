@@ -607,9 +607,10 @@ func findMatching(source string, start int, open, close byte) int {
 			quote = character
 			continue
 		}
-		if character == open {
+		switch character {
+		case open:
 			depth++
-		} else if character == close {
+		case close:
 			depth--
 			if depth == 0 {
 				return index
