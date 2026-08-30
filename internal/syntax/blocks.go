@@ -134,6 +134,23 @@ func buildBlocks(file *File) {
 				}
 			}
 			if file.Blocks[blockIndex].Kind == BlockInterface && command.Canonical != "endclass" {
+				if command.Canonical == "const" {
+					static := false
+					for _, modifier := range command.Modifiers {
+						if modifier.Name == "static" {
+							static = true
+							break
+						}
+					}
+					if !static {
+						command.Block = blockIndex
+						command.detailsOpaque = true
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{
+							Code: "vim/E1410", Message: "Const variable not supported in an interface", Span: command.Name,
+						})
+						continue
+					}
+				}
 				if command.Canonical == "def" {
 					command.Block = blockIndex
 					interfaceMethod[blockIndex] = true
