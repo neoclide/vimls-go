@@ -1496,6 +1496,12 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 			}
+			if target, ok := objectCompoundAssignment(result, expressionScope, expression); ok {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1411", Message: "Missing dot after object \"" + target.Value + "\"", Span: target.Span,
+				})
+				return
+			}
 			if expression.Kind == syntax.ExpressionBinary || expression.Kind == syntax.ExpressionAssignment {
 				op := expression.Value
 				if expression.Kind == syntax.ExpressionAssignment {
@@ -1786,6 +1792,41 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 	}
 }
 
+func objectCompoundAssignment(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (*syntax.Expression, bool) {
+	if result == nil || result.File == nil || scope == nil || expression == nil || expression.Kind != syntax.ExpressionAssignment || expression.Value == "=" || len(expression.Children) < 2 || !scopeUsesDefTypeRules(scope) {
+		return nil, false
+	}
+	target := expression.Children[0]
+	if target == nil || target.Kind != syntax.ExpressionIdentifier {
+		return nil, false
+	}
+	declaration := resolve(scope, target.Value, target.Span.Start, false, nil)
+	if declaration == nil || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
+		return nil, false
+	}
+	className := assignmentTargetType(result, scope, target).Name
+	if localClasses(result.File)[className] == nil || !declarationCanHoldObjectClass(result.File, declaration, className) {
+		return nil, false
+	}
+	return target, true
+}
+
+func declarationCanHoldObjectClass(file *syntax.File, declaration *Declaration, className string) bool {
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration == nil {
+			continue
+		}
+		for _, binding := range command.Declaration.Bindings {
+			if binding.Name != declaration.Span || binding.ParsedType == nil {
+				continue
+			}
+			return convertSyntaxType(binding.ParsedType).Name == className
+		}
+	}
+	return true
+}
+
 func expressionContainsInvalidPlus(result *FileAnalysis, expression *syntax.Expression) bool {
 	if expression == nil {
 		return false
@@ -1920,6 +1961,9 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, command *syntax.Comm
 
 func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression) {
 	if expression == nil {
+		return
+	}
+	if _, ok := objectCompoundAssignment(result, scope, expression); ok {
 		return
 	}
 	if expression.Kind == syntax.ExpressionLambda {

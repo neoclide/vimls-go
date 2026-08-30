@@ -447,7 +447,9 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			for _, argument := range expression.Children[1:] {
 				state.infer(argument, scope)
 			}
-			if builtin, arguments, ok := builtinCallArguments(state.result.File, expression); ok {
+			if className, ok := state.constructorObjectClass(expression, scope); ok {
+				typ = ValueType{Name: className}
+			} else if builtin, arguments, ok := builtinCallArguments(state.result.File, expression); ok {
 				argumentTypes := make([]ValueType, 0, len(arguments))
 				for _, argument := range arguments {
 					argumentTypes = append(argumentTypes, state.infer(argument, scope))
@@ -488,6 +490,25 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	}
 	state.result.expressionTypes[expression] = typ
 	return typ
+}
+
+func (state *typeState) constructorObjectClass(expression *syntax.Expression, scope *Scope) (string, bool) {
+	if state == nil || state.result == nil || state.result.File == nil || expression == nil || expression.Kind != syntax.ExpressionCall || len(expression.Children) == 0 {
+		return "", false
+	}
+	callee := expression.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionMember || callee.Value != "new" || state.result.File.Text(callee.Operator) != "." || len(callee.Children) != 1 {
+		return "", false
+	}
+	receiver := callee.Children[0]
+	if receiver == nil || receiver.Kind != syntax.ExpressionIdentifier {
+		return "", false
+	}
+	declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+	if declaration == nil || declaration.Kind != SymbolKindClass {
+		return "", false
+	}
+	return receiver.Value, true
 }
 
 func builtinVariableValueType(variable vimdata.Variable) ValueType {

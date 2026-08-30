@@ -350,6 +350,49 @@ func TestAnalyzeE1421EnumCannotBeUsedAsValue(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1411MissingDotAfterObject(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "inferred object", body: "var o = A.new()\ndef F()\n  o += 4\nenddef", want: true},
+		{name: "typed object", body: "var o: A = A.new()\ndef F()\n  o ..= 'x'\nenddef", want: true},
+		{name: "simple assignment", body: "var o = A.new()\ndef F()\n  o = A.new()\nenddef"},
+		{name: "object member", body: "var o = A.new()\ndef F()\n  o.value += 1\nenddef"},
+		{name: "unknown any", body: "var o: any = A.new()\ndef F()\n  o += 1\nenddef"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse("vim9script\nclass A\n  var value: number\nendclass\n" + test.body + "\n")
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1411" {
+					got = append(got, diagnostic)
+				}
+			}
+			wantCount := 0
+			if test.want {
+				wantCount = 1
+			}
+			if len(got) != wantCount {
+				t.Fatalf("E1411 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+			if test.want && (got[0].Message != "Missing dot after object \"o\"" || file.Text(got[0].Span) != "o") {
+				t.Fatalf("E1411 diagnostic = %#v", got[0])
+			}
+			if test.want {
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == "vim/E1051" || diagnostic.Code == "vim/E1019" {
+						t.Fatalf("cascading diagnostic = %#v", diagnostic)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
