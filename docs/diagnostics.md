@@ -933,3 +933,41 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   with the Vim9 E1024 behavior.
 - `src/typval.c:1206-1218` emits E1024 for strict Number-to-String conversion,
   and `src/errors.h:2692-2693` defines the exact message.
+
+## Missing return statement: E1027
+
+Analysis reports E1027 when an explicitly non-void `def` or block lambda can
+reach its closing `enddef` or `}` without returning a value or throwing. The
+diagnostic selects that closing token. A `def` retained in a Legacy-root file
+still follows this compiled Vim9 rule.
+
+A direct `return` or `throw` terminates the current path. An `if` terminates
+only when it has an `else` and every `if`, `elseif`, and `else` branch
+terminates. A return inside a `for` or `while` is not guaranteed because the
+loop may execute zero times. For `try`, a `finally` that ends in `return` is
+sufficient; without one, the try and catch paths must all end in `return` and
+the catches must end with a catch-all. Pattern-only catches do not cover the
+compiler's fallthrough case. Unlike a direct `throw` or one merged by `endif`,
+a `throw` immediately before `endtry` is cleared by Vim's compiler state and
+does not satisfy this rule.
+
+An omitted or `void` return type does not require a return statement. A bare
+`return` in a non-void function uses E1003 and still terminates the path, so it
+does not also acquire E1027. Incomplete functions and control blocks retain
+their syntax diagnostics instead of receiving a speculative missing-return
+diagnostic.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:519-533` contains the two official E1027
+  compile cases, each with one non-returning `if` branch.
+- `src/testdir/test_vim9_func.vim:544-595` accepts a final `throw` and complete
+  `if`/`elseif`/`else` paths containing returns or throws.
+- `src/testdir/test_vim9_script.vim:1212-1238` distinguishes a pattern-only
+  catch that still produces E1027 from a `finally` that returns.
+- `src/testdir/test_vim9_script.vim:5552-5561` applies E1027 to an explicitly
+  non-void block lambda.
+- `src/vim9compile.c:4561-4702` and `src/vim9cmds.c:600-868,1726-1960`
+  maintain and merge the compiler's return and throw state.
+- `src/vim9compile.c:4912-4938` emits the missing-return error at function
+  completion, and `src/errors.h:2700-2701` defines its exact message.

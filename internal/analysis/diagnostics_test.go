@@ -2851,3 +2851,123 @@ func TestAnalyzeE1003MissingReturnValue(t *testing.T) {
 		})
 	}
 }
+
+func TestAnalyzeE1027MissingReturnStatement(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{
+			name:   "empty def",
+			source: "vim9script\ndef Missing(): number\nenddef\n",
+			span:   "enddef",
+		},
+		{
+			name: "official first branch falls through",
+			source: "vim9script\ndef Missing(): number\n" +
+				"  if g:cond\n    echo 'no return'\n  else\n    return 0\n  endif\nenddef\n",
+			span: "enddef",
+		},
+		{
+			name: "official second branch falls through",
+			source: "vim9script\ndef Missing(): number\n" +
+				"  if g:cond\n    return 1\n  else\n    echo 'no return'\n  endif\nenddef\n",
+			span: "enddef",
+		},
+		{
+			name:   "loop return is not guaranteed",
+			source: "vim9script\ndef Missing(): number\n  while g:cond\n    return 1\n  endwhile\nenddef\n",
+			span:   "enddef",
+		},
+		{
+			name: "pattern catch is not exhaustive",
+			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch /x/\n" +
+				"    return 'caught'\n  endtry\nenddef\n",
+			span: "enddef",
+		},
+		{
+			name: "catch throw is cleared by endtry",
+			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch\n" +
+				"    throw 'failed'\n  endtry\nenddef\n",
+			span: "enddef",
+		},
+		{
+			name: "try throw is cleared by endtry",
+			source: "vim9script\ndef Missing(): string\n  try\n    throw 'failed'\n  catch\n" +
+				"    return 'caught'\n  endtry\nenddef\n",
+			span: "enddef",
+		},
+		{
+			name: "fallthrough finally clears earlier returns",
+			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch\n" +
+				"    return 'caught'\n  finally\n    echo 'done'\n  endtry\nenddef\n",
+			span: "enddef",
+		},
+		{
+			name: "finally throw is cleared by endtry",
+			source: "vim9script\ndef Missing(): string\n  try\n    echo 'work'\n  finally\n" +
+				"    throw 'failed'\n  endtry\nenddef\n",
+			span: "enddef",
+		},
+		{
+			name:   "Legacy root def still compiles",
+			source: "def Missing(): number\n  echo 'no return'\nenddef\n",
+			span:   "enddef",
+		},
+		{
+			name:   "typed block lambda",
+			source: "vim9script\ndef Outer()\n  defer (): number => {\n  }()\nenddef\n",
+			span:   "}",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1027" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Missing return statement" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1027 diagnostics = %#v, want one on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{name: "direct return", source: "vim9script\ndef Complete(): number\n  return 1\nenddef\n"},
+		{name: "direct throw", source: "vim9script\ndef Complete(): number\n  throw 'failed'\nenddef\n"},
+		{
+			name: "all conditional branches terminate",
+			source: "vim9script\ndef Complete(): number\n" +
+				"  if g:first\n    return 1\n  elseif g:second\n    throw 'failed'\n  else\n    return 3\n  endif\nenddef\n",
+		},
+		{
+			name: "catch all returns",
+			source: "vim9script\ndef Complete(): string\n  try\n    return 'ok'\n  catch\n" +
+				"    return 'caught'\n  endtry\nenddef\n",
+		},
+		{
+			name: "finally returns",
+			source: "vim9script\ndef Complete(): string\n  try\n    echo 'work'\n  finally\n" +
+				"    return 'done'\n  endtry\nenddef\n",
+		},
+		{name: "void", source: "vim9script\ndef Complete(): void\n  echo 'done'\nenddef\n"},
+		{name: "inferred void", source: "vim9script\ndef Complete()\n  echo 'done'\nenddef\n"},
+		{name: "bare return has E1003 priority", source: "vim9script\ndef Complete(): number\n  return\nenddef\n"},
+		{name: "loop followed by return", source: "vim9script\ndef Complete(): number\n  while g:cond\n    return 1\n  endwhile\n  return 2\nenddef\n"},
+		{name: "inline lambda returns expression", source: "vim9script\nvar Complete = (): number => 1\n"},
+		{name: "incomplete def", source: "vim9script\ndef Incomplete(): number\n  echo 'editing'\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1027" {
+					t.Fatalf("source unexpectedly received E1027: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+}

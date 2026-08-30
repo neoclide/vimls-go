@@ -104,7 +104,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
-	collectMissingReturnValueDiagnostics(result, file.Commands)
+	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 
 	sortDeclarations(result)
 	for index := range file.Commands {
@@ -132,21 +132,54 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	return result
 }
 
-func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []syntax.Command, blocks []syntax.Block) {
 	if result == nil || result.File == nil {
 		return
 	}
-	var walk func([]syntax.Command, []bool)
-	walk = func(commands []syntax.Command, functionNeedsValue []bool) {
+	seenLambdas := make(map[*syntax.Expression]bool)
+	var walkCommands func([]syntax.Command, []syntax.Block, []bool)
+	var walkExpression func(*syntax.Expression, []bool)
+	walkExpression = func(expression *syntax.Expression, functionNeedsValue []bool) {
+		if expression == nil || seenLambdas[expression] {
+			return
+		}
+		seenLambdas[expression] = true
+		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
+			needsValue := returnTypeNeedsValue(expression.ReturnType)
+			body := expression.LambdaBody
+			if needsValue && len(body.Diagnostics) == 0 && !syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) &&
+				commandSequenceFlow(body.Commands, body.Blocks, 0, len(body.Commands)) == functionFlowFallsThrough {
+				span := expression.Span
+				if span.End > span.Start {
+					span.Start = span.End - 1
+				}
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1027", Message: "Missing return statement", Span: span,
+				})
+			}
+			walkCommands(body.Commands, body.Blocks, append(functionNeedsValue, needsValue))
+		}
+		for _, child := range expression.Children {
+			walkExpression(child, functionNeedsValue)
+		}
+	}
+	walkCommands = func(commands []syntax.Command, blocks []syntax.Block, functionNeedsValue []bool) {
 		for index := range commands {
 			command := &commands[index]
 			switch command.Canonical {
 			case "def":
-				needsValue := false
-				if function := command.Function; function != nil && function.ReturnType != nil {
-					needsValue = function.ReturnType.Kind != syntax.TypeMissing && function.ReturnType.Name != "void"
-				}
+				needsValue := command.Function != nil && returnTypeNeedsValue(command.Function.ReturnType)
 				functionNeedsValue = append(functionNeedsValue, needsValue)
+				if needsValue && validBlock(blocks, command.Block) {
+					block := blocks[command.Block]
+					if block.Kind == syntax.BlockDef && block.Header == index && block.End > index && block.End < len(commands) &&
+						commands[block.End].Canonical == "enddef" && !syntaxDiagnosticOverlaps(result.File.Diagnostics, block.Span) &&
+						commandSequenceFlow(commands, blocks, index+1, block.End) == functionFlowFallsThrough {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1027", Message: "Missing return statement", Span: commands[block.End].Name,
+						})
+					}
+				}
 			case "function":
 				functionNeedsValue = append(functionNeedsValue, false)
 			}
@@ -155,15 +188,199 @@ func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []synta
 					Code: "vim/E1003", Message: "Missing return value", Span: command.Name,
 				})
 			}
+			for _, expression := range command.Expressions {
+				walkExpression(expression, functionNeedsValue)
+			}
+			for _, expression := range command.Targets {
+				walkExpression(expression, functionNeedsValue)
+			}
+			if command.Mapping != nil {
+				walkExpression(command.Mapping.RHSExpression, functionNeedsValue)
+			}
+			if command.Declaration != nil {
+				walkExpression(command.Declaration.Initializer, functionNeedsValue)
+			}
+			if command.For != nil {
+				walkExpression(command.For.Iterable, functionNeedsValue)
+			}
+			if command.Import != nil {
+				walkExpression(command.Import.Path, functionNeedsValue)
+			}
+			for _, value := range command.EnumValues {
+				walkExpression(value.Initializer, functionNeedsValue)
+				for _, argument := range value.Arguments {
+					walkExpression(argument, functionNeedsValue)
+				}
+			}
+			if command.Function != nil {
+				for _, parameter := range command.Function.Parameters {
+					walkExpression(parameter.Default, functionNeedsValue)
+				}
+			}
 			if command.Embedded != nil {
-				walk(command.Embedded.Commands, functionNeedsValue)
+				walkCommands(command.Embedded.Commands, command.Embedded.Blocks, functionNeedsValue)
 			}
 			if (command.Canonical == "enddef" || command.Canonical == "endfunction") && len(functionNeedsValue) > 0 {
 				functionNeedsValue = functionNeedsValue[:len(functionNeedsValue)-1]
 			}
 		}
 	}
-	walk(commands, nil)
+	walkCommands(commands, blocks, nil)
+}
+
+func returnTypeNeedsValue(returnType *syntax.Type) bool {
+	return returnType != nil && returnType.Kind != syntax.TypeMissing && returnType.Name != "void"
+}
+
+func syntaxDiagnosticOverlaps(diagnostics []syntax.Diagnostic, span syntax.Span) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Span.Start <= span.End && diagnostic.Span.End >= span.Start {
+			return true
+		}
+	}
+	return false
+}
+
+type functionFlow uint8
+
+const (
+	functionFlowFallsThrough functionFlow = iota
+	functionFlowReturns
+	functionFlowThrows
+	functionFlowUnknown
+)
+
+func (flow functionFlow) terminates() bool {
+	return flow == functionFlowReturns || flow == functionFlowThrows
+}
+
+func commandSequenceFlow(commands []syntax.Command, blocks []syntax.Block, start, end int) functionFlow {
+	if start < 0 || end < start || end > len(commands) {
+		return functionFlowUnknown
+	}
+	unknown := false
+	for index := start; index < end; {
+		command := &commands[index]
+		switch command.Canonical {
+		case "return":
+			return functionFlowReturns
+		case "throw":
+			return functionFlowThrows
+		}
+		if isBlockHeader(blocks, index, command.Block) {
+			block := blocks[command.Block]
+			if block.End <= index || block.End >= end || block.End >= len(commands) {
+				unknown = true
+				index++
+				continue
+			}
+			flow := commandBlockFlow(commands, blocks, block)
+			if flow.terminates() {
+				return flow
+			}
+			if flow == functionFlowUnknown {
+				unknown = true
+			}
+			index = block.End + 1
+			continue
+		}
+		index++
+	}
+	if unknown {
+		return functionFlowUnknown
+	}
+	return functionFlowFallsThrough
+}
+
+func commandBlockFlow(commands []syntax.Command, blocks []syntax.Block, block syntax.Block) functionFlow {
+	switch block.Kind {
+	case syntax.BlockIf:
+		return ifBlockFlow(commands, blocks, block)
+	case syntax.BlockTry:
+		return tryBlockFlow(commands, blocks, block)
+	case syntax.BlockScope, syntax.BlockAugroup:
+		return commandSequenceFlow(commands, blocks, block.Header+1, block.End)
+	case syntax.BlockFor, syntax.BlockWhile, syntax.BlockFunction, syntax.BlockDef,
+		syntax.BlockClass, syntax.BlockInterface, syntax.BlockEnum, syntax.BlockCommand:
+		return functionFlowFallsThrough
+	default:
+		return functionFlowUnknown
+	}
+}
+
+func ifBlockFlow(commands []syntax.Command, blocks []syntax.Block, block syntax.Block) functionFlow {
+	if len(block.Branches) == 0 || block.Branches[len(block.Branches)-1] <= block.Header ||
+		block.Branches[len(block.Branches)-1] >= block.End || commands[block.Branches[len(block.Branches)-1]].Canonical != "else" {
+		return functionFlowFallsThrough
+	}
+	headers := make([]int, 0, len(block.Branches)+1)
+	headers = append(headers, block.Header)
+	headers = append(headers, block.Branches...)
+	for index, header := range headers {
+		end := block.End
+		if index+1 < len(headers) {
+			end = headers[index+1]
+		}
+		flow := commandSequenceFlow(commands, blocks, header+1, end)
+		if flow == functionFlowUnknown {
+			return functionFlowUnknown
+		}
+		if !flow.terminates() {
+			return functionFlowFallsThrough
+		}
+	}
+	return functionFlowReturns
+}
+
+func tryBlockFlow(commands []syntax.Command, blocks []syntax.Block, block syntax.Block) functionFlow {
+	if len(block.Branches) == 0 {
+		return functionFlowUnknown
+	}
+	for index, branch := range block.Branches {
+		if branch <= block.Header || branch >= block.End || index > 0 && branch <= block.Branches[index-1] {
+			return functionFlowUnknown
+		}
+		if commands[branch].Canonical != "catch" && commands[branch].Canonical != "finally" {
+			return functionFlowUnknown
+		}
+	}
+	lastBranch := block.Branches[len(block.Branches)-1]
+	if commands[lastBranch].Canonical == "finally" {
+		flow := commandSequenceFlow(commands, blocks, lastBranch+1, block.End)
+		if flow == functionFlowUnknown {
+			return functionFlowUnknown
+		}
+		if flow == functionFlowReturns {
+			return functionFlowReturns
+		}
+		return functionFlowFallsThrough
+	}
+	if commands[lastBranch].Canonical != "catch" || commands[lastBranch].Argument.Start < commands[lastBranch].Argument.End {
+		return functionFlowFallsThrough
+	}
+	headers := make([]int, 0, len(block.Branches)+1)
+	headers = append(headers, block.Header)
+	headers = append(headers, block.Branches...)
+	for index, header := range headers {
+		end := block.End
+		if index+1 < len(headers) {
+			end = headers[index+1]
+		}
+		flow := commandSequenceFlow(commands, blocks, header+1, end)
+		if flow == functionFlowUnknown {
+			return functionFlowUnknown
+		}
+		if index+1 < len(headers) {
+			if flow != functionFlowReturns {
+				return functionFlowFallsThrough
+			}
+		} else if flow != functionFlowReturns {
+			return functionFlowFallsThrough
+		} else {
+			return functionFlowReturns
+		}
+	}
+	return functionFlowFallsThrough
 }
 
 func collectFuncrefVariableNameDiagnostics(result *FileAnalysis) {
