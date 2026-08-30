@@ -1133,6 +1133,30 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   Number, and Float receivers.
 - `src/errors.h:2867-2868` defines the exact E1107 message.
 
+## Bang on a nested function: E1117
+
+Syntax analysis reports E1117 when a `def!` or function-definition
+`function!` header is nested anywhere inside an enclosing compiled `def`. The
+diagnostic selects the bang and uses Vim's exact `Cannot use ! with nested
+:def` or `Cannot use ! with nested :function` message. Intervening control
+blocks do not change the enclosing compile context, and a `def` retained in a
+Legacy-root file follows the same rule.
+
+The bang is rejected before nested-function name parsing, so it cannot be used
+as a redeclaration mechanism. A repeated nested declaration without bang keeps
+E1073 instead. Top-level `def!` does not receive E1117; top-level Vim9
+non-global `function!` keeps E477, and Legacy `function!` remains valid. A bang
+on an `enddef` or `endfunction` closer is not a nested-function header and does
+not receive E1117.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:1035-1045` rejects `forceit` before parsing a nested
+  function name and chooses `:def` or `:function` for the message.
+- `src/testdir/test_vim9_func.vim:994-1027` distinguishes E1073 for a duplicate
+  nested declaration without bang from E1117 for both nested header forms.
+- `src/errors.h:2886-2887` defines the exact E1117 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

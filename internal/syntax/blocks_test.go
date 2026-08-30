@@ -153,6 +153,96 @@ func TestVim9MismatchedFunctionClosers(t *testing.T) {
 	}
 }
 
+func TestNestedFunctionBangDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, message string
+		wantE1117, wantE477   int
+		wantAfter             bool
+	}{
+		{
+			name: "nested def bang",
+			source: "vim9script\ndef Outer()\n  def Inner()\n  enddef\n" +
+				"  def! Inner()\n  enddef\nenddef\nvar after = 1\n",
+			message: "Cannot use ! with nested :def", wantE1117: 1, wantAfter: true,
+		},
+		{
+			name: "nested function bang takes precedence over E477",
+			source: "vim9script\ndef Outer()\n  def Inner()\n  enddef\n" +
+				"  function! Inner()\n  endfunction\nenddef\nvar after = 1\n",
+			message: "Cannot use ! with nested :function", wantE1117: 1, wantAfter: true,
+		},
+		{
+			name: "deep and Legacy-root defs",
+			source: "def Outer()\n  if true\n    def! Inner()\n    enddef\n" +
+				"  endif\nenddef\nvar after = 1\n",
+			message: "Cannot use ! with nested :def", wantE1117: 1, wantAfter: true,
+		},
+		{
+			name:   "top-level Vim9 def bang",
+			source: "vim9script\ndef! Top()\nenddef\n",
+		},
+		{
+			name:     "top-level Vim9 function bang retains E477",
+			source:   "vim9script\nfunction! TopFunction()\nendfunction\n",
+			wantE477: 1,
+		},
+		{
+			name:   "top-level Legacy function bang",
+			source: "function! Legacy()\nendfunction\n",
+		},
+		{
+			name:   "def inside Legacy function has no def ancestor",
+			source: "function Legacy()\n  def! Inner()\n  enddef\nendfunction\n",
+		},
+		{
+			name: "nested headers without bang",
+			source: "vim9script\ndef Outer()\n  def Inner()\n  enddef\n" +
+				"  function InnerFunction()\n  endfunction\nenddef\n",
+		},
+		{
+			name: "bang closers are excluded",
+			source: "vim9script\ndef Outer()\n  def Inner()\n  enddef!\n" +
+				"  function InnerFunction()\n  endfunction!\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			e477 := 0
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1117" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E477" {
+					e477++
+				}
+			}
+			if len(got) != test.wantE1117 || e477 != test.wantE477 {
+				t.Fatalf("E1117=%#v E477=%d, want E1117=%d E477=%d; all diagnostics = %#v", got, e477, test.wantE1117, test.wantE477, file.Diagnostics)
+			}
+			for _, diagnostic := range got {
+				if diagnostic.Message != test.message || file.Text(diagnostic.Span) != "!" {
+					t.Fatalf("E1117 diagnostic = %#v on %q", diagnostic, file.Text(diagnostic.Span))
+				}
+			}
+			if test.wantAfter {
+				found := false
+				for index := range file.Commands {
+					command := &file.Commands[index]
+					if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("following declaration recovery = %#v", file.Commands)
+				}
+			}
+		})
+	}
+}
+
 func TestLegacyEndfunctionClosesUnterminatedControlBlocks(t *testing.T) {
 	file := (LegacyParser{}).Parse("function! Complete()\n  if 1\n    while 1\n      return\nendfunction\n")
 	if len(file.Diagnostics) != 0 {

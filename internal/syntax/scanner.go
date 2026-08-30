@@ -2807,7 +2807,22 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				}
 			}
 		}
-		if command.Canonical == "function" && command.Dialect == Vim9 && command.Bang.Start < command.Bang.End && command.Function != nil && !strings.HasPrefix(file.Text(command.Function.Name), "g:") {
+		nestedInDef := false
+		if command.Block >= 0 && command.Block < len(file.Blocks) {
+			for parent := file.Blocks[command.Block].Parent; parent >= 0 && parent < len(file.Blocks); parent = file.Blocks[parent].Parent {
+				if file.Blocks[parent].Kind == BlockDef {
+					nestedInDef = true
+					break
+				}
+			}
+		}
+		if command.Bang.Start < command.Bang.End && nestedInDef {
+			name := "def"
+			if command.Canonical == "function" {
+				name = "function"
+			}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1117", Message: "Cannot use ! with nested :" + name, Span: command.Bang})
+		} else if command.Canonical == "function" && command.Dialect == Vim9 && command.Bang.Start < command.Bang.End && command.Function != nil && !strings.HasPrefix(file.Text(command.Function.Name), "g:") {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "no ! allowed", Span: command.Bang})
 		}
 		abstractMethod := slices.ContainsFunc(command.Modifiers, func(modifier Modifier) bool { return modifier.Name == "abstract" })
