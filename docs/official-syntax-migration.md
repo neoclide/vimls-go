@@ -335,6 +335,12 @@ pending-fix.
 Commit `57432be` migrated the two Vim9 type-alias forms missing `=`, making
 the authoritative current split 913 migrated, zero ready, and 155
 pending-fix.
+Commit `b6095b4` migrated the empty generic reference and generic-call comma
+spacing cases, making the split 915 migrated, zero ready, and 153 pending-fix.
+A phase audit then removed four expression variants that require buffer,
+symbol, or type state and three imported-namespace variants that require
+import-name resolution. The authoritative parser split is therefore 915
+migrated, zero ready, and 146 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -928,24 +934,24 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 84 | 0 | 31 |
-| `C-EXPR` | 19 | 15 | 0 | 4 |
-| `C-GENERIC` | 109 | 60 | 0 | 49 |
-| `C-IMPORT` | 14 | 11 | 0 | 3 |
+| `C-EXPR` | 15 | 15 | 0 | 0 |
+| `C-GENERIC` | 109 | 62 | 0 | 47 |
+| `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **369** | **281** | **0** | **88** |
+| **Total** | **362** | **283** | **0** | **79** |
 
 ```text
 C-EXPR
-  E15 C:65:1303/script,388:9139/script; G:854:19046/script; S:2125:44736/vim9-script,3069:64279/vim9-script
-  E16 S:57:1170/{def|vim9-script},2521:52593/{def|vim9-script}
+  E15 C:65:1303/script,388:9139/script; S:2125:44736/vim9-script,3069:64279/vim9-script
+  E16 S:2521:52593/{def|vim9-script}
   E107 S:5429:121774/script,5593:125312/script
   E109 S:2323:48121/def
   E110 S:2322:48073/def
   E114 S:2320:47969/def
   E115 C:50:1025/script; S:2321:48021/def
   E116 G:304:6695/script
-  E129 S:3901:83284/script,5454:122336/script
+  E129 S:3901:83284/script
 
 C-BLOCK
   E170 S:1538:31411/def,1539:31464/def,3078:64889/def,3469:74060/def
@@ -1017,7 +1023,6 @@ C-IMPORT
   E1043 I:1728:42236/script
   E1044 I:1729:42305/script
   E1047 I:531:14329/script,536:14451/script,541:14571/script
-  E1060 I:512:13833/script,519:14018/script,525:14180/script
   E1257 I:603:15955/script
   E1261 I:591:15641/script
   E983 I:2978:73280/script
@@ -1044,6 +1049,14 @@ Authority is distributed across `src/eval.c`, `src/vim9expr.c`,
 `src/vim9cmds.c`, `src/vim9compile.c`, `src/vim9generics.c`,
 `src/vim9class.c`, `src/ex_docmd.c`, `src/userfunc.c`, and `src/usercmd.c`.
 
+The Group C parser inventory excludes seven failures whose outcome requires
+state beyond the token stream. `S:57:1170/{def|vim9-script}` checks the current
+buffer range, `G:854:19046/script` asks whether a resolved funcref is generic,
+and `S:5454:122336/script` checks whether a resolved value is callable. The
+three `I:{512:13833,519:14018,525:14180}/script` E1060 failures require knowing
+that `foo` is an imported namespace before requiring a member dot. These cases
+belong to runtime or semantic analysis, not parser-negative coverage.
+
 Commit `1e10f55` migrated the `C-EXCMD` E1083 variant. The generated command
 table now retains Vim's EX_XFILE/EX_FILES/EX_FILE1 property, valid filename
 expansions retain each embedded expression in the command AST, and a missing
@@ -1064,6 +1077,11 @@ type arguments, explicit missing nodes, and the following call AST. An absent
 outer `>` recovers only at an argument opener on the same physical line;
 comparisons, legacy expressions, valid generic calls, and existing empty-list
 handling remain unchanged.
+
+Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
+references at command start now reach the expression parser without requiring
+a call suffix, and generic type-argument lists diagnose a missing space after
+a comma while retaining the reference or call AST.
 
 Commit `c03403f` migrated the generic declaration recoveries at
 `G:{54:1052,62:1232,2605:57388}/script`. When a missing `>` is followed by an
