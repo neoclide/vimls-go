@@ -304,3 +304,23 @@ Representative source evidence:
   invalid command forms and their E476/E492 context split.
 - `runtime/doc/message.txt:797-801` defines E492 after builtin and user-command
   lookup fails.
+
+## Using a Special as a Number: E611
+
+E611 means `Using a Special as a Number`. It is the historical numeric
+conversion error used by Legacy Vim script and by the Vim9 script evaluator.
+A compiled Vim9 `def` applies its stricter type rules first and reports E1051
+for the same invalid `+` expression.
+
+Analysis reports E611 when a numeric arithmetic expression directly contains
+a statically known Special value such as `v:none` or `v:null`. The diagnostic
+is attached to that operand. Values whose type cannot be proven remain
+unknown, so dynamic expressions do not acquire speculative conversion errors.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:2056-2057` distinguishes E1051 in a compiled
+  `def` from E611 in Vim9 script for `v:none` and `v:null` operands.
+- `src/typval.c:257` emits E611 when Legacy-compatible numeric conversion sees
+  a Special value.
+- `src/errors.h:1564-1565` defines the exact English message.

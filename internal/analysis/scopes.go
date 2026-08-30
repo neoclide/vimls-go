@@ -395,9 +395,9 @@ func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bo
 	})
 }
 
-// collectArithmeticDiagnostics implements the Vim9 operator checks whose
-// operands are sufficiently known to prove an error.  Unknown values remain
-// deliberately opaque.
+// collectArithmeticDiagnostics keeps compiled Vim9 operator errors distinct
+// from the historical conversion errors used by Legacy and script-level Vim9.
+// Unknown values remain deliberately opaque.
 func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
 	if result == nil || result.File == nil {
 		return
@@ -408,32 +408,32 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 		if scope == nil {
 			scope = parent
 		}
-		if command.Dialect == syntax.Vim9 {
-			seen := make(map[*syntax.Expression]bool)
-			var walk func(*syntax.Expression, *Scope)
-			walk = func(expression *syntax.Expression, expressionScope *Scope) {
-				if expression == nil || seen[expression] {
-					return
+		seen := make(map[*syntax.Expression]bool)
+		var walk func(*syntax.Expression, *Scope)
+		walk = func(expression *syntax.Expression, expressionScope *Scope) {
+			if expression == nil || seen[expression] {
+				return
+			}
+			seen[expression] = true
+			if expression.Kind == syntax.ExpressionLambda {
+				if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
+					expressionScope = lambdaScope
 				}
-				seen[expression] = true
-				if expression.Kind == syntax.ExpressionLambda {
-					if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
-						expressionScope = lambdaScope
-					}
-					if expression.LambdaBody != nil {
-						collectArithmeticDiagnostics(result, expression.LambdaBody.Commands, expressionScope)
-					}
+				if expression.LambdaBody != nil {
+					collectArithmeticDiagnostics(result, expression.LambdaBody.Commands, expressionScope)
 				}
-				if expression.Kind == syntax.ExpressionBinary || expression.Kind == syntax.ExpressionAssignment {
-					op := expression.Value
+			}
+			if expression.Kind == syntax.ExpressionBinary || expression.Kind == syntax.ExpressionAssignment {
+				op := expression.Value
+				if expression.Kind == syntax.ExpressionAssignment {
+					op = result.File.Text(expression.Operator)
+				}
+				if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
 					if expression.Kind == syntax.ExpressionAssignment {
-						op = result.File.Text(expression.Operator)
+						left = assignmentTargetType(result, expressionScope, expression.Children[0])
 					}
-					if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) && scopeUsesDefTypeRules(expressionScope) {
-						left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
-						if expression.Kind == syntax.ExpressionAssignment {
-							left = assignmentTargetType(result, expressionScope, expression.Children[0])
-						}
+					if command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) {
 						base := strings.TrimSuffix(op, "=")
 						invalid := false
 						code, message := "", ""
@@ -463,21 +463,29 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 							}
 							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
 						}
+					} else if expression.Kind == syntax.ExpressionBinary && (left.Name == "special" || right.Name == "special") {
+						operand := expression.Children[1]
+						if left.Name == "special" {
+							operand = expression.Children[0]
+						}
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E611", Message: "Using a Special as a Number", Span: operand.Span,
+						})
 					}
 				}
-				for _, child := range expression.Children {
-					walk(child, expressionScope)
-				}
 			}
-			for _, expression := range command.Expressions {
-				walk(expression, scope)
+			for _, child := range expression.Children {
+				walk(child, expressionScope)
 			}
-			for _, expression := range command.Targets {
-				walk(expression, scope)
-			}
-			if command.Declaration != nil {
-				walk(command.Declaration.Initializer, scope)
-			}
+		}
+		for _, expression := range command.Expressions {
+			walk(expression, scope)
+		}
+		for _, expression := range command.Targets {
+			walk(expression, scope)
+		}
+		if command.Declaration != nil {
+			walk(command.Declaration.Initializer, scope)
 		}
 		if command.Embedded != nil {
 			collectArithmeticDiagnostics(result, command.Embedded.Commands, scope)

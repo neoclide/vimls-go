@@ -175,6 +175,47 @@ func TestAnalyzeArithmeticDiagnosticsStayConservative(t *testing.T) {
 	}
 }
 
+func TestAnalyzeSpecialAsNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, wantCode, wantMessage string
+		wantSpans                           []string
+	}{
+		{
+			name: "vim9 script", source: "vim9script\nvar noneValue = 1 + v:none\nvar nullValue = v:null + 1\n",
+			wantCode: "vim/E611", wantMessage: "Using a Special as a Number", wantSpans: []string{"v:none", "v:null"},
+		},
+		{
+			name: "legacy script", source: "let g:value = v:none + 1\n",
+			wantCode: "vim/E611", wantMessage: "Using a Special as a Number", wantSpans: []string{"v:none"},
+		},
+		{
+			name: "compiled def", source: "vim9script\ndef F()\n  var value = 1 + v:none\nenddef\n",
+			wantCode: "vim/E1051", wantMessage: "Wrong argument type for +", wantSpans: []string{"+"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var spans []string
+			for _, diagnostic := range result.Diagnostics {
+				if test.name == "compiled def" && diagnostic.Code == "vim/E611" {
+					t.Fatalf("compiled def retained E611: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.wantCode {
+					if diagnostic.Message != test.wantMessage {
+						t.Fatalf("diagnostic = %#v", diagnostic)
+					}
+					spans = append(spans, file.Text(diagnostic.Span))
+				}
+			}
+			if !reflect.DeepEqual(spans, test.wantSpans) {
+				t.Fatalf("spans = %q, want %q; diagnostics = %#v", spans, test.wantSpans, result.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name     string
