@@ -216,6 +216,62 @@ func TestAnalyzeSpecialAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFuncrefAsNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name: "vim9 script index",
+			source: "vim9script\n" +
+				"var value = [4, 6][() => 1]\n",
+			span: "() => 1",
+		},
+		{
+			name: "vim9 script arithmetic",
+			source: "vim9script\n" +
+				"var F = () => 1\n" +
+				"var value = F + 1\n",
+			span: "F",
+		},
+		{
+			name: "legacy arithmetic",
+			source: "let F = function('len')\n" +
+				"let value = F + 1\n",
+			span: "F",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E703" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Funcref as a Number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E703 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef F()\n  var value = [4, 6][() => 1]\nenddef\n")
+	result := Analyze(file)
+	var mismatch []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E703" {
+			t.Fatalf("compiled def retained E703: %#v", result.Diagnostics)
+		}
+		if diagnostic.Code == "vim/E1012" {
+			mismatch = append(mismatch, diagnostic)
+		}
+	}
+	if len(mismatch) != 1 || file.Text(mismatch[0].Span) != "() => 1" {
+		t.Fatalf("compiled def diagnostics = %#v, want one E1012 on lambda", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name     string

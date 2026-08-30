@@ -463,14 +463,29 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 							}
 							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
 						}
-					} else if expression.Kind == syntax.ExpressionBinary && (left.Name == "special" || right.Name == "special") {
-						operand := expression.Children[1]
-						if left.Name == "special" {
-							operand = expression.Children[0]
+					} else if expression.Kind == syntax.ExpressionBinary {
+						operand := expression.Children[0]
+						code, message := "", ""
+						switch left.Name {
+						case "special":
+							code, message = "vim/E611", "Using a Special as a Number"
+						case "func":
+							code, message = "vim/E703", "Using a Funcref as a Number"
 						}
-						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-							Code: "vim/E611", Message: "Using a Special as a Number", Span: operand.Span,
-						})
+						if code == "" {
+							operand = expression.Children[1]
+							switch right.Name {
+							case "special":
+								code, message = "vim/E611", "Using a Special as a Number"
+							case "func":
+								code, message = "vim/E703", "Using a Funcref as a Number"
+							}
+						}
+						if code != "" {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: code, Message: message, Span: operand.Span,
+							})
+						}
 					}
 				}
 			}
@@ -763,6 +778,12 @@ func collectIndexTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, expr
 	for _, index := range expression.Children[1:] {
 		if index == nil || index.Kind == syntax.ExpressionMissing {
 			continue
+		}
+		if !scopeUsesDefTypeRules(scope) && resolvedExpressionType(result, scope, index).Name == "func" {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E703", Message: "Using a Funcref as a Number", Span: index.Span,
+			})
+			return
 		}
 		before := len(result.Diagnostics)
 		appendTypeMismatchDiagnostic(result, expected, index)

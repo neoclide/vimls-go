@@ -368,3 +368,26 @@ Representative source evidence:
   Funcref arguments.
 - `src/evalfunc.c:8881-8925` implements the accepted runtime categories, and
   `src/errors.h:1803-1804` defines the exact message.
+
+## Using a Funcref as a Number: E703
+
+E703 means `Using a Funcref as a Number`. Legacy Vim script and the Vim9
+script evaluator use this historical conversion error when a Funcref is used
+where a Number is required. A compiled Vim9 `def` performs strict type checking
+first: the corresponding index error is E1012, while arithmetic `+` uses
+E1051.
+
+Analysis reports E703 when an arithmetic operand or List, Tuple, Blob, or
+String index is statically known to be a Funcref. Unknown values remain
+unknown, and compiled `def` expressions retain their Vim9-specific diagnostic.
+The diagnostic span selects the Funcref operand or index rather than the whole
+expression.
+
+Representative source evidence:
+
+- `src/testdir/test_listdict.vim:1524-1525` distinguishes E1012 in a compiled
+  `def` from E703 in Vim9 script for a lambda used as a List index.
+- `src/testdir/test_float_func.vim:18-20` covers Legacy conversion of a
+  Funcref to a Number.
+- `src/typval.c:214-230` maps both `VAR_FUNC` and `VAR_PARTIAL` numeric
+  conversion to E703, and `src/errors.h:1807-1808` defines the exact message.
