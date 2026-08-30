@@ -669,3 +669,26 @@ Representative source evidence:
   E805 from compiled E1012 for Float List indexes and slice bounds.
 - `src/typval.c:214-226` maps Float-to-Number conversion to E805, and
   `src/errors.h:2074-2075` defines the exact message.
+
+## Using a Float as a String: E806
+
+E806 means `Using a Float as a String`. For statically parsed expressions, Vim
+uses it when a Float value itself is indexed or sliced and would therefore
+need to act as a String.
+
+Analysis reports E806 on a statically known Float receiver of `[...]` outside
+a compiled Vim9 context. Both literal and resolved variable receivers are
+supported in Legacy and top-level Vim9 script. A Float used as the index of a
+valid container is E805 instead. Float concatenation is valid conversion and
+does not receive E806. A compiled Vim9 `def` uses E1107 for the Float-receiver
+indexing form.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:2283-2284` distinguishes E1107 in a compiled
+  `def` from E806 at top-level Vim9 script.
+- `src/testdir/test_vimscript.vim:7419` covers the same Float receiver in
+  Legacy Vim script.
+- `src/eval.c:6079-6095` maps a Float index receiver to E806, while
+  `src/eval.c:4545-4565` shows that Float concatenation is accepted.
+- `src/errors.h:2076-2077` defines the exact message.

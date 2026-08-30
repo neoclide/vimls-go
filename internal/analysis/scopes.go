@@ -798,6 +798,15 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					})
 				}
 			}
+			if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 &&
+				!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
+				receiver := expression.Children[0]
+				if resolvedExpressionType(result, expressionScope, receiver).Name == "float" {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E806", Message: "Using a Float as a String", Span: receiver.Span,
+					})
+				}
+			}
 			if command.Dialect == syntax.Legacy && (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 {
 				receiver := resolvedExpressionType(result, expressionScope, expression.Children[0])
 				if receiver.Name == "blob" || receiver.Name == "list" || receiver.Name == "string" || receiver.Name == "tuple" {

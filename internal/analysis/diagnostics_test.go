@@ -826,6 +826,57 @@ func TestAnalyzeFloatAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFloatAsStringDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script literal receiver",
+			source: "vim9script\nvar value = 0.7[1]\n",
+			span:   "0.7",
+		},
+		{
+			name:   "vim9 script typed receiver",
+			source: "vim9script\nvar receiver = 0.7\nvar value = receiver[1]\n",
+			span:   "receiver",
+		},
+		{
+			name:   "legacy receiver",
+			source: "echo 1.1[0]\n",
+			span:   "1.1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E806" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Float as a String" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E806 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  var value = 0.7[1]\nenddef\n",
+		"vim9script\nvar value = 'x' .. 0.7\n",
+		"let value = 'x' . 0.7\n",
+		"vim9script\nvar values = [1]\nvar value = values[0.7]\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E806" {
+				t.Fatalf("source %q unexpectedly received E806: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string
