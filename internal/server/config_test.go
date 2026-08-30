@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 func TestParseTargetVersion(t *testing.T) {
@@ -72,6 +74,33 @@ func TestTargetVersionFromOptions(t *testing.T) {
 			}
 			if (warning != "") != test.wantWarning {
 				t.Fatalf("warning = %q", warning)
+			}
+		})
+	}
+}
+
+func TestUnresolvedSeverityFromOptions(t *testing.T) {
+	tests := []struct {
+		name        string
+		raw         any
+		want        syntax.DiagnosticSeverity
+		wantWarning bool
+	}{
+		{name: "absent", want: syntax.DiagnosticWarning},
+		{name: "empty object", raw: map[string]any{}, want: syntax.DiagnosticWarning},
+		{name: "error", raw: map[string]any{"unresolvedSeverity": "error"}, want: syntax.DiagnosticError},
+		{name: "warning", raw: map[string]any{"unresolvedSeverity": "warning"}, want: syntax.DiagnosticWarning},
+		{name: "information", raw: map[string]any{"unresolvedSeverity": "information"}, want: syntax.DiagnosticInformation},
+		{name: "hint", raw: []byte(`{"unresolvedSeverity":"hint"}`), want: syntax.DiagnosticHint},
+		{name: "invalid shape", raw: []any{}, want: syntax.DiagnosticWarning, wantWarning: true},
+		{name: "invalid type", raw: map[string]any{"unresolvedSeverity": 2}, want: syntax.DiagnosticWarning, wantWarning: true},
+		{name: "invalid value", raw: map[string]any{"unresolvedSeverity": "off"}, want: syntax.DiagnosticWarning, wantWarning: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			severity, warning := unresolvedSeverityFromOptions(test.raw)
+			if severity != test.want || (warning != "") != test.wantWarning {
+				t.Fatalf("severity = %v, warning = %q, want %v, warning=%t", severity, warning, test.want, test.wantWarning)
 			}
 		})
 	}
@@ -185,6 +214,31 @@ func TestTargetVersionFromSettings(t *testing.T) {
 			}
 			if (warning != "") != test.wantWarning {
 				t.Fatalf("warning = %q", warning)
+			}
+		})
+	}
+}
+
+func TestUnresolvedSeverityFromSettings(t *testing.T) {
+	previous := syntax.DiagnosticInformation
+	tests := []struct {
+		name        string
+		settings    string
+		want        syntax.DiagnosticSeverity
+		wantWarning bool
+	}{
+		{name: "empty object", settings: `{}`, want: previous},
+		{name: "direct", settings: `{"unresolvedSeverity":"error"}`, want: syntax.DiagnosticError},
+		{name: "nested", settings: `{"vimls":{"unresolvedSeverity":"hint"}}`, want: syntax.DiagnosticHint},
+		{name: "invalid shape", settings: `[]`, want: previous, wantWarning: true},
+		{name: "invalid type", settings: `{"unresolvedSeverity":2}`, want: previous, wantWarning: true},
+		{name: "invalid value", settings: `{"unresolvedSeverity":"off"}`, want: previous, wantWarning: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			severity, warning := unresolvedSeverityFromSettings([]byte(test.settings), previous)
+			if severity != test.want || (warning != "") != test.wantWarning {
+				t.Fatalf("severity = %v, warning = %q, want %v, warning=%t", severity, warning, test.want, test.wantWarning)
 			}
 		})
 	}

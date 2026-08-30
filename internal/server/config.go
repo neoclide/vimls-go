@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/workspace"
 )
 
@@ -18,6 +19,8 @@ const DefaultTargetVersion = "9.1.0000"
 const MaximumTargetVersion = "9.2.1015"
 
 var ErrInvalidTargetVersion = errors.New("invalid Vim target version")
+
+const defaultUnresolvedSeverity = syntax.DiagnosticWarning
 
 type TargetVersion struct {
 	Major  int
@@ -105,6 +108,39 @@ func targetVersionFromOptions(raw any) (TargetVersion, bool, string) {
 		return fallback, false, fmt.Sprintf("vimls: %v; using target 9.1.0000", err)
 	}
 	return version, true, ""
+}
+
+func unresolvedSeverityFromOptions(raw any) (syntax.DiagnosticSeverity, string) {
+	if raw == nil {
+		return defaultUnresolvedSeverity, ""
+	}
+	var options map[string]any
+	switch value := raw.(type) {
+	case map[string]any:
+		options = value
+	case []byte:
+		if len(value) == 0 || string(value) == "null" {
+			return defaultUnresolvedSeverity, ""
+		}
+		if err := json.Unmarshal(value, &options); err != nil {
+			return defaultUnresolvedSeverity, "vimls: initializationOptions must be an object; using unresolvedSeverity warning"
+		}
+	default:
+		return defaultUnresolvedSeverity, "vimls: initializationOptions must be an object; using unresolvedSeverity warning"
+	}
+	value, exists := options["unresolvedSeverity"]
+	if !exists || value == nil {
+		return defaultUnresolvedSeverity, ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return defaultUnresolvedSeverity, "vimls: unresolvedSeverity must be a string; using warning"
+	}
+	severity, ok := parseDiagnosticSeverity(text)
+	if !ok {
+		return defaultUnresolvedSeverity, "vimls: unresolvedSeverity must be error, warning, information, or hint; using warning"
+	}
+	return severity, ""
 }
 
 func runtimepathFromOptions(raw any) ([]string, bool, string) {
@@ -296,4 +332,47 @@ func targetVersionFromSettings(raw []byte, previous TargetVersion) (TargetVersio
 		return previous, fmt.Sprintf("vimls: %v; retaining target %s", err, previous.String())
 	}
 	return version, ""
+}
+
+func unresolvedSeverityFromSettings(raw []byte, previous syntax.DiagnosticSeverity) (syntax.DiagnosticSeverity, string) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return previous, ""
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return previous, "vimls: workspace settings must be an object; retaining unresolvedSeverity"
+	}
+	value, exists := settings["unresolvedSeverity"]
+	if nested, ok := settings["vimls"].(map[string]any); ok {
+		if nestedValue, nestedExists := nested["unresolvedSeverity"]; nestedExists {
+			value, exists = nestedValue, true
+		}
+	}
+	if !exists {
+		return previous, ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return previous, "vimls: unresolvedSeverity must be a string; retaining previous value"
+	}
+	severity, ok := parseDiagnosticSeverity(text)
+	if !ok {
+		return previous, "vimls: unresolvedSeverity must be error, warning, information, or hint; retaining previous value"
+	}
+	return severity, ""
+}
+
+func parseDiagnosticSeverity(value string) (syntax.DiagnosticSeverity, bool) {
+	switch value {
+	case "error":
+		return syntax.DiagnosticError, true
+	case "warning":
+		return syntax.DiagnosticWarning, true
+	case "information":
+		return syntax.DiagnosticInformation, true
+	case "hint":
+		return syntax.DiagnosticHint, true
+	default:
+		return 0, false
+	}
 }

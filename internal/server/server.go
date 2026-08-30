@@ -59,6 +59,7 @@ type Server struct {
 	state               state
 	targetVersion       TargetVersion
 	targetOverride      bool
+	unresolvedSeverity  syntax.DiagnosticSeverity
 	pendingWarning      string
 	client              protocol.Client
 	cancellations       map[jsonrpc2.ID]context.CancelFunc
@@ -111,6 +112,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		output:              output,
 		log:                 logOutput,
 		targetVersion:       target,
+		unresolvedSeverity:  defaultUnresolvedSeverity,
 		cancellations:       make(map[jsonrpc2.ID]context.CancelFunc),
 		documents:           workspace.NewDocuments(),
 		encoding:            text.UTF16,
@@ -344,6 +346,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	changeKind := protocol.TextDocumentSyncKindIncremental
 	targetVersion, targetOverride, targetWarning := targetVersionFromOptions([]byte(params.InitializationOptions))
 	runtimePaths, runtimepathConfigured, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
+	unresolvedSeverity, unresolvedWarning := unresolvedSeverityFromOptions([]byte(params.InitializationOptions))
 	if !runtimepathConfigured {
 		runtimePaths = defaultRuntimePaths()
 	}
@@ -354,11 +357,17 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.mu.Lock()
 	s.targetVersion = targetVersion
 	s.targetOverride = targetOverride
+	s.unresolvedSeverity = unresolvedSeverity
 	s.pendingWarning = targetWarning
-	if s.pendingWarning == "" {
-		s.pendingWarning = runtimepathWarning
-	} else if runtimepathWarning != "" {
-		s.pendingWarning += "; " + runtimepathWarning
+	for _, warning := range []string{runtimepathWarning, unresolvedWarning} {
+		if warning == "" {
+			continue
+		}
+		if s.pendingWarning == "" {
+			s.pendingWarning = warning
+		} else {
+			s.pendingWarning += "; " + warning
+		}
 	}
 	s.encoding = encoding
 	s.state = stateActive
@@ -549,9 +558,8 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 	s.mu.Lock()
 	supported := s.workspaceConfiguration
 	client := s.client
-	override := s.targetOverride
 	s.mu.Unlock()
-	if !supported || client == nil || override {
+	if !supported || client == nil {
 		return nil
 	}
 	section := "vimls"
@@ -567,10 +575,12 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 
 func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
 	s.mu.Lock()
-	var warning string
+	var targetWarning string
 	if !s.targetOverride {
-		s.targetVersion, warning = targetVersionFromSettings(settings, s.targetVersion)
+		s.targetVersion, targetWarning = targetVersionFromSettings(settings, s.targetVersion)
 	}
+	var unresolvedWarning string
+	s.unresolvedSeverity, unresolvedWarning = unresolvedSeverityFromSettings(settings, s.unresolvedSeverity)
 	s.mu.Unlock()
 	s.publishMu.Lock()
 	snapshots := s.documents.ConfigurationChanged()
@@ -578,8 +588,14 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 	for _, snapshot := range snapshots {
 		s.startAnalysis(snapshot.URI())
 	}
-	if warning != "" {
-		return s.sendWarning(ctx, warning)
+	if targetWarning != "" && unresolvedWarning != "" {
+		return s.sendWarning(ctx, targetWarning+"; "+unresolvedWarning)
+	}
+	if targetWarning != "" {
+		return s.sendWarning(ctx, targetWarning)
+	}
+	if unresolvedWarning != "" {
+		return s.sendWarning(ctx, unresolvedWarning)
 	}
 	return nil
 }
@@ -889,6 +905,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 	s.mu.Lock()
 	encoding := s.encoding
 	client := s.client
+	unresolvedSeverity := s.unresolvedSeverity
 	s.mu.Unlock()
 
 	s.publishMu.Lock()
@@ -916,7 +933,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 				Start: protocol.Position{Line: uint32(start.Line), Character: uint32(start.Character)},
 				End:   protocol.Position{Line: uint32(end.Line), Character: uint32(end.Character)},
 			},
-			Severity: protocolDiagnosticSeverity(item.Code),
+			Severity: protocolDiagnosticSeverity(item.Code, unresolvedSeverity),
 			Code:     protocol.String(item.Code),
 			Source:   protocol.NewOptional(Name),
 			Message:  protocol.String(item.Message),
@@ -942,12 +959,20 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 	}
 }
 
-func protocolDiagnosticSeverity(code string) protocol.DiagnosticSeverity {
+func protocolDiagnosticSeverity(code string, unresolvedSeverity syntax.DiagnosticSeverity) protocol.DiagnosticSeverity {
+	switch code {
+	case "vim/E117", "vim/E121", "vim/E1001", "vim/E1089":
+		return protocolSeverity(unresolvedSeverity)
+	}
 	definition, ok := syntax.LookupVimlsDiagnostic(code)
 	if !ok {
 		return protocol.DiagnosticSeverityError
 	}
-	switch definition.Severity {
+	return protocolSeverity(definition.Severity)
+}
+
+func protocolSeverity(severity syntax.DiagnosticSeverity) protocol.DiagnosticSeverity {
+	switch severity {
 	case syntax.DiagnosticWarning:
 		return protocol.DiagnosticSeverityWarning
 	case syntax.DiagnosticInformation:

@@ -15,9 +15,80 @@ import (
 
 func TestProtocolDiagnosticSeverity(t *testing.T) {
 	for _, code := range []string{"vimls/missing-end", "vim/E113", "vim/E518", "vim/E1012", "future/source"} {
-		if got := protocolDiagnosticSeverity(code); got != protocol.DiagnosticSeverityError {
+		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticWarning); got != protocol.DiagnosticSeverityError {
 			t.Errorf("%s severity = %v, want error", code, got)
 		}
+	}
+	for _, code := range []string{"vim/E117", "vim/E121", "vim/E1001", "vim/E1089"} {
+		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticWarning); got != protocol.DiagnosticSeverityWarning {
+			t.Errorf("%s severity = %v, want warning", code, got)
+		}
+		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticHint); got != protocol.DiagnosticSeverityHint {
+			t.Errorf("%s configured severity = %v, want hint", code, got)
+		}
+	}
+}
+
+func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+	instance.mu.Lock()
+	instance.client = client
+	instance.mu.Unlock()
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	documentURI := uri.MustParse("file:///unresolved.vim")
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI: documentURI, Version: 1,
+			Text: "vim9script\ndoesnotexist()\ndef Test()\n  echo missingValue\nenddef\n",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) != 2 || first.Diagnostics[0].Code != protocol.String("vim/E117") || first.Diagnostics[1].Code != protocol.String("vim/E1001") {
+		t.Fatalf("default unresolved diagnostics = %#v", first.Diagnostics)
+	}
+	for _, diagnostic := range first.Diagnostics {
+		if diagnostic.Severity != protocol.DiagnosticSeverityWarning {
+			t.Fatalf("default unresolved severity = %v, want warning; diagnostics = %#v", diagnostic.Severity, first.Diagnostics)
+		}
+	}
+
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{
+		Settings: protocol.LSPAny([]byte(`{"vimls":{"unresolvedSeverity":"error"}}`)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated := waitForDiagnostics(t, client.published)
+	if len(updated.Diagnostics) != 2 {
+		t.Fatalf("configured unresolved diagnostics = %#v", updated.Diagnostics)
+	}
+	for _, diagnostic := range updated.Diagnostics {
+		if diagnostic.Severity != protocol.DiagnosticSeverityError {
+			t.Fatalf("configured unresolved severity = %v, want error; diagnostics = %#v", diagnostic.Severity, updated.Diagnostics)
+		}
+	}
+}
+
+func TestInitializationUnresolvedSeverity(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[],"unresolvedSeverity":"hint"}`)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	instance.mu.Lock()
+	severity := instance.unresolvedSeverity
+	instance.mu.Unlock()
+	if severity != syntax.DiagnosticHint {
+		t.Fatalf("initial unresolved severity = %v, want hint", severity)
 	}
 }
 
@@ -40,19 +111,28 @@ func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
 }
 
 func TestInitializationTargetOverrideHasPrecedence(t *testing.T) {
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"targetVersion":"9.2.4","unresolvedSeverity":"hint"}`))}
 	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = client
+	supported := true
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		InitializationOptions: []byte(`{"targetVersion":"9.1.1232"}`),
+		Capabilities:          protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{Configuration: &supported}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{
-		Settings: []byte(`{"vimls":{"targetVersion":"9.2.4"}}`),
-	}); err != nil {
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := instance.TargetVersion().String(); got != "9.1.1232" {
 		t.Fatalf("target version = %q", got)
+	}
+	instance.mu.Lock()
+	severity := instance.unresolvedSeverity
+	instance.mu.Unlock()
+	if client.calls != 1 || severity != syntax.DiagnosticHint {
+		t.Fatalf("configuration calls = %d, unresolved severity = %v", client.calls, severity)
 	}
 	if revision := instance.documents.ConfigRevision(); revision != 2 {
 		t.Fatalf("config revision = %d, want 2", revision)

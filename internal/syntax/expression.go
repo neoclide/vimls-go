@@ -1086,12 +1086,6 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 	token := p.current()
 	switch token.text {
 	case "(":
-		// Vim's compile_call() stores a direct function name in a
-		// MAX_FUNC_NAME_LEN (200-byte) buffer.  Variables of the same length
-		// remain valid until they are used as a direct callable.
-		if p.dialect == Vim9 && left.Kind == ExpressionIdentifier && len(left.Value) >= 200 {
-			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1011", Message: "Name too long: " + left.Value, Span: left.Span})
-		}
 		p.advance()
 		if p.dialect == Vim9 && p.lambdaBody && p.current().text == "]" {
 			// A call opener in a lambda body can be the malformed endpoint of an

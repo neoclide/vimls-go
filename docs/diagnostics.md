@@ -35,6 +35,39 @@ Representative source evidence:
 - `src/errors.h:1313-1316` defines E518; `src/testdir/test_options.vim:885-905`
   covers unknown operands for all three `:set` variants.
 
+## Unresolved functions and variables
+
+Vim uses E117 for a direct function call whose name cannot be found. The
+language server reports `E117: Unknown function: {name}` only for an unscoped
+Vim9 call when the name does not resolve to a built-in function, a lexical
+callable, or a same-file function declaration. Scoped calls such as
+`g:Dynamic()`, autoload calls such as `plugin#Dynamic()`, member calls, and
+legacy Vim script calls remain `unknown` because their target may be supplied
+dynamically.
+
+A direct function name of 200 bytes or more has a context-specific result.
+Compiling it inside a Vim9 `def` produces E1011, while the same unresolved call
+at Vim9 script level produces E117. The analyzer preserves this distinction.
+Functions whose availability depends on Vim build features also remain outside
+the E117 rule unless the server has matching feature information.
+
+Unresolved-symbol diagnostics are warnings by default. Clients can set
+`vimls.unresolvedSeverity` to `error`, `warning`, `information`, or `hint`.
+The same value applies to E117 and the unknown-variable codes E121, E1001, and
+E1089. It changes only the LSP severity; the native Vim code and message stay
+unchanged. The workspace setting can be returned as
+`{"unresolvedSeverity":"error"}` for the requested `vimls` section, or nested
+under `vimls` in `workspace/didChangeConfiguration`. The same field is accepted
+in `initializationOptions` as the initial value.
+
+Representative source evidence:
+
+- `src/errors.h:284-285` defines E117.
+- `src/testdir/test_vim9_expr.vim:3885-3897` shows that an unscoped call does
+  not resolve a `g:` function.
+- `src/testdir/test_vim9_expr.vim:4498-4499` distinguishes the long-name
+  E1011/E117 pair and covers an ordinary missing function.
+
 ## Function argument count: E118 and E119
 
 E118 and E119 predate Vim9 script, but Vim still uses them in both legacy Vim

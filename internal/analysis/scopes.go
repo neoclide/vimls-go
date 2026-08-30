@@ -2232,6 +2232,18 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 	if callee == nil {
 		return
 	}
+	if checkTypes && call.Value == "" && callee.Kind == syntax.ExpressionIdentifier {
+		// compile_call() has a 200-byte direct-name buffer only while compiling
+		// a def. At Vim9 script level the same unresolved spelling is E117.
+		if scopeContainsDef(scope) && len(callee.Value) >= 200 {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1011", Message: "Name too long: " + callee.Value, Span: callee.Span})
+			return
+		}
+		if unresolvedDirectFunction(scope, callee) {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E117", Message: "Unknown function: " + callee.Value, Span: callee.Span})
+			return
+		}
+	}
 	callable := result.TypeOf(callee)
 	arguments := call.Children[1:]
 	if callee.Kind == syntax.ExpressionMember && len(callee.Children) == 1 && result.File.Text(callee.Operator) == "->" {
@@ -2283,6 +2295,13 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 			Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: argument.Span,
 		})
 	}
+}
+
+func unresolvedDirectFunction(scope *Scope, callee *syntax.Expression) bool {
+	if scope == nil || callee == nil || callee.Kind != syntax.ExpressionIdentifier || callee.Value == "" || strings.ContainsAny(callee.Value, ":#&$@") {
+		return false
+	}
+	return resolve(scope, callee.Value, callee.Span.Start, true, nil) == nil
 }
 
 func callbackReceivesTooManyArguments(actual ValueType, expected builtinArgumentType) bool {

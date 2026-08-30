@@ -492,7 +492,7 @@ func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "optional variadic and conservative targets",
-			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(null_object, 2, 3, 4)\nvar dynamic = call('len', [])\nMyFunction()\ns:len()\nitems->len()\n",
+			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(null_object, 2, 3, 4)\nvar dynamic = call('len', [])\ng:MyFunction()\ns:len()\nitems->len()\n",
 		},
 		{
 			name:   "incomplete calls do not cascade",
@@ -522,6 +522,71 @@ func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 				last = start
 			}
 		})
+	}
+}
+
+func TestAnalyzeUnknownFunctionDiagnostics(t *testing.T) {
+	longName := "Func" + strings.Repeat("x", 196)
+	tests := []struct {
+		name, source, code, message, text string
+	}{
+		{
+			name:   "Vim9 script",
+			source: "vim9script\ndoesnotexist()\n",
+			code:   "vim/E117", message: "Unknown function: doesnotexist", text: "doesnotexist",
+		},
+		{
+			name:   "Vim9 def",
+			source: "vim9script\ndef Test()\n  Missing()\nenddef\n",
+			code:   "vim/E117", message: "Unknown function: Missing", text: "Missing",
+		},
+		{
+			name:   "unscoped global function",
+			source: "vim9script\ndef g:ExistingGlobal()\nenddef\nExistingGlobal()\n",
+			code:   "vim/E117", message: "Unknown function: ExistingGlobal", text: "ExistingGlobal",
+		},
+		{
+			name:   "long Vim9 script call",
+			source: "vim9script\necho " + longName + "()\n",
+			code:   "vim/E117", message: "Unknown function: " + longName, text: longName,
+		},
+		{
+			name:   "long Vim9 def call",
+			source: "vim9script\ndef Test()\n  echo " + longName + "()\nenddef\n",
+			code:   "vim/E1011", message: "Name too long: " + longName, text: longName,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E117" || diagnostic.Code == "vim/E1011" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Code != test.code || got[0].Message != test.message || file.Text(got[0].Span) != test.text {
+				t.Fatalf("diagnostics = %#v, want %s %q on %q; syntax diagnostics = %#v; all diagnostics = %#v", got, test.code, test.message, test.text, file.Diagnostics, result.Diagnostics)
+			}
+		})
+	}
+
+	conservative := "vim9script\n" +
+		"len([])\n" +
+		"Known()\n" +
+		"def Known()\nenddef\n" +
+		"var Dynamic: func\nDynamic()\n" +
+		"g:Dynamic()\n" +
+		"plugin#Dynamic()\n" +
+		"var object: any\nobject.Dynamic()\n" +
+		"[]->Dynamic()\n" +
+		"legacy call Missing()\n"
+	file := syntax.Parse(conservative)
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E117" {
+			t.Fatalf("dynamic, scoped, known, member, or legacy call reported E117: %#v; syntax diagnostics = %#v", diagnostic, file.Diagnostics)
+		}
 	}
 }
 

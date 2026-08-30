@@ -160,7 +160,7 @@ func TestOfficialVimCompileFailures(t *testing.T) {
 // Completed codes have focused Go coverage. Pending codes are statically
 // analyzable Vim compile errors that still need implementation or test review.
 const officialCompileCompletedCodes = `
-E15 E16 E46 E107 E109 E110 E111 E113 E114 E115 E116 E118 E119 E170 E171 E176 E260 E274 E354
+E15 E16 E46 E107 E109 E110 E111 E113 E114 E115 E116 E117 E118 E119 E170 E171 E176 E260 E274 E354
 E481 E518 E580 E581 E582 E583 E584 E586 E587 E588 E600 E602 E603
 E606 E607 E690 E696 E697 E720 E722 E723 E973 E1001 E1002 E1004
 E1005 E1006 E1007 E1008 E1009 E1010 E1011 E1012 E1013 E1016 E1017 E1018 E1019 E1020
@@ -173,7 +173,7 @@ E1414 E1526 E1527 E1539 E1552 E1553 E1555 E1561
 `
 
 const officialCompilePendingCodes = `
-E117 E121 E155 E464 E475
+E121 E155 E464 E475
 E476 E488 E492 E611 E689 E701 E703 E704 E716 E721 E728 E729
 E730 E731 E734 E745 E804 E805 E806 E896 E908 E974 E976 E996
 E1003 E1015 E1023 E1024 E1027 E1030 E1037
@@ -214,6 +214,8 @@ func officialCompileCodeStatuses() map[string]bool {
 // inventing facts that are absent from an isolated source variant.
 var officialCompileMigrationExclusions = map[string]bool{
 	"src/testdir/test_vim9_expr.vim:209:6326":   true, // dynamic g: function values and condition
+	"src/testdir/test_vim9_expr.vim:2696:80191": true, // job_stop() is E117 only in builds without +channel
+	"src/testdir/test_vim9_expr.vim:3285:97680": true, // job_stop() is E117 only in builds without +channel
 	"src/testdir/test_vim9_func.vim:1408:30078": true, // g:TakesOneArg is defined by the test harness
 	"src/testdir/test_vim9_func.vim:1409:30129": true, // g:TakesOneArg is defined by the test harness
 	"src/testdir/test_vim9_func.vim:1706:37318": true,

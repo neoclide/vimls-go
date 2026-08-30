@@ -1966,7 +1966,7 @@ func TestVim9UnsupportedNamespacesAndLongNames(t *testing.T) {
 	validName := longName[:len(longName)-1]
 	source := "vim9script\necho a:somevar\necho l:somevar\necho x:somevar\necho " + longName + "\necho " + validName + "()\necho " + longName + "()\nvar after = 1\n"
 	file := Parse(source)
-	if len(file.Diagnostics) != 4 {
+	if len(file.Diagnostics) != 3 {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 	for i, name := range []string{"a:somevar", "l:somevar", "x:somevar"} {
@@ -1974,8 +1974,10 @@ func TestVim9UnsupportedNamespacesAndLongNames(t *testing.T) {
 			t.Fatalf("namespace diagnostic = %#v", file.Diagnostics[i])
 		}
 	}
-	if file.Diagnostics[3].Code != "vim/E1011" || file.Diagnostics[3].Message != "Name too long: "+longName || file.Text(file.Diagnostics[3].Span) != longName || file.Commands[len(file.Commands)-1].Declaration == nil {
-		t.Fatalf("long-name diagnostic/recovery = %#v", file.Diagnostics)
+	// The parser retains long direct call names. Vim9 script and def compilation
+	// use different errors for the same spelling, so analysis owns that context.
+	if file.Commands[len(file.Commands)-1].Declaration == nil {
+		t.Fatalf("long-name recovery = %#v", file.Commands)
 	}
 }
 
