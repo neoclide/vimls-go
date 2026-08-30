@@ -407,6 +407,12 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 	if defSignature && !parameter.Variadic {
 		parameter.Target = parseConstructorParameterTarget(source, start, nameEnd, command.Argument.Start)
 	}
+	if defSignature && !typed && equals < 0 && nameEnd > start && source[start:nameEnd] != "_" && parameter.Target == nil {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1077", Message: "missing argument type",
+			Span: Span{Start: command.Argument.Start + start, End: command.Argument.Start + nameEnd},
+		})
+	}
 	if defSignature && typed {
 		if colon+1 >= end || !isExpressionSpace(source[colon+1]) {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
