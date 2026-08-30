@@ -21,6 +21,19 @@ func TestBuildsNestedRecoveringBlocks(t *testing.T) {
 	}
 }
 
+func TestVim9InvalidNestedDefHeaderStopsSignatureDiagnostics(t *testing.T) {
+	// Vim v9.2.1015 src/testdir/test_vim9_func.vim:1290-1298 expects only
+	// E476 for the invalid nested command; +Func+ is not a function signature.
+	file := Parse("vim9script\ndef Func()\n  def +Func+\nenddef\ndefcompile\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E476" || file.Text(file.Diagnostics[0].Span) != "def" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockDef || file.Blocks[0].End != 3 || len(file.Commands) != 5 || file.Commands[4].Canonical != "defcompile" {
+		t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9MissingEnddefDiagnostic(t *testing.T) {
 	incomplete := Parse("vim9script\ndef Func()\n  return 1\n  var after = 1\n")
 	if len(incomplete.Diagnostics) != 1 || incomplete.Diagnostics[0].Code != "vim/E1057" || incomplete.Diagnostics[0].Message != "Missing :enddef" || incomplete.Text(incomplete.Diagnostics[0].Span) != "def" {

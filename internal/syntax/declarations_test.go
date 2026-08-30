@@ -938,11 +938,13 @@ func TestVim9InterfaceMemberInitializer(t *testing.T) {
 	})
 
 	t.Run("legacy interface", func(t *testing.T) {
-		file := Parse("interface Legacy\n  var count = 7\nendinterface\n")
-		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1342" || file.Text(file.Diagnostics[0].Span) != "interface" {
-			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		for _, member := range []string{"var count = 7", "static var count = 7"} {
+			file := Parse("interface Legacy\n  " + member + "\nendinterface\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1342" || file.Text(file.Diagnostics[0].Span) != "interface" {
+				t.Fatalf("member=%q diagnostics=%#v", member, file.Diagnostics)
+			}
+			assertFileSpans(t, file)
 		}
-		assertFileSpans(t, file)
 	})
 }
 

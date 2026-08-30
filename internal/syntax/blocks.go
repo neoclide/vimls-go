@@ -149,7 +149,7 @@ commands:
 					continue
 				}
 			}
-			if file.Blocks[blockIndex].Kind == BlockInterface && command.Canonical != "endclass" {
+			if file.Blocks[blockIndex].Kind == BlockInterface && file.Commands[file.Blocks[blockIndex].Header].Dialect == Vim9 && command.Canonical != "endclass" {
 				abstractModifier := false
 				for _, modifier := range command.Modifiers {
 					if modifier.Name == "abstract" {
@@ -295,6 +295,7 @@ commands:
 				argumentStart := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
 				if argumentStart < command.Argument.End && file.Source[argumentStart] == '+' {
 					command.Block = stack[len(stack)-1]
+					command.detailsOpaque = true
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
 						Code: "vim/E476", Message: "Invalid command", Span: command.Name,
 					})
