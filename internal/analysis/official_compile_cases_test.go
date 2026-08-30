@@ -173,7 +173,7 @@ E1408 E1409 E1410 E1411 E1414 E1415 E1416 E1417 E1418 E1419 E1420 E1421 E1422 E1
 `
 
 const officialCompilePendingCodes = `
-E1274 E1282 E1283 E1301 E1306 E1307 E1314 E1315
+E1282 E1283 E1301 E1306 E1307 E1314 E1315
 E1318 E1325 E1326 E1328 E1330 E1332 E1333 E1335
 E1337 E1340 E1341 E1343 E1346 E1347 E1348 E1349 E1350
 E1351 E1352 E1353 E1354 E1355 E1356 E1357 E1358 E1359 E1360 E1363
@@ -236,6 +236,7 @@ var officialCompileStaticAnalysisExcludedCodes = map[string]string{
 	"vim/E1154": "requires compile-time constant evaluation",
 	"vim/E1191": "depends on another function's lazy compiler state",
 	"vim/E1271": "internal closure compiler invariant",
+	"vim/E1274": "depends on the runtime execution stack having a named script frame",
 	"vim/E1277": "depends on Vim build features",
 	"vim/E1362": "depends on compile-time object evaluation",
 	"vim/E1412": "internal builtin object-method fallback",
