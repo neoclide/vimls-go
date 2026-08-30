@@ -1464,6 +1464,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:527-532` documents the no-shadowing rule.
 - `src/errors.h:2995-2996` defines the exact E1167 message template.
 
+## Script argument collision: E1168
+
+Analysis reports E1168 when a Vim9 `def` or lambda argument conflicts with a
+visible script variable, constant, type alias, class, interface, or enum. The
+diagnostic selects the argument name and preserves Vim's remaining signature
+text in the message: for example, `Argument already declared in the script: A:
+number)`.
+
+Root script items and items in an ancestor script control block are visible;
+items from sibling or finished blocks are not. Deferred `def` compilation sees
+later root declarations, while a lambda evaluated directly in script sees only
+earlier declarations. A lambda compiled inside a `def` follows the deferred
+rule. `_`, Legacy arguments, scoped global assignments, imports, functions,
+local variables, and aggregate members are not E1168 script-item matches.
+E1168 has priority over E1167 for the same argument.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:440-470` checks script items before compiled locals and
+  emits E1168 with the unmodified argument tail.
+- `src/testdir/test_vim9_func.vim:1422-1502` covers root, same-block,
+  sibling-block, and later-root visibility during deferred compilation.
+- `src/testdir/test_vim9_func.vim:1613-1620` distinguishes a def-local E1167
+  conflict from a script-level E1168 conflict for the same lambda shape.
+- `src/testdir/test_vim9_typealias.vim:144-150` requires the exact
+  `A: number)` message tail for a type-alias collision.
+- `runtime/doc/vim9.txt:527-532` documents the script-wide no-shadowing rule.
+- `src/errors.h:2997-2998` defines the exact E1168 message template.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

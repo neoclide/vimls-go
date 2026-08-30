@@ -175,6 +175,10 @@ func collectArgumentShadowDiagnostics(result *FileAnalysis) {
 		if !compiled || syntaxDiagnosticTouchesCall(result.File.Diagnostics, declaration.Span) {
 			continue
 		}
+		if scriptArgumentConflict(result, declaration) {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1168", Message: "Argument already declared in the script: " + argumentScriptMessageTail(result.File, declaration), Span: declaration.Span})
+			continue
+		}
 		for parent := scope.Parent; parent != nil && parent != result.Root; parent = parent.Parent {
 			if parent.Kind == syntax.BlockClass || parent.Kind == syntax.BlockInterface || parent.Kind == syntax.BlockEnum {
 				continue
@@ -188,6 +192,48 @@ func collectArgumentShadowDiagnostics(result *FileAnalysis) {
 		}
 	next:
 	}
+}
+
+func scriptArgumentConflict(result *FileAnalysis, parameter *Declaration) bool {
+	deferred := scopeContainsDef(parameter.Scope)
+	for scope := parameter.Scope.Parent; scope != nil; scope = scope.Parent {
+		scriptLevel := true
+		for parent := scope; parent != nil && parent != result.Root; parent = parent.Parent {
+			if parent.Kind == syntax.BlockDef || parent.Kind == syntax.BlockFunction || parent.Lambda != nil || parent.Kind == syntax.BlockClass || parent.Kind == syntax.BlockInterface || parent.Kind == syntax.BlockEnum {
+				scriptLevel = false
+				break
+			}
+		}
+		if !scriptLevel {
+			continue
+		}
+		for _, declaration := range scope.Declarations {
+			if declaration.Name != parameter.Name || !deferred && declaration.Span.Start >= parameter.Span.Start {
+				continue
+			}
+			switch declaration.Kind {
+			case SymbolKindVariable, SymbolKindConstant, SymbolKindTypeAlias, SymbolKindClass, SymbolKindInterface, SymbolKindEnum:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func argumentScriptMessageTail(file *syntax.File, parameter *Declaration) string {
+	if file == nil || parameter == nil || parameter.Scope == nil {
+		return ""
+	}
+	end := parameter.Span.End
+	if parameter.Scope.Kind == syntax.BlockDef {
+		end = enclosingDefHeaderSpan(file, parameter.Scope).End
+	} else if parameter.Scope.Lambda != nil {
+		end = parameter.Scope.Lambda.Operator.Start
+	}
+	if parameter.Span.Start < 0 || end < parameter.Span.Start || end > len(file.Source) {
+		return parameter.Name
+	}
+	return strings.TrimRight(file.Source[parameter.Span.Start:end], " \t")
 }
 
 func collectDuplicateTypeAliasDiagnostics(result *FileAnalysis) {

@@ -2108,6 +2108,83 @@ func TestAnalyzeE1167ArgumentShadowDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1168ScriptArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, message string
+		recovery                    bool
+	}{
+		{"root def recovery", "vim9script\nvar name = 1\ndef Func(name: string)\nenddef\nvar after = 1\n", "name", "Argument already declared in the script: name: string)", true},
+		{"same script block", "vim9script\nif true\n  var name = 'piet'\n  def Func(name: string)\n  enddef\nendif\n", "name", "Argument already declared in the script: name: string)", false},
+		{"second block own variable", "vim9script\nif true\n  var name = 'piet'\nendif\nif true\n  var name = 'peter'\n  def Func(name: string)\n  enddef\nendif\n", "name", "Argument already declared in the script: name: string)", false},
+		{"later root def", "vim9script\ndef Func(name: string)\nenddef\nvar name = 1\n", "name", "Argument already declared in the script: name: string)", false},
+		{"script lambda", "vim9script\nvar name = 1\nvar Callback = (name) => name\n", "name", "Argument already declared in the script: name)", false},
+		{"type alias", "vim9script\ntype A = number\ndef Foo(A: number)\nenddef\n", "A", "Argument already declared in the script: A: number)", false},
+		{"lambda in def", "vim9script\nvar name = 1\ndef Func()\n  var Callback = (name) => name\nenddef\n", "name", "Argument already declared in the script: name)", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1167" {
+					t.Fatalf("E1168 cascaded E1167: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == "vim/E1168" {
+					count++
+					if diagnostic.Message != test.message || file.Text(diagnostic.Span) != test.span {
+						t.Fatalf("diagnostic = %#v", diagnostic)
+					}
+				}
+			}
+			if count != 1 {
+				t.Fatalf("want one E1168, got %d", count)
+			}
+			if test.recovery {
+				found := false
+				for index := range file.Commands {
+					declaration := file.Commands[index].Declaration
+					if declaration != nil && file.Text(declaration.Name) == "after" {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("following declaration not retained: %#v", file.Commands)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"variable in sibling block", "vim9script\nif true\n  var name = 1\nendif\nif true\n  def Func(name: number)\n  enddef\nendif\n", ""},
+		{"later variable after script lambda", "vim9script\nvar Callback = (name) => name\nvar name = 1\n", ""},
+		{"Legacy root", "let name = 1\nlet Callback = {name -> name}\nfunction Legacy(name)\nendfunction\n", ""},
+		{"scoped global variable", "vim9script\ng:name = 1\ndef Func(name: number)\nenddef\n", ""},
+		{"underscore", "vim9script\ndef Func(_: any)\nenddef\n", ""},
+		{"class member reserved for E1340", "vim9script\nclass Item\n  var name: number\n  def Method(name: number)\n  enddef\nendclass\n", ""},
+		{"outer local remains E1167", "vim9script\ndef Func()\n  var name = 1\n  var Callback = (name) => name\nenddef\n", "vim/E1167"},
+		{"import and function names", "vim9script\nimport './Xmodule.vim' as module\ndef Helper()\nenddef\ndef Func(module: any, Helper: any)\nenddef\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			all := CombinedDiagnostics(file, Analyze(file))
+			found := test.want == ""
+			for _, diagnostic := range all {
+				if diagnostic.Code == "vim/E1168" {
+					t.Fatalf("unexpected E1168: %#v", all)
+				}
+				if diagnostic.Code == test.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("diagnostics = %#v, want %s", all, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
