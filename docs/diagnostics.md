@@ -346,3 +346,25 @@ Representative source evidence:
 - `src/testdir/test_let.vim:320-326` covers the Legacy String-index assignment.
 - `src/eval.c:1819-1840` rejects assignment indexes after unsupported value
   types, and `src/errors.h:1779-1780` defines the exact E689 message.
+
+## Invalid type for len(): E701
+
+E701 means `Invalid type for len()`. Legacy Vim script and the Vim9 script
+evaluator use this native error when the argument's value category is not
+accepted by `len()`. A compiled Vim9 `def` performs strict argument checking
+first and reports E1013 for the same source.
+
+Analysis reuses the pinned `arg_len1` builtin checker. It reports E701 only
+when the argument type is statically known and invalid; unknown arguments stay
+unknown. Strings, Numbers, Blobs, Lists, Tuples, Dictionaries, and Objects
+remain accepted, including method-call syntax.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_builtin.vim:2620-2627` distinguishes E1013 in a
+  compiled `def` from E701 in Vim9 script for `len(true)` and lists accepted
+  value categories.
+- `src/testdir/test_functions.vim:123-131` covers Legacy E701 for Special and
+  Funcref arguments.
+- `src/evalfunc.c:8881-8925` implements the accepted runtime categories, and
+  `src/errors.h:1803-1804` defines the exact message.

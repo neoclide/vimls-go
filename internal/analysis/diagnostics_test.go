@@ -238,6 +238,20 @@ func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 			message:  "Dictionary required for argument 1",
 			argument: "[8, 9]",
 		},
+		{
+			name:     "script len argument",
+			source:   "vim9script\nlen(true)\n",
+			code:     "vim/E701",
+			message:  "Invalid type for len()",
+			argument: "true",
+		},
+		{
+			name:     "legacy len argument",
+			source:   "echo len(v:none)\n",
+			code:     "vim/E701",
+			message:  "Invalid type for len()",
+			argument: "v:none",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -266,9 +280,9 @@ func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 		})
 	}
 
-	positive := syntax.Parse("vim9script\nsubstitute('Hallo', 'a', 'e', '')\n{'a': 1}->keys()\n")
+	positive := syntax.Parse("vim9script\nsubstitute('Hallo', 'a', 'e', '')\n{'a': 1}->keys()\nlen(123)\n")
 	for _, diagnostic := range Analyze(positive).Diagnostics {
-		if diagnostic.Code == "vim/E1174" || diagnostic.Code == "vim/E1206" {
+		if diagnostic.Code == "vim/E701" || diagnostic.Code == "vim/E1174" || diagnostic.Code == "vim/E1206" {
 			t.Fatalf("valid builtin argument diagnostic = %#v", diagnostic)
 		}
 	}

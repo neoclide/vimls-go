@@ -2050,7 +2050,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		seen[expression] = true
 		if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
 			builtin, arguments, builtinCall := builtinCallArguments(result.File, expression)
-			if dialect == syntax.Vim9 && builtinCall {
+			if builtinCall && (dialect == syntax.Vim9 || builtin.Name == "len") {
 				actual := make([]ValueType, len(arguments))
 				for index, argument := range arguments {
 					actual[index] = result.TypeOf(argument)
@@ -2165,6 +2165,8 @@ func builtinArgumentDiagnostic(checker string, index int, span syntax.Span) (syn
 	checker = strings.TrimSuffix(checker, "_mod")
 	var code, required string
 	switch checker {
+	case "arg_len1":
+		return syntax.Diagnostic{Code: "vim/E701", Message: "Invalid type for len()", Span: span}, true
 	case "arg_string":
 		code, required = "vim/E1174", "String"
 	case "arg_dict_any":
