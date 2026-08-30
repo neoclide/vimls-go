@@ -663,9 +663,11 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 }
 
 type builtinArgumentType struct {
-	display     string
-	kinds       builtinValueKind
-	elementKind builtinValueKind
+	display           string
+	kinds             builtinValueKind
+	elementKind       builtinValueKind
+	functionArguments []ValueType
+	functionReturn    *ValueType
 }
 
 type builtinValueKind uint16
@@ -791,7 +793,11 @@ func builtinArgumentExpectation(checker string, actual []ValueType, index int) (
 	case "arg_string_or_func":
 		return makeType("string or function", builtinString|builtinFunc|builtinBool|builtinNumber)
 	case "arg_filter_func", "arg_map_func", "arg_foreach_func", "arg_sort_how":
-		return makeType("string or function", builtinString|builtinFunc)
+		expected, _ := makeType("string or function", builtinString|builtinFunc)
+		if len(actual) > 0 {
+			expected.functionArguments, expected.functionReturn = builtinCallbackSignature(actual[0], checker)
+		}
+		return expected, true
 	case "arg_bool_or_nr":
 		return makeType("bool or number", builtinBool|builtinNumber)
 	case "arg_bool_or_dict_any":
@@ -880,11 +886,65 @@ func builtinArgumentMismatch(actual ValueType, expected builtinArgumentType) boo
 	if expected.kinds&kind == 0 {
 		return true
 	}
+	if kind == builtinFunc && builtinFunctionSignatureMismatch(actual, expected) {
+		return true
+	}
 	if expected.elementKind == 0 || actual.Name == "string" || len(actual.Arguments) == 0 || isUnknownType(actual.Arguments[0]) {
 		return false
 	}
 	actualElement := builtinValueTypeKind(actual.Arguments[0])
 	return actualElement != 0 && expected.elementKind&actualElement == 0
+}
+
+func builtinCallbackSignature(container ValueType, checker string) ([]ValueType, *ValueType) {
+	index := ValueType{Name: "number"}
+	item := UnknownValueType
+	switch container.Name {
+	case "list", "dict":
+		if container.Name == "dict" {
+			index = ValueType{Name: "string"}
+		}
+		if len(container.Arguments) > 0 {
+			item = container.Arguments[0]
+		}
+	case "tuple":
+		item = indexedType(container)
+	case "string":
+		item = ValueType{Name: "string"}
+	case "blob":
+		item = ValueType{Name: "number"}
+	default:
+		return nil, nil
+	}
+	if checker == "arg_sort_how" {
+		result := ValueType{Name: "number"}
+		return []ValueType{item, item}, &result
+	}
+	var result *ValueType
+	switch checker {
+	case "arg_filter_func":
+		value := ValueType{Name: "bool"}
+		result = &value
+	case "arg_map_func":
+		value := item
+		result = &value
+	}
+	return []ValueType{index, item}, result
+}
+
+func builtinFunctionSignatureMismatch(actual ValueType, expected builtinArgumentType) bool {
+	if len(expected.functionArguments) == 0 || !actual.ArgumentCountKnown || actual.Variadic {
+		return false
+	}
+	if len(actual.Arguments) != len(expected.functionArguments) {
+		return true
+	}
+	for index := range expected.functionArguments {
+		if !compatibleTypes(actual.Arguments[index], expected.functionArguments[index]) {
+			return true
+		}
+	}
+	return expected.functionReturn != nil && actual.Return != nil && !compatibleTypes(*expected.functionReturn, *actual.Return)
 }
 
 func valueTypeDisplay(typ ValueType) string {
@@ -980,6 +1040,8 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
 					}
 				}
+			} else {
+				collectFunctionArgumentTypeDiagnostics(result, expression)
 			}
 		}
 		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
@@ -1017,6 +1079,29 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		}
 	}
 	walkCommands(commands, parent)
+}
+
+func collectFunctionArgumentTypeDiagnostics(result *FileAnalysis, call *syntax.Expression) {
+	if result == nil || call == nil || call.Value != "" || len(call.Children) == 0 {
+		return
+	}
+	callable := result.TypeOf(call.Children[0])
+	if callable.Name != "func" || !callable.ArgumentCountKnown {
+		return
+	}
+	arguments := call.Children[1:]
+	for index, argument := range arguments {
+		if index >= len(callable.Arguments) {
+			break
+		}
+		actual := result.TypeOf(argument)
+		if compatibleTypes(callable.Arguments[index], actual) {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(callable.Arguments[index]) + " but got " + valueTypeDisplay(actual), Span: argument.Span,
+		})
+	}
 }
 
 // collectBuiltinCallArityDiagnostic reports arity errors only where the

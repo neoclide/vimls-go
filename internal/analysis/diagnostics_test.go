@@ -23,14 +23,19 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 		{"builtin function result", "vim9script\ndef F()\n  foldclosed(function('min'))\nenddef\n", 1},
 		{"builtin channel result", "vim9script\ndef F()\n  map(test_null_channel(), '1')\nenddef\n", 1},
 		{"builtin void result", "vim9script\ndef F()\n  test_feedinput(test_void())\nenddef\n", 1},
+		{"filter callback parameter", "vim9script\ndef F()\n  var values = [1, 2]\n  filter(values, (i: string, v: number) => true)\nenddef\n", 1},
+		{"map callback return", "vim9script\ndef F()\n  var values: list<number> = [1, 2]\n  map(values, (_, v) => [])\nenddef\n", 1},
+		{"sort callback return", "vim9script\ndef F()\n  sort([1, 2], (a: number, b: number) => true)\nenddef\n", 1},
+		{"callback void return", "vim9script\ndef F()\n  def TestIdx(k: number, v: dict<any>)\n  enddef\n  indexof([{color: 'red'}], TestIdx)\nenddef\n", 1},
 		{"unknown argument", "vim9script\ndef F(value: any)\n  abs(value)\nenddef\n", 0},
 		{"incomplete call", "vim9script\ndef F()\n  len(\nenddef\n", 0},
 		{"legacy", "echo abs('x')\n", 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
 			var got int
-			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+			for _, diagnostic := range result.Diagnostics {
 				if diagnostic.Code == "vim/E1013" {
 					got++
 					if diagnostic.Span.Start >= diagnostic.Span.End || diagnostic.Message == "" {
@@ -39,9 +44,22 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 				}
 			}
 			if got != test.want {
-				t.Fatalf("E1013 diagnostics = %d, want %d; all diagnostics = %#v", got, test.want, Analyze(syntax.Parse(test.source)).Diagnostics)
+				t.Fatalf("E1013 diagnostics = %d, want %d; all diagnostics = %#v", got, test.want, result.Diagnostics)
 			}
 		})
+	}
+}
+
+func TestAnalyzeFunctionArgumentTypeDiagnostics(t *testing.T) {
+	source := "vim9script\ndef F()\n  var Ref = (x: number, y: number) => x + y\n  Ref(1, 'x')\n  Ref(1, 2)\nenddef\n"
+	var diagnostics []syntax.Diagnostic
+	for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+		if diagnostic.Code == "vim/E1013" {
+			diagnostics = append(diagnostics, diagnostic)
+		}
+	}
+	if len(diagnostics) != 1 || source[diagnostics[0].Span.Start:diagnostics[0].Span.End] != "'x'" {
+		t.Fatalf("E1013 diagnostics = %#v", diagnostics)
 	}
 }
 

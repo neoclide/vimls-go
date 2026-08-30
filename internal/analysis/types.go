@@ -11,9 +11,11 @@ import (
 // any is deliberate: Vim expressions are dynamic and an unknown fact must
 // never be turned into a guessed type.  Return is set for function values.
 type ValueType struct {
-	Name      string
-	Arguments []ValueType
-	Return    *ValueType
+	Name               string
+	Arguments          []ValueType
+	Return             *ValueType
+	ArgumentCountKnown bool
+	Variadic           bool
 }
 
 const ValueTypeAny = "any"
@@ -104,7 +106,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 					}
 				}
 				returnType := convertSyntaxType(command.Function.ReturnType)
-				declaration.Type = ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType)}
+				declaration.Type = ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, Variadic: parametersAreVariadic(command.Function.Parameters)}
 			}
 		}
 		state.collectLambdaFactsCommands(command.Expressions)
@@ -275,23 +277,27 @@ func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) 
 		if command.Function != nil && command.Function.ReturnType == nil {
 			declaration := state.declarations[command.Function.Name]
 			if declaration != nil && declaration.Type.Return != nil && isUnknownType(*declaration.Type.Return) {
-				block := command.Block
+				inferred := UnknownValueType
+				hasValueReturn := false
 				for bodyIndex := index + 1; bodyIndex < len(commands); bodyIndex++ {
 					body := &commands[bodyIndex]
-					if body.Block != block {
-						if body.Canonical == "endfunction" || body.Canonical == "enddef" {
-							break
-						}
-						continue
-					}
-					if body.Canonical == "return" && len(body.Expressions) > 0 {
-						typ := state.infer(body.Expressions[0], state.commandScopes[body])
-						if !isUnknownType(typ) {
-							declaration.Type.Return = valueTypePointer(typ)
-						}
+					if body.Canonical == "endfunction" || body.Canonical == "enddef" {
 						break
 					}
+					if body.Canonical == "return" && len(body.Expressions) > 0 {
+						hasValueReturn = true
+						current := state.infer(body.Expressions[0], state.commandScopes[body])
+						if isUnknownType(inferred) {
+							inferred = current
+						} else {
+							inferred = mergeTypes(inferred, current)
+						}
+					}
 				}
+				if !hasValueReturn {
+					inferred = ValueType{Name: "void"}
+				}
+				*declaration.Type.Return = inferred
 			}
 		}
 		if command.Embedded != nil {
@@ -596,7 +602,11 @@ func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) 
 			returnType = UnknownValueType
 		}
 	}
-	return ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType)}
+	return ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, Variadic: parametersAreVariadic(expression.Parameters)}
+}
+
+func parametersAreVariadic(parameters []syntax.Parameter) bool {
+	return len(parameters) > 0 && parameters[len(parameters)-1].Variadic
 }
 
 func (state *typeState) lambdaBodyReturnType(commands []syntax.Command, scope *Scope) ValueType {
@@ -626,7 +636,24 @@ func compatibleTypes(expected, actual ValueType) bool {
 	if isUnknownType(expected) || isUnknownType(actual) {
 		return true
 	}
-	return expected.Name == actual.Name && len(expected.Arguments) == len(actual.Arguments)
+	if (expected.Name == "float" && actual.Name == "number") || (expected.Name == "bool" && actual.Name == "number") {
+		return true
+	}
+	if expected.Name != actual.Name {
+		return false
+	}
+	if len(expected.Arguments) == 0 || len(actual.Arguments) == 0 {
+		return true
+	}
+	if len(expected.Arguments) != len(actual.Arguments) {
+		return false
+	}
+	for index := range expected.Arguments {
+		if !compatibleTypes(expected.Arguments[index], actual.Arguments[index]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (state *typeState) assign(expression *syntax.Expression, typ ValueType) {
@@ -705,7 +732,7 @@ func mergeTypes(left, right ValueType) ValueType {
 	if left.Name != right.Name || len(left.Arguments) != len(right.Arguments) {
 		return UnknownValueType
 	}
-	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...)}
+	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: left.ArgumentCountKnown && right.ArgumentCountKnown, Variadic: left.Variadic && right.Variadic}
 	for index := range result.Arguments {
 		result.Arguments[index] = mergeTypes(result.Arguments[index], right.Arguments[index])
 	}
