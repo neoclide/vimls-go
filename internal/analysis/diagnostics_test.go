@@ -4686,6 +4686,63 @@ func TestAnalyzeE1253ReduceReverseContainerDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1256BuiltinCallbackArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"sort zero script", "vim9script\nsort(['a', 'b'], 0)\n", "0"},
+		{"sort one script", "vim9script\nsort(['a', 'b'], 1)\n", "1"},
+		{"sort zero def", "vim9script\ndef Func()\n  sort(['a', 'b'], 0)\nenddef\n", "0"},
+		{"sort one def", "vim9script\ndef Func()\n  sort(['a', 'b'], 1)\nenddef\n", "1"},
+		{"filter number def", "vim9script\ndef Func()\n  filter([1], 1)\nenddef\n", "1"},
+		{"map number def", "vim9script\ndef Func()\n  map([1], 1)\nenddef\n", "1"},
+		{"block lambda", "vim9script\nvar Callback = () => {\n  map([1], 1)\n}\n", "1"},
+		{"foreach compiled", "vim9script\ndef Func()\n  foreach([1], 1)\nenddef\n", "1"},
+		{"uniq script", "vim9script\nuniq([1], 1)\n", "1"},
+		{"indexof script", "vim9script\nindexof([1], 1)\n", "1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1256" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1256 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "String or function required for argument 2" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1256 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"top-level filter keeps E1024", "vim9script\nfilter([1], 1)\n", "vim/E1024"},
+		{"top-level map keeps E1024", "vim9script\nmap([1], 1)\n", "vim/E1024"},
+		{"valid string function partial unknown", "vim9script\nsort([], '')\nsort([], (left, right) => 0)\nsort([], function('len', ['x']))\nsort([], Unknown)\n", ""},
+		{"function signature keeps E176", "vim9script\ndef Func()\n  filter([1], () => true)\nenddef\n", "vim/E176"},
+		{"arity ownership", "vim9script\nindexof([1])\n", "vim/E119"},
+		{"Legacy", "let value = sort([1], 1)\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1256" {
+					t.Fatalf("guard unexpectedly received E1256: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1216DigraphSetlistDiagnostics(t *testing.T) {
 	const message = "digraph_setlist() argument must be a list of lists with two items"
 	for _, test := range []struct{ name, source, span string }{

@@ -2442,6 +2442,38 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   allowed global-variable target.
 - `src/errors.h:3223-3224` defines the exact E1254 message.
 
+## String or function callback argument: E1256
+
+Analysis reports E1256 when a compiled Vim9 callback checker receives a
+statically known value that is neither a String nor a function or Partial.
+This covers `filter()`, `map()`, `foreach()`, `sort()`, and `uniq()` in a
+`def` or block lambda. Top-level Vim9 `sort()` and `uniq()` use the same code,
+as does `indexof()` because its runtime implementation checks the callback
+type directly. The diagnostic selects the invalid effective argument and
+includes its one-based index.
+
+Top-level `filter()` and `map()` still report E1024 when a Number must undergo
+strict String conversion. A callable with an incompatible signature retains
+its callback arity or type diagnostic rather than E1256. Valid String,
+function, Partial, and unknown values, ordinary arity failures, and Legacy
+calls keep their existing behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_listdict.vim:1022-1027` expects E1256 for `sort()` with
+  numeric callback selectors in both compiled and script contexts.
+- `src/testdir/test_vim9_builtin.vim:1563-1564,2713-2715` distinguishes
+  compiled E1256 from top-level E1024 for numeric `filter()` and `map()`
+  callback arguments.
+- `src/evalfunc.c:821-910` implements the native filter, map, foreach, and
+  sort callback checkers and emits E1256 only for a non-String, non-callable
+  value.
+- `src/list.c:2529-2541` applies the direct runtime check for `sort()` and
+  `uniq()`; `src/evalfunc.c:8435-8445` does the same for `indexof()`.
+- `runtime/doc/vim9.txt:2758-2782` documents the builtin argument check and
+  an E1256 `call()` example.
+- `src/errors.h:3229-3230` defines the exact E1256 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

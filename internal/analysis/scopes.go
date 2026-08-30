@@ -6102,6 +6102,16 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						if builtin.Name == "sign_undefine" && index == 0 && actual[index].Name == "list" && !scopeUsesDefTypeRules(scope) {
 							continue
 						}
+						trimmedChecker := strings.TrimSuffix(checker, "_mod")
+						compiledCallbackChecker := scopeUsesDefTypeRules(scope) &&
+							(trimmedChecker == "arg_filter_func" || trimmedChecker == "arg_map_func" || trimmedChecker == "arg_foreach_func" || trimmedChecker == "arg_sort_how")
+						runtimeCallbackChecker := !scopeUsesDefTypeRules(scope) && dialect == syntax.Vim9 &&
+							((trimmedChecker == "arg_sort_how" && (builtin.Name == "sort" || builtin.Name == "uniq")) ||
+								trimmedChecker == "arg_filter_func" && builtin.Name == "indexof")
+						if (compiledCallbackChecker || runtimeCallbackChecker) && !isUnknownType(actual[index]) && actual[index].Name != "string" && actual[index].Name != "func" && actual[index].Name != "partial" {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1256", Message: "String or function required for argument " + strconv.Itoa(index+1), Span: argument.Span})
+							continue
+						}
 						// Vim9 script compilation reports the historical E118 when
 						// indexof() will pass more arguments than a statically known
 						// callback accepts. A def uses E176 for the same mismatch, so
@@ -6147,7 +6157,6 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							})
 							continue
 						}
-						trimmedChecker := strings.TrimSuffix(checker, "_mod")
 						if !scopeUsesDefTypeRules(scope) && trimmedChecker == "arg_list_or_dict_or_blob_or_string" && actual[index].Name == "tuple" {
 							continue
 						}
