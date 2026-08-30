@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/chemzqm/vimls-go/internal/analysis"
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/analysis"
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 var (

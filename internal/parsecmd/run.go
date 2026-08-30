@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer, dialect syntax.Dialect) int {

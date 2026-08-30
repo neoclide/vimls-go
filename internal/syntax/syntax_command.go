@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/chemzqm/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 // scanSyntaxArgument gives the structured syntax item consumers their own Ex

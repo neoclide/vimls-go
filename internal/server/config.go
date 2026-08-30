@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chemzqm/vimls-go/internal/workspace"
+	"github.com/neoclide/vimls-go/internal/workspace"
 )
 
 const DefaultTargetVersion = "9.1.0000"

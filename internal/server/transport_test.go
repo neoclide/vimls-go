@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chemzqm/vimls-go/internal/jsonrpc"
+	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
 )
 

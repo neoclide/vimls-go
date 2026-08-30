@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/chemzqm/vimls-go/internal/server"
+	"github.com/neoclide/vimls-go/internal/server"
 )
 
 func main() {

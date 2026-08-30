@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chemzqm/vimls-go/tools/internal/vimhelp"
+	"github.com/neoclide/vimls-go/tools/internal/vimhelp"
 )
 
 const (

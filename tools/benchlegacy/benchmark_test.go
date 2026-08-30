@@ -14,8 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
-	"github.com/chemzqm/vimls-go/internal/workspace"
+	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/workspace"
 	oldast "github.com/vim-jp/go-vimlparser/ast"
 	oldparser "github.com/vim-jp/go-vimlparser/go"
 )

@@ -3,7 +3,7 @@ package syntax
 import (
 	"unicode/utf8"
 
-	"github.com/chemzqm/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 // parseSetCommand parses the small, syntax-only part of Vim's :set family.

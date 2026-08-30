@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 func TestCollectSymbolsBuildsDeclarationHierarchy(t *testing.T) {

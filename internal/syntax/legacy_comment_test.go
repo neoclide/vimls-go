@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chemzqm/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 func TestLegacyExpressionTrailingDoubleQuoteComments(t *testing.T) {

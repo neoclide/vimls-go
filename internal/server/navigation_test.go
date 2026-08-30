@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
-	"github.com/chemzqm/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

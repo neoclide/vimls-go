@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chemzqm/vimls-go/internal/jsonrpc"
-	"github.com/chemzqm/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/jsonrpc"
+	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 )
 

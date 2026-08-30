@@ -14,8 +14,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
-	"github.com/chemzqm/vimls-go/internal/workspace"
+	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/workspace"
 )
 
 var (

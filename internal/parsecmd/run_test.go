@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 func TestRunUsesIndependentDialectParser(t *testing.T) {

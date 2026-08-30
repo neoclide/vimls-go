@@ -3,8 +3,8 @@ package analysis
 import (
 	"strings"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
-	"github.com/chemzqm/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 // ValueType is the small, protocol-independent type fact used by analysis.

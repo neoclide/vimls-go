@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
-	"github.com/chemzqm/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 // FileAnalysis is the protocol-independent lexical information collected from

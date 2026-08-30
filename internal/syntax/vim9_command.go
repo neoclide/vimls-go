@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/chemzqm/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 // scanVim9CommandArgument follows Vim9 command consumers.  Vim9 comments,

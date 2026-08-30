@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

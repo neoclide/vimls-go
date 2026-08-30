@@ -1,4 +1,4 @@
-module github.com/chemzqm/vimls-go
+module github.com/neoclide/vimls-go
 
 go 1.26.0
 

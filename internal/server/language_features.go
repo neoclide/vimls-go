@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chemzqm/vimls-go/internal/analysis"
-	"github.com/chemzqm/vimls-go/internal/syntax"
-	"github.com/chemzqm/vimls-go/internal/vimdata"
-	"github.com/chemzqm/vimls-go/internal/workspace"
+	"github.com/neoclide/vimls-go/internal/analysis"
+	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

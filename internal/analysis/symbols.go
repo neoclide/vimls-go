@@ -5,7 +5,7 @@ package analysis
 import (
 	"strings"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 // SymbolKind identifies the source construct represented by a Symbol.  The

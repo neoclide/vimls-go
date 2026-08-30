@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 // ParseSources parses independent source snapshots with a bounded worker pool.

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chemzqm/vimls-go/internal/jsonrpc"
+	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	"go.lsp.dev/uri"
 )
 

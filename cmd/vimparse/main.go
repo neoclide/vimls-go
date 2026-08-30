@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
-	"github.com/chemzqm/vimls-go/internal/parsecmd"
-	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/parsecmd"
+	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
 func main() {
