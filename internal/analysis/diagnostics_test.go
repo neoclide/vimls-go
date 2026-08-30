@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -85,6 +86,59 @@ func TestAnalyzeTypeMismatchDiagnostics(t *testing.T) {
 		if got[index] != want[index] {
 			t.Fatalf("E1012 span[%d] = %q, want %q", index, got[index], want[index])
 		}
+	}
+}
+
+func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
+	source := "vim9script\n" +
+		"set ts=4 tabstop=4 tabs=4 nofutureoption t_ZZ=terminal\n" +
+		"var shortName = &ts\n" +
+		"var longName = &l:tabstop\n" +
+		"var boolName = &nu\n" +
+		"var stringName = &encoding\n" +
+		"var future = &futureoption\n" +
+		"var terminal = &t_ZZ\n" +
+		"&ts = [7]\n" +
+		"&futureoption = [7]\n" +
+		"&t_TI = 123\n"
+	file := syntax.Parse(source)
+	result := Analyze(file)
+
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Root.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	for name, want := range map[string]string{
+		"shortName": "number", "longName": "number", "boolName": "bool", "stringName": "string", "future": "any", "terminal": "string",
+	} {
+		if declaration := declarations[name]; declaration == nil || declaration.Type.Name != want {
+			t.Errorf("%s type = %#v, want %s", name, declaration, want)
+		}
+	}
+
+	var unknownSpans []string
+	var unknownMessages []string
+	var mismatchSpans []string
+	for _, diagnostic := range result.Diagnostics {
+		switch diagnostic.Code {
+		case syntax.DiagnosticUnknownOption:
+			unknownSpans = append(unknownSpans, file.Text(diagnostic.Span))
+			unknownMessages = append(unknownMessages, diagnostic.Message)
+		case "vim/E1012":
+			mismatchSpans = append(mismatchSpans, file.Text(diagnostic.Span))
+		}
+	}
+	wantUnknown := []string{"tabs", "futureoption", "&futureoption", "&futureoption"}
+	if !reflect.DeepEqual(unknownSpans, wantUnknown) {
+		t.Fatalf("unknown option spans = %#v, want %#v; diagnostics = %#v", unknownSpans, wantUnknown, result.Diagnostics)
+	}
+	wantMessages := []string{"Unknown option: tabs", "Unknown option: futureoption", "Unknown option: futureoption", "Unknown option: futureoption"}
+	if !reflect.DeepEqual(unknownMessages, wantMessages) {
+		t.Fatalf("unknown option messages = %#v, want %#v", unknownMessages, wantMessages)
+	}
+	wantMismatch := []string{"[7]", "123"}
+	if !reflect.DeepEqual(mismatchSpans, wantMismatch) {
+		t.Fatalf("E1012 spans = %#v, want %#v; diagnostics = %#v", mismatchSpans, wantMismatch, result.Diagnostics)
 	}
 }
 

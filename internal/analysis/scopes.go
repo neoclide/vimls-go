@@ -24,6 +24,7 @@ type FileAnalysis struct {
 	commandScopes   map[*syntax.Command]*Scope
 	lambdaScopes    map[*syntax.Expression]*Scope
 	lambdaBodies    map[*syntax.Expression]bool
+	unknownOptions  map[syntax.Span]bool
 }
 
 // Scope is a lexical region. Root has Block == -1 and an empty Kind. Other
@@ -82,6 +83,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	result.commandScopes = make(map[*syntax.Command]*Scope)
 	result.lambdaScopes = make(map[*syntax.Expression]*Scope)
 	result.lambdaBodies = make(map[*syntax.Expression]bool)
+	result.unknownOptions = make(map[syntax.Span]bool)
 	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
 	collectLambdaScopesCommands(result, root, file.Commands)
 
@@ -309,7 +311,16 @@ func assignmentTargetType(result *FileAnalysis, scope *Scope, target *syntax.Exp
 	}
 	switch target.Kind {
 	case syntax.ExpressionIdentifier:
-		if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") || terminalOptionName(target.Value) {
+		if strings.HasPrefix(target.Value, "&") {
+			if option, ok := vimdata.LookupOption(target.Value); ok {
+				return builtinOptionValueType(option)
+			}
+			if vimdata.IsTerminalOptionName(target.Value) {
+				return ValueType{Name: "string"}
+			}
+			return UnknownValueType
+		}
+		if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") {
 			return ValueType{Name: "string"}
 		}
 		return resolvedExpressionType(result, scope, target)
@@ -862,6 +873,11 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	if command == nil || scope == nil {
 		return
 	}
+	if command.Set != nil {
+		for _, option := range command.Set.Options {
+			appendUnknownOptionDiagnostic(result, file.Text(option.Name), option.Name)
+		}
+	}
 	if command.Function != nil {
 		functionScope := scope
 		if functionScope.Block >= 0 && functionScope.Kind != syntax.BlockFunction && functionScope.Kind != syntax.BlockDef {
@@ -926,6 +942,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 	switch expression.Kind {
 	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
+			if strings.HasPrefix(expression.Value, "&") {
+				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
+			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped)
 			result.References = append(result.References, &Reference{
 				Name: expression.Value, Span: expression.Span,
@@ -996,6 +1015,33 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	}
+}
+
+func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span) {
+	if result == nil || name == "" || span.End <= span.Start || result.unknownOptions[span] {
+		return
+	}
+	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsTerminalOptionName(name) {
+		return
+	}
+	display := name
+	if strings.HasPrefix(display, "&") {
+		display = display[1:]
+		if strings.HasPrefix(display, "g:") || strings.HasPrefix(display, "l:") {
+			display = display[2:]
+		}
+	}
+	if display == "" || display == "all" || display == "termcap" {
+		return
+	}
+	definition, ok := syntax.LookupVimlsDiagnostic(syntax.DiagnosticUnknownOption)
+	if !ok {
+		return
+	}
+	result.unknownOptions[span] = true
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: definition.Code, Message: definition.Message + ": " + display, Span: span,
+	})
 }
 
 type builtinArgumentType struct {

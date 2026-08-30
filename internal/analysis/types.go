@@ -351,7 +351,15 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		case "null_tuple":
 			typ = ValueType{Name: "tuple"}
 		default:
-			if strings.HasPrefix(expression.Value, "$") || strings.HasPrefix(expression.Value, "@") || terminalOptionName(expression.Value) {
+			if strings.HasPrefix(expression.Value, "&") {
+				if option, ok := vimdata.LookupOption(expression.Value); ok {
+					typ = builtinOptionValueType(option)
+				} else if vimdata.IsTerminalOptionName(expression.Value) {
+					typ = ValueType{Name: "string"}
+				} else {
+					typ = unknown
+				}
+			} else if strings.HasPrefix(expression.Value, "$") || strings.HasPrefix(expression.Value, "@") {
 				typ = ValueType{Name: "string"}
 			} else if variable, ok := vimdata.LookupVariable(expression.Value); ok {
 				typ = builtinVariableValueType(variable)
@@ -478,15 +486,6 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	return typ
 }
 
-func terminalOptionName(name string) bool {
-	if !strings.HasPrefix(name, "&") {
-		return false
-	}
-	name = strings.TrimPrefix(name[1:], "l:")
-	name = strings.TrimPrefix(name, "g:")
-	return strings.HasPrefix(name, "t_")
-}
-
 func builtinVariableValueType(variable vimdata.Variable) ValueType {
 	switch variable.Type {
 	case "number", "string", "bool":
@@ -505,6 +504,19 @@ func builtinVariableValueType(variable vimdata.Variable) ValueType {
 		}
 	}
 	return UnknownValueType
+}
+
+func builtinOptionValueType(option vimdata.Option) ValueType {
+	switch option.Type {
+	case vimdata.OptionBool:
+		return ValueType{Name: "bool"}
+	case vimdata.OptionNumber:
+		return ValueType{Name: "number"}
+	case vimdata.OptionString:
+		return ValueType{Name: "string"}
+	default:
+		return UnknownValueType
+	}
 }
 
 func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType) ValueType {
