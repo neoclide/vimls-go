@@ -21,8 +21,6 @@ type DiagnosticDefinition struct {
 	Severity DiagnosticSeverity
 }
 
-const DiagnosticUnknownOption = "vimls/unknown-option"
-
 // VimlsDiagnosticDefinitions is the complete, code-sorted list of diagnostics
 // owned by vimls-go. Keep entries here even when their messages are refined at
 // the emission site for a specific delimiter, command, or target version.
@@ -56,7 +54,6 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/unexpected-branch", Message: "branch command has no matching block", Severity: DiagnosticError},
 	{Code: "vimls/unexpected-end", Message: "end command has no matching block", Severity: DiagnosticError},
 	{Code: "vimls/unexpected-token", Message: "unexpected token in expression", Severity: DiagnosticError},
-	{Code: DiagnosticUnknownOption, Message: "Unknown option", Severity: DiagnosticWarning},
 }
 
 // LookupVimlsDiagnostic returns metadata for a vimls-owned diagnostic code.

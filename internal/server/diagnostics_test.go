@@ -14,10 +14,7 @@ import (
 )
 
 func TestProtocolDiagnosticSeverity(t *testing.T) {
-	if got := protocolDiagnosticSeverity(syntax.DiagnosticUnknownOption); got != protocol.DiagnosticSeverityWarning {
-		t.Fatalf("unknown-option severity = %v, want warning", got)
-	}
-	for _, code := range []string{"vimls/missing-end", "vim/E1012", "future/source"} {
+	for _, code := range []string{"vimls/missing-end", "vim/E113", "vim/E518", "vim/E1012", "future/source"} {
 		if got := protocolDiagnosticSeverity(code); got != protocol.DiagnosticSeverityError {
 			t.Errorf("%s severity = %v, want error", code, got)
 		}

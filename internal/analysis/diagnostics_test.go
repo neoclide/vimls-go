@@ -332,12 +332,14 @@ func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 	}
 
 	var unknownSpans []string
+	var unknownCodes []string
 	var unknownMessages []string
 	var mismatchSpans []string
 	for _, diagnostic := range result.Diagnostics {
 		switch diagnostic.Code {
-		case syntax.DiagnosticUnknownOption:
+		case "vim/E113", "vim/E518":
 			unknownSpans = append(unknownSpans, file.Text(diagnostic.Span))
+			unknownCodes = append(unknownCodes, diagnostic.Code)
 			unknownMessages = append(unknownMessages, diagnostic.Message)
 		case "vim/E1012":
 			mismatchSpans = append(mismatchSpans, file.Text(diagnostic.Span))
@@ -347,6 +349,10 @@ func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 	if !reflect.DeepEqual(unknownSpans, wantUnknown) {
 		t.Fatalf("unknown option spans = %#v, want %#v; diagnostics = %#v", unknownSpans, wantUnknown, result.Diagnostics)
 	}
+	wantCodes := []string{"vim/E518", "vim/E518", "vim/E113", "vim/E113"}
+	if !reflect.DeepEqual(unknownCodes, wantCodes) {
+		t.Fatalf("unknown option codes = %#v, want %#v", unknownCodes, wantCodes)
+	}
 	wantMessages := []string{"Unknown option: tabs", "Unknown option: futureoption", "Unknown option: futureoption", "Unknown option: futureoption"}
 	if !reflect.DeepEqual(unknownMessages, wantMessages) {
 		t.Fatalf("unknown option messages = %#v, want %#v", unknownMessages, wantMessages)
@@ -354,6 +360,32 @@ func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 	wantMismatch := []string{"[7]", "123"}
 	if !reflect.DeepEqual(mismatchSpans, wantMismatch) {
 		t.Fatalf("E1012 spans = %#v, want %#v; diagnostics = %#v", mismatchSpans, wantMismatch, result.Diagnostics)
+	}
+}
+
+func TestAnalyzeLegacyUnknownOptionDiagnostics(t *testing.T) {
+	source := "let value = &missingopt\nset missingopt\nsetlocal anothermissing\nlet &missingopt = 1\nlet terminal = &t_runtime\n"
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	want := []syntax.Diagnostic{
+		{Code: "vim/E113", Message: "Unknown option: missingopt"},
+		{Code: "vim/E518", Message: "Unknown option: missingopt"},
+		{Code: "vim/E518", Message: "Unknown option: anothermissing"},
+		{Code: "vim/E113", Message: "Unknown option: missingopt"},
+	}
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E113" || diagnostic.Code == "vim/E518" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("unknown option diagnostics = %#v, want %#v; all diagnostics = %#v", got, want, result.Diagnostics)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Code != want[index].Code || diagnostic.Message != want[index].Message {
+			t.Fatalf("diagnostic[%d] = %#v, want %#v", index, diagnostic, want[index])
+		}
 	}
 }
 

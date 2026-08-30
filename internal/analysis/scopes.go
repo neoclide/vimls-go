@@ -1406,7 +1406,7 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	}
 	if command.Set != nil {
 		for _, option := range command.Set.Options {
-			appendUnknownOptionDiagnostic(result, file.Text(option.Name), option.Name)
+			appendUnknownSetOptionDiagnostic(result, file.Text(option.Name), option.Name)
 		}
 	}
 	if command.Function != nil {
@@ -1609,11 +1609,31 @@ func assignmentTargetNeedsDeclaration(name string) bool {
 }
 
 func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span) {
-	if result == nil || name == "" || span.End <= span.Start || result.unknownOptions[span] {
+	display, ok := unknownOptionDisplay(result, name, span)
+	if !ok {
 		return
 	}
-	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsTerminalOptionName(name) {
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E113", Message: "Unknown option: " + display, Span: span,
+	})
+}
+
+func appendUnknownSetOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span) {
+	display, ok := unknownOptionDisplay(result, name, span)
+	if !ok {
 		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E518", Message: "Unknown option: " + display, Span: span,
+	})
+}
+
+func unknownOptionDisplay(result *FileAnalysis, name string, span syntax.Span) (string, bool) {
+	if result == nil || name == "" || span.End <= span.Start || result.unknownOptions[span] {
+		return "", false
+	}
+	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsTerminalOptionName(name) {
+		return "", false
 	}
 	display := name
 	if strings.HasPrefix(display, "&") {
@@ -1623,16 +1643,10 @@ func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span synta
 		}
 	}
 	if display == "" || display == "all" || display == "termcap" {
-		return
-	}
-	definition, ok := syntax.LookupVimlsDiagnostic(syntax.DiagnosticUnknownOption)
-	if !ok {
-		return
+		return "", false
 	}
 	result.unknownOptions[span] = true
-	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-		Code: definition.Code, Message: definition.Message + ": " + display, Span: span,
-	})
+	return display, true
 }
 
 type builtinArgumentType struct {

@@ -22,10 +22,6 @@ func TestVimlsDiagnosticDefinitions(t *testing.T) {
 		previous = definition.Code
 	}
 
-	unknown, ok := LookupVimlsDiagnostic(DiagnosticUnknownOption)
-	if !ok || unknown.Message != "Unknown option" || unknown.Severity != DiagnosticWarning {
-		t.Fatalf("unknown-option definition = %#v, %v", unknown, ok)
-	}
 	if _, ok := LookupVimlsDiagnostic("vim/E1012"); ok {
 		t.Fatal("Vim error unexpectedly appeared in the vimls diagnostic catalog")
 	}

@@ -8,6 +8,33 @@ values remain `unknown`.
 
 The evidence below is pinned to Vim 9.2.1015.
 
+## Unknown options: E113 and E518
+
+Vim uses different native error codes for an unknown option according to the
+syntax that performs the lookup.
+
+| Code | Static context | Message |
+| --- | --- | --- |
+| `E113` | An option expression or assignment such as `&missing`, `&g:missing`, or `&l:missing` | `Unknown option: {name}` |
+| `E518` | An operand of `:set`, `:setlocal`, or `:setglobal` | `Unknown option: {name}` |
+
+Both codes predate Vim9 script and remain in use there. The analyzer resolves
+documented long and short option names from the pinned Vim option table. An
+unknown `t_` terminal option remains conservative `unknown`, because terminal
+codes can be created or removed at runtime and vary by build and terminal.
+
+The previous internal `vimls/unknown-option` warning is not used for these
+cases. Proven option failures use Vim's native error code and error severity.
+
+Representative source evidence:
+
+- `src/errors.h:274-277` defines E113; `src/testdir/test_let.vim:279-283`
+  covers legacy option expressions.
+- `src/testdir/test_vim9_assign.vim:188,1589` and
+  `src/testdir/test_vim9_expr.vim:4173` show that Vim9 retains E113.
+- `src/errors.h:1313-1316` defines E518; `src/testdir/test_options.vim:885-905`
+  covers unknown operands for all three `:set` variants.
+
 ## Function argument count: E118 and E119
 
 E118 and E119 predate Vim9 script, but Vim still uses them in both legacy Vim
