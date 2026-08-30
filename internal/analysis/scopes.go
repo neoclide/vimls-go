@@ -101,6 +101,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks)
 	collectArgumentRedeclarationDiagnostics(result)
 	collectVim9RedeclarationDiagnostics(result)
+	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
 
 	sortDeclarations(result)
@@ -125,6 +126,43 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+// collectVim9NameAlreadyDefinedDiagnostics covers Vim9 :def and :import names.
+// Other declaration kinds retain their specific redeclaration diagnostics.
+func collectVim9NameAlreadyDefinedDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.File == nil || result.File.Dialect != syntax.Vim9 {
+		return
+	}
+	eligible := make(map[syntax.Span]bool)
+	var collect func([]syntax.Command)
+	collect = func(items []syntax.Command) {
+		for index := range items {
+			command := &items[index]
+			if command.Dialect == syntax.Vim9 {
+				if command.Canonical == "def" && command.Function != nil && !emptySyntaxSpan(command.Function.Name) {
+					eligible[command.Function.Name] = true
+				}
+				if command.Import != nil && !emptySyntaxSpan(command.Import.Alias) {
+					eligible[command.Import.Alias] = true
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(commands)
+	for _, declaration := range result.Declarations {
+		if declaration == nil || declaration.Scope == nil || !eligible[declaration.Span] {
+			continue
+		}
+		if resolve(declaration.Scope, declaration.Name, declaration.Span.Start, false, nil) != nil {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1073", Message: "Name already defined: " + declaration.Name, Span: declaration.Span,
+			})
+		}
+	}
 }
 
 func collectVim9RedeclarationDiagnostics(result *FileAnalysis) {

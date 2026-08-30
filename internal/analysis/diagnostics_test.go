@@ -726,6 +726,37 @@ func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1073NameAlreadyDefined(t *testing.T) {
+	tests := []struct {
+		name, source, text string
+		want               int
+	}{
+		{"nested defs", "vim9script\ndef Outer()\n  def Inner()\n  enddef\n  def Inner()\n  enddef\nenddef\n", "Inner", 1},
+		{"parameter and nested def", "vim9script\ndef Outer(Ref: number)\n  def Ref()\n  enddef\nenddef\n", "Ref", 1},
+		{"local and nested def", "vim9script\ndef Outer()\n  var Inner = 1\n  def Inner()\n  enddef\nenddef\n", "Inner", 1},
+		{"script defs", "vim9script\ndef Func()\nenddef\ndef Func()\nenddef\n", "Func", 1},
+		{"script and nested def", "vim9script\ndef Func()\nenddef\ndef Outer()\n  def Func()\n  enddef\nenddef\n", "Func", 1},
+		{"import alias", "vim9script\nimport autoload 'one.vim' as one\nimport autoload 'two.vim' as one\n", "one", 1},
+		{"variable and import alias", "vim9script\nvar one = 1\nimport autoload 'one.vim' as one\n", "one", 1},
+		{"different functions", "vim9script\ndef A()\n  def Inner()\n  enddef\nenddef\ndef B()\n  def Inner()\n  enddef\nenddef\n", "Inner", 0},
+		{"legacy", "def Outer()\n  def Inner()\n  enddef\n  def Inner()\n  enddef\nenddef\n", "Inner", 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1073" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want || test.want == 1 && (got[0].Message != "Name already defined: "+test.text || file.Text(got[0].Span) != test.text) {
+				t.Fatalf("E1073 diagnostics = %#v", got)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1093DestructuringCardinality(t *testing.T) {
 	tests := []struct {
 		name      string
