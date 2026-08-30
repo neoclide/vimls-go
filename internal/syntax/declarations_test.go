@@ -534,6 +534,37 @@ func TestVim9ImportInvalidAliasDiagnostics(t *testing.T) {
 	}
 }
 
+func TestVim9ImportPathDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, code, message, path string
+	}{
+		{"vim script requires alias", "vim9script\nimport './Ximport/.vim'\nvar after = 1\n", "vim/E1261", `Cannot import .vim without using "as"`, "'./Ximport/.vim'"},
+		{"non vim script requires alias or suffix", "vim9script\nimport './module'\nvar after = 1\n", "vim/E1257", `Imported script must use "as" or end in .vim: module`, "'./module'"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Message != test.message || file.Text(file.Diagnostics[0].Span) != test.path {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) != 3 || file.Commands[1].Import == nil || file.Commands[2].Declaration == nil {
+				t.Fatalf("recovery = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+	for _, source := range []string{
+		"import './module.vim'\nlet after = 1\n",
+		"vim9script\nlegacy import './module.vim'\nvar after = 1\n",
+		"vim9script\nimport './module.vim' as module\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1257") || hasDiagnostic(file, "vim/E1261") {
+			t.Fatalf("unexpected import diagnostic = %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestDestructuringDeclarationsAndForLoop(t *testing.T) {
 	file := Parse("vim9script\nvar [first: number, second; rest] = values\nfor [key, value] in items\n  echo key value\nendfor\n")
 	if len(file.Diagnostics) != 0 {

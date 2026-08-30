@@ -67,18 +67,19 @@ func parseFunctionSignature(file *File, command *Command) {
 			directAggregateMethod = parent == BlockClass || parent == BlockInterface || parent == BlockEnum
 		}
 	}
-	// Vim9 rejects an underscore-leading script function and requires a
-	// g:-qualified name to begin with an ASCII capital.  Direct object-type
+	// Vim9 script function names begin with an ASCII capital. Direct object-type
 	// methods use different grammar, including private underscore names.
 	if command.Dialect == Vim9 && !directAggregateMethod {
 		name := source[nameStart:offset]
-		invalid := strings.HasPrefix(name, "_")
+		capital := name[0]
+		checkCapital := !strings.Contains(name, ":")
 		if strings.HasPrefix(name, "g:") && len(name) > 2 {
-			invalid = name[2] < 'A' || name[2] > 'Z'
+			capital = name[2]
+			checkCapital = true
 		}
-		if invalid {
+		if checkCapital && (capital < 'A' || capital > 'Z') {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E1267", Message: "function name must start with a capital letter",
+				Code: "vim/E1267", Message: "Function name must start with a capital: " + name,
 				Span: function.Name,
 			})
 		}

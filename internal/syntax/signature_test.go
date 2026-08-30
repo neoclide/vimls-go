@@ -17,6 +17,32 @@ func TestVim9NestedUnsupportedFunctionNamespaces(t *testing.T) {
 	}
 }
 
+func TestVim9FunctionNameCapitalDiagnostic(t *testing.T) {
+	for _, name := range []string{"_Foo", "lower", "g:globalFunc"} {
+		t.Run(name, func(t *testing.T) {
+			file := Parse("vim9script\ndef " + name + "()\nenddef\nvar after = 1\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1267" || file.Diagnostics[0].Message != "Function name must start with a capital: "+name || file.Text(file.Diagnostics[0].Span) != name {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\ndef Func()\nenddef\n",
+		"vim9script\ndef g:GlobalFunc()\nenddef\n",
+		"vim9script\nclass Thing\n  def _Foo()\n  enddef\nendclass\n",
+		"def _Foo()\nenddef\nlet after = 1\n",
+		"vim9script\nlegacy def _Foo()\nenddef\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1267") {
+			t.Fatalf("unexpected E1267: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestParsesVim9GenericFunctionSignature(t *testing.T) {
 	file := (Vim9Parser{}).Parse("def Zip<T, U>(first: list<T>, second: list<U> = []): list<tuple<T, U>>\nenddef\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 {

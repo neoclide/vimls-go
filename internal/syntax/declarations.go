@@ -48,10 +48,11 @@ func parseImport(file *File, command *Command) {
 			if separator := strings.LastIndexAny(path, "/\\"); separator >= 0 {
 				tail = path[separator+1:]
 			}
-			if tail == ".vim" {
+			extension := strings.Index(tail, ".vim")
+			if extension == 0 && extension+len(".vim") == len(tail) {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1261", Message: `Cannot import .vim without using "as"`, Span: importNode.PathSpan})
-			} else if !strings.HasSuffix(path, ".vim") {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1257", Message: `Imported script must use "as" or end in .vim: ` + literal, Span: importNode.PathSpan})
+			} else if extension < 0 || extension+len(".vim") != len(tail) {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1257", Message: `Imported script must use "as" or end in .vim: ` + tail, Span: importNode.PathSpan})
 			}
 		}
 	}
