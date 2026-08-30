@@ -1207,6 +1207,37 @@ func TestVim9InterfaceFinalReportsE1408(t *testing.T) {
 	}
 }
 
+func TestVim9InterfaceAbstractReportsE1404(t *testing.T) {
+	for name, member := range map[string]string{
+		"method":          "abstract def Foo()\n  enddef",
+		"static method":   "abstract static def Foo()\n  enddef",
+		"static variable": "abstract static foo: number = 10",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := Parse("vim9script\ninterface A\n  " + member + "\nendinterface\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1404" || file.Diagnostics[0].Message != "Abstract cannot be used in an interface" || file.Text(file.Diagnostics[0].Span) != "abstract" {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockInterface || file.Blocks[0].End < 0 {
+				t.Fatalf("blocks = %#v, commands = %#v", file.Blocks, file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	for name, source := range map[string]string{
+		"interface method": "vim9script\ninterface A\n  def Foo()\n  enddef\nendinterface\n",
+		"abstract class":   "vim9script\nabstract class A\n  abstract def Foo()\n  enddef\nendclass\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := Parse(source)
+			if hasDiagnostic(file, "vim/E1404") {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +

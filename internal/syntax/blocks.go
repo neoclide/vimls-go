@@ -135,6 +135,16 @@ func buildBlocks(file *File) {
 				}
 			}
 			if file.Blocks[blockIndex].Kind == BlockInterface && command.Canonical != "endclass" {
+				for _, modifier := range command.Modifiers {
+					if modifier.Name == "abstract" {
+						command.Block = blockIndex
+						command.detailsOpaque = true
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{
+							Code: "vim/E1404", Message: "Abstract cannot be used in an interface", Span: modifier.Span,
+						})
+						break
+					}
+				}
 				if command.Canonical == "final" || command.Canonical == "const" {
 					static := false
 					for _, modifier := range command.Modifiers {
