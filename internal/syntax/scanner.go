@@ -2600,6 +2600,20 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		return
 	}
+	if command.Dialect == Vim9 && command.Canonical == "disassemble" {
+		// Vim9 disassemble accepts a generic function reference as its sole
+		// argument.  Keep ordinary names opaque: only attach the expression
+		// when the parser actually recognizes a generic reference/call.
+		trimmed := strings.TrimSpace(source)
+		if strings.Contains(trimmed, "<") {
+			target, diagnostics, _ := parseExpressionPrefixWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
+			if target != nil && (target.Kind == ExpressionGenericReference || target.Kind == ExpressionCall) && (len(target.TypeArguments) > 0 || target.Kind == ExpressionGenericReference) {
+				command.Targets = append(command.Targets, target)
+				file.Diagnostics = append(file.Diagnostics, diagnostics...)
+			}
+		}
+		return
+	}
 	if command.Canonical == "command" {
 		if diagnoseUserCommandAttributes(file, command) {
 			// The name and its immediately attached '#' are one invalid
