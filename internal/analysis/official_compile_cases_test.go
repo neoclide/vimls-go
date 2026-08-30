@@ -110,6 +110,18 @@ func TestOfficialVimCompileCases(t *testing.T) {
 	}
 }
 
+func TestOfficialVimCompileStaticAnalysisExclusions(t *testing.T) {
+	supported := officialCompileSupportedCodes()
+	for code, reason := range officialCompileStaticAnalysisExcludedCodes {
+		if reason == "" {
+			t.Fatalf("static-analysis exclusion %s has no reason", code)
+		}
+		if supported[code] {
+			t.Fatalf("static-analysis exclusion %s is also marked supported", code)
+		}
+	}
+}
+
 func TestOfficialVimCompileFailureTriage(t *testing.T) {
 	if strings.TrimSpace(*officialCompileCaseFilter) == "" {
 		t.Skip("use -args -official-compile-case=<path,line,code,all> to select cases")
@@ -230,6 +242,7 @@ func officialCompileSupportedCodes() map[string]bool {
 		"vim/E1007": true,
 		"vim/E1008": true,
 		"vim/E1009": true,
+		"vim/E1013": true,
 		"vim/E1018": true,
 		"vim/E1021": true,
 		"vim/E1022": true,
@@ -275,17 +288,44 @@ func officialCompileSupportedCodes() map[string]bool {
 	}
 }
 
+// These compiler errors are intentionally outside pure language-server
+// analysis. Keep the reasons beside the official coverage gate so future
+// implementation batches do not treat them as missing syntax/type work.
+var officialCompileStaticAnalysisExcludedCodes = map[string]string{
+	"vim/E1028": "compiler fallback after another compilation failure",
+	"vim/E1146": "internal command-dispatch fallback",
+	"vim/E1154": "requires compile-time constant evaluation",
+	"vim/E1191": "depends on another function's lazy compiler state",
+	"vim/E1271": "internal closure compiler invariant",
+	"vim/E1277": "depends on Vim build features",
+	"vim/E1362": "depends on compile-time object evaluation",
+	"vim/E1412": "internal builtin object-method fallback",
+	"vim/E1413": "internal builtin class-method fallback",
+}
+
+var officialCompileContexts = map[string]string{
+	"src/testdir/test_vim9_func.vim:1706:37318/defcompile": "def g:FilterWithCond(x: string, Cond: func(string): bool): bool\n  return Cond(x)\nenddef\n",
+	"src/testdir/test_vim9_func.vim:1949:43074/defcompile": "def g:MyDefVarargs(one: string, two = 'foo', ...rest: list<string>)\nenddef\n",
+	"src/testdir/test_vim9_func.vim:1951:43200/defcompile": "def g:MyDefVarargs(one: string, two = 'foo', ...rest: list<string>)\nenddef\n",
+	"src/testdir/test_vim9_func.vim:2099:46590/defcompile": "def g:MyVarargsOnly(...args: list<string>)\nenddef\n",
+	"src/testdir/test_vim9_func.vim:2100:46703/defcompile": "def g:MyVarargsOnly(...args: list<string>)\nenddef\n",
+}
+
 func analyzeOfficialCompileSource(t *testing.T, record officialCompileRecord) []syntax.Diagnostic {
 	t.Helper()
-	file := syntax.Parse(record.Source)
-	if file.Source != record.Source || len(file.Commands) == 0 {
+	source := record.Source + officialCompileContexts[record.ID]
+	file := syntax.Parse(source)
+	if file.Source != source || len(file.Commands) == 0 {
 		t.Fatalf("%s: parser did not retain official compile source", record.ID)
 	}
 	diagnostics := append([]syntax.Diagnostic(nil), file.Diagnostics...)
 	diagnostics = append(diagnostics, Analyze(file).Diagnostics...)
 	for _, diagnostic := range diagnostics {
-		if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(record.Source) {
+		if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(source) {
 			t.Fatalf("%s: out-of-bounds diagnostic %#v", record.ID, diagnostic)
+		}
+		if source != record.Source && diagnostic.Span.Start >= len(record.Source) {
+			t.Fatalf("%s: invalid restored context diagnostic %#v", record.ID, diagnostic)
 		}
 	}
 	return diagnostics

@@ -51,15 +51,21 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 }
 
 func TestAnalyzeFunctionArgumentTypeDiagnostics(t *testing.T) {
-	source := "vim9script\ndef F()\n  var Ref = (x: number, y: number) => x + y\n  Ref(1, 'x')\n  Ref(1, 2)\nenddef\n"
+	source := "vim9script\ndef Filter(x: string, Cond: func(string): bool): bool\n  return Cond(x)\nenddef\ndef Defaults(one: string, two = 'foo', ...rest: list<string>)\nenddef\ndef Varargs(...args: list<string>)\nenddef\ndef F()\n  var Ref = (x: number, y: number) => x + y\n  Ref(1, 'lambda')\n  Ref(1, 2)\n  Filter('foo', (v) => v .. '^b')\n  Defaults('one', 22)\n  Defaults('one', 'two', 123)\n  Varargs(1)\n  Varargs('one', 2)\nenddef\n"
 	var diagnostics []syntax.Diagnostic
 	for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
 		if diagnostic.Code == "vim/E1013" {
 			diagnostics = append(diagnostics, diagnostic)
 		}
 	}
-	if len(diagnostics) != 1 || source[diagnostics[0].Span.Start:diagnostics[0].Span.End] != "'x'" {
+	want := []string{"'lambda'", "(v) => v .. '^b'", "22", "123", "1", "2"}
+	if len(diagnostics) != len(want) {
 		t.Fatalf("E1013 diagnostics = %#v", diagnostics)
+	}
+	for index, diagnostic := range diagnostics {
+		if got := source[diagnostic.Span.Start:diagnostic.Span.End]; got != want[index] {
+			t.Fatalf("E1013[%d] span = %q, want %q; diagnostics = %#v", index, got, want[index], diagnostics)
+		}
 	}
 }
 

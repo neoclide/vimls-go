@@ -184,6 +184,7 @@ func (state *typeState) walkCommands() {
 }
 
 func (state *typeState) walkCommandList(commands []syntax.Command) {
+	file := state.result.File
 	for index := range commands {
 		command := &commands[index]
 		scope := state.commandScopes[command]
@@ -209,9 +210,16 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 			}
 		}
 		if command.Function != nil {
-			for _, parameter := range command.Function.Parameters {
+			functionDeclaration := state.declarations[command.Function.Name]
+			for parameterIndex, parameter := range command.Function.Parameters {
 				if parameter.Default != nil {
-					state.infer(parameter.Default, scope)
+					defaultType := state.infer(parameter.Default, scope)
+					if functionDeclaration != nil && parameterIndex < len(functionDeclaration.Type.Arguments) && isUnknownType(functionDeclaration.Type.Arguments[parameterIndex]) && !isUnknownType(defaultType) {
+						functionDeclaration.Type.Arguments[parameterIndex] = defaultType
+					}
+					if parameterDeclaration := state.declarations[parameterDeclarationSpan(file, parameter)]; parameterDeclaration != nil && isUnknownType(parameterDeclaration.Type) && !isUnknownType(defaultType) {
+						parameterDeclaration.Type = defaultType
+					}
 				}
 			}
 		}
@@ -642,6 +650,9 @@ func compatibleTypes(expected, actual ValueType) bool {
 	if expected.Name != actual.Name {
 		return false
 	}
+	if expected.Return != nil && actual.Return != nil && !compatibleTypes(*expected.Return, *actual.Return) {
+		return false
+	}
 	if len(expected.Arguments) == 0 || len(actual.Arguments) == 0 {
 		return true
 	}
@@ -688,9 +699,18 @@ func convertSyntaxType(typeNode *syntax.Type) ValueType {
 	if typeNode == nil || typeNode.Kind == syntax.TypeMissing || typeNode.Name == "" {
 		return UnknownValueType
 	}
-	typ := ValueType{Name: typeNode.Name}
+	if typeNode.Kind == syntax.TypeOptional || typeNode.Kind == syntax.TypeVariadic {
+		if len(typeNode.Arguments) == 0 {
+			return UnknownValueType
+		}
+		return convertSyntaxType(typeNode.Arguments[0])
+	}
+	typ := ValueType{Name: typeNode.Name, ArgumentCountKnown: typeNode.Kind == syntax.TypeFunction}
 	for _, argument := range typeNode.Arguments {
 		typ.Arguments = append(typ.Arguments, convertSyntaxType(argument))
+	}
+	if typeNode.Kind == syntax.TypeFunction && len(typeNode.Arguments) > 0 {
+		typ.Variadic = typeNode.Arguments[len(typeNode.Arguments)-1].Kind == syntax.TypeVariadic
 	}
 	if typeNode.ReturnType != nil {
 		typ.Return = valueTypePointer(convertSyntaxType(typeNode.ReturnType))

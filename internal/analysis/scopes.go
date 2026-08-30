@@ -1176,15 +1176,23 @@ func collectFunctionArgumentTypeDiagnostics(result *FileAnalysis, call *syntax.E
 	}
 	arguments := call.Children[1:]
 	for index, argument := range arguments {
-		if index >= len(callable.Arguments) {
-			break
+		expectedIndex := index
+		if expectedIndex >= len(callable.Arguments) {
+			if !callable.Variadic || len(callable.Arguments) == 0 {
+				break
+			}
+			expectedIndex = len(callable.Arguments) - 1
+		}
+		expected := callable.Arguments[expectedIndex]
+		if callable.Variadic && expectedIndex == len(callable.Arguments)-1 {
+			expected = indexedType(expected)
 		}
 		actual := result.TypeOf(argument)
-		if compatibleTypes(callable.Arguments[index], actual) {
+		if compatibleTypes(expected, actual) {
 			continue
 		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-			Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(callable.Arguments[index]) + " but got " + valueTypeDisplay(actual), Span: argument.Span,
+			Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: argument.Span,
 		})
 	}
 }
