@@ -108,7 +108,7 @@ Deliver:
 - Document/workspace symbols, hover, definition, declaration, references,
   document highlights, folding ranges, and selection ranges.
 - Incremental index for workspace files, imports, autoload names, configured
-  runtimepath roots, and versioned builtin metadata.
+  runtimepath roots, and multi-target builtin metadata.
 
 Exit gate: cross-file legacy autoload and Vim9 import navigation works through a
 subprocess LSP test; duplicate, missing, cyclic, symlinked, and out-of-root files
@@ -121,7 +121,7 @@ server dynamically registers Vim file watchers when the client supports it;
 initialized and custom-notification runtimepath roots are included in the
 bounded index. The subprocess test covers watcher registration, runtimepath and
 workspace symbols, plus cross-file definition and references. M5 remains open
-for versioned builtin metadata.
+for multi-target builtin metadata, which is currently deferred.
 
 ## M6: completion and safe edits
 

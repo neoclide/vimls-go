@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -29,10 +30,26 @@ EXCMD(CMD_beta, "beta", ex_beta,
 }
 
 func TestPinnedCommandSourceCount(t *testing.T) {
-	root := "/Users/chemzqm/lib/vim"
+	root := os.Getenv("VIM_SOURCE")
+	if root == "" {
+		root = "/Users/chemzqm/lib/vim"
+	}
+	info, err := os.Stat(root)
+	if os.IsNotExist(err) {
+		t.Skipf("pinned Vim checkout %s is not available", root)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("Vim source %s is not a directory", root)
+	}
 	resolved, err := exec.Command("git", "-C", root, "rev-list", "-n", "1", vimTag).Output()
-	if err != nil || strings.TrimSpace(string(resolved)) != vimCommit {
-		t.Skip("pinned Vim checkout is not available")
+	if err != nil {
+		t.Fatalf("resolve %s in %s: %v", vimTag, root, err)
+	}
+	if got := strings.TrimSpace(string(resolved)); got != vimCommit {
+		t.Fatalf("%s resolves to %s, want %s", vimTag, got, vimCommit)
 	}
 	source, err := exec.Command("git", "-C", root, "show", vimTag+":src/ex_cmds.h").Output()
 	if err != nil {
