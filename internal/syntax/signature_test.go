@@ -97,6 +97,60 @@ func TestVim9FunctionNameCapitalDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9AutoloadFunctionNameDiagnostic(t *testing.T) {
+	message := "Cannot use name with # in Vim9 script, use export instead"
+	for _, test := range []struct {
+		name, source, function string
+	}{
+		{
+			name:     "def",
+			source:   "vim9script\ndef somescript#Func()\nenddef\nvar after = 1\n",
+			function: "somescript#Func",
+		},
+		{
+			name:     "function bang",
+			source:   "vim9script\nfunction! Script#Func()\nendfunction\nvar after = 1\n",
+			function: "Script#Func",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1263" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1267" {
+					t.Fatalf("unexpected E1267: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.function {
+				t.Fatalf("E1263 diagnostics = %#v", file.Diagnostics)
+			}
+			foundAfter := false
+			for _, command := range file.Commands {
+				foundAfter = foundAfter || command.Declaration != nil && file.Text(command.Declaration.Name) == "after"
+			}
+			if !foundAfter {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"def g:some#func()\nenddef\nlet after = 1\n",
+		"vim9script\nlegacy def Some#Func()\nenddef\nvar after = 1\n",
+		"vim9script\nexport def Some#Func()\nenddef\n",
+		"vim9script\ndef loadme#()\nenddef\n",
+		"vim9script\ndef Func(value: string = '#')\n  var text = 'a#b'\nenddef\n# comment #\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1263") {
+			t.Fatalf("unexpected E1263: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9DictionaryFunctionDiagnostic(t *testing.T) {
 	tests := []struct {
 		name, source string

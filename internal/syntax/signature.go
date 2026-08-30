@@ -75,9 +75,21 @@ func parseFunctionSignature(file *File, command *Command) {
 			Span: function.Name,
 		})
 	}
+	if command.Dialect == Vim9 && strings.Contains(name, "#") && !strings.HasSuffix(name, "#") {
+		exported := false
+		for _, modifier := range command.Modifiers {
+			exported = exported || modifier.Name == "export"
+		}
+		if !exported {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1263", Message: "Cannot use name with # in Vim9 script, use export instead",
+				Span: function.Name,
+			})
+		}
+	}
 	// Vim9 script function names begin with an ASCII capital. Direct object-type
 	// methods use different grammar, including private underscore names.
-	if command.Dialect == Vim9 && !directAggregateMethod && !dictFunction {
+	if command.Dialect == Vim9 && !directAggregateMethod && !dictFunction && !strings.Contains(name, "#") {
 		capital := name[0]
 		checkCapital := !strings.Contains(name, ":")
 		if strings.HasPrefix(name, "g:") && len(name) > 2 {

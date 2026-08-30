@@ -2574,6 +2574,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   aliases.
 - `src/errors.h:3241-3242` defines the exact E1262 message.
 
+## Autoload-style function name in Vim9: E1263
+
+Syntax analysis reports E1263 when a non-exported Vim9 `def` or `function`
+definition uses a valid name containing `#`. The diagnostic selects the full
+function name. Such names bypass the ordinary E1267 capital-name check so the
+autoload-specific rule owns the failure.
+
+An exported definition remains outside E1263, as does a Legacy-root autoload
+definition. A trailing `#` has no final function-name component and remains on
+Vim's separate missing-name path. Hash characters in parameters, bodies, and
+comments do not affect the definition name.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:2791-2807` distinguishes a Legacy-root
+  autoload definition from E1263 in a Vim9 script.
+- `src/userfunc.c:5165-5182` handles exported definitions first, then emits
+  E1263 for a parsed Vim9 function name containing the autoload separator.
+- `runtime/doc/userfunc.txt:565-568` directs Vim9 scripts to use a name without
+  `#` and export it instead.
+- `src/errors.h:3243-3244` defines the exact E1263 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
