@@ -971,3 +971,34 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   maintain and merge the compiler's return and throw state.
 - `src/vim9compile.c:4912-4938` emits the missing-return error at function
   completion, and `src/errors.h:2700-2701` defines its exact message.
+
+## Using a String as a Number: E1030
+
+E1030 means `Using a String as a Number: "{value}"`. Analysis reports it when
+Vim9 runtime expression semantics require a statically known String to be a
+Number. This includes arithmetic at script level, String-valued indexes and
+slice bounds on Strings, Lists, Tuples, or Blobs at script level, and unary
+`+` or `-` in both script and compiled `def` contexts. A simple literal
+contributes its value to the message; a known String whose runtime value is
+unavailable retains the native message prefix without inventing a value.
+
+The diagnostic follows Vim's left-to-right conversion order. For example,
+`'text' + 0z1122` reports E1030 on the String before considering the Blob.
+Legacy expressions retain their permissive String-to-Number coercion. A
+compiled `def` performs static checking first for binary arithmetic and
+indexes: the corresponding errors remain E1051 for `+`, E1036 for `-`, `*`,
+and `/`, E1035 for `%`, and E1012 for an index or slice bound.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_expr.vim:2046` distinguishes script-level E1030 from
+  compiled E1051 for String plus Blob.
+- `src/testdir/test_vim9_expr.vim:2267-2269` distinguishes script-level E1030
+  from compiled E1036 or E1035 for String multiplication, division, and
+  remainder.
+- `src/testdir/test_vim9_expr.vim:4156-4157` requires E1030 for unary `-` and
+  `+` in both compiled and script contexts.
+- `src/testdir/test_vim9_expr.vim:4334-4346` distinguishes script-level E1030
+  from compiled E1012 for String indexes and slice bounds.
+- `src/vim9execute.c:8233-8253` rejects a runtime String used as a Number, and
+  `src/errors.h:2706-2707` defines the exact message.

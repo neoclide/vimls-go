@@ -175,6 +175,85 @@ func TestAnalyzeArithmeticDiagnosticsStayConservative(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1030UsingStringAsNumber(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{
+			name: "script addition checks left first", source: "vim9script\nvar x = 'asdf' + 0z1122\n",
+			message: `Using a String as a Number: "asdf"`, span: "'asdf'",
+		},
+		{
+			name: "script multiplication", source: "vim9script\nvar x = '1' * '2'\n",
+			message: `Using a String as a Number: "1"`, span: "'1'",
+		},
+		{
+			name: "compiled unary minus", source: "vim9script\ndef F()\n  var x = -'xx'\nenddef\n",
+			message: `Using a String as a Number: "xx"`, span: "'xx'",
+		},
+		{
+			name: "script unary plus", source: "vim9script\nvar x = +'xx'\n",
+			message: `Using a String as a Number: "xx"`, span: "'xx'",
+		},
+		{
+			name: "script index", source: "vim9script\nvar x = 'asdf'['1']\n",
+			message: `Using a String as a Number: "1"`, span: "'1'",
+		},
+		{
+			name: "script slice checks first invalid bound", source: "vim9script\nvar x = 'asdf'['1' : '2']\n",
+			message: `Using a String as a Number: "1"`, span: "'1'",
+		},
+		{
+			name:    "known string without static value",
+			source:  "vim9script\nvar index: string = input('index: ')\nvar x = 'asdf'[index]\n",
+			message: "Using a String as a Number", span: "index",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1030" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1012" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1030 expression retained E1012: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1030 diagnostics = %#v, want %q on %q; all diagnostics = %#v", got, test.message, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, code string
+	}{
+		{name: "compiled addition", source: "vim9script\ndef F()\n  var x = 'asdf' + 0z1122\nenddef\n", code: "vim/E1051"},
+		{name: "compiled multiplication", source: "vim9script\ndef F()\n  var x = '1' * '2'\nenddef\n", code: "vim/E1036"},
+		{name: "compiled remainder", source: "vim9script\ndef F()\n  var x = '1' % '2'\nenddef\n", code: "vim/E1035"},
+		{name: "compiled index", source: "vim9script\ndef F()\n  var x = 'asdf'['1']\nenddef\n", code: "vim/E1012"},
+		{name: "Legacy coercion", source: "let g:x = -'xx'\nlet g:y = '1' * '2'\nlet g:z = 'asdf'['1']\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			foundContextCode := test.code == ""
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1030" {
+					t.Fatalf("source unexpectedly received E1030: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.code {
+					foundContextCode = true
+				}
+			}
+			if !foundContextCode {
+				t.Fatalf("diagnostics = %#v, want %s", result.Diagnostics, test.code)
+			}
+		})
+	}
+}
+
 func TestAnalyzeSpecialAsNumberDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantCode, wantMessage string

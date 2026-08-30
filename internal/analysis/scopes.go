@@ -889,6 +889,23 @@ func numericConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagno
 	}
 }
 
+func stringAsNumberDiagnostic(result *FileAnalysis, expression *syntax.Expression) (syntax.Diagnostic, bool) {
+	if result == nil || expression == nil || result.TypeOf(expression).Name != "string" {
+		return syntax.Diagnostic{}, false
+	}
+	message := "Using a String as a Number"
+	literal := expression
+	for literal.Kind == syntax.ExpressionParenthesized && len(literal.Children) == 1 {
+		literal = literal.Children[0]
+	}
+	if literal.Kind == syntax.ExpressionString {
+		if value, ok := syntax.StaticDictionaryIndexKey(literal); ok {
+			message += `: "` + value + `"`
+		}
+	}
+	return syntax.Diagnostic{Code: "vim/E1030", Message: message, Span: expression.Span}, true
+}
+
 func staticNumberValue(expression *syntax.Expression) (int64, bool) {
 	if expression == nil {
 		return 0, false
@@ -1068,13 +1085,23 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						leftOperand, rightOperand := expression.Children[0], expression.Children[1]
 						containerConcat := op == "+" && left.Name == right.Name && (left.Name == "list" || left.Name == "tuple" || left.Name == "blob")
 						diagnostic, ok := syntax.Diagnostic{}, false
+						if !containerConcat && command.Dialect == syntax.Vim9 {
+							diagnostic, ok = stringAsNumberDiagnostic(result, leftOperand)
+						}
 						if !containerConcat {
-							diagnostic, ok = numericConversionDiagnostic(left, leftOperand.Span)
+							if !ok {
+								diagnostic, ok = numericConversionDiagnostic(left, leftOperand.Span)
+							}
 						}
 						if !ok && !containerConcat {
 							leftNumeric := left.Name == "number" || left.Name == "float"
 							if (right.Name != "list" && right.Name != "blob") || leftNumeric {
-								diagnostic, ok = numericConversionDiagnostic(right, rightOperand.Span)
+								if command.Dialect == syntax.Vim9 {
+									diagnostic, ok = stringAsNumberDiagnostic(result, rightOperand)
+								}
+								if !ok {
+									diagnostic, ok = numericConversionDiagnostic(right, rightOperand.Span)
+								}
 							}
 						}
 						if !ok && op == "%" {
@@ -1141,6 +1168,11 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			}
 			if expression.Kind == syntax.ExpressionUnary && (expression.Value == "+" || expression.Value == "-") && len(expression.Children) == 1 && !expressionContainsMissing(expression) {
 				operand := expression.Children[0]
+				if command.Dialect == syntax.Vim9 {
+					if diagnostic, ok := stringAsNumberDiagnostic(result, operand); ok {
+						result.Diagnostics = append(result.Diagnostics, diagnostic)
+					}
+				}
 				if result.TypeOf(operand).Name == "blob" {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code: "vim/E974", Message: "Using a Blob as a Number", Span: operand.Span,
@@ -1511,6 +1543,10 @@ func collectIndexTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, expr
 			continue
 		}
 		if !scopeUsesDefTypeRules(scope) {
+			if diagnostic, ok := stringAsNumberDiagnostic(result, index); ok {
+				result.Diagnostics = append(result.Diagnostics, diagnostic)
+				return
+			}
 			switch resolvedExpressionType(result, scope, index).Name {
 			case "func":
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
