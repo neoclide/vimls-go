@@ -1976,6 +1976,26 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   from the first argument's container type.
 - `src/errors.h:3135-3136` defines the exact E1220 message.
 
+## String or Blob required for builtin argument: E1221
+
+Analysis reports E1221 at Vim9 script level when an `arg_string_or_blob`
+builtin argument has a known incompatible type. The diagnostic selects the
+complete normalized argument and uses its one-based position, including
+method receivers and later arguments.
+
+String, Blob, and dynamically typed values are accepted. A mismatch in a
+compiled `def` or block lambda retains E1013, Legacy calls are not diagnosed,
+and String-or-Number checkers remain on E1220.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:593-598` distinguishes compiled E1013
+  from script-level E1221 for a later raw-channel argument.
+- `src/testdir/test_vim9_builtin.vim:4239-4242` covers the first argument of
+  `sha256()`.
+- `src/evalfunc.c:612-627` defines the `arg_string_or_blob` checker.
+- `src/errors.h:3137-3138` defines the exact E1221 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
