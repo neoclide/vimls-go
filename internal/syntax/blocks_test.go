@@ -54,6 +54,59 @@ func TestVim9MissingEnddefDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9NestedRedirDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		wantE1092    int
+		wantE1185    int
+	}{
+		{
+			name: "official ordinary redir nested after variable redir",
+			source: "vim9script\ndef Func()\n  redir => text\n  redir > Xnopfile\n" +
+				"  redir END\nenddef\n",
+			wantE1092: 1,
+		},
+		{
+			name: "nested variable redir retains original state through END",
+			source: "vim9script\ndef Func()\n  redir => text\n  redir =>> more\n" +
+				"  redir END\nenddef\n",
+			wantE1092: 1,
+		},
+		{
+			name: "separate defs and ordinary redir remain independent",
+			source: "vim9script\ndef First()\n  redir => text\n  redir END\nenddef\n" +
+				"def Second()\n  redir > Xnopfile\n  redir END\nenddef\n",
+		},
+		{
+			name: "legacy redir remains unaffected",
+			source: "function Legacy()\n  redir => text\n  redir > Xnopfile\n" +
+				"  redir END\nendfunction\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var e1092, e1185 []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				switch diagnostic.Code {
+				case "vim/E1092":
+					e1092 = append(e1092, diagnostic)
+				case "vim/E1185":
+					e1185 = append(e1185, diagnostic)
+				}
+			}
+			if len(e1092) != test.wantE1092 || len(e1185) != test.wantE1185 {
+				t.Fatalf("diagnostics = %#v, want E1092=%d E1185=%d", file.Diagnostics, test.wantE1092, test.wantE1185)
+			}
+			for _, diagnostic := range e1092 {
+				if diagnostic.Message != "Cannot nest :redir" || file.Text(diagnostic.Span) != "redir" {
+					t.Fatalf("E1092 diagnostic = %#v on %q", diagnostic, file.Text(diagnostic.Span))
+				}
+			}
+		})
+	}
+}
+
 func TestVim9MismatchedFunctionClosers(t *testing.T) {
 	tests := []struct {
 		name, source, code, message, span string

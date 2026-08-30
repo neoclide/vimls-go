@@ -54,6 +54,27 @@ Representative source evidence, pinned to Vim 9.2.1015:
 - `runtime/doc/userfunc.txt:240-245` describes fixed argument bindings and
   mutable composite contents.
 
+## Nested Vim9 redirection: E1092
+
+Vim reports `E1092: Cannot nest :redir` when a compiled `def` encounters any
+second `:redir` command while variable redirection is open. Only `redir END`
+closes that state. Syntax analysis tracks it per enclosing `def`, reports the
+nested command name, and retains the original open state so a later END still
+recovers normally.
+
+The rule starts from the Vim9 `redir => target` and `redir =>> target` forms.
+An ordinary file or register redirection without an open compiled variable
+redirection, and Legacy-dialect redirection, remain outside this diagnostic.
+
+Representative source evidence, pinned to Vim 9.2.1015:
+
+- `src/vim9cmds.c:2571-2615` accepts END for an open compiled redirection and
+  otherwise emits E1092 before parsing the nested command's arguments.
+- `src/testdir/test_vim9_cmd.vim:1999-2007` opens variable redirection, nests
+  `redir > Xnopfile`, and expects E1092.
+- `runtime/doc/various.txt:610-620` documents variable redirection and the
+  E1092 marker.
+
 ## Unknown options: E113 and E518
 
 Vim uses different native error codes for an unknown option according to the

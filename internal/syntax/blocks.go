@@ -51,6 +51,10 @@ commands:
 			argument := strings.TrimSpace(file.Text(command.Argument))
 			if argument == "END" {
 				delete(redirOpen, defBlock)
+			} else if redirOpen[defBlock] {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1092", Message: "Cannot nest :redir", Span: command.Name,
+				})
 			} else if strings.HasPrefix(argument, "=>") {
 				if redirOpen == nil {
 					redirOpen = make(map[int]bool)
