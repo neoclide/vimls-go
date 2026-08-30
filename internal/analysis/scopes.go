@@ -3461,6 +3461,17 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 			})
 		}
 	}
+	if receiver, invalid := compiledMemberReceiverType(result, scope, expression); invalid {
+		receiverExpression := expression.Children[0]
+		for receiverExpression != nil && receiverExpression.Kind == syntax.ExpressionParenthesized && len(receiverExpression.Children) == 1 {
+			receiverExpression = receiverExpression.Children[0]
+		}
+		if _, nestedInvalid := compiledMemberReceiverType(result, scope, receiverExpression); !nestedInvalid {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1229", Message: "Expected dictionary for using key \"" + expression.Value + "\", but got " + valueTypeDisplay(receiver), Span: expression.Span,
+			})
+		}
+	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 		target := expression.Children[0]
 		if (target.Kind == syntax.ExpressionList || target.Kind == syntax.ExpressionTuple) && appendDestructuringTypeMismatchDiagnostic(result, scope, target, expression.Children[1], nil) {
@@ -3513,6 +3524,25 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	for _, child := range expression.Children {
 		collectAssignmentTypeMismatchDiagnostics(result, scope, child)
 	}
+}
+
+func compiledMemberReceiverType(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (ValueType, bool) {
+	if result == nil || result.File == nil || expression == nil || expression.Kind != syntax.ExpressionMember || !scopeUsesDefTypeRules(scope) ||
+		expression.Value == "" || len(expression.Children) != 1 || result.File.Text(expression.Operator) != "." || expressionContainsMissing(expression) ||
+		syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
+		return UnknownValueType, false
+	}
+	receiverExpression := expression.Children[0]
+	var declaration *Declaration
+	if receiverExpression != nil && receiverExpression.Kind == syntax.ExpressionIdentifier {
+		declaration = resolve(scope, receiverExpression.Value, receiverExpression.Span.Start, false, nil)
+	}
+	receiver := resolvedExpressionType(result, scope, receiverExpression)
+	interfaces := localInterfaces(result.File)
+	invalid := !isUnknownType(receiver) && receiver.Name != "dict" && receiver.Name != "object" && result.classes[receiver.Name] == nil &&
+		result.classAliases[receiver.Name] == "" && interfaces[receiver.Name] == nil && receiver.Name != "enum" && localEnum(result.File, receiver.Name) == nil &&
+		(declaration == nil || declaration.Kind != SymbolKindClass && declaration.Kind != SymbolKindInterface && declaration.Kind != SymbolKindEnum && declaration.Kind != SymbolKindTypeAlias)
+	return receiver, invalid
 }
 
 func appendDestructuringTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, target, rhs *syntax.Expression, bindings []syntax.Binding) bool {

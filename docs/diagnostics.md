@@ -2133,6 +2133,27 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/errors.h:3149-3152` distinguishes the unused List-or-Dictionary E1227
   message from the exact E1228 message.
 
+## Dictionary or Object required for member access: E1229
+
+Analysis reports E1229 in a compiled `def` or block lambda when dot-key
+member access has a statically known receiver that is neither a Dictionary nor
+an Object. The diagnostic selects the complete member expression and names
+both the requested key and the inferred receiver type.
+
+Dictionary, generic Object, local class, interface, enum-object, and dynamic
+receivers are accepted. Static aggregate selectors, arrow-method syntax,
+incomplete expressions, and Legacy functions remain on their existing paths.
+At top-level Vim9 script, the same String member spelling retains E488. For a
+nested invalid chain, only the first invalid member is reported.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_expr.vim:4183-4188` distinguishes compiled E1229 from
+  top-level script E488 for a String receiver.
+- `src/vim9instr.c:2282-2318` accepts Dictionary, Object, any, and unknown
+  receiver types and directly emits E1229 for other compiled types.
+- `src/errors.h:3153-3154` defines the exact E1229 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

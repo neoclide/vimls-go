@@ -5015,6 +5015,68 @@ func TestAnalyzeE1228ListDictionaryOrBlobBuiltinArgumentDiagnostics(t *testing.T
 	}
 }
 
+func TestAnalyzeE1229CompiledMemberAccessDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message, span string }{
+		{"official string def", "vim9script\ndef Func()\n  var text = ''\n  var value = text.memb\nenddef\n", `Expected dictionary for using key "memb", but got string`, "text.memb"},
+		{"nested parenthesized list", "vim9script\ndef Func()\n  var value = ([1]).first.second\nenddef\n", `Expected dictionary for using key "first", but got list<number>`, "([1]).first"},
+		{"block lambda", "vim9script\nvar Callback = () => {\n  var value = ''.memb\n}\n", `Expected dictionary for using key "memb", but got string`, "''.memb"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1229" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1229 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"top-level keeps E488", "vim9script\nvar text = ''\nvar value = text.memb\n", "vim/E488"},
+		{"dictionary", "vim9script\ndef Func()\n  var values = {}\n  var value = values.key\nenddef\n", ""},
+		{"any", "vim9script\ndef Func()\n  var value: any = 1\n  var item = value.key\nenddef\n", ""},
+		{"unknown", "vim9script\ndef Func()\n  var item = Unknown.key\nenddef\n", ""},
+		{"class object", "vim9script\nclass A\n  var key: number\nendclass\ndef Func()\n  var object = A.new()\n  var value = object.key\nenddef\n", ""},
+		{"enum selector", "vim9script\nenum E\n  Value\nendenum\ndef Func()\n  var value = E.Value\nenddef\n", ""},
+		{"arrow method", "vim9script\ndef Func()\n  var value = 'text'->len()\nenddef\n", ""},
+		{"Legacy function", "function Func()\n  let value = 'text'.memb\nendfunction\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1229" {
+					t.Fatalf("guard unexpectedly received E1229: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef Func()\n  var text = ''\n  var value = text.\nenddef\n")
+	if len(file.Diagnostics) == 0 {
+		t.Fatal("incomplete member source lacks parser diagnostics")
+	}
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E1229" {
+			t.Fatalf("incomplete member unexpectedly received E1229: %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},
