@@ -37,6 +37,10 @@ func TestImportGraphChainDiamondAndCycle(t *testing.T) {
 	if first.ImportPath != "'./b.vim'" || first.PathSpan != (syntax.Span{Start: 7, End: 16}) || first.Alias != "B" || first.AliasSpan != (syntax.Span{Start: 20, End: 21}) || first.Autoload {
 		t.Fatalf("retained import metadata = %#v", first)
 	}
+	dependents := snapshot.ReverseDependents(d)
+	if len(dependents) != 3 || !containsGraphPath(dependents, a) || !containsGraphPath(dependents, b) || !containsGraphPath(dependents, c) || containsGraphPath(dependents, d) {
+		t.Fatalf("transitive reverse dependents(D) = %#v", dependents)
+	}
 }
 
 func TestImportGraphReplaceUpdatesReverseEdgesAndKeepsOldSnapshot(t *testing.T) {
@@ -189,4 +193,13 @@ func sameGraphPath(left, right string) bool {
 	leftCanonical, leftErr := CanonicalPath(left)
 	rightCanonical, rightErr := CanonicalPath(right)
 	return leftErr == nil && rightErr == nil && leftCanonical == rightCanonical
+}
+
+func containsGraphPath(paths []string, wanted string) bool {
+	for _, path := range paths {
+		if sameGraphPath(path, wanted) {
+			return true
+		}
+	}
+	return false
 }

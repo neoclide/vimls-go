@@ -264,6 +264,27 @@ func TestWorkspaceImportGraphBuildsDirectedReadySnapshot(t *testing.T) {
 	}
 }
 
+func TestWorkspaceImportGraphOmitsUnreadableTarget(t *testing.T) {
+	root := t.TempDir()
+	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './private.vim' as Private\n")
+	targetPath := writeWorkspaceFile(t, root, "private.vim", "vim9script\nexport var Value = 1\n")
+	if err := os.Chmod(targetPath, 0); err != nil {
+		t.Skipf("cannot make target unreadable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(targetPath, 0o600) })
+	if _, err := os.ReadFile(targetPath); err == nil {
+		t.Skip("file permissions do not make the target unreadable")
+	}
+	resolver := workspacePathResolver([]string{root}, nil)
+	instance := New(nil, nil, io.Discard)
+	_, graph, _, _ := instance.buildWorkspaceIndex(context.Background(), []string{root}, resolver, nil)
+	mainPath = mustWorkspaceCanonicalPath(t, mainPath)
+	imports := graph.Snapshot().Imports(mainPath)
+	if len(imports) != 1 || imports[0].Target != "" || imports[0].Missing || imports[0].Dynamic || len(graph.Snapshot().Outgoing(mainPath)) != 0 {
+		t.Fatalf("unreadable target imports = %#v", imports)
+	}
+}
+
 func TestWorkspaceImportGraphTracksOpenDocumentChanges(t *testing.T) {
 	root := t.TempDir()
 	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './one.vim' as Lib\n")

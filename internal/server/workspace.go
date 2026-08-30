@@ -380,6 +380,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 		indexedDiskFiles = append(indexedDiskFiles, newDiskFiles...)
 		files = append(files, parsed...)
 	}
+	indexed := make(map[string]struct{}, len(files))
 	for position, file := range files {
 		if file == nil {
 			continue
@@ -389,12 +390,27 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 			warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 			break
 		}
-		if err := graph.Replace(path, collectWorkspaceImportFacts(path, file, resolver, openByPath)); err != nil {
-			index.Remove(path)
-			continue
-		}
+		indexed[path] = struct{}{}
 		if indexedDiskFiles[position] {
 			diskFiles[path] = struct{}{}
+		}
+	}
+	for position, file := range files {
+		if file == nil {
+			continue
+		}
+		path := indexedPaths[position]
+		if _, ok := indexed[path]; !ok {
+			continue
+		}
+		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, resolver, openByPath), func(target string) bool {
+			_, ok := indexed[target]
+			return ok
+		})
+		if err := graph.Replace(path, facts); err != nil {
+			index.Remove(path)
+			delete(indexed, path)
+			delete(diskFiles, path)
 		}
 	}
 	graph.SetReady(true)
@@ -438,6 +454,17 @@ func collectWorkspaceImportFacts(importer string, file *syntax.File, resolver *w
 		}
 	}
 	collect(file.Commands)
+	return facts
+}
+
+func retainWorkspaceImportTargets(facts []workspace.ImportFact, known func(string) bool) []workspace.ImportFact {
+	for index := range facts {
+		if facts[index].Target == "" || known(facts[index].Target) {
+			continue
+		}
+		facts[index].Target = ""
+		facts[index].Missing = false
+	}
 	return facts
 }
 
@@ -495,7 +522,14 @@ func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []s
 		s.logf("vimls: workspace index limit reached for %s: %v", path, err)
 	}
 	if _, pending := s.workspacePending[path]; pending {
-		if err := s.workspaceGraph.Replace(path, collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath)); err != nil {
+		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath), func(target string) bool {
+			if openByPath[target] != nil {
+				return true
+			}
+			_, ok := s.workspaceIndex.Source(target)
+			return ok
+		})
+		if err := s.workspaceGraph.Replace(path, facts); err != nil {
 			s.logf("vimls: update import graph for %s: %v", path, err)
 		}
 		delete(s.workspacePending, path)
@@ -563,7 +597,14 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 		if err := s.workspaceIndex.Replace(path, file); err != nil {
 			s.workspaceIndex.Remove(path)
 		}
-		if err := s.workspaceGraph.Replace(path, collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath)); err != nil {
+		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath), func(target string) bool {
+			if openByPath[target] != nil {
+				return true
+			}
+			_, ok := s.workspaceIndex.Source(target)
+			return ok
+		})
+		if err := s.workspaceGraph.Replace(path, facts); err != nil {
 			s.logf("vimls: restore import graph for %s: %v", path, err)
 		}
 	}

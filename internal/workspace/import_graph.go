@@ -232,18 +232,30 @@ func (s ImportGraphSnapshot) Incoming(path string) []ImportFact {
 	return cloneImportFacts(s.incoming[canonical])
 }
 
-// ReverseDependents returns the unique canonical importers of path.
+// ReverseDependents returns every unique canonical importer that directly or
+// transitively depends on path. The starting path is excluded, including when
+// it participates in a cycle.
 func (s ImportGraphSnapshot) ReverseDependents(path string) []string {
-	incoming := s.Incoming(path)
-	result := make([]string, 0, len(incoming))
-	previous := ""
-	for _, fact := range incoming {
-		if fact.Importer == previous {
-			continue
-		}
-		previous = fact.Importer
-		result = append(result, fact.Importer)
+	canonical, err := normalizeImportGraphPath(path)
+	if err != nil {
+		return nil
 	}
+	seen := map[string]struct{}{canonical: {}}
+	queue := []string{canonical}
+	result := make([]string, 0)
+	for len(queue) > 0 {
+		target := queue[0]
+		queue = queue[1:]
+		for _, fact := range s.incoming[target] {
+			if _, exists := seen[fact.Importer]; exists {
+				continue
+			}
+			seen[fact.Importer] = struct{}{}
+			queue = append(queue, fact.Importer)
+			result = append(result, fact.Importer)
+		}
+	}
+	sort.Strings(result)
 	return result
 }
 
