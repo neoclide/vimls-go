@@ -345,6 +345,9 @@ Commit `7e748e2` migrated the three single-`=` Vim9 condition variants, making
 the authoritative current split 918 migrated, zero ready, and 143 pending-fix.
 Commit `a2e0aca` migrated the two Vim9 `:match` attached-hash variants, making
 the authoritative current split 920 migrated, zero ready, and 141 pending-fix.
+Commit `c30bf4d` migrated the two same-line Vim9 `for` type-colon variants,
+making the authoritative current split 922 migrated, zero ready, and 139
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -939,11 +942,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 109 | 62 | 0 | 47 |
+| `C-GENERIC` | 109 | 64 | 0 | 45 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **362** | **288** | **0** | **74** |
+| **Total** | **362** | **290** | **0** | **72** |
 
 ```text
 C-EXPR
@@ -1098,6 +1101,12 @@ Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
 references at command start now reach the expression parser without requiring
 a call suffix, and generic type-argument lists diagnose a missing space after
 a comma while retaining the reference or call AST.
+
+Commit `c30bf4d` migrated `S:2823:58387/{def|vim9-script}`. When a Vim9 `for`
+binding is followed by whitespace and a type colon but no usable `in` clause,
+the retained binding now reports E1059 instead of the less specific missing-in
+diagnostic. The cross-line colon at `S:5621:125950/script` remains a separate
+continuation-boundary task.
 
 Commit `c03403f` migrated the generic declaration recoveries at
 `G:{54:1052,62:1232,2605:57388}/script`. When a missing `>` is followed by an
