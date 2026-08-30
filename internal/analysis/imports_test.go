@@ -11,18 +11,19 @@ func TestAnalyzeImportsReportsStaticLoadAndMemberErrors(t *testing.T) {
 		[]ImportLoad{
 			{Span: syntax.Span{Start: 1, End: 16}, Path: "missing.vim", Missing: true},
 			{Span: syntax.Span{Start: 20, End: 35}, Path: "autoload.vim", Missing: true, Autoload: true, Runtime: true},
-			{Span: syntax.Span{Start: 60, End: 72}, Path: "self.vim", Self: true},
+			{Span: syntax.Span{Start: 60, End: 72}, Path: "self.vim", Self: true, Duplicate: true},
+			{Span: syntax.Span{Start: 80, End: 91}, Path: "same.vim", Duplicate: true},
 		},
 		[]ImportMember{
 			{Span: syntax.Span{Start: 40, End: 47}, Name: "Missing", TargetKnown: true},
 			{Span: syntax.Span{Start: 50, End: 57}, Name: "Private", TargetKnown: true, Exists: true},
 		},
 	)
-	wantCodes := []string{"vim/E1053", "vim/E1053", "vim/E1048", "vim/E1049", "vim/E1088"}
+	wantCodes := []string{"vim/E1053", "vim/E1053", "vim/E1048", "vim/E1049", "vim/E1088", "vim/E1262"}
 	wantMessages := []string{
 		`Could not import "missing.vim"`, `Could not import "autoload.vim"`,
 		"Item not found in script: Missing", "Item not exported in script: Private",
-		"Script cannot import itself",
+		"Script cannot import itself", "Cannot import the same script twice: same.vim",
 	}
 	if len(diagnostics) != len(wantCodes) {
 		t.Fatalf("diagnostics = %#v", diagnostics)
@@ -40,6 +41,7 @@ func TestAnalyzeImportsKeepsUnknownAndValidImportsQuiet(t *testing.T) {
 			{Path: "dynamic.vim"},
 			{Path: "relative.vim", Missing: true, Autoload: true},
 			{Missing: true},
+			{Duplicate: true},
 		},
 		[]ImportMember{
 			{Name: "Unknown"},

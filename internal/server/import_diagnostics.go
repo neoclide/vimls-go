@@ -68,11 +68,16 @@ func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.Fil
 	}
 
 	loads := make([]analysis.ImportLoad, 0, len(imports))
+	seenTargets := make(map[string]bool)
 	for _, importFact := range imports {
 		name, static := workspace.StaticImportPath(importFact.ImportPath)
+		duplicate := importFact.Target != "" && seenTargets[importFact.Target]
+		if importFact.Target != "" {
+			seenTargets[importFact.Target] = true
+		}
 		loads = append(loads, analysis.ImportLoad{
 			Span: importFact.PathSpan, Path: name,
-			Self:    importFact.Target != "" && importFact.Importer == importFact.Target,
+			Self: importFact.Target != "" && importFact.Importer == importFact.Target, Duplicate: duplicate,
 			Missing: importFact.Missing && static, Autoload: importFact.Autoload,
 			Runtime: workspace.RuntimeImport(importFact.ImportPath),
 		})

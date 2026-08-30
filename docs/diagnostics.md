@@ -2547,6 +2547,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   and member-only message.
 - `src/errors.h:3237-3238` defines the exact E1260 message.
 
+## Duplicate resolved import: E1262
+
+Workspace analysis reports E1262 on the second import that resolves to the
+same script, even when the source spellings or `as` aliases differ. The
+comparison uses the import graph's canonical filesystem target, including
+resolved symbolic links, rather than comparing raw path strings. The
+diagnostic selects the second import path and includes its evaluated static
+spelling.
+
+Only resolved targets participate. Dynamic or unresolved imports remain
+unknown instead of being guessed from similar text, and a self-import retains
+the earlier E1088 precedence. Distinct targets and the first import of a
+target remain quiet.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:564-574` imports one script under two
+  aliases and expects E1262 on the duplicate.
+- `src/testdir/test_vim9_import.vim:3096-3111` covers duplicate autoload
+  targets whose path spelling differs only by case on a case-insensitive
+  filesystem.
+- `src/vim9script.c:536-557` compares resolved script IDs, preserves reload
+  handling, and emits E1262 for the later import.
+- `runtime/doc/vim9.txt:3643-3651` documents duplicate imports with different
+  aliases.
+- `src/errors.h:3241-3242` defines the exact E1262 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

@@ -10,12 +10,13 @@ import (
 // autoload lookup through 'runtimepath'; relative and absolute autoload
 // failures use Vim's file-open diagnostics instead of E1053.
 type ImportLoad struct {
-	Span     syntax.Span
-	Path     string
-	Self     bool
-	Missing  bool
-	Autoload bool
-	Runtime  bool
+	Span      syntax.Span
+	Path      string
+	Self      bool
+	Duplicate bool
+	Missing   bool
+	Autoload  bool
+	Runtime   bool
 }
 
 // ImportMember describes one member use whose import target and exported
@@ -36,6 +37,12 @@ func AnalyzeImports(loads []ImportLoad, members []ImportMember) []syntax.Diagnos
 		if load.Self {
 			diagnostics = append(diagnostics, syntax.Diagnostic{
 				Code: "vim/E1088", Message: "Script cannot import itself", Span: load.Span,
+			})
+			continue
+		}
+		if load.Duplicate && load.Path != "" {
+			diagnostics = append(diagnostics, syntax.Diagnostic{
+				Code: "vim/E1262", Message: "Cannot import the same script twice: " + load.Path, Span: load.Span,
 			})
 			continue
 		}

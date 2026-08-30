@@ -357,6 +357,29 @@ func TestServerPublishesE1088ForSelfImport(t *testing.T) {
 	}
 }
 
+func TestServerPublishesE1262ForResolvedDuplicateImport(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+	instance, published := initializeWorkspaceDiagnosticServer(t, root)
+	importerURI := uri.File(filepath.Join(root, "duplicate-import.vim"))
+	source := "vim9script\nimport './lib.vim' as First\nimport 'lib.vim' as Second\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: importerURI, Version: 1, Text: source,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnosticsForURI(t, published, importerURI)
+	var duplicates []protocol.Diagnostic
+	for _, diagnostic := range params.Diagnostics {
+		if diagnostic.Code == protocol.String("vim/E1262") {
+			duplicates = append(duplicates, diagnostic)
+		}
+	}
+	if len(duplicates) != 1 || duplicates[0].Message != protocol.String("Cannot import the same script twice: lib.vim") || duplicates[0].Range.Start.Line != 2 {
+		t.Fatalf("E1262 diagnostics = %#v; all=%#v", duplicates, params.Diagnostics)
+	}
+}
+
 func TestServerKeepsDeferredAutoloadMembersConservative(t *testing.T) {
 	root := t.TempDir()
 	autoloadRoot := filepath.Join(root, "autoload")
