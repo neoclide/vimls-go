@@ -1227,6 +1227,12 @@ parser inventory. After a valid legacy `unlet`, `lockvar`, or `unlockvar`
 target, a hash cannot begin another target or a legacy comment; it is retained
 as the opaque E488 tail while the preceding target AST remains available.
 
+The Group C checkpoint also exposed an accepted-corpus dialect-state bug at
+`test_vim9_import.vim:2660:65998`. Commit `7564306` makes only an actual
+`:function Name(...)` definition enter a legacy function body; listing forms
+such as `:verbose function Name` retain the surrounding Vim9 dialect for every
+following physical line.
+
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
 attached hash after a closed regexp is E488, while `none#` falls through to the
