@@ -391,3 +391,30 @@ Representative source evidence:
   Funcref to a Number.
 - `src/typval.c:214-230` maps both `VAR_FUNC` and `VAR_PARTIAL` numeric
   conversion to E703, and `src/errors.h:1807-1808` defines the exact message.
+
+## Invalid Funcref variable name: E704
+
+E704 means `Funcref variable name must start with a capital: {name}`. A plain
+variable or parameter that holds a Funcref must start with an ASCII capital.
+The `w:`, `b:`, and `t:` namespaces are exempt, as is `s:` in Legacy script;
+`g:` still requires a capital after the prefix. Autoload names containing `#`
+and direct class or interface members do not use the ordinary Funcref-variable
+rule.
+
+Analysis reports E704 when a variable, constant, function parameter, or lambda
+parameter has a statically known `func` or `partial` type and its name violates
+that rule. This covers explicit function types and types inferred from lambdas
+or known Funcref-producing expressions. Dynamic Dictionary updates, foreign
+language assignments, and values whose type is unknown remain unknown.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_assign.vim:68-80` and `2967-2990` cover inferred
+  Funcref declarations in compiled `def` and Vim9 script contexts.
+- `src/testdir/test_vim9_func.vim:2875-2878` covers an explicit `func()` local,
+  while `src/testdir/test_functions.vim:4256-4290` covers function and lambda
+  parameters beginning with an underscore.
+- `src/evalvars.c:4484-4503` implements the namespace, capital, and autoload
+  rules. `src/vim9compile.c:2190-2195` and `src/userfunc.c:579-589` apply them
+  to declarations and parameters; `src/errors.h:1809-1810` defines the exact
+  message.

@@ -118,6 +118,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
 	inferTypes(result)
+	collectFuncrefVariableNameDiagnostics(result)
 	collectArithmeticDiagnostics(result, file.Commands, root)
 	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
@@ -127,6 +128,43 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectFuncrefVariableNameDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	for _, declaration := range result.Declarations {
+		if declaration == nil || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant ||
+			declaration.Type.Name != "func" && declaration.Type.Name != "partial" || funcrefVariableNameAllowed(result.File.Dialect, declaration) {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E704", Message: "Funcref variable name must start with a capital: " + declaration.Name, Span: declaration.Span,
+		})
+	}
+}
+
+func funcrefVariableNameAllowed(dialect syntax.Dialect, declaration *Declaration) bool {
+	if declaration == nil {
+		return false
+	}
+	// Class and interface members are resolved through an object or class,
+	// rather than Vim's ordinary Funcref-variable namespace.
+	if declaration.Scope != nil && (declaration.Scope.Kind == syntax.BlockClass || declaration.Scope.Kind == syntax.BlockInterface) {
+		return true
+	}
+	name := declaration.Name
+	if strings.Contains(name, "#") {
+		return true
+	}
+	if len(name) >= 2 && name[1] == ':' {
+		if name[0] == 'w' || name[0] == 'b' || name[0] == 't' || name[0] == 's' && dialect == syntax.Legacy {
+			return true
+		}
+		name = name[2:]
+	}
+	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
 }
 
 // collectVim9ScriptItemRedefinitionDiagnostics reports E1041 when two

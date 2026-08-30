@@ -272,6 +272,85 @@ func TestAnalyzeFuncrefAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, wantName string
+	}{
+		{
+			name:     "vim9 script inferred type",
+			source:   "vim9script\nvar lambda = () => 1\n",
+			wantName: "lambda",
+		},
+		{
+			name:     "compiled def inferred type",
+			source:   "vim9script\ndef F()\n  var lambda = () => 1\nenddef\n",
+			wantName: "lambda",
+		},
+		{
+			name:     "compiled def explicit type",
+			source:   "vim9script\ndef F()\n  var ref1: func()\nenddef\n",
+			wantName: "ref1",
+		},
+		{
+			name:     "compiled def parameter",
+			source:   "vim9script\ndef F(_Fn: func)\nenddef\n",
+			wantName: "_Fn",
+		},
+		{
+			name:     "lambda parameter",
+			source:   "vim9script\nvar Fn = (_Farg: func) => 1\n",
+			wantName: "_Farg",
+		},
+		{
+			name:     "legacy inferred type",
+			source:   "let lower = function('len')\n",
+			wantName: "lower",
+		},
+		{
+			name:     "legacy global",
+			source:   "let g:lower = function('len')\n",
+			wantName: "g:lower",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E704" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := "Funcref variable name must start with a capital: " + test.wantName
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.wantName {
+				t.Fatalf("diagnostics = %#v, want one E704 %q on %q; all diagnostics = %#v", got, message, test.wantName, result.Diagnostics)
+			}
+		})
+	}
+
+	valid := []struct {
+		name, source string
+	}{
+		{name: "capital", source: "vim9script\nvar Fn = () => 1\n"},
+		{name: "global capital", source: "let g:Fn = function('len')\n"},
+		{name: "legacy script local", source: "let s:lower = function('len')\n"},
+		{name: "window local", source: "let w:lower = function('len')\n"},
+		{name: "autoload", source: "let package#lower = function('len')\n"},
+		{name: "class member", source: "vim9script\nclass C\n  static var handler: func\nendclass\n"},
+	}
+	for _, test := range valid {
+		t.Run("valid "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E704" {
+					t.Fatalf("valid name diagnostic = %#v; all diagnostics = %#v", diagnostic, result.Diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name     string
