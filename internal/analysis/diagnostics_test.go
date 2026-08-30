@@ -3095,6 +3095,113 @@ func TestAnalyzeUnreachableCodeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeStrictStringConversionDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []struct{ message, text string }
+	}{
+		{
+			name: "compiled concatenation and compound assignment",
+			source: "vim9script\ndef Func()\n  var text = ''\n  var values = [1]\n" +
+				"  var value = values .. {}\n  text ..= values\nenddef\n",
+			want: []struct{ message, text string }{{"Cannot convert list to string", "values"}, {"Cannot convert list to string", "values"}},
+		},
+		{
+			name: "computed dictionary key and interpolated values",
+			source: "vim9script\ndef Func()\n  var dict = {[[1, 2]]: 0}\n" +
+				"  var blob = 0z12\n  var text = $'{blob}'\nenddef\n",
+			want: []struct{ message, text string }{{"Cannot convert list to string", "[1, 2]"}, {"Cannot convert blob to string", "blob"}},
+		},
+		{
+			name: "typealias interpolation has E1105 precedence",
+			source: "vim9script\ntype MyType = number\ndef Func()\n" +
+				"  var text = $\"-{MyType}-\"\nenddef\n",
+			want: []struct{ message, text string }{{"Cannot convert typealias to string", "MyType"}},
+		},
+		{
+			name: "compiled known non-string values and left precedence",
+			source: "vim9script\ndef Void()\nenddef\ndef Func()\n" +
+				"  var tuple = (1, 2) .. 'x'\n  var dictionary = {} .. 'x'\n  var void = Void() .. 'x'\n  var blob = 0z12 .. 'x'\n" +
+				"  var funcref = function('len') .. 'x'\n  var partial = function('len', ['a']) .. 'x'\n  var null = null_partial .. 'x'\n" +
+				"  var job = null_job .. 'x'\n  var channel = null_channel .. 'x'\n  var first = [1] .. {}\nenddef\n",
+			want: []struct{ message, text string }{
+				{"Cannot convert tuple to string", "(1, 2)"}, {"Cannot convert dict to string", "{}"}, {"Cannot convert void to string", "Void()"},
+				{"Cannot convert blob to string", "0z12"}, {"Cannot convert func to string", "function('len')"}, {"Cannot convert partial to string", "function('len', ['a'])"},
+				{"Cannot convert partial to string", "null_partial"}, {"Cannot convert job to string", "null_job"}, {"Cannot convert channel to string", "null_channel"}, {"Cannot convert list to string", "[1]"},
+			},
+		},
+		{
+			name: "computed key lambda and plain key guard",
+			source: "vim9script\ndef Func()\n  var values = [1]\n  var plain = {values: 1}\n" +
+				"  var computed = {[[1]]: 1}\n  var Callback = () => {\n    return [1] .. 'x'\n  }\nenddef\n",
+			want: []struct{ message, text string }{{"Cannot convert list to string", "[1]"}, {"Cannot convert list to string", "[1]"}},
+		},
+		{
+			name: "class and object values",
+			source: "vim9script\nclass A\nendclass\ndef Func()\n  var object = A.new()\n" +
+				"  var objectText = object .. ''\n  var classText = A .. ''\nenddef\n",
+			want: []struct{ message, text string }{{"Cannot convert object to string", "object"}, {"Cannot convert class to string", "A"}},
+		},
+		{
+			name:   "legacy-root def",
+			source: "def Func()\n  var values = [1]\n  var text = values .. 'x'\nenddef\n",
+			want:   []struct{ message, text string }{{"Cannot convert list to string", "values"}},
+		},
+		{
+			name:   "Vim9 script top level retains old path",
+			source: "vim9script\nvar values = [1]\nvar top = values .. 'x'\n",
+		},
+		{
+			name:   "Legacy-root function retains old path",
+			source: "function Legacy()\n  let old = [1] . 'x'\nendfunction\n",
+		},
+		{
+			name: "allowed scalar and interpolation container conversions",
+			source: "vim9script\ndef Func()\n  var scalar = 'x' .. v:none .. true .. 1 .. 1.5\n" +
+				"  var interpolated = $\"{[1]}-{(1, 2)}-{{key: 1}}\"\nenddef\n",
+		},
+		{
+			name:   "unknown any scalar and interpolated containers stay valid",
+			source: "vim9script\ndef Func()\n  var value: any\n  var text = value .. 1\n  var more = $'{[1]}-{ {key: 1} }'\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1105" {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.name == "typealias interpolation has E1105 precedence" {
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == "vim/E1407" || diagnostic.Code == "vim/E1403" {
+						t.Fatalf("typealias interpolation retained %s: %#v", diagnostic.Code, diagnostic)
+					}
+				}
+			}
+			if test.name != "Vim9 script top level retains old path" && test.name != "Legacy-root function retains old path" {
+				for _, diagnostic := range result.Diagnostics {
+					switch diagnostic.Code {
+					case "vim/E729", "vim/E730", "vim/E731", "vim/E734", "vim/E908", "vim/E976":
+						t.Fatalf("compiled source retained %s: %#v", diagnostic.Code, diagnostic)
+					}
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1105 diagnostics = %#v, want %#v", got, test.want)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != test.want[index].message || file.Text(diagnostic.Span) != test.want[index].text {
+					t.Fatalf("E1105[%d] = %#v on %q, want %q on %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index].message, test.want[index].text)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeReturningValueWithoutReturnTypeDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

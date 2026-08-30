@@ -2330,6 +2330,39 @@ func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnos
 	}
 }
 
+func strictStringConversionDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression, interpolate bool) (syntax.Diagnostic, bool) {
+	if result == nil || expression == nil {
+		return syntax.Diagnostic{}, false
+	}
+	typ := result.TypeOf(expression)
+	name := typ.Name
+	if expression.Kind == syntax.ExpressionIdentifier {
+		if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindTypeAlias {
+			name = "typealias"
+		} else if declaration != nil && declaration.Kind == SymbolKindClass {
+			name = "class"
+		}
+	}
+	if expression.Kind == syntax.ExpressionCall && len(expression.Children) > 0 && expression.Children[0].Kind == syntax.ExpressionIdentifier && expression.Children[0].Value == "function" && len(expression.Children) > 2 {
+		name = "partial"
+	}
+	if expression.Kind == syntax.ExpressionIdentifier && expression.Value == "null_partial" {
+		name = "partial"
+	}
+	if isUnknownType(ValueType{Name: name}) || name == "string" || name == "special" || name == "bool" || name == "number" || name == "float" || interpolate && (name == "list" || name == "tuple" || name == "dict") {
+		return syntax.Diagnostic{}, false
+	}
+	if result.classes[name] != nil {
+		name = "object"
+	}
+	switch name {
+	case "list", "tuple", "dict", "void", "blob", "func", "partial", "job", "channel", "class", "object", "typealias":
+	default:
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{Code: "vim/E1105", Message: "Cannot convert " + strings.ToLower(name) + " to string", Span: expression.Span}, true
+}
+
 func numericConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnostic, bool) {
 	switch typ.Name {
 	case "special":
@@ -2577,6 +2610,21 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						compoundTypeError = true
 					}
 				}
+				compiled := command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)
+				if compiled && !expressionContainsMissing(expression) && len(expression.Children) >= 2 {
+					if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") {
+						for _, operand := range expression.Children[:2] {
+							if diagnostic, ok := strictStringConversionDiagnostic(result, expressionScope, operand, false); ok {
+								result.Diagnostics = append(result.Diagnostics, diagnostic)
+								break
+							}
+						}
+					} else if expression.Kind == syntax.ExpressionAssignment && (op == ".=" || op == "..=") && assignmentTargetType(result, expressionScope, expression.Children[0]).Name == "string" {
+						if diagnostic, ok := strictStringConversionDiagnostic(result, expressionScope, expression.Children[1], false); ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
+						}
+					}
+				}
 				if !compoundTypeError && (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
 					if expression.Kind == syntax.ExpressionAssignment {
@@ -2757,7 +2805,19 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 			}
-			if expression.Kind == syntax.ExpressionDictionary && !(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
+			if expression.Kind == syntax.ExpressionDictionary && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) {
+				for keyIndex := 0; keyIndex+1 < len(expression.Children); keyIndex += 2 {
+					key := expression.Children[keyIndex]
+					if key.Kind != syntax.ExpressionList || len(key.Children) != 1 {
+						continue
+					}
+					key = key.Children[0]
+					if diagnostic, ok := strictStringConversionDiagnostic(result, expressionScope, key, false); ok {
+						result.Diagnostics = append(result.Diagnostics, diagnostic)
+						break
+					}
+				}
+			} else if expression.Kind == syntax.ExpressionDictionary {
 				for keyIndex := 0; keyIndex+1 < len(expression.Children); keyIndex += 2 {
 					key := expression.Children[keyIndex]
 					value := key
@@ -2773,6 +2833,14 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 					if valueType.Name == "list" {
 						diagnostic, _ := stringConversionDiagnostic(valueType, value.Span)
+						result.Diagnostics = append(result.Diagnostics, diagnostic)
+						break
+					}
+				}
+			}
+			if expression.Kind == syntax.ExpressionInterpolatedString && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) {
+				for _, child := range expression.Children {
+					if diagnostic, ok := strictStringConversionDiagnostic(result, expressionScope, child, true); ok {
 						result.Diagnostics = append(result.Diagnostics, diagnostic)
 						break
 					}
@@ -4066,6 +4134,16 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		return
 	}
 	switch expression.Kind {
+	case syntax.ExpressionInterpolatedString:
+		for _, child := range expression.Children {
+			if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && child.Kind == syntax.ExpressionIdentifier {
+				if declaration := resolve(scope, child.Value, child.Span.Start, false, skipped); declaration != nil && declaration.Kind == SymbolKindTypeAlias {
+					result.typeAliasExempt[child.Span] = true
+				}
+			}
+			walkExpression(result, file, child, scope, skipped, false, dialect)
+		}
+		return
 	case syntax.ExpressionAssignment:
 		if len(expression.Children) == 0 {
 			return

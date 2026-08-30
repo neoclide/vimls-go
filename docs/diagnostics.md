@@ -1038,6 +1038,42 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:1495-1510` documents when `s:` is optional, required,
   or rejected according to script and function context.
 
+## Invalid compiled string conversion: E1105
+
+Analysis reports E1105 when a statically known value cannot undergo Vim's
+strict implicit String conversion in a compiled Vim9 `def` or lambda. This
+includes List, Tuple, Dictionary, Void, Blob, Funcref, Partial, Job, Channel,
+Class, Object, and Typealias values. The diagnostic selects the invalid value;
+binary `.` and `..` check the left operand before the right and report only the
+first failed conversion. A String-target `.=`, or its Vim9 `..=` spelling, also
+checks the right-hand value. Unknown and `any` values remain conservative.
+
+Computed Vim9 Dictionary keys use the same strict conversion, while ordinary
+identifier keys remain literal key names. Interpolated strings use Vim's
+separate interpolation conversion: List, Tuple, and Dictionary values are
+accepted there, but the other invalid types still receive E1105. In particular,
+a Typealias directly interpolated inside a compiled function receives E1105
+rather than the general E1407 value diagnostic.
+
+Top-level Vim9 script and Legacy function expressions retain their established
+E729, E730, E731, E734, E908, and E976 paths. A `def` in a Legacy-root file is
+still compiled as Vim9 and therefore uses E1105.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9instr.c:185-245` defines strict `ISN_2STRING` conversion and the
+  `TOSTRING_INTERPOLATE` List, Tuple, and Dictionary exception.
+- `src/vim9expr.c:1943-1964,3406-3418` applies strict conversion to computed
+  Dictionary keys and concatenation operands in evaluation order.
+- `src/vim9compile.c:1240-1249,3515-3536` applies interpolation and compound-
+  assignment conversion rules.
+- `src/testdir/test_vim9_expr.vim:1943-1967,2048-2068,3152-3154` covers the
+  official invalid operand types and computed Dictionary keys.
+- `src/testdir/test_vim9_assign.vim:278-287` distinguishes compiled E1105 from
+  script-level E734 for compound concatenation.
+- `src/testdir/test_vim9_typealias.vim:274-286` covers the Typealias
+  interpolation precedence case.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
