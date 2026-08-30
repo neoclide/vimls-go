@@ -397,12 +397,12 @@ func TestIncompleteFunctionSignatureRecovers(t *testing.T) {
 }
 
 func TestVim9ConstructorParameterTarget(t *testing.T) {
-	source := "vim9script\ndef new(\n  this.name,\n  this.age: number = v:none,\n  this.\n)\nenddef\n"
+	source := "vim9script\nclass Person\n  def new(\n    this.name,\n    this.age: number = v:none,\n    this.\n  )\n  enddef\nendclass\n"
 	file := Parse(source)
-	if len(file.Diagnostics) != 0 || len(file.Commands) < 2 || file.Commands[1].Function == nil {
+	if len(file.Diagnostics) != 0 || len(file.Commands) < 3 || file.Commands[2].Function == nil {
 		t.Fatalf("file = %#v", file)
 	}
-	parameters := file.Commands[1].Function.Parameters
+	parameters := file.Commands[2].Function.Parameters
 	if len(parameters) != 3 {
 		t.Fatalf("parameters = %#v", parameters)
 	}
@@ -429,14 +429,14 @@ func TestVim9ConstructorParameterTarget(t *testing.T) {
 	}
 
 	for _, source := range []string{
-		"vim9script\ndef new(thisArg, this.a.b)\nenddef\n",
-		"vim9script\ndef new(this.1, this.a-b)\nenddef\n",
+		"vim9script\nclass Person\n  def new(thisArg, this.a.b)\n  enddef\nendclass\n",
+		"vim9script\nclass Person\n  def new(this.1, this.a-b)\n  enddef\nendclass\n",
 	} {
 		file := Parse(source)
-		if len(file.Commands) < 2 || file.Commands[1].Function == nil {
+		if len(file.Commands) < 3 || file.Commands[2].Function == nil {
 			t.Fatalf("source=%q file=%#v", source, file)
 		}
-		for _, parameter := range file.Commands[1].Function.Parameters {
+		for _, parameter := range file.Commands[2].Function.Parameters {
 			if parameter.Target != nil {
 				t.Fatalf("source=%q unexpectedly recognized target=%#v", source, parameter.Target)
 			}
