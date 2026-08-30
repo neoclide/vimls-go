@@ -3642,3 +3642,52 @@ func TestAnalyzeE1536TupleRequired(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1535DestructuringRequiresListOrTuple(t *testing.T) {
+	tests := []struct {
+		name      string
+		prefix    string
+		rightHand string
+	}{
+		{name: "script string", prefix: "vim9script\n", rightHand: "''"},
+		{name: "script dictionary", prefix: "vim9script\n", rightHand: "{}"},
+		{name: "def string", prefix: "vim9script\ndef F()\n", rightHand: "''"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			suffix := "var after = 1\n"
+			indent := ""
+			if strings.Contains(test.prefix, "def F") {
+				indent = "  "
+				suffix = "enddef\nvar after = 1\n"
+			}
+			source := test.prefix + indent + "var v1: any\n" + indent + "var v2: any\n" + indent + "[v1, v2] = " + test.rightHand + "\n" + suffix
+			file := syntax.Parse(source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1535" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "List or Tuple required" || file.Text(got[0].Span) != test.rightHand {
+				t.Fatalf("E1535 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar [v1, v2] = [1, 2]\n",
+		"vim9script\nvar [v1, v2] = (1, 2)\n",
+		"vim9script\ndef F(values: any)\n  var [v1, v2] = values\nenddef\n",
+		"vim9script\nvar [v1, v2] = Dynamic()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1535" {
+				t.Fatalf("guard source reported E1535: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}

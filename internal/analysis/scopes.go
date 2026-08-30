@@ -109,7 +109,6 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
-	collectVim9DestructuringDiagnostics(result, file.Commands)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 
 	sortDeclarations(result)
@@ -126,6 +125,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
+	collectVim9DestructuringDiagnostics(result, file.Commands)
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
 	collectOperatorDiagnostics(result, file.Commands, root)
@@ -986,6 +986,13 @@ func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bo
 	if !defRules && isStaticNullTuple(rhs) {
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vim/E1536", Message: "Tuple required", Span: rhs.Span,
+		})
+		return
+	}
+	rhsType := result.TypeOf(rhs)
+	if !isUnknownType(rhsType) && rhsType.Name != "list" && rhsType.Name != "tuple" {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1535", Message: "List or Tuple required", Span: rhs.Span,
 		})
 		return
 	}
