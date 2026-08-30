@@ -1028,6 +1028,15 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				if expression.Kind == syntax.ExpressionAssignment {
 					op = result.File.Text(expression.Operator)
 				}
+				if expression.Kind == syntax.ExpressionBinary && command.Dialect == syntax.Vim9 &&
+					(op == "is" || op == "isnot") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
+					if left.Name == right.Name && (left.Name == "bool" || left.Name == "special" || left.Name == "number" || left.Name == "float") {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1037", Message: `Cannot use "` + op + `" with ` + left.Name, Span: expression.Operator,
+						})
+					}
+				}
 				compoundTypeError := false
 				if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 					targetType := assignmentTargetType(result, expressionScope, expression.Children[0])

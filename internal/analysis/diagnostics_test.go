@@ -254,6 +254,63 @@ func TestAnalyzeE1030UsingStringAsNumber(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1037InvalidIdentityComparison(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{
+			name: "bool is", source: "vim9script\nvar x = true is false\n",
+			message: `Cannot use "is" with bool`, span: "is",
+		},
+		{
+			name: "special isnot", source: "vim9script\nvar x = v:none isnot v:null\n",
+			message: `Cannot use "isnot" with special`, span: "isnot",
+		},
+		{
+			name: "compiled number", source: "vim9script\ndef F()\n  var x = 123 is 123\nenddef\n",
+			message: `Cannot use "is" with number`, span: "is",
+		},
+		{
+			name: "float isnot", source: "vim9script\nvar x = 1.3 isnot 1.3\n",
+			message: `Cannot use "isnot" with float`, span: "isnot",
+		},
+		{
+			name: "vim9cmd", source: "vim9cmd echo 1 is 1\n",
+			message: `Cannot use "is" with number`, span: "is",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1037" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1037 diagnostics = %#v, want %q on %q; all diagnostics = %#v", got, test.message, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let g:x = 1 is 1\n",
+		"vim9script\nvar x = 'a' is 'a'\n",
+		"vim9script\nvar x = [1] is [1]\n",
+		"vim9script\nvar x = 1 is 1.0\n",
+		"vim9script\nvar x = v:none is 8\n",
+		"vim9script\nvar x = 1 is# 1\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1037" {
+				t.Fatalf("source %q unexpectedly received E1037: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeSpecialAsNumberDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantCode, wantMessage string

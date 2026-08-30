@@ -1002,3 +1002,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   from compiled E1012 for String indexes and slice bounds.
 - `src/vim9execute.c:8233-8253` rejects a runtime String used as a Number, and
   `src/errors.h:2706-2707` defines the exact message.
+
+## Invalid identity comparison: E1037
+
+E1037 means `Cannot use "{operator}" with {type}`. In Vim9 expressions,
+analysis reports it when `is` or `isnot` compares two statically known values
+of the same scalar type: Bool, Special, Number, or Float. The diagnostic
+selects the identity operator. It applies in a compiled `def`, at script level,
+and after `vim9cmd`; Legacy identity comparisons retain their historical
+behavior.
+
+Strings, Blobs, Lists, Dictionaries, Functions, and Objects support identity
+comparison and do not receive E1037. Mixed Number and Float operands, mixed
+Special-and-other-type comparisons, and unknown or `any` values also remain
+outside this rule. The suffixed operators `is#`, `is?`, `isnot#`, and
+`isnot?` are invalid Vim9 syntax and retain E15 instead of being mapped to
+E1037.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_expr.vim:1645-1648` rejects Number identity in both
+  compiled and script contexts.
+- `src/testdir/test_vim9_expr.vim:1736-1744` covers `is` and `isnot` for Bool,
+  Special, Number, and Float, and distinguishes the invalid operator suffixes.
+- `src/testdir/test_vim9_disassemble.vim:2302-2323` retains valid identity
+  comparisons for reference-like and String values.
+- `src/vim9instr.c:495-585` selects comparison instructions and emits E1037
+  only for these four same-type scalar comparisons.
+- `src/errors.h:2721-2722` defines the exact message.
