@@ -119,6 +119,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
+	collectDuplicateTypeAliasDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
@@ -149,6 +150,54 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectDuplicateTypeAliasDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	classes := localClasses(file)
+	seen := make(map[string]bool)
+	classAliases := make(map[string]bool)
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect != syntax.Vim9 || command.TypeAlias == nil {
+			continue
+		}
+		scope := result.commandScopes[command]
+		if scopeContainsDef(scope) || scopeInsideAggregate(scope) {
+			continue
+		}
+		name := file.Text(command.TypeAlias.Name)
+		if seen[name] {
+			diagnostic := syntax.Diagnostic{Span: command.TypeAlias.Name}
+			if classAliases[name] {
+				diagnostic.Code = "vim/E1041"
+				diagnostic.Message = `Redefining script item: "` + name + `"`
+			} else {
+				diagnostic.Code = "vim/E1396"
+				diagnostic.Message = `Type alias "` + name + `" already exists`
+			}
+			result.Diagnostics = append(result.Diagnostics, diagnostic)
+			continue
+		}
+		seen[name] = true
+		typeNode := command.TypeAlias.Type
+		if typeNode != nil && typeNode.Kind == syntax.TypeNamed && (classes[typeNode.Name] != nil || classAliases[typeNode.Name]) {
+			classAliases[name] = true
+		}
+	}
+}
+
+func scopeInsideAggregate(scope *Scope) bool {
+	for current := scope; current != nil; current = current.Parent {
+		switch current.Kind {
+		case syntax.BlockClass, syntax.BlockInterface, syntax.BlockEnum:
+			return true
+		}
+	}
+	return false
 }
 
 func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {

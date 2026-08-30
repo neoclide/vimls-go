@@ -3280,6 +3280,56 @@ enddef
 	}
 }
 
+func TestAnalyzeDuplicateTypeAliasDiagnostic(t *testing.T) {
+	source := `vim9script
+type Direct = list<number>
+type Direct = list<string>
+if true
+  type Nested = number
+endif
+type Nested = string
+type First = number
+type Second = First
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1396" {
+			got = append(got, diagnostic)
+		}
+	}
+	want := []struct {
+		message string
+		span    string
+	}{
+		{`Type alias "Direct" already exists`, "Direct"},
+		{`Type alias "Nested" already exists`, "Nested"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("E1396 diagnostics = %#v, want %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, want, file.Diagnostics, result.Diagnostics)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Message != want[index].message || file.Text(diagnostic.Span) != want[index].span {
+			t.Fatalf("E1396 diagnostic[%d] = %#v on %q, want %#v", index, diagnostic, file.Text(diagnostic.Span), want[index])
+		}
+	}
+
+	classAlias := Analyze(syntax.Parse("vim9script\nclass C\nendclass\ntype Alias = C\ntype Alias = C\n"))
+	foundE1041 := false
+	for _, diagnostic := range classAlias.Diagnostics {
+		if diagnostic.Code == "vim/E1396" {
+			t.Fatalf("class alias duplicate reported E1396: %#v", classAlias.Diagnostics)
+		}
+		if diagnostic.Code == "vim/E1041" && diagnostic.Message == `Redefining script item: "Alias"` {
+			foundE1041 = true
+		}
+	}
+	if !foundE1041 {
+		t.Fatalf("class alias diagnostics = %#v, want E1041", classAlias.Diagnostics)
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]
