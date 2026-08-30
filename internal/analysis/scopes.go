@@ -141,6 +141,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
+	collectVariableTypeMismatchDiagnostics(result)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
@@ -523,18 +524,244 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 	}
 }
 
-func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
+func collectVariableTypeMismatchDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
 	file := result.File
+	interfaces := localInterfaces(file)
+	for _, iface := range interfaces {
+		reported := make(map[string]bool)
+		for _, memberIndex := range iface.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Declaration == nil || commandHasModifier(member, "static") {
+				continue
+			}
+			for bindingIndex, binding := range member.Declaration.Bindings {
+				name := file.Text(binding.Name)
+				actual := aggregateBindingType(result, member, bindingIndex)
+				if name == "" || reported[name] || isUnknownType(actual) {
+					continue
+				}
+				seen := make(map[*syntax.Command]bool)
+				var checkParents func(*syntax.Command) bool
+				checkParents = func(current *syntax.Command) bool {
+					if current == nil || current.Aggregate == nil || seen[current] {
+						return false
+					}
+					seen[current] = true
+					if expected, found := aggregateObjectVariableType(result, current, name); found {
+						if !memberTypesCompatible(result, expected, actual) {
+							appendVariableTypeMismatchDiagnostic(result, name, expected, actual, aggregateEndSpan(file, iface))
+							reported[name] = true
+						}
+						return true
+					}
+					for _, parent := range current.Aggregate.Extends {
+						if checkParents(interfaces[file.Text(parent)]) {
+							return true
+						}
+					}
+					return false
+				}
+				for _, parent := range iface.Aggregate.Extends {
+					if checkParents(interfaces[file.Text(parent)]) {
+						break
+					}
+				}
+			}
+		}
+	}
+	for _, class := range result.classes {
+		reported := make(map[string]bool)
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Declaration == nil {
+				continue
+			}
+			for bindingIndex, binding := range member.Declaration.Bindings {
+				if binding.ParsedType == nil {
+					continue
+				}
+				value := initializerElement(member.Declaration.Initializer, bindingIndex, len(member.Declaration.Bindings))
+				if value == nil || expressionContainsMissing(value) {
+					continue
+				}
+				expected, actual := convertSyntaxType(binding.ParsedType), result.TypeOf(value)
+				if isUnknownType(actual) || memberTypesCompatible(result, expected, actual) {
+					continue
+				}
+				name := file.Text(binding.Name)
+				appendVariableTypeMismatchDiagnostic(result, name, expected, actual, value.Span)
+				reported[name] = true
+			}
+		}
+		seenInterfaces := make(map[*syntax.Command]bool)
+		var checkInterface func(*syntax.Command)
+		checkInterface = func(iface *syntax.Command) {
+			if iface == nil || iface.Aggregate == nil || seenInterfaces[iface] {
+				return
+			}
+			seenInterfaces[iface] = true
+			for _, memberIndex := range iface.Aggregate.Members {
+				if memberIndex < 0 || memberIndex >= len(file.Commands) {
+					continue
+				}
+				member := &file.Commands[memberIndex]
+				if member.Declaration == nil || commandHasModifier(member, "static") {
+					continue
+				}
+				for bindingIndex, binding := range member.Declaration.Bindings {
+					name := file.Text(binding.Name)
+					if name == "" || strings.HasPrefix(name, "_") || reported[name] {
+						continue
+					}
+					expected := aggregateBindingType(result, member, bindingIndex)
+					actual, found := classObjectVariableType(result, class, name)
+					if found && !isUnknownType(expected) && !isUnknownType(actual) && !memberTypesCompatible(result, expected, actual) {
+						appendVariableTypeMismatchDiagnostic(result, name, expected, actual, aggregateEndSpan(file, class))
+						reported[name] = true
+					}
+				}
+			}
+			for _, parent := range iface.Aggregate.Extends {
+				checkInterface(interfaces[file.Text(parent)])
+			}
+		}
+		for _, implemented := range class.Aggregate.Implements {
+			checkInterface(interfaces[file.Text(implemented)])
+		}
+	}
+}
+
+func localInterfaces(file *syntax.File) map[string]*syntax.Command {
 	interfaces := make(map[string]*syntax.Command)
+	if file == nil {
+		return interfaces
+	}
 	for index := range file.Commands {
 		command := &file.Commands[index]
 		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockInterface {
 			interfaces[file.Text(command.Aggregate.Name)] = command
 		}
 	}
+	return interfaces
+}
+
+func aggregateBindingType(result *FileAnalysis, command *syntax.Command, bindingIndex int) ValueType {
+	if result == nil || command == nil || command.Declaration == nil || bindingIndex < 0 || bindingIndex >= len(command.Declaration.Bindings) {
+		return UnknownValueType
+	}
+	binding := command.Declaration.Bindings[bindingIndex]
+	if binding.ParsedType != nil {
+		return convertSyntaxType(binding.ParsedType)
+	}
+	value := initializerElement(command.Declaration.Initializer, bindingIndex, len(command.Declaration.Bindings))
+	return result.TypeOf(value)
+}
+
+func aggregateObjectVariableType(result *FileAnalysis, aggregate *syntax.Command, name string) (ValueType, bool) {
+	if result == nil || result.File == nil || aggregate == nil || aggregate.Aggregate == nil {
+		return UnknownValueType, false
+	}
+	file := result.File
+	for _, memberIndex := range aggregate.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		member := &file.Commands[memberIndex]
+		if member.Declaration == nil || commandHasModifier(member, "static") {
+			continue
+		}
+		for bindingIndex, binding := range member.Declaration.Bindings {
+			if file.Text(binding.Name) == name {
+				return aggregateBindingType(result, member, bindingIndex), true
+			}
+		}
+	}
+	return UnknownValueType, false
+}
+
+func classObjectVariableType(result *FileAnalysis, class *syntax.Command, name string) (ValueType, bool) {
+	seen := make(map[*syntax.Command]bool)
+	for current := class; current != nil; current = extendedClass(result.File, result.classes, current) {
+		if seen[current] {
+			return UnknownValueType, false
+		}
+		seen[current] = true
+		if typ, found := aggregateObjectVariableType(result, current, name); found {
+			return typ, true
+		}
+	}
+	return UnknownValueType, false
+}
+
+func memberTypesCompatible(result *FileAnalysis, expected, actual ValueType) bool {
+	if isUnknownType(expected) || isUnknownType(actual) {
+		return true
+	}
+	if expected.Name == "float" && actual.Name == "number" || expected.Name == "bool" && actual.Name == "number" {
+		return true
+	}
+	if expected.Name != actual.Name {
+		if result != nil && result.classes[expected.Name] != nil && result.classes[actual.Name] != nil {
+			seen := make(map[*syntax.Command]bool)
+			for class := result.classes[actual.Name]; class != nil; class = extendedClass(result.File, result.classes, class) {
+				if seen[class] {
+					return false
+				}
+				seen[class] = true
+				if result.File.Text(class.Aggregate.Name) == expected.Name {
+					return true
+				}
+			}
+			return false
+		}
+		if isASCIIUpperName(expected.Name) || isASCIIUpperName(actual.Name) {
+			return true
+		}
+		return false
+	}
+	if len(expected.Arguments) != len(actual.Arguments) {
+		return false
+	}
+	if expected.ArgumentCountKnown != actual.ArgumentCountKnown || expected.RequiredArguments != actual.RequiredArguments || expected.Variadic != actual.Variadic ||
+		(expected.Return == nil) != (actual.Return == nil) {
+		return false
+	}
+	for index := range expected.Arguments {
+		if !memberTypesCompatible(result, expected.Arguments[index], actual.Arguments[index]) {
+			return false
+		}
+	}
+	if expected.Return != nil && !memberTypesCompatible(result, *expected.Return, *actual.Return) {
+		return false
+	}
+	return true
+}
+
+func isASCIIUpperName(name string) bool {
+	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+func appendVariableTypeMismatchDiagnostic(result *FileAnalysis, name string, expected, actual ValueType, span syntax.Span) {
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1382", Message: `Variable "` + name + `": type mismatch, expected ` + methodTypeDisplay(result, expected) + ` but got ` + methodTypeDisplay(result, actual), Span: span,
+	})
+}
+
+func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	interfaces := localInterfaces(file)
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
@@ -2298,6 +2525,9 @@ func collectTypeMismatchDiagnostics(result *FileAnalysis, commands []syntax.Comm
 func collectDeclarationTypeMismatchDiagnostic(result *FileAnalysis, command *syntax.Command) {
 	declaration := command.Declaration
 	if declaration == nil || declaration.Initializer == nil || expressionContainsMissing(declaration.Initializer) {
+		return
+	}
+	if command.Block >= 0 && command.Block < len(result.File.Blocks) && result.File.Blocks[command.Block].Kind == syntax.BlockClass {
 		return
 	}
 	for index, binding := range declaration.Bindings {

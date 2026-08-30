@@ -4647,6 +4647,74 @@ func TestAnalyzeE1432ConcreteMethodOverridesGenericMethod(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1382VariableTypeMismatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+		span    string
+	}{
+		{
+			name:    "class initializer",
+			source:  "vim9script\nclass S\n  var l: list<string> = [1, 2, 3]\nendclass\n",
+			message: `Variable "l": type mismatch, expected list<string> but got list<number>`, span: "[1, 2, 3]",
+		},
+		{
+			name:    "extended interface",
+			source:  "vim9script\ninterface A\n  var val: number\nendinterface\ninterface B extends A\n  var val: string\nendinterface\n",
+			message: `Variable "val": type mismatch, expected number but got string`, span: "endinterface",
+		},
+		{
+			name:    "implemented interface parent member",
+			source:  "vim9script\ninterface I\n  var value: list<dict<number>>\nendinterface\nclass A\n  var value: list<dict<string>>\nendclass\nclass B extends A implements I\nendclass\n",
+			message: `Variable "value": type mismatch, expected list<dict<number>> but got list<dict<string>>`, span: "endclass",
+		},
+		{
+			name:    "implemented interface inferred member",
+			source:  "vim9script\ninterface I\n  var value: list<dict<string>>\nendinterface\nclass C implements I\n  var value = {a: 1, b: 2}\nendclass\n",
+			message: `Variable "value": type mismatch, expected list<dict<string>> but got dict<number>`, span: "endclass",
+		},
+		{
+			name:    "function variable return",
+			source:  "vim9script\ninterface I\n  var Callback: func(number): bool\nendinterface\nclass C implements I\n  var Callback: func(number): string\nendclass\n",
+			message: `Variable "Callback": type mismatch, expected func(number): bool but got func(number): string`, span: "endclass",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			analysis := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range analysis.Diagnostics {
+				if diagnostic.Code == "vim/E1382" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1382 diagnostics=%#v; syntax diagnostics=%#v", got, file.Diagnostics)
+			}
+			for _, diagnostic := range analysis.Diagnostics {
+				if diagnostic.Code == "vim/E1012" {
+					t.Fatalf("unexpected E1012 alongside E1382: %#v", diagnostic)
+				}
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ninterface I\n  var value: list<dict<number>>\nendinterface\nclass C implements I\n  var value = [{a: 1}]\nendclass\n",
+		"vim9script\nclass S\n  var l: list<string> = ['ok']\nendclass\n",
+		"vim9script\nclass S\n  var value: float = 1\nendclass\n",
+		"vim9script\nclass Base\nendclass\nclass Child extends Base\nendclass\ninterface I\n  var value: Base\nendinterface\nclass C implements I\n  var value: Child\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1382" {
+				t.Fatalf("guard source reported E1382: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1383MethodTypeMismatch(t *testing.T) {
 	tests := []struct {
 		name    string
