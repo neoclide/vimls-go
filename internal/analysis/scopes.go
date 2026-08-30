@@ -5985,7 +5985,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							continue
 						}
 						if !scopeUsesDefTypeRules(scope) {
-							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, argument.Span); ok {
+							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, actual, argument.Span, dialect == syntax.Vim9); ok {
 								result.Diagnostics = append(result.Diagnostics, diagnostic)
 								continue
 							}
@@ -6057,10 +6057,22 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 // errors for the simple argument checkers whose native diagnostic is useful to
 // callers. E1013 remains the general static type mismatch for checkers without
 // a specialized native diagnostic.
-func builtinArgumentDiagnostic(checker string, index int, span syntax.Span) (syntax.Diagnostic, bool) {
+func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, span syntax.Span, vim9 bool) (syntax.Diagnostic, bool) {
 	checker = strings.TrimSuffix(checker, "_mod")
 	var code, required string
 	switch checker {
+	case "arg_number":
+		if vim9 {
+			code, required = "vim/E1210", "Number"
+		}
+	case "arg_item_of_prev":
+		if vim9 && index > 0 && index <= len(actual)-1 && actual[index-1].Name == "blob" {
+			code, required = "vim/E1210", "Number"
+		}
+	case "arg_remove2":
+		if vim9 && index > 0 && len(actual) > 0 && (actual[0].Name == "list" || actual[0].Name == "blob") {
+			code, required = "vim/E1210", "Number"
+		}
 	case "arg_len1":
 		return syntax.Diagnostic{Code: "vim/E701", Message: "Invalid type for len()", Span: span}, true
 	case "arg_string":
@@ -6078,6 +6090,9 @@ func builtinArgumentDiagnostic(checker string, index int, span syntax.Span) (syn
 			Code: "vim/E1531", Message: "Argument of get() must be a List, Tuple, Dictionary or Blob", Span: span,
 		}, true
 	default:
+		return syntax.Diagnostic{}, false
+	}
+	if code == "" {
 		return syntax.Diagnostic{}, false
 	}
 	return syntax.Diagnostic{

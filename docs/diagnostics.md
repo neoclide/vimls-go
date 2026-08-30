@@ -1748,6 +1748,38 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   check before dropping an otherwise useful result.
 - `src/errors.h:3101-3102` defines the exact E1207 message.
 
+## Number required for builtin argument: E1210
+
+Analysis reports E1210 at Vim9 script level when a builtin argument with a
+known static type reaches Vim's strict Number check with a non-Number value.
+The message uses the normalized one-based argument position, including method
+calls, and the diagnostic selects the complete offending argument.
+
+The direct rule follows Vim's `arg_number` metadata. The same code also applies
+to the value inserted into a Blob and to a List or Blob index passed to
+`remove()`, because those container-dependent runtime paths explicitly use the
+Number check. A compiled `def` or block lambda retains the stricter E1013 type
+mismatch. Float-to-Number conversion retains E805, while Legacy calls,
+dynamically typed arguments, List element-type mismatches, and the
+container-dependent third argument of `extend()` remain on their existing
+paths.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:206-208` distinguishes E1013 in a
+  compiled `def` from E1210 for the first and second Number arguments during
+  Vim9 script evaluation.
+- `src/testdir/test_vim9_builtin.vim:2321-2327` covers the Blob item and later
+  direct Number arguments of `index()`.
+- `src/testdir/test_vim9_builtin.vim:3670-3676` covers List and Blob indexes
+  passed to `remove()`.
+- `src/testdir/test_blob.vim:404-408` covers a non-Number value added to a Blob.
+- `src/typval.c:487-499` implements the strict runtime Number check and its
+  one-based argument number.
+- `src/list.c:2964-2976,3252-3289` applies that check to Blob insertion and
+  List or Blob removal.
+- `src/errors.h:3109-3110` defines the exact E1210 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
