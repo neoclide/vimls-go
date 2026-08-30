@@ -429,6 +429,12 @@ pending-fix.
 Commit `8cd5b1b` migrated both unknown generic tuple-type variants. The
 authoritative parser split is therefore 981 migrated, zero ready, and 51
 pending-fix.
+Commit `0df3f25` migrated the enum-terminator separator variant, and commit
+`9057bcb` migrated the already-ready Vim9 `#{` function-body variant. Four
+E492 cases were then removed from syntax scope because deciding whether a
+command exists or what dynamically executed text means is not parsing. The
+authoritative syntax split is therefore 983 migrated, zero ready, and 45
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1504,7 +1510,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 132 migrated and 51 pending-fix. In the
+Group D contains 179 syntax variants: 134 migrated and 45 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1588,7 +1594,7 @@ followed by `<...>` reports E1010 over the complete retained TypeGeneric node.
 Ordinary user type names and expression-context generic function calls remain
 unchanged.
 
-#### `test_vim9_enum.vim` (34)
+#### `test_vim9_enum.vim` (31)
 
 ```text
 E1065 M ready: 60:1409/script,68:1610/script,76:1834/script
@@ -1605,10 +1611,9 @@ E1419 P recovery: 224:5261/script
 E1420 P mapping: 84:2047/script,100:2430/script
 E1435 P missing: 1706:39098/script
 E488 M ready: 108:2615/script
-E488 P missing: 116:2820/script
+E488 M missing: 116:2820/script
 E488 M recovery: 123:3013/script
 E488 M ready: 132:3226/script
-E492 P mapping: 44:1002/script,52:1215/script,92:2227/script
 ```
 
 Commit `1779234` migrated the already-ready enum header-separator case at
@@ -1620,7 +1625,18 @@ the enum value phase reports E1170 over those two bytes, stops only that
 physical value line, and retains the preceding values, `endenum`, and later
 commands. `#{{` and ordinary Vim9 comments keep their existing behavior.
 
-#### `test_vim9_func.vim` (75)
+Commit `0df3f25` migrated `116:2820/script`. The scanner now carries the
+existing aggregate kind through logical-line scanning, so a separator after a
+matched `endenum` reports E488 and becomes opaque without affecting class or
+interface terminators.
+
+The three E492 cases at lines 44, 52, and 92 are intentionally excluded from
+syntax migration. `noenum`, `enums`, and `Enum` are unknown or user-command
+candidates; whether they produce E492 depends on command definition state.
+The parser keeps such commands opaque as required for user-defined and future
+commands.
+
+#### `test_vim9_func.vim` (74)
 
 ```text
 E1005 M ready: 2887:66332/def
@@ -1643,7 +1659,7 @@ E1151 M mapping: 373:8000/script
 E1152 M recovery: 382:8151/script
 E1157 M ready: 1689:36926/{def|vim9-script}
 E1160 P missing: 2034:44861/script
-E1170 P missing: 73:1788/def
+E1170 M ready: 73:1788/def
 E1172 P missing: 1626:35394/{def|vim9-script}
 E1173 M missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/script,2388:53495/script
 E125 M ready: 948:20577/script,955:20687/script
@@ -1658,7 +1674,6 @@ E476 P recovery: 781:16158/def
 E488 M ready: 971:20965/script,3746:85903/script
 E488 P missing: 1755:38517/{def|vim9-script}
 E488 P recovery: 1748:38346/{def|vim9-script},2403:53812/script
-E492 P missing: 3889:89267/script
 E720 P missing: 3539:81179/{def|vim9-script}
 E884 P mapping: 3740:85793/script
 ```
@@ -1678,6 +1693,12 @@ Ex separator remains valid after a top-level definition. A separator payload
 after a nested definition is E1173 because the compiled definition cannot
 return `eap->nextcmd`; that tail stays opaque and the outer function continues
 on the next physical line.
+
+Commit `9057bcb` migrates the already-supported `73:1788/def` case: the shared
+Vim9 command scanner reports E1170 for `#{`, keeps that physical line opaque,
+and resumes at the following line. The E492 case at `3889:89267/script` is
+excluded because the error comes from dynamically executing register text,
+not from parsing the containing script.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
