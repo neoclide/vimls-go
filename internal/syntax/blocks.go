@@ -181,6 +181,14 @@ func buildBlocks(file *File) {
 			}
 		}
 		if kind, ok := openingBlock(file, command); ok {
+			// Vim9 enums are script-level declarations.  Keep the enum as a
+			// block for recovery, but report the declaration-context error when
+			// it appears inside a function definition.
+			if kind == BlockEnum && command.Dialect == Vim9 && defBlock >= 0 {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1435", Message: "Enum can only be used in a script", Span: command.Name,
+				})
+			}
 			parent := -1
 			if len(stack) > 0 {
 				parent = stack[len(stack)-1]
