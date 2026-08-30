@@ -537,23 +537,23 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 		}
 		for _, parameter := range command.Function.Parameters {
 			if parameter.Default != nil {
-				walkExpression(result, file, parameter.Default, functionScope, nil, false)
+				walkExpression(result, file, parameter.Default, functionScope, nil, false, command.Dialect)
 			}
 		}
 	}
 	if command.Import != nil && command.Import.Path != nil {
-		walkExpression(result, file, command.Import.Path, scope, nil, false)
+		walkExpression(result, file, command.Import.Path, scope, nil, false, command.Dialect)
 	}
 	for _, value := range command.EnumValues {
 		skip := map[syntax.Span]bool{value.Name: true}
 		if value.Initializer != nil {
-			walkExpression(result, file, value.Initializer, scope, skip, false)
+			walkExpression(result, file, value.Initializer, scope, skip, false, command.Dialect)
 		} else {
 			// Arguments are also children of Initializer for constructor-style
 			// enum values.  Walk them only when the recovering AST has no
 			// initializer, otherwise references would be duplicated.
 			for _, argument := range value.Arguments {
-				walkExpression(result, file, argument, scope, skip, false)
+				walkExpression(result, file, argument, scope, skip, false, command.Dialect)
 			}
 		}
 	}
@@ -565,14 +565,14 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 				skip[binding.Name] = true
 			}
 		}
-		walkExpression(result, file, expression, scope, skip, false)
+		walkExpression(result, file, expression, scope, skip, false, command.Dialect)
 	}
 	if command.Mapping != nil {
-		walkExpression(result, file, command.Mapping.RHSExpression, scope, nil, false)
+		walkExpression(result, file, command.Mapping.RHSExpression, scope, nil, false, command.Dialect)
 	}
 	if command.Canonical != "++" && command.Canonical != "--" {
 		for _, target := range command.Targets {
-			walkExpression(result, file, target, scope, nil, false)
+			walkExpression(result, file, target, scope, nil, false, command.Dialect)
 		}
 	}
 	if command.Embedded != nil {
@@ -587,26 +587,32 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	}
 }
 
-func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.Expression, scope *Scope, skipped map[syntax.Span]bool, preferFunction bool) {
+func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.Expression, scope *Scope, skipped map[syntax.Span]bool, preferFunction bool, dialect syntax.Dialect) {
 	if expression == nil || scope == nil || file == nil {
 		return
 	}
 	switch expression.Kind {
 	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
+			declaration := resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped)
 			result.References = append(result.References, &Reference{
 				Name: expression.Value, Span: expression.Span,
-				Declaration: resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped),
+				Declaration: declaration,
 			})
+			if declaration == nil && !preferFunction && dialect == syntax.Vim9 && scopeContainsDef(scope) && !strings.Contains(expression.Value, ":") && expression.Value != "this" && expression.Value != "super" {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1001", Message: "Variable not found: " + expression.Value, Span: expression.Span,
+				})
+			}
 		}
 		for _, child := range expression.Children {
-			walkExpression(result, file, child, scope, skipped, false)
+			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	case syntax.ExpressionMember:
 		// Value is the member spelling, not a lexical variable.  Only the
 		// receiver expression participates in same-file resolution.
 		if len(expression.Children) > 0 {
-			walkExpression(result, file, expression.Children[0], scope, skipped, false)
+			walkExpression(result, file, expression.Children[0], scope, skipped, false, dialect)
 		}
 	case syntax.ExpressionDictionary:
 		for index, child := range expression.Children {
@@ -615,16 +621,16 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			if index%2 == 0 && child != nil && child.Kind == syntax.ExpressionIdentifier {
 				continue
 			}
-			walkExpression(result, file, child, scope, skipped, false)
+			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	case syntax.ExpressionCall:
 		collectBuiltinCallArityDiagnostic(result, file, expression)
 		for index, child := range expression.Children {
-			walkExpression(result, file, child, scope, skipped, index == 0)
+			walkExpression(result, file, child, scope, skipped, index == 0, dialect)
 		}
 	case syntax.ExpressionGenericReference:
 		for index, child := range expression.Children {
-			walkExpression(result, file, child, scope, skipped, index == 0)
+			walkExpression(result, file, child, scope, skipped, index == 0, dialect)
 		}
 	case syntax.ExpressionLambda:
 		lambdaScope := result.lambdaScopes[expression]
@@ -645,11 +651,11 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			if index < len(expression.Parameters) {
 				continue
 			}
-			walkExpression(result, file, child, lambdaScope, skipped, false)
+			walkExpression(result, file, child, lambdaScope, skipped, false, dialect)
 		}
 	default:
 		for _, child := range expression.Children {
-			walkExpression(result, file, child, scope, skipped, false)
+			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	}
 }

@@ -128,3 +128,42 @@ func immutableDiagnosticName(message string) string {
 	}
 	return strings.Trim(message[len(`Cannot change read-only variable `):], `"`)
 }
+
+func TestAnalyzeUndefinedVim9DefIdentifiers(t *testing.T) {
+	source := `vim9script
+var scriptValue = 1
+def Check(value: number)
+  echo missing
+  echo missing + scriptValue
+  if value > 0
+    echo blockMissing
+  endif
+  echo MissingCall()
+  echo MissingGeneric<number>(1)
+  echo s:scoped
+  echo this
+  echo super
+  var lambda = (item: number) => item + lambdaMissing
+  legacy echo legacyMissing
+enddef
+echo outsideMissing
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	want := []string{"missing", "missing", "blockMissing", "lambdaMissing"}
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1001" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("E1001 diagnostics = %#v, want %v (all diagnostics = %#v, syntax diagnostics = %#v)", got, want, result.Diagnostics, file.Diagnostics)
+	}
+	for index, name := range want {
+		diagnostic := got[index]
+		if diagnostic.Message != "Variable not found: "+name || file.Text(diagnostic.Span) != name {
+			t.Fatalf("diagnostic[%d] = %#v (%q), want %q", index, diagnostic, file.Text(diagnostic.Span), name)
+		}
+	}
+}
