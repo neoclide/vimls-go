@@ -726,6 +726,87 @@ func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1041ScriptItemRedefinition(t *testing.T) {
+	tests := []struct {
+		name, source, text, forbidden string
+		want                          int
+	}{
+		{"official for binding", "vim9script\nvar x = 5\nfor x in range(5)\nendfor\n", "x", "vim/E1017", 1},
+		{"script variables", "vim9script\nvar x = 1\nvar x = 2\n", "x", "vim/E1017", 1},
+		{"legacy guard", "var x = 1\nvar x = 2\n", "x", "", 0},
+		{"def local uses E1017", "vim9script\ndef F()\n  var x = 1\n  var x = 2\nenddef\n", "x", "", 0},
+		{"def then variable", "vim9script\ndef Func()\nenddef\nvar Func = 1\n", "Func", "vim/E1073", 1},
+		{"variable then def", "vim9script\nvar Func = 1\ndef Func()\nenddef\n", "Func", "vim/E1073", 1},
+		{"variable then class", "vim9script\nvar Thing = 1\nclass Thing\nendclass\n", "Thing", "", 1},
+		{"enum then variable", "vim9script\nenum Thing\n  One\nendenum\nvar Thing = 1\n", "Thing", "", 1},
+		{"duplicate class", "vim9script\nclass Thing\nendclass\nclass Thing\nendclass\n", "Thing", "", 1},
+		{"variable then type alias", "vim9script\nvar Thing = 1\ntype Thing = string\n", "Thing", "", 1},
+		{"type alias then variable", "vim9script\ntype Thing = number\nvar Thing = 1\n", "Thing", "", 1},
+		{"type aliases use E1396", "vim9script\ntype Thing = number\ntype Thing = string\n", "Thing", "", 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			diagnostics := Analyze(file).Diagnostics
+			var got []syntax.Diagnostic
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "vim/E1041" {
+					got = append(got, diagnostic)
+				}
+				if test.forbidden != "" && diagnostic.Code == test.forbidden {
+					t.Fatalf("%s conflict used %s: %#v", test.name, test.forbidden, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E1041 diagnostics = %#v", got)
+			}
+			if test.want == 1 {
+				if got[0].Message != `Redefining script item: "`+test.text+`"` || file.Text(got[0].Span) != test.text {
+					t.Fatalf("E1041 diagnostic = %#v, text=%q", got[0], file.Text(got[0].Span))
+				}
+			}
+		})
+	}
+}
+
+func TestAnalyzeE1041GenericTypeParameterConflicts(t *testing.T) {
+	tests := []struct {
+		name, source, text string
+	}{
+		{"type alias", "vim9script\ntype A = number\ndef Fn<A>()\nenddef\n", "A"},
+		{"script function", "vim9script\ndef MyFunc()\nenddef\ndef Fn<MyFunc>()\nenddef\n", "MyFunc"},
+		{"class", "vim9script\nclass A\nendclass\ndef Fn<A>()\nenddef\n", "A"},
+		{"script variable", "vim9script\nvar B = 'abc'\ndef Fn<A, B>()\nenddef\n", "B"},
+		{"generic function name", "vim9script\ndef I<A>(x: A): A\n  return x\nenddef\ndef Id<I>(x: I): I\n  return x\nenddef\n", "I"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1041" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Redefining script item: "`+test.text+`"` || file.Text(got[0].Span) != test.text {
+				t.Fatalf("E1041 diagnostics = %#v, want one on %q", got, test.text)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef One<A>()\nenddef\ndef Two<A>()\nenddef\n",
+		"vim9script\ndef Outer<T>()\n  def Inner<T>()\n  enddef\nenddef\n",
+		"vim9script\ndef Duplicate<A, A>()\nenddef\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1041" {
+				t.Fatalf("reusable or duplicate local generic parameter reported E1041: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1073NameAlreadyDefined(t *testing.T) {
 	tests := []struct {
 		name, source, text string

@@ -102,6 +102,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectArgumentRedeclarationDiagnostics(result)
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
+	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
 
 	sortDeclarations(result)
@@ -126,6 +127,104 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+// collectVim9ScriptItemRedefinitionDiagnostics reports E1041 when two
+// different kinds of script item use one name, and for duplicate variables,
+// aggregates, and top-level loop bindings. Duplicate functions and duplicate
+// type aliases retain their more specific diagnostics.
+func collectVim9ScriptItemRedefinitionDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.File == nil {
+		return
+	}
+	eligible := make(map[syntax.Span]bool)
+	var collect func([]syntax.Command)
+	collect = func(items []syntax.Command) {
+		for index := range items {
+			command := &items[index]
+			scope := result.commandScopes[command]
+			topLevel := scope == result.Root || scope != nil && scope.Kind == syntax.BlockFor && scope.Parent == result.Root
+			if command.Dialect == syntax.Vim9 && topLevel {
+				if command.Declaration != nil {
+					for _, binding := range command.Declaration.Bindings {
+						eligible[binding.Name] = true
+					}
+				}
+				if command.For != nil {
+					for _, binding := range command.For.Bindings {
+						eligible[binding.Name] = true
+					}
+				}
+				if command.Aggregate != nil {
+					eligible[command.Aggregate.Name] = true
+				}
+				if command.TypeAlias != nil {
+					eligible[command.TypeAlias.Name] = true
+				}
+			}
+			if command.Canonical == "def" && command.Function != nil {
+				eligible[command.Function.Name] = true
+			}
+			if command.Aggregate != nil {
+				eligible[command.Aggregate.Name] = true
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(commands)
+	// Declarations are sorted by source position by the collector's caller;
+	// use the source order explicitly since duplicate reporting must point at
+	// the later item.
+	seen := make(map[string]bool)
+	seenKind := make(map[string]SymbolKind)
+	declarations := append([]*Declaration(nil), result.Declarations...)
+	sort.SliceStable(declarations, func(i, j int) bool { return declarations[i].Span.Start < declarations[j].Span.Start })
+	for _, declaration := range declarations {
+		if declaration == nil || !eligible[declaration.Span] || declaration.Scope == nil {
+			continue
+		}
+		topLevel := declaration.Scope == result.Root || declaration.Scope.Kind == syntax.BlockFor && declaration.Scope.Parent == result.Root
+		if !topLevel {
+			continue
+		}
+		previousKind := seenKind[declaration.Name]
+		isFunction := functionSymbolKind(declaration.Kind)
+		if seen[declaration.Name] && !(isFunction && functionSymbolKind(previousKind)) &&
+			!(declaration.Kind == SymbolKindTypeAlias && previousKind == SymbolKindTypeAlias) {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1041", Message: `Redefining script item: "` + declaration.Name + `"`, Span: declaration.Span})
+		}
+		seen[declaration.Name] = true
+		seenKind[declaration.Name] = declaration.Kind
+	}
+	rootNames := make(map[string]bool)
+	for _, declaration := range result.Root.Declarations {
+		if declaration != nil {
+			rootNames[declaration.Name] = true
+		}
+	}
+	var genericConflicts func([]syntax.Command)
+	genericConflicts = func(items []syntax.Command) {
+		for index := range items {
+			command := &items[index]
+			if command.Function != nil && command.Canonical == "def" {
+				for _, parameter := range command.Function.TypeParameters {
+					if rootNames[parameter.Name] {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1041", Message: `Redefining script item: "` + parameter.Name + `"`, Span: parameter.Span})
+					}
+				}
+			}
+			if command.Embedded != nil {
+				genericConflicts(command.Embedded.Commands)
+			}
+		}
+	}
+	genericConflicts(commands)
+}
+
+func functionSymbolKind(kind SymbolKind) bool {
+	return kind == SymbolKindFunction || kind == SymbolKindMethod || kind == SymbolKindConstructor
 }
 
 // collectVim9NameAlreadyDefinedDiagnostics covers Vim9 :def and :import names.
@@ -155,7 +254,8 @@ func collectVim9NameAlreadyDefinedDiagnostics(result *FileAnalysis, commands []s
 		if declaration == nil || declaration.Scope == nil || !eligible[declaration.Span] {
 			continue
 		}
-		if resolve(declaration.Scope, declaration.Name, declaration.Span.Start, false, nil) != nil {
+		if existing := resolve(declaration.Scope, declaration.Name, declaration.Span.Start, false, nil); existing != nil &&
+			!(declaration.Scope == result.Root && functionSymbolKind(declaration.Kind) && !functionSymbolKind(existing.Kind)) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1073", Message: "Name already defined: " + declaration.Name, Span: declaration.Span,
 			})
