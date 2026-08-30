@@ -348,6 +348,9 @@ the authoritative current split 920 migrated, zero ready, and 141 pending-fix.
 Commit `c30bf4d` migrated the two same-line Vim9 `for` type-colon variants,
 making the authoritative current split 922 migrated, zero ready, and 139
 pending-fix.
+A generic-call phase audit then removed four failures that parse function names
+from string values inside `function()` or `call()`. The authoritative parser
+split is therefore 922 migrated, zero ready, and 135 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -942,11 +945,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 109 | 64 | 0 | 45 |
+| `C-GENERIC` | 105 | 64 | 0 | 41 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **362** | **290** | **0** | **72** |
+| **Total** | **358** | **290** | **0** | **68** |
 
 ```text
 C-EXPR
@@ -1021,7 +1024,7 @@ C-GENERIC
   E1552 G:22:376/script,83:1769/script,2615:57599/script
   E1553 G:54:1052/script,92:2032/script,805:17703/script,2605:57388/script
   E1554 G:280:6221/script,923:20811/script,932:21066/script,941:21321/script,1077:24455/script,1089:24747/script,1101:25039/script,1706:36532/script,1720:36821/script,1734:37119/script,2087:45368/script,2099:45711/script,2105:45860/script,2226:48986/script,2244:49426/script,2254:49642/script,2354:52131/script,2364:52374/script,2374:52597/script,2683:59253/script,2692:59455/script,2701:59667/script,2810:62141/script,2822:62380/script,2834:62629/script
-  E1555 G:30:565/script,256:5703/script,264:5880/script,650:14312/script,787:17195/script,914:20548/script,969:21961/script,1065:24155/script,1139:25810/script,1191:26790/script,1214:27205/script,1298:28752/script,1457:31742/script,1479:32151/script,1557:33623/script,1692:36240/script,2145:46759/script,2304:50718/script,2424:53708/script,2584:56941/script,2665:58818/script,2786:61632/script,2919:64579/script,3030:67202/script,3536:79340/script,3546:79564/script
+  E1555 G:30:565/script,256:5703/script,264:5880/script,650:14312/script,787:17195/script,969:21961/script,1139:25810/script,1191:26790/script,1214:27205/script,1298:28752/script,1457:31742/script,1479:32151/script,1557:33623/script,1692:36240/script,2145:46759/script,2304:50718/script,2424:53708/script,2584:56941/script,2919:64579/script,3030:67202/script,3536:79340/script,3546:79564/script
 
 C-IMPORT
   E1038 S:1817:37904/def
@@ -1056,13 +1059,15 @@ Authority is distributed across `src/eval.c`, `src/vim9expr.c`,
 `src/vim9cmds.c`, `src/vim9compile.c`, `src/vim9generics.c`,
 `src/vim9class.c`, `src/ex_docmd.c`, `src/userfunc.c`, and `src/usercmd.c`.
 
-The Group C parser inventory excludes seven failures whose outcome requires
+The Group C parser inventory excludes eleven failures whose outcome requires
 state beyond the token stream. `S:57:1170/{def|vim9-script}` checks the current
 buffer range, `G:854:19046/script` asks whether a resolved funcref is generic,
 and `S:5454:122336/script` checks whether a resolved value is callable. The
 three `I:{512:13833,519:14018,525:14180}/script` E1060 failures require knowing
-that `foo` is an imported namespace before requiring a member dot. These cases
-belong to runtime or semantic analysis, not parser-negative coverage.
+that `foo` is an imported namespace before requiring a member dot. Finally,
+`G:{914:20548,1065:24155,2665:58818,2786:61632}/script` parses a function name
+stored in a string passed to `function()` or `call()`. These cases belong to
+runtime or semantic analysis, not parser-negative coverage.
 
 Commit `1e10f55` migrated the `C-EXCMD` E1083 variant. The generated command
 table now retains Vim's EX_XFILE/EX_FILES/EX_FILE1 property, valid filename
