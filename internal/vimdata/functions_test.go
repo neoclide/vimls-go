@@ -23,7 +23,7 @@ func TestLookupFunctionMetadata(t *testing.T) {
 	}
 	for _, test := range tests {
 		function, ok := LookupFunction(test.name)
-		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType || len(function.ArgumentChecks) != test.checkCount || function.ArgumentChecks[0] != test.firstCheck || function.ArgumentChecks[len(function.ArgumentChecks)-1] != test.lastCheck {
+		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType || len(function.ArgumentChecks) != test.checkCount || function.ArgumentChecks[0] != test.firstCheck || function.ArgumentChecks[len(function.ArgumentChecks)-1] != test.lastCheck || function.Documentation == "" || function.DocumentationSource == "" {
 			t.Fatalf("LookupFunction(%q) = %#v, %v", test.name, function, ok)
 		}
 	}

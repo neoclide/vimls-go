@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -89,5 +92,29 @@ func TestPinnedRevisionAndGeneratedTable(t *testing.T) {
 	}
 	if got := strings.Join(functions[0].ArgumentChecks, ","); functions[0].Name != "abs" || got != "arg_float_or_nr" {
 		t.Fatalf("abs metadata = %#v", functions[0])
+	}
+	if err := addDocumentation(root, functions); err != nil {
+		t.Fatal(err)
+	}
+	wantSources := map[string]string{"abs": "builtin.txt", "ch_open": "channel.txt", "popup_create": "popup.txt", "term_start": "terminal.txt"}
+	for _, function := range functions {
+		if want := wantSources[function.Name]; want != "" && (function.DocumentationSource != want || function.Documentation == "") {
+			t.Errorf("%s documentation = %q from %q", function.Name, function.Documentation, function.DocumentationSource)
+		}
+	}
+	generated := filepath.Join(t.TempDir(), "functions_generated.go")
+	if err := writeOutput(generated, functions); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(generated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("..", "..", "internal", "vimdata", "functions_generated.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("functions_generated.go is stale; run tools/genbuiltins")
 	}
 }

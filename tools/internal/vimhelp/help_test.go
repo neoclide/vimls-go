@@ -1,0 +1,56 @@
+package vimhelp
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestParseTags(t *testing.T) {
+	tags, err := ParseTags([]byte("foo()\tbuiltin.txt\t/*foo()*\n'bar'\toptions.txt\t/*'bar'*\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tags["foo()"] != "builtin.txt" || tags["'bar'"] != "options.txt" || len(tags) != 2 {
+		t.Fatalf("tags = %#v", tags)
+	}
+}
+
+func TestExtractAndConvertMarkdown(t *testing.T) {
+	source := []byte(`foo({expr})                                      *foo()* *oldfoo()*
+	Return a |Number| for {expr}.
+	Example: >
+		echo foo(1) | echo untouched
+<		1
+
+bar()                                             *bar()*
+	See |foo()|.
+==============================================================================
+unrelated text
+`)
+	docs, err := Extract("runtime/doc/builtin.txt", source, []string{"foo()", "oldfoo()", "bar()"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foo := docs["foo()"]
+	if foo.Source != "builtin.txt" || foo.Markdown != docs["oldfoo()"].Markdown {
+		t.Fatalf("foo documentation = %#v, alias = %#v", foo, docs["oldfoo()"])
+	}
+	for _, want := range []string{"foo({expr})", "`Number`", "```vim", "echo foo(1) | echo untouched", "```"} {
+		if !strings.Contains(foo.Markdown, want) {
+			t.Errorf("foo Markdown missing %q:\n%s", want, foo.Markdown)
+		}
+	}
+	if strings.Contains(foo.Markdown, "*foo()*") || strings.Contains(foo.Markdown, "unrelated text") {
+		t.Fatalf("foo Markdown retained help markup or escaped its section:\n%s", foo.Markdown)
+	}
+	if got := docs["bar()"].Markdown; !strings.Contains(got, "`foo()`") || strings.Contains(got, "====") {
+		t.Fatalf("bar Markdown = %q", got)
+	}
+}
+
+func TestToMarkdownHandlesExpectedOutputAndReopensExample(t *testing.T) {
+	markdown := ToMarkdown("Examples: >\n\t:echo 1\n<\t1  >\n\t:echo 2\n<\t2")
+	if strings.Count(markdown, "```vim") != 2 || strings.Count(markdown, "```") != 4 || !strings.Contains(markdown, "1\n```vim") {
+		t.Fatalf("Markdown =\n%s", markdown)
+	}
+}
