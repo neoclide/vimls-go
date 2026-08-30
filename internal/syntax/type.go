@@ -331,6 +331,18 @@ func (p *typeParser) parseType() *Type {
 		}
 		node.Span.End = p.base + p.offset
 	}
+	// A postfix question mark is not a Vim9 type operator.  Consume it here,
+	// while the parser is still in a type context, so malformed function
+	// signatures retain their argument and closing delimiter instead of
+	// cascading into missing-delimiter errors.
+	if p.offset > 0 && p.offset < len(p.source) && p.source[p.offset] == '?' &&
+		!isExpressionSpace(p.source[p.offset-1]) && !isLineLeadingBackslash(p.source, p.offset-1) {
+		p.offset++
+		node.Span.End = p.base + p.offset
+		p.diagnostics = append(p.diagnostics, Diagnostic{
+			Code: "vim/E1010", Message: "type not recognized", Span: node.Span,
+		})
+	}
 	return node
 }
 
