@@ -420,6 +420,9 @@ pending-fix.
 Commit `df781ad` migrated all five function-closer trailing-text variants. The
 authoritative parser split is therefore 975 migrated, zero ready, and 57
 pending-fix.
+Commit `05e9d93` migrated all three leading-comma tuple variants. The
+authoritative parser split is therefore 978 migrated, zero ready, and 54
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1495,7 +1498,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 126 migrated and 57 pending-fix. In the
+Group D contains 183 syntax variants: 129 migrated and 54 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1556,16 +1559,22 @@ E1004 M ready: 138:3809/def
 E1008 M ready: 62:1444/{def|vim9-script},67:1600/{def|vim9-script}
 E1010 M ready: 120:3271/{def|vim9-script}
 E1010 P missing: 167:4773/{def|vim9-script}
-E1015 P recovery: 159:4498/def
+E1015 M recovery: 159:4498/def
 E1068 M ready: 82:2083/{def|vim9-script},92:2394/def,97:2538/{def|vim9-script},143:3972/def,151:4245/def
 E1069 M ready: 72:1754/{def|vim9-script},77:1924/{def|vim9-script},87:2239/{def|vim9-script}
 E15 M mapping: 143:3972/vim9-script,151:4245/vim9-script
 E15 P missing: 143:3972/legacy,151:4245/legacy
-E15 P recovery: 159:4498/{legacy|vim9-script}
+E15 M recovery: 159:4498/{legacy|vim9-script}
 E1526 M ready: 112:3010/{legacy|def|vim9-script}
 E1527 M ready: 104:2756/{legacy|def|vim9-script}
 E1539 M ready: 127:3486/{def|vim9-script}
 ```
+
+Commit `05e9d93` retains a leading tuple gap as the first missing child and
+continues parsing all later items through `)`. The command context maps that
+one structural error to E1015 inside a compiled `def` and E15 in legacy or
+top-level Vim9 script without changing empty, one-item, list, or Dictionary
+comma grammar.
 
 #### `test_vim9_enum.vim` (34)
 
