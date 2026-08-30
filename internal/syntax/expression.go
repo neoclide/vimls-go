@@ -1330,6 +1330,9 @@ func (p *expressionParser) parseParenthesized() *Expression {
 				// recovery can continue with the next value or closing paren.
 				if p.dialect == Vim9 {
 					reportTupleDiagnostic("vim/E1068", "no white space allowed before ','", p.current())
+				} else {
+					reportTupleDiagnostic("vim/E15", "invalid expression", p.current())
+					children = append(children, &Expression{Kind: ExpressionMissing, Span: p.current().span})
 				}
 				p.advance()
 			}
