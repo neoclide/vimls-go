@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/chemzqm/vimls-go/internal/syntax"
@@ -107,6 +108,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
 	inferTypes(result)
+	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
 	collectImmutableAssignmentDiagnostics(result, file.Commands, root)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
@@ -658,6 +660,357 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	}
+}
+
+type builtinArgumentType struct {
+	display     string
+	kinds       builtinValueKind
+	elementKind builtinValueKind
+}
+
+type builtinValueKind uint16
+
+const (
+	builtinNumber builtinValueKind = 1 << iota
+	builtinFloat
+	builtinString
+	builtinBool
+	builtinBlob
+	builtinList
+	builtinTuple
+	builtinDict
+	builtinFunc
+	builtinChannel
+	builtinJob
+	builtinObject
+)
+
+func builtinValueTypeKind(typ ValueType) builtinValueKind {
+	switch typ.Name {
+	case "number":
+		return builtinNumber
+	case "float":
+		return builtinFloat
+	case "string":
+		return builtinString
+	case "bool":
+		return builtinBool
+	case "blob":
+		return builtinBlob
+	case "list":
+		return builtinList
+	case "tuple":
+		return builtinTuple
+	case "dict":
+		return builtinDict
+	case "func":
+		return builtinFunc
+	case "channel":
+		return builtinChannel
+	case "job":
+		return builtinJob
+	case "object":
+		return builtinObject
+	default:
+		return 0
+	}
+}
+
+func builtinArgumentExpectation(checker string, actual []ValueType, index int) (builtinArgumentType, bool) {
+	checker = strings.TrimSuffix(checker, "_mod")
+	makeType := func(display string, kinds builtinValueKind) (builtinArgumentType, bool) {
+		return builtinArgumentType{display: display, kinds: kinds}, true
+	}
+	switch checker {
+	case "arg_number":
+		return makeType("number", builtinNumber)
+	case "arg_bool":
+		return makeType("bool", builtinBool)
+	case "arg_string":
+		return makeType("string", builtinString)
+	case "arg_blob":
+		return makeType("blob", builtinBlob)
+	case "arg_object":
+		return makeType("object", builtinObject)
+	case "arg_float_or_nr":
+		return makeType("float or number", builtinFloat|builtinNumber)
+	case "arg_buffer", "arg_lnum":
+		return makeType("number or string", builtinNumber|builtinString)
+	case "arg_buffer_or_dict_any":
+		return makeType("number, string or dict", builtinNumber|builtinString|builtinDict)
+	case "arg_list_any":
+		return makeType("list", builtinList)
+	case "arg_dict_any":
+		return makeType("dict", builtinDict)
+	case "arg_tuple_any":
+		return makeType("tuple", builtinTuple)
+	case "arg_job":
+		return makeType("job", builtinJob)
+	case "arg_chan_or_job":
+		return makeType("channel or job", builtinChannel|builtinJob)
+	case "arg_list_number":
+		return builtinArgumentType{display: "list<number>", kinds: builtinList, elementKind: builtinNumber}, true
+	case "arg_list_string":
+		return builtinArgumentType{display: "list<string>", kinds: builtinList, elementKind: builtinString}, true
+	case "arg_list_or_blob":
+		return makeType("list or blob", builtinList|builtinBlob)
+	case "arg_list_or_tuple":
+		return makeType("list or tuple", builtinList|builtinTuple)
+	case "arg_list_or_tuple_or_blob":
+		return makeType("list, tuple or blob", builtinList|builtinTuple|builtinBlob)
+	case "arg_list_or_tuple_or_dict":
+		return makeType("list, tuple or dict", builtinList|builtinTuple|builtinDict)
+	case "arg_list_or_dict_or_blob":
+		return makeType("list, dict or blob", builtinList|builtinDict|builtinBlob)
+	case "arg_list_or_dict_or_blob_or_string":
+		return makeType("list, dict, blob or string", builtinList|builtinDict|builtinBlob|builtinString)
+	case "arg_list_tuple_dict_blob_or_string":
+		return makeType("list, tuple, dict, blob or string", builtinList|builtinTuple|builtinDict|builtinBlob|builtinString)
+	case "arg_string_list_tuple_or_blob":
+		return makeType("string, list, tuple or blob", builtinString|builtinList|builtinTuple|builtinBlob)
+	case "arg_string_list_tuple_or_dict":
+		return makeType("string, list, tuple or dict", builtinString|builtinList|builtinTuple|builtinDict)
+	case "arg_string_or_blob":
+		return makeType("string or blob", builtinString|builtinBlob)
+	case "arg_string_or_nr":
+		return makeType("string or number", builtinString|builtinNumber)
+	case "arg_string_or_list_any":
+		return makeType("string or list", builtinString|builtinList)
+	case "arg_string_or_list_string":
+		return builtinArgumentType{display: "string or list<string>", kinds: builtinString | builtinList, elementKind: builtinString}, true
+	case "arg_string_or_dict_any", "arg_dict_any_or_string":
+		return makeType("string or dict", builtinString|builtinDict)
+	case "arg_str_or_nr_or_list":
+		return makeType("string, number or list", builtinString|builtinNumber|builtinList)
+	case "arg_string_or_func":
+		return makeType("string or function", builtinString|builtinFunc|builtinBool|builtinNumber)
+	case "arg_filter_func", "arg_map_func", "arg_foreach_func", "arg_sort_how":
+		return makeType("string or function", builtinString|builtinFunc)
+	case "arg_bool_or_nr":
+		return makeType("bool or number", builtinBool|builtinNumber)
+	case "arg_bool_or_dict_any":
+		return makeType("bool or dict", builtinBool|builtinDict)
+	case "arg_reverse":
+		return makeType("string, list, tuple or blob", builtinString|builtinList|builtinTuple|builtinBlob)
+	case "arg_get1":
+		return makeType("blob, list, tuple, dict or function", builtinBlob|builtinList|builtinTuple|builtinDict|builtinFunc)
+	case "arg_len1":
+		return makeType("string, number, blob, list, tuple, dict or object", builtinString|builtinNumber|builtinBlob|builtinList|builtinTuple|builtinDict|builtinObject)
+	case "arg_repeat1":
+		return makeType("string, number, blob, list or tuple", builtinString|builtinNumber|builtinBlob|builtinList|builtinTuple)
+	case "arg_slice1":
+		return makeType("string, blob, list or tuple", builtinString|builtinBlob|builtinList|builtinTuple)
+	case "arg_cursor1":
+		return makeType("number, string or list", builtinNumber|builtinString|builtinList)
+	case "arg_same_as_prev", "arg_same_struct_as_prev":
+		if index == 0 || index > len(actual)-1 || isUnknownType(actual[index-1]) {
+			return builtinArgumentType{}, false
+		}
+		expected := actual[index-1]
+		kind := builtinValueTypeKind(expected)
+		if kind == 0 {
+			return builtinArgumentType{}, false
+		}
+		result := builtinArgumentType{display: valueTypeDisplay(expected), kinds: kind}
+		if checker == "arg_same_as_prev" && len(expected.Arguments) > 0 && !isUnknownType(expected.Arguments[0]) {
+			result.elementKind = builtinValueTypeKind(expected.Arguments[0])
+		}
+		return result, true
+	case "arg_item_of_prev":
+		if index == 0 || index > len(actual)-1 {
+			return builtinArgumentType{}, false
+		}
+		previous := actual[index-1]
+		if previous.Name == "blob" {
+			return makeType("number", builtinNumber)
+		}
+		if previous.Name != "list" || len(previous.Arguments) == 0 || isUnknownType(previous.Arguments[0]) {
+			return builtinArgumentType{}, false
+		}
+		kind := builtinValueTypeKind(previous.Arguments[0])
+		if kind == 0 {
+			return builtinArgumentType{}, false
+		}
+		return makeType(valueTypeDisplay(previous.Arguments[0]), kind)
+	case "arg_extend3":
+		if index < 2 || len(actual) < 1 {
+			return builtinArgumentType{}, false
+		}
+		switch actual[0].Name {
+		case "list", "blob":
+			return makeType("number", builtinNumber)
+		case "dict":
+			return makeType("string", builtinString)
+		default:
+			return builtinArgumentType{}, false
+		}
+	case "arg_remove2":
+		if index == 0 || len(actual) < 1 {
+			return builtinArgumentType{}, false
+		}
+		switch actual[0].Name {
+		case "list", "blob":
+			return makeType("number", builtinNumber)
+		case "dict":
+			return makeType("string or number", builtinString|builtinNumber)
+		default:
+			return builtinArgumentType{}, false
+		}
+	case "arg_any", "varargs_class":
+		return builtinArgumentType{}, false
+	default:
+		return builtinArgumentType{}, false
+	}
+}
+
+func builtinArgumentMismatch(actual ValueType, expected builtinArgumentType) bool {
+	if isUnknownType(actual) {
+		return false
+	}
+	kind := builtinValueTypeKind(actual)
+	if kind == 0 {
+		return false
+	}
+	if expected.kinds&kind == 0 {
+		return true
+	}
+	if expected.elementKind == 0 || actual.Name == "string" || len(actual.Arguments) == 0 || isUnknownType(actual.Arguments[0]) {
+		return false
+	}
+	actualElement := builtinValueTypeKind(actual.Arguments[0])
+	return actualElement != 0 && expected.elementKind&actualElement == 0
+}
+
+func valueTypeDisplay(typ ValueType) string {
+	if isUnknownType(typ) {
+		return "any"
+	}
+	if len(typ.Arguments) == 0 {
+		return typ.Name
+	}
+	arguments := make([]string, 0, len(typ.Arguments))
+	for _, argument := range typ.Arguments {
+		arguments = append(arguments, valueTypeDisplay(argument))
+	}
+	return typ.Name + "<" + strings.Join(arguments, ", ") + ">"
+}
+
+func builtinCallArguments(file *syntax.File, call *syntax.Expression) (vimdata.BuiltinFunction, []*syntax.Expression, bool) {
+	if file == nil || call == nil || call.Kind != syntax.ExpressionCall || len(call.Children) == 0 {
+		return vimdata.BuiltinFunction{}, nil, false
+	}
+	callee := call.Children[0]
+	var name string
+	var receiver *syntax.Expression
+	var explicit []*syntax.Expression
+	switch {
+	case call.Value == "" && callee != nil && callee.Kind == syntax.ExpressionIdentifier:
+		name = callee.Value
+		explicit = call.Children[1:]
+	case call.Value == "" && callee != nil && callee.Kind == syntax.ExpressionMember && len(callee.Children) == 1 && file.Text(callee.Operator) == "->":
+		name = callee.Value
+		receiver = callee.Children[0]
+		explicit = call.Children[1:]
+	case call.Value == "->" && callee != nil && callee.Kind == syntax.ExpressionIdentifier && len(call.Children) >= 2:
+		name = callee.Value
+		receiver = call.Children[1]
+		explicit = call.Children[2:]
+	default:
+		return vimdata.BuiltinFunction{}, nil, false
+	}
+	if strings.Contains(name, ":") {
+		return vimdata.BuiltinFunction{}, nil, false
+	}
+	builtin, ok := vimdata.LookupFunction(name)
+	if !ok {
+		return vimdata.BuiltinFunction{}, nil, false
+	}
+	if receiver == nil {
+		return builtin, explicit, true
+	}
+	if builtin.MethodArgument == 0 {
+		return vimdata.BuiltinFunction{}, nil, false
+	}
+	receiverIndex := builtin.MethodArgument - 1
+	if receiverIndex > len(explicit) {
+		return vimdata.BuiltinFunction{}, nil, false
+	}
+	arguments := make([]*syntax.Expression, 0, len(explicit)+1)
+	arguments = append(arguments, explicit[:receiverIndex]...)
+	arguments = append(arguments, receiver)
+	arguments = append(arguments, explicit[receiverIndex:]...)
+	return builtin, arguments, true
+}
+
+func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	seen := make(map[*syntax.Expression]bool)
+	var walkCommands func([]syntax.Command, *Scope)
+	var walk func(*syntax.Expression, *Scope, syntax.Dialect)
+	walk = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
+		if expression == nil || seen[expression] {
+			return
+		}
+		seen[expression] = true
+		if expression.Kind == syntax.ExpressionCall && dialect == syntax.Vim9 && !expressionContainsMissing(expression) && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
+			if builtin, arguments, ok := builtinCallArguments(result.File, expression); ok {
+				actual := make([]ValueType, len(arguments))
+				for index, argument := range arguments {
+					actual[index] = result.TypeOf(argument)
+				}
+				for index, argument := range arguments {
+					checkerIndex := index
+					if checkerIndex >= len(builtin.ArgumentChecks) {
+						if builtin.MaxArgs < 0 && len(builtin.ArgumentChecks) > 0 {
+							checkerIndex = len(builtin.ArgumentChecks) - 1
+						} else {
+							break
+						}
+					}
+					expected, ok := builtinArgumentExpectation(builtin.ArgumentChecks[checkerIndex], actual, index)
+					if !ok {
+						continue
+					}
+					if builtinArgumentMismatch(actual[index], expected) {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
+					}
+				}
+			}
+		}
+		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
+			walkCommands(expression.LambdaBody.Commands, result.lambdaScopes[expression])
+		}
+		for _, child := range expression.Children {
+			walk(child, scope, dialect)
+		}
+	}
+	walkCommands = func(list []syntax.Command, fallback *Scope) {
+		for index := range list {
+			command := &list[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = fallback
+			}
+			for _, expression := range command.Expressions {
+				walk(expression, scope, command.Dialect)
+			}
+			for _, expression := range command.Targets {
+				walk(expression, scope, command.Dialect)
+			}
+			if command.Declaration != nil {
+				walk(command.Declaration.Initializer, scope, command.Dialect)
+			}
+			if command.For != nil {
+				walk(command.For.Iterable, scope, command.Dialect)
+			}
+			if command.Import != nil {
+				walk(command.Import.Path, scope, command.Dialect)
+			}
+			if command.Embedded != nil {
+				walkCommands(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	walkCommands(commands, parent)
 }
 
 // collectBuiltinCallArityDiagnostic reports arity errors only where the

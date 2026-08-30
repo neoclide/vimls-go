@@ -382,6 +382,9 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	case syntax.ExpressionCall:
 		if len(expression.Children) > 0 {
 			callee := state.infer(expression.Children[0], scope)
+			for _, argument := range expression.Children[1:] {
+				state.infer(argument, scope)
+			}
 			if callee.Name == "func" && callee.Return != nil {
 				typ = *callee.Return
 			} else {

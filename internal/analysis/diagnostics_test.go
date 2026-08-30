@@ -7,6 +7,40 @@ import (
 	"github.com/chemzqm/vimls-go/internal/syntax"
 )
 
+func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   int
+	}{
+		{"number", "vim9script\ndef F()\n  abs('x')\nenddef\n", 1},
+		{"string", "vim9script\ndef F()\n  split(1)\nenddef\n", 1},
+		{"buffer union mismatch", "vim9script\ndef F()\n  bufname({})\nenddef\n", 1},
+		{"buffer union matches", "vim9script\ndef F()\n  bufname(1)\n  bufname('x')\nenddef\n", 0},
+		{"len union", "vim9script\ndef F()\n  len(1)\n  len({})\n  len(1.0)\nenddef\n", 1},
+		{"method argument", "vim9script\ndef F()\n  ['x']->map(3)\nenddef\n", 1},
+		{"unknown argument", "vim9script\ndef F(value: any)\n  abs(value)\nenddef\n", 0},
+		{"incomplete call", "vim9script\ndef F()\n  len(\nenddef\n", 0},
+		{"legacy", "echo abs('x')\n", 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var got int
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1013" {
+					got++
+					if diagnostic.Span.Start >= diagnostic.Span.End || diagnostic.Message == "" {
+						t.Fatalf("invalid E1013 = %#v", diagnostic)
+					}
+				}
+			}
+			if got != test.want {
+				t.Fatalf("E1013 diagnostics = %d, want %d; all diagnostics = %#v", got, test.want, Analyze(syntax.Parse(test.source)).Diagnostics)
+			}
+		})
+	}
+}
+
 func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -32,7 +66,7 @@ func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "optional variadic and conservative targets",
-			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(1, 2, 3, 4)\nvar dynamic = call('len', [])\nMyFunction()\ns:len()\nitems->len()\n",
+			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(null_object, 2, 3, 4)\nvar dynamic = call('len', [])\nMyFunction()\ns:len()\nitems->len()\n",
 		},
 		{
 			name:   "incomplete calls do not cascade",
