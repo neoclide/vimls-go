@@ -2187,7 +2187,10 @@ func (p *expressionParser) parseList() *Expression {
 
 func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 	open := p.current()
-	if arrowOffset := findLegacyLambdaArrow(p.source, open.span.Start-p.base); arrowOffset >= 0 {
+	openOffset := open.span.Start - p.base
+	if arrowOffset := findLegacyLambdaArrow(p.source, openOffset); arrowOffset >= 0 && (p.dialect != Vim9 || arrowOffset == openOffset+1) {
+		// Vim9 still accepts the historical no-argument {-> expression}
+		// spelling, but a named {x -> expression} form is a malformed Dictionary.
 		return p.parseLegacyLambda(open, arrowOffset)
 	}
 	p.advance()
