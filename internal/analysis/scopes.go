@@ -31,6 +31,8 @@ type FileAnalysis struct {
 	suppressedSyntaxDiagnostics map[syntax.Diagnostic]bool
 	enumValueExempt             map[syntax.Span]bool
 	typeAliasExempt             map[syntax.Span]bool
+	classValueExempt            map[syntax.Span]bool
+	classAliases                map[string]string
 }
 
 // Scope is a lexical region. Root has Block == -1 and an empty Kind. Other
@@ -98,6 +100,8 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	result.unknownOptions = make(map[syntax.Span]bool)
 	result.enumValueExempt = make(map[syntax.Span]bool)
 	result.typeAliasExempt = make(map[syntax.Span]bool)
+	result.classValueExempt = make(map[syntax.Span]bool)
+	result.classAliases = localClassAliases(file)
 	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
 	collectLambdaScopesCommands(result, root, file.Commands)
 
@@ -3125,7 +3129,8 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			if !preferFunction {
 				appendEnumAsValueDiagnostic(result, scope, expression, dialect)
 			}
-			if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && declaration != nil && declaration.Kind == SymbolKindTypeAlias && !result.typeAliasExempt[expression.Span] {
+			classAsValue := appendClassAsValueDiagnostic(result, declaration, expression, dialect)
+			if !classAsValue && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && declaration != nil && declaration.Kind == SymbolKindTypeAlias && !result.typeAliasExempt[expression.Span] {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1407", Message: "Cannot use a Typealias as a variable or value", Span: expression.Span,
 				})
@@ -3150,6 +3155,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			if expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
 				result.enumValueExempt[expression.Children[0].Span] = true
 				result.typeAliasExempt[expression.Children[0].Span] = true
+				result.classValueExempt[expression.Children[0].Span] = true
 			}
 			walkExpression(result, file, expression.Children[0], scope, skipped, false, dialect)
 		}
@@ -3190,6 +3196,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			for _, argument := range expression.Children[firstArgument:] {
 				if argument != nil && argument.Kind == syntax.ExpressionIdentifier {
 					result.typeAliasExempt[argument.Span] = true
+					result.classValueExempt[argument.Span] = true
 				}
 			}
 		}
@@ -3229,6 +3236,26 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	}
+}
+
+func appendClassAsValueDiagnostic(result *FileAnalysis, declaration *Declaration, expression *syntax.Expression, dialect syntax.Dialect) bool {
+	if result == nil || declaration == nil || expression == nil || dialect != syntax.Vim9 || result.classValueExempt[expression.Span] {
+		return false
+	}
+	className := ""
+	switch declaration.Kind {
+	case SymbolKindClass:
+		className = declaration.Name
+	case SymbolKindTypeAlias:
+		className = result.classAliases[declaration.Name]
+	}
+	if className == "" {
+		return false
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1405", Message: "Class \"" + className + "\" cannot be used as a value", Span: expression.Span,
+	})
+	return true
 }
 
 func appendAbstractSuperMethodDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
@@ -3280,6 +3307,30 @@ func localClasses(file *syntax.File) map[string]*syntax.Command {
 		}
 	}
 	return classes
+}
+
+func localClassAliases(file *syntax.File) map[string]string {
+	classes := localClasses(file)
+	targets := make(map[string]string)
+	for index := range file.Commands {
+		alias := file.Commands[index].TypeAlias
+		if alias != nil && alias.Type != nil && alias.Type.Kind == syntax.TypeNamed {
+			targets[file.Text(alias.Name)] = alias.Type.Name
+		}
+	}
+	aliases := make(map[string]string)
+	for alias, target := range targets {
+		seen := make(map[string]bool)
+		for target != "" && !seen[target] {
+			seen[target] = true
+			if classes[target] != nil {
+				aliases[alias] = target
+				break
+			}
+			target = targets[target]
+		}
+	}
+	return aliases
 }
 
 func enclosingClassCommand(file *syntax.File, scope *Scope) *syntax.Command {

@@ -3156,6 +3156,57 @@ endclass
 	}
 }
 
+func TestAnalyzeClassAsValueDiagnostic(t *testing.T) {
+	source := `vim9script
+class C
+endclass
+type Alias = C
+var scriptValue = [C]
+def F(): any
+  var direct = C
+  var alias = Alias
+  echo len(C)
+  return C
+enddef
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1405" {
+			got = append(got, diagnostic)
+		}
+	}
+	wantSpans := []string{"C", "C", "Alias", "C", "C"}
+	if len(got) != len(wantSpans) {
+		t.Fatalf("E1405 diagnostics = %#v, want spans %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, wantSpans, file.Diagnostics, result.Diagnostics)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Message != `Class "C" cannot be used as a value` || file.Text(diagnostic.Span) != wantSpans[index] {
+			t.Fatalf("E1405 diagnostic[%d] = %#v on %q", index, diagnostic, file.Text(diagnostic.Span))
+		}
+	}
+
+	valid := Analyze(syntax.Parse(`vim9script
+class C
+  static var label = 'ok'
+endclass
+type Alias = C
+var object: C = C.new()
+var aliasObject: Alias = Alias.new()
+echo C.label
+echo type(C)
+echo typename(C)
+echo string(C)
+echo instanceof(object, C)
+`))
+	for _, diagnostic := range valid.Diagnostics {
+		if diagnostic.Code == "vim/E1405" {
+			t.Fatalf("class context reported E1405: %#v", valid.Diagnostics)
+		}
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]
