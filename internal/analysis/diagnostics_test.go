@@ -143,6 +143,55 @@ func TestAnalyzeE1427EnumNameCannotBeModified(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1426EnumOrdinalCannotBeModified(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   int
+	}{
+		{
+			name:   "constructor",
+			source: "vim9script\nenum Planet\n  Mercury\n  def new()\n    this.ordinal = 20\n  enddef\nendenum\n",
+			want:   1,
+		},
+		{
+			name:   "ordinary enum method compound assignment",
+			source: "vim9script\nenum Planet\n  Mercury\n  def Advance()\n    this.ordinal += 1\n  enddef\nendenum\n",
+			want:   1,
+		},
+		{
+			name:   "read and ordinary member assignment",
+			source: "vim9script\nenum Planet\n  Mercury\n  var count: number\n  def Advance()\n    echo this.ordinal\n    this.count = 1\n  enddef\nendenum\n",
+		},
+		{
+			name:   "class member",
+			source: "vim9script\nclass Counter\n  var ordinal: number\n  def Advance()\n    this.ordinal = 1\n  enddef\nendclass\n",
+		},
+		{
+			name:   "outside enum",
+			source: "vim9script\nenum Planet\n  Mercury\nendenum\ndef Advance()\n  Planet.Mercury.ordinal = 1\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1426" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E1426 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+			if test.want == 1 && (got[0].Message != "Enum \"Planet\" ordinal value cannot be modified" || file.Text(got[0].Span) != "this.ordinal") {
+				t.Fatalf("E1426 diagnostic = %#v", got[0])
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string

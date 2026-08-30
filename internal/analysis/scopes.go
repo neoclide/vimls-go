@@ -2203,11 +2203,20 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 	}
 	if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && expression.Children[1] != nil && expression.Children[1].Kind != syntax.ExpressionMissing {
 		target := expression.Children[0]
-		if target != nil && target.Kind == syntax.ExpressionMember && target.Value == "name" && len(target.Children) == 1 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier && target.Children[0].Value == "this" {
+		if target != nil && target.Kind == syntax.ExpressionMember && len(target.Children) == 1 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier && target.Children[0].Value == "this" {
 			if enumName, ok := enclosingVim9EnumName(result.File, scope); ok {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E1427", Message: "Enum \"" + enumName + "\" name cannot be modified", Span: target.Span,
-				})
+				diagnostic := syntax.Diagnostic{Span: target.Span}
+				switch target.Value {
+				case "name":
+					diagnostic.Code = "vim/E1427"
+					diagnostic.Message = "Enum \"" + enumName + "\" name cannot be modified"
+				case "ordinal":
+					diagnostic.Code = "vim/E1426"
+					diagnostic.Message = "Enum \"" + enumName + "\" ordinal value cannot be modified"
+				}
+				if diagnostic.Code != "" {
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
+				}
 			}
 		} else if target != nil && target.Kind == syntax.ExpressionIdentifier && validNameSpan(result.File, target.Span) {
 			if isReadOnlyVimVariableTarget(target) || dialect == syntax.Legacy && isReadOnlyLegacyArgumentTarget(scope, target) {
