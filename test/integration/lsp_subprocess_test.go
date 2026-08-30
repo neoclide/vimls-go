@@ -11,12 +11,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/jsonrpc"
+	"github.com/neoclide/vimls-go/internal/workspace"
+	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
@@ -73,9 +76,10 @@ func TestLSPSubprocess(t *testing.T) {
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
 	registration := readJSON(t, reader)
-	if string(registration["method"]) != `"client/registerCapability"` || !strings.Contains(string(registration["params"]), `"method":"workspace/didChangeWatchedFiles"`) || !strings.Contains(string(registration["params"]), `"pattern":"**/*.vim"`) || !strings.Contains(string(registration["params"]), fmt.Sprintf(`"baseUri":%q`, uri.File(runtimeRoot))) {
+	if string(registration["method"]) != `"client/registerCapability"` {
 		t.Fatalf("watch registration = %s", registration)
 	}
+	assertVimWatchRegistration(t, registration["params"], []string{workspaceRoot, runtimeRoot})
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, registration["id"]))
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nvar value: number = 1\nclass Widget\n  def new()\n    if true\n      echo value\n    endif\n  enddef\nendclass\ndef Add(left: number, right: number)\nenddef\necho Add(1, 2)\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
@@ -169,23 +173,23 @@ func TestLSPSubprocess(t *testing.T) {
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99999,"method":"workspace/symbol","params":{"query":"runtimeName"}}`)
 	runtimeSymbols := readJSON(t, reader)
-	if string(runtimeSymbols["id"]) != "99999" || !strings.Contains(string(runtimeSymbols["result"]), `"name":"runtimeName"`) || !strings.Contains(string(runtimeSymbols["result"]), fmt.Sprintf(`"uri":%q`, uri.File(filepath.Join(runtimeRoot, "plugin", "runtime.vim")))) {
+	if string(runtimeSymbols["id"]) != "99999" || !strings.Contains(string(runtimeSymbols["result"]), `"name":"runtimeName"`) || !strings.Contains(string(runtimeSymbols["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, filepath.Join(runtimeRoot, "plugin", "runtime.vim")))) {
 		t.Fatalf("runtimepath symbols = %s", runtimeSymbols)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, uri.File(workspaceMain), workspaceMainSource))
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100000,"method":"textDocument/definition","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10}}}`, uri.File(workspaceMain)))
 	crossDefinition := readJSON(t, reader)
-	if string(crossDefinition["id"]) != "100000" || !strings.Contains(string(crossDefinition["result"]), fmt.Sprintf(`"uri":%q`, uri.File(workspaceLib))) || !strings.Contains(string(crossDefinition["result"]), `"start":{"line":1,"character":11}`) {
+	if string(crossDefinition["id"]) != "100000" || !strings.Contains(string(crossDefinition["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, workspaceLib))) || !strings.Contains(string(crossDefinition["result"]), `"start":{"line":1,"character":11}`) {
 		t.Fatalf("cross-file definition = %s", crossDefinition)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100001,"method":"textDocument/references","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10},"context":{"includeDeclaration":true}}}`, uri.File(workspaceMain)))
 	crossReferences := readJSON(t, reader)
-	if string(crossReferences["id"]) != "100001" || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, uri.File(workspaceLib))) || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, uri.File(workspaceMain))) {
+	if string(crossReferences["id"]) != "100001" || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, workspaceLib))) || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, workspaceMain))) {
 		t.Fatalf("cross-file references = %s", crossReferences)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100002,"method":"textDocument/documentLink","params":{"textDocument":{"uri":%q}}}`, uri.File(workspaceMain)))
 	documentLinks := readJSON(t, reader)
-	if string(documentLinks["id"]) != "100002" || !strings.Contains(string(documentLinks["result"]), fmt.Sprintf(`"target":%q`, uri.File(workspaceLib))) {
+	if string(documentLinks["id"]) != "100002" || !strings.Contains(string(documentLinks["result"]), fmt.Sprintf(`"target":%q`, canonicalFileURI(t, workspaceLib))) {
 		t.Fatalf("document links = %s", documentLinks)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100003,"method":"textDocument/completion","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":9}}}`, uri.File(workspaceMain)))
@@ -218,6 +222,53 @@ func TestLSPSubprocess(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
+}
+
+func assertVimWatchRegistration(t *testing.T, raw json.RawMessage, roots []string) {
+	t.Helper()
+	var params protocol.RegistrationParams
+	if err := protocol.Unmarshal(raw, &params); err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Registrations) != 1 {
+		t.Fatalf("registrations = %#v", params.Registrations)
+	}
+	registration := params.Registrations[0]
+	if registration.ID != "vimls-watch-vim-files" || registration.Method != protocol.MethodWorkspaceDidChangeWatchedFiles {
+		t.Fatalf("registration = %#v", registration)
+	}
+	var options protocol.DidChangeWatchedFilesRegistrationOptions
+	if err := protocol.Unmarshal(registration.RegisterOptions, &options); err != nil {
+		t.Fatal(err)
+	}
+	if len(options.Watchers) != len(roots) {
+		t.Fatalf("watchers = %#v", options.Watchers)
+	}
+	canonicalRoots := make([]string, len(roots))
+	for index, root := range roots {
+		canonical, err := workspace.CanonicalPath(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonicalRoots[index] = canonical
+	}
+	sort.Strings(canonicalRoots)
+	wantKind := protocol.WatchKindCreate | protocol.WatchKindChange | protocol.WatchKindDelete
+	for index, root := range canonicalRoots {
+		pattern, ok := options.Watchers[index].GlobPattern.(*protocol.RelativePattern)
+		if !ok || pattern.BaseURI != protocol.URI(uri.File(root)) || pattern.Pattern != protocol.Pattern("**/*.vim") || options.Watchers[index].Kind != wantKind {
+			t.Fatalf("watcher %d = %#v", index, options.Watchers[index])
+		}
+	}
+}
+
+func canonicalFileURI(t *testing.T, path string) uri.URI {
+	t.Helper()
+	canonical, err := workspace.CanonicalPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uri.File(canonical)
 }
 
 func TestVersionSubprocess(t *testing.T) {
