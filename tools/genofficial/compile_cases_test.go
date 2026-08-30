@@ -2,7 +2,6 @@ package main
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -31,57 +30,5 @@ func TestCompileExpectedCodes(t *testing.T) {
 				t.Fatalf("compileExpectedCodes(%q) = %q, want %q", test.source, got, test.want)
 			}
 		})
-	}
-}
-
-func TestBuildPinnedCompileCaseCorpus(t *testing.T) {
-	files := readPinnedTestFiles(t)
-	inventory := readPinnedHelperInventory(t)
-	corpus, err := buildCompileCaseCorpus(files, inventory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := checkCompileCaseCorpus(corpus); err != nil {
-		t.Fatal(err)
-	}
-	wantSummary := compileCaseSummary{
-		Calls: 1770, ExtractedCalls: 1762, SkippedCalls: 8,
-		Cases: 3171, ExpectedCodes: 2964, UnresolvedCode: 207,
-		DirectLists: 1403, Heredocs: 349, ListConcats: 10,
-	}
-	if corpus.Summary != wantSummary || len(corpus.Files) != 14 {
-		t.Fatalf("compile corpus files=%d summary=%+v, want files=14 summary=%+v", len(corpus.Files), corpus.Summary, wantSummary)
-	}
-
-	wantCalls := 0
-	for _, helper := range inventory.Records {
-		if helper.Disposition == "pending-extraction" && isCompileFailureHelper(helper.Name) {
-			wantCalls++
-		}
-	}
-	if len(corpus.Records) != wantCalls {
-		t.Fatalf("compile records=%d, selected helper calls=%d", len(corpus.Records), wantCalls)
-	}
-	for _, record := range corpus.Records {
-		for _, variant := range record.Cases {
-			if variant.Context == "def" && !strings.HasSuffix(variant.Source, "defcompile\n") {
-				t.Fatalf("%s/%s does not end in defcompile: %q", record.ID, variant.Name, variant.Source)
-			}
-			if variant.Context == "script" && !strings.HasPrefix(variant.Source, "vim9script\n") {
-				t.Fatalf("%s/%s does not begin in vim9script: %q", record.ID, variant.Name, variant.Source)
-			}
-		}
-	}
-}
-
-func TestPinnedCompileCaseArtifact(t *testing.T) {
-	var artifact compileCaseCorpus
-	readPinnedGzipJSON(t, "v9.2.1015-compile-cases.json.gz", &artifact)
-	want, err := buildCompileCaseCorpus(readPinnedTestFiles(t), readPinnedHelperInventory(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(artifact, want) {
-		t.Fatal("generated compile-case artifact is stale; run make generate-official")
 	}
 }

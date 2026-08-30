@@ -132,34 +132,18 @@ new Vim-source research pass.
 
 ### Semantics
 
-The pinned `v9.2.1015-compile-cases.json.gz` corpus is the starting inventory
-for Vim9 static diagnostics. It normalizes official failure helpers into an
-in-memory `def` variant and, where the helper requires it, a separate
-`vim9script` variant. It never starts Vim or executes generated function
-bodies. Every record retains the upstream helper coordinate, complete
-reconstructed source, and the expected Vim error code for each variant when
-one is available. An unresolved error argument remains explicit and must be
-classified from the pinned source rather than guessed from analyzer output.
+The pinned `v9.2.1015-compile-cases.json.gz` corpus supplies self-contained
+official `def` and `vim9script` failure sources without starting Vim. The
+compile-diagnostic status map is the progress ledger: `true` means the static
+rule has focused Go coverage, `false` means it is pending, and permanently
+non-static errors have a separate exclusion reason.
 
-The artifact is a complete provenance inventory, not an instruction to execute
-every repeated assertion. Compile-diagnostic gates deterministically spread at
-most 30 self-contained representative variants across each error code and its
-available `def` and `vim9script` contexts. A code with hundreds of upstream
-occurrences therefore does not make routine tests hundreds of times larger.
-
-Only source that can be analyzed in isolation is eligible for migration. Cases
-that require starting Vim, execution-time state, build features, files, jobs,
-terminals, or functions and variables defined elsewhere in Vim's test harness
-remain in the inventory with an explicit exclusion reason. Do not reconstruct
-that runtime environment or add hidden context to make such a case pass. Cover
-the same statically decidable rule with a minimal Go-driven source fixture
-instead.
-
-Adding an error rule requires focused Go tests for its essential syntax forms,
-diagnostic code, and in-bounds source span, plus representative official
-provenance when a self-contained upstream case exists. Repeated upstream cases
-are not migrated merely to increase a count, and official helper coverage is
-not a substitute for direct recovery and type-inference tests.
+Routine analysis tests run at most 30 deterministic official cases per error
+code. Cases that require runtime state, build features, external files, jobs,
+terminals, or definitions from Vim's test harness are not run; cover the same
+statically decidable rule with a focused Go fixture instead. Official cases
+supplement, rather than replace, direct tests for syntax forms, recovery,
+diagnostic code, message, and in-bounds source span.
 
 Table and workspace fixtures cover scopes, shadowing, closures, imports/exports,
 autoload, cycles, members, generics, null values and `null_<type>` behavior,

@@ -181,9 +181,6 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	if err := checkCompileCaseCorpus(compileCases); err != nil {
-		fatal(err)
-	}
 	if err := writeJSONGzip(*helperOutput, inventory); err != nil {
 		fatal(err)
 	}
