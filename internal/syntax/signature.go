@@ -480,7 +480,7 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		if defaultStart >= end {
 			parameter.Default = &Expression{Kind: ExpressionMissing, Span: parameter.DefaultSpan}
 			code, message := "vim/E125", "illegal argument"
-			if defSignature {
+			if defSignature && command.Dialect == Vim9 {
 				code, message = "vim/E15", "invalid expression"
 			}
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: parameter.DefaultSpan})
