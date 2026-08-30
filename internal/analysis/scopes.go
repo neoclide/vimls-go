@@ -916,6 +916,8 @@ func declarationHasCompoundTarget(file *syntax.File, span syntax.Span) bool {
 func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax.Command) {
 	for index := range commands {
 		command := &commands[index]
+		scope := result.commandScopes[command]
+		defRules := scopeUsesDefTypeRules(scope)
 		if command.Dialect == syntax.Vim9 && command.Declaration != nil && command.Declaration.Initializer != nil {
 			bindings := command.Declaration.Bindings
 			if len(bindings) > 0 && command.Declaration.Target != nil &&
@@ -929,7 +931,7 @@ func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax
 						fixed++
 					}
 				}
-				appendVim9CardinalityDiagnostic(result, fixed, rest, command.Declaration.Initializer)
+				appendVim9CardinalityDiagnostic(result, fixed, rest, command.Declaration.Initializer, defRules)
 			}
 		}
 		if command.Dialect == syntax.Vim9 {
@@ -948,7 +950,7 @@ func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax
 						if rest {
 							expected--
 						}
-						appendVim9CardinalityDiagnostic(result, expected, rest, rhs)
+						appendVim9CardinalityDiagnostic(result, expected, rest, rhs, defRules)
 					}
 				}
 				if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
@@ -977,12 +979,18 @@ func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax
 	}
 }
 
-func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bool, rhs *syntax.Expression) {
+func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bool, rhs *syntax.Expression, defRules bool) {
 	if rhs == nil || expressionContainsMissing(rhs) || rhs.Kind != syntax.ExpressionList && rhs.Kind != syntax.ExpressionTuple {
 		return
 	}
 	got := len(rhs.Children)
 	if rest && got >= expected || !rest && got == expected {
+		return
+	}
+	if !defRules && rhs.Kind == syntax.ExpressionTuple && got < expected {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1538", Message: "More targets than Tuple items", Span: rhs.Span,
+		})
 		return
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
