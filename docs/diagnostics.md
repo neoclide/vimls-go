@@ -1493,6 +1493,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:527-532` documents the script-wide no-shadowing rule.
 - `src/errors.h:2997-2998` defines the exact E1168 message template.
 
+## Unsupported for-loop iterable: E1177
+
+Analysis reports E1177 when a Vim9 `for` loop iterates a value whose type is
+statically known not to be iterable. The diagnostic uses Vim's exact `For loop
+on {type} not supported` form and selects the iterable expression. Local class
+instances use Vim's runtime type name `object` rather than their class name.
+
+Lists, Tuples, Strings, and Blobs remain valid iterables. Unknown and `any`
+values stay conservative because their runtime type decides whether the loop
+is valid. Legacy commands, including an explicit `legacy for` under a Vim9
+root, retain their historical iterable diagnostics instead of receiving
+E1177. When E1177 owns an invalid iterable, the loop does not also receive a
+binding E1012 diagnostic; malformed iterable syntax and earlier expression
+diagnostics keep precedence.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_script.vim:3079-3086` expects the exact Dictionary
+  message for both a compiled literal and a dynamically typed runtime value.
+- `src/vim9cmds.c:1010-1075` accepts only List, Tuple, String, Blob, `any`, and
+  unknown compile-time iterable types and emits E1177 for every other known
+  type.
+- `src/vim9execute.c:2990-3040` applies the corresponding runtime check.
+- `runtime/doc/eval.txt:3637-3644` documents the supported Vim9 iterable
+  values and the E1177 failure.
+- `src/vim9type.c:2532-2561` defines the lower-case runtime type names used in
+  the message.
+- `src/errors.h:3015-3016` defines the exact E1177 message template.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

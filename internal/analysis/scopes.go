@@ -3199,6 +3199,24 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, command *syntax.Comm
 	if loop == nil || loop.Iterable == nil || expressionContainsMissing(loop.Iterable) {
 		return
 	}
+	if syntaxDiagnosticOverlaps(result.File.Diagnostics, loop.Iterable.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, loop.Iterable.Span) {
+		return
+	}
+	iterable := result.TypeOf(loop.Iterable)
+	if !isUnknownType(iterable) && iterable.Name != "list" && iterable.Name != "tuple" && iterable.Name != "string" && iterable.Name != "blob" {
+		name := iterable.Name
+		if result.classes[name] != nil || result.classAliases[name] != "" || name == "enum" {
+			name = "object"
+		}
+		if name == "partial" {
+			name = "func"
+		}
+		switch name {
+		case "number", "float", "bool", "dict", "func", "void", "job", "channel", "class", "object", "special":
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1177", Message: "For loop on " + name + " not supported", Span: loop.Iterable.Span})
+			return
+		}
+	}
 	actual := indexedType(result.TypeOf(loop.Iterable))
 	for _, binding := range loop.Bindings {
 		expected := convertSyntaxType(binding.ParsedType)

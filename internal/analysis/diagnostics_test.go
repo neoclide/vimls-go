@@ -2185,6 +2185,93 @@ func TestAnalyzeE1168ScriptArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1177UnsupportedForIterableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message, span string }{
+		{"script dict", "vim9script\nfor i in {a: 1}\nendfor\n", "For loop on dict not supported", "{a: 1}"},
+		{"def number", "vim9script\ndef F()\n  for i in 1\n  endfor\nenddef\n", "For loop on number not supported", "1"},
+		{"lambda bool", "vim9script\nvar F = () => {\n  for i in true\n  endfor\n}\n", "For loop on bool not supported", "true"},
+		{"Legacy-root def", "def F()\n  for i in 1\n  endfor\nenddef\n", "For loop on number not supported", "1"},
+		{"class object", "vim9script\nclass Item\nendclass\ndef F()\n  var item = Item.new()\n  for value in item\n  endfor\nenddef\n", "For loop on object not supported", "item"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1177" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1012" {
+					t.Fatalf("retained E1012: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1177 = %#v", got)
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\nfor i in [1]\nendfor\nfor i in (1, 2)\nendfor\nfor i in 'x'\nendfor\nfor i in 0z12\nendfor\n",
+		"vim9script\nfor i in Unknown\nendfor\nvar value: any\nfor i in value\nendfor\nlegacy for i in 1\nendfor\n",
+		"for i in 1\nendfor\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1177" {
+				t.Fatalf("unexpected E1177: %#v", diagnostic)
+			}
+		}
+	}
+	file := syntax.Parse("vim9script\ndef F()\n  for item: number in ['bad']\n  endfor\nenddef\n")
+	result := Analyze(file)
+	e1012 := 0
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1177" {
+			t.Fatalf("valid iterable received E1177: %#v", result.Diagnostics)
+		}
+		if diagnostic.Code == "vim/E1012" {
+			e1012++
+			if file.Text(diagnostic.Span) != "['bad']" {
+				t.Fatalf("E1012 = %#v", diagnostic)
+			}
+		}
+	}
+	if e1012 != 1 {
+		t.Fatalf("diagnostics = %#v, want one E1012", result.Diagnostics)
+	}
+	for _, test := range []struct {
+		name, source, code, message string
+	}{
+		{"class value", "vim9script\nclass Item\nendclass\nfor value in Item\nendfor\n", "vim/E1405", `Class "Item" cannot be used as a value`},
+		{"script type alias", "vim9script\ntype T = dict<number>\nfor value in T\nendfor\n", "vim/E1403", `Type alias "T" cannot be used as a value`},
+		{"compiled type alias", "vim9script\ntype T = dict<number>\ndef F()\n  for value in T\n  endfor\nenddef\n", "vim/E1407", "Cannot use a Typealias as a variable or value"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			owned := 0
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1177" {
+					t.Fatalf("owned iterable received E1177: %#v", diagnostic)
+				}
+				if diagnostic.Code == test.code && diagnostic.Message == test.message {
+					owned++
+				}
+			}
+			if owned != 1 {
+				t.Fatalf("owner count = %d, want 1", owned)
+			}
+		})
+	}
+	malformed := syntax.Parse("vim9script\ndef F()\n  for item in [1 : ]\n  endfor\nenddef\n")
+	if len(malformed.Diagnostics) == 0 {
+		t.Fatal("malformed iterable did not retain a syntax diagnostic")
+	}
+	malformedResult := Analyze(malformed)
+	for _, diagnostic := range malformedResult.Diagnostics {
+		if diagnostic.Code == "vim/E1177" {
+			t.Fatalf("malformed iterable received E1177: %#v", malformedResult.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
