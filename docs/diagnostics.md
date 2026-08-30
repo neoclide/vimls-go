@@ -3093,3 +3093,26 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/typval.c:937-953` emits E1301 for a non-repeatable runtime value.
 - `runtime/doc/builtin.txt:9336-9350` documents `repeat()` and method use.
 - `src/errors.h:3348-3352` defines the exact message.
+
+## Compiled loop nesting limit: E1306
+
+E1306 means `Loop nesting too deep`. A compiled Vim function supports at most
+ten simultaneously enclosing `for` and `while` loops. Analysis reports E1306
+on the command name that opens the eleventh loop; both loop forms contribute
+to the same depth.
+
+The count belongs to one compiled `def` or lambda. A nested lambda starts a new
+count instead of inheriting enclosing loops. Top-level Vim9 execution and
+Legacy `function` blocks do not use this compiler limit. Other block kinds do
+not contribute to the count, and deeper loops in the same already-invalid
+chain do not repeat the diagnostic.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_script.vim:3158-3213` covers ten successful mixed
+  loops and failures for an eleventh mixed or `for` loop.
+- `src/structs.h:2501` defines `MAX_LOOP_DEPTH` as 10.
+- `src/vim9cmds.c:1002-1007` applies the shared depth limit while compiling
+  `for`.
+- `src/vim9cmds.c:1315-1320` applies the same limit while compiling `while`.
+- `src/errors.h:3365-3366` defines the exact message.

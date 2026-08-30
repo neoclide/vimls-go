@@ -136,6 +136,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectInterfaceVariableAccessDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 	collectUnreachableCodeDiagnostics(result)
+	collectLoopNestingDiagnostics(result)
 
 	sortDeclarations(result)
 	for index := range file.Commands {
@@ -1878,6 +1879,31 @@ func collectUnreachableCodeDiagnostics(result *FileAnalysis) {
 		}
 	}
 	walkSequence(file.Commands, file.Blocks, 0, len(file.Commands), file.Dialect == syntax.Vim9)
+}
+
+func collectLoopNestingDiagnostics(result *FileAnalysis) {
+	if result == nil {
+		return
+	}
+	for command, scope := range result.commandScopes {
+		if command == nil || command.Dialect != syntax.Vim9 || (command.Canonical != "for" && command.Canonical != "while") || !scopeUsesDefTypeRules(scope) {
+			continue
+		}
+		depth := 0
+		for current := scope; current != nil; current = current.Parent {
+			if current.Kind == syntax.BlockFor || current.Kind == syntax.BlockWhile {
+				depth++
+			}
+			if current.Kind == syntax.BlockDef || current.Lambda != nil {
+				break
+			}
+		}
+		if depth == 11 {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1306", Message: "Loop nesting too deep", Span: command.Name,
+			})
+		}
+	}
 }
 
 func syntaxDiagnosticOverlaps(diagnostics []syntax.Diagnostic, span syntax.Span) bool {

@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -5051,6 +5052,97 @@ func TestAnalyzeE1301RepeatArgumentDiagnostics(t *testing.T) {
 				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
 			}
 		})
+	}
+}
+
+func TestAnalyzeE1306LoopNestingDiagnostics(t *testing.T) {
+	nestedLoops := func(kinds []string, prefix, suffix string) string {
+		var source strings.Builder
+		source.WriteString(prefix)
+		for index, kind := range kinds {
+			if kind == "for" {
+				source.WriteString(strings.Repeat("  ", index))
+				source.WriteString("for item")
+				source.WriteString(strconv.Itoa(index))
+				source.WriteString(" in [1]\n")
+			} else {
+				source.WriteString(strings.Repeat("  ", index))
+				source.WriteString("while true\n")
+			}
+		}
+		source.WriteString(strings.Repeat("  ", len(kinds)))
+		source.WriteString("var value = 1\n")
+		for index := len(kinds) - 1; index >= 0; index-- {
+			if kinds[index] == "for" {
+				source.WriteString(strings.Repeat("  ", index))
+				source.WriteString("endfor\n")
+			} else {
+				source.WriteString(strings.Repeat("  ", index))
+				source.WriteString("endwhile\n")
+			}
+		}
+		source.WriteString(suffix)
+		return source.String()
+	}
+	elevenFor := make([]string, 11)
+	for index := range elevenFor {
+		elevenFor[index] = "for"
+	}
+	mixed := append([]string(nil), elevenFor[:10]...)
+	mixed = append(mixed, "while")
+	lambdaEleven := nestedLoops(elevenFor, "vim9script\nvar Callback = () => {\n", "}\n")
+	for _, test := range []struct {
+		name, source, span string
+		want               int
+	}{
+		{"official Legacy-root def mixed loops", nestedLoops(mixed, "def Func()\n", "enddef\n"), "while", 1},
+		{"eleven for loops", nestedLoops(elevenFor, "vim9script\ndef Func()\n", "enddef\n"), "for", 1},
+		{"eleventh while", nestedLoops(mixed, "vim9script\ndef Func()\n", "enddef\n"), "while", 1},
+		{"block lambda eleven loops", lambdaEleven, "for", 1},
+		{"ten loops", nestedLoops(elevenFor[:10], "vim9script\ndef Func()\n", "enddef\n"), "", 0},
+		{"Vim9 script", nestedLoops(elevenFor, "vim9script\n", ""), "", 0},
+		{"Legacy function", nestedLoops(elevenFor, "function Func()\n", "endfunction\n"), "", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1306" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E1306 diagnostics = %#v", got)
+			}
+			for _, diagnostic := range got {
+				if diagnostic.Message != "Loop nesting too deep" || file.Text(diagnostic.Span) != test.span {
+					t.Fatalf("E1306 diagnostic = %#v", diagnostic)
+				}
+			}
+		})
+	}
+
+	lambdaSource := nestedLoops(elevenFor[:10], "vim9script\ndef Func()\n", "enddef\n")
+	lambdaSource = strings.Replace(lambdaSource, "                    var value = 1\n", "                    var Callback = () => {\n                      for inner in [1]\n                      endfor\n                    }\n", 1)
+	lambdaResult := Analyze(syntax.Parse(lambdaSource))
+	for _, diagnostic := range lambdaResult.Diagnostics {
+		if diagnostic.Code == "vim/E1306" {
+			t.Fatalf("lambda loop boundary diagnostics = %#v", lambdaResult.Diagnostics)
+		}
+	}
+
+	twoDefs := nestedLoops(elevenFor, "vim9script\ndef First()\n", "enddef\ndef Second()\n") + nestedLoops(elevenFor, "", "enddef\n")
+	file := syntax.Parse(twoDefs)
+	result := Analyze(file)
+	count := 0
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1306" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("independent def diagnostics = %#v", result.Diagnostics)
 	}
 }
 
