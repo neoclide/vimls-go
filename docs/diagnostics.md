@@ -1055,3 +1055,36 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/userfunc.c:1254-1272` applies the same native limit while collecting
   inline block functions.
 - `src/errors.h:2765-2766` defines the exact message.
+
+## Import alias requires a dot: E1060
+
+E1060 means `Expected dot after name: {text}`. A Vim9 import alias names a
+namespace rather than a value, so analysis reports E1060 whenever a resolved
+alias reference is not immediately followed by `.`. The diagnostic selects
+the alias. Expression uses preserve the source tail that Vim includes in the
+message, while a compound assignment target retains the alias alone. This
+covers bare values, arithmetic, compound assignment targets and operands, and
+a line break or space before the dot. Direct assignment uses its own E1094 or
+E1236 rule instead of E1060.
+
+A contiguous member access such as `module.Export` does not receive E1060 and
+does not require resolving the imported file first. Whitespace or a line break
+after the dot has already satisfied the E1060 check and uses E1074 instead.
+Legacy-root recovery remains conservative and does not apply Vim9 import
+namespace semantics merely because it retained an `import` command.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:151-159` reports E1060 for a line break
+  before the member dot.
+- `src/testdir/test_vim9_import.vim:191-200` reports E1060 from a compiled
+  `def` that uses an import alias in arithmetic.
+- `src/testdir/test_vim9_import.vim:223-229` preserves the exact
+  `Export exported` message tail.
+- `src/testdir/test_vim9_import.vim:507-525` covers a bare alias and compound
+  assignment on both sides.
+- `runtime/doc/vim9.txt:3567-3576` requires the namespace dot without
+  surrounding whitespace.
+- `src/vim9expr.c:650-696`, `src/eval.c:7660-7675`, and
+  `src/evalvars.c:3180-3205` implement the compiled and evaluated checks.
+- `src/errors.h:2769-2770` defines the exact message.

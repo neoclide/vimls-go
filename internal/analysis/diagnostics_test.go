@@ -311,6 +311,78 @@ func TestAnalyzeE1037InvalidIdentityComparison(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1060ImportAliasRequiresDot(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "script bare alias",
+			source:  "vim9script\nimport './Xfoo.vim' as foo\nvar that = foo\n",
+			message: "Expected dot after name: foo", span: "foo",
+		},
+		{
+			name: "compiled binary expression",
+			source: "vim9script\nimport './Xfoo.vim' as Export\ndef Func()\n  var dummy = 1\n" +
+				"  var imported = Export + dummy\nenddef\ndefcompile\n",
+			message: "Expected dot after name: Export + dummy", span: "Export",
+		},
+		{
+			name:    "following bare token",
+			source:  "vim9script\nimport './Xfoo.vim' as Export\ng:imported = Export exported\n",
+			message: "Expected dot after name: Export exported", span: "Export",
+		},
+		{
+			name:    "compound right hand side",
+			source:  "vim9script\nimport './Xfoo.vim' as foo\nvar that: any\nthat += foo\n",
+			message: "Expected dot after name: foo", span: "foo",
+		},
+		{
+			name:    "compound target",
+			source:  "vim9script\nimport './Xfoo.vim' as foo\nfoo += 9\n",
+			message: "Expected dot after name: foo", span: "foo",
+		},
+		{
+			name:    "line break before dot",
+			source:  "vim9script\nimport './Xfoo.vim' as expo\ng:value = expo\n  .exported\n",
+			message: "Expected dot after name: expo", span: "expo",
+		},
+		{
+			name:    "space before dot",
+			source:  "vim9script\nimport './Xfoo.vim' as foo\nvar that = foo .exported\n",
+			message: "Expected dot after name: foo .exported", span: "foo",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1060" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1060 diagnostics = %#v, want %q on %q; all diagnostics = %#v", got, test.message, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nimport './Xfoo.vim' as foo\nvar that = foo.exported\n",
+		"vim9script\nimport './Xfoo.vim' as foo\nvar that = foo. exported\n",
+		"vim9script\nimport './Xfoo.vim' as foo\nfoo = 'value'\n",
+		"vim9script\nvar foo = 1\nvar that = foo + 1\n",
+		"import './Xfoo.vim' as foo\nlet g:that = foo\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1060" {
+				t.Fatalf("source %q unexpectedly received E1060: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeSpecialAsNumberDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantCode, wantMessage string

@@ -118,6 +118,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	sort.SliceStable(result.References, func(i, j int) bool {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
+	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
@@ -130,6 +131,44 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectImportNamespaceDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil || result.File.Dialect != syntax.Vim9 {
+		return
+	}
+	source := result.File.Source
+	seen := make(map[syntax.Span]bool)
+	for _, reference := range result.References {
+		if reference == nil || reference.Declaration == nil || reference.Declaration.Kind != SymbolKindImport || seen[reference.Span] {
+			continue
+		}
+		seen[reference.Span] = true
+		if reference.Span.End < len(source) && source[reference.Span.End] == '.' {
+			continue
+		}
+		end := reference.Span.End
+		for end < len(source) && source[end] != '\n' && source[end] != '\r' {
+			end++
+		}
+		after := strings.TrimLeft(source[reference.Span.End:end], " \t")
+		if strings.HasPrefix(after, "=") && !strings.HasPrefix(after, "==") && !strings.HasPrefix(after, "=~") {
+			continue
+		}
+		tail := strings.TrimRight(source[reference.Span.Start:end], " \t")
+		for _, operator := range []string{"+=", "-=", "*=", "/=", "%="} {
+			if strings.HasPrefix(after, operator) {
+				tail = reference.Name
+				break
+			}
+		}
+		if tail == "" {
+			tail = reference.Name
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1060", Message: "Expected dot after name: " + tail, Span: reference.Span,
+		})
+	}
 }
 
 func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []syntax.Command, blocks []syntax.Block) {
