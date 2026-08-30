@@ -1007,12 +1007,15 @@ func (s *Server) stopAnalysis() {
 	s.analysisWG.Wait()
 	// Synchronize with a rebuild that may have checked analysisContext just
 	// before cancellation, so its WaitGroup.Add completes before Wait starts.
-	s.workspaceMu.Lock()
-	s.workspaceMu.Unlock()
+	waitGroupAddBarrier(&s.workspaceMu)
 	s.workspaceWG.Wait()
-	s.watchMu.Lock()
-	s.watchMu.Unlock()
+	waitGroupAddBarrier(&s.watchMu)
 	s.watchWG.Wait()
+}
+
+func waitGroupAddBarrier(mu *sync.Mutex) {
+	mu.Lock()
+	defer mu.Unlock()
 }
 
 func (s *Server) logf(format string, args ...any) {
