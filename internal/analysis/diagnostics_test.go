@@ -7,6 +7,64 @@ import (
 	"github.com/chemzqm/vimls-go/internal/syntax"
 )
 
+func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []syntax.Diagnostic
+	}{
+		{
+			name:   "legacy direct builtins",
+			source: "echo len()\necho abs(1, 2)\necho range(1, 2, 3, 4)\n",
+			want: []syntax.Diagnostic{
+				{Code: "vim/E119", Message: "Not enough arguments for function: len"},
+				{Code: "vim/E118", Message: "Too many arguments for function: abs"},
+				{Code: "vim/E118", Message: "Too many arguments for function: range"},
+			},
+		},
+		{
+			name:   "vim9 direct builtins",
+			source: "vim9script\nvar first = len()\nvar second = abs(1, 2)\n",
+			want: []syntax.Diagnostic{
+				{Code: "vim/E119", Message: "Not enough arguments for function: len"},
+				{Code: "vim/E118", Message: "Too many arguments for function: abs"},
+			},
+		},
+		{
+			name:   "optional variadic and conservative targets",
+			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(1, 2, 3, 4)\nvar dynamic = call('len', [])\nMyFunction()\ns:len()\nitems->len()\n",
+		},
+		{
+			name:   "incomplete calls do not cascade",
+			source: "vim9script\nvar missing = len(\nvar missingComma = len(1 2)\nvar missingArgument = abs(1,)\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			got := Analyze(file).Diagnostics
+			if len(got) != len(test.want) {
+				t.Fatalf("diagnostics = %#v, want %#v (syntax diagnostics = %#v)", got, test.want, file.Diagnostics)
+			}
+			last := -1
+			for index, diagnostic := range got {
+				want := test.want[index]
+				if diagnostic.Code != want.Code || diagnostic.Message != want.Message {
+					t.Fatalf("diagnostic[%d] = %#v, want %#v", index, diagnostic, want)
+				}
+				name := diagnostic.Message[strings.LastIndex(diagnostic.Message, ": ")+2:]
+				start := strings.Index(test.source[last+1:], name) + last + 1
+				wantSpan := syntax.Span{Start: start, End: start + len(name)}
+				if start <= last || diagnostic.Span != wantSpan || file.Text(diagnostic.Span) != name {
+					t.Fatalf("diagnostic[%d] span = %#v (%q), want %#v (%q)", index, diagnostic.Span, file.Text(diagnostic.Span), wantSpan, name)
+				}
+				last = start
+			}
+		})
+	}
+}
+
 func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string

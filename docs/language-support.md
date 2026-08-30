@@ -152,6 +152,11 @@ old configuration revision are stale and cannot publish.
 - Conservative legacy inference and conservative handling of `execute()`,
   `eval()`, dynamically formed names, user commands, and runtimepath mutation.
 
+Arity diagnostics currently cover direct calls to statically named Vim built-in
+functions using the pinned function metadata. User-defined functions, scoped or
+member calls, and dynamically resolved call targets remain conservative
+`unknown` until their signatures can be resolved without guessing.
+
 ## File discovery
 
 Include `.vim` files and Vim configuration/plugin paths such as vimrc, gvimrc,

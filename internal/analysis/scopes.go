@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/chemzqm/vimls-go/internal/vimdata"
 )
 
 // FileAnalysis is the protocol-independent lexical information collected from
@@ -612,6 +613,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false)
 		}
 	case syntax.ExpressionCall:
+		collectBuiltinCallArityDiagnostic(result, file, expression)
 		for index, child := range expression.Children {
 			walkExpression(result, file, child, scope, skipped, index == 0)
 		}
@@ -645,6 +647,62 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false)
 		}
 	}
+}
+
+// collectBuiltinCallArityDiagnostic reports arity errors only where the
+// callable is a plain, statically named builtin. Scoped, member, method, and
+// dynamically named calls deliberately remain unknown.
+func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression) {
+	if result == nil || file == nil || call == nil || call.Value != "" || len(call.Children) == 0 || expressionContainsMissing(call) || syntaxDiagnosticTouchesCall(file.Diagnostics, call.Span) {
+		return
+	}
+	callee := call.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionIdentifier || strings.Contains(callee.Value, ":") || !validNameSpan(file, callee.Span) {
+		return
+	}
+	builtin, ok := vimdata.LookupFunction(callee.Value)
+	if !ok {
+		return
+	}
+	argumentCount := len(call.Children) - 1
+	if argumentCount < builtin.MinArgs {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E119", Message: "Not enough arguments for function: " + builtin.Name, Span: callee.Span,
+		})
+		return
+	}
+	if builtin.MaxArgs >= 0 && argumentCount > builtin.MaxArgs {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E118", Message: "Too many arguments for function: " + builtin.Name, Span: callee.Span,
+		})
+	}
+}
+
+func expressionContainsMissing(expression *syntax.Expression) bool {
+	if expression == nil {
+		return false
+	}
+	if expression.Kind == syntax.ExpressionMissing {
+		return true
+	}
+	for _, child := range expression.Children {
+		if expressionContainsMissing(child) {
+			return true
+		}
+	}
+	return false
+}
+
+// Syntax diagnostics use point spans for some missing delimiters. Treating a
+// point on the call boundary as touching suppresses arity cascades while a
+// document is being edited.
+func syntaxDiagnosticTouchesCall(diagnostics []syntax.Diagnostic, call syntax.Span) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Span.Start <= call.End && diagnostic.Span.End >= call.Start {
+			return true
+		}
+	}
+	return false
 }
 
 func resolve(scope *Scope, name string, offset int, preferFunction bool, hidden map[syntax.Span]bool) *Declaration {
