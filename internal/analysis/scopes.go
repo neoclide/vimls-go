@@ -611,6 +611,8 @@ func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnos
 		return syntax.Diagnostic{Code: "vim/E729", Message: "Using a Funcref as a String", Span: span}, true
 	case "list":
 		return syntax.Diagnostic{Code: "vim/E730", Message: "Using a List as a String", Span: span}, true
+	case "dict":
+		return syntax.Diagnostic{Code: "vim/E731", Message: "Using a Dictionary as a String", Span: span}, true
 	default:
 		return syntax.Diagnostic{}, false
 	}

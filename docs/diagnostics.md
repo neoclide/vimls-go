@@ -546,3 +546,22 @@ Representative source evidence:
   E1013 in a compiled `def` from E730 for `search()` and `searchpos()`.
 - `src/typval.c:1223-1224` maps List string conversion to E730, and
   `src/errors.h:1861-1862` defines the exact message.
+
+## Using a Dictionary as a String: E731
+
+E731 means `Using a Dictionary as a String`. Legacy Vim script and the Vim9
+script evaluator use it when concatenation tries to convert a Dictionary to a
+String.
+
+Analysis reports E731 for a statically known Dictionary operand of Legacy `.`
+or Vim9 `..` concatenation. The diagnostic selects the invalid operand,
+checking the left operand before the right, while dynamically typed values
+remain unknown. A compiled Vim9 `def` does not receive E731; Vim uses E1105 for
+its operator type error.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:1944-1953` and `2048-2050` distinguish E1105
+  in a compiled `def` from E731 at Vim9 script level.
+- `src/typval.c:1226-1229` maps Dictionary string conversion to E731, and
+  `src/errors.h:1863-1864` defines the exact message.

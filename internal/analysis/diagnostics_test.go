@@ -440,6 +440,51 @@ func TestAnalyzeListAsStringDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDictionaryAsStringDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script right operand",
+			source: "vim9script\nvar value = 'a' .. {a: 1}\n",
+			span:   "{a: 1}",
+		},
+		{
+			name:   "vim9 script left operand",
+			source: "vim9script\nvar value = {a: 1} .. 'a'\n",
+			span:   "{a: 1}",
+		},
+		{
+			name:   "legacy operand",
+			source: "let value = 'a' . {'a': 1}\n",
+			span:   "{'a': 1}",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E731" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Dictionary as a String" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E731 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef F()\n  var value = 'a' .. {a: 1}\nenddef\n")
+	result := Analyze(file)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E731" {
+			t.Fatalf("compiled def retained E731: %#v", result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string
