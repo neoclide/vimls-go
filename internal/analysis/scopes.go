@@ -2531,6 +2531,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 	case syntax.ExpressionCall:
 		collectBuiltinCallArityDiagnostic(result, file, expression)
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
+		appendTooManyGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		appendNotEnoughGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		appendGenericFunctionCallWithoutTypesDiagnostic(result, expression, scope, skipped)
 		appendQuotedGenericFunctionDiagnostic(result, expression, scope, skipped)
@@ -2539,6 +2540,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		}
 	case syntax.ExpressionGenericReference:
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
+		appendTooManyGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		appendNotEnoughGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		for index, child := range expression.Children {
 			walkExpression(result, file, child, scope, skipped, index == 0, dialect)
@@ -2612,6 +2614,28 @@ func appendNotEnoughGenericTypeArgumentsDiagnostic(result *FileAnalysis, express
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1557", Message: "Not enough types specified for generic function '" + callee.Value + "'", Span: callee.Span,
+	})
+}
+
+func appendTooManyGenericTypeArgumentsDiagnostic(result *FileAnalysis, expression *syntax.Expression, scope *Scope, hidden map[syntax.Span]bool) {
+	if result == nil || expression == nil || len(expression.TypeArguments) == 0 || len(expression.Children) == 0 {
+		return
+	}
+	for _, argument := range expression.TypeArguments {
+		if argument == nil || argument.Kind == syntax.TypeMissing {
+			return
+		}
+	}
+	callee := expression.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionIdentifier {
+		return
+	}
+	declaration := resolve(scope, callee.Value, callee.Span.Start, true, hidden)
+	if declaration == nil || !functionSymbolKind(declaration.Kind) || declaration.TypeParameterCount == 0 || len(expression.TypeArguments) <= declaration.TypeParameterCount {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1556", Message: "Too many types specified for generic function '" + callee.Value + "'", Span: callee.Span,
 	})
 }
 
