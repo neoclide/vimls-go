@@ -410,6 +410,10 @@ pending-fix.
 Commit `b9bd5b6` migrated the final legacy variable-target tail variant. The
 authoritative parser split is therefore 965 migrated, zero ready, and 67
 pending-fix.
+Commit `7fcd4d2` migrated both malformed lambda slice-endpoint variants, and
+commit `1779234` migrated the already-ready enum header-separator variant. The
+authoritative parser split is therefore 968 migrated, zero ready, and 64
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1485,9 +1489,16 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 116 migrated and 67 pending-fix. In the
+Group D contains 183 syntax variants: 119 migrated and 64 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
+
+The one-pass source-file research split the remaining work into four concrete
+parser areas without overlapping official fixtures: tuple/list recovery and
+unknown generic type syntax; function closer, declaration-head, and call-tail
+recovery; enum body and terminator recovery; and command-boundary error
+mapping. Keep these batches separate so a focused official filter proves each
+grammar change before the next batch.
 
 #### `test_expr.vim` (30)
 
@@ -1524,8 +1535,13 @@ E1004 M ready: 529:14207/def
 E1097 M ready: 1532:48170/def
 E1127 M ready: 1521:47598/def
 E15 M ready: 1521:47598/{legacy|vim9-script}
-E15 P recovery: 1530:48090/{def|vim9-script}
+E15 M recovery: 1530:48090/{def|vim9-script}
 ```
+
+Commit `7fcd4d2` completed `test_listdict.vim` syntax migration. A malformed
+call opener in a lambda slice endpoint reports one E15 without consuming the
+outer `]`; the retained AST contains the slice, lambda, recovering call, and
+missing argument, and parsing resumes on the next physical line.
 
 #### `test_tuple.vim` (37)
 
@@ -1563,10 +1579,14 @@ E1420 P mapping: 84:2047/script,100:2430/script
 E1435 P missing: 1706:39098/script
 E488 M ready: 108:2615/script
 E488 P missing: 116:2820/script
-E488 P recovery: 123:3013/script
+E488 M recovery: 123:3013/script
 E488 M ready: 132:3226/script
 E492 P mapping: 44:1002/script,52:1215/script,92:2227/script
 ```
+
+Commit `1779234` migrated the already-ready enum header-separator case at
+`123:3013/script`; the enum declaration and same-line terminator recovery
+remain represented while E488 owns the malformed command boundary.
 
 #### `test_vim9_func.vim` (75)
 
