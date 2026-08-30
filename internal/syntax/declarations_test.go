@@ -1090,6 +1090,42 @@ func TestVim9AbstractEnumMethodReportsE1417(t *testing.T) {
 	}
 }
 
+func TestVim9EnumExtendsReportsE1416(t *testing.T) {
+	for name, declaration := range map[string]string{
+		"class": "class Base\nendclass\n",
+		"enum":  "enum Base\n  First\nendenum\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := Parse("vim9script\n" + declaration + "enum Child extends Base\n  Value\nendenum\n")
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1416" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Enum cannot extend a class or enum" || file.Text(got[0].Span) != "extends" {
+				t.Fatalf("E1416 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+			}
+			var child *Command
+			for index := range file.Commands {
+				if file.Commands[index].Aggregate != nil && file.Text(file.Commands[index].Aggregate.Name) == "Child" {
+					child = &file.Commands[index]
+					break
+				}
+			}
+			if child == nil || len(child.Aggregate.Extends) != 0 {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	allowed := Parse("vim9script\ninterface Face\nendinterface\nenum Child implements Face\n  Value\nendenum\n")
+	if hasDiagnostic(allowed, "vim/E1416") {
+		t.Fatalf("implements diagnostics = %#v", allowed.Diagnostics)
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
