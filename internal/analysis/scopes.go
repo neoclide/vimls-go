@@ -2493,8 +2493,19 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E46", Message: "Cannot change read-only variable \"" + target.Value + "\"", Span: target.Span,
 				})
-			} else if dialect == syntax.Vim9 && expression.Value == "=" && result.File.Text(expression.Operator) == "=" && !strings.Contains(target.Value, ":") {
-				if declaration := resolve(scope, target.Value, target.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindConstant {
+			} else if dialect == syntax.Vim9 && !strings.Contains(target.Value, ":") {
+				declaration := resolve(scope, target.Value, target.Span.Start, false, nil)
+				if declaration != nil && declaration.Kind == SymbolKindTypeAlias {
+					diagnostic := syntax.Diagnostic{Span: target.Span}
+					if scopeUsesDefTypeRules(scope) {
+						diagnostic.Code = "vim/E46"
+						diagnostic.Message = "Cannot change read-only variable \"" + target.Value + "\""
+					} else {
+						diagnostic.Code = "vim/E1403"
+						diagnostic.Message = "Type alias \"" + target.Value + "\" cannot be used as a value"
+					}
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
+				} else if expression.Value == "=" && result.File.Text(expression.Operator) == "=" && declaration != nil && declaration.Kind == SymbolKindConstant {
 					diagnostic := syntax.Diagnostic{Span: target.Span}
 					if scopeContainsDef(scope) {
 						diagnostic.Code = "vim/E1018"
@@ -3130,10 +3141,16 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				appendEnumAsValueDiagnostic(result, scope, expression, dialect)
 			}
 			classAsValue := appendClassAsValueDiagnostic(result, declaration, expression, dialect)
-			if !classAsValue && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && declaration != nil && declaration.Kind == SymbolKindTypeAlias && !result.typeAliasExempt[expression.Span] {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E1407", Message: "Cannot use a Typealias as a variable or value", Span: expression.Span,
-				})
+			if !classAsValue && dialect == syntax.Vim9 && declaration != nil && declaration.Kind == SymbolKindTypeAlias && !result.typeAliasExempt[expression.Span] {
+				diagnostic := syntax.Diagnostic{Span: expression.Span}
+				if scopeUsesDefTypeRules(scope) {
+					diagnostic.Code = "vim/E1407"
+					diagnostic.Message = "Cannot use a Typealias as a variable or value"
+				} else {
+					diagnostic.Code = "vim/E1403"
+					diagnostic.Message = "Type alias \"" + declaration.Name + "\" cannot be used as a value"
+				}
+				result.Diagnostics = append(result.Diagnostics, diagnostic)
 			}
 			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
 			unknownVimVariable := isUnknownVimVariable(expression.Value)

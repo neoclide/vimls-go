@@ -3207,6 +3207,46 @@ echo instanceof(object, C)
 	}
 }
 
+func TestAnalyzeTypeAliasScriptValueDiagnostic(t *testing.T) {
+	source := `vim9script
+type T = number
+var direct = T
+var nested = [T]
+T = 1
+T += 2
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1403" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("E1403 diagnostics = %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics, result.Diagnostics)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Message != `Type alias "T" cannot be used as a value` || file.Text(diagnostic.Span) != "T" {
+			t.Fatalf("E1403 diagnostic[%d] = %#v on %q", index, diagnostic, file.Text(diagnostic.Span))
+		}
+	}
+
+	compiled := Analyze(syntax.Parse("vim9script\ntype T = number\ndef F()\n  T = 1\nenddef\n"))
+	foundE46 := false
+	for _, diagnostic := range compiled.Diagnostics {
+		if diagnostic.Code == "vim/E1403" {
+			t.Fatalf("compiled assignment reported E1403: %#v", compiled.Diagnostics)
+		}
+		if diagnostic.Code == "vim/E46" && diagnostic.Message == `Cannot change read-only variable "T"` {
+			foundE46 = true
+		}
+	}
+	if !foundE46 {
+		t.Fatalf("compiled assignment diagnostics = %#v, want E46", compiled.Diagnostics)
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]
