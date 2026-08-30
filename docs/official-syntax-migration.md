@@ -13,7 +13,7 @@ groups; the exact source for every case remains in
 - Included test files: 44
 - Failure variants: 3,500
 - Existing parser-negative assertions at the baseline: 362
-- Current parser-negative syntax assertions: 911 (`b668b6e`)
+- Current parser-negative syntax assertions: 1,022 (`8b587da`)
 
 The 3,500 variants are partitioned by source file. A variant belongs to exactly
 one phase: `syntax`, `type`, `name`, `semantic`, `runtime`, or `unknown`.
@@ -490,6 +490,12 @@ pending-fix.
 Commit `27590ba` migrated the invalid nested-`def` head variant. The
 authoritative syntax split is therefore 1019 migrated, zero ready, and 3
 pending-fix.
+Commit `5ef656f` migrated both invalid quote-tail lambda-block variants. The
+authoritative syntax split is therefore 1021 migrated, zero ready, and one
+pending-fix.
+Commit `8b587da` migrated the final incomplete nested-`def` fixture. All 1,022
+parser-syntax variants are now migrated: Group A 325, Group B 191, Group C
+333, and Group D 173, with no stale expected-map keys.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1565,8 +1571,8 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 170 migrated and 3 pending-fix. In the
-exact inventory below, `M` and `P` mean those two statuses.
+Group D contains 173 syntax variants, all migrated. In the exact inventory
+below, `M` marks that status.
 `test_blob.vim` has no syntax failure variants.
 
 The one-pass source-file research split the remaining work into four concrete
@@ -1746,7 +1752,7 @@ E476 M recovery: 1298:27807/script
 E476 M recovery: 781:16158/def
 E488 M ready: 971:20965/script,3746:85903/script
 E488 M ready: 1755:38517/{def|vim9-script}
-E488 P recovery: 1748:38346/{def|vim9-script},2403:53812/script
+E488 M recovery: 1748:38346/{def|vim9-script},2403:53812/script
 E720 M missing: 3539:81179/{def|vim9-script}
 E884 M mapping: 3740:85793/script
 ```
@@ -1855,6 +1861,18 @@ Commit `27590ba` migrates `1298:27807/script`. An invalid nested `def +Func+`
 retains its Function.Name and E476 diagnostic but does not open a false inner
 block, so the real `enddef` closes the outer function and later commands remain
 at script scope.
+
+Commit `5ef656f` migrates `1748:38346/{def,vim9-script}`. A double quote after
+an inline-lambda block opener is an invalid physical-line tail, not a string
+continued through the block. Recovery reports one E488 on that tail, retains
+the following lambda-body commands and closing brace, and resumes the outer
+call at its own closing parenthesis.
+
+Commit `8b587da` migrates `2403:53812/script`. In a legacy script, nested
+`def` bodies are stored for later compilation, while a direct `# text` command
+reports E488 during sourcing. The parser keeps the complete nested function
+and missing-default AST but does not place its deferred recovery diagnostics
+ahead of that source-phase error.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
