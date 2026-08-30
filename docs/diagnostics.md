@@ -2090,6 +2090,27 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   mismatch helper.
 - `src/errors.h:3145-3146` defines the exact E1225 message.
 
+## List or Blob required for builtin argument: E1226
+
+Analysis reports E1226 at Vim9 script level when a normalized
+`arg_list_or_blob` builtin argument has a known incompatible type. This covers
+both ordinary and modifiable checker spellings. The diagnostic selects the
+complete normalized argument and uses its one-based position, including a
+method receiver.
+
+List, Blob, and dynamically typed values are accepted. A mismatch in a
+compiled `def` or block lambda retains E1013, Legacy calls are not diagnosed,
+and the wider List-or-Dictionary-or-Blob checker remains separate.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:72-75` distinguishes compiled E1013 from
+  script-level E1226 for `add()`.
+- `src/testdir/test_vim9_builtin.vim:2434-2437` covers `insert()`.
+- `src/evalfunc.c:429-455` defines the ordinary and modifiable checker
+  variants through the generic compile-time type mismatch helper.
+- `src/errors.h:3147-3148` defines the exact E1226 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

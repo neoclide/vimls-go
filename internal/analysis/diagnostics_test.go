@@ -4908,6 +4908,59 @@ func TestAnalyzeE1225StringListTupleOrDictionaryBuiltinArgumentDiagnostics(t *te
 	}
 }
 
+func TestAnalyzeE1226ListOrBlobBuiltinArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"modifiable checker", "vim9script\nadd({}, 1)\n", "{}"},
+		{"non-modifiable checker", "vim9script\ninsert({}, 1)\n", "{}"},
+		{"method receiver", "vim9script\n{}->add(1)\n", "{}"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1226" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1226 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "List or Blob required for argument 1" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1226 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"compiled def", "vim9script\ndef Func()\n  add({}, 1)\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  add({}, 1)\n}\n", "vim/E1013"},
+		{"list", "vim9script\nadd([], 1)\n", ""},
+		{"blob", "vim9script\nadd(0z12, 1)\n", ""},
+		{"unknown", "vim9script\nadd(Unknown, 1)\n", ""},
+		{"Legacy", "let value = add({}, 1)\n", ""},
+		{"list dictionary blob union", "vim9script\nextend(1, [])\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1226" {
+					t.Fatalf("guard unexpectedly received E1226: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},
