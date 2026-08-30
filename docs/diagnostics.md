@@ -418,3 +418,33 @@ Representative source evidence:
   rules. `src/vim9compile.c:2190-2195` and `src/userfunc.c:579-589` apply them
   to declarations and parameters; `src/errors.h:1809-1810` defines the exact
   message.
+
+## Missing Dictionary key: E716
+
+E716 means `Key not present in Dictionary: "{key}"`. Legacy Vim script and
+Vim9 script report it while evaluating a missing Dictionary member or index.
+Compiled `def` code normally performs the same lookup at execution time; an
+invalid dot-member tail can instead be rejected earlier as E488.
+
+Analysis reports E716 only when the complete key set is statically known. It
+supports direct Dictionary literals and a freshly declared literal or
+default-empty Vim9 Dictionary when no intervening command can have exposed or
+changed it. Dot members and literal String or Number indexes are checked.
+Existing keys remain valid. Dynamic indexes, Dictionary parameters, aliases,
+function results, and values used by an intervening command remain unknown.
+Plain member assignment may create a key and is not treated as a missing-key
+read.
+
+For the recovered `dict.a#b` and `dict.a:b` forms, Vim9 script looks up the
+valid prefix `a`; analysis therefore reports E716 only when that prefix is
+provably absent. A compiled `def` retains Vim's E488 for the invalid tail.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:3140-3162` covers missing Dictionary members,
+  literal indexes, and the different `a#b`/`a:b` script and `def` outcomes.
+- `src/testdir/test_let.vim:345-359` covers Legacy member access during a
+  compound assignment.
+- `src/eval.c:1405-1410` reports a missing read, while `src/eval.c:2487-2492`
+  distinguishes missing compound-assignment keys from keys created by plain
+  assignment. `src/errors.h:1833-1834` defines the exact message.

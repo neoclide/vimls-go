@@ -351,6 +351,106 @@ func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMissingDictionaryKeyDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, key, span string
+	}{
+		{
+			name:   "vim9 invalid hash member tail",
+			source: "vim9script\nvar x = { \"a#b\": 1 }\nx.a#b\n",
+			key:    "a",
+			span:   "x.a#b",
+		},
+		{
+			name:   "vim9 invalid colon member tail",
+			source: "vim9script\nvar x = { \"a:b\": 1 }\nx.a:b\n",
+			key:    "a",
+			span:   "x.a:b",
+		},
+		{
+			name:   "vim9 missing member",
+			source: "vim9script\nvar x = {present: 1}\necho x.missing\n",
+			key:    "missing",
+			span:   "x.missing",
+		},
+		{
+			name:   "vim9 missing index",
+			source: "vim9script\nvar x = {present: 1}\necho x['missing']\n",
+			key:    "missing",
+			span:   "x['missing']",
+		},
+		{
+			name:   "vim9 default empty dictionary",
+			source: "vim9script\nvar x: dict<number>\necho x.missing\n",
+			key:    "missing",
+			span:   "x.missing",
+		},
+		{
+			name:   "legacy missing member",
+			source: "let x = {'present': 1}\necho x.missing\n",
+			key:    "missing",
+			span:   "x.missing",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E716" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := "Key not present in Dictionary: \"" + test.key + "\""
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E716 %q on %q; all diagnostics = %#v; commands = %#v", got, message, test.span, result.Diagnostics, file.Commands)
+			}
+		})
+	}
+}
+
+func TestAnalyzeMissingDictionaryKeyStaysConservative(t *testing.T) {
+	tests := []struct {
+		name, source string
+	}{
+		{
+			name:   "present key",
+			source: "vim9script\nvar x = {present: 1}\necho x.present\n",
+		},
+		{
+			name:   "present index",
+			source: "vim9script\nvar x = {present: 1}\necho x['present']\n",
+		},
+		{
+			name:   "dynamic index",
+			source: "vim9script\nvar key = 'missing'\nvar x = {present: 1}\necho x[key]\n",
+		},
+		{
+			name:   "dynamic dictionary parameter",
+			source: "vim9script\ndef F(x: dict<number>)\n  echo x.missing\nenddef\n",
+		},
+		{
+			name:   "dictionary passed before access",
+			source: "vim9script\nvar x = {present: 1}\nMutate(x)\necho x.missing\n",
+		},
+		{
+			name:   "compiled invalid member tail",
+			source: "vim9script\ndef F()\n  var x = { \"a#b\": 1 }\n  x.a#b\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E716" {
+					t.Fatalf("conservative case diagnostic = %#v; all diagnostics = %#v", diagnostic, result.Diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name     string

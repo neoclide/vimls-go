@@ -119,6 +119,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	inferTypes(result)
 	collectFuncrefVariableNameDiagnostics(result)
+	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
 	collectArithmeticDiagnostics(result, file.Commands, root)
 	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
@@ -165,6 +166,209 @@ func funcrefVariableNameAllowed(dialect syntax.Dialect, declaration *Declaration
 		name = name[2:]
 	}
 	return len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z'
+}
+
+func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	if result == nil || result.File == nil {
+		return
+	}
+	type dictionaryShape struct {
+		keys       map[string]struct{}
+		generation int
+	}
+	declarations := make(map[syntax.Span]*Declaration)
+	for _, declaration := range result.Declarations {
+		if declaration != nil {
+			declarations[declaration.Span] = declaration
+		}
+	}
+	staticLiteralKey := func(expression *syntax.Expression) (string, bool) {
+		if expression == nil {
+			return "", false
+		}
+		switch expression.Kind {
+		case syntax.ExpressionNumber:
+			return expression.Value, expression.Value != ""
+		case syntax.ExpressionString:
+			literal := expression.Value
+			if len(literal) < 2 || literal[len(literal)-1] != literal[0] || literal[0] != '\'' && literal[0] != '"' {
+				return "", false
+			}
+			value := literal[1 : len(literal)-1]
+			if literal[0] == '\'' && strings.Contains(value, "''") || literal[0] == '"' && strings.Contains(value, "\\") {
+				return "", false
+			}
+			return value, true
+		}
+		return "", false
+	}
+	staticDictionaryKey := func(expression *syntax.Expression) (string, bool) {
+		if expression == nil {
+			return "", false
+		}
+		if expression.Kind == syntax.ExpressionIdentifier {
+			return expression.Value, expression.Value != ""
+		}
+		if expression.Kind == syntax.ExpressionList && len(expression.Children) == 1 {
+			return staticLiteralKey(expression.Children[0])
+		}
+		return staticLiteralKey(expression)
+	}
+	staticDictionaryKeys := func(expression *syntax.Expression) (map[string]struct{}, bool) {
+		if expression == nil || expression.Kind != syntax.ExpressionDictionary || len(expression.Children)%2 != 0 {
+			return nil, false
+		}
+		keys := make(map[string]struct{}, len(expression.Children)/2)
+		for index := 0; index < len(expression.Children); index += 2 {
+			key, ok := staticDictionaryKey(expression.Children[index])
+			if !ok {
+				return nil, false
+			}
+			keys[key] = struct{}{}
+		}
+		return keys, true
+	}
+	shapes := make(map[*Declaration]dictionaryShape)
+	shapeForReceiver := func(scope *Scope, receiver *syntax.Expression, generation int) (map[string]struct{}, bool) {
+		if keys, ok := staticDictionaryKeys(receiver); ok {
+			return keys, true
+		}
+		if receiver == nil || receiver.Kind != syntax.ExpressionIdentifier {
+			return nil, false
+		}
+		declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+		shape, ok := shapes[declaration]
+		if !ok {
+			return nil, false
+		}
+		if shape.generation != generation && shape.generation+1 != generation {
+			return nil, false
+		}
+		return shape.keys, true
+	}
+	appendMissingKey := func(scope *Scope, expression *syntax.Expression, generation int) {
+		if expression == nil || len(expression.Children) == 0 {
+			return
+		}
+		for _, diagnostic := range result.File.Diagnostics {
+			if diagnostic.Code == "vim/E488" && diagnostic.Span.Start <= expression.Span.End && diagnostic.Span.End >= expression.Span.Start {
+				return
+			}
+		}
+		var key string
+		var ok bool
+		switch expression.Kind {
+		case syntax.ExpressionMember:
+			if result.File.Text(expression.Operator) != "." {
+				return
+			}
+			key = expression.Value
+			if tail := strings.IndexAny(key, "#:"); tail >= 0 {
+				key = key[:tail]
+			}
+			ok = key != ""
+		case syntax.ExpressionIndex:
+			if len(expression.Children) < 2 {
+				return
+			}
+			key, ok = staticLiteralKey(expression.Children[1])
+		default:
+			return
+		}
+		if !ok {
+			return
+		}
+		keys, known := shapeForReceiver(scope, expression.Children[0], generation)
+		if !known {
+			return
+		}
+		if _, exists := keys[key]; exists {
+			return
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E716", Message: "Key not present in Dictionary: \"" + key + "\"", Span: expression.Span,
+		})
+	}
+
+	generation := 0
+	var walkCommands func([]syntax.Command, *Scope)
+	var walkExpression func(*syntax.Expression, *Scope, bool, int)
+	walkExpression = func(expression *syntax.Expression, scope *Scope, read bool, currentGeneration int) {
+		if expression == nil || scope == nil {
+			return
+		}
+		if expression.Kind == syntax.ExpressionLambda {
+			lambdaScope := result.lambdaScopes[expression]
+			if lambdaScope == nil {
+				lambdaScope = scope
+			}
+			if expression.LambdaBody != nil {
+				walkCommands(expression.LambdaBody.Commands, lambdaScope)
+			}
+			for index, child := range expression.Children {
+				if index >= len(expression.Parameters) {
+					walkExpression(child, lambdaScope, true, currentGeneration)
+				}
+			}
+			return
+		}
+		if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 {
+			walkExpression(expression.Children[1], scope, true, currentGeneration)
+			plainAssignment := expression.Value == "=" && result.File.Text(expression.Operator) == "="
+			walkExpression(expression.Children[0], scope, !plainAssignment, currentGeneration)
+			for _, child := range expression.Children[2:] {
+				walkExpression(child, scope, true, currentGeneration)
+			}
+			return
+		}
+		if read && (expression.Kind == syntax.ExpressionMember || expression.Kind == syntax.ExpressionIndex) {
+			appendMissingKey(scope, expression, currentGeneration)
+		}
+		for _, child := range expression.Children {
+			walkExpression(child, scope, true, currentGeneration)
+		}
+	}
+	walkCommands = func(items []syntax.Command, inherited *Scope) {
+		for index := range items {
+			generation++
+			currentGeneration := generation
+			command := &items[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = inherited
+			}
+			if command.Declaration != nil {
+				walkExpression(command.Declaration.Initializer, scope, true, currentGeneration)
+				if len(command.Declaration.Bindings) == 1 {
+					binding := command.Declaration.Bindings[0]
+					declaration := declarations[binding.Name]
+					keys, known := staticDictionaryKeys(command.Declaration.Initializer)
+					if !known && command.Dialect == syntax.Vim9 && command.Declaration.Initializer == nil && convertSyntaxType(binding.ParsedType).Name == "dict" {
+						keys, known = map[string]struct{}{}, true
+					}
+					if declaration != nil && known {
+						shapes[declaration] = dictionaryShape{keys: keys, generation: generation}
+					}
+				}
+			} else {
+				for _, expression := range command.Expressions {
+					walkExpression(expression, scope, true, currentGeneration)
+				}
+			}
+			for _, target := range command.Targets {
+				walkExpression(target, scope, true, currentGeneration)
+			}
+			if command.Function != nil {
+				for _, parameter := range command.Function.Parameters {
+					walkExpression(parameter.Default, scope, true, currentGeneration)
+				}
+			}
+			if command.Embedded != nil {
+				walkCommands(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	walkCommands(commands, parent)
 }
 
 // collectVim9ScriptItemRedefinitionDiagnostics reports E1041 when two
