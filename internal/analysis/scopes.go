@@ -6245,6 +6245,10 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 		if vim9 {
 			code, required = "vim/E1212", "Bool"
 		}
+	case "arg_bool_or_nr":
+		if vim9 {
+			code, required = "vim/E1235", "Bool or Number"
+		}
 	case "arg_list_any":
 		if vim9 {
 			code, required = "vim/E1211", "List"

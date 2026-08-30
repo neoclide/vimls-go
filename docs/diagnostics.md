@@ -2260,6 +2260,29 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:146-147` states that `:legacy` cannot stand alone.
 - `src/errors.h:3168-3169` defines the exact E1234 message.
 
+## Bool or Number builtin argument: E1235
+
+Analysis reports E1235 at top-level Vim9 script when argument one of
+`getchar()` or `getcharstr()` has a statically known type that is neither Bool
+nor Number. The diagnostic selects the invalid argument, includes its one-based
+argument index, and owns the mismatch instead of also reporting E1013.
+
+Compiled `def` and block-lambda calls retain E1013. Bool and Number values are
+type-valid for this rule, so out-of-domain numeric constants such as `2` remain
+on the existing E1023 value-check path. Unknown values, Legacy calls, and the
+optional Dictionary argument keep their existing behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:1883` and `:1902` distinguish compiled
+  E1013 from top-level E1235 for String arguments to `getchar()` and
+  `getcharstr()`.
+- `src/typval.c:540-552` implements `arg_bool_or_nr` by accepting only Bool and
+  Number values and emitting E1235 otherwise.
+- `runtime/doc/vim9.txt:2758-2777` documents the top-level Vim9 builtin type
+  check and its `getcharstr('9')` example.
+- `src/errors.h:3171-3172` defines the exact E1235 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

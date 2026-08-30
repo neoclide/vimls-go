@@ -4364,6 +4364,58 @@ func TestAnalyzeE1212BuiltinBoolArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1235BuiltinBoolOrNumberArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"getchar string", "vim9script\ngetchar('1')\n", "'1'"},
+		{"getcharstr string", "vim9script\ngetcharstr('1')\n", "'1'"},
+		{"container", "vim9script\ngetchar([])\n", "[]"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1235" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1235 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Bool or Number required for argument 1" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1235 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"compiled def", "vim9script\ndef Func()\n  getchar('1')\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  getcharstr('1')\n}\n", "vim/E1013"},
+		{"bool", "vim9script\ngetchar(true)\n", ""},
+		{"number", "vim9script\ngetchar(1)\n", ""},
+		{"unknown", "vim9script\ngetchar(Unknown)\n", ""},
+		{"Legacy", "let value = getchar('1')\n", ""},
+		{"number value retains E1023", "vim9script\ngetchar(2)\n", "vim/E1023"},
+		{"second options argument retains E1206", "vim9script\ngetchar(0, [])\n", "vim/E1206"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1235" {
+					t.Fatalf("guard unexpectedly received E1235: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1216DigraphSetlistDiagnostics(t *testing.T) {
 	const message = "digraph_setlist() argument must be a list of lists with two items"
 	for _, test := range []struct{ name, source, span string }{
