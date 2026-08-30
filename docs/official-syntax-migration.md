@@ -341,6 +341,8 @@ A phase audit then removed four expression variants that require buffer,
 symbol, or type state and three imported-namespace variants that require
 import-name resolution. The authoritative parser split is therefore 915
 migrated, zero ready, and 146 pending-fix.
+Commit `7e748e2` migrated the three single-`=` Vim9 condition variants, making
+the authoritative current split 918 migrated, zero ready, and 143 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -933,13 +935,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 84 | 0 | 31 |
+| `C-EXCMD` | 115 | 87 | 0 | 28 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 109 | 62 | 0 | 47 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **362** | **283** | **0** | **79** |
+| **Total** | **362** | **286** | **0** | **76** |
 
 ```text
 C-EXPR
@@ -1069,6 +1071,12 @@ valid expression AST remains intact and parsing resumes with the next physical
 line. A hash after whitespace remains an ordinary Vim9 comment. Commit
 `bc08c8c` added the three matching `execute`, `echo`, and `echomsg` official
 variants whose attached hash tails were already diagnosed by that parser path.
+
+Commit `7e748e2` migrated
+`S:{2088:44163,2096:44294,3476:74196}/def`. A single `=` after a parsed
+`if`, `elseif`, or `while` condition now maps to Vim's E488 only inside a
+compiled definition; comparisons, fat arrows, assignments, and legacy syntax
+retain their existing interpretation.
 
 Commit `e2f7aba` migrated the five generic-call records at
 `G:{3048:67627,3057:67814,3066:68011,3075:68222,3084:68421}/script`.
