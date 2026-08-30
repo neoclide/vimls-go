@@ -2835,6 +2835,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if assignment.Start < 0 {
 			diagnosticsStart := len(file.Diagnostics)
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
+			diagnoseVim9IllegalDeclarationName(file, command, declaration)
 			diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 			diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
 			diagnoseInvalidClassDeclaration(file, command, declaration)
@@ -2852,6 +2853,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		left := file.Source[command.Argument.Start:assignment.Start]
 		diagnosticsStart := len(file.Diagnostics)
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
+		diagnoseVim9IllegalDeclarationName(file, command, declaration)
 		diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 		diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
 		invalidClassDeclaration := diagnoseInvalidClassDeclaration(file, command, declaration)
@@ -4475,10 +4477,23 @@ func parseForLoop(file *File, command *Command) {
 		}
 	} else {
 		segment := source[leftStart:leftEnd]
-		name, typeSpan := declarationSpans(segment, command.Argument.Start+leftStart, command.Dialect)
+		base := command.Argument.Start + leftStart
+		name, typeSpan := declarationSpans(segment, base, command.Dialect)
 		binding := Binding{Name: name, Type: typeSpan}
 		if command.Dialect == Vim9 {
-			diagnoseVim9TypeDelimiter(file, segment, command.Argument.Start+leftStart, name)
+			diagnoseVim9TypeDelimiter(file, segment, base, name)
+			position := skipExpressionSpace(segment, name.End-base)
+			if commandInsideBlock(command, file.Blocks, BlockDef) && position < len(segment) && (segment[position] == '[' || segment[position] == '.') {
+				target, _ := parseExpressionWithVersion(segment, base, command.Dialect, command.ScriptVersion)
+				targetSpan := Span{Start: base, End: base + len(segment)}
+				if target != nil {
+					targetSpan = target.Span
+					command.Targets = append(command.Targets, target)
+				}
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E461", Message: "Illegal variable name: " + file.Text(targetSpan), Span: targetSpan,
+				})
+			}
 		}
 		if typeSpan.Start < typeSpan.End {
 			binding.ParsedType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, file.Source[typeSpan.Start:typeSpan.End], typeSpan.Start)
@@ -4502,6 +4517,15 @@ func parseForLoop(file *File, command *Command) {
 	file.Diagnostics = append(file.Diagnostics, iterableDiagnostics...)
 	command.For = loop
 	command.Expressions = append(command.Expressions, loop.Iterable)
+}
+
+func diagnoseVim9IllegalDeclarationName(file *File, command *Command, declaration *Declaration) {
+	if command == nil || declaration == nil || command.Dialect != Vim9 || declaration.Name.Start >= declaration.Name.End || !strings.Contains(file.Text(declaration.Name), "#") {
+		return
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{
+		Code: "vim/E461", Message: "Illegal variable name: " + file.Text(declaration.Name), Span: declaration.Name,
+	})
 }
 
 func vim9ForHeaderIsComment(file *File, command *Command) bool {

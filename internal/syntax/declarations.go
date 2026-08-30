@@ -518,7 +518,8 @@ func maskVim9Comments(source string) string {
 			lineStart = false
 			continue
 		}
-		if character == '#' {
+		dictionaryStart := index+1 < len(masked) && masked[index+1] == '{' && (index+2 >= len(masked) || masked[index+2] != '{')
+		if character == '#' && !dictionaryStart && (lineStart || index > 0 && isSpace(masked[index-1])) {
 			for index < len(masked) && masked[index] != '\n' {
 				masked[index] = ' '
 				index++
