@@ -5209,6 +5209,16 @@ func scanVim9Continuation(source string, state vim9ContinuationScan) vim9Continu
 			state.pendingSpace = true
 			continue
 		}
+		if character == '"' && len(state.lambdaDepth) > 0 && !state.lambdaBodyStarted {
+			// Text after an inline-lambda block opener is an invalid physical-line
+			// tail, not the start of a multiline string.  Keep collecting the block
+			// so the expression parser can report E488 and find its real close.
+			state.appendTail(character)
+			for index+1 < len(source) && source[index+1] != '\n' {
+				index++
+			}
+			continue
+		}
 		if len(state.lambdaDepth) > 0 {
 			state.lambdaBodyStarted = true
 		}

@@ -1565,24 +1565,39 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 			}
 			if payloadStart < lineEnd && p.source[payloadStart] != '#' {
 				// An inline-function block may only have a comment after its
-				// opening brace.  Keep an empty block and leave this same-line
-				// payload opaque instead of treating it as a lambda command.
-				body := (Vim9Parser{}).Parse("")
-				bodyOffset, ok := safeLambdaOffset(p.base, bodyStart)
+				// opening brace.  Leave the invalid same-line payload opaque,
+				// but keep parsing commands from the next physical line.
+				bodyParseStart := blockEnd
+				if lineEnd < blockEnd {
+					bodyParseStart = lineEnd
+					if p.source[bodyParseStart] == '\n' {
+						bodyParseStart++
+					}
+				}
+				body := (Vim9Parser{}).Parse(p.source[bodyParseStart:blockEnd])
+				bodyOffset, ok := safeLambdaOffset(p.base, bodyParseStart)
 				if !ok {
 					bodyOffset = 0
 				}
 				rebaseLambdaFile(body, p.source, bodyOffset)
 				lambda.LambdaBody = body
-				block := &Expression{Kind: ExpressionLambdaBlock, Span: Span{Start: p.base + blockStart, End: p.base + payloadStart}}
+				p.diagnostics = append(p.diagnostics, body.Diagnostics...)
+				block := &Expression{Kind: ExpressionLambdaBlock, Span: Span{Start: p.base + blockStart, End: p.base + blockEnd + 1}}
 				lambda.Children = append(lambda.Children, block)
 				lambda.Span = Span{Start: open.span.Start, End: block.Span.End}
 				p.diagnostics = append(p.diagnostics, Diagnostic{
-					Code: "vim/E488", Message: "trailing characters", Span: Span{Start: p.base + payloadStart, End: p.base + blockEnd},
+					Code: "vim/E488", Message: "trailing characters", Span: Span{Start: p.base + payloadStart, End: p.base + lineEnd},
 				})
 				closingEnd := p.base + blockEnd + 1
 				for p.current().kind != expressionEOF && p.current().span.End <= closingEnd {
 					p.advance()
+				}
+				if p.current().kind != expressionEOF && p.current().span.Start < closingEnd {
+					// A malformed quote token can span across the block close and
+					// the enclosing call delimiter.  Resume exactly after the known
+					// block boundary so the outer expression keeps its own tokens.
+					p.lexer.offset = closingEnd - p.base
+					p.lexer.current = p.lexer.scan()
 				}
 				return lambda, true
 			}
@@ -2043,6 +2058,10 @@ func findVim9LambdaBlockEnd(source string, open int) int {
 	if open >= len(source) || source[open] != '{' {
 		return -1
 	}
+	firstLineEnd := len(source)
+	if newline := strings.IndexByte(source[open:], '\n'); newline >= 0 {
+		firstLineEnd = open + newline
+	}
 	depth := 0
 	quote := byte(0)
 	for index := open; index < len(source); index++ {
@@ -2057,6 +2076,10 @@ func findVim9LambdaBlockEnd(source string, open int) int {
 					quote = 0
 				}
 			}
+			continue
+		}
+		if character == '"' && index < firstLineEnd {
+			index = firstLineEnd - 1
 			continue
 		}
 		if character == '\'' || character == '"' {
