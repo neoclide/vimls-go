@@ -88,6 +88,54 @@ func TestAnalyzeTypeMismatchDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMapCallbackReturnTypeDiagnostics(t *testing.T) {
+	source := `vim9script
+def StringMap(i: number, value: number): string
+  return 'bad'
+enddef
+var numbers: list<number> = [1, 2]
+map(numbers, StringMap)
+var dictionary: dict<number> = {key: 1}
+map(dictionary, (_, value) => [])
+`
+	file := syntax.Parse(source)
+	var got []string
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E1013" {
+			t.Fatalf("map callback return was reported as E1013: %#v", diagnostic)
+		}
+		if diagnostic.Code == "vim/E1012" {
+			got = append(got, file.Text(diagnostic.Span))
+		}
+	}
+	want := []string{"StringMap", "(_, value) => []"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("E1012 spans = %#v, want %#v", got, want)
+	}
+}
+
+func TestAnalyzeMapCallbackReturnTypeInDefIsArgumentMismatch(t *testing.T) {
+	source := `vim9script
+def StringMap(i: number, value: number): string
+  return 'bad'
+enddef
+def Check()
+  var numbers: list<number> = [1, 2]
+  map(numbers, StringMap)
+enddef
+`
+	file := syntax.Parse(source)
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if file.Text(diagnostic.Span) == "StringMap" {
+			if diagnostic.Code != "vim/E1013" {
+				t.Fatalf("map callback diagnostic = %#v, want E1013", diagnostic)
+			}
+			return
+		}
+	}
+	t.Fatal("missing map callback diagnostic")
+}
+
 func TestAnalyzeMalformedVariadicTupleDoesNotPanic(t *testing.T) {
 	source := "vim9script\nvar t: tuple<number, ...number> = (1, 2, 3)\n"
 	file := syntax.Parse(source)

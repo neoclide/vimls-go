@@ -1368,14 +1368,19 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							break
 						}
 					}
-					expected, ok := builtinArgumentExpectation(builtin.ArgumentChecks[checkerIndex], actual, index)
+					checker := builtin.ArgumentChecks[checkerIndex]
+					expected, ok := builtinArgumentExpectation(checker, actual, index)
 					if !ok {
 						continue
+					}
+					if checker == "arg_map_func" && !scopeContainsDef(scope) {
+						expected.functionReturn = nil
 					}
 					if builtinArgumentMismatch(actual[index], expected) {
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
 					}
 				}
+				collectMapCallbackReturnTypeDiagnostic(result, scope, builtin, arguments, actual)
 				collectBuiltinCompiledStringDiagnostics(result, scope, builtin, arguments, expression.Span.Start)
 			} else {
 				collectFunctionArgumentTypeDiagnostics(result, expression)
@@ -1416,6 +1421,27 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		}
 	}
 	walkCommands(commands, parent)
+}
+
+func collectMapCallbackReturnTypeDiagnostic(result *FileAnalysis, scope *Scope, builtin vimdata.BuiltinFunction, arguments []*syntax.Expression, actual []ValueType) {
+	if result == nil || scopeContainsDef(scope) || builtin.Name != "map" || len(arguments) < 2 || len(actual) < 2 {
+		return
+	}
+	container, callback := actual[0], actual[1]
+	if (container.Name != "list" && container.Name != "dict") || len(container.Arguments) == 0 || callback.Name != "func" || callback.Return == nil {
+		return
+	}
+	element := container.Arguments[0]
+	if isUnknownType(element) || isUnknownType(*callback.Return) {
+		return
+	}
+	expectedArguments, _ := builtinCallbackSignature(container, "arg_map_func")
+	if builtinFunctionSignatureMismatch(callback, builtinArgumentType{functionArguments: expectedArguments}) || assignmentTypesCompatible(element, *callback.Return) {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1012", Message: "Type mismatch; expected " + valueTypeDisplay(element) + " but got " + valueTypeDisplay(*callback.Return), Span: arguments[1].Span,
+	})
 }
 
 func collectBuiltinCompiledStringDiagnostics(result *FileAnalysis, scope *Scope, function vimdata.BuiltinFunction, arguments []*syntax.Expression, visibilityOffset int) {
