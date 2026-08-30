@@ -2596,6 +2596,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   `#` and export it instead.
 - `src/errors.h:3243-3244` defines the exact E1263 message.
 
+## Missing relative or absolute autoload import: E1264
+
+Workspace analysis reports E1264 when a static `import autoload` using a
+relative or absolute path cannot resolve to a readable regular file. The
+diagnostic selects the import path and includes its decoded spelling. Valid
+relative and absolute autoload imports remain supported and produce no error.
+
+Runtime-path autoload names are distinct: a missing name below `autoload/`
+retains E1053. Dynamic path expressions and paths that cannot be checked
+safely remain unknown. Vim first reports its file-open error for a missing or
+non-file direct path and then reaches E1264; the language server reports the
+specific import error because it does not duplicate Vim's filesystem errors.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:2993-3016` distinguishes missing relative
+  and absolute autoload paths from a missing runtime-path autoload name.
+- `src/vim9script.c:356-403` validates a direct autoload path without loading
+  the target and preserves the unresolved script-ID sentinel on failure.
+- `src/vim9script.c:471-531` separates relative and absolute paths from the
+  `autoload/` runtime search and emits E1264 after a direct-path failure.
+- `runtime/doc/vim9.txt:3745-3764` documents valid relative and absolute
+  autoload imports, so E1264 is not applied to paths that resolve.
+- `src/errors.h:3245-3246` defines the exact E1264 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

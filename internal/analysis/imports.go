@@ -7,8 +7,7 @@ import (
 )
 
 // ImportLoad describes one statically decoded import. Runtime is true for an
-// autoload lookup through 'runtimepath'; relative and absolute autoload
-// failures use Vim's file-open diagnostics instead of E1053.
+// import or autoload lookup through 'runtimepath'.
 type ImportLoad struct {
 	Span      syntax.Span
 	Path      string
@@ -46,7 +45,13 @@ func AnalyzeImports(loads []ImportLoad, members []ImportMember) []syntax.Diagnos
 			})
 			continue
 		}
-		if !load.Missing || load.Path == "" || load.Autoload && !load.Runtime {
+		if !load.Missing || load.Path == "" {
+			continue
+		}
+		if load.Autoload && !load.Runtime {
+			diagnostics = append(diagnostics, syntax.Diagnostic{
+				Code: "vim/E1264", Message: "Autoload import cannot use absolute or relative path: " + load.Path, Span: load.Span,
+			})
 			continue
 		}
 		diagnostics = append(diagnostics, syntax.Diagnostic{

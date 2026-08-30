@@ -333,6 +333,15 @@ import dynamicPath as Dynamic
 	if len(imports) != 2 || imports[0].Message != protocol.String(`Could not import "./missing.vim"`) || imports[1].Message != protocol.String(`Could not import "runtimeMissing.vim"`) {
 		t.Fatalf("E1053 diagnostics = %#v; all=%#v", imports, params.Diagnostics)
 	}
+	var autoloadPaths []protocol.Diagnostic
+	for _, diagnostic := range params.Diagnostics {
+		if diagnostic.Code == protocol.String("vim/E1264") {
+			autoloadPaths = append(autoloadPaths, diagnostic)
+		}
+	}
+	if len(autoloadPaths) != 1 || autoloadPaths[0].Message != protocol.String("Autoload import cannot use absolute or relative path: ./relativeMissing.vim") || autoloadPaths[0].Range.Start.Line != 3 {
+		t.Fatalf("E1264 diagnostics = %#v; all=%#v", autoloadPaths, params.Diagnostics)
+	}
 }
 
 func TestServerPublishesE1088ForSelfImport(t *testing.T) {
