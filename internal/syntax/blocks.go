@@ -779,6 +779,61 @@ func suppressInvalidInterfaceInitializers(file *File) {
 	file.Diagnostics = kept
 }
 
+// A legacy script stores :def bodies for later compilation.  A direct legacy
+// `# text` command is rejected while sourcing, before a following :defcompile
+// can surface diagnostics from those stored bodies.  Keep the recovered def
+// AST, but do not put its deferred diagnostics ahead of that source error.
+func suppressDeferredDefDiagnosticsBeforeLegacyPoundError(file *File) {
+	if file == nil || file.Dialect != Legacy {
+		return
+	}
+	errorStart := -1
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Block >= 0 || command.Dialect != Legacy || command.Canonical != "#" {
+			continue
+		}
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E488" && diagnostic.Span.Start >= command.Argument.Start && diagnostic.Span.End <= command.Argument.End {
+				errorStart = diagnostic.Span.Start
+				break
+			}
+		}
+		if errorStart >= 0 {
+			break
+		}
+	}
+	if errorStart < 0 {
+		return
+	}
+
+	var deferred []Span
+	for _, block := range file.Blocks {
+		if block.Kind != BlockDef || block.Parent >= 0 || block.Header < 0 || block.Header >= len(file.Commands) || block.Span.End > errorStart {
+			continue
+		}
+		header := file.Commands[block.Header]
+		deferred = append(deferred, Span{Start: header.Span.End, End: block.Span.End})
+	}
+	if len(deferred) == 0 {
+		return
+	}
+	kept := file.Diagnostics[:0]
+	for _, diagnostic := range file.Diagnostics {
+		suppress := false
+		for _, body := range deferred {
+			if diagnostic.Span.Start >= body.Start && diagnostic.Span.End <= body.End {
+				suppress = true
+				break
+			}
+		}
+		if !suppress {
+			kept = append(kept, diagnostic)
+		}
+	}
+	file.Diagnostics = kept
+}
+
 func blockHeaderHasVimDiagnostic(file *File, headerIndex int) bool {
 	header := file.Commands[headerIndex]
 	for _, diagnostic := range file.Diagnostics {
