@@ -1195,6 +1195,13 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		}
 		if !builtIn || expressionNameEnd > nameEnd {
 			nameExpression = looksLikeVim9Expression(file.Source, nameStart, expressionNameEnd, end)
+			// A colon after an identifier that extends a built-in command name is
+			// not a standalone typed declaration.  Vim falls back to the Ex
+			// command boundary and requires whitespace after that command, e.g.
+			// "exit_cb: Func})" is :exit followed by an attached argument.
+			if builtIn && expressionNameEnd > nameEnd && expressionNameEnd < end && file.Source[expressionNameEnd] == ':' {
+				nameExpression = false
+			}
 		} else if !malformedDeclaration {
 			nameExpression = (canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && looksLikeImmediateVim9Expression(file.Source, nameEnd, end)) ||
 				(canonical == "substitute" || canonical == "smagic" || canonical == "snomagic") && looksLikeSubstituteVim9Expression(file.Source, typedName, nameEnd, end) ||
