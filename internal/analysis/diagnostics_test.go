@@ -4364,6 +4364,46 @@ func TestAnalyzeE1212BuiltinBoolArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},
+		{"root def", "vim9script\nimport './item.vim' as Item\ndef Item()\nenddef\n", "Item"},
+		{"const destructuring and control", "vim9script\nimport './item.vim' as Item\nconst Item = 1\nvar [Item, other] = [1, 2]\nif true\n  var Item = 3\nendif\n", "Item"},
+		{"cross dialect function", "vim9script\nimport './item.vim' as Item\nlegacy function Item()\nendfunction\n", "Item"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1213" {
+					got = append(got, diagnostic)
+				}
+				if (diagnostic.Code == "vim/E1041" || diagnostic.Code == "vim/E1017" || diagnostic.Code == "vim/E1073") && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1213 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Redefining imported item "`+test.span+`"` || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1213 diagnostics = %#v", got)
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\nvar Item = 1\nimport './item.vim' as Item\nvar Item = 2\n",
+		"import './item.vim' as Item\nlet Item = 1\n",
+		"vim9script\nimport './item.vim' as Item\ndef Outer()\n  var Item = 1\nenddef\nvar Callback = () => {\n  var Item = 1\n}\n",
+		"vim9script\nimport './item.vim' as Item\nItem = 1\necho Item\nclass Item\nendclass\ntype Item = number\nvar Other = 1\n",
+		"vim9script\ndef Func()\n  import './item.vim' as Item\n  var Item = 1\nenddef\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1213" {
+				t.Fatalf("guard unexpectedly received E1213: %#v", result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeCompiledIndexReceiverDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

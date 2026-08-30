@@ -121,6 +121,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectArgumentShadowDiagnostics(result)
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
+	collectImportedItemRedefinitionDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectDuplicateTypeAliasDiagnostics(result)
 	collectUnimplementedAbstractMethodDiagnostics(result)
@@ -2330,6 +2331,68 @@ func collectVim9NameAlreadyDefinedDiagnostics(result *FileAnalysis, commands []s
 			})
 		}
 	}
+}
+
+func collectImportedItemRedefinitionDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.Root == nil {
+		return
+	}
+	eligibleImports := make(map[syntax.Span]bool)
+	var collectImports func([]syntax.Command)
+	collectImports = func(items []syntax.Command) {
+		for index := range items {
+			command := &items[index]
+			if command.Dialect == syntax.Vim9 && command.Import != nil && !emptySyntaxSpan(command.Import.Alias) {
+				eligibleImports[command.Import.Alias] = true
+			}
+			if command.Embedded != nil {
+				collectImports(command.Embedded.Commands)
+			}
+		}
+	}
+	collectImports(commands)
+	declarations := append([]*Declaration(nil), result.Declarations...)
+	sort.SliceStable(declarations, func(i, j int) bool { return declarations[i].Span.Start < declarations[j].Span.Start })
+	occupied := make(map[string]bool)
+	imports := make(map[string]*Declaration)
+	for _, declaration := range declarations {
+		if declaration == nil || declaration.Scope == nil {
+			continue
+		}
+		if declaration.Kind == SymbolKindImport {
+			if declaration.Scope == result.Root && eligibleImports[declaration.Span] && !occupied[declaration.Name] {
+				imports[declaration.Name] = declaration
+			}
+			if declaration.Scope == result.Root {
+				occupied[declaration.Name] = true
+			}
+			continue
+		}
+		if imported := imports[declaration.Name]; imported != nil && imported.Span.Start < declaration.Span.Start && importedItemScriptScope(result.Root, declaration.Scope) &&
+			(declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant || functionSymbolKind(declaration.Kind)) && !declaration.Parameter {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1213", Message: `Redefining imported item "` + declaration.Name + `"`, Span: declaration.Span})
+			delete(imports, declaration.Name)
+		}
+		if importedItemScriptScope(result.Root, declaration.Scope) {
+			occupied[declaration.Name] = true
+		}
+	}
+}
+
+func importedItemScriptScope(root, scope *Scope) bool {
+	for current := scope; current != nil; current = current.Parent {
+		if current.Lambda != nil {
+			return false
+		}
+		switch current.Kind {
+		case syntax.BlockDef, syntax.BlockFunction, syntax.BlockClass, syntax.BlockInterface, syntax.BlockEnum:
+			return false
+		}
+		if current == root {
+			return true
+		}
+	}
+	return false
 }
 
 func collectVim9RedeclarationDiagnostics(result *FileAnalysis) {

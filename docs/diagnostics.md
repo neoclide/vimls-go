@@ -1837,6 +1837,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   zero-or-one exception.
 - `src/errors.h:3113-3114` defines the exact E1212 message.
 
+## Imported item redefinition: E1213
+
+Analysis reports E1213 when a valid root-level Vim9 import alias is followed
+by a script-level variable, constant, destructuring binding, `def`, or legacy
+function with the same name. The diagnostic selects the later declaration and
+is emitted once for the imported alias.
+
+Declarations inside a function, lambda, class, interface, or enum do not use
+E1213. Neither do assignments, reads, type aliases, aggregate declarations,
+Legacy-root imports, or an import alias already rejected because an earlier
+script item owns the name.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:335-341` covers a variable declaration
+  that redefines an imported alias.
+- `src/testdir/test_vim9_import.vim:2221-2228` covers a root-level `def` with
+  the imported name.
+- `src/testdir/test_vim9_import.vim:2230-2240` distinguishes a nested use of
+  the imported name, which belongs to E1236 rather than E1213.
+- `src/evalvars.c:4179-4195` applies E1213 to script-local declarations while
+  routing non-declaration use through E1236.
+- `src/userfunc.c:1959-1988` applies the same distinction to functions.
+- `src/errors.h:3115-3116` defines the exact E1213 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
