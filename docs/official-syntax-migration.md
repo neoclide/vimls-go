@@ -374,6 +374,10 @@ cases, making the authoritative current split 946 migrated, zero ready, and 96
 pending-fix.
 Commit `cfb96da` migrated the final two Group C generic cases, making the
 authoritative current split 948 migrated, zero ready, and 94 pending-fix.
+A recovery-phase audit then removed the split-lambda use-after-free regression
+fixture whose later physical lines are deliberately incomplete. The
+authoritative parser split is therefore 948 migrated, zero ready, and 93
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -970,9 +974,9 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
-| `C-MODIFIER` | 57 | 56 | 0 | 1 |
+| `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **343** | **316** | **0** | **27** |
+| **Total** | **342** | **316** | **0** | **26** |
 
 ```text
 C-EXPR
@@ -1062,7 +1066,7 @@ C-IMPORT
   E983 I:2978:73280/script
 
 C-MODIFIER
-  E1050 C:1202:25888/script; S:365:9084/def,366:9128/def,367:9173/def,368:9218/def,2021:42097/script
+  E1050 C:1202:25888/script; S:365:9084/def,366:9128/def,367:9173/def,368:9218/def
   E1082 C:1275:27368/{def|vim9-script},1280:27472/{def|vim9-script}
   E1176 C:1227:26455/{def|vim9-script},1233:26572/def,1240:26731/def,1249:26910/{def|vim9-script},1256:27030/{def|vim9-script},1263:27152/{def|vim9-script},1270:27274/{def|vim9-script}
   E1202 G:149:3384/script,157:3555/script,197:4369/script,213:4713/script,221:4889/script,229:5072/script,336:7374/script,357:7889/script,365:8067/script,397:8780/script,728:15637/script
@@ -1099,6 +1103,14 @@ accepted the string. It also excludes E1069 at
 all fourteen errors arise only when `function()` or `call()` interprets a
 string value as a function name. These cases belong to runtime or semantic
 analysis, not parser-negative coverage.
+
+`S:2021:42097/script` remains in the pinned corpus as a parser-stability input
+but is excluded from exact negative conformance. Vim's test verifies that an
+E1050 on the first `0` does not trigger a use-after-free, then stops compiling;
+the following split lambda and `try` block are intentionally incomplete. Loose
+editor recovery must resume on those later physical lines and may diagnose
+them, so suppressing their independent syntax solely to match Vim's first-error
+execution helper would violate the parser recovery contract.
 
 Commit `1e10f55` migrated the `C-EXCMD` E1083 variant. The generated command
 table now retains Vim's EX_XFILE/EX_FILES/EX_FILE1 property, valid filename
