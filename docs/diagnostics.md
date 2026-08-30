@@ -2043,6 +2043,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   checker orderings.
 - `src/errors.h:3141-3142` defines the exact E1223 message.
 
+## String, Number or List required for builtin argument: E1224
+
+Analysis reports E1224 at Vim9 script level when either the general
+String-or-Number-or-List checker or the cursor argument checker receives a
+known incompatible type. The diagnostic selects the complete normalized
+argument and uses its one-based position, including method receivers and later
+arguments.
+
+String, Number, List, and dynamically typed values are accepted. A mismatch
+in a compiled `def` or block lambda retains E1013, Legacy calls are not
+diagnosed, and wider unions such as buffer-or-Dictionary remain outside this
+rule.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:249-252` distinguishes compiled E1013
+  from script-level E1224 for a later `setbufline()` argument.
+- `src/testdir/test_vim9_builtin.vim:917-920` covers the cursor-specific
+  checker.
+- `src/testdir/test_vim9_builtin.vim:4711-4720` covers the later input
+  argument of `system()` and `systemlist()`.
+- `src/evalfunc.c:1052-1068` defines the general checker, and
+  `src/evalfunc.c:1218-1238` defines the cursor variant.
+- `src/errors.h:3143-3144` defines the exact E1224 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

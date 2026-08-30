@@ -4798,6 +4798,61 @@ func TestAnalyzeE1223StringOrDictionaryBuiltinArgumentDiagnostics(t *testing.T) 
 	}
 }
 
+func TestAnalyzeE1224StringNumberOrListBuiltinArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message, span string }{
+		{"cursor", "vim9script\ncursor({})\n", "String, Number or List required for argument 1", "{}"},
+		{"later argument", "vim9script\nsystem('echo', {})\n", "String, Number or List required for argument 2", "{}"},
+		{"setbufline", "vim9script\nsetbufline(1, 1, {})\n", "String, Number or List required for argument 3", "{}"},
+		{"method receiver", "vim9script\n{}->setbufline(1, 1)\n", "String, Number or List required for argument 3", "{}"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1224" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1224 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1224 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"compiled def", "vim9script\ndef Func()\n  cursor({})\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  cursor({})\n}\n", "vim/E1013"},
+		{"string", "vim9script\nsystem('echo', 'input')\n", ""},
+		{"number", "vim9script\nsystem('echo', 1)\n", ""},
+		{"list", "vim9script\nsystem('echo', ['input'])\n", ""},
+		{"unknown", "vim9script\nsystem('echo', Unknown)\n", ""},
+		{"Legacy", "let value = cursor({})\n", ""},
+		{"buffer or dictionary union", "vim9script\ngetbufinfo(true)\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1224" {
+					t.Fatalf("guard unexpectedly received E1224: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},
