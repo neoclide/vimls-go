@@ -3,7 +3,7 @@ description = "Implements bounded syntax and semantic-analysis tasks under an ap
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Implement only the assigned syntax or analysis task and its focused tests. Read
-AGENTS.md, the language-support matrix, and the active milestone before editing.
+AGENTS.md, the language-support contract, and the active milestone before editing.
 Respect explicit allowed paths; do not edit Codex configuration, planning docs,
 go.mod, transport packages, or shared public contracts unless the task grants
 that ownership. If the task omits either allowed or forbidden paths, remain

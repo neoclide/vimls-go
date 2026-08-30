@@ -6,8 +6,9 @@
   single-session TCP listener exists only for debugging.
 - Keep stdout reserved for LSP frames and write logs to stderr.
 - Implement LSP 3.18 and JSON-RPC 2.0 at the wire boundary.
-- Parse legacy Vim script and Vim9 script as separate contextual dialects,
-  including mixed-dialect files.
+- Parse legacy Vim script and Vim9 script through independent root parsers.
+  Retain cross-dialect constructs with loose recovery without requiring an
+  exhaustive matrix of mixed combinations.
 - Use Vim `v9.2.1015` as the production grammar source and Vim 9.1 as the
   compatibility floor.
 - Analyze untrusted source without executing or sourcing it.

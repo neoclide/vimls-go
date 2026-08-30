@@ -18,7 +18,7 @@
 internal/<package>/*_test.go       focused unit and package integration tests
 testdata/legacy/                   accepted and rejected legacy scripts
 testdata/vim9/                     accepted and rejected Vim9 scripts
-testdata/mixed/                    contextual dialect transitions
+testdata/mixed/                    cross-dialect smoke/recovery cases, not a matrix
 testdata/incomplete/               editor typing states and recovery
 testdata/unicode/                  byte/rune/UTF-16/line-ending boundaries
 testdata/workspace/                import, autoload, runtimepath projects
@@ -50,6 +50,11 @@ they are not repeated for every syntax form. Essential ambiguity cases include
 `|`, quotes versus comments, command abbreviations, ranges/modifiers,
 continuations, heredocs, mapping payloads, `vim9cmd`, `legacy`, `def`, and
 `function`.
+
+Cross-dialect smoke cases assert retention, forward recovery, and no diagnostic
+solely for mixing. They do not claim complete semantics for `def` in a
+legacy-root file or `function` in a Vim9-root file, and those combinations are
+not multiplied across the per-form syntax suite.
 
 The default offline gate also reads generated v9.2.1015 artifacts below
 `testdata/official/`. The full-file corpus losslessly contains all 362 tracked

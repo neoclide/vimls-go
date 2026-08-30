@@ -4,8 +4,10 @@
 
 Build a Go language server for legacy Vim script and Vim9 script. The minimum
 supported Vim release is 9.1; newer stable Vim releases must remain supported.
-“Vim9 support” includes mixed-dialect files, not only files beginning with
-`vim9script`.
+Legacy Vim script and Vim9 script have independent root parsers. Cross-dialect
+constructs are retained with loose recovery and are not errors merely because
+they mix dialects; exhaustive support for `def` in a legacy-root file and
+`function` in a Vim9-root file is deferred.
 
 ## First principles
 
@@ -44,11 +46,14 @@ turn behavior observed only on a newer Vim into an unconditional Vim 9.1 rule.
 
 ## Language invariants
 
-- Treat legacy Vim script and Vim9 script as related dialects sharing Ex
-  commands and expressions.
+- Treat legacy Vim script and Vim9 script as related languages with independent
+  root parsers that share Ex commands and neutral syntax data where useful.
 - Dialect is contextual: `vim9script`, `def`, `function`, `vim9cmd`, `legacy`,
   and `scriptversion` can change the applicable rules. `vim9cmd` and `legacy`
   affect only their following command; they are not persistent parser modes.
+- Do not emit a diagnostic solely because a file contains a cross-dialect
+  construct. Complete parsing and semantics for `def` in a legacy-root file and
+  `function` in a Vim9-root file remain a TODO, not a 1.0 coverage matrix.
 - Parse command ranges, modifiers, abbreviations, bang, separators, comments,
   continuations, heredocs, and embedded command payloads contextually. A line
   split or regular-expression-only parser is not sufficient.
@@ -93,6 +98,9 @@ packages in advance of the milestone that needs them.
   `testdata/`.
 - Every accepted syntax form needs a positive fixture; every diagnostic or
   recovery rule needs a negative or incomplete fixture.
+- Do not repeat every syntax form across mixed-dialect, incomplete-input, and
+  version contexts. Use official per-form evidence plus focused tests for each
+  shared recovery or context-switching mechanism.
 - Use the official Vim test suite and runtime scripts as a corpus, but retain
   provenance and do not copy incompatible licensed content into generated
   artifacts without review.
@@ -153,5 +161,5 @@ read-only and ask the primary agent for a corrected brief.
 - Inspect `git status` before editing and preserve unrelated work.
 - Keep commits milestone-scoped; stage only intended files.
 - A local commit does not authorize push, release, issue closure, or PR creation.
-- Update the roadmap and language-support matrix when a milestone changes what
+- Update the roadmap and language-support contract when a milestone changes what
   the server actually supports.

@@ -97,8 +97,8 @@ func TestIndependentLegacyAndVim9Parsers(t *testing.T) {
 func TestMixedDialectBodiesAndCommandModifiers(t *testing.T) {
 	legacy := Parse("def Build()\nvar x = 1 # Vim9\nenddef\nvim9cmd var y = 2 # Vim9\nlet g:z = 3 \" legacy\n")
 	wantLegacy := []Dialect{Legacy, Vim9, Vim9, Vim9, Legacy}
-	if len(legacy.Commands) != len(wantLegacy) {
-		t.Fatalf("legacy commands = %#v", legacy.Commands)
+	if len(legacy.Diagnostics) != 0 || len(legacy.Commands) != len(wantLegacy) {
+		t.Fatalf("legacy commands = %#v, diagnostics = %#v", legacy.Commands, legacy.Diagnostics)
 	}
 	for index, want := range wantLegacy {
 		if got := legacy.Commands[index].Dialect; got != want {
@@ -108,8 +108,8 @@ func TestMixedDialectBodiesAndCommandModifiers(t *testing.T) {
 
 	vim9 := Parse("vim9script\nfunction Old()\nlet x = 1 \" legacy\nendfunction\nlegacy let g:y = 2 \" legacy\nvar z = 3 # Vim9\n")
 	wantVim9 := []Dialect{Legacy, Vim9, Legacy, Legacy, Legacy, Vim9}
-	if len(vim9.Commands) != len(wantVim9) {
-		t.Fatalf("Vim9 commands = %#v", vim9.Commands)
+	if len(vim9.Diagnostics) != 0 || len(vim9.Commands) != len(wantVim9) {
+		t.Fatalf("Vim9 commands = %#v, diagnostics = %#v", vim9.Commands, vim9.Diagnostics)
 	}
 	for index, want := range wantVim9 {
 		if got := vim9.Commands[index].Dialect; got != want {

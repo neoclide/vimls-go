@@ -48,8 +48,10 @@ Deliver:
 - Expression parser with stable byte spans and deterministic AST serialization
   for golden tests.
 
-Exit gate: official/curated legacy, Vim9, mixed, invalid, and incomplete corpora
-parse without panic or nontermination; recovery reaches later valid declarations.
+Exit gate: official/curated legacy, Vim9, invalid, and incomplete corpora parse
+without panic or nontermination; recovery reaches later valid declarations.
+Existing mixed-dialect cases are smoke coverage only: mixing alone produces no
+diagnostic and must not prevent recovery to later commands.
 
 ## M3: full legacy and Vim9 syntax
 
@@ -63,6 +65,10 @@ per-form evidence. Focused curated tests cover mixed-dialect transitions and
 incomplete-input recovery once per shared parser mechanism, rather than
 duplicating every syntax form across those contexts. Version-boundary evidence
 is required only for forms introduced after the 9.1 compatibility floor.
+
+Complete parsing and semantics for `def` in a legacy-root file and `function`
+in a Vim9-root file are deferred. Existing tests for those combinations remain,
+but no exhaustive combination matrix is an M3 exit gate.
 
 Exit gate: every required construct has official or focused acceptance evidence
 and relevant rejection evidence. Context switching and physical-line recovery
@@ -168,7 +174,7 @@ Before each implementation slice:
 1. Freeze a short task brief with owned paths, contract, fixtures, and commands.
 2. Delegate only independent non-overlapping work.
 3. Integrate in the primary thread.
-4. Update the support matrix from actual behavior, not intended behavior.
+4. Update the support contract from actual behavior, not intended behavior.
 
 Run an adversarial QA review only at a substantial feature stabilization point
 or before release, not as a blocker between every implementation slice.

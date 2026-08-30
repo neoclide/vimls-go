@@ -13,24 +13,32 @@ script.
 
 ## Dialect model
 
-The parser uses contextual parse state rather than one file-wide Boolean:
+The parser exposes two independent root entry points:
 
-- A sourced file begins in legacy syntax unless its first effective command is
-  `vim9script`.
-- A `def` body uses Vim9 syntax and semantics, including when it occurs in a
-  legacy file.
-- A `function` body uses legacy syntax, including in a Vim9 file.
+- `LegacyParser` parses a legacy-root file.
+- `Vim9Parser` parses a Vim9-root file.
+- `Parse` dispatches to Vim9 only when the first effective command is
+  `vim9script`; otherwise it dispatches to legacy.
 - `vim9cmd` applies Vim9 rules to its following command only.
 - `legacy` applies legacy rules to its following command only where Vim permits
   it. Neither modifier creates a persistent lexer mode.
 - `scriptversion` changes applicable legacy expression rules.
 
-The parse state retains enclosing script/function/class contexts and an
-explicit one-command override. The syntax tree records the resolved context so
-semantic analysis never has to guess the dialect from surrounding text again.
+The current parser retains `def` in a legacy-root file and `function` in a
+Vim9-root file through contextual parsing and loose recovery. Their presence
+alone must not produce a diagnostic, but complete parsing and semantic support
+for those two combinations is a TODO. Existing mixed-dialect tests remain as
+smoke coverage; there is no requirement to enumerate every mixed combination.
+
+Within either root parser, parse state retains enclosing
+script/function/class contexts and an explicit one-command override. The syntax
+tree records the resolved context so semantic analysis does not have to infer
+the dialect again.
 
 ## Syntax required for 1.0
 
+The following requirements apply to each construct in its native root language;
+they do not create a cross-product requirement across mixed-dialect contexts.
 The 1.0 parser must accept and recover across:
 
 - Ex ranges, addresses, command modifiers, abbreviations, bang, counts,
