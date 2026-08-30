@@ -64,6 +64,9 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 	}
 	file.Diagnostics = append(file.Diagnostics, temporary.Diagnostics...)
 
+	command.Kind = temporaryCommand.Kind
+	command.TypedName = temporaryCommand.TypedName
+	command.Canonical = temporaryCommand.Canonical
 	command.Embedded = temporaryCommand.Embedded
 	command.Declaration = temporaryCommand.Declaration
 	command.Expressions = temporaryCommand.Expressions

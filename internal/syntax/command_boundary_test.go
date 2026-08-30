@@ -596,7 +596,7 @@ func TestVim9MalformedCommandStartCallRecoversNextPhysicalLine(t *testing.T) {
 
 func TestVim9CommandStartSpacedCallRemainsExCommand(t *testing.T) {
 	file := Parse("vim9script\nFunc ()\nvar after = 1\n")
-	if len(file.Commands) != 3 || file.Commands[1].Kind != CommandUser || file.Commands[1].Canonical != "Func" || len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E492" || file.Text(file.Diagnostics[0].Span) != "Func" || file.Commands[2].Declaration == nil {
+	if len(file.Commands) != 3 || file.Commands[1].Kind != CommandUser || file.Commands[1].Canonical != "Func" || len(file.Diagnostics) != 0 || file.Commands[2].Declaration == nil {
 		t.Fatalf("spaced call = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}
 	assertFileSpans(t, file)

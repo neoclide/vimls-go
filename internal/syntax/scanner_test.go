@@ -292,21 +292,17 @@ func TestOfficialModifierNamedVariableAssignment(t *testing.T) {
 	}
 }
 
-func TestOfficialVim9WhitespaceBeforeCallParen(t *testing.T) {
-	// v9.2.1015 src/testdir/test_vim9_expr.vim:4487 and
-	// src/testdir/test_vim9_func.vim:781.  Vim reports E492 for the
-	// top-level unknown command and E476 while compiling a def; the parser
-	// keeps the command opaque in both contexts.
+func TestVim9PotentialUserCommandBeforeParenRemainsUnknown(t *testing.T) {
+	// Whether CallMe is a valid command depends on user commands loaded from
+	// runtimepath.  Until the workspace provides that immutable snapshot, the
+	// parser retains the command without guessing E476 or E492.
 	bare := Parse("vim9script\nCallMe ('yes')\n")
-	if len(bare.Commands) != 2 || bare.Commands[1].Kind != CommandUser || bare.Commands[1].Canonical != "CallMe" {
+	if len(bare.Diagnostics) != 0 || len(bare.Commands) != 2 || bare.Commands[1].Kind != CommandUser || bare.Commands[1].Canonical != "CallMe" {
 		t.Fatalf("bare call command = %#v", bare.Commands)
 	}
-	if !hasDiagnostic(bare, "vim/E492") {
-		t.Fatalf("bare call diagnostics = %#v", bare.Diagnostics)
-	}
 	compiled := Parse("def Func()\n  CallMe ('yes')\nenddef\ndefcompile\n")
-	if len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "vim/E476" || compiled.Text(compiled.Diagnostics[0].Span) != "CallMe" {
-		t.Fatalf("compiled call diagnostics = %#v", compiled.Diagnostics)
+	if len(compiled.Diagnostics) != 0 || len(compiled.Commands) != 4 || compiled.Commands[1].Kind != CommandUser || compiled.Commands[1].Canonical != "CallMe" {
+		t.Fatalf("compiled call = %#v, diagnostics = %#v", compiled.Commands, compiled.Diagnostics)
 	}
 
 	call := Parse("vim9script\ncall Test ('text')\n")
@@ -329,7 +325,7 @@ func TestOfficialVim9WhitespaceBeforeCallParen(t *testing.T) {
 }
 
 func TestOfficialVim9InvalidCommandContexts(t *testing.T) {
-	compiled := Parse("def Func()\n  notexist:repl\n  ka\n  :1ka\n  Print\n  mode 4\nenddef\ndefcompile\n")
+	compiled := Parse("def Func()\n  notexist:repl\n  ka\n  :1ka\n  mode 4\nenddef\ndefcompile\n")
 	var gotCompiled []string
 	for _, diagnostic := range compiled.Diagnostics {
 		if diagnostic.Code == "vim/E476" {
@@ -339,12 +335,12 @@ func TestOfficialVim9InvalidCommandContexts(t *testing.T) {
 			t.Fatalf("compiled trailing-expression diagnostic = %#v", diagnostic)
 		}
 	}
-	want := []string{"notexist:repl", "ka", "ka", "Print", "mode 4"}
+	want := []string{"notexist:repl", "ka", "ka", "mode 4"}
 	if !slices.Equal(gotCompiled, want) {
 		t.Fatalf("compiled E476 spans = %q, want %q; diagnostics = %#v", gotCompiled, want, compiled.Diagnostics)
 	}
 
-	script := Parse("vim9script\nnotexist:repl\nka\n:1ka\nPrint\nmode 4\n")
+	script := Parse("vim9script\nnotexist:repl\nka\n:1ka\nmode 4\n")
 	var gotScript []string
 	for _, diagnostic := range script.Diagnostics {
 		if diagnostic.Code == "vim/E492" {
@@ -356,6 +352,29 @@ func TestOfficialVim9InvalidCommandContexts(t *testing.T) {
 	}
 	if !slices.Equal(gotScript, want) {
 		t.Fatalf("script E492 spans = %q, want %q; diagnostics = %#v", gotScript, want, script.Diagnostics)
+	}
+
+	potentialUserCommands := Parse("vim9script\nPrint\nCallMe ('yes')\nMyCommand:repl\ndef Func()\n  Print\n  CallMe ('yes')\n  MyCommand:repl\nenddef\n")
+	if len(potentialUserCommands.Diagnostics) != 0 {
+		t.Fatalf("potential user command diagnostics = %#v", potentialUserCommands.Diagnostics)
+	}
+	for _, index := range []int{3, 7} {
+		if potentialUserCommands.Commands[index].Kind != CommandUser || potentialUserCommands.Commands[index].Canonical != "MyCommand" {
+			t.Fatalf("potential user command %d = %#v", index, potentialUserCommands.Commands[index])
+		}
+	}
+}
+
+func TestOfficialVim9MissingVarTypedAssignmentIsInvalidCommand(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_assign.vim:3110-3133.  This complete
+	// type-and-assignment shape is distinguishable without resolving commands.
+	compiled := Parse("def Func()\n  MyVar: string = 'abc'\nenddef\ndefcompile\n")
+	if len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "vim/E476" || compiled.Text(compiled.Diagnostics[0].Span) != "MyVar: string = 'abc'" || compiled.Commands[1].Kind != CommandUnknown {
+		t.Fatalf("compiled diagnostics = %#v", compiled.Diagnostics)
+	}
+	script := Parse("vim9script\nMyVar: string = 'abc'\n")
+	if len(script.Diagnostics) != 1 || script.Diagnostics[0].Code != "vim/E492" || script.Text(script.Diagnostics[0].Span) != "MyVar: string = 'abc'" || script.Commands[1].Kind != CommandUnknown {
+		t.Fatalf("script diagnostics = %#v", script.Diagnostics)
 	}
 }
 

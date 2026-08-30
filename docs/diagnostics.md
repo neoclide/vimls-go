@@ -225,25 +225,32 @@ Representative source evidence:
 
 E476 means `Invalid command: {command}`. Vim uses it while compiling a `def`
 when text at command position cannot be interpreted as a valid Vim9 command.
-This includes declaration-like text without `var`, a command-like identifier
-that is not valid in Vim9, and whitespace that makes a function call look like
-an Ex command.
+The parser reports it only when that conclusion is independent of Vim's
+mutable user-command registry. Supported forms include a complete typed
+assignment that omitted `var`, a lowercase name that is neither a builtin nor
+a possible user command, and an invalid form of a known builtin command.
 
 The same source text does not always use E476 at script level. An invalid Ex
 command uses E492 there, while `call Name (` uses E1068 for the whitespace
 before the argument list. The parser keeps that context distinction instead
 of treating E476 as a generic unknown-command code.
 
+The builtin Ex command table is complete for the pinned Vim release. A complete
+user-command table, however, requires parsing every Vim file on runtimepath and
+publishing the result as an immutable workspace snapshot. Until that exists,
+capitalized candidates such as `Print` and `CallMe (` remain opaque and do not
+produce E476 or E492.
+
 Representative source evidence:
 
+- `src/testdir/test_vim9_assign.vim:3110-3133` distinguishes E476 in a `def`
+  from E492 at script level for `MyVar: string = 'abc'` without `var`.
 - `src/testdir/test_vim9_cmd.vim:2076` distinguishes E476 in a `def` from E492
   at script level for declaration-like `name:replacement` text.
-- `src/testdir/test_vim9_expr.vim:4487` covers whitespace before a call that is
-  interpreted as an invalid command while compiling a `def`.
 - `src/testdir/test_vim9_func.vim:781` distinguishes E476 in a `def` from E1068
   at script level for `call Name (`.
-- `src/testdir/test_vim9_script.vim:4836-4881` covers other command-position
-  forms and their E476/E492 context split.
+- `src/testdir/test_vim9_script.vim:4836-4841,4881` covers lowercase and known
+  builtin command-position forms and their E476/E492 context split.
 
 ## Trailing characters: E488
 

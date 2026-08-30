@@ -531,8 +531,8 @@ duplicate these exact keys.
 ### Group A inventory: `test_vim9_expr.vim`
 
 Selectors below use `Ecode:call-lines`; each call line expands to every matching
-artifact context carrying that code. This accounts for all 325 syntax variants:
-325 migrated and zero pending-fix.
+artifact context carrying that code. This accounts for all 323 syntax variants:
+323 migrated and zero pending-fix.
 
 | Group ID | Codes | Variants | Migrated | Ready | Pending-fix |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -543,7 +543,7 @@ artifact context carrying that code. This accounts for all 325 syntax variants:
 | `expr-dict-delimiter` | E720, E722, E723 | 23 | 23 | 0 | 0 |
 | `expr-heredoc-end` | E1145 | 2 | 2 | 0 | 0 |
 | `expr-literal-register` | E354, E973 | 12 | 12 | 0 | 0 |
-| `expr-command-boundary` | E476, E488, E492 | 13 | 13 | 0 | 0 |
+| `expr-command-boundary` | E488 | 11 | 11 | 0 | 0 |
 | `expr-comment-token` | E1170 | 11 | 11 | 0 | 0 |
 
 ```text
@@ -589,9 +589,7 @@ expr-literal-register
   E973: 2445
 
 expr-command-boundary
-  E476: 4487
   E488: 2835,3161,3162,4170,4190,4484,4485
-  E492: 4487
 
 expr-comment-token
   E1170: 3122,3123,3124,3125,3127,4201
@@ -677,10 +675,12 @@ string containing a newline. `3145:94088/vim9-script` and
 same source shape succeeds for a Dictionary. The syntax parser must not execute
 strings or invent value types merely to reproduce those runtime E488 codes.
 
-Commit `bca737c` migrated `test_vim9_expr.vim:4487:130048/vim9-script`.
+The two `test_vim9_expr.vim:4487:130048` variants are runtimepath-dependent.
 Whitespace before the argument parenthesis keeps `CallMe` in the Ex-command
-path: Vim9 script reports E492 on the command name, while the already-migrated
-compiled context retains E476 and both recover at the next physical command.
+path, but whether it is valid depends on the complete user-command table. The
+parser retains `CallMe` as an opaque `CommandUser` without E476 or E492 until
+the workspace publishes an immutable command snapshot built from every
+runtimepath Vim file.
 
 Commit `a05b752` completed `expr-command-boundary` with both contexts of
 `test_vim9_expr.vim:2835:84508`. Vim9 requires an inline-function opening `{`
@@ -1226,8 +1226,8 @@ The same phase boundary excludes E1144 at
 `S:{5083:114089,5092:114275,5099:114475}/script`, because their outcome depends
 on the mutable user-command registry. `S:2381:49427/def` constructs a command
 string for `:execute`, so its E475 is runtime-only. Finally, the E476/E492
-variants at `C:{22:487,2076:42938}`, `G:{296:6532,312:6869,346:7617}`, and
-`S:{4836:108460,4841:108556,4876:109149,4881:109297,5550:124415}` are invalid
+variants at `A:4487:130048`, `C:22:487`,
+`G:{296:6532,312:6869,346:7617}`, and `S:{4876:109149,5550:124415}` are invalid
 only after Vim resolves a command name and context. The syntax parser keeps
 unknown, user-defined, and future commands opaque instead of inventing those
 state-dependent errors.

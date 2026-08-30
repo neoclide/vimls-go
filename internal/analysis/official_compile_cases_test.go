@@ -208,13 +208,16 @@ func officialCompileCodeStatuses() map[string]bool {
 	return statuses
 }
 
-// These upstream cases depend on dynamic values or functions defined elsewhere
-// in Vim's test harness. Focused Go tests cover the static rules without
-// inventing facts that are absent from an isolated source variant.
+// These upstream cases depend on dynamic values, runtimepath user commands, or
+// functions defined elsewhere in Vim's test harness. Focused Go tests cover the
+// static rules without inventing facts absent from an isolated source variant.
 var officialCompileMigrationExclusions = map[string]bool{
 	"src/testdir/test_vim9_expr.vim:209:6326":   true, // dynamic g: function values and condition
 	"src/testdir/test_vim9_expr.vim:2696:80191": true, // job_stop() is E117 only in builds without +channel
 	"src/testdir/test_vim9_expr.vim:3285:97680": true, // job_stop() is E117 only in builds without +channel
+
+	"src/testdir/test_vim9_expr.vim:4487:130048": true, // CallMe may resolve to a runtimepath user command
+
 	"src/testdir/test_vim9_func.vim:1408:30078": true, // g:TakesOneArg is defined by the test harness
 	"src/testdir/test_vim9_func.vim:1409:30129": true, // g:TakesOneArg is defined by the test harness
 	"src/testdir/test_vim9_func.vim:1706:37318": true,
@@ -236,6 +239,8 @@ var officialCompileMigrationExclusions = map[string]bool{
 	"src/testdir/test_vim9_func.vim:2881:65761": true,
 	"src/testdir/test_vim9_func.vim:2882:65908": true,
 	"src/testdir/test_vim9_func.vim:2903:66816": true,
+
+	"src/testdir/test_vim9_script.vim:4876:109149": true, // :Print may be overruled by a runtimepath user command
 }
 
 // These compiler errors are permanently outside pure language-server static

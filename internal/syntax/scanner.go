@@ -483,29 +483,6 @@ func normalizeVim9CallDiagnostics(file *File) {
 			}
 			continue
 		}
-		if diagnostic.Code != "vim/E476" || diagnostic.Message != "invalid command: whitespace before function arguments" {
-			continue
-		}
-		commandIndex := sort.Search(len(file.Commands), func(index int) bool {
-			return file.Commands[index].Name.Start >= diagnostic.Span.Start
-		})
-		if commandIndex == len(file.Commands) || file.Commands[commandIndex].Name != diagnostic.Span {
-			continue
-		}
-		command := &file.Commands[commandIndex]
-		inDef := false
-		for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
-			if file.Blocks[block].Kind == BlockDef {
-				inDef = true
-				break
-			}
-		}
-		if inDef {
-			diagnostic.Message = "Invalid command"
-		} else {
-			diagnostic.Code = "vim/E492"
-			diagnostic.Message = "Not an editor command"
-		}
 	}
 }
 
@@ -514,7 +491,7 @@ func diagnoseVim9InvalidCommand(file *File, command *Command) {
 		return
 	}
 	invalid := command.Kind == CommandUnknown && command.TypedName == "ka" ||
-		command.Kind == CommandBuiltin && (command.Canonical == "mode" || command.Canonical == "Print")
+		command.Kind == CommandBuiltin && command.Canonical == "mode"
 	if !invalid {
 		return
 	}
@@ -1280,6 +1257,12 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				(canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && strings.HasPrefix(file.Source[skipSpace(file.Source, nameEnd, end):end], "->")) ||
 				(canonical != "substitute" && canonical != "smagic" && canonical != "snomagic" && canonical != "iput" && canonical != "put" && looksLikeVim9AssignmentAfterName(file.Source, nameEnd, end))
 		}
+		if dialect == Vim9 && !builtIn && startsUpper(typedName) && nameEnd < end && file.Source[nameEnd] == ':' &&
+			!invalidVim9TypedAssignmentCommand(file.Source[nameStart:end], scriptVersion) {
+			// A capitalized colon form can be a user command with an attached
+			// argument. Only a complete typed assignment is statically distinct.
+			nameExpression = false
+		}
 		expressionAtCommandStart := dialect == Vim9 && (looksLikeVim9SigilExpression(file.Source, nameStart, end) || nameExpression)
 		if dialect == Vim9 && !expressionAtCommandStart && nameEnd < end && file.Source[nameEnd] == '#' {
 			// Autoload function calls use # in the name and are expressions even
@@ -1490,15 +1473,6 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				case "open", "t", "xit":
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1100", Message: "command not supported in Vim9 script (missing :var?): " + typedName, Span: nameSpan})
 				}
-			}
-			if !builtIn && startsUpper(typedName) && spacedVim9Call(file.Source, nameEnd, end) {
-				// At command start Vim still treats this as an Ex command, not
-				// an expression.  Block construction below determines whether
-				// Vim reports script-level E492 or compiled-def E476.
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{
-					Code: "vim/E476", Message: "invalid command: whitespace before function arguments",
-					Span: nameSpan,
-				})
 			}
 			if canonical == "call" {
 				if before, open, ok := spacedVim9CallInArgument(file.Source, argumentStart, argumentEnd); ok {
@@ -2834,6 +2808,17 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			leftEnd := trimSpaceEnd(source, 0, assignment.Start)
 			rightStart := skipSpace(source, assignment.End, len(source))
 			leftSource := source[:leftEnd]
+			if command.Dialect == Vim9 && invalidVim9TypedAssignmentCommand(source, command.ScriptVersion) {
+				code := "vim/E492"
+				message := "Not an editor command: " + file.Text(command.Argument)
+				if commandInsideBlock(command, file.Blocks, BlockDef) {
+					code = "vim/E476"
+					message = "Invalid command: " + file.Text(command.Argument)
+				}
+				command.Kind = CommandUnknown
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Argument})
+				return
+			}
 			var left *Expression
 			var leftDiagnostics []Diagnostic
 			var typedDeclaration *Declaration
@@ -2921,17 +2906,30 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			if nameEnd >= command.Argument.Start && nameEnd < command.Argument.End {
 				tail := skipSpace(file.Source, nameEnd, command.Argument.End)
 				if tail < command.Argument.End && file.Source[tail] == ':' && tail+1 < command.Argument.End && !isSpace(file.Source[tail+1]) {
+					scopeDiagnostic := false
 					if inDef {
 						if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, expression.Span); ok {
 							diagnostics[0] = diagnostic
-						} else if !strings.Contains(expression.Value, ":") {
-							diagnostics[0] = Diagnostic{Code: "vim/E476", Message: "Invalid command: " + file.Text(command.Argument), Span: command.Argument}
-							command.Kind = CommandUnknown
-							command.Expressions = command.Expressions[:len(command.Expressions)-1]
+							scopeDiagnostic = true
 						}
-					} else if !strings.Contains(expression.Value, ":") {
-						diagnostics[0] = Diagnostic{Code: "vim/E492", Message: "Not an editor command: " + file.Text(command.Argument), Span: command.Argument}
+					}
+					if !scopeDiagnostic && staticallyInvalidVim9CommandName(expression.Value) {
+						code := "vim/E492"
+						message := "Not an editor command: " + file.Text(command.Argument)
+						if inDef {
+							code = "vim/E476"
+							message = "Invalid command: " + file.Text(command.Argument)
+						}
+						diagnostics[0] = Diagnostic{Code: code, Message: message, Span: command.Argument}
 						command.Kind = CommandUnknown
+						command.Expressions = command.Expressions[:len(command.Expressions)-1]
+					} else if !scopeDiagnostic && startsUpper(expression.Value) {
+						// A capitalized name may be a user command loaded from any
+						// runtimepath file. Keep it opaque until the workspace has a
+						// complete immutable command snapshot.
+						diagnostics = diagnostics[:0]
+						command.Kind = CommandUser
+						command.Canonical = command.TypedName
 						command.Expressions = command.Expressions[:len(command.Expressions)-1]
 					}
 				}
@@ -4933,6 +4931,36 @@ func declarationSpans(source string, base int, dialect Dialect) (Span, Span) {
 	return name, typeSpan
 }
 
+func invalidVim9TypedAssignmentCommand(source string, scriptVersion uint8) bool {
+	assignment := findAssignment(source)
+	if assignment.Start < 0 {
+		return false
+	}
+	leftEnd := trimSpaceEnd(source, 0, assignment.Start)
+	rightStart := skipSpace(source, assignment.End, len(source))
+	leftSource := source[:leftEnd]
+	if source[assignment.Start:assignment.End] != "=" || rightStart >= len(source) {
+		return false
+	}
+	name, typeSpan := declarationSpans(leftSource, 0, Vim9)
+	if name.Start >= name.End || typeSpan.Start >= typeSpan.End || !startsUpper(leftSource[name.Start:name.End]) {
+		return false
+	}
+	if _, diagnostics := parseTypeAt(leftSource[typeSpan.Start:typeSpan.End], typeSpan.Start); len(diagnostics) != 0 {
+		return false
+	}
+	expression, diagnostics := parseExpressionWithVersion(source[rightStart:], rightStart, Vim9, scriptVersion)
+	return expression != nil && expression.Kind != ExpressionMissing && len(diagnostics) == 0
+}
+
+func staticallyInvalidVim9CommandName(name string) bool {
+	if name == "" || startsUpper(name) || strings.Contains(name, ":") {
+		return false
+	}
+	_, builtIn := vimdata.Lookup(name)
+	return !builtIn
+}
+
 func looksLikeVim9Expression(source string, nameStart, nameEnd, end int) bool {
 	if nameEnd >= end {
 		return false
@@ -4968,26 +4996,6 @@ func looksLikeVim9Expression(source string, nameStart, nameEnd, end int) bool {
 		return true
 	}
 	return source[position] == '=' || position+1 < end && strings.ContainsRune("+-*/%.", rune(source[position])) && source[position+1] == '='
-}
-
-// spacedVim9Call reports the command-start form that Vim9 rejects as a
-// function call: the opening parenthesis is separated from the name by
-// whitespace.  Keeping this separate from looksLikeVim9Expression is
-// intentional: a capitalized legacy/user command with spaced arguments must
-// remain an opaque command.
-func spacedVim9Call(source string, nameEnd, end int) bool {
-	return vim9CallOpen(source, nameEnd, end) >= 0
-}
-
-func vim9CallOpen(source string, nameEnd, end int) int {
-	if nameEnd >= end || !isSpace(source[nameEnd]) {
-		return -1
-	}
-	open := skipSpace(source, nameEnd, end)
-	if open < end && source[open] == '(' {
-		return open
-	}
-	return -1
 }
 
 func spacedVim9CallInArgument(source string, start, end int) (int, int, bool) {
