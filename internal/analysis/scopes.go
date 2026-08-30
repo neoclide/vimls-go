@@ -100,6 +100,8 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	// The enum block is still authoritative for its one-name-per-line members.
 	collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks)
 	collectArgumentRedeclarationDiagnostics(result)
+	collectVim9RedeclarationDiagnostics(result)
+	collectVim9DestructuringDiagnostics(result, file.Commands)
 
 	sortDeclarations(result)
 	for index := range file.Commands {
@@ -123,6 +125,132 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectVim9RedeclarationDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	first := make(map[*Scope]map[string]int)
+	for _, declaration := range result.Declarations {
+		if declaration.Scope == nil || declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
+			continue
+		}
+		names := first[declaration.Scope]
+		if names == nil {
+			names = make(map[string]int)
+			first[declaration.Scope] = names
+		}
+		position, exists := names[declaration.Name]
+		if !exists || declaration.Span.Start < position {
+			names[declaration.Name] = declaration.Span.Start
+		}
+	}
+	for _, declaration := range result.Declarations {
+		if declaration.Scope == nil || declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
+			continue
+		}
+		duplicate := first[declaration.Scope][declaration.Name] < declaration.Span.Start &&
+			(scopeUsesDefTypeRules(declaration.Scope) || declarationHasCompoundTarget(result.File, declaration.Span))
+		if !duplicate && declaration.Scope.Kind == syntax.BlockFor && scopeUsesDefTypeRules(declaration.Scope) {
+			for scope := declaration.Scope.Parent; scope != nil; scope = scope.Parent {
+				if position, exists := first[scope][declaration.Name]; exists && position < declaration.Span.Start {
+					duplicate = true
+					break
+				}
+			}
+		}
+		if duplicate {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1017", Message: "Variable already declared: " + declaration.Name, Span: declaration.Span,
+			})
+		}
+	}
+}
+
+func declarationHasCompoundTarget(file *syntax.File, span syntax.Span) bool {
+	position := span.End
+	for position < len(file.Source) && (file.Source[position] == ' ' || file.Source[position] == '\t') {
+		position++
+	}
+	return position < len(file.Source) && (file.Source[position] == '.' || file.Source[position] == '[')
+}
+
+func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	for index := range commands {
+		command := &commands[index]
+		if command.Dialect == syntax.Vim9 && command.Declaration != nil && command.Declaration.Initializer != nil {
+			bindings := command.Declaration.Bindings
+			if len(bindings) > 0 && command.Declaration.Target != nil &&
+				(command.Declaration.Target.Kind == syntax.ExpressionList || command.Declaration.Target.Kind == syntax.ExpressionTuple) {
+				fixed := 0
+				rest := false
+				for _, binding := range bindings {
+					if binding.Rest {
+						rest = true
+					} else {
+						fixed++
+					}
+				}
+				appendVim9CardinalityDiagnostic(result, fixed, rest, command.Declaration.Initializer)
+			}
+		}
+		if command.Dialect == syntax.Vim9 {
+			seen := make(map[*syntax.Expression]bool)
+			var checkAssignment func(*syntax.Expression)
+			checkAssignment = func(expression *syntax.Expression) {
+				if expression == nil || seen[expression] {
+					return
+				}
+				seen[expression] = true
+				if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 {
+					target, rhs := expression.Children[0], expression.Children[1]
+					if target.Kind == syntax.ExpressionList || target.Kind == syntax.ExpressionTuple {
+						rest := strings.Contains(result.File.Text(target.Span), ";")
+						expected := len(target.Children)
+						if rest {
+							expected--
+						}
+						appendVim9CardinalityDiagnostic(result, expected, rest, rhs)
+					}
+				}
+				if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
+					collectVim9DestructuringDiagnostics(result, expression.LambdaBody.Commands)
+				}
+				for _, child := range expression.Children {
+					checkAssignment(child)
+				}
+			}
+			if command.Declaration != nil {
+				checkAssignment(command.Declaration.Initializer)
+			}
+			for _, expression := range command.Expressions {
+				if command.Declaration != nil && expression != nil && expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 1 && expression.Children[0] == command.Declaration.Target {
+					continue
+				}
+				checkAssignment(expression)
+			}
+			for _, expression := range command.Targets {
+				checkAssignment(expression)
+			}
+		}
+		if command.Embedded != nil {
+			collectVim9DestructuringDiagnostics(result, command.Embedded.Commands)
+		}
+	}
+}
+
+func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bool, rhs *syntax.Expression) {
+	if rhs == nil || expressionContainsMissing(rhs) || rhs.Kind != syntax.ExpressionList && rhs.Kind != syntax.ExpressionTuple {
+		return
+	}
+	got := len(rhs.Children)
+	if rest && got >= expected || !rest && got == expected {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1093", Message: "Expected " + strconv.Itoa(expected) + " items but got " + strconv.Itoa(got), Span: rhs.Span,
+	})
 }
 
 // collectArithmeticDiagnostics implements the Vim9 operator checks whose

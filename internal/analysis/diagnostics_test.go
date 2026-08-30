@@ -612,3 +612,136 @@ enddef
 		t.Fatalf("E1001 diagnostics = %#v", diagnostics)
 	}
 }
+
+func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		text   string
+	}{
+		{
+			name:   "local variable",
+			source: "vim9script\ndef F()\n  final one = 234\n  var one = 99\n  legacy echo one\nenddef\nvar after = 1\n",
+			text:   "one",
+		},
+		{
+			name:   "for binding",
+			source: "vim9script\ndef F()\n  var x = 5\n  for x in range(5)\n  endfor\nenddef\nvar after = 1\n",
+			text:   "x",
+		},
+		{
+			name:   "script compound target",
+			source: "vim9script\nvar dd = {one: 1}\nvar dd.one = 2\nvar after = 1\n",
+			text:   "dd",
+		},
+		{
+			name:   "block lambda local",
+			source: "vim9script\nvar Callback = () => {\n  var inner = 1\n  var inner = 2\n}\nvar after = 1\n",
+			text:   "inner",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1017" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Variable already declared: "+test.text || file.Text(got[0].Span) != test.text {
+				t.Fatalf("E1017 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value = 1\nvar value = 2\n",
+		"vim9script\ndef F()\n  var value = 1\n  if true\n    var value = 2\n  endif\nenddef\n",
+		"function F()\n  let value = 1\n  let value = 2\nendfunction\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1017" {
+				t.Fatalf("guard source reported E1017: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
+func TestAnalyzeE1093DestructuringCardinality(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		message   string
+		rightHand string
+	}{
+		{
+			name:      "declaration too few",
+			source:    "vim9script\ndef F()\n  var [v1, v2] = [1]\nenddef\nvar after = 1\n",
+			message:   "Expected 2 items but got 1",
+			rightHand: "[1]",
+		},
+		{
+			name:      "single declaration too many",
+			source:    "vim9script\ndef F()\n  var [v1] = [1, 2]\nenddef\nvar after = 1\n",
+			message:   "Expected 1 items but got 2",
+			rightHand: "[1, 2]",
+		},
+		{
+			name:      "declaration rest too few",
+			source:    "vim9script\ndef F()\n  var [v1, v2; rest] = [1]\nenddef\nvar after = 1\n",
+			message:   "Expected 2 items but got 1",
+			rightHand: "[1]",
+		},
+		{
+			name:      "assignment too many",
+			source:    "vim9script\ndef F()\n  var v1: number\n  var v2: number\n  [v1, v2] = [1, 2, 3]\nenddef\nvar after = 1\n",
+			message:   "Expected 2 items but got 3",
+			rightHand: "[1, 2, 3]",
+		},
+		{
+			name:      "assignment rest too few",
+			source:    "vim9script\ndef F()\n  var v1: number\n  var v2: number\n  [v1, v2; _] = [1]\nenddef\nvar after = 1\n",
+			message:   "Expected 2 items but got 1",
+			rightHand: "[1]",
+		},
+		{
+			name:      "block lambda declaration",
+			source:    "vim9script\nvar Callback = () => {\n  var [v1, v2] = [1]\n}\nvar after = 1\n",
+			message:   "Expected 2 items but got 1",
+			rightHand: "[1]",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1093" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.rightHand {
+				t.Fatalf("E1093 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F(values: list<any>)\n  var [v1, v2] = values\nenddef\n",
+		"vim9script\ndef F()\n  var [v1, v2] = [1, 2]\nenddef\n",
+		"function F()\n  let [v1, v2] = [1]\nendfunction\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1093" {
+				t.Fatalf("guard source reported E1093: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
