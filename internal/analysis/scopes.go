@@ -651,6 +651,20 @@ func logicalRightOperandIsEvaluated(expression *syntax.Expression) bool {
 	}
 }
 
+func extendArgumentMismatchIndex(actual []ValueType) int {
+	if len(actual) < 2 || isUnknownType(actual[0]) || isUnknownType(actual[1]) {
+		return -1
+	}
+	first := actual[0].Name
+	if first != "blob" && first != "dict" && first != "list" {
+		return 0
+	}
+	if actual[1].Name != first {
+		return 1
+	}
+	return -1
+}
+
 // collectOperatorDiagnostics keeps compiled Vim9 operator errors distinct
 // from the historical conversion errors used by Legacy and script-level Vim9.
 // Unknown values remain deliberately opaque.
@@ -677,6 +691,21 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 				if expression.LambdaBody != nil {
 					collectOperatorDiagnostics(result, expression.LambdaBody.Commands, expressionScope)
+				}
+			}
+			if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) &&
+				!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
+				builtin, arguments, ok := builtinCallArguments(result.File, expression)
+				if ok && (builtin.Name == "extend" || builtin.Name == "extendnew") {
+					actual := make([]ValueType, len(arguments))
+					for index, argument := range arguments {
+						actual[index] = result.TypeOf(argument)
+					}
+					if bad := extendArgumentMismatchIndex(actual); bad >= 0 {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E896", Message: "Argument of " + builtin.Name + "() must be a List, Dictionary or Blob", Span: arguments[bad].Span,
+						})
+					}
 				}
 			}
 			if expression.Kind == syntax.ExpressionBinary || expression.Kind == syntax.ExpressionAssignment {
@@ -2441,6 +2470,10 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 				for index, argument := range arguments {
 					actual[index] = result.TypeOf(argument)
 				}
+				extendMismatch := -1
+				if !scopeUsesDefTypeRules(scope) && (builtin.Name == "extend" || builtin.Name == "extendnew") {
+					extendMismatch = extendArgumentMismatchIndex(actual)
+				}
 				for index, argument := range arguments {
 					checkerIndex := index
 					if checkerIndex >= len(builtin.ArgumentChecks) {
@@ -2463,6 +2496,9 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						continue
 					}
 					if builtinArgumentMismatch(actual[index], expected) {
+						if extendMismatch >= 0 {
+							continue
+						}
 						// At script level sign_undefine() converts each list item
 						// to a sign name and consults Vim's mutable sign registry.
 						// A def keeps the strict list<string> compile-time check.

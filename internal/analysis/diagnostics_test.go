@@ -877,6 +877,88 @@ func TestAnalyzeFloatAsStringDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeExtendArgumentDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "vim9 script invalid first argument",
+			source:  "vim9script\nextend('a', 1)\n",
+			message: "Argument of extend() must be a List, Dictionary or Blob",
+			span:    "'a'",
+		},
+		{
+			name:    "vim9 script invalid second argument",
+			source:  "vim9script\nextend([1, 2], 3)\n",
+			message: "Argument of extend() must be a List, Dictionary or Blob",
+			span:    "3",
+		},
+		{
+			name:    "vim9 script mismatched extendnew containers",
+			source:  "vim9script\nextendnew({a: 1}, [42])\n",
+			message: "Argument of extendnew() must be a List, Dictionary or Blob",
+			span:    "[42]",
+		},
+		{
+			name:    "legacy invalid second argument",
+			source:  "call extend(0z01, [2])\n",
+			message: "Argument of extend() must be a List, Dictionary or Blob",
+			span:    "[2]",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E896" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" {
+					t.Fatalf("runtime E896 case retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E896 %q on %q; all diagnostics = %#v", got, test.message, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  extend('a', 1)\nenddef\n",
+		"vim9script\ndef F()\n  extendnew({a: 1}, [42])\nenddef\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		foundE1013 := false
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1013" {
+				foundE1013 = true
+			}
+			if diagnostic.Code == "vim/E896" {
+				t.Fatalf("compiled def retained E896: %#v", result.Diagnostics)
+			}
+		}
+		if !foundE1013 {
+			t.Fatalf("compiled def diagnostics = %#v, want E1013", result.Diagnostics)
+		}
+	}
+
+	for _, source := range []string{
+		"vim9script\nextend([1], ['x'])\n",
+		"vim9script\nextend([1], [2])\n",
+		"vim9script\nextend({a: 1}, {b: 2})\n",
+		"vim9script\nextend(0z01, 0z02)\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E896" {
+				t.Fatalf("source %q unexpectedly received E896: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

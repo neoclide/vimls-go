@@ -692,3 +692,29 @@ Representative source evidence:
 - `src/eval.c:6079-6095` maps a Float index receiver to E806, while
   `src/eval.c:4545-4565` shows that Float concatenation is accepted.
 - `src/errors.h:2076-2077` defines the exact message.
+
+## Invalid extend container arguments: E896
+
+E896 means `Argument of {function} must be a List, Dictionary or Blob`. Vim
+uses it when the first two arguments of `extend()` or `extendnew()` do not form
+a same-kind List, Dictionary, or Blob pair at runtime.
+
+Analysis reports E896 when both argument types are statically known and either
+the first argument is not an accepted container or the second argument has a
+different outer type. The diagnostic selects the first argument when it is
+invalid, otherwise the second, and includes the exact builtin name. Legacy and
+top-level Vim9 script use E896; a compiled Vim9 `def` retains E1013. A
+same-kind container pair with incompatible element types also remains E1013,
+as required by Vim's script-level static type check. Unknown argument types
+remain unknown.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_builtin.vim:1190-1198` distinguishes runtime E896
+  from compiled E1013 for `extend()`, and keeps same-kind List element
+  mismatches on E1013 in both Vim9 contexts.
+- `src/testdir/test_vim9_builtin.vim:1344-1349` covers Dictionary, List, and
+  Blob mismatches for `extendnew()` with the same def/script distinction.
+- `src/list.c:3154-3182` accepts only same-kind List, Dictionary, or Blob
+  pairs and emits E896 otherwise.
+- `src/errors.h:2331-2333` defines the exact message template.
