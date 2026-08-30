@@ -398,6 +398,9 @@ pending-fix.
 Commit `fc03b57` migrated the three illegal Vim9 declaration and compiled-loop
 binding variants. The authoritative parser split is therefore 958 migrated,
 zero ready, and 74 pending-fix.
+Commit `372dfc2` migrated the attached Vim9 `catch` pattern-tail variant. The
+authoritative parser split is therefore 959 migrated, zero ready, and 73
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -990,13 +993,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 106 | 99 | 0 | 7 |
+| `C-EXCMD` | 106 | 100 | 0 | 6 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **333** | **326** | **0** | **7** |
+| **Total** | **333** | **327** | **0** | **6** |
 
 ```text
 C-EXPR
@@ -1191,6 +1194,12 @@ an attached `#` in an illegal name from a whitespace-delimited Vim9 comment.
 Compiled `for` member and index targets report E461 while retaining both the
 base binding and the complete target expression AST; parsing continues with
 the iterable and following physical lines.
+
+Commit `372dfc2` migrated `S:3654:77678/def`. The shared `catch` regexp scanner
+now distinguishes an attached hash after a completed pattern from a
+whitespace-delimited Vim9 comment. The former remains owned by `catch` and
+reports E488; opaque or unterminated patterns still avoid secondary block
+diagnostics, and recovery resumes at the following physical line.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
