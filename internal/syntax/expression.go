@@ -581,7 +581,14 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 					types = append(types, &Type{Kind: TypeMissing, Span: span})
 					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1008", Message: "Missing <type> after generic function", Span: span})
 				}
-				return &Expression{Kind: ExpressionGenericReference, Span: Span{Start: left.Span.Start, End: p.base + delimiter}, Operator: Span{Start: p.base + open, End: p.base + delimiter}, Children: []*Expression{left}, TypeArguments: types}, true
+				expressionEnd := delimiter
+				if end > delimiter {
+					// In Fn<number,) the comma belongs to the incomplete generic
+					// list, not to the enclosing call's argument list.
+					p.advance()
+					expressionEnd = end
+				}
+				return &Expression{Kind: ExpressionGenericReference, Span: Span{Start: left.Span.Start, End: p.base + expressionEnd}, Operator: Span{Start: p.base + open, End: p.base + expressionEnd}, Children: []*Expression{left}, TypeArguments: types}, true
 			}
 		}
 		// Recover an unterminated generic list only when its call argument
