@@ -6137,7 +6137,11 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							})
 							continue
 						}
-						if !scopeUsesDefTypeRules(scope) || strings.TrimSuffix(checker, "_mod") == "arg_string_list_tuple_or_dict" {
+						trimmedChecker := strings.TrimSuffix(checker, "_mod")
+						if !scopeUsesDefTypeRules(scope) && trimmedChecker == "arg_list_or_dict_or_blob_or_string" && actual[index].Name == "tuple" {
+							continue
+						}
+						if !scopeUsesDefTypeRules(scope) || trimmedChecker == "arg_string_list_tuple_or_dict" || trimmedChecker == "arg_list_tuple_dict_blob_or_string" {
 							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, actual, argument.Span, dialect == syntax.Vim9); ok {
 								result.Diagnostics = append(result.Diagnostics, diagnostic)
 								continue
@@ -6330,6 +6334,14 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 	case "arg_list_or_dict_or_blob":
 		if vim9 {
 			code, required = "vim/E1228", "List, Dictionary or Blob"
+		}
+	case "arg_list_or_dict_or_blob_or_string":
+		if vim9 && index >= 0 && index < len(actual) && actual[index].Name != "tuple" {
+			code, required = "vim/E1251", "List, Tuple, Dictionary, Blob or String"
+		}
+	case "arg_list_tuple_dict_blob_or_string":
+		if vim9 {
+			code, required = "vim/E1251", "List, Tuple, Dictionary, Blob or String"
 		}
 	case "arg_item_of_prev":
 		if vim9 && index > 0 && index <= len(actual)-1 && actual[index-1].Name == "blob" {

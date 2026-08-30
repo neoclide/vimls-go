@@ -4519,6 +4519,67 @@ func TestAnalyzeE1238BuiltinBlobArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1251BuiltinContainerArgumentDiagnostics(t *testing.T) {
+	const message = "List, Tuple, Dictionary, Blob or String required for argument 1"
+	for _, test := range []struct{ name, source, span string }{
+		{"filter script", "vim9script\nfilter(1, (_, _) => true)\n", "1"},
+		{"foreach script job", "vim9script\nforeach(null_job, (_, _) => true)\n", "null_job"},
+		{"foreach def job", "vim9script\ndef Func()\n  foreach(null_job, (_, _) => true)\nenddef\n", "null_job"},
+		{"items method def", "vim9script\ndef Func()\n  123->items()\nenddef\n", "123"},
+		{"map channel", "vim9script\nmap(null_channel, (_, _) => 1)\n", "null_channel"},
+		{"mapnew job", "vim9script\nmapnew(null_job, (_, _) => 1)\n", "null_job"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1251" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1251 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1251 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"compiled filter", "vim9script\ndef Func()\n  filter(1, (_, _) => true)\nenddef\n", "vim/E1013"},
+		{"compiled map", "vim9script\ndef Func()\n  map(1, (_, _) => 1)\nenddef\n", "vim/E1013"},
+		{"compiled mapnew", "vim9script\ndef Func()\n  mapnew(1, (_, _) => 1)\nenddef\n", "vim/E1013"},
+		{"valid containers", "vim9script\nfilter([], (_, _) => true)\nforeach({}, (_, _) => true)\nitems(0z12)\n", ""},
+		{"unknown", "vim9script\nfilter(Unknown, (_, _) => true)\n", ""},
+		{"Legacy", "let value = filter(1, 'Callback')\n", ""},
+		{"tuple filter", "vim9script\nfilter((1, 2), (_, _) => true)\n", ""},
+		{"tuple items", "vim9script\ndef Func()\n  (1, 2)->items()\nenddef\n", ""},
+		{"callback ownership", "vim9script\nfilter([], () => true)\n", ""},
+		{"arity ownership", "vim9script\nfilter([])\n", "vim/E119"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1251" {
+					t.Fatalf("guard unexpectedly received E1251: %#v", result.Diagnostics)
+				}
+				if test.name == "tuple filter" && diagnostic.Code == "vim/E1013" {
+					t.Fatalf("top-level tuple incorrectly received E1013: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1216DigraphSetlistDiagnostics(t *testing.T) {
 	const message = "digraph_setlist() argument must be a list of lists with two items"
 	for _, test := range []struct{ name, source, span string }{

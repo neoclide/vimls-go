@@ -2365,6 +2365,34 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   and E1247.
 - `src/errors.h:3206-3207` defines the exact E1247 message.
 
+## Container builtin argument: E1251
+
+Analysis reports E1251 when a Vim9 builtin that accepts a List, Tuple,
+Dictionary, Blob, or String receives a statically known value outside that
+union. This covers `foreach()` and `items()` in both script and compiled
+contexts, and top-level script calls to `filter()`, `map()`, and `mapnew()`.
+The diagnostic selects the invalid effective argument and includes its
+one-based index.
+
+Compiled `filter()`, `map()`, and `mapnew()` calls retain the stricter E1013
+from their generic compile-time checker. Tuple values pass this type check;
+the separate restriction on mutating a Tuple is left to E1524. Valid or
+unknown containers, Legacy calls, callback diagnostics, and arity diagnostics
+keep their existing behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:1563,1686,2523,2712-2714,2945-2947`
+  distinguishes compiled E1013 from top-level E1251 for `filter()`, `map()`,
+  and `mapnew()`, and covers E1251 from `foreach()` and `items()`.
+- `src/evalfunc.c:683-733` defines the generic and native argument checkers;
+  only the native checker includes Tuple and directly emits E1251.
+- `src/list.c:2810-2840` applies the runtime union check before the separate
+  Tuple restriction for the mutating functions.
+- `runtime/doc/vim9.txt:2758-2779` documents the Vim9 builtin argument checks
+  and an E1251 `filter()` example.
+- `src/errors.h:3217-3218` defines the exact E1251 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
