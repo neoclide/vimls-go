@@ -204,7 +204,7 @@ func main() {
 	fmt.Printf("wrote upstream Vim license to %s\n", *licenseOutput)
 	fmt.Printf("wrote %d Check helper lexemes from %s (%s) to %s\n", len(inventory.Records), inventory.Tag, inventory.Commit, *helperOutput)
 	fmt.Printf("wrote %d parser cases from %d allowlisted helper calls to %s\n", parserCases.Summary.Cases, parserCases.Summary.Calls, *parserCasesOutput)
-	fmt.Printf("wrote %d explicit defcompile failure cases to %s\n", compileCases.Summary.ExtractedCalls, *compileCasesOutput)
+	fmt.Printf("wrote %d static compile variants from %d helper calls to %s\n", compileCases.Summary.Cases, compileCases.Summary.ExtractedCalls, *compileCasesOutput)
 }
 
 func listTestFiles(root string) ([]string, error) {

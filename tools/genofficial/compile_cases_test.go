@@ -6,28 +6,29 @@ import (
 	"testing"
 )
 
-func TestCompileExpectedCode(t *testing.T) {
+func TestCompileExpectedCodes(t *testing.T) {
 	tests := []struct {
 		name   string
 		source string
 		helper string
-		want   string
+		cases  int
+		want   []string
 	}{
-		{name: "direct single quote", source: "'E1012: Type mismatch'", helper: "CheckDefFailure", want: "vim/E1012"},
-		{name: "direct double quote", source: `"E1001: Variable not found"`, helper: "CheckSourceDefFailure", want: "vim/E1001"},
-		{name: "shared pair", source: "['E1013: def', 'E121: script']", helper: "CheckDefAndScriptFailure", want: "vim/E1013"},
-		{name: "same code", source: "'E1097:'", helper: "CheckSourceDefAndScriptFailure", want: "vim/E1097"},
-		{name: "direct helper rejects list", source: "['E1012:', 'E121:']", helper: "CheckDefFailure"},
-		{name: "dynamic identifier", source: "msg", helper: "CheckDefAndScriptFailure"},
-		{name: "message without code", source: "'expected number but got string'", helper: "CheckDefFailure"},
-		{name: "ambiguous pattern", source: "'E1012:.*E1191:'", helper: "CheckDefFailure"},
+		{name: "direct single quote", source: "'E1012: Type mismatch'", helper: "CheckDefFailure", cases: 1, want: []string{"vim/E1012"}},
+		{name: "direct double quote", source: `"E1001: Variable not found"`, helper: "CheckSourceDefFailure", cases: 1, want: []string{"vim/E1001"}},
+		{name: "separate lane codes", source: "['E1013: def', 'E121: script']", helper: "CheckDefAndScriptFailure", cases: 2, want: []string{"vim/E1013", "vim/E121"}},
+		{name: "shared lane code", source: "'E1097:'", helper: "CheckSourceDefAndScriptFailure", cases: 2, want: []string{"vim/E1097", "vim/E1097"}},
+		{name: "direct helper rejects list", source: "['E1012:', 'E121:']", helper: "CheckDefFailure", cases: 1},
+		{name: "dynamic identifier", source: "msg", helper: "CheckDefAndScriptFailure", cases: 2},
+		{name: "message without code", source: "'expected number but got string'", helper: "CheckDefFailure", cases: 1},
+		{name: "ambiguous pattern", source: "'E1012:.*E1191:'", helper: "CheckDefFailure", cases: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			source := []byte(test.source)
-			got := compileExpectedCode(source, helperArgument{Start: 0, End: len(source)}, test.helper)
-			if got != test.want {
-				t.Fatalf("compileExpectedCode(%q) = %q, want %q", test.source, got, test.want)
+			got := compileExpectedCodes(source, helperArgument{Start: 0, End: len(source)}, test.helper, test.cases)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("compileExpectedCodes(%q) = %q, want %q", test.source, got, test.want)
 			}
 		})
 	}
@@ -45,7 +46,7 @@ func TestBuildPinnedCompileCaseCorpus(t *testing.T) {
 	}
 	wantSummary := compileCaseSummary{
 		Calls: 1770, ExtractedCalls: 1762, SkippedCalls: 8,
-		ExpectedCodes: 1662, UnresolvedCode: 100,
+		Cases: 3171, ExpectedCodes: 2964, UnresolvedCode: 207,
 		DirectLists: 1403, Heredocs: 349, ListConcats: 10,
 	}
 	if corpus.Summary != wantSummary || len(corpus.Files) != 14 {
@@ -62,8 +63,13 @@ func TestBuildPinnedCompileCaseCorpus(t *testing.T) {
 		t.Fatalf("compile records=%d, selected helper calls=%d", len(corpus.Records), wantCalls)
 	}
 	for _, record := range corpus.Records {
-		if record.Disposition == "extracted" && !strings.HasSuffix(record.Source, "defcompile\n") {
-			t.Fatalf("%s does not end in defcompile: %q", record.ID, record.Source)
+		for _, variant := range record.Cases {
+			if variant.Context == "def" && !strings.HasSuffix(variant.Source, "defcompile\n") {
+				t.Fatalf("%s/%s does not end in defcompile: %q", record.ID, variant.Name, variant.Source)
+			}
+			if variant.Context == "script" && !strings.HasPrefix(variant.Source, "vim9script\n") {
+				t.Fatalf("%s/%s does not begin in vim9script: %q", record.ID, variant.Name, variant.Source)
+			}
 		}
 	}
 }

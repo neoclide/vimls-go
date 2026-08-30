@@ -4,15 +4,13 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strings"
 )
 
 var compileErrorCodePattern = regexp.MustCompile(`E[0-9]+`)
 
-// compileCaseCorpus contains every official helper case that explicitly runs
-// :defcompile and expects compilation to fail.  Script-source and function-
-// execution helpers are intentionally separate: they may depend on runtime
-// values and are not evidence for a compile-time diagnostic.
+// compileCaseCorpus contains every official helper case that expects static
+// Vim9 source or :def compilation to fail. Function-execution helpers remain
+// separate because they may depend on runtime values.
 type compileCaseCorpus struct {
 	SchemaVersion int                 `json:"schemaVersion"`
 	Tag           string              `json:"tag"`
@@ -23,27 +21,34 @@ type compileCaseCorpus struct {
 }
 
 type compileCaseRecord struct {
-	ID            string `json:"id"`
-	Path          string `json:"path"`
-	Line          int    `json:"line"`
-	Offset        int    `json:"offset"`
-	CallStart     int    `json:"callStart"`
-	CallEnd       int    `json:"callEnd"`
-	Helper        string `json:"helper"`
-	InputKind     string `json:"inputKind,omitempty"`
-	InputStart    int    `json:"inputStart,omitempty"`
-	InputEnd      int    `json:"inputEnd,omitempty"`
-	ErrorArgument string `json:"errorArgument,omitempty"`
-	ExpectedCode  string `json:"expectedCode,omitempty"`
-	Source        string `json:"source,omitempty"`
-	Disposition   string `json:"disposition"`
-	Reason        string `json:"reason,omitempty"`
+	ID            string               `json:"id"`
+	Path          string               `json:"path"`
+	Line          int                  `json:"line"`
+	Offset        int                  `json:"offset"`
+	CallStart     int                  `json:"callStart"`
+	CallEnd       int                  `json:"callEnd"`
+	Helper        string               `json:"helper"`
+	InputKind     string               `json:"inputKind,omitempty"`
+	InputStart    int                  `json:"inputStart,omitempty"`
+	InputEnd      int                  `json:"inputEnd,omitempty"`
+	ErrorArgument string               `json:"errorArgument,omitempty"`
+	Disposition   string               `json:"disposition"`
+	Reason        string               `json:"reason,omitempty"`
+	Cases         []compileCaseVariant `json:"cases,omitempty"`
+}
+
+type compileCaseVariant struct {
+	Name         string `json:"name"`
+	Context      string `json:"context"`
+	ExpectedCode string `json:"expectedCode,omitempty"`
+	Source       string `json:"source"`
 }
 
 type compileCaseSummary struct {
 	Calls           int `json:"calls"`
 	ExtractedCalls  int `json:"extractedCalls"`
 	SkippedCalls    int `json:"skippedCalls"`
+	Cases           int `json:"cases"`
 	ExpectedCodes   int `json:"expectedCodes"`
 	UnresolvedCode  int `json:"unresolvedCodes"`
 	DirectLists     int `json:"directLists"`
@@ -53,7 +58,7 @@ type compileCaseSummary struct {
 }
 
 func buildCompileCaseCorpus(files testFilesCorpus, inventory helperInventory) (compileCaseCorpus, error) {
-	result := compileCaseCorpus{SchemaVersion: 1, Tag: files.Tag, Commit: files.Commit}
+	result := compileCaseCorpus{SchemaVersion: 2, Tag: files.Tag, Commit: files.Commit}
 	if files.Tag != vimTag || files.Commit != vimCommit || inventory.Tag != vimTag || inventory.Commit != vimCommit {
 		return result, fmt.Errorf("official compile case inputs have mismatched provenance")
 	}
@@ -74,7 +79,7 @@ func buildCompileCaseCorpus(files testFilesCorpus, inventory helperInventory) (c
 		}
 		fileSet[helper.Path] = struct{}{}
 		record := compileCaseRecord{
-			ID:   fmt.Sprintf("%s:%d:%d/defcompile", helper.Path, helper.Line, helper.Offset),
+			ID:   fmt.Sprintf("%s:%d:%d", helper.Path, helper.Line, helper.Offset),
 			Path: helper.Path, Line: helper.Line, Offset: helper.Offset,
 			CallStart: helper.CallStart, CallEnd: helper.CallEnd, Helper: helper.Name,
 		}
@@ -99,15 +104,30 @@ func buildCompileCaseCorpus(files testFilesCorpus, inventory helperInventory) (c
 		record.InputKind = binding.Kind
 		record.InputStart = binding.Start
 		record.InputEnd = binding.End
-		record.Source = helperDefSource(lines, true, true)
-		record.ExpectedCode = compileExpectedCode(file.Source, arguments[1], helper.Name)
+		parserCases, ok := expandParserHelper(helper.Name, lines)
+		if !ok || len(parserCases) == 0 {
+			record.Disposition = "skipped"
+			record.Reason = "compile helper source transformation is not implemented"
+			result.Summary.SkippedCalls++
+			result.Records = append(result.Records, record)
+			continue
+		}
+		expectedCodes := compileExpectedCodes(file.Source, arguments[1], helper.Name, len(parserCases))
+		for index, parserCase := range parserCases {
+			variant := compileCaseVariant{Name: parserCase.Name, Context: parserCase.Context, Source: parserCase.Source}
+			if len(expectedCodes) == len(parserCases) {
+				variant.ExpectedCode = expectedCodes[index]
+			}
+			record.Cases = append(record.Cases, variant)
+			result.Summary.Cases++
+			if variant.ExpectedCode == "" {
+				result.Summary.UnresolvedCode++
+			} else {
+				result.Summary.ExpectedCodes++
+			}
+		}
 		record.Disposition = "extracted"
 		result.Summary.ExtractedCalls++
-		if record.ExpectedCode == "" {
-			result.Summary.UnresolvedCode++
-		} else {
-			result.Summary.ExpectedCodes++
-		}
 		switch binding.Kind {
 		case "direct-list":
 			result.Summary.DirectLists++
@@ -137,24 +157,31 @@ func isCompileFailureHelper(name string) bool {
 	}
 }
 
-func compileExpectedCode(source []byte, argument helperArgument, helper string) string {
+func compileExpectedCodes(source []byte, argument helperArgument, helper string, caseCount int) []string {
 	values, ok := compileErrorValues(source, argument)
 	if !ok || len(values) == 0 {
-		return ""
+		return nil
 	}
-	value := values[0]
 	if helper == "CheckDefFailure" || helper == "CheckSourceDefFailure" {
-		if len(values) != 1 {
-			return ""
+		if len(values) != 1 || caseCount != 1 {
+			return nil
 		}
-	} else if len(values) != 1 && len(values) != 2 {
-		return ""
+	} else {
+		if len(values) == 1 && caseCount == 2 {
+			values = []string{values[0], values[0]}
+		} else if len(values) != caseCount {
+			return nil
+		}
 	}
-	codes := compileErrorCodePattern.FindAllString(value, -1)
-	if len(codes) != 1 {
-		return ""
+	result := make([]string, len(values))
+	for index, value := range values {
+		codes := compileErrorCodePattern.FindAllString(value, -1)
+		if len(codes) != 1 {
+			return nil
+		}
+		result[index] = "vim/" + codes[0]
 	}
-	return "vim/" + codes[0]
+	return result
 }
 
 func compileErrorValues(source []byte, argument helperArgument) ([]string, bool) {
@@ -184,10 +211,10 @@ func compileErrorValues(source []byte, argument helperArgument) ([]string, bool)
 }
 
 func checkCompileCaseCorpus(corpus compileCaseCorpus) error {
-	if corpus.SchemaVersion != 1 || corpus.Tag != vimTag || corpus.Commit != vimCommit {
+	if corpus.SchemaVersion != 2 || corpus.Tag != vimTag || corpus.Commit != vimCommit {
 		return fmt.Errorf("unexpected compile case provenance: schema=%d tag=%q commit=%q", corpus.SchemaVersion, corpus.Tag, corpus.Commit)
 	}
-	if corpus.Summary.Calls != len(corpus.Records) || corpus.Summary.ExtractedCalls+corpus.Summary.SkippedCalls != corpus.Summary.Calls || corpus.Summary.ExpectedCodes+corpus.Summary.UnresolvedCode != corpus.Summary.ExtractedCalls {
+	if corpus.Summary.Calls != len(corpus.Records) || corpus.Summary.ExtractedCalls+corpus.Summary.SkippedCalls != corpus.Summary.Calls || corpus.Summary.ExpectedCodes+corpus.Summary.UnresolvedCode != corpus.Summary.Cases {
 		return fmt.Errorf("inconsistent compile case summary: records=%d summary=%+v", len(corpus.Records), corpus.Summary)
 	}
 	if !sort.StringsAreSorted(corpus.Files) {
@@ -197,16 +224,21 @@ func checkCompileCaseCorpus(corpus compileCaseCorpus) error {
 		if index > 0 && (corpus.Records[index-1].Path > record.Path || corpus.Records[index-1].Path == record.Path && corpus.Records[index-1].Offset >= record.Offset) {
 			return fmt.Errorf("compile case records are not strictly ordered at %d", index)
 		}
-		if !strings.HasSuffix(record.ID, "/defcompile") || record.Path == "" || record.Line < 1 || record.CallEnd <= record.CallStart {
+		if record.ID == "" || record.Path == "" || record.Line < 1 || record.CallEnd <= record.CallStart {
 			return fmt.Errorf("invalid compile case record %d: %#v", index, record)
 		}
 		switch record.Disposition {
 		case "extracted":
-			if record.Source == "" || record.InputKind == "" || record.InputEnd <= record.InputStart || record.Reason != "" {
+			if len(record.Cases) == 0 || record.InputKind == "" || record.InputEnd <= record.InputStart || record.Reason != "" {
 				return fmt.Errorf("invalid extracted compile case %d: %#v", index, record)
 			}
+			for caseIndex, variant := range record.Cases {
+				if variant.Name == "" || variant.Context == "" || variant.Source == "" {
+					return fmt.Errorf("invalid extracted compile case %d variant %d: %#v", index, caseIndex, variant)
+				}
+			}
 		case "skipped":
-			if record.Source != "" || record.Reason == "" {
+			if len(record.Cases) != 0 || record.Reason == "" {
 				return fmt.Errorf("invalid skipped compile case %d: %#v", index, record)
 			}
 		default:

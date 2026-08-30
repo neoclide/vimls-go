@@ -27,12 +27,12 @@ These files are generated from Vim tag `v9.2.1015`, commit
   parser-negative migration status are maintained in
   [`docs/official-syntax-migration.md`](../../docs/official-syntax-migration.md).
 - `v9.2.1015-compile-cases.json.gz` separately inventories all 1,770 official
-  helper calls that explicitly expect `:defcompile` to fail. It statically
-  reconstructs 1,762 complete functions, retains eight classified extraction
-  skips, resolves 1,662 exact Vim error codes, and keeps 100 message-only or
-  dynamic error arguments for later source classification. Script-source and
-  function-execution failures are excluded because they may depend on runtime
-  state.
+  static failure helper calls. It reconstructs 1,762 inputs as 3,171 pure-Go
+  `def` and `vim9script` variants, retains eight classified extraction skips,
+  resolves 2,964 exact Vim error codes, and keeps 207 message-only or dynamic
+  variant expectations for later source classification. Function-execution
+  helpers are excluded because they may depend on runtime state. Tests consume
+  the pinned variants in memory and never start Vim.
 
 The full-file corpus is a stability and lossless-recovery gate. It does not by
 itself prove that vimls-go accepts and rejects every construct exactly as Vim

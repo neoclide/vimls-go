@@ -133,12 +133,13 @@ new Vim-source research pass.
 ### Semantics
 
 The pinned `v9.2.1015-compile-cases.json.gz` corpus is the starting inventory
-for Vim9 compile diagnostics. It includes only official helpers that invoke
-`:defcompile`; it never executes the generated function bodies. Every record
-retains the upstream helper coordinate, complete reconstructed source, and the
-static expected Vim error code when one is available. An unresolved error
-argument remains explicit and must be classified from the pinned source rather
-than guessed from analyzer output.
+for Vim9 static diagnostics. It normalizes official failure helpers into an
+in-memory `def` variant and, where the helper requires it, a separate
+`vim9script` variant. It never starts Vim or executes generated function
+bodies. Every record retains the upstream helper coordinate, complete
+reconstructed source, and the expected Vim error code for each variant when
+one is available. An unresolved error argument remains explicit and must be
+classified from the pinned source rather than guessed from analyzer output.
 
 Compile-diagnostic implementation tests consume exact records from this
 artifact. Adding an error rule requires migrating the matching official cases,
