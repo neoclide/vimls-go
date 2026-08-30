@@ -125,6 +125,46 @@ func TestUserCommandInvalidArgumentCount(t *testing.T) {
 	}
 }
 
+func TestUserCommandCompleteoptEscapeRejectsWholeArgumentMode(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "legacy official order",
+			source: "com! -nargs=_ -complete=customlist,EscOne -completeopt=escape DoCmd :\nlet after = 1\n",
+		},
+		{
+			name:   "legacy reverse order",
+			source: "com! -completeopt=escape -nargs=_ DoCmd :\nlet after = 1\n",
+		},
+		{
+			name:   "Vim9",
+			source: "vim9script\ncom! -completeopt=escape -nargs=_ DoCmd :\nvar after = 1\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1579" || file.Diagnostics[0].Message != "-completeopt=escape cannot be used with -nargs=_" || file.Text(file.Diagnostics[0].Span) != "-completeopt=escape" {
+				t.Fatalf("diagnostics = %#v, want E1579 on -completeopt=escape", file.Diagnostics)
+			}
+			if len(file.Commands) < 2 || file.Commands[len(file.Commands)-1].Span.Start <= file.Diagnostics[0].Span.End {
+				t.Fatalf("parser did not recover after E1579: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, nargs := range []string{"0", "1", "*", "?", "+"} {
+		file := Parse("command! -nargs=" + nargs + " -completeopt=escape DoCmd :\n")
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1579" {
+				t.Fatalf("valid -nargs=%s produced E1579: %#v", nargs, file.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestVim9UserCommandBlockBody(t *testing.T) {
 	source := "vim9script\ncommand Foo {\n  var value = 1\n  if value == 1\n    echo 'ok'\n  endif\n}\necho done\n"
 	file := Parse(source)

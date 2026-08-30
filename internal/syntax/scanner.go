@@ -3730,6 +3730,8 @@ func userCommandBodySpan(source string, argument Span) (Span, bool) {
 func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 	allowArguments := false
 	complete := Span{}
+	nargsUnderscore := false
+	completeoptEscape := Span{}
 	start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
 	for start < command.Argument.End && file.Source[start] == '-' {
 		end := start
@@ -3739,8 +3741,11 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 		attribute := file.Source[start:end]
 		if strings.HasPrefix(attribute, "-nargs=") {
 			switch attribute[len("-nargs="):] {
-			case "1", "_", "*", "?", "+":
+			case "1", "*", "?", "+":
 				allowArguments = true
+			case "_":
+				allowArguments = true
+				nargsUnderscore = true
 			case "0":
 				allowArguments = false
 			default:
@@ -3751,8 +3756,16 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 			}
 		} else if strings.HasPrefix(attribute, "-complete=") && len(attribute) > len("-complete=") {
 			complete = Span{Start: start, End: end}
+		} else if attribute == "-completeopt=escape" {
+			completeoptEscape = Span{Start: start, End: end}
 		}
 		start = skipSpace(file.Source, end, command.Argument.End)
+	}
+	if nargsUnderscore && completeoptEscape.Start < completeoptEscape.End {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1579", Message: "-completeopt=escape cannot be used with -nargs=_", Span: completeoptEscape,
+		})
+		return true
 	}
 	if command.Dialect != Vim9 {
 		return false
