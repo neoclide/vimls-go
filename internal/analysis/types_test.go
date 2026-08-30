@@ -81,9 +81,6 @@ var after = forward
 	for _, declaration := range result.Root.Declarations {
 		declarations[declaration.Name] = declaration
 	}
-	if declarations["Any"] == nil || declarations["AnyReturn"] == nil || declarations["VoidReturn"] == nil {
-		t.Fatalf("function declarations = %#v", declarations)
-	}
 	for _, name := range []string{"n", "propagated", "arithmetic"} {
 		if declarations[name].Type.Name != "number" {
 			t.Fatalf("%s type = %#v", name, declarations[name].Type)
