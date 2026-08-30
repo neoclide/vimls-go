@@ -3846,3 +3846,51 @@ func TestAnalyzeE1532CannotModifyTuple(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1434GenericMethodTypeParameterCount(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "child has more type parameters",
+			source: "vim9script\nclass A\n  def Fn<T>(t: T): T\n    return t\n  enddef\nendclass\nclass B extends A\n  def Fn<X, Y>(t: X): X\n    return t\n  enddef\nendclass\n",
+		},
+		{
+			name:   "child has fewer type parameters",
+			source: "vim9script\nclass A\n  def Fn<X, Y>(t: X): X\n    return t\n  enddef\nendclass\nclass B extends A\n  def Fn<T>(t: T): T\n    return t\n  enddef\nendclass\n",
+		},
+		{
+			name:   "abstract parent",
+			source: "vim9script\nabstract class A\n  abstract def Fn<T>(t: T): T\nendclass\nclass B extends A\n  def Fn<X, Y>(t: X): X\n    return t\n  enddef\nendclass\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1434" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Mismatched number of type variables for generic method  "Fn" in class "A"` || file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("E1434 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  def Fn<T>(t: T): T\n    return t\n  enddef\nendclass\nclass B extends A\n  def Fn<X>(t: X): X\n    return t\n  enddef\nendclass\n",
+		"vim9script\nclass B extends Missing\n  def Fn<X, Y>(t: X): X\n    return t\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  def Fn(t: number): number\n    return t\n  enddef\nendclass\nclass B extends A\n  def Fn<X>(t: X): X\n    return t\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static def Fn<T>(t: T): T\n    return t\n  enddef\nendclass\nclass B extends A\n  static def Fn<X, Y>(t: X): X\n    return t\n  enddef\nendclass\n",
+		"vim9script\nclass A extends B\n  def Fn<T>(t: T): T\n    return t\n  enddef\nendclass\nclass B extends A\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1434" {
+				t.Fatalf("guard source reported E1434: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}

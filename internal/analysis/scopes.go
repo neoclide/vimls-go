@@ -109,6 +109,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
+	collectGenericMethodOverrideDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 
 	sortDeclarations(result)
@@ -137,6 +138,106 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	classes := make(map[string]*syntax.Command)
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockClass {
+			classes[file.Text(command.Aggregate.Name)] = command
+		}
+	}
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Extends) == 0 {
+			continue
+		}
+		super := classes[file.Text(class.Aggregate.Extends[0])]
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			method := member.Function
+			if method == nil || commandHasModifier(member, "static") || len(method.TypeParameters) == 0 {
+				continue
+			}
+			name := file.Text(method.Name)
+			seen := make(map[*syntax.Command]bool)
+			for current := super; current != nil; current = extendedClass(file, classes, current) {
+				if seen[current] {
+					break
+				}
+				seen[current] = true
+				inherited := aggregateMethod(file, current, name)
+				if inherited == nil {
+					continue
+				}
+				if len(inherited.Function.TypeParameters) > 0 && len(inherited.Function.TypeParameters) != len(method.TypeParameters) {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code:    "vim/E1434",
+						Message: "Mismatched number of type variables for generic method  \"" + name + "\" in class \"" + file.Text(current.Aggregate.Name) + "\"",
+						Span:    aggregateEndSpan(file, class),
+					})
+				}
+				break
+			}
+		}
+	}
+}
+
+func extendedClass(file *syntax.File, classes map[string]*syntax.Command, class *syntax.Command) *syntax.Command {
+	if file == nil || class == nil || class.Aggregate == nil || len(class.Aggregate.Extends) == 0 {
+		return nil
+	}
+	return classes[file.Text(class.Aggregate.Extends[0])]
+}
+
+func aggregateMethod(file *syntax.File, class *syntax.Command, name string) *syntax.Command {
+	if file == nil || class == nil || class.Aggregate == nil {
+		return nil
+	}
+	for _, memberIndex := range class.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		member := &file.Commands[memberIndex]
+		method := member.Function
+		if method != nil && !commandHasModifier(member, "static") && file.Text(method.Name) == name {
+			return member
+		}
+	}
+	return nil
+}
+
+func commandHasModifier(command *syntax.Command, name string) bool {
+	if command == nil {
+		return false
+	}
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func aggregateEndSpan(file *syntax.File, command *syntax.Command) syntax.Span {
+	if file != nil && command != nil && command.Block >= 0 && command.Block < len(file.Blocks) {
+		end := file.Blocks[command.Block].End
+		if end >= 0 && end < len(file.Commands) {
+			return file.Commands[end].Name
+		}
+	}
+	if command != nil {
+		return command.Name
+	}
+	return syntax.Span{}
 }
 
 // CombinedDiagnostics returns parser and semantic diagnostics with the narrow
