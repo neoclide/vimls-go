@@ -5053,6 +5053,52 @@ func TestAnalyzeE1374InheritedClassVariableBareAccess(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1373UnimplementedAbstractMethod(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "direct parent",
+			source: "vim9script\nabstract class A\n  abstract def Foo()\nendclass\nclass B extends A\nendclass\n",
+		},
+		{
+			name:   "transitive parent",
+			source: "vim9script\nabstract class A\n  abstract def Foo()\nendclass\nabstract class B extends A\n  abstract def Bar()\nendclass\nclass C extends B\n  def Bar()\n  enddef\nendclass\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1373" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Abstract method "Foo" is not implemented` || file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("E1373 diagnostics=%#v; syntax diagnostics=%#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nabstract class A\n  abstract def Foo()\nendclass\nclass B extends A\n  def Foo()\n  enddef\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def Foo()\nendclass\nabstract class B extends A\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def Foo()\nendclass\nabstract class B extends A\n  def Foo()\n  enddef\nendclass\nclass C extends B\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def Foo(value: number)\nendclass\nclass B extends A\n  def Foo(value: string)\n  enddef\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def Foo()\nendclass\nclass B extends A\n  def _Foo()\n  enddef\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def Foo()\n  abstract def Bar()\nendclass\nclass B extends A\n  abstract def Foo()\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def Foo()\nendclass\nclass B extends A\n  public def Foo()\n  enddef\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1373" {
+				t.Fatalf("guard source reported E1373: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+	Analyze(syntax.Parse("vim9script\nclass A extends B\nendclass\nabstract class B extends A\n  abstract def Foo()\nendclass\n"))
+}
+
 func TestAnalyzeE1431AbstractSuperMethodCall(t *testing.T) {
 	tests := []struct {
 		name    string

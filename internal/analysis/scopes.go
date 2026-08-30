@@ -122,6 +122,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectDuplicateTypeAliasDiagnostics(result)
+	collectUnimplementedAbstractMethodDiagnostics(result)
 	collectMethodAccessLevelDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
 	collectMethodTypeMismatchDiagnostics(result)
@@ -520,6 +521,68 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 					})
 				}
 				break
+			}
+		}
+	}
+}
+
+func collectUnimplementedAbstractMethodDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || commandHasModifier(class, "abstract") {
+			continue
+		}
+		parent := extendedClass(file, result.classes, class)
+		if parent == nil || !commandHasModifier(parent, "abstract") {
+			continue
+		}
+		seenNames := make(map[string]bool)
+		invalidClassMethod := false
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Function != nil && (commandHasModifier(member, "abstract") || commandHasModifier(member, "public")) {
+				invalidClassMethod = true
+				break
+			}
+			if member.Function != nil && !commandHasModifier(member, "static") && !commandHasModifier(member, "public") {
+				seenNames[strings.TrimPrefix(file.Text(member.Function.Name), "_")] = true
+			}
+		}
+		if invalidClassMethod {
+			continue
+		}
+		visited := make(map[*syntax.Command]bool)
+		reported := false
+		for current := parent; current != nil && !visited[current] && !reported; current = extendedClass(file, result.classes, current) {
+			visited[current] = true
+			for _, memberIndex := range current.Aggregate.Members {
+				if memberIndex < 0 || memberIndex >= len(file.Commands) {
+					continue
+				}
+				member := &file.Commands[memberIndex]
+				if member.Function == nil || commandHasModifier(member, "static") || commandHasModifier(member, "public") {
+					continue
+				}
+				name := file.Text(member.Function.Name)
+				base := strings.TrimPrefix(name, "_")
+				if seenNames[base] {
+					continue
+				}
+				seenNames[base] = true
+				if commandHasModifier(member, "abstract") {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1373", Message: `Abstract method "` + name + `" is not implemented`, Span: aggregateEndSpan(file, class),
+					})
+					reported = true
+					break
+				}
 			}
 		}
 	}
