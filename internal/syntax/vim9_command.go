@@ -47,8 +47,7 @@ func scanVim9CommandArgument(source string, start, end int, metadata vimdata.Com
 		return scanHighlightArgument(source, start, end, Vim9, parsed)
 	}
 	if metadata.Name == "catch" {
-		argumentEnd, separator, comment := scanCatchArgument(source, start, end)
-		return argumentEnd, separator, comment, nil
+		return scanCatchArgument(source, start, end, Vim9)
 	}
 	if metadata.Name == "syntax" {
 		return scanSyntaxArgument(source, start, end, Vim9, parsed, metadata)

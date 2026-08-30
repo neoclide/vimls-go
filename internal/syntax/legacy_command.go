@@ -32,8 +32,7 @@ func scanLegacyCommandArgument(source string, start, end int, metadata vimdata.C
 		return scanHighlightArgument(source, start, end, Legacy, parsed)
 	}
 	if metadata.Name == "catch" {
-		argumentEnd, separator, comment := scanCatchArgument(source, start, end)
-		return argumentEnd, separator, comment, nil
+		return scanCatchArgument(source, start, end, Legacy)
 	}
 	if metadata.Name == "syntax" {
 		return scanSyntaxArgument(source, start, end, Legacy, parsed, metadata)

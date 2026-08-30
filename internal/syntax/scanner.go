@@ -2459,6 +2459,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		return
 	}
+	if command.Canonical == "catch" {
+		if boundary := command.boundaryExpression; boundary != nil && len(boundary.diagnostics) > 0 {
+			file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
+			command.boundaryExpression = nil
+			return
+		}
+	}
 	if command.Substitute != nil {
 		file.Diagnostics = append(file.Diagnostics, command.Substitute.diagnostics...)
 		command.Substitute.diagnostics = nil
@@ -5321,16 +5328,17 @@ func usesEscapedExArgument(name string) bool {
 		name == "menutranslate" || strings.HasSuffix(name, "menu")
 }
 
-func scanCatchArgument(source string, start, end int) (int, Span, Span) {
+func scanCatchArgument(source string, start, end int, dialect Dialect) (int, Span, Span, *expressionBoundary) {
 	position := skipSpace(source, start, end)
 	if position >= end {
-		return trimSpaceEnd(source, start, end), Span{}, Span{}
+		return trimSpaceEnd(source, start, end), Span{}, Span{}, nil
 	}
 	if source[position] == '|' {
-		return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}, Span{}
+		return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}, Span{}, nil
 	}
 	delimiter := source[position]
 	position++
+	closed := false
 	for position < end {
 		if source[position] == '\\' && position+1 < end {
 			position += 2
@@ -5338,15 +5346,28 @@ func scanCatchArgument(source string, start, end int) (int, Span, Span) {
 		}
 		if source[position] == delimiter {
 			position++
+			closed = true
 			break
 		}
 		position++
 	}
+	if dialect == Vim9 && closed && position < end && source[position] == '#' {
+		argumentEnd := trimSpaceEnd(source, start, end)
+		return argumentEnd, Span{}, Span{}, &expressionBoundary{
+			argument: Span{Start: start, End: argumentEnd},
+			diagnostics: []Diagnostic{{
+				Code: "vim/E488", Message: "trailing characters", Span: Span{Start: position, End: end},
+			}},
+		}
+	}
 	position = skipSpace(source, position, end)
 	if position < end && source[position] == '|' {
-		return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}, Span{}
+		return trimSpaceEnd(source, start, position), Span{Start: position, End: position + 1}, Span{}, nil
 	}
-	return trimSpaceEnd(source, start, end), Span{}, Span{}
+	if dialect == Vim9 && position < end && source[position] == '#' {
+		return trimSpaceEnd(source, start, position), Span{}, Span{Start: position, End: end}, nil
+	}
+	return trimSpaceEnd(source, start, end), Span{}, Span{}, nil
 }
 
 // scanEscapedExArgument mirrors separate_nextcmd() for commands whose
