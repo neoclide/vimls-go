@@ -999,6 +999,35 @@ func TestVim9MissingEndenumReportsE1420(t *testing.T) {
 	}
 }
 
+func TestVim9InvalidEnumBodyCommandReportsE1419(t *testing.T) {
+	for name, source := range map[string]string{
+		"missing comma": "vim9script\nenum Planet\n  mercury\n  venus\nendenum\n",
+		"leading comma": "vim9script\nenum Planet\n  mercury\n  ,venus\nendenum\n",
+		"after comment": "vim9script\nenum Planet\n  mercury\n\n  # Venus\n  venus\nendenum\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := Parse(source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1419" {
+					got = append(got, diagnostic)
+				}
+			}
+			want := "venus"
+			if name == "leading comma" {
+				want = ",venus"
+			}
+			if len(got) != 1 || got[0].Message != "Not a valid command in an Enum: "+want || file.Text(got[0].Span) != want {
+				t.Fatalf("E1419 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+			}
+			if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockEnum || file.Blocks[0].End < 0 || file.Commands[file.Blocks[0].End].Canonical != "endenum" {
+				t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
