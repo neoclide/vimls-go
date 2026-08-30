@@ -1971,6 +1971,58 @@ func TestAnalyzeE1165SliceAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1183CompoundSliceAssignmentDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, message string
+		recovery                    bool
+	}{
+		{"official blob def recovery", "vim9script\ndef Func()\n  var b = 0z1234\n  b[1 : 1] ..= 0z55\n  var after = 1\nenddef\n", "b[1 : 1]", "Cannot use a range with an assignment operator: b[1 : 1] ..= 0z55", true},
+		{"list plus", "vim9script\ndef Func()\n  var values = [1, 2]\n  values[0 : 1] += 1\nenddef\n", "values[0 : 1]", "Cannot use a range with an assignment operator: values[0 : 1] += 1", false},
+		{"dict plus", "vim9script\ndef Func()\n  var values = {a: 1}\n  values['a' : 'a'] += 1\nenddef\n", "values['a' : 'a']", "Cannot use a range with an assignment operator: values['a' : 'a'] += 1", false},
+		{"string concat", "vim9script\ndef Func()\n  var text = 'ab'\n  text[0 : 1] ..= 'x'\nenddef\n", "text[0 : 1]", "Cannot use a range with an assignment operator: text[0 : 1] ..= 'x'", false},
+		{"tuple plus", "vim9script\ndef Func()\n  var values = (1, 2)\n  values[0 : 1] += 1\nenddef\n", "values[0 : 1]", "Cannot use a range with an assignment operator: values[0 : 1] += 1", false},
+		{"any plus", "vim9script\ndef Func()\n  var values: any\n  values[0 : 1] += 1\nenddef\n", "values[0 : 1]", "Cannot use a range with an assignment operator: values[0 : 1] += 1", false},
+		{"unknown plus", "vim9script\ndef Func()\n  unknown[0 : 1] += 1\nenddef\n", "unknown[0 : 1]", "Cannot use a range with an assignment operator: unknown[0 : 1] += 1", false},
+		{"Legacy-root def", "def Func()\n  var b = 0z12\n  b[0 : 1] ..= 0z34\nenddef\n", "b[0 : 1]", "Cannot use a range with an assignment operator: b[0 : 1] ..= 0z34", false},
+		{"lambda", "vim9script\nvar Callback = () => {\n  var values = [1]\n  values[0 : 1] += 1\n}\n", "values[0 : 1]", "Cannot use a range with an assignment operator: values[0 : 1] += 1", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1183" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1141" || diagnostic.Code == "vim/E1165" || diagnostic.Code == "vim/E1019" || diagnostic.Code == "vim/E1012" {
+					t.Fatalf("E1183 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || file.Text(got[0].Span) != test.span || got[0].Message != test.message {
+				t.Fatalf("E1183 diagnostics = %#v", got)
+			}
+			if test.recovery && (file.Commands[len(file.Commands)-2].Declaration == nil || file.Text(file.Commands[len(file.Commands)-2].Declaration.Name) != "after") {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Func()\n  var values = [1]\n  values[0 : 1] = [2]\n  values[0] += 1\nenddef\n",
+		"vim9script\nvar values = [1]\nvalues[0 : 1] += 1\n",
+		"let values = [1]\nlet values[0 : 1] += 1\n",
+		"vim9script\ndef Func()\n  var values = [1]\n  legacy let values[0 : 1] += 1\nenddef\n",
+		"vim9script\ndef Func()\n  var values = [1]\n  values[0 :\nenddef\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1183" {
+				t.Fatalf("guard unexpectedly received E1183: %#v", result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1166DictionaryRangeUnletDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source, span string

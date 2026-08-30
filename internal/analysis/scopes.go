@@ -3826,6 +3826,12 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 				Code: "vim/E689", Message: "Index not allowed after a string: " + result.File.Text(expression.Span), Span: target.Span,
 			})
 		}
+		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && expression.Value != "=" && target != nil && target.Kind == syntax.ExpressionSlice && !expressionContainsMissing(expression) {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1183", Message: "Cannot use a range with an assignment operator: " + result.File.Text(expression.Span), Span: target.Span,
+			})
+			return
+		}
 		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && !sliceAssignmentNeedsE1165(result, scope, expression) {
 			appendIndexableAssignmentDiagnostic(result, scope, target)
 		}

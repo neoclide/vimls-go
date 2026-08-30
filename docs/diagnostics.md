@@ -1608,6 +1608,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   function and recommends a Vim9 class or an explicit Dictionary parameter.
 - `src/errors.h:3029-3030` defines the exact E1182 message.
 
+## Range with assignment operator: E1183
+
+Analysis reports E1183 when compiled Vim9 code uses a compound assignment
+operator with a slice target, such as `items[1 : 2] += other`. The diagnostic
+uses Vim's `Cannot use a range with an assignment operator: {expression}`
+message, includes the complete assignment expression, and selects the slice
+target.
+
+The rule depends on the assignment shape, not the receiver's inferred type,
+because Vim rejects the range while loading the compound-assignment target.
+It therefore applies in a `def` or compiled lambda to List, Blob, Dictionary,
+String, tuple, `any`, and unresolved receivers. Plain `=` slice assignments
+retain E1165 and the supported List/Blob rules; direct-index compound
+assignments are not ranges. Top-level Vim9 evaluation, Legacy commands, and an
+explicit `legacy` command inside a `def` do not receive this compile-only code.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_blob.vim:135-139` expects E1183 only for the compiled-`def`
+  variant of `b[1 : 1] ..= 0z55`; Legacy and Vim9-script evaluation both use
+  E734 instead.
+- `src/vim9compile.c:2557-2649` loads a compound-assignment target, parses its
+  index, and emits E1183 as soon as that index is a range.
+- `src/vim9compile.c:3396-3404` takes this target-loading path only for a
+  compound operator, before compiling the right-hand expression.
+- `src/errors.h:3031-3032` defines the exact E1183 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
