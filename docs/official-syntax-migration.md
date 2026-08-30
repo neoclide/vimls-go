@@ -343,6 +343,8 @@ import-name resolution. The authoritative parser split is therefore 915
 migrated, zero ready, and 146 pending-fix.
 Commit `7e748e2` migrated the three single-`=` Vim9 condition variants, making
 the authoritative current split 918 migrated, zero ready, and 143 pending-fix.
+Commit `a2e0aca` migrated the two Vim9 `:match` attached-hash variants, making
+the authoritative current split 920 migrated, zero ready, and 141 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -935,13 +937,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 87 | 0 | 28 |
+| `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 109 | 62 | 0 | 47 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **362** | **286** | **0** | **76** |
+| **Total** | **362** | **288** | **0** | **74** |
 
 ```text
 C-EXPR
@@ -1077,6 +1079,12 @@ Commit `7e748e2` migrated
 `if`, `elseif`, or `while` condition now maps to Vim's E488 only inside a
 compiled definition; comparisons, fat arrows, assignments, and legacy syntax
 retain their existing interpretation.
+
+Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
+Ex `:match` command now validates its optional group and delimited regexp: an
+attached hash after a closed regexp is E488, while `none#` falls through to the
+ordinary group-plus-regexp grammar and reports E475. Whitespace-delimited Vim9
+comments and the special `none` form remain valid.
 
 Commit `e2f7aba` migrated the five generic-call records at
 `G:{3048:67627,3057:67814,3066:68011,3075:68222,3084:68421}/script`.
