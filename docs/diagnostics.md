@@ -2312,6 +2312,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   namespace as E1236.
 - `src/errors.h:3173-3174` defines the exact E1236 message.
 
+## Blob builtin argument: E1238
+
+Analysis reports E1238 at top-level Vim9 script when an `arg_blob` builtin
+argument has a statically known non-Blob type. This covers `base64_encode()`,
+`blob2list()`, and argument one of `blob2str()`, including method receivers.
+The diagnostic selects the invalid effective argument, uses its one-based
+index, and owns the mismatch instead of also reporting E1013.
+
+Compiled `def` and block-lambda calls retain E1013. Valid Blob and unknown
+values, Legacy calls, ordinary arity, and `blob2str()`'s optional Dictionary
+argument keep their existing behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:356` and `:366` distinguish compiled
+  E1013 from top-level E1238 for `blob2list(10)` and `blob2str("ab")`.
+- `src/typval.c:590-602` implements `arg_blob` and emits E1238 for non-Blob
+  values.
+- `runtime/doc/vim9.txt:2758-2778` documents the top-level Vim9 builtin type
+  check and its method example.
+- `src/errors.h:3179-3180` defines the exact E1238 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

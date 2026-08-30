@@ -4468,6 +4468,57 @@ func TestAnalyzeE1235BuiltinBoolOrNumberArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1238BuiltinBlobArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"official number", "vim9script\nblob2list(10)\n", "10"},
+		{"official string", "vim9script\nblob2str('ab')\n", "'ab'"},
+		{"method receiver", "vim9script\n10->blob2list()\n", "10"},
+		{"base64 encode", "vim9script\nbase64_encode([])\n", "[]"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1238" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1238 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Blob required for argument 1" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1238 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"compiled def", "vim9script\ndef Func()\n  blob2list(10)\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  blob2str('ab')\n}\n", "vim/E1013"},
+		{"blob", "vim9script\nblob2list(0z12)\n", ""},
+		{"unknown", "vim9script\nblob2list(Unknown)\n", ""},
+		{"Legacy", "let value = blob2list(10)\n", ""},
+		{"second options argument retains E1206", "vim9script\nblob2str(0z12, [])\n", "vim/E1206"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1238" {
+					t.Fatalf("guard unexpectedly received E1238: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1216DigraphSetlistDiagnostics(t *testing.T) {
 	const message = "digraph_setlist() argument must be a list of lists with two items"
 	for _, test := range []struct{ name, source, span string }{
