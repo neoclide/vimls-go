@@ -6,8 +6,10 @@ targets Vim 9.1 and newer stable releases.
 The repository is being built milestone by milestone from the contracts in
 `docs/`. The server currently provides bounded stdio and TCP transports,
 lifecycle and target-version handling, immutable document snapshots,
-incremental synchronization, and UTF-8/UTF-16/UTF-32 position conversion.
-UTF-16 is the default when the client does not negotiate another encoding.
+incremental synchronization, background parsing, document symbols, syntax and
+target-version diagnostics, and conservative Vim9 immutable-assignment
+diagnostics. Position conversion supports UTF-8, UTF-16, and UTF-32; UTF-16 is
+the default when the client does not negotiate another encoding.
 
 ## Build
 

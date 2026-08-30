@@ -73,6 +73,12 @@ Deliver:
 - Conservative legacy inference and version-target diagnostics.
 - Stable diagnostic codes, ranges, severities, related information, and limits.
 
+Current implementation has same-file scopes, declarations, references,
+shadowing, conservative type facts, document symbols, target-version
+diagnostics, and direct Vim9 `const`/`final` reassignment diagnostics. Arity,
+full Vim9 type checking, import resolution, and the remaining mutation forms
+are still M4 work; unresolved or dynamic targets remain unknown.
+
 Exit gate: diagnostics match golden results and safe Vim oracle cases; unknown
 dynamic behavior does not create false undefined/type errors; stale diagnostics
 cannot publish after a newer edit or close.
