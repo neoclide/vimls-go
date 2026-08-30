@@ -178,7 +178,14 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 				if inherited == nil {
 					continue
 				}
-				if len(inherited.Function.TypeParameters) > 0 && len(inherited.Function.TypeParameters) != len(method.TypeParameters) {
+				inheritedCount := len(inherited.Function.TypeParameters)
+				if inheritedCount == 0 {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code:    "vim/E1433",
+						Message: "Overriding concrete method \"" + name + "\" in class \"" + file.Text(current.Aggregate.Name) + "\" with a generic method",
+						Span:    aggregateEndSpan(file, class),
+					})
+				} else if inheritedCount != len(method.TypeParameters) {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code:    "vim/E1434",
 						Message: "Mismatched number of type variables for generic method  \"" + name + "\" in class \"" + file.Text(current.Aggregate.Name) + "\"",
