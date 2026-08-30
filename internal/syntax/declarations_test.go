@@ -1689,6 +1689,78 @@ func TestVim9E1016ScopedExpressionRecovery(t *testing.T) {
 	assertFileSpans(t, file)
 }
 
+func TestLegacyRootDefScriptVariableDeclarationDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		recovery           bool
+	}{
+		{
+			name: "var declaration",
+			source: "def Func()\n  var s:name = 1\n" +
+				"  var after = 2\nenddef\n",
+			span: "s:name",
+		},
+		{
+			name: "typed var declaration without initializer",
+			source: "def Func()\n  var s:typed: number\n" +
+				"  var after = 2\nenddef\n",
+			span: "s:typed",
+		},
+		{
+			name: "final declaration",
+			source: "def Func()\n  final s:name = 1\n" +
+				"  var after = 2\nenddef\n",
+			span: "s:name",
+		},
+		{
+			name: "const declaration",
+			source: "def Func()\n  const s:name = 1\n" +
+				"  var after = 2\nenddef\n",
+			span: "s:name",
+		},
+		{
+			name: "typed-tail recovery",
+			source: "def Func()\n  s:notexist:repl\n" +
+				"  var after = 2\nenddef\n",
+			span:     "s:notexist",
+			recovery: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1101" || file.Diagnostics[0].Message != "Cannot declare a script variable in a function: "+test.span || file.Text(file.Diagnostics[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) != 4 || file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+				t.Fatalf("following-command recovery = %#v", file.Commands)
+			}
+			if test.recovery {
+				if len(file.Commands[1].Expressions) != 1 || file.Commands[1].Expressions[0].Kind != ExpressionIdentifier || file.Commands[1].Expressions[0].Value != test.span {
+					t.Fatalf("typed-tail recovery = %#v", file.Commands[1])
+				}
+			} else if file.Commands[1].Declaration == nil || file.Text(file.Commands[1].Declaration.Name) != test.span {
+				t.Fatalf("declaration recovery = %#v", file.Commands[1])
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Func()\n  var s:name = 1\nenddef\n",
+		"function Legacy()\n  var s:name = 1\nendfunction\n",
+		"vim9cmd var s:name = 1\n",
+		"def Func()\n  s:name = 1\nenddef\n",
+		"def Func()\n  var g:name = 1\n  const g:constant = 1\n  final w:window = 1\nenddef\n",
+	} {
+		file := Parse(source)
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1101" {
+				t.Fatalf("unexpected E1101 = %#v\n%s", file.Diagnostics, source)
+			}
+		}
+	}
+}
+
 func TestVim9E1016ScopeGuards(t *testing.T) {
 	valid := Parse("vim9script\ng:foo = 1\nvar after = 2\n")
 	if len(valid.Diagnostics) != 0 || len(valid.Commands) != 3 || len(valid.Commands[2].Expressions) != 1 {

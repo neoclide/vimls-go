@@ -1011,6 +1011,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:1388-1409` distinguishes E1096 from missing return
   value and missing return statement diagnostics.
 
+## Script-variable declaration in a function: E1101
+
+Syntax analysis reports E1101 when a compiled `def` in a Legacy-root file
+tries to declare an `s:` script variable with `var`, `final`, or `const`. The
+diagnostic selects the full `s:name`. An ordinary assignment to an existing or
+dynamic script variable remains valid E1101-wise; only declaration syntax is
+rejected.
+
+The rule also preserves Vim's recovery for an omitted declaration command,
+such as `s:name: type`: inside a `def` this declaration-shaped input receives
+E1101 instead of a generic trailing-character or invalid-command diagnostic.
+A Vim9-root file uses its separate E1268 rule for `s:`, while Legacy
+`function` bodies and script-level commands remain outside E1101.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:1866-1903` separates the `s:` namespace, reports E1101
+  for a declaration, and otherwise retains script-variable lookup.
+- `src/vim9compile.c:2031-2040,4605-4628` applies the check to compiled
+  `var`, `final`, and `const` assignments.
+- `src/testdir/test_vim9_assign.vim:214-226` distinguishes Legacy-root E1101
+  declarations from E1268 in a Vim9-root `def`.
+- `src/testdir/test_vim9_cmd.vim:2068-2071` covers the declaration-shaped
+  `s:notexist:repl` recovery form.
+- `runtime/doc/vim9.txt:1495-1510` documents when `s:` is optional, required,
+  or rejected according to script and function context.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

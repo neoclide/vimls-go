@@ -2846,7 +2846,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 					left, leftDiagnostics = parseExpressionWithVersion(file.Text(typedDeclaration.Name), typedDeclaration.Name.Start, command.Dialect, command.ScriptVersion)
 					tailStart := skipSpace(file.Source, typedDeclaration.Name.End, typeSpan.Start)
 					if commandInsideBlock(command, file.Blocks, BlockDef) {
-						if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, typedDeclaration.Name); ok {
+						if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, command, typedDeclaration.Name); ok {
 							leftDiagnostics = append(leftDiagnostics, diagnostic)
 						} else {
 							leftDiagnostics = append(leftDiagnostics, Diagnostic{
@@ -2925,7 +2925,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				if tail < command.Argument.End && file.Source[tail] == ':' && tail+1 < command.Argument.End && !isSpace(file.Source[tail+1]) {
 					scopeDiagnostic := false
 					if inDef {
-						if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, expression.Span); ok {
+						if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, command, expression.Span); ok {
 							diagnostics[0] = diagnostic
 							scopeDiagnostic = true
 						}
@@ -4991,15 +4991,20 @@ func diagnoseCannotLockOption(file *File, command *Command, declaration *Declara
 	return true
 }
 
-// vim9ScopeDeclarationDiagnostic mirrors vim9_declare_error() for the
-// declaration forms which can be recognized without evaluating the script.
-// Keep the option and register sigils out of this helper: they have their own
-// diagnostics and target handling.
-func vim9ScopeDeclarationDiagnostic(file *File, name Span) (Diagnostic, bool) {
-	if file == nil || name.Start < 0 || name.End <= name.Start || name.End > len(file.Source) {
+// vim9ScopeDeclarationDiagnostic mirrors the static scope checks in
+// compile_lhs_script_var() and vim9_declare_error(). Keep the option and
+// register sigils out of this helper: they have their own diagnostics and
+// target handling.
+func vim9ScopeDeclarationDiagnostic(file *File, command *Command, name Span) (Diagnostic, bool) {
+	if file == nil || command == nil || name.Start < 0 || name.End <= name.Start || name.End > len(file.Source) {
 		return Diagnostic{}, false
 	}
 	value := file.Text(name)
+	if file.Dialect == Legacy && commandInsideBlock(command, file.Blocks, BlockDef) && strings.HasPrefix(value, "s:") {
+		return Diagnostic{
+			Code: "vim/E1101", Message: "Cannot declare a script variable in a function: " + value, Span: name,
+		}, true
+	}
 	if strings.HasPrefix(value, "$") {
 		return Diagnostic{
 			Code: "vim/E1016", Message: "Cannot declare an environment variable: " + value, Span: name,
@@ -5026,7 +5031,7 @@ func vim9ScopeDeclarationDiagnostic(file *File, name Span) (Diagnostic, bool) {
 }
 
 func diagnoseVim9ScopeDeclaration(file *File, command *Command, declaration *Declaration, hasAssignment bool) {
-	if command == nil || declaration == nil || command.Dialect != Vim9 || command.Canonical != "var" {
+	if command == nil || declaration == nil || command.Dialect != Vim9 || command.Canonical != "var" && command.Canonical != "final" && command.Canonical != "const" {
 		return
 	}
 	// At script root Vim rejects an uninitialized environment declaration as
@@ -5034,7 +5039,7 @@ func diagnoseVim9ScopeDeclaration(file *File, command *Command, declaration *Dec
 	if !hasAssignment && command.Block < 0 && strings.HasPrefix(file.Text(declaration.Name), "$") {
 		return
 	}
-	if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, declaration.Name); ok {
+	if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, command, declaration.Name); ok && (command.Canonical == "var" || diagnostic.Code == "vim/E1101") {
 		file.Diagnostics = append(file.Diagnostics, diagnostic)
 	}
 }
