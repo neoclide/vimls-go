@@ -2128,6 +2128,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			}
 			if command.Dialect == syntax.Vim9 && expression.Kind == syntax.ExpressionMember {
 				appendObjectVariableThroughClassDiagnostic(result, expressionScope, expression)
+				appendClassVariableThroughObjectDiagnostic(result, expressionScope, expression)
 				appendClassMethodThroughObjectDiagnostic(result, expressionScope, expression)
 			}
 			if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) &&
@@ -3984,6 +3985,42 @@ func appendClassMethodThroughObjectDiagnostic(result *FileAnalysis, scope *Scope
 			})
 		}
 		return
+	}
+}
+
+func appendClassVariableThroughObjectDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || result.File.Text(member.Operator) != "." || member.Value == "" {
+		return
+	}
+	receiver := member.Children[0]
+	if receiver.Kind == syntax.ExpressionIdentifier {
+		declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+		if declaration != nil && (declaration.Kind == SymbolKindClass || declaration.Kind == SymbolKindTypeAlias && result.classAliases[declaration.Name] != "") {
+			return
+		}
+	}
+	file := result.File
+	class := result.classes[resolvedExpressionType(result, scope, receiver).Name]
+	if class == nil || class.Aggregate == nil {
+		return
+	}
+	for _, memberIndex := range class.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		declaration := &file.Commands[memberIndex]
+		if declaration.Declaration == nil || !commandHasModifier(declaration, "static") {
+			continue
+		}
+		for _, binding := range declaration.Declaration.Bindings {
+			if file.Text(binding.Name) == member.Value {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1375", Message: `Class variable "` + member.Value + `" accessible only using class "` + file.Text(class.Aggregate.Name) + `"`, Span: memberNameSpan(file, member),
+				})
+				return
+			}
+		}
 	}
 }
 

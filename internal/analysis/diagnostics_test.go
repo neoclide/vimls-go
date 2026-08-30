@@ -4961,6 +4961,48 @@ func TestAnalyzeE1376ObjectVariableThroughClass(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1375ClassVariableThroughObject(t *testing.T) {
+	for _, use := range []string{
+		"var value = a.count",
+		"var value = A.new().count",
+		"a.count = 2",
+		"def Test(a: A)\n  var value = a.count\nenddef",
+		"def Test(a: A)\n  a.count = 2\nenddef",
+		"var value = a._count",
+	} {
+		source := "vim9script\nclass A\n  static var count: number = 1\n  static var _count: number = 1\nendclass\nvar a = A.new()\n" + use + "\n"
+		file := syntax.Parse(source)
+		memberName := "count"
+		if strings.Contains(use, "_count") {
+			memberName = "_count"
+		}
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E1375" {
+				got = append(got, diagnostic)
+			}
+		}
+		wantMessage := `Class variable "` + memberName + `" accessible only using class "A"`
+		if len(got) != 1 || got[0].Message != wantMessage || file.Text(got[0].Span) != memberName {
+			t.Fatalf("use=%q E1375 diagnostics=%#v; syntax diagnostics=%#v", use, got, file.Diagnostics)
+		}
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  static var count: number = 1\nendclass\nvar value = A.count\n",
+		"vim9script\nclass A\n  static var count: number = 1\nendclass\ntype Alias = A\nvar value = Alias.count\n",
+		"vim9script\nclass A\n  var count: number = 1\nendclass\nvar a = A.new()\nvar value = a.count\n",
+		"vim9script\nclass A\n  static def Count()\n  enddef\nendclass\nvar a = A.new()\na.Count()\n",
+		"vim9script\nclass A\n  static var count: number = 1\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nvar value = b.count\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1375" {
+				t.Fatalf("guard source reported E1375: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1431AbstractSuperMethodCall(t *testing.T) {
 	tests := []struct {
 		name    string
