@@ -3599,3 +3599,46 @@ func TestAnalyzeE1537LessTargetsThanTupleItems(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1536TupleRequired(t *testing.T) {
+	tests := []struct {
+		name      string
+		rightHand string
+	}{
+		{name: "null tuple literal", rightHand: "null_tuple"},
+		{name: "testing builtin", rightHand: "test_null_tuple()"},
+		{name: "parenthesized literal", rightHand: "(null_tuple)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\nvar [v1; rest] = " + test.rightHand + "\nvar after = 1\n"
+			file := syntax.Parse(source)
+			all := Analyze(file).Diagnostics
+			var got []syntax.Diagnostic
+			for _, diagnostic := range all {
+				if diagnostic.Code == "vim/E1536" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(all) != 1 || len(got) != 1 || got[0].Message != "Tuple required" || file.Text(got[0].Span) != test.rightHand {
+				t.Fatalf("diagnostics = %#v; syntax diagnostics = %#v", all, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  var [v1; rest] = null_tuple\nenddef\n",
+		"vim9script\nvar values: tuple<any> = ()\nvar [v1; rest] = values\n",
+		"vim9script\nvar [v1; rest] = ()\n",
+		"vim9script\nvar [v1; rest] = Dynamic()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1536" {
+				t.Fatalf("guard source reported E1536: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}

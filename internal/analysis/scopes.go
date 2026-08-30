@@ -980,7 +980,16 @@ func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax
 }
 
 func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bool, rhs *syntax.Expression, defRules bool) {
-	if rhs == nil || expressionContainsMissing(rhs) || rhs.Kind != syntax.ExpressionList && rhs.Kind != syntax.ExpressionTuple {
+	if rhs == nil || expressionContainsMissing(rhs) {
+		return
+	}
+	if !defRules && isStaticNullTuple(rhs) {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1536", Message: "Tuple required", Span: rhs.Span,
+		})
+		return
+	}
+	if rhs.Kind != syntax.ExpressionList && rhs.Kind != syntax.ExpressionTuple {
 		return
 	}
 	got := len(rhs.Children)
@@ -1125,6 +1134,20 @@ func extendArgumentMismatchIndex(actual []ValueType) int {
 		return 1
 	}
 	return -1
+}
+
+func isStaticNullTuple(expression *syntax.Expression) bool {
+	if expression == nil {
+		return false
+	}
+	if expression.Kind == syntax.ExpressionIdentifier {
+		return expression.Value == "null_tuple"
+	}
+	if expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		return isStaticNullTuple(expression.Children[0])
+	}
+	return expression.Kind == syntax.ExpressionCall && len(expression.Children) == 1 &&
+		expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier && expression.Children[0].Value == "test_null_tuple"
 }
 
 // collectOperatorDiagnostics keeps compiled Vim9 operator errors distinct
@@ -3759,7 +3782,7 @@ func validNameSpan(file *syntax.File, span syntax.Span) bool {
 
 func isLiteralIdentifier(name string) bool {
 	switch strings.ToLower(name) {
-	case "true", "false", "null", "null_blob", "null_channel", "null_class", "null_dict", "null_function", "null_job", "null_list", "null_object", "null_partial", "null_string":
+	case "true", "false", "null", "null_blob", "null_channel", "null_class", "null_dict", "null_function", "null_job", "null_list", "null_object", "null_partial", "null_string", "null_tuple":
 		return true
 	default:
 		return false
