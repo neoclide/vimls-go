@@ -309,6 +309,9 @@ func assignmentTargetType(result *FileAnalysis, scope *Scope, target *syntax.Exp
 	}
 	switch target.Kind {
 	case syntax.ExpressionIdentifier:
+		if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") || terminalOptionName(target.Value) {
+			return ValueType{Name: "string"}
+		}
 		return resolvedExpressionType(result, scope, target)
 	case syntax.ExpressionIndex, syntax.ExpressionMember:
 		if len(target.Children) > 0 {
@@ -928,7 +931,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				Name: expression.Value, Span: expression.Span,
 				Declaration: declaration,
 			})
-			unscoped := !strings.Contains(expression.Value, ":")
+			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
 			unknownVimVariable := strings.HasPrefix(expression.Value, "v:")
 			if unknownVimVariable {
 				_, known := vimdata.LookupVariable(expression.Value)

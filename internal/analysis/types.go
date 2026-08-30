@@ -351,7 +351,9 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		case "null_tuple":
 			typ = ValueType{Name: "tuple"}
 		default:
-			if variable, ok := vimdata.LookupVariable(expression.Value); ok {
+			if strings.HasPrefix(expression.Value, "$") || strings.HasPrefix(expression.Value, "@") || terminalOptionName(expression.Value) {
+				typ = ValueType{Name: "string"}
+			} else if variable, ok := vimdata.LookupVariable(expression.Value); ok {
 				typ = builtinVariableValueType(variable)
 			} else if reference := state.references[expression.Span]; reference != nil && reference.Declaration != nil {
 				typ = reference.Declaration.Type
@@ -474,6 +476,15 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	}
 	state.result.expressionTypes[expression] = typ
 	return typ
+}
+
+func terminalOptionName(name string) bool {
+	if !strings.HasPrefix(name, "&") {
+		return false
+	}
+	name = strings.TrimPrefix(name[1:], "l:")
+	name = strings.TrimPrefix(name, "g:")
+	return strings.HasPrefix(name, "t_")
 }
 
 func builtinVariableValueType(variable vimdata.Variable) ValueType {
