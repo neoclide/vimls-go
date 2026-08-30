@@ -426,6 +426,12 @@ func parseEnumValues(file *File, command *Command) bool {
 		if valueStart >= valueEnd {
 			continue
 		}
+		if command.Dialect == Vim9 && strings.HasPrefix(source[valueStart:valueEnd], "#{") && !strings.HasPrefix(source[valueStart:valueEnd], "#{{") {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1170", Message: "Cannot use #{ to start a comment", Span: Span{Start: start + valueStart, End: start + valueStart + 2},
+			})
+			return false
+		}
 		nameEnd := scanWord(source, valueStart, valueEnd)
 		if nameEnd == valueStart {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
