@@ -445,10 +445,16 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	case syntax.ExpressionIndex, syntax.ExpressionSlice:
 		if len(expression.Children) > 0 {
 			typ = indexedType(state.infer(expression.Children[0], scope))
+			for _, index := range expression.Children[1:] {
+				state.infer(index, scope)
+			}
 		} else {
 			typ = unknown
 		}
 	case syntax.ExpressionCast:
+		if len(expression.Children) > 0 {
+			state.infer(expression.Children[0], scope)
+		}
 		typ = convertSyntaxType(expression.CastType)
 	case syntax.ExpressionLambda:
 		typ = state.lambdaType(expression, scope)

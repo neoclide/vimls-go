@@ -137,6 +137,9 @@ func collectTypeMismatchDiagnostics(result *FileAnalysis, commands []syntax.Comm
 					collectAssignmentTypeMismatchDiagnostics(result, scope, expression)
 				}
 			}
+			for _, target := range command.Targets {
+				collectAssignmentTypeMismatchDiagnostics(result, scope, target)
+			}
 		}
 		if command.Embedded != nil {
 			collectTypeMismatchDiagnostics(result, command.Embedded.Commands, scope)
@@ -182,6 +185,7 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		return
 	}
 	if expression.Kind == syntax.ExpressionLambda {
+		collectLambdaReturnTypeMismatchDiagnostic(result, expression)
 		if expression.LambdaBody != nil {
 			lambdaScope := result.lambdaScopes[expression]
 			if lambdaScope == nil {
@@ -196,6 +200,12 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		}
 		return
 	}
+	if expression.Kind == syntax.ExpressionCast && expression.CastType != nil && len(expression.Children) > 0 {
+		appendTypeMismatchDiagnostic(result, convertSyntaxType(expression.CastType), expression.Children[0])
+	}
+	if expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice {
+		collectIndexTypeMismatchDiagnostic(result, scope, expression)
+	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 		if expected := assignmentTargetType(result, scope, expression.Children[0]); !isUnknownType(expected) {
 			appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
@@ -203,6 +213,50 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	}
 	for _, child := range expression.Children {
 		collectAssignmentTypeMismatchDiagnostics(result, scope, child)
+	}
+}
+
+func collectLambdaReturnTypeMismatchDiagnostic(result *FileAnalysis, expression *syntax.Expression) {
+	expected := convertSyntaxType(expression.ReturnType)
+	if isUnknownType(expected) {
+		return
+	}
+	if expression.LambdaBody == nil {
+		if len(expression.Children) > len(expression.Parameters) {
+			appendTypeMismatchDiagnostic(result, expected, expression.Children[len(expression.Parameters)])
+		}
+		return
+	}
+	for index := range expression.LambdaBody.Commands {
+		command := &expression.LambdaBody.Commands[index]
+		if command.Canonical == "return" && len(command.Expressions) > 0 {
+			before := len(result.Diagnostics)
+			appendTypeMismatchDiagnostic(result, expected, command.Expressions[0])
+			if len(result.Diagnostics) > before {
+				return
+			}
+		}
+	}
+}
+
+func collectIndexTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression) {
+	if len(expression.Children) < 2 {
+		return
+	}
+	receiver := resolvedExpressionType(result, scope, expression.Children[0])
+	if receiver.Name != "blob" && receiver.Name != "list" && receiver.Name != "string" && receiver.Name != "tuple" {
+		return
+	}
+	expected := ValueType{Name: "number"}
+	for _, index := range expression.Children[1:] {
+		if index == nil || index.Kind == syntax.ExpressionMissing {
+			continue
+		}
+		before := len(result.Diagnostics)
+		appendTypeMismatchDiagnostic(result, expected, index)
+		if len(result.Diagnostics) > before {
+			return
+		}
 	}
 }
 

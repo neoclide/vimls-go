@@ -70,14 +70,14 @@ func TestAnalyzeFunctionArgumentTypeDiagnostics(t *testing.T) {
 }
 
 func TestAnalyzeTypeMismatchDiagnostics(t *testing.T) {
-	source := "vim9script\ndef F()\n  var numberValue: number = 'bad'\n  var numbers: list<number> = [1, 'bad']\n  var dictionary: dict<number> = {ok: 1, bad: 'bad'}\n  var tupleValue = ('x', 'y')\n  tupleValue = (1, 2)\n  numbers[0] = 'bad'\n  numbers[:] = ['bad']\n  for item: number in ['bad']\n  endfor\nenddef\n"
+	source := "vim9script\ndef F()\n  var numberValue: number = 'bad'\n  var numbers: list<number> = [1, 'bad']\n  var dictionary: dict<number> = {ok: 1, bad: 'bad'}\n  var tupleValue = ('x', 'y')\n  tupleValue = (1, 2)\n  numbers[0] = 'bad'\n  numbers[:] = ['bad']\n  var badIndex = numbers['bad']\n  var badCast = <number>string(1)\n  var BadLambda = (value: number): string => 99\n  for item: number in ['bad']\n  endfor\nenddef\n"
 	var got []string
 	for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
 		if diagnostic.Code == "vim/E1012" {
 			got = append(got, source[diagnostic.Span.Start:diagnostic.Span.End])
 		}
 	}
-	want := []string{"'bad'", "'bad'", "'bad'", "1", "'bad'", "'bad'", "['bad']"}
+	want := []string{"'bad'", "'bad'", "'bad'", "1", "'bad'", "'bad'", "'bad'", "string(1)", "99", "['bad']"}
 	if len(got) != len(want) {
 		t.Fatalf("E1012 spans = %#v, want %#v", got, want)
 	}
