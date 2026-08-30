@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,31 +39,48 @@ type PathResolver struct {
 // Existing runtime paths are canonicalized so symlink checks are applied to
 // their actual location.
 func NewPathResolver(root string, runtimePaths []string) (*PathResolver, error) {
-	if strings.TrimSpace(root) == "" {
+	return NewPathResolverForRoots([]string{root}, runtimePaths)
+}
+
+// NewPathResolverForRoots creates a resolver for one or more workspace roots.
+// The first valid root supplies Vim's cwd-equivalent root for :source; all
+// valid roots remain security boundaries for paths originating in any open
+// workspace. Runtime paths retain their caller-provided precedence.
+func NewPathResolverForRoots(roots []string, runtimePaths []string) (*PathResolver, error) {
+	resolver := &PathResolver{}
+	seenBoundaries := make(map[string]struct{}, len(roots)+len(runtimePaths))
+	seenRuntimePaths := make(map[string]struct{}, len(runtimePaths))
+	for _, root := range roots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		absRoot = filepath.Clean(absRoot)
+		info, err := os.Stat(absRoot)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		boundary, err := canonicalPath(absRoot)
+		if err != nil {
+			continue
+		}
+		if resolver.root == "" {
+			// Keep the lexical root for returned paths and candidate construction;
+			// boundaries use canonical paths for mount and symlink safety.
+			resolver.root = absRoot
+		}
+		if _, exists := seenBoundaries[boundary]; exists {
+			continue
+		}
+		seenBoundaries[boundary] = struct{}{}
+		resolver.boundaries = append(resolver.boundaries, boundary)
+	}
+	if resolver.root == "" {
 		return nil, ErrResolverRoot
 	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return nil, fmt.Errorf("resolve resolver root %q: %w", root, err)
-	}
-	absRoot = filepath.Clean(absRoot)
-	info, err := os.Stat(absRoot)
-	if err != nil {
-		return nil, fmt.Errorf("stat resolver root %q: %w", absRoot, err)
-	}
-	if !info.IsDir() {
-		return nil, ErrResolverRoot
-	}
-	rootBoundary, err := canonicalPath(absRoot)
-	if err != nil {
-		return nil, fmt.Errorf("resolve resolver root %q: %w", absRoot, err)
-	}
-	// Keep the lexical root for returned paths and candidate construction;
-	// boundaries use the canonical root so /tmp-style mount aliases do not
-	// make an in-root file appear to escape.
-	resolver := &PathResolver{root: absRoot}
-	resolver.boundaries = append(resolver.boundaries, rootBoundary)
-	seen := make(map[string]struct{}, len(runtimePaths))
 	for _, runtimePath := range runtimePaths {
 		if strings.TrimSpace(runtimePath) == "" {
 			continue
@@ -82,14 +98,34 @@ func NewPathResolver(root string, runtimePaths []string) (*PathResolver, error) 
 		if canonicalErr != nil {
 			continue
 		}
-		if _, exists := seen[boundary]; exists {
+		if _, exists := seenRuntimePaths[boundary]; exists {
 			continue
 		}
-		seen[boundary] = struct{}{}
-		resolver.runtimePaths = append(resolver.runtimePaths, runtimePath)
-		resolver.boundaries = append(resolver.boundaries, boundary)
+		seenRuntimePaths[boundary] = struct{}{}
+		// Vim's runtime lookup uses DIP_NOAFTER for imports and autoloads.
+		// An explicit after entry is still trusted as a path boundary, but is
+		// not itself a search root.
+		if filepath.Base(runtimePath) != "after" {
+			resolver.runtimePaths = append(resolver.runtimePaths, runtimePath)
+		}
+		if _, exists := seenBoundaries[boundary]; !exists {
+			seenBoundaries[boundary] = struct{}{}
+			resolver.boundaries = append(resolver.boundaries, boundary)
+		}
 	}
 	return resolver, nil
+}
+
+// Allows reports whether path is safely contained in any configured workspace
+// or runtime boundary. It resolves existing symlinks and every existing parent
+// of a missing path, so a lexical in-root path through an escaping symlink is
+// rejected without opening or executing the target.
+func (r *PathResolver) Allows(path string) bool {
+	if r == nil || strings.TrimSpace(path) == "" {
+		return false
+	}
+	canonical, err := canonicalPathAllowMissing(path)
+	return err == nil && r.withinBoundary(canonical)
 }
 
 // ResolveImport resolves a parsed :import command. Literal string imports

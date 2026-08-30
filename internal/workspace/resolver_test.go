@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -143,6 +144,82 @@ func TestPathResolverDoesNotUseAfterImportOrGuessExtensions(t *testing.T) {
 	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
 	if result.Path != "" || len(result.Candidates) != 1 || result.Candidates[0] != filepath.Join(runtimePath, "import", "plain") {
 		t.Fatalf("extension/after handling = %#v", result)
+	}
+}
+
+func TestPathResolverSkipsExplicitAfterRuntimePath(t *testing.T) {
+	root := t.TempDir()
+	after := filepath.Join(t.TempDir(), "after")
+	normal := t.TempDir()
+	from := filepath.Join(root, "main.vim")
+	writeResolverFile(t, from, "vim9script\nimport 'shared.vim' as shared\n")
+	writeResolverFile(t, filepath.Join(after, "import", "shared.vim"), "vim9script\n")
+	want := filepath.Join(normal, "import", "shared.vim")
+	writeResolverFile(t, want, "vim9script\n")
+	resolver, err := NewPathResolver(root, []string{after, normal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := syntax.Parse(mustResolverRead(t, from))
+	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
+	if result.Path != want || len(result.Candidates) != 1 || result.Candidates[0] != want {
+		t.Fatalf("explicit after runtime path = %#v, want %q", result, want)
+	}
+	if !resolver.Allows(filepath.Join(after, "import", "private.vim")) {
+		t.Fatal("explicit after path is not retained as a security boundary")
+	}
+}
+
+func TestPathResolverForRootsUsesFirstRootAndAllowsAllRoots(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	from := filepath.Join(second, "plugin", "main.vim")
+	target := filepath.Join(second, "plugin", "lib.vim")
+	writeResolverFile(t, from, "vim9script\nimport './lib.vim' as lib\n")
+	writeResolverFile(t, target, "vim9script\n")
+	resolver, err := NewPathResolverForRoots([]string{"", filepath.Join(first, "missing"), first, second}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := syntax.Parse(mustResolverRead(t, from))
+	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
+	if result.Path != target || len(result.Candidates) != 1 {
+		t.Fatalf("second-root relative import = %#v, want %q", result, target)
+	}
+	if result := resolver.ResolveSource("", "source.vim"); len(result.Candidates) != 1 || result.Candidates[0] != filepath.Join(first, "source.vim") {
+		t.Fatalf("source root = %#v, want first root %q", result, first)
+	}
+	for _, path := range []string{filepath.Join(first, "missing.vim"), filepath.Join(second, "missing.vim")} {
+		if !resolver.Allows(path) {
+			t.Fatalf("workspace missing path %q is not allowed", path)
+		}
+	}
+	if _, err := NewPathResolverForRoots([]string{"", filepath.Join(first, "not-a-root")}, nil); !errors.Is(err, ErrResolverRoot) {
+		t.Fatalf("invalid roots error = %v, want ErrResolverRoot", err)
+	}
+}
+
+func TestPathResolverAllowsMissingPathsAndRejectsEscapingSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink targets are not portable on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	resolver, err := NewPathResolver(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolver.Allows(filepath.Join(root, "not-created", "file.vim")) {
+		t.Fatal("missing in-root path is not allowed")
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "outside")); err != nil {
+		t.Fatal(err)
+	}
+	if resolver.Allows(filepath.Join(root, "outside", "missing.vim")) {
+		t.Fatal("missing path through escaping symlink is allowed")
+	}
+	if resolver.Allows(filepath.Join(outside, "file.vim")) {
+		t.Fatal("outside path is allowed")
 	}
 }
 
