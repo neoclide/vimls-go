@@ -444,6 +444,9 @@ Commit `d32d420` migrated both missing-`endenum` variants. A strict phase audit
 then removed six function cases that require scope/type resolution or dynamic
 unknown-command lookup. The authoritative syntax split is therefore 989
 migrated, zero ready, and 33 pending-fix.
+Commit `1b34e68` migrated both lambda return-type spacing variants. The
+authoritative syntax split is therefore 991 migrated, zero ready, and 31
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1519,7 +1522,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 140 migrated and 33 pending-fix. In the
+Group D contains 173 syntax variants: 142 migrated and 31 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1674,7 +1677,7 @@ E1065 M ready: 398:8465/script
 E1068 M ready: 426:8986/script,434:9120/script,441:9237/script,2495:56457/script,2885:66191/def
 E1068 P recovery: 781:16158/vim9-script
 E1069 M ready: 1157:24812/script,2441:54782/script,2483:56005/script,2485:56148/script,2505:56703/script,2886:66262/def,2888:66507/def
-E1069 P missing: 1695:37074/{def|vim9-script}
+E1069 M missing: 1695:37074/{def|vim9-script}
 E1077 P mapping: 2484:56080/script
 E110 M ready: 2086:46156/def,2087:46235/def
 E1151 M mapping: 373:8000/script
@@ -1726,6 +1729,11 @@ The function-scope duplicate at line 2123 and unknown type names at lines 645,
 at line 4728 is also excluded: unknown user or future commands must remain
 opaque. The postfix optional marker at line 2077 remains in scope because its
 placement is invalid type grammar independent of name resolution.
+
+Commit `1b34e68` migrates `1695:37074/{def,vim9-script}`. The lambda parser
+reports E1069 on a return-type colon whose following byte is not whitespace,
+while retaining the parameter, parsed return type, arrow, body, and next
+physical command.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
