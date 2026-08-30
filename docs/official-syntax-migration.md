@@ -414,6 +414,9 @@ Commit `7fcd4d2` migrated both malformed lambda slice-endpoint variants, and
 commit `1779234` migrated the already-ready enum header-separator variant. The
 authoritative parser split is therefore 968 migrated, zero ready, and 64
 pending-fix.
+Commit `3dd8912` migrated both mismatched function-closer variants. The
+authoritative parser split is therefore 970 migrated, zero ready, and 62
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1489,7 +1492,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 119 migrated and 64 pending-fix. In the
+Group D contains 183 syntax variants: 121 migrated and 62 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1607,8 +1610,8 @@ E1069 M ready: 1157:24812/script,2441:54782/script,2483:56005/script,2485:56148/
 E1069 P missing: 1695:37074/{def|vim9-script}
 E1077 P mapping: 2484:56080/script
 E110 M ready: 2086:46156/def,2087:46235/def
-E1151 P mapping: 373:8000/script
-E1152 P recovery: 382:8151/script
+E1151 M mapping: 373:8000/script
+E1152 M recovery: 382:8151/script
 E1157 M ready: 1689:36926/{def|vim9-script}
 E1160 P missing: 2034:44861/script
 E1170 P missing: 73:1788/def
@@ -1633,6 +1636,12 @@ E884 P mapping: 3740:85793/script
 
 Authority is `src/vim9expr.c`, `src/vim9type.c`, `src/vim9cmds.c`,
 `src/userfunc.c`, `src/vim9class.c`, `src/tuple.c`, and `src/errors.h`.
+
+Commit `3dd8912` recognizes `endfunction` against an active `def` as E1151 and
+`enddef` against an active legacy `function` as E1152. The mismatched closer is
+attached to the active block for recovery; its later real closer and outer
+blocks remain in the command and block trees without a same-line generic
+missing/unexpected-end cascade.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
