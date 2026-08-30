@@ -1,9 +1,15 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"io"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+
+	"go.lsp.dev/protocol"
 )
 
 func TestParseTargetVersion(t *testing.T) {
@@ -77,18 +83,105 @@ func TestTargetVersionFromOptions(t *testing.T) {
 func TestRuntimepathFromOptions(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
-	paths, warning := runtimepathFromOptions([]byte(`{"runtimepath":["` + first + `","` + second + `","` + first + `"]}`))
-	if warning != "" || len(paths) != 2 || paths[0] != filepath.Clean(first) || paths[1] != filepath.Clean(second) {
-		t.Fatalf("runtimepath = %#v, warning = %q", paths, warning)
+	paths, configured, warning := runtimepathFromOptions([]byte(`{"runtimepath":["` + second + `","` + first + `","` + second + `"]}`))
+	if warning != "" || !configured || len(paths) != 2 || paths[0] != filepath.Clean(second) || paths[1] != filepath.Clean(first) {
+		t.Fatalf("runtimepath = %#v, configured = %v, warning = %q", paths, configured, warning)
 	}
 	for _, raw := range []any{
 		[]byte(`{"runtimepath":"` + first + `"}`),
 		[]byte(`{"runtimepath":["` + first + `",1]}`),
 		[]byte(`[]`),
 	} {
-		if paths, warning := runtimepathFromOptions(raw); len(paths) != 0 || warning == "" {
+		if paths, _, warning := runtimepathFromOptions(raw); len(paths) != 0 || warning == "" {
 			t.Fatalf("invalid runtimepath %s = %#v, warning = %q", raw, paths, warning)
 		}
+	}
+	if paths, configured, warning := runtimepathFromOptions([]byte(`{"runtimepath":[]}`)); len(paths) != 0 || !configured || warning != "" {
+		t.Fatalf("empty configured runtimepath = %#v, %v, %q", paths, configured, warning)
+	}
+	if paths, configured, warning := runtimepathFromOptions([]byte(`{}`)); len(paths) != 0 || configured || warning != "" {
+		t.Fatalf("absent runtimepath = %#v, %v, %q", paths, configured, warning)
+	}
+}
+
+func TestRuntimeDirectoriesFromVimOutputAndEnvironment(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+	output := []byte(`["` + first + `","` + missing + `","` + second + `","` + first + `"]`)
+	paths, err := runtimeDirectoriesFromVimOutput(output)
+	if err != nil || !reflect.DeepEqual(paths, []string{filepath.Clean(first), filepath.Clean(second)}) {
+		t.Fatalf("runtime directories = %#v, %v", paths, err)
+	}
+	for _, output := range [][]byte{nil, []byte(`null`), []byte(`{"runtimepath":[]}`), []byte("[]\nnoise")} {
+		paths, err := runtimeDirectoriesFromVimOutput(output)
+		if err == nil {
+			t.Fatalf("invalid Vim output %q accepted as %#v", output, paths)
+		}
+	}
+
+	t.Setenv("VIMRUNTIME", first)
+	paths, cause := runtimepathEnvironmentFallback(errors.New("query failed"))
+	if !reflect.DeepEqual(paths, []string{filepath.Clean(first)}) || cause == nil {
+		t.Fatalf("environment fallback = %#v, %v", paths, cause)
+	}
+}
+
+func TestCleanVimEnvironment(t *testing.T) {
+	environment := cleanVimEnvironment([]string{
+		"PATH=/bin", "VIMINIT=source bad.vim", "EXINIT=bad", "GVIMINIT=bad",
+		"VIM=/tmp/vim", "VIMRUNTIME=/tmp/runtime", "XDG_CONFIG_HOME=/tmp/config",
+		"LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8", "KEEP=value",
+	})
+	joined := strings.Join(environment, "\n")
+	for _, forbidden := range []string{"VIMINIT=", "EXINIT=", "GVIMINIT=", "VIM=", "VIMRUNTIME=", "XDG_CONFIG_HOME="} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("environment retained %q: %q", forbidden, joined)
+		}
+	}
+	for _, required := range []string{"PATH=/bin", "KEEP=value", "LC_ALL=C", "LANG=C"} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("environment omitted %q: %q", required, joined)
+		}
+	}
+	if count := strings.Count(joined, "LANG="); count != 1 {
+		t.Fatalf("LANG count = %d in %q", count, joined)
+	}
+}
+
+func TestInitializeDiscoversRuntimepathOnlyWhenAbsent(t *testing.T) {
+	discovered := t.TempDir()
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	calls := 0
+	instance.runtimepathFinder = func(context.Context) ([]string, error) {
+		calls++
+		return []string{discovered}, nil
+	}
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	paths := append([]string(nil), instance.runtimePaths...)
+	instance.workspaceMu.Unlock()
+	if calls != 1 || !reflect.DeepEqual(paths, []string{filepath.Clean(discovered)}) {
+		t.Fatalf("discovered runtimepath = %#v, calls = %d", paths, calls)
+	}
+
+	explicit := New(nil, nil, io.Discard)
+	t.Cleanup(explicit.stopAnalysis)
+	explicit.runtimepathFinder = func(context.Context) ([]string, error) {
+		t.Fatal("runtimepath finder called for an explicitly empty runtimepath")
+		return nil, nil
+	}
+	if _, err := explicit.Initialize(context.Background(), &protocol.InitializeParams{InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`))}); err != nil {
+		t.Fatal(err)
+	}
+	explicit.workspaceMu.Lock()
+	paths = append(paths[:0], explicit.runtimePaths...)
+	explicit.workspaceMu.Unlock()
+	if len(paths) != 0 {
+		t.Fatalf("explicit empty runtimepath = %#v", paths)
 	}
 }
 

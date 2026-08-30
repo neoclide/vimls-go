@@ -1,11 +1,17 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const DefaultTargetVersion = "9.1.0000"
@@ -101,9 +107,9 @@ func targetVersionFromOptions(raw any) (TargetVersion, bool, string) {
 	return version, true, ""
 }
 
-func runtimepathFromOptions(raw any) ([]string, string) {
+func runtimepathFromOptions(raw any) ([]string, bool, string) {
 	if raw == nil {
-		return nil, ""
+		return nil, false, ""
 	}
 	var options map[string]any
 	switch value := raw.(type) {
@@ -111,17 +117,17 @@ func runtimepathFromOptions(raw any) ([]string, string) {
 		options = value
 	case []byte:
 		if len(value) == 0 || string(value) == "null" {
-			return nil, ""
+			return nil, false, ""
 		}
 		if err := json.Unmarshal(value, &options); err != nil {
-			return nil, "vimls: initializationOptions must be an object; ignoring runtimepath"
+			return nil, false, "vimls: initializationOptions must be an object; ignoring runtimepath"
 		}
 	default:
-		return nil, "vimls: initializationOptions must be an object; ignoring runtimepath"
+		return nil, false, "vimls: initializationOptions must be an object; ignoring runtimepath"
 	}
 	rawPaths, exists := options["runtimepath"]
 	if !exists || rawPaths == nil {
-		return nil, ""
+		return nil, false, ""
 	}
 	var paths []string
 	switch values := rawPaths.(type) {
@@ -132,14 +138,122 @@ func runtimepathFromOptions(raw any) ([]string, string) {
 		for _, rawPath := range values {
 			path, ok := rawPath.(string)
 			if !ok {
-				return nil, "vimls: runtimepath must be an array of strings; ignoring runtimepath"
+				return nil, true, "vimls: runtimepath must be an array of strings; ignoring runtimepath"
 			}
 			paths = append(paths, path)
 		}
 	default:
-		return nil, "vimls: runtimepath must be an array of strings; ignoring runtimepath"
+		return nil, true, "vimls: runtimepath must be an array of strings; ignoring runtimepath"
 	}
-	return normalizeWorkspaceRoots(paths), ""
+	return normalizeRuntimePaths(paths), true, ""
+}
+
+const defaultRuntimepathTimeout = 2 * time.Second
+
+func discoverDefaultRuntimePaths(parent context.Context) ([]string, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, defaultRuntimepathTimeout)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, "vim",
+		"--clean", "-u", "NONE", "-U", "NONE", "-i", "NONE",
+		"--noplugin", "-n", "-es", "-X", "--not-a-term",
+		"-c", "0put =json_encode(globpath(&runtimepath, '', 0, 1))",
+		"-c", "1print",
+		"-c", "qa!",
+	)
+	command.Env = cleanVimEnvironment(os.Environ())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		return runtimepathEnvironmentFallback(fmt.Errorf("query installed Vim runtimepath: %w%s", err, vimStderrDetail(stderr.String())))
+	}
+	paths, unmarshalErr := runtimeDirectoriesFromVimOutput(stdout.Bytes())
+	if unmarshalErr != nil {
+		return runtimepathEnvironmentFallback(fmt.Errorf("decode installed Vim runtimepath: %w", unmarshalErr))
+	}
+	if len(paths) == 0 {
+		return runtimepathEnvironmentFallback(errors.New("installed Vim returned no existing runtime directories"))
+	}
+	return paths, nil
+}
+
+func runtimeDirectoriesFromVimOutput(output []byte) ([]string, error) {
+	output = bytes.TrimSpace(output)
+	if len(output) == 0 || output[0] != '[' {
+		return nil, errors.New("Vim runtimepath output is not a JSON array")
+	}
+	var paths []string
+	if err := json.Unmarshal(output, &paths); err != nil {
+		return nil, err
+	}
+	return existingRuntimeDirectories(paths), nil
+}
+
+func cleanVimEnvironment(environment []string) []string {
+	blocked := map[string]bool{
+		"EXINIT": true, "GVIMINIT": true, "LANG": true, "LC_ALL": true,
+		"VIM": true, "VIMINIT": true, "VIMRUNTIME": true, "XDG_CONFIG_HOME": true,
+	}
+	result := make([]string, 0, len(environment)+2)
+	for _, item := range environment {
+		name := item
+		if index := strings.IndexByte(item, '='); index >= 0 {
+			name = item[:index]
+		}
+		if blocked[strings.ToUpper(name)] {
+			continue
+		}
+		result = append(result, item)
+	}
+	return append(result, "LC_ALL=C", "LANG=C")
+}
+
+func existingRuntimeDirectories(paths []string) []string {
+	paths = normalizeRuntimePaths(paths)
+	result := paths[:0]
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err == nil && info.IsDir() {
+			result = append(result, path)
+		}
+	}
+	return result
+}
+
+func runtimepathEnvironmentFallback(cause error) ([]string, error) {
+	path := strings.TrimSpace(os.Getenv("VIMRUNTIME"))
+	if path == "" {
+		return nil, cause
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, cause
+	}
+	info, err := os.Stat(absolute)
+	if err != nil || !info.IsDir() {
+		return nil, cause
+	}
+	return []string{filepath.Clean(absolute)}, cause
+}
+
+func vimStderrDetail(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) > 512 {
+		value = value[:512]
+	}
+	return ": " + value
 }
 
 func targetVersionFromSettings(raw []byte, previous TargetVersion) (TargetVersion, string) {

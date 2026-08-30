@@ -94,29 +94,31 @@ type Server struct {
 	initialized              bool
 	watchWG                  sync.WaitGroup
 	workspaceConfiguration   bool
+	runtimepathFinder        func(context.Context) ([]string, error)
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {
 	target, _ := ParseTargetVersion(DefaultTargetVersion)
 	analysisContext, analysisCancel := context.WithCancel(context.Background())
 	return &Server{
-		input:           input,
-		output:          output,
-		log:             logOutput,
-		targetVersion:   target,
-		cancellations:   make(map[jsonrpc2.ID]context.CancelFunc),
-		documents:       workspace.NewDocuments(),
-		encoding:        text.UTF16,
-		exitCode:        make(chan int, 1),
-		analysisContext: analysisContext,
-		analysisCancel:  analysisCancel,
-		analysisWake:    make(chan struct{}, maxParallelAnalysis),
-		analysisPending: make(map[string]struct{}),
-		analysisRunning: make(map[string]struct{}),
-		parsed:          make(map[string]parsedDocument),
-		published:       make(map[string]bool),
-		workspaceIndex:  workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes),
-		workspaceFiles:  make(map[string]struct{}),
+		input:             input,
+		output:            output,
+		log:               logOutput,
+		targetVersion:     target,
+		cancellations:     make(map[jsonrpc2.ID]context.CancelFunc),
+		documents:         workspace.NewDocuments(),
+		encoding:          text.UTF16,
+		exitCode:          make(chan int, 1),
+		analysisContext:   analysisContext,
+		analysisCancel:    analysisCancel,
+		analysisWake:      make(chan struct{}, maxParallelAnalysis),
+		analysisPending:   make(map[string]struct{}),
+		analysisRunning:   make(map[string]struct{}),
+		parsed:            make(map[string]parsedDocument),
+		published:         make(map[string]bool),
+		workspaceIndex:    workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes),
+		workspaceFiles:    make(map[string]struct{}),
+		runtimepathFinder: discoverDefaultRuntimePaths,
 	}
 }
 
@@ -326,13 +328,22 @@ func implementedMethod(method string) bool {
 	}
 }
 
-func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
+func (s *Server) Initialize(ctx context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
 	encoding, protocolEncoding := negotiatePositionEncoding(params.Capabilities.General)
 	openClose := true
 	includeText := true
 	changeKind := protocol.TextDocumentSyncKindIncremental
 	targetVersion, targetOverride, targetWarning := targetVersionFromOptions([]byte(params.InitializationOptions))
-	runtimePaths, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
+	runtimePaths, runtimepathConfigured, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
+	if !runtimepathConfigured && s.runtimepathFinder != nil {
+		discovered, err := s.runtimepathFinder(ctx)
+		if len(discovered) > 0 {
+			runtimePaths = discovered
+		}
+		if err != nil {
+			s.logf("vimls: default runtimepath discovery: %v", err)
+		}
+	}
 	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 	prepareRename := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.Rename != nil && params.Capabilities.TextDocument.Rename.PrepareSupport != nil && *params.Capabilities.TextDocument.Rename.PrepareSupport
