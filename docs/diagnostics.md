@@ -86,6 +86,27 @@ Representative source evidence:
 - `src/testdir/test_vim9_expr.vim:4498-4499` distinguishes the long-name
   E1011/E117 pair and covers an ordinary missing function.
 
+## Runtime sign lookup: E155
+
+E155 means `Unknown sign: {name}`. The language server does not emit it from
+source alone because the result depends on Vim's mutable sign-definition
+registry. For example, Vim9 script converts the number in
+`sign_undefine([1])` to the sign name `"1"`; the call succeeds if that sign was
+defined earlier and reports E155 only when it is absent. Static analysis cannot
+choose between those states.
+
+A compiled `def` is different: its typed call rejects `list<number>` before
+consulting the registry and uses E1013. The analyzer retains that compile-time
+type diagnostic while leaving the script-level call unknown.
+
+Representative source evidence:
+
+- `src/errors.h:365-366` defines E155.
+- `src/sign.c:1129-1143` shows that E155 depends on `sign_find()` and the
+  current registry.
+- `src/testdir/test_vim9_builtin.vim:4299-4301` distinguishes E1013 in a `def`
+  from the registry-dependent E155 at script level.
+
 ## Function argument count: E118 and E119
 
 E118 and E119 predate Vim9 script, but Vim still uses them in both legacy Vim

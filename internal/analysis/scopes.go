@@ -2056,6 +2056,12 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						continue
 					}
 					if builtinArgumentMismatch(actual[index], expected) {
+						// At script level sign_undefine() converts each list item
+						// to a sign name and consults Vim's mutable sign registry.
+						// A def keeps the strict list<string> compile-time check.
+						if builtin.Name == "sign_undefine" && index == 0 && actual[index].Name == "list" && !scopeUsesDefTypeRules(scope) {
+							continue
+						}
 						// Vim9 script compilation reports the historical E118 when
 						// indexof() will pass more arguments than a statically known
 						// callback accepts. A def uses E176 for the same mismatch, so

@@ -233,6 +233,29 @@ func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeUnknownSignDependsOnRuntimeRegistry(t *testing.T) {
+	script := syntax.Parse("vim9script\nsign_undefine([1])\n")
+	for _, diagnostic := range Analyze(script).Diagnostics {
+		if diagnostic.Code == "vim/E155" || diagnostic.Code == "vim/E1013" {
+			t.Fatalf("runtime-dependent script sign diagnostic = %#v", diagnostic)
+		}
+	}
+
+	def := syntax.Parse("vim9script\ndef Check()\n  sign_undefine([1])\nenddef\n")
+	var got []syntax.Diagnostic
+	for _, diagnostic := range Analyze(def).Diagnostics {
+		if diagnostic.Code == "vim/E1013" {
+			got = append(got, diagnostic)
+		}
+		if diagnostic.Code == "vim/E155" {
+			t.Fatalf("def type mismatch reported runtime E155: %#v", diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Argument 1: type mismatch, expected string or list<string> but got list<number>" || def.Text(got[0].Span) != "[1]" {
+		t.Fatalf("def sign_undefine diagnostics = %#v", got)
+	}
+}
+
 func TestAnalyzeFunctionArgumentTypeDiagnostics(t *testing.T) {
 	source := "vim9script\ndef Filter(x: string, Cond: func(string): bool): bool\n  return Cond(x)\nenddef\ndef Defaults(one: string, two = 'foo', ...rest: list<string>)\nenddef\ndef Varargs(...args: list<string>)\nenddef\ndef F()\n  var Ref = (x: number, y: number) => x + y\n  Ref(1, 'lambda')\n  Ref(1, 2)\n  Filter('foo', (v) => v .. '^b')\n  Defaults('one', 22)\n  Defaults('one', 'two', 123)\n  Varargs(1)\n  Varargs('one', 2)\nenddef\n"
 	var diagnostics []syntax.Diagnostic
