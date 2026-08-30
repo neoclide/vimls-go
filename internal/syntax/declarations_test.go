@@ -1172,6 +1172,25 @@ func TestVim9LowercaseEnumNameReportsE1415(t *testing.T) {
 	}
 }
 
+func TestVim9InterfacePublicMemberReportsE1387(t *testing.T) {
+	for _, member := range []string{
+		"public static var num: number",
+		"public final num: number = 1",
+		"public def Foo()\n  enddef",
+	} {
+		source := "vim9script\ninterface A\n  " + member + "\nendinterface\nvar after = 1\n"
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1387" || file.Diagnostics[0].Message != "public variable not supported in an interface" || file.Text(file.Diagnostics[0].Span) != "public" {
+			t.Fatalf("member=%q diagnostics=%#v", member, file.Diagnostics)
+		}
+		last := file.Commands[len(file.Commands)-1]
+		if last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+			t.Fatalf("member=%q commands=%#v", member, file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+}
+
 func TestVim9InterfaceConstReportsE1410(t *testing.T) {
 	file := Parse("vim9script\ninterface A\n  const foo: number = 10\nendinterface\n")
 	var got []Diagnostic

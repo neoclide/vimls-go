@@ -37,6 +37,7 @@ func buildBlocks(file *File) {
 			catchAll[blockIndex] = true
 		}
 	}
+commands:
 	for commandIndex := range file.Commands {
 		command := &file.Commands[commandIndex]
 		defBlock := -1
@@ -149,14 +150,31 @@ func buildBlocks(file *File) {
 				}
 			}
 			if file.Blocks[blockIndex].Kind == BlockInterface && command.Canonical != "endclass" {
+				abstractModifier := false
 				for _, modifier := range command.Modifiers {
 					if modifier.Name == "abstract" {
+						abstractModifier = true
 						command.Block = blockIndex
 						command.detailsOpaque = true
 						file.Diagnostics = append(file.Diagnostics, Diagnostic{
 							Code: "vim/E1404", Message: "Abstract cannot be used in an interface", Span: modifier.Span,
 						})
 						break
+					}
+				}
+				if !abstractModifier {
+					for _, modifier := range command.Modifiers {
+						if modifier.Name == "public" {
+							command.Block = blockIndex
+							command.detailsOpaque = true
+							file.Diagnostics = append(file.Diagnostics, Diagnostic{
+								Code: "vim/E1387", Message: "public variable not supported in an interface", Span: modifier.Span,
+							})
+							if command.Canonical == "def" {
+								interfaceMethod[blockIndex] = true
+							}
+							continue commands
+						}
 					}
 				}
 				if command.Canonical == "final" || command.Canonical == "const" {
