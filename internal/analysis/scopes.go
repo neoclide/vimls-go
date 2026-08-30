@@ -605,6 +605,17 @@ func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bo
 	})
 }
 
+func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnostic, bool) {
+	switch typ.Name {
+	case "func", "partial":
+		return syntax.Diagnostic{Code: "vim/E729", Message: "Using a Funcref as a String", Span: span}, true
+	case "list":
+		return syntax.Diagnostic{Code: "vim/E730", Message: "Using a List as a String", Span: span}, true
+	default:
+		return syntax.Diagnostic{}, false
+	}
+}
+
 // collectOperatorDiagnostics keeps compiled Vim9 operator errors distinct
 // from the historical conversion errors used by Legacy and script-level Vim9.
 // Unknown values remain deliberately opaque.
@@ -704,18 +715,34 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 				if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&
 					!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
-					operand := expression.Children[0]
-					left, right := result.TypeOf(operand), result.TypeOf(expression.Children[1])
-					if left.Name != "func" && left.Name != "partial" {
-						operand = expression.Children[1]
-						if right.Name != "func" && right.Name != "partial" {
-							operand = nil
-						}
+					left, right := expression.Children[0], expression.Children[1]
+					diagnostic, ok := stringConversionDiagnostic(result.TypeOf(left), left.Span)
+					if !ok {
+						diagnostic, ok = stringConversionDiagnostic(result.TypeOf(right), right.Span)
 					}
-					if operand != nil {
-						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-							Code: "vim/E729", Message: "Using a Funcref as a String", Span: operand.Span,
-						})
+					if ok {
+						result.Diagnostics = append(result.Diagnostics, diagnostic)
+					}
+				}
+			}
+			if expression.Kind == syntax.ExpressionDictionary && !(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
+				for keyIndex := 0; keyIndex+1 < len(expression.Children); keyIndex += 2 {
+					key := expression.Children[keyIndex]
+					value := key
+					if command.Dialect == syntax.Vim9 {
+						if key.Kind != syntax.ExpressionList || len(key.Children) != 1 {
+							continue
+						}
+						value = key.Children[0]
+					}
+					valueType := resolvedExpressionType(result, expressionScope, value)
+					if value.Kind == syntax.ExpressionList {
+						valueType = ValueType{Name: "list"}
+					}
+					if valueType.Name == "list" {
+						diagnostic, _ := stringConversionDiagnostic(valueType, value.Span)
+						result.Diagnostics = append(result.Diagnostics, diagnostic)
+						break
 					}
 				}
 			}
@@ -912,6 +939,11 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		target := expression.Children[0]
 		if !isReadOnlyVimVariableTarget(target) {
 			if expected := assignmentTargetType(result, scope, target); !isUnknownType(expected) {
+				if !scopeUsesDefTypeRules(scope) && expected.Name == "string" && target.Kind == syntax.ExpressionIdentifier && strings.HasPrefix(target.Value, "&") && result.TypeOf(expression.Children[1]).Name == "list" {
+					diagnostic, _ := stringConversionDiagnostic(result.TypeOf(expression.Children[1]), expression.Children[1].Span)
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
+					return
+				}
 				appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
 			}
 		}
@@ -2349,6 +2381,11 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						// def-local callback checks on their existing E1013 path.
 						if builtin.Name == "indexof" && index == 1 && !scopeContainsDef(scope) && actual[index].Name == "func" && actual[index].Return != nil && actual[index].Return.Name == "void" {
 							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1031", Message: "Cannot use void value", Span: argument.Span})
+							continue
+						}
+						if !scopeUsesDefTypeRules(scope) && strings.TrimSuffix(checker, "_mod") == "arg_string_or_func" && actual[index].Name == "list" {
+							diagnostic, _ := stringConversionDiagnostic(actual[index], argument.Span)
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
 							continue
 						}
 						if !scopeUsesDefTypeRules(scope) {

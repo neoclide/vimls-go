@@ -369,6 +369,77 @@ func TestAnalyzeFuncrefAsStringDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeListAsStringDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script concatenation",
+			source: "vim9script\nvar value = 'a' .. [1]\n",
+			span:   "[1]",
+		},
+		{
+			name:   "legacy concatenation",
+			source: "let value = 'a' . [1]\n",
+			span:   "[1]",
+		},
+		{
+			name:   "builtin string or function argument",
+			source: "vim9script\nsearch('a', '', 9, 0, [0])\n",
+			span:   "[0]",
+		},
+		{
+			name:   "computed Dictionary key",
+			source: "vim9script\nvar value = {[[1, 2]]: 0}\n",
+			span:   "[1, 2]",
+		},
+		{
+			name:   "typed computed Dictionary key",
+			source: "vim9script\nvar key: list<number> = [1]\nvar value = {[key]: 0}\n",
+			span:   "key",
+		},
+		{
+			name:   "string option assignment",
+			source: "vim9script\n&grepprg = [343]\n",
+			span:   "[343]",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E730" {
+					got = append(got, diagnostic)
+				}
+				if (diagnostic.Code == "vim/E1012" || diagnostic.Code == "vim/E1013") && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("generic type mismatch retained for %q: %#v", test.span, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a List as a String" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E730 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef F()\n  var value = 'a' .. [1]\nenddef\n")
+	result := Analyze(file)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E730" {
+			t.Fatalf("compiled def retained E730: %#v", result.Diagnostics)
+		}
+	}
+
+	file = syntax.Parse("vim9script\nvar key: list<number> = [1]\nvar value = {key: 0}\n")
+	result = Analyze(file)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E730" {
+			t.Fatalf("Vim9 literal key used a same-named variable type: %#v", result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

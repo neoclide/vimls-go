@@ -520,3 +520,29 @@ Representative source evidence:
   concatenation.
 - `src/typval.c:1219-1224` maps Funcref and Partial string conversion to E729,
   and `src/errors.h:1859-1860` defines the exact message.
+
+## Using a List as a String: E730
+
+E730 means `Using a List as a String`. Legacy Vim script and the Vim9 script
+evaluator use it when an operation implicitly requires a String but receives a
+List.
+
+Analysis reports E730 for statically known Lists in Legacy `.` or Vim9 `..`
+concatenation, Vim9 computed Dictionary keys, Vim9 string-option assignments,
+and the String-or-Funcref argument of `search()` and `searchpos()`. It selects
+the List expression and leaves dynamically typed values unknown. A compiled
+Vim9 `def` does not receive E730: Vim uses E1105 for concatenation and computed
+Dictionary keys, E1012 for option assignment, and E1013 for the builtin
+argument mismatch.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:1944-1948` and `2048-2049` distinguish E1105
+  in a compiled `def` from E730 at Vim9 script level for concatenation.
+- `src/testdir/test_vim9_expr.vim:3152-3154` covers a List-valued computed
+  Dictionary key, while `src/testdir/test_vim9_expr.vim:4172-4174` covers a
+  string-option assignment.
+- `src/testdir/test_vim9_builtin.vim:3831-3833` and `3984-3986` distinguish
+  E1013 in a compiled `def` from E730 for `search()` and `searchpos()`.
+- `src/typval.c:1223-1224` maps List string conversion to E730, and
+  `src/errors.h:1861-1862` defines the exact message.
