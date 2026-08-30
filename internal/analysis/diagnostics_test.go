@@ -651,6 +651,97 @@ func TestAnalyzeListLogicalDiagnosticsUseContextualVimCodes(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1023NumberAsBoolDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, message string
+	}{
+		{
+			name: "script logical left", source: "vim9script\nvar value = 3 || false\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+		{
+			name: "script logical right", source: "vim9script\nvar value = false || 3\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+		{
+			name: "script numeric false evaluates right", source: "vim9script\nvar value = 0 || 3\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+		{
+			name: "script numeric true evaluates right", source: "vim9script\nvar value = 1 && 3\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+		{
+			name: "script condition", source: "vim9script\nif 3\nendif\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+		{
+			name: "compiled condition", source: "vim9script\ndef F()\n  if 3\n  endif\nenddef\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+		{
+			name: "script logical continuation", source: "vim9script\nif true\n    && 3\nendif\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+		{
+			name: "hex condition", source: "vim9script\nif 0x02\nendif\n",
+			span: "0x02", message: "Using a Number as a Bool: 2",
+		},
+		{
+			name: "negative condition", source: "vim9script\nif -2\nendif\n",
+			span: "-2", message: "Using a Number as a Bool: -2",
+		},
+		{
+			name: "ternary condition", source: "vim9script\nvar value = 3 ? 'yes' : 'no'\n",
+			span: "3", message: "Using a Number as a Bool: 3",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1023" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1023 diagnostics = %#v, want one on %q; syntax diagnostics = %#v", got, test.span, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"if 3\nendif\n",
+		"vim9script\nif 0\nendif\n",
+		"vim9script\nif 1\nendif\n",
+		"vim9script\nvar value = true || 3\n",
+		"vim9script\nvar value = false && 3\n",
+		"vim9script\nvar value = 1 || 3\n",
+		"vim9script\nvar value = 0 && 3\n",
+		"vim9script\nvar condition = 3\nif condition\nendif\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1023" {
+				t.Fatalf("source %q unexpectedly received E1023: %#v", source, diagnostic)
+			}
+		}
+	}
+
+	compiled := Analyze(syntax.Parse("vim9script\ndef F()\n  var value = 3 || false\nenddef\n"))
+	foundE1012 := false
+	for _, diagnostic := range compiled.Diagnostics {
+		if diagnostic.Code == "vim/E1012" {
+			foundE1012 = true
+		}
+		if diagnostic.Code == "vim/E1023" {
+			t.Fatalf("compiled logical expression retained E1023: %#v", compiled.Diagnostics)
+		}
+	}
+	if !foundE1012 {
+		t.Fatalf("compiled logical diagnostics = %#v, want E1012", compiled.Diagnostics)
+	}
+}
+
 func TestAnalyzeFloatModuloDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

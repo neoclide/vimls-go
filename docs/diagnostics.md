@@ -852,3 +852,30 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   a name but sees another non-ending token; an empty expression instead uses
   E1143.
 - `src/errors.h:2672-2673` defines the exact message template.
+
+## Using a Number as a Bool: E1023
+
+Vim9 permits the Numbers `0` and `1` where a Boolean is expected, but rejects
+every other Number with E1023. Analysis reports the error when the numeric
+value is statically known in an `if`, `elseif`, or `while` condition, a ternary
+condition, or an evaluated top-level Vim9 `&&` or `||` operand. The invalid
+numeric expression is selected and the message contains its decimal value.
+
+Logical operands are checked left-to-right and the right operand is checked
+only when a statically known left operand evaluates it. Inside a compiled
+`def`, invalid Number operands of `&&` and `||` remain the compile-time E1012
+type mismatch; a direct condition such as `if 3` uses E1023 in both a `def` and
+top-level Vim9 script. Legacy numeric truthiness remains unchanged. Dynamic
+values stay unknown rather than being guessed.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_expr.vim:683-697` distinguishes E1012 in compiled
+  logical expressions from E1023 in script evaluation and uses E1023 for
+  `if 3` in both contexts.
+- `src/testdir/test_vim9_expr.vim:829-846` covers left-to-right `&&`
+  conversion and its compiled/script error-code split.
+- `runtime/doc/vim9.txt:2501-2514` states that only 0 and 1 are accepted as
+  Numbers used as Booleans.
+- `src/typval.c:205-223` implements the Vim9 value check, and
+  `src/errors.h:2690-2693` defines the exact E1023 and E1024 messages.

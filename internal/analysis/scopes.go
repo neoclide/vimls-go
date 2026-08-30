@@ -672,22 +672,64 @@ func numericConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagno
 	}
 }
 
+func staticNumberValue(expression *syntax.Expression) (int64, bool) {
+	if expression == nil {
+		return 0, false
+	}
+	switch expression.Kind {
+	case syntax.ExpressionParenthesized:
+		if len(expression.Children) == 1 {
+			return staticNumberValue(expression.Children[0])
+		}
+	case syntax.ExpressionUnary:
+		if len(expression.Children) == 1 && (expression.Value == "+" || expression.Value == "-") {
+			value, ok := staticNumberValue(expression.Children[0])
+			if ok && expression.Value == "-" {
+				value = -value
+			}
+			return value, ok
+		}
+	case syntax.ExpressionNumber:
+		if isFloatLiteral(expression.Value) {
+			return 0, false
+		}
+		literal := strings.ReplaceAll(expression.Value, "'", "")
+		value, err := strconv.ParseInt(literal, 0, 64)
+		if err != nil {
+			value, err = strconv.ParseInt(literal, 10, 64)
+		}
+		return value, err == nil
+	}
+	return 0, false
+}
+
+func numberAsBoolDiagnostic(expression *syntax.Expression) (syntax.Diagnostic, bool) {
+	value, ok := staticNumberValue(expression)
+	if !ok || value == 0 || value == 1 {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{
+		Code: "vim/E1023", Message: "Using a Number as a Bool: " + strconv.FormatInt(value, 10), Span: expression.Span,
+	}, true
+}
+
 func logicalRightOperandIsEvaluated(expression *syntax.Expression) bool {
 	if expression == nil || expression.Kind != syntax.ExpressionBinary || len(expression.Children) < 2 {
 		return false
 	}
 	left := expression.Children[0]
-	if left == nil || left.Kind != syntax.ExpressionIdentifier {
-		return false
+	if value, ok := staticNumberValue(left); ok {
+		return expression.Value == "||" && value == 0 || expression.Value == "&&" && value == 1
 	}
-	switch expression.Value {
-	case "||":
-		return left.Value == "false" || left.Value == "v:false"
-	case "&&":
-		return left.Value == "true" || left.Value == "v:true"
-	default:
-		return false
+	if left != nil && left.Kind == syntax.ExpressionIdentifier {
+		switch expression.Value {
+		case "||":
+			return left.Value == "false" || left.Value == "v:false"
+		case "&&":
+			return left.Value == "true" || left.Value == "v:true"
+		}
 	}
+	return false
 }
 
 func extendArgumentMismatchIndex(actual []ValueType) int {
@@ -834,6 +876,16 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				if expression.Kind == syntax.ExpressionBinary && (op == "&&" || op == "||") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&
 					!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 					left, right := expression.Children[0], expression.Children[1]
+					if command.Dialect == syntax.Vim9 {
+						diagnostic, ok := numberAsBoolDiagnostic(left)
+						if !ok && logicalRightOperandIsEvaluated(expression) {
+							diagnostic, ok = numberAsBoolDiagnostic(right)
+						}
+						if ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
+							return
+						}
+					}
 					operand := left
 					if result.TypeOf(left).Name != "list" {
 						operand = nil
@@ -880,6 +932,11 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			}
 			if expression.Kind == syntax.ExpressionTernary && len(expression.Children) == 3 && !expressionContainsMissing(expression) {
 				condition := expression.Children[0]
+				if command.Dialect == syntax.Vim9 {
+					if diagnostic, ok := numberAsBoolDiagnostic(condition); ok {
+						result.Diagnostics = append(result.Diagnostics, diagnostic)
+					}
+				}
 				switch result.TypeOf(condition).Name {
 				case "float":
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -1155,10 +1212,17 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 }
 
 func collectConditionTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, command *syntax.Command) {
-	if command == nil || !scopeUsesDefTypeRules(scope) || command.Canonical != "if" && command.Canonical != "elseif" && command.Canonical != "while" || len(command.Expressions) == 0 {
+	if command == nil || command.Dialect != syntax.Vim9 || command.Canonical != "if" && command.Canonical != "elseif" && command.Canonical != "while" || len(command.Expressions) == 0 {
 		return
 	}
 	condition := command.Expressions[0]
+	if diagnostic, ok := numberAsBoolDiagnostic(condition); ok {
+		result.Diagnostics = append(result.Diagnostics, diagnostic)
+		return
+	}
+	if !scopeUsesDefTypeRules(scope) {
+		return
+	}
 	actual := result.TypeOf(condition)
 	if isUnknownType(actual) || actual.Name == "bool" || actual.Name == "number" {
 		return
