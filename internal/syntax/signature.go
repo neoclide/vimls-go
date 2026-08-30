@@ -413,6 +413,12 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 			Span: Span{Start: command.Argument.Start + start, End: command.Argument.Start + nameEnd},
 		})
 	}
+	if defSignature && parameter.Variadic && equals >= 0 {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1160", Message: "cannot use a default for variable arguments",
+			Span: Span{Start: command.Argument.Start + equals, End: command.Argument.Start + end},
+		})
+	}
 	if defSignature && typed {
 		if colon+1 >= end || !isExpressionSpace(source[colon+1]) {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
