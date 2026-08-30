@@ -368,6 +368,10 @@ func parseTypeAlias(file *File, command *Command) {
 	} else {
 		var diagnostics []Diagnostic
 		typeNode, diagnostics = parseTypeAt(source[typeStart:typeEnd], typeSpan.Start)
+		if command.Dialect == Vim9 && len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-type" {
+			diagnostics[0].Code = "vim/E488"
+			diagnostics[0].Message = "trailing characters"
+		}
 		if !nameDiagnostic {
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		}

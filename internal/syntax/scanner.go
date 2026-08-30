@@ -2915,6 +2915,10 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		command.Expressions = append(command.Expressions, expression)
 		if command.Dialect == Vim9 {
 			diagnostics = mapIncompleteExpressionDiagnostics(file, command, diagnostics)
+			if command.Canonical == "elseif" && len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-expression" {
+				diagnostics[0].Code = "vim/E488"
+				diagnostics[0].Message = "trailing characters"
+			}
 		}
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
 	case "return", "throw", "call", "eval", "defer", "caddexpr", "cexpr", "cgetexpr", "laddexpr", "lexpr", "lgetexpr":
