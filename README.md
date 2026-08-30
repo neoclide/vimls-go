@@ -87,6 +87,8 @@ GOPROXY=off GOSUMDB=off make test-official
 See [the roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
 [language support contract](docs/language-support.md), and
 [test strategy](docs/testing.md). Semantics derived from Vim's tests are
-recorded in the [static diagnostic reference](docs/diagnostics.md). The pinned
-Vim failure-phase research and implementation queue live in the
+recorded in the [static diagnostic reference](docs/diagnostics.md). Remaining
+version-pinned research about historical error codes used by Vim9 is retained
+in the [pre-E1000 research appendix](docs/vim9-errors-under-1000.md). The
+pinned Vim failure-phase research and implementation queue live in the
 [official syntax migration ledger](docs/official-syntax-migration.md).

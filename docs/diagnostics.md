@@ -8,6 +8,35 @@ values remain `unknown`.
 
 The evidence below is pinned to Vim 9.2.1015.
 
+## Read-only variables: E46
+
+E46 is Vim's historical read-only-binding error. The analyzer reports
+`Cannot change read-only variable "{name}"` for a direct assignment to a
+known read-only `v:` value in Legacy Vim script, Vim9 script, or a compiled
+`def`. It also reports E46 for direct `=` rebinding of a lexically resolved
+top-level Vim9 `const` or `final`, and for direct assignment to a Legacy
+function argument such as `a:value` or `a:000`.
+
+Immutability does not imply E46 in every context. Direct rebinding of a local
+`const` or `final` inside a compiled `def` uses E1018. Mutating a locked value
+or a fixed container can use E741 or E742, and member, index, compound, or
+dynamically resolved assignments remain on their own diagnostic paths. The
+analyzer therefore requires both a statically resolved binding and the exact
+assignment context before emitting E46.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:2545-2549` uses E46 for assignments to
+  `v:true`, `v:false`, `v:null`, and `v:none` in both a `def` and Vim9 script.
+- `src/testdir/test_vim9_script.vim:1814` uses E46 when a top-level Vim9
+  `const` is rebound.
+- `src/testdir/test_vim9_script.vim:3090-3094` distinguishes E1018 in a
+  compiled `def` from E46 at Vim9 script level.
+- `src/testdir/test_listdict.vim:974-977` distinguishes rebinding the Legacy
+  variadic argument list (`a:000`, E46) from mutating its fixed contents
+  (E742).
+- `src/errors.h:124-126` defines the unnamed and named E46 messages.
+
 ## Unknown options: E113 and E518
 
 Vim uses different native error codes for an unknown option according to the
