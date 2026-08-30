@@ -147,6 +147,39 @@ func TestAnalyzeTypeMismatchDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeConcatenatingAssignmentRequiresStringTarget(t *testing.T) {
+	source := `vim9script
+def F()
+  var anr = 4
+  anr ..= "text"
+  &ts ..= "xxx"
+  var text = "ok"
+  text ..= "text"
+  var values = [1]
+  values[0] ..= "text"
+  var dictionary = {key: 1}
+  dictionary.key ..= "text"
+  s:dynamic ..= "text"
+enddef
+`
+	file := syntax.Parse(source)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E1019" {
+			got = append(got, diagnostic)
+		}
+	}
+	want := []string{"anr", "&ts"}
+	if len(got) != len(want) {
+		t.Fatalf("E1019 diagnostics = %#v, want targets %v", got, want)
+	}
+	for index, target := range want {
+		if got[index].Message != "Can only concatenate to string" || file.Text(got[index].Span) != target {
+			t.Fatalf("E1019 diagnostic[%d] = %#v (%q), want target %q", index, got[index], file.Text(got[index].Span), target)
+		}
+	}
+}
+
 func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 	source := "vim9script\n" +
 		"set ts=4 tabstop=4 tabs=4 nofutureoption t_ZZ=terminal\n" +

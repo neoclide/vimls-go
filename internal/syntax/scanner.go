@@ -2971,6 +2971,15 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		declaration.Target, diagnostics = parseDeclarationTarget(file, command, declaration, left, diagnostics)
 		declaration.Assignment = assignment
 		declaration.Initializer = expression
+		// A compound operator cannot initialize a new Vim9 variable.  Keep
+		// this check on the declaration path so ordinary assignments (and
+		// legacy :let) retain their existing behavior.  Heredoc assignments
+		// are consumed before this path and are represented by =<<.
+		if command.Dialect == Vim9 && command.Canonical == "var" && file.Text(assignment) != "=" && file.Text(assignment) != "=<<" {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1020", Message: "Cannot use an operator on a new variable: " + file.Text(declaration.Name), Span: declaration.Name,
+			})
+		}
 		diagnoseInvalidInterfaceDeclaration(file, command, declaration)
 		command.Declaration = declaration
 		command.Expressions = append(command.Expressions, &Expression{

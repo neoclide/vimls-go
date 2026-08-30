@@ -221,6 +221,19 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 			appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
 		}
 	}
+	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "..=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+		target := expression.Children[0]
+		// Vim9's concatenating assignment is only valid for a direct string
+		// target.  Keep compound member/index assignments opaque: their
+		// container type does not prove the assignable member's type.
+		if target != nil && target.Kind == syntax.ExpressionIdentifier {
+			if targetType := assignmentTargetType(result, scope, target); !isUnknownType(targetType) && targetType.Name != "string" {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1019", Message: "Can only concatenate to string", Span: target.Span,
+				})
+			}
+		}
+	}
 	for _, child := range expression.Children {
 		collectAssignmentTypeMismatchDiagnostics(result, scope, child)
 	}

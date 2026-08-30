@@ -841,3 +841,64 @@ func TestVim9E1016ScopeGuards(t *testing.T) {
 	assertFileSpans(t, rootEnvironment)
 	assertFileSpans(t, constants)
 }
+
+func TestVim9E1020CompoundDeclarationAssignment(t *testing.T) {
+	tests := []struct {
+		name, source string
+	}{
+		{
+			name:   "def",
+			source: "def Build()\n  var xnr += 4\n  var after = 2\nenddef\n",
+		},
+		{
+			name:   "script",
+			source: "vim9script\nvar xnr += 4\nvar after = 2\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1020" || file.Diagnostics[0].Message != "Cannot use an operator on a new variable: xnr" || file.Text(file.Diagnostics[0].Span) != "xnr" {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			var declarationCommand *Command
+			for index := range file.Commands {
+				if file.Commands[index].Canonical == "var" {
+					declarationCommand = &file.Commands[index]
+					break
+				}
+			}
+			if declarationCommand == nil || declarationCommand.Declaration == nil || declarationCommand.Declaration.Target == nil || declarationCommand.Declaration.Initializer == nil {
+				t.Fatalf("declaration = %#v", declarationCommand)
+			}
+			declaration := declarationCommand.Declaration
+			if file.Text(declaration.Assignment) != "+=" || file.Text(declaration.Target.Span) != "xnr" || declaration.Initializer.Value != "4" {
+				t.Fatalf("declaration = %#v", declaration)
+			}
+			recovered := false
+			for _, command := range file.Commands {
+				if command.Canonical == "var" && command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+					recovered = true
+					break
+				}
+			}
+			if !recovered {
+				t.Fatalf("recovery commands = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
+func TestCompoundAssignmentDoesNotReportE1020ForExistingOrLegacyVariables(t *testing.T) {
+	vim9 := Parse("vim9script\nvar x = 1\nx += 4\nvar after = 2\n")
+	if hasDiagnostic(vim9, "vim/E1020") || len(vim9.Diagnostics) != 0 || len(vim9.Commands) != 4 {
+		t.Fatalf("existing-variable assignment = %#v", vim9)
+	}
+	legacy := (LegacyParser{}).Parse("let x = 1\nlet x += 4\nlet after = 2\n")
+	if hasDiagnostic(legacy, "vim/E1020") || len(legacy.Diagnostics) != 0 || len(legacy.Commands) != 3 {
+		t.Fatalf("legacy assignment = %#v", legacy)
+	}
+	assertFileSpans(t, vim9)
+	assertFileSpans(t, legacy)
+}
