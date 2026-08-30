@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -100,7 +101,7 @@ func TestRuntimepathFromOptions(t *testing.T) {
 	}
 }
 
-func TestDefaultRuntimePathsUseFirstInstalledRootAndNewestVersion(t *testing.T) {
+func TestDefaultRuntimePathsUseOneInstallationAndItsNewestVersion(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
 	for _, path := range []string{
@@ -118,7 +119,7 @@ func TestDefaultRuntimePathsUseFirstInstalledRootAndNewestVersion(t *testing.T) 
 		filepath.Join(first, "vim92"),
 		filepath.Join(first, "vimfiles", "after"),
 	}
-	if got := defaultRuntimePathsIn([]string{filepath.Join(first, "missing"), first, second}); !reflect.DeepEqual(got, want) {
+	if got := firstInstalledVimRuntimePaths([]string{filepath.Join(first, "missing"), first, second}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("default runtimepath = %#v, want %#v", got, want)
 	}
 	direct := filepath.Join(t.TempDir(), "runtime")
@@ -127,8 +128,29 @@ func TestDefaultRuntimePathsUseFirstInstalledRootAndNewestVersion(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	if got := defaultRuntimePathsIn([]string{direct}); !reflect.DeepEqual(got, []string{direct}) {
+	if got := firstInstalledVimRuntimePaths([]string{direct}); !reflect.DeepEqual(got, []string{direct}) {
 		t.Fatalf("direct runtimepath = %#v", got)
+	}
+}
+
+func TestDefaultRuntimePathsSkipUnreadableCandidate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix directory permissions are not portable to Windows")
+	}
+	unreadable := t.TempDir()
+	if err := os.Chmod(unreadable, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
+
+	installed := t.TempDir()
+	for _, name := range []string{"doc", "syntax"} {
+		if err := os.MkdirAll(filepath.Join(installed, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := firstInstalledVimRuntimePaths([]string{unreadable, installed}); !reflect.DeepEqual(got, []string{installed}) {
+		t.Fatalf("default runtimepath = %#v, want only %#v", got, installed)
 	}
 }
 

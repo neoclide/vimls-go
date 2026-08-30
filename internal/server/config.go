@@ -147,10 +147,13 @@ func runtimepathFromOptions(raw any) ([]string, bool, string) {
 }
 
 func defaultRuntimePaths() []string {
-	return defaultRuntimePathsIn(defaultVimInstallRoots(runtime.GOOS))
+	return firstInstalledVimRuntimePaths(vimInstallCandidates(runtime.GOOS))
 }
 
-func defaultVimInstallRoots(goos string) []string {
+// vimInstallCandidates returns conventional installation locations in
+// precedence order. Discovery uses only the first candidate containing a Vim
+// runtime; paths from different installations are never combined.
+func vimInstallCandidates(goos string) []string {
 	switch goos {
 	case "windows":
 		roots := make([]string, 0, 3)
@@ -175,14 +178,16 @@ func defaultVimInstallRoots(goos string) []string {
 	}
 }
 
-func defaultRuntimePathsIn(installRoots []string) []string {
-	for _, installRoot := range installRoots {
+func firstInstalledVimRuntimePaths(candidates []string) []string {
+	for _, installRoot := range candidates {
 		installRoot = filepath.Clean(installRoot)
 		if isInstalledVimRuntime(installRoot) {
 			return []string{installRoot}
 		}
 		entries, err := os.ReadDir(installRoot)
 		if err != nil {
+			// Default discovery is best-effort. Missing and unreadable install
+			// locations must not make language-server initialization fail.
 			continue
 		}
 		type versionDirectory struct {
