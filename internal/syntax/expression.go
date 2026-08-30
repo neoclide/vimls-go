@@ -826,6 +826,14 @@ func (p *expressionParser) parsePrefix() *Expression {
 	switch token.kind {
 	case expressionIdentifier:
 		p.advance()
+		if p.dialect == Vim9 {
+			for _, namespace := range []string{"a:", "l:", "x:"} {
+				if strings.HasPrefix(token.text, namespace) {
+					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1075", Message: "Namespace not supported: " + token.text, Span: token.span})
+					break
+				}
+			}
+		}
 		if p.dialect == Vim9 && strings.HasPrefix(token.text, "$") && (len(token.text) == 1 || strings.Trim(token.text, "$") == "") {
 			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/invalid-atom", Message: "invalid atom", Span: token.span})
 		}
@@ -1071,6 +1079,12 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 	token := p.current()
 	switch token.text {
 	case "(":
+		// Vim's compile_call() stores a direct function name in a
+		// MAX_FUNC_NAME_LEN (200-byte) buffer.  Variables of the same length
+		// remain valid until they are used as a direct callable.
+		if p.dialect == Vim9 && left.Kind == ExpressionIdentifier && len(left.Value) >= 200 {
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1011", Message: "Name too long: " + left.Value, Span: left.Span})
+		}
 		p.advance()
 		if p.dialect == Vim9 && p.lambdaBody && p.current().text == "]" {
 			// A call opener in a lambda body can be the malformed endpoint of an
@@ -3062,7 +3076,7 @@ func isComparisonWord(value string) bool {
 
 func isScopePrefix(value string) bool {
 	switch value {
-	case "a", "b", "g", "l", "s", "t", "v", "w", "&g", "&l":
+	case "a", "b", "g", "l", "s", "t", "v", "w", "x", "&g", "&l":
 		return true
 	default:
 		return false

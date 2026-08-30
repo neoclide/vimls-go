@@ -2,6 +2,21 @@ package syntax
 
 import "testing"
 
+func TestVim9NestedUnsupportedFunctionNamespaces(t *testing.T) {
+	file := Parse("vim9script\ndef Outer()\n  def s:Nested()\n  enddef\n  def b:Nested()\n  enddef\nenddef\nvar after = 1\n")
+	if len(file.Diagnostics) != 2 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	for i, name := range []string{"s:Nested", "b:Nested"} {
+		if file.Diagnostics[i].Code != "vim/E1075" || file.Diagnostics[i].Message != "Namespace not supported: "+name || file.Text(file.Diagnostics[i].Span) != name {
+			t.Fatalf("diagnostic = %#v", file.Diagnostics[i])
+		}
+	}
+	if file.Commands[len(file.Commands)-1].Declaration == nil {
+		t.Fatalf("next-line recovery = %#v", file.Commands)
+	}
+}
+
 func TestParsesVim9GenericFunctionSignature(t *testing.T) {
 	file := (Vim9Parser{}).Parse("def Zip<T, U>(first: list<T>, second: list<U> = []): list<tuple<T, U>>\nenddef\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 {

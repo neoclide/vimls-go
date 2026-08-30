@@ -1911,6 +1911,24 @@ func TestOfficialNamespaceDictionaryExpression(t *testing.T) {
 	}
 }
 
+func TestVim9UnsupportedNamespacesAndLongNames(t *testing.T) {
+	longName := "Func" + strings.Repeat("x", 196)
+	validName := longName[:len(longName)-1]
+	source := "vim9script\necho a:somevar\necho l:somevar\necho x:somevar\necho " + longName + "\necho " + validName + "()\necho " + longName + "()\nvar after = 1\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 4 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	for i, name := range []string{"a:somevar", "l:somevar", "x:somevar"} {
+		if file.Diagnostics[i].Code != "vim/E1075" || file.Diagnostics[i].Message != "Namespace not supported: "+name || file.Text(file.Diagnostics[i].Span) != name {
+			t.Fatalf("namespace diagnostic = %#v", file.Diagnostics[i])
+		}
+	}
+	if file.Diagnostics[3].Code != "vim/E1011" || file.Diagnostics[3].Message != "Name too long: "+longName || file.Text(file.Diagnostics[3].Span) != longName || file.Commands[len(file.Commands)-1].Declaration == nil {
+		t.Fatalf("long-name diagnostic/recovery = %#v", file.Diagnostics)
+	}
+}
+
 func TestOfficialLegacyCurlyName(t *testing.T) {
 	// v9.2.1015 runtime/doc/eval.txt *curly-braces-names* and
 	// src/testdir/test_eval_stuff.vim.

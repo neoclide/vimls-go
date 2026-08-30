@@ -38,6 +38,19 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
+	if vim9Context && command.Block >= 0 && command.Block < len(file.Blocks) {
+		block := file.Blocks[command.Block]
+		if block.Kind == BlockDef && block.Parent >= 0 && block.Parent < len(file.Blocks) && file.Blocks[block.Parent].Kind == BlockDef {
+			for _, namespace := range []string{"s:", "b:"} {
+				if strings.HasPrefix(source[nameStart:offset], namespace) {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1075", Message: "Namespace not supported: " + source[nameStart:offset], Span: function.Name,
+					})
+					break
+				}
+			}
+		}
+	}
 	if vim9Context && source[nameStart:offset] == "g:" {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E129", Message: "function name required", Span: function.Name,
