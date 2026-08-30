@@ -3407,6 +3407,8 @@ func builtinArgumentDiagnostic(checker string, index int, span syntax.Span) (syn
 		code, required = "vim/E1174", "String"
 	case "arg_dict_any":
 		code, required = "vim/E1206", "Dictionary"
+	case "arg_list_or_tuple_or_dict":
+		code, required = "vim/E1530", "List or Tuple or Dictionary"
 	case "arg_get1":
 		return syntax.Diagnostic{
 			Code: "vim/E1531", Message: "Argument of get() must be a List, Tuple, Dictionary or Blob", Span: span,
