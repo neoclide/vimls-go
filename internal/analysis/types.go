@@ -607,6 +607,16 @@ func (state *typeState) binaryType(expression *syntax.Expression, scope *Scope) 
 	if operator == "." || operator == ".." {
 		return ValueType{Name: "string"}
 	}
+	if operator == "+" && left.Name == right.Name {
+		switch left.Name {
+		case "list":
+			return mergeTypes(left, right)
+		case "tuple":
+			return ValueType{Name: "tuple", Arguments: append(append([]ValueType(nil), left.Arguments...), right.Arguments...)}
+		case "blob":
+			return ValueType{Name: "blob"}
+		}
+	}
 	if operator == "+" || operator == "-" || operator == "*" || operator == "/" || operator == "%" || operator == "**" || operator == "<<" || operator == ">>" {
 		if left.Name == "float" || right.Name == "float" {
 			return ValueType{Name: "float"}

@@ -2937,6 +2937,8 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
 			diagnoseVim9ScopeDeclaration(file, command, declaration, false)
 			diagnoseVim9IllegalDeclarationName(file, command, declaration)
+			diagnoseVim9ReservedDeclarationName(file, command, declaration)
+			diagnoseVim9OptionDeclaration(file, command, declaration)
 			diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 			diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
 			diagnoseInvalidClassDeclaration(file, command, declaration)
@@ -2956,6 +2958,8 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
 		diagnoseVim9ScopeDeclaration(file, command, declaration, true)
 		diagnoseVim9IllegalDeclarationName(file, command, declaration)
+		diagnoseVim9ReservedDeclarationName(file, command, declaration)
+		diagnoseVim9OptionDeclaration(file, command, declaration)
 		diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 		diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
 		invalidClassDeclaration := diagnoseInvalidClassDeclaration(file, command, declaration)
@@ -4468,6 +4472,15 @@ func parseDeclarationHead(file *File, source string, base int, dialect Dialect) 
 	name, typeSpan := declarationSpans(source, base, dialect)
 	if dialect == Vim9 {
 		start := skipSpace(source, 0, len(source))
+		if start < len(source) && source[start] == '&' {
+			end := start + 1
+			for end < len(source) && (isVimIdentifierByte(source[end]) || source[end] == ':') {
+				end++
+			}
+			if end > start+1 {
+				name = Span{Start: base + start, End: base + end}
+			}
+		}
 		if start < len(source) && source[start] == '@' {
 			_, size := utf8.DecodeRuneInString(source[start+1:])
 			if size > 0 {
@@ -4685,6 +4698,26 @@ func diagnoseVim9IllegalDeclarationName(file *File, command *Command, declaratio
 	file.Diagnostics = append(file.Diagnostics, Diagnostic{
 		Code: "vim/E461", Message: "Illegal variable name: " + file.Text(declaration.Name), Span: declaration.Name,
 	})
+}
+
+func diagnoseVim9ReservedDeclarationName(file *File, command *Command, declaration *Declaration) {
+	if command == nil || declaration == nil || command.Dialect != Vim9 || (command.Canonical != "var" && command.Canonical != "const" && command.Canonical != "final") {
+		return
+	}
+	name := file.Text(declaration.Name)
+	if name == "true" || name == "false" || name == "null" || name == "this" || name == "super" {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1034", Message: "Cannot use reserved name " + name, Span: declaration.Name})
+	}
+}
+
+func diagnoseVim9OptionDeclaration(file *File, command *Command, declaration *Declaration) {
+	if command == nil || declaration == nil || command.Dialect != Vim9 || command.Canonical != "var" {
+		return
+	}
+	name := file.Text(declaration.Name)
+	if strings.HasPrefix(name, "&") && len(name) > 1 {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1052", Message: "Cannot declare an option: " + name, Span: declaration.Name})
+	}
 }
 
 // vim9ScopeDeclarationDiagnostic mirrors vim9_declare_error() for the

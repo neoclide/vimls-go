@@ -114,6 +114,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
 	inferTypes(result)
+	collectArithmeticDiagnostics(result, file.Commands, root)
 	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
@@ -122,6 +123,113 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+// collectArithmeticDiagnostics implements the Vim9 operator checks whose
+// operands are sufficiently known to prove an error.  Unknown values remain
+// deliberately opaque.
+func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	if result == nil || result.File == nil {
+		return
+	}
+	for index := range commands {
+		command := &commands[index]
+		scope := result.commandScopes[command]
+		if scope == nil {
+			scope = parent
+		}
+		if command.Dialect == syntax.Vim9 {
+			seen := make(map[*syntax.Expression]bool)
+			var walk func(*syntax.Expression, *Scope)
+			walk = func(expression *syntax.Expression, expressionScope *Scope) {
+				if expression == nil || seen[expression] {
+					return
+				}
+				seen[expression] = true
+				if expression.Kind == syntax.ExpressionLambda {
+					if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
+						expressionScope = lambdaScope
+					}
+					if expression.LambdaBody != nil {
+						collectArithmeticDiagnostics(result, expression.LambdaBody.Commands, expressionScope)
+					}
+				}
+				if expression.Kind == syntax.ExpressionBinary || expression.Kind == syntax.ExpressionAssignment {
+					op := expression.Value
+					if expression.Kind == syntax.ExpressionAssignment {
+						op = result.File.Text(expression.Operator)
+					}
+					if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) && scopeUsesDefTypeRules(expressionScope) {
+						left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
+						if expression.Kind == syntax.ExpressionAssignment {
+							left = assignmentTargetType(result, expressionScope, expression.Children[0])
+						}
+						base := strings.TrimSuffix(op, "=")
+						invalid := false
+						code, message := "", ""
+						if !isUnknownType(left) && !isUnknownType(right) {
+							leftNumeric := left.Name == "number" || left.Name == "float"
+							rightNumeric := right.Name == "number" || right.Name == "float"
+							switch base {
+							case "%":
+								invalid = left.Name != "number" || right.Name != "number"
+								code, message = "vim/E1035", "requires number arguments"
+							case "-", "*", "/":
+								invalid = !leftNumeric || !rightNumeric
+								code, message = "vim/E1036", base+" requires number or float arguments"
+							case "+":
+								containerConcat := left.Name == right.Name && (left.Name == "list" || left.Name == "tuple" || left.Name == "blob")
+								invalid = (!leftNumeric || !rightNumeric) && !containerConcat
+								code, message = "vim/E1051", "Wrong argument type for +"
+							}
+						}
+						if invalid {
+							span := expression.Operator
+							if span.End <= span.Start {
+								span = expression.Span
+							}
+							if code == "vim/E1035" {
+								message = "% " + message
+							}
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
+						}
+					}
+				}
+				for _, child := range expression.Children {
+					walk(child, expressionScope)
+				}
+			}
+			for _, expression := range command.Expressions {
+				walk(expression, scope)
+			}
+			for _, expression := range command.Targets {
+				walk(expression, scope)
+			}
+			if command.Declaration != nil {
+				walk(command.Declaration.Initializer, scope)
+			}
+		}
+		if command.Embedded != nil {
+			collectArithmeticDiagnostics(result, command.Embedded.Commands, scope)
+		}
+	}
+}
+
+func expressionContainsInvalidPlus(result *FileAnalysis, expression *syntax.Expression) bool {
+	if expression == nil {
+		return false
+	}
+	if expression.Kind == syntax.ExpressionBinary && expression.Value == "+" && len(expression.Children) >= 2 {
+		left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
+		return !isUnknownType(left) && !isUnknownType(right) &&
+			(left.Name != "number" && left.Name != "float" || right.Name != "number" && right.Name != "float")
+	}
+	for _, child := range expression.Children {
+		if expressionContainsInvalidPlus(result, child) {
+			return true
+		}
+	}
+	return false
 }
 
 // collectVoidValueDiagnostics reports E1031 only for the Vim9 contexts where
@@ -391,6 +499,9 @@ func assignmentTargetType(result *FileAnalysis, scope *Scope, target *syntax.Exp
 		}
 		if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") {
 			return ValueType{Name: "string"}
+		}
+		if variable, ok := vimdata.LookupVariable(target.Value); ok {
+			return builtinVariableValueType(variable)
 		}
 		return resolvedExpressionType(result, scope, target)
 	case syntax.ExpressionIndex, syntax.ExpressionMember:
@@ -1538,6 +1649,9 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 								result.Diagnostics = append(result.Diagnostics, diagnostic)
 								continue
 							}
+						}
+						if expressionContainsInvalidPlus(result, argument) {
+							continue
 						}
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
 					}

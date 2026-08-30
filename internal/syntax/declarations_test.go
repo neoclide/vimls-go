@@ -2,6 +2,46 @@ package syntax
 
 import "testing"
 
+func TestVim9ReservedDeclarationNames(t *testing.T) {
+	file := Parse("vim9script\nvar true = 1\nvar false = 2\nvar null = 3\nvar this = 4\nvar super = 5\nvar after = 6\n")
+	if len(file.Diagnostics) != 5 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	for index, name := range []string{"true", "false", "null", "this", "super"} {
+		diagnostic := file.Diagnostics[index]
+		if diagnostic.Code != "vim/E1034" || diagnostic.Message != "Cannot use reserved name "+name || file.Text(diagnostic.Span) != name {
+			t.Fatalf("diagnostic %d = %#v, span=%q", index, diagnostic, file.Text(diagnostic.Span))
+		}
+	}
+	if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands[len(file.Commands)-1])
+	}
+}
+
+func TestVim9OptionDeclaration(t *testing.T) {
+	file := Parse("vim9script\nvar &tabstop = 4\nvar after = 6\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1052" || file.Diagnostics[0].Message != "Cannot declare an option: &tabstop" || file.Text(file.Diagnostics[0].Span) != "&tabstop" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if file.Commands[1].Declaration == nil || file.Text(file.Commands[1].Declaration.Name) != "&tabstop" || file.Commands[1].Declaration.Initializer == nil || file.Commands[2].Declaration == nil {
+		t.Fatalf("declarations = %#v", file.Commands)
+	}
+}
+
+func TestVim9DeclarationDiagnosticGuards(t *testing.T) {
+	file := Parse("vim9script\nvar truthful = 1\nconst nullValue = 2\n&tabstop = 4\nfinal &option\nlegacy let true = 1\n")
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1034" || diagnostic.Code == "vim/E1052" {
+			t.Fatalf("ordinary identifier, option assignment, or legacy declaration diagnostic = %#v", diagnostic)
+		}
+	}
+
+	scoped := Parse("vim9script\nvar &g:tabstop = 4\n")
+	if len(scoped.Diagnostics) != 1 || scoped.Diagnostics[0].Code != "vim/E1052" || scoped.Diagnostics[0].Message != "Cannot declare an option: &g:tabstop" || scoped.Text(scoped.Diagnostics[0].Span) != "&g:tabstop" {
+		t.Fatalf("scoped option diagnostics = %#v", scoped.Diagnostics)
+	}
+}
+
 func TestVim9RegisterDeclarationPreservesTargetAndInitializer(t *testing.T) {
 	for _, test := range []struct {
 		name, source, code string

@@ -117,6 +117,64 @@ func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	})
 }
 
+func TestAnalyzeArithmeticDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, code, message, span string
+	}{
+		{
+			name: "remainder", source: "vim9script\ndef F()\n  var x = '1' % '2'\nenddef\n",
+			code: "vim/E1035", message: "% requires number arguments", span: "%",
+		},
+		{
+			name: "multiplication", source: "vim9script\ndef F()\n  var x = [1] * [2]\nenddef\n",
+			code: "vim/E1036", message: "* requires number or float arguments", span: "*",
+		},
+		{
+			name: "subtraction", source: "vim9script\ndef F()\n  echo {} - 22\nenddef\n",
+			code: "vim/E1036", message: "- requires number or float arguments", span: "-",
+		},
+		{
+			name: "addition", source: "vim9script\ndef F()\n  var x = 0z01 + 2\nenddef\n",
+			code: "vim/E1051", message: "Wrong argument type for +", span: "+",
+		},
+		{
+			name: "compound addition", source: "vim9script\ndef F()\n  v:errmsg += 'more'\nenddef\n",
+			code: "vim/E1051", message: "Wrong argument type for +", span: "+=",
+		},
+		{
+			name: "script lambda", source: "vim9script\necho filter([1, 2, 3], (_, v: string) => v + 1)\n",
+			code: "vim/E1051", message: "Wrong argument type for +", span: "+",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == test.code {
+					got = append(got, diagnostic)
+				}
+				if test.name == "script lambda" && diagnostic.Code == "vim/E1013" {
+					t.Fatalf("invalid lambda retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one %s %q on %q; all diagnostics = %#v", got, test.code, test.message, test.span, result.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestAnalyzeArithmeticDiagnosticsStayConservative(t *testing.T) {
+	source := "vim9script\nvar scriptOnly = '1' % '2'\ndef F(value: any)\n  var remainder = 5 % 2\n  var sum = 1.0 + 2\n  var unknown = value + 1\n  var lists = [1] + [2]\n  var tuples = (1, 'one') + (2, 'two')\n  var blobs = 0z01 + 0z02\nenddef\nlegacy let legacyValue = '1' % '2'\n"
+	for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+		if diagnostic.Code == "vim/E1035" || diagnostic.Code == "vim/E1036" || diagnostic.Code == "vim/E1051" {
+			t.Fatalf("valid, unknown, script, or legacy expression diagnostic = %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name     string

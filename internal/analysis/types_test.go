@@ -62,6 +62,23 @@ func TestAnalyzeInfersShiftAndDestructuredElementTypes(t *testing.T) {
 	}
 }
 
+func TestAnalyzeInfersContainerConcatenationTypes(t *testing.T) {
+	result := Analyze(syntax.Parse("vim9script\nvar listValue = [1] + [2]\nvar tupleValue = (1, 'one') + (2, 'two')\nvar blobValue = 0z01 + 0z02\n"))
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	if declarations["listValue"].Type.Name != "list" || len(declarations["listValue"].Type.Arguments) != 1 || declarations["listValue"].Type.Arguments[0].Name != "number" {
+		t.Fatalf("list concatenation type = %#v", declarations["listValue"].Type)
+	}
+	if declarations["tupleValue"].Type.Name != "tuple" || len(declarations["tupleValue"].Type.Arguments) != 4 {
+		t.Fatalf("tuple concatenation type = %#v", declarations["tupleValue"].Type)
+	}
+	if declarations["blobValue"].Type.Name != "blob" {
+		t.Fatalf("blob concatenation type = %#v", declarations["blobValue"].Type)
+	}
+}
+
 func TestAnalyzeInfersOperatorsReferencesAndFunctions(t *testing.T) {
 	source := `vim9script
 var n = 1
