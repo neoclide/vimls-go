@@ -3884,6 +3884,9 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 		if command.Declaration != nil {
 			skip = make(map[syntax.Span]bool, len(command.Declaration.Bindings))
 			for _, binding := range command.Declaration.Bindings {
+				if strings.HasPrefix(file.Text(binding.Name), "&") {
+					continue
+				}
 				skip[binding.Name] = true
 			}
 		}
