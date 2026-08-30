@@ -4254,6 +4254,58 @@ func TestAnalyzeE1210BuiltinNumberArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1211BuiltinListArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message, span string }{
+		{"list any non-first", "vim9script\ncomplete(1, 'x')\n", "List required for argument 2", "'x'"},
+		{"list number", "vim9script\nsetpos('.', 'x')\n", "List required for argument 2", "'x'"},
+		{"list string", "vim9script\ncomplete_info('x')\n", "List required for argument 1", "'x'"},
+		{"slice", "vim9script\nslice({}, 1)\n", "List required for argument 1", "{}"},
+		{"method index", "vim9script\n1->complete('x')\n", "List required for argument 2", "'x'"},
+		{"vim9cmd", "vim9cmd complete(1, 'x')\n", "List required for argument 2", "'x'"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1211" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1211 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1211 diagnostics = %#v", got)
+			}
+		})
+	}
+	for _, test := range []struct{ name, source, want string }{
+		{"compiled def", "vim9script\ndef Func()\n  complete(1, 'x')\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  complete(1, 'x')\n}\n", "vim/E1013"},
+		{"Legacy", "let value = complete(1, 'x')\n", ""},
+		{"unknown", "vim9script\ncomplete(1, Unknown)\n", ""},
+		{"list item mismatch", "vim9script\ncomplete_info([1])\n", "vim/E1013"},
+		{"arg reverse", "vim9script\nreverse({})\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1211" {
+					t.Fatalf("guard unexpectedly received E1211: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeCompiledIndexReceiverDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

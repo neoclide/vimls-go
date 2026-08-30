@@ -1780,6 +1780,36 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   List or Blob removal.
 - `src/errors.h:3109-3110` defines the exact E1210 message.
 
+## List required for builtin argument: E1211
+
+Analysis reports E1211 at Vim9 script level when a builtin's outer argument
+must be a List but its known static type is not a List. The diagnostic selects
+the complete argument and uses the normalized one-based position for both
+ordinary and method calls.
+
+The rule covers the general List checker and the outer-type portion of
+`list<number>` and `list<string>` checkers. A value that is already a List but
+has an incompatible known element type remains on E1013 instead. `slice()` also
+uses E1211 for an unsupported container because Vim deliberately routes that
+runtime failure through its List check. Other unions, including `reverse()`,
+keep their own diagnostics. Compiled `def` and block-lambda scopes retain
+E1013; Legacy and dynamically typed calls remain conservative.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:811-824` covers a later general List
+  argument and the outer type of a `list<string>` argument.
+- `src/testdir/test_vim9_builtin.vim:2385-2388` distinguishes a non-List
+  E1211 failure from a List element-type E1013 failure.
+- `src/testdir/test_vim9_builtin.vim:2664-2678` makes the same distinction for
+  `list<number>` arguments.
+- `src/testdir/test_vim9_builtin.vim:4321-4328` covers the special `slice()`
+  container path.
+- `src/typval.c:606-618` implements the strict runtime List check.
+- `src/list.c:3496-3510` routes unsupported `slice()` containers through that
+  check before validating its Number arguments.
+- `src/errors.h:3111-3112` defines the exact E1211 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

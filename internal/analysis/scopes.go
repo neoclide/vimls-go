@@ -6061,6 +6061,18 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 	checker = strings.TrimSuffix(checker, "_mod")
 	var code, required string
 	switch checker {
+	case "arg_list_any":
+		if vim9 {
+			code, required = "vim/E1211", "List"
+		}
+	case "arg_list_number", "arg_list_string":
+		if vim9 && index >= 0 && index < len(actual) && actual[index].Name != "list" {
+			code, required = "vim/E1211", "List"
+		}
+	case "arg_slice1":
+		if vim9 {
+			code, required = "vim/E1211", "List"
+		}
 	case "arg_number":
 		if vim9 {
 			code, required = "vim/E1210", "Number"
