@@ -164,7 +164,7 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 			}
 			member := &file.Commands[memberIndex]
 			method := member.Function
-			if method == nil || commandHasModifier(member, "static") || len(method.TypeParameters) == 0 {
+			if method == nil || commandHasModifier(member, "static") {
 				continue
 			}
 			name := file.Text(method.Name)
@@ -179,13 +179,20 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 					continue
 				}
 				inheritedCount := len(inherited.Function.TypeParameters)
-				if inheritedCount == 0 {
+				childCount := len(method.TypeParameters)
+				if inheritedCount > 0 && childCount == 0 {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code:    "vim/E1432",
+						Message: "Overriding generic method \"" + name + "\" in class \"" + file.Text(current.Aggregate.Name) + "\" with a concrete method",
+						Span:    aggregateEndSpan(file, class),
+					})
+				} else if inheritedCount == 0 && childCount > 0 {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code:    "vim/E1433",
 						Message: "Overriding concrete method \"" + name + "\" in class \"" + file.Text(current.Aggregate.Name) + "\" with a generic method",
 						Span:    aggregateEndSpan(file, class),
 					})
-				} else if inheritedCount != len(method.TypeParameters) {
+				} else if inheritedCount > 0 && inheritedCount != childCount {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code:    "vim/E1434",
 						Message: "Mismatched number of type variables for generic method  \"" + name + "\" in class \"" + file.Text(current.Aggregate.Name) + "\"",
