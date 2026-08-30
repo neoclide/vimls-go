@@ -485,6 +485,66 @@ func TestAnalyzeDictionaryAsStringDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeWrongVariableTypeDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "vim9 script concatenates List",
+			source:  "vim9script\nvar value = '-'\nvalue ..= [1, 2]\n",
+			message: "Wrong variable type for .=",
+			span:    "..=",
+		},
+		{
+			name:    "vim9 script concatenates Dictionary",
+			source:  "vim9script\nvar value = '-'\nvalue ..= {a: 2}\n",
+			message: "Wrong variable type for .=",
+			span:    "..=",
+		},
+		{
+			name:    "legacy concatenates List",
+			source:  "let value = '-'\nlet value .= [1, 2]\n",
+			message: "Wrong variable type for .=",
+			span:    ".=",
+		},
+		{
+			name:    "vim9 script Dictionary target",
+			source:  "vim9script\nvar value: dict<number> = {a: 1}\nvalue += 1\n",
+			message: "Wrong variable type for +=",
+			span:    "+=",
+		},
+		{
+			name:    "compiled Dictionary target",
+			source:  "vim9script\ndef F()\n  var value: dict<number> = {a: 1}\n  value *= 1\nenddef\n",
+			message: "Wrong variable type for *=",
+			span:    "*=",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E734" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E734 %q on %q; all diagnostics = %#v", got, test.message, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef F()\n  var value = '-'\n  value ..= [1, 2]\nenddef\n")
+	result := Analyze(file)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E734" {
+			t.Fatalf("compiled string concatenation retained E734: %#v", result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

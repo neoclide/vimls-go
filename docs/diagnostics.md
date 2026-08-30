@@ -565,3 +565,27 @@ Representative source evidence:
   in a compiled `def` from E731 at Vim9 script level.
 - `src/typval.c:1226-1229` maps Dictionary string conversion to E731, and
   `src/errors.h:1863-1864` defines the exact message.
+
+## Wrong variable type for compound assignment: E734
+
+E734 means `Wrong variable type for {operator}=`. Vim reports it when a
+compound assignment cannot operate on the statically known target and value
+types.
+
+Analysis reports E734 for Legacy `.=` or Vim9 `..=` when a statically known
+String variable receives a List or Dictionary outside a compiled `def`. The
+message uses Vim's normalized `.=` spelling. The same source in a compiled
+`def` uses E1105 instead. Analysis also reports E734 for numeric compound
+assignment to a statically known Dictionary target in both Vim9 script and a
+compiled `def`. Diagnostics select the compound operator; unknown target or
+value types remain unknown.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_assign.vim:268-287` distinguishes E1105 in a compiled
+  `def` from E734 at Vim9 script level for List and Dictionary concatenation.
+- `src/testdir/test_vim9_assign.vim:3510-3513` covers `+=`, `-=`, `*=`, `/=`,
+  and `%=` on a Dictionary target in both contexts.
+- `src/vim9compile.c:3488-3506` rejects compound assignment on a Dictionary
+  type, while `src/eval.c:2749-2796` applies the runtime type matrix.
+- `src/errors.h:1869-1870` defines the exact message template.

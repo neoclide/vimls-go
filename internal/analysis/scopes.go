@@ -651,7 +651,25 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				if expression.Kind == syntax.ExpressionAssignment {
 					op = result.File.Text(expression.Operator)
 				}
-				if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+				compoundTypeError := false
+				if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					targetType := assignmentTargetType(result, expressionScope, expression.Children[0])
+					rightType := result.TypeOf(expression.Children[1])
+					numericCompound := op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%="
+					invalidTarget := numericCompound && targetType.Name == "dict"
+					invalidScriptConcat := (op == ".=" || op == "..=") && !scopeUsesDefTypeRules(expressionScope) && targetType.Name == "string" && (rightType.Name == "list" || rightType.Name == "dict")
+					if invalidTarget || invalidScriptConcat {
+						symbol := strings.TrimSuffix(op, "=")
+						if symbol == ".." {
+							symbol = "."
+						}
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E734", Message: "Wrong variable type for " + symbol + "=", Span: expression.Operator,
+						})
+						compoundTypeError = true
+					}
+				}
+				if !compoundTypeError && (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
 					if expression.Kind == syntax.ExpressionAssignment {
 						left = assignmentTargetType(result, expressionScope, expression.Children[0])
