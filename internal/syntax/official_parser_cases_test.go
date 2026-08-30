@@ -157,6 +157,7 @@ func officialParserExpectedFailures() map[string]string {
 	// allowlist until their parser phase is proven independently.
 	return map[string]string{
 		"src/testdir/test_vim9_func.vim:392:8331/script":           "vim/E1173",
+		"src/testdir/test_vim9_func.vim:73:1788/def":               "vim/E1170",
 		"src/testdir/test_vim9_func.vim:1145:24549/script":         "vim/E1173",
 		"src/testdir/test_vim9_func.vim:2361:52851/script":         "vim/E1173",
 		"src/testdir/test_vim9_func.vim:2378:53272/script":         "vim/E1173",
