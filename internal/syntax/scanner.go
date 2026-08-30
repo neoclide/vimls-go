@@ -468,6 +468,21 @@ func parseSource(source string, initial Dialect) *File {
 func normalizeVim9SpacedCallDiagnostics(file *File) {
 	for diagnosticIndex := range file.Diagnostics {
 		diagnostic := &file.Diagnostics[diagnosticIndex]
+		if diagnostic.Code == "vim/E1068" && diagnostic.Message == "no white space allowed before function arguments" {
+			commandIndex := sort.Search(len(file.Commands), func(index int) bool {
+				return file.Commands[index].Argument.End >= diagnostic.Span.End
+			})
+			if commandIndex < len(file.Commands) {
+				command := &file.Commands[commandIndex]
+				if command.Canonical == "call" && diagnostic.Span.Start >= command.Argument.Start &&
+					diagnostic.Span.End <= command.Argument.End && commandInsideBlock(command, file.Blocks, BlockDef) {
+					diagnostic.Code = "vim/E476"
+					diagnostic.Message = "Invalid command"
+					diagnostic.Span = command.Name
+				}
+			}
+			continue
+		}
 		if diagnostic.Code != "vim/E476" || diagnostic.Message != "invalid command: whitespace before function arguments" {
 			continue
 		}
@@ -2989,6 +3004,17 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
+		if command.Canonical == "call" && command.Dialect == Vim9 {
+			if _, _, spaced := spacedVim9CallInArgument(file.Source, command.Argument.Start, command.Argument.End); spaced {
+				kept := diagnostics[:0]
+				for _, diagnostic := range diagnostics {
+					if diagnostic.Code != "vimls/trailing-expression" {
+						kept = append(kept, diagnostic)
+					}
+				}
+				diagnostics = kept
+			}
+		}
 		if command.Canonical == "defer" && command.Dialect == Vim9 && len(diagnostics) == 0 && expression != nil && expression.Kind != ExpressionCall {
 			name := ""
 			if expression.Kind == ExpressionIdentifier {
