@@ -260,9 +260,12 @@ func parseSource(source string, initial Dialect) *File {
 			lambdaCloseOffset = findVim9LambdaRecoveryClose(source, nextOffset)
 		}
 		lambdaBodyCommand := lambdaRecoveryBoundary && lambdaCloseOffset >= 0
+		forTypeContinuation := vim9Continuation >= 0 && first < contentEnd && source[first] == ':' &&
+			file.Commands[vim9Continuation].Canonical == "for"
 		if vim9Continuation >= 0 && (len(vim9ContinuationState.lambdaDepth) == 0 || lambdaRecoveryBoundary) && first < contentEnd &&
 			!(source[first] == '}' && vim9ContinuationState.depth > 0) && startsVim9RecoveryCommand(source, first, contentEnd) &&
 			!lambdaBodyCommand &&
+			!forTypeContinuation &&
 			!(vim9ContinuationState.depth > 0 && looksLikeVim9NamedItem(source, first, contentEnd)) &&
 			!continuesVim9FunctionSignature(file, vim9Continuation, vim9ContinuationState, source, first, contentEnd) &&
 			!(source[first] == ':' && (len(vim9ContinuationState.ternaryDepth) > 0 || vim9ContinuationState.bracketDepth > 0)) {
