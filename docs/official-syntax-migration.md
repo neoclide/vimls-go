@@ -1355,6 +1355,9 @@ built-in Vim9 command is followed by an illegal attached byte, while preserving
 the command and making its details opaque for line recovery. Unknown and future
 commands remain opaque. The external `Comd#`, locally defined `Foo3Bar`, and
 name-dependent `exit_cb:` variants remain outside this parser-only batch.
+Commit `edf7519` keeps an attached-hash E1144 on `catch#...` as the sole
+line-local diagnostic by preventing block construction from reparsing the
+already opaque tail as a catch-pattern separator.
 
 Commit `648ba36` reports E1032 when a closed Vim9 `try` has neither `catch` nor
 `finally`. The block closes normally, so it cannot also produce the E600 used
