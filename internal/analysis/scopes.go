@@ -105,6 +105,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	// A malformed or partially parsed enum value may remain an opaque command.
 	// The enum block is still authoritative for its one-name-per-line members.
 	collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks)
+	collectDuplicateEnumValueDiagnostics(result)
 	collectArgumentRedeclarationDiagnostics(result)
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
@@ -138,6 +139,49 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectDuplicateEnumValueDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	declarations := append([]*Declaration(nil), result.Declarations...)
+	sort.SliceStable(declarations, func(i, j int) bool { return declarations[i].Span.Start < declarations[j].Span.Start })
+	seen := make(map[*Scope]map[string]bool)
+	reported := make(map[*Scope]bool)
+	for _, declaration := range declarations {
+		if declaration == nil || declaration.Kind != SymbolKindEnumMember || reported[declaration.Scope] || !vim9EnumScope(result.File, declaration.Scope) {
+			continue
+		}
+		names := seen[declaration.Scope]
+		if names == nil {
+			names = make(map[string]bool)
+			seen[declaration.Scope] = names
+		}
+		if names[declaration.Name] {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1428", Message: "Duplicate enum value: " + declaration.Name, Span: declaration.Span,
+			})
+			reported[declaration.Scope] = true
+			continue
+		}
+		names[declaration.Name] = true
+	}
+}
+
+func vim9EnumScope(file *syntax.File, scope *Scope) bool {
+	if file == nil || scope == nil || scope.Kind != syntax.BlockEnum || scope.Block < 0 {
+		return false
+	}
+	commands, blocks := file.Commands, file.Blocks
+	if scope.CommandList != nil {
+		commands, blocks = scope.CommandList.Commands, scope.CommandList.Blocks
+	}
+	if scope.Block >= len(blocks) {
+		return false
+	}
+	header := blocks[scope.Block].Header
+	return header >= 0 && header < len(commands) && commands[header].Dialect == syntax.Vim9
 }
 
 func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {

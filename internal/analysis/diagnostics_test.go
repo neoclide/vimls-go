@@ -54,6 +54,50 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1428DuplicateEnumValue(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "across lines",
+			source: "vim9script\nenum A\n  Foo,\n  Bar,\n  Foo\nendenum\n",
+			want:   "Foo",
+		},
+		{
+			name:   "same logical line stops after first duplicate",
+			source: "vim9script\nenum A\n  Foo, Bar, Foo,\n  Bar\nendenum\n",
+			want:   "Foo",
+		},
+		{
+			name:   "case sensitive and scoped per enum",
+			source: "vim9script\nenum A\n  Foo, foo\nendenum\nenum B\n  Foo\nendenum\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1428" {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("E1428 diagnostics = %#v", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Message != "Duplicate enum value: "+test.want || file.Text(got[0].Span) != test.want || got[0].Span.Start != strings.LastIndex(test.source, test.want) {
+				t.Fatalf("E1428 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
