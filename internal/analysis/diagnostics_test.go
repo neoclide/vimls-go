@@ -1905,6 +1905,72 @@ func TestAnalyzeDestructuringElementTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1165SliceAssignmentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span, message string }{
+		{"official dict def recovery", "vim9script\ndef Func()\n  var d = {x: 1}\n  d[1 : 2] = {y: 2}\n  var after = 1\nenddef\n", "d[1 : 2]", "Cannot use a range with an assignment: d[1 : 2] = {y: 2}"},
+		{"number def", "vim9script\ndef Func()\n  var n = 1\n  n[1 : 2] = 3\nenddef\n", "n[1 : 2]", "Cannot use a range with an assignment: n[1 : 2] = 3"},
+		{"Legacy-root def", "def Func()\n  var d = {}\n  d[1 : 2] = {}\nenddef\n", "d[1 : 2]", "Cannot use a range with an assignment: d[1 : 2] = {}"},
+		{"lambda", "vim9script\nvar Callback = () => {\n  var d = {}\n  d[1 : 2] = {}\n}\n", "d[1 : 2]", "Cannot use a range with an assignment: d[1 : 2] = {}"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1165" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1141" || diagnostic.Code == "vim/E1012" {
+					t.Fatalf("E1165 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || file.Text(got[0].Span) != test.span || got[0].Message != test.message {
+				t.Fatalf("E1165 diagnostics = %#v", got)
+			}
+			if test.name == "official dict def recovery" && file.Commands[len(file.Commands)-2].Declaration == nil {
+				t.Fatalf("following declaration not retained: %#v", file.Commands)
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\nvar d = {}\nd[1 : 2] = {}\n", "let d = {}\nlet d[1 : 2] = {}\n",
+		"vim9script\ndef F()\n  var l = [1]\n  l[0 : 1] = [2]\n  var b = 0z12\n  b[0 : 1] = 0z34\n  var a: any\n  a[0 : 1] = 1\nenddef\n",
+		"vim9script\ndef F()\n  var n = 1\n  n[0] = 1\n  unknown[0 : 1] = 1\n  n[\nenddef\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1165" {
+				t.Fatalf("guard unexpectedly received E1165: %#v", result.Diagnostics)
+			}
+		}
+	}
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"tuple keeps E1533", "vim9script\ndef F()\n  var t = (1, 2)\n  t[0 : 1] = 1\nenddef\n", "vim/E1533"},
+		{"compound slice keeps E1141", "vim9script\ndef F()\n  var n = 1\n  n[0 : 1] += 1\nenddef\n", "vim/E1141"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1165" {
+					t.Fatalf("source retained E1165: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+					if test.want == "vim/E1533" && diagnostic.Message != "Cannot slice a tuple" {
+						t.Fatalf("tuple diagnostic = %#v", diagnostic)
+					}
+				}
+			}
+			if count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

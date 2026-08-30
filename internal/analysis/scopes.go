@@ -3195,6 +3195,14 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 			})
 			return
 		}
+		if sliceAssignmentNeedsE1165(result, scope, expression) {
+			if target != nil {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1165", Message: "Cannot use a range with an assignment: " + result.File.Text(expression.Span), Span: target.Span,
+				})
+			}
+			return
+		}
 		if !isReadOnlyVimVariableTarget(target) {
 			if expected := assignmentTargetType(result, scope, target); !isUnknownType(expected) {
 				if !scopeUsesDefTypeRules(scope) && expected.Name == "string" && target.Kind == syntax.ExpressionIdentifier && strings.HasPrefix(target.Value, "&") && result.TypeOf(expression.Children[1]).Name == "list" {
@@ -3693,13 +3701,26 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 				Code: "vim/E689", Message: "Index not allowed after a string: " + result.File.Text(expression.Span), Span: target.Span,
 			})
 		}
-		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && !sliceAssignmentNeedsE1165(result, scope, expression) {
 			appendIndexableAssignmentDiagnostic(result, scope, target)
 		}
 	}
 	for _, child := range expression.Children {
 		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
+}
+
+func sliceAssignmentNeedsE1165(result *FileAnalysis, scope *Scope, expression *syntax.Expression) bool {
+	if result == nil || scope == nil || expression == nil || expression.Kind != syntax.ExpressionAssignment || expression.Value != "=" ||
+		len(expression.Children) < 2 || expressionContainsMissing(expression) || !scopeUsesDefTypeRules(scope) {
+		return false
+	}
+	target := expression.Children[0]
+	if target == nil || target.Kind != syntax.ExpressionSlice || len(target.Children) == 0 || target.Children[0] == nil {
+		return false
+	}
+	receiver := resolvedExpressionType(result, scope, target.Children[0])
+	return !isUnknownType(receiver) && receiver.Name != "list" && receiver.Name != "blob" && receiver.Name != "tuple"
 }
 
 func appendIndexableAssignmentDiagnostic(result *FileAnalysis, scope *Scope, target *syntax.Expression) {

@@ -1386,6 +1386,32 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:108-109` states that `vim9cmd` cannot stand alone.
 - `src/errors.h:2988-2989` defines the exact E1164 message.
 
+## Invalid range assignment: E1165
+
+Analysis reports E1165 for a direct `=` assignment to a slice when the receiver
+is statically known to be invalid in a compiled Vim9 context. The diagnostic
+uses Vim's exact `Cannot use a range with an assignment: {assignment}` form,
+retains the complete assignment text in the message, and selects the slice
+target.
+
+The check applies in `def` and block-lambda bodies, including a `def` retained
+under a Legacy root. List and Blob slices remain valid, Tuple slices retain
+E1533, and `any`, unresolved receivers, incomplete input, compound assignments,
+ordinary Vim9 script execution, and Legacy assignments remain outside E1165.
+E1165 also suppresses lower-priority indexability and assignment-type cascades
+for the same target.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:2664-2686` rejects a range for direct assignment when the
+  compiled receiver is neither a List, Blob, nor `any`, while preserving the
+  Tuple-specific diagnostic.
+- `src/testdir/test_vim9_assign.vim:1745` expects E1165 for the official
+  inferred-Dictionary assignment in a compiled `def`.
+- `runtime/doc/eval.txt:3165-3175` documents range assignment and associates it
+  with E1165.
+- `src/errors.h:2991-2992` defines the exact E1165 message template.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
