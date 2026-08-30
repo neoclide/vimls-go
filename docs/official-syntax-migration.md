@@ -440,6 +440,10 @@ syntax split is therefore 984 migrated, zero ready, and 44 pending-fix.
 Commit `a5e3b9d` migrated all three closed enum-value-phase variants. The
 authoritative syntax split is therefore 987 migrated, zero ready, and 41
 pending-fix.
+Commit `d32d420` migrated both missing-`endenum` variants. A strict phase audit
+then removed six function cases that require scope/type resolution or dynamic
+unknown-command lookup. The authoritative syntax split is therefore 989
+migrated, zero ready, and 33 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1515,7 +1519,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 179 syntax variants: 138 migrated and 41 pending-fix. In the
+Group D contains 173 syntax variants: 140 migrated and 33 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1613,7 +1617,7 @@ E1415 M ready: 28:569/script
 E1418 M ready: 288:6615/script,298:6850/script
 E1419 M missing: 214:5043/script,264:6157/script
 E1419 M recovery: 224:5261/script
-E1420 P mapping: 84:2047/script,100:2430/script
+E1420 M mapping: 84:2047/script,100:2430/script
 E1435 M missing: 1706:39098/script
 E488 M ready: 108:2615/script
 E488 M missing: 116:2820/script
@@ -1651,14 +1655,17 @@ recovery syntax but cannot become a new value or ordinary command. Its full
 command span owns E1419, including a leading comma, and the matched `endenum`
 still closes the block.
 
-#### `test_vim9_func.vim` (74)
+Commit `d32d420` migrates the two E1420 cases. A near-miss terminator remains
+in the incomplete enum syntax tree, while EOF reports `Missing :endenum` on
+the header. The existing invalid-header cascade suppression also covers E1420,
+so a primary E488, E1415, or E1416 is not followed by a false missing-end.
+
+#### `test_vim9_func.vim` (68)
 
 ```text
 E1005 M ready: 2887:66332/def
-E1006 P missing: 2123:47271/def
 E1007 M ready: 2078:45879/def
 E1008 M ready: 2462:55226/script,2464:55349/script,2481:55796/script
-E1010 P missing: 645:13404/script,659:13755/script,660:13796/script,2486:56238/script
 E1010 P recovery: 2077:45815/def
 E1055 M ready: 2482:55906/script
 E1057 P mapping: 408:8674/script,2466:55472/script
@@ -1684,7 +1691,6 @@ E129 P mapping: 3734:85678/script
 E15 P mapping: 828:17920/def
 E16 P mapping: 3817:87815/def
 E476 P mapping: 4520:103771/script,1298:27807/script
-E476 P missing: 4728:108040/script
 E476 P recovery: 781:16158/def
 E488 M ready: 971:20965/script,3746:85903/script
 E488 P missing: 1755:38517/{def|vim9-script}
@@ -1714,6 +1720,12 @@ Vim9 command scanner reports E1170 for `#{`, keeps that physical line opaque,
 and resumes at the following line. The E492 case at `3889:89267/script` is
 excluded because the error comes from dynamically executing register text,
 not from parsing the containing script.
+
+The function-scope duplicate at line 2123 and unknown type names at lines 645,
+659, 660, and 2486 belong to analysis, not syntax. The arbitrary `xxx` command
+at line 4728 is also excluded: unknown user or future commands must remain
+opaque. The postfix optional marker at line 2077 remains in scope because its
+placement is invalid type grammar independent of name resolution.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
