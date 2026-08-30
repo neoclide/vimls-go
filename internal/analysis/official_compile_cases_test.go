@@ -298,6 +298,7 @@ func officialCompileSupportedCodes() map[string]bool {
 		"vim/E1007": true,
 		"vim/E1008": true,
 		"vim/E1009": true,
+		"vim/E1012": true,
 		"vim/E1013": true,
 		"vim/E1018": true,
 		"vim/E1021": true,
@@ -353,6 +354,20 @@ var officialCompileMigrationExclusions = map[string]string{
 	"src/testdir/test_vim9_func.vim:1951:43200": "depends on test-defined g:MyDefVarargs()",
 	"src/testdir/test_vim9_func.vim:2099:46590": "depends on test-defined g:MyVarargsOnly()",
 	"src/testdir/test_vim9_func.vim:2100:46703": "depends on test-defined g:MyVarargsOnly()",
+	"src/testdir/test_vim9_func.vim:2851:63748": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2852:63899": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2857:64141": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2858:64281": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2865:64558": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2866:64703": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2871:64951": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2872:65098": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2878:65345": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2879:65483": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2880:65616": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2881:65761": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2882:65908": "depends on a test-defined global function",
+	"src/testdir/test_vim9_func.vim:2903:66816": "depends on a test-defined global function",
 }
 
 // These compiler errors are intentionally outside pure language-server
