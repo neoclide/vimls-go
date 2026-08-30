@@ -613,6 +613,8 @@ func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnos
 		return syntax.Diagnostic{Code: "vim/E730", Message: "Using a List as a String", Span: span}, true
 	case "dict":
 		return syntax.Diagnostic{Code: "vim/E731", Message: "Using a Dictionary as a String", Span: span}, true
+	case "blob":
+		return syntax.Diagnostic{Code: "vim/E976", Message: "Using a Blob as a String", Span: span}, true
 	default:
 		return syntax.Diagnostic{}, false
 	}

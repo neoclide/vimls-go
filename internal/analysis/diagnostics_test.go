@@ -1086,6 +1086,56 @@ func TestAnalyzeBlobAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBlobAsStringDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script right operand",
+			source: "vim9script\nvar value = 'a' .. 0z32\n",
+			span:   "0z32",
+		},
+		{
+			name:   "vim9 script left operand",
+			source: "vim9script\nvar value = 0z32 .. 'a'\n",
+			span:   "0z32",
+		},
+		{
+			name:   "legacy operand",
+			source: "let value = 'a' . 0z32\n",
+			span:   "0z32",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E976" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Blob as a String" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E976 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  var value = 'a' .. 0z32\nenddef\n",
+		"vim9script\nvar value = 0z01 + 0z02\n",
+		"vim9script\nvar value = 0z01 - 2\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E976" {
+				t.Fatalf("source %q unexpectedly received E976: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

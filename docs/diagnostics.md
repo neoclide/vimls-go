@@ -768,3 +768,22 @@ Representative source evidence:
   compiled and script contexts.
 - `src/typval.c:250-273` maps Blob numeric conversion to E974, and
   `src/errors.h:2561-2562` defines the exact message.
+
+## Using a Blob as a String: E976
+
+E976 means `Using a Blob as a String`. Legacy and top-level Vim9 script use it
+when concatenation requires String conversion from a Blob.
+
+Analysis reports E976 for a statically known Blob operand of Legacy `.` or
+Vim9 `..` concatenation outside a compiled context. The invalid operand is
+selected left-to-right. Numeric Blob operations remain E974, and Blob-plus-
+Blob remains valid container concatenation. A compiled Vim9 `def` uses E1105
+for the concatenation type error.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:1954-1967` and `2049-2054` distinguish E1105
+  in a compiled `def` from E976 at top-level Vim9 script.
+- `src/typval.c:1206-1250` rejects Blob-to-String conversion in both strict and
+  non-strict paths.
+- `src/errors.h:2565-2566` defines the exact message.
