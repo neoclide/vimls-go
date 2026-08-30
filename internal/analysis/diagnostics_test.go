@@ -251,6 +251,59 @@ func TestAnalyzeE1423EnumValueCannotBeModified(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1422EnumValueNotFound(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "missing value",
+			source: "vim9script\nenum Foo\n  apple, orange\nendenum\nvar value: Foo = Foo.pear\n",
+			want:   true,
+		},
+		{
+			name:   "missing assignment value in def",
+			source: "vim9script\nenum Foo\n  apple\nendenum\ndef Fn()\n  Foo.pear = Foo.apple\nenddef\n",
+			want:   true,
+		},
+		{
+			name:   "known selectors",
+			source: "vim9script\nenum Foo\n  apple\n  static var farm: string\n  static def Work()\n  enddef\nendenum\necho Foo.apple\necho Foo.values\necho Foo.farm\necho Foo.Work\n",
+		},
+		{
+			name:   "object member",
+			source: "vim9script\nenum Foo\n  apple\nendenum\necho Foo.apple.missing\n",
+		},
+		{
+			name:   "shadowed enum",
+			source: "vim9script\nenum Foo\n  apple\nendenum\ndef Fn(Foo: any)\n  echo Foo.pear\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1422" {
+					got = append(got, diagnostic)
+				}
+			}
+			wantCount := 0
+			if test.want {
+				wantCount = 1
+			}
+			if len(got) != wantCount {
+				t.Fatalf("E1422 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+			if test.want && (got[0].Message != "Enum value \"pear\" not found in enum \"Foo\"" || file.Text(got[0].Span) != "pear") {
+				t.Fatalf("E1422 diagnostic = %#v", got[0])
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string

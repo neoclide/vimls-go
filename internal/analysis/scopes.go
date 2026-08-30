@@ -272,6 +272,45 @@ func enumHasObjectMember(file *syntax.File, enum *syntax.Command, name string) b
 	return false
 }
 
+func enumHasClassSelector(file *syntax.File, enum *syntax.Command, name string) bool {
+	if name == "values" || enumHasValue(file, enum, name) || enumHasObjectMember(file, enum, name) {
+		return true
+	}
+	for _, memberIndex := range enum.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		function := file.Commands[memberIndex].Function
+		if function != nil && file.Text(function.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func appendMissingEnumValueDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || expression == nil || expression.Kind != syntax.ExpressionMember ||
+		len(expression.Children) != 1 || expression.Children[0] == nil || expression.Children[0].Kind != syntax.ExpressionIdentifier || expression.Value == "" {
+		return
+	}
+	receiver := expression.Children[0]
+	declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+	if declaration == nil || declaration.Kind != SymbolKindEnum {
+		return
+	}
+	enum := localEnum(result.File, receiver.Value)
+	if enum == nil || enumHasClassSelector(result.File, enum, expression.Value) {
+		return
+	}
+	span := syntax.Span{Start: expression.Span.End - len(expression.Value), End: expression.Span.End}
+	if !validNameSpan(result.File, span) {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1422", Message: "Enum value \"" + expression.Value + "\" not found in enum \"" + receiver.Value + "\"", Span: span,
+	})
+}
+
 func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
@@ -2867,6 +2906,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 	case syntax.ExpressionMember:
 		// Value is the member spelling, not a lexical variable.  Only the
 		// receiver expression participates in same-file resolution.
+		if dialect == syntax.Vim9 {
+			appendMissingEnumValueDiagnostic(result, scope, expression)
+		}
 		if len(expression.Children) > 0 {
 			walkExpression(result, file, expression.Children[0], scope, skipped, false, dialect)
 		}
@@ -3142,6 +3184,9 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 			}
 		}
 	case syntax.ExpressionMember:
+		if dialect == syntax.Vim9 {
+			appendMissingEnumValueDiagnostic(result, scope, expression)
+		}
 		if len(expression.Children) > 0 {
 			walkAssignmentTarget(result, file, expression.Children[0], scope, skipped, dialect)
 		}
