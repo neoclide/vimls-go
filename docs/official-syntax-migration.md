@@ -407,6 +407,9 @@ pending-fix.
 Commit `66ba656` migrated the two attached Vim9 block-delimiter variants. The
 authoritative parser split is therefore 964 migrated, zero ready, and 68
 pending-fix.
+Commit `b9bd5b6` migrated the final legacy variable-target tail variant. The
+authoritative parser split is therefore 965 migrated, zero ready, and 67
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -999,13 +1002,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 106 | 105 | 0 | 1 |
+| `C-EXCMD` | 106 | 106 | 0 | 0 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **333** | **332** | **0** | **1** |
+| **Total** | **333** | **333** | **0** | **0** |
 
 ```text
 C-EXPR
@@ -1218,6 +1221,11 @@ after `{` or `}` is retained as an opaque malformed tail and reports E488,
 while a whitespace-delimited hash remains a comment. The delimiters still
 participate in scope recovery, but their primary diagnostic suppresses a
 cascading missing- or unexpected-brace error on the same edit.
+
+Commit `b9bd5b6` migrated `S:4077:87087/script` and completed the Group C
+parser inventory. After a valid legacy `unlet`, `lockvar`, or `unlockvar`
+target, a hash cannot begin another target or a legacy comment; it is retained
+as the opaque E488 tail while the preceding target AST remains available.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
