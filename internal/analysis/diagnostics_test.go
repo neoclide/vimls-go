@@ -1885,6 +1885,81 @@ func TestAnalyzeBoolAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBitshiftOperandDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+		want         []string
+	}{
+		{"Legacy left operand", "let value = 'text' << 1\n", []string{"<<"}},
+		{"Legacy right operand", "let value = 1 >> []\n", []string{">>"}},
+		{"Vim9 script left and right", "vim9script\nvar left = 'text' << 1\nvar right = 1 >> []\n", []string{"<<", ">>"}},
+		{"left operand wins", "vim9script\nvar value = 'text' << []\n", []string{"<<"}},
+		{"compiled direct constants", "vim9script\ndef Func()\n  var left = ('text') << 1\n  var right = 1 >> (0.5)\nenddef\n", []string{"<<", ">>"}},
+		{"compiled Blob and literal identifiers", "vim9script\ndef Func()\n  var blob = (0z12) << 1\n  var bool = true >> 1\n  var special = v:none << 1\n  var nullValue = null >> 1\n  var nullList = null_list << 1\nenddef\n", []string{"<<", ">>", "<<", ">>", "<<"}},
+		{"block lambda constant", "vim9script\nvar Callback = () => ('text') << 1\n", []string{"<<"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1282" {
+					got = append(got, diagnostic)
+				}
+				if (test.name == "compiled direct constants" || test.name == "compiled Blob and literal identifiers") && diagnostic.Code == "vim/E1012" {
+					t.Fatalf("compiled constant retained E1012: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1282 diagnostics = %#v, want %#v", result.Diagnostics, test.want)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "Bitshift operands must be numbers" || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E1282 diagnostic = %#v on %q", diagnostic, file.Text(diagnostic.Span))
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, span, message string
+	}{
+		{"compiled string variable", "vim9script\ndef Func()\n  var text: string = 'text'\n  var value = text << 1\nenddef\n", "text", "Type mismatch; expected number but got string"},
+		{"compiled not-list", "vim9script\ndef Func()\n  var value = ![] >> 1\nenddef\n", "![]", "Type mismatch; expected number but got bool"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1282" {
+					t.Fatalf("compiled variable unexpectedly received E1282: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == "vim/E1012" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1012 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar anyValue: any\nvar value = anyValue << 1\nvar unknown = Unknown >> 1\n",
+		"vim9script\nvar value = 1 << 2\nvar other = 8 >> 1\n",
+		"vim9script\ndef Func()\n  var value = 1 << 2\nenddef\n",
+	} {
+		file := syntax.Parse(source)
+		result := Analyze(file)
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1282" {
+				t.Fatalf("source unexpectedly received E1282: %#v", result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeIndexableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

@@ -2942,6 +2942,32 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						}
 					}
 				}
+				if expression.Kind == syntax.ExpressionBinary && (op == "<<" || op == ">>") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					compiled := command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)
+					for _, operand := range expression.Children[:2] {
+						actual := result.TypeOf(operand)
+						if isUnknownType(actual) || actual.Name == "number" {
+							continue
+						}
+						constant := operand
+						for constant.Kind == syntax.ExpressionParenthesized && len(constant.Children) == 1 {
+							constant = constant.Children[0]
+						}
+						precompiledConstant := constant.Kind == syntax.ExpressionString || constant.Kind == syntax.ExpressionBlob ||
+							constant.Kind == syntax.ExpressionNumber && isFloatLiteral(constant.Value) ||
+							constant.Kind == syntax.ExpressionIdentifier && (isLiteralIdentifier(constant.Value) || constant.Value == "v:true" || constant.Value == "v:false" || constant.Value == "v:null" || constant.Value == "v:none")
+						if !compiled || precompiledConstant {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E1282", Message: "Bitshift operands must be numbers", Span: expression.Operator,
+							})
+							return
+						}
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1012", Message: "Type mismatch; expected number but got " + valueTypeDisplay(actual), Span: operand.Span,
+						})
+						return
+					}
+				}
 				if !compoundTypeError && (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
 					if expression.Kind == syntax.ExpressionAssignment {

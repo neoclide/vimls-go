@@ -3018,3 +3018,27 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9cmds.c:109-169` routes environment and indexed targets separately
   before applying the direct-name restriction.
 - `src/errors.h:2812-2813` defines the exact message.
+
+## Non-number bitshift operand: E1282
+
+E1282 means `Bitshift operands must be numbers`. Analysis reports it on the
+`<<` or `>>` operator when a statically known operand is not a Number. The
+left operand is checked first, matching Vim's evaluation order. Unknown and
+`any` operands stay quiet because their runtime values decide the result.
+
+Legacy and script-level Vim9 expressions apply the runtime rule directly. In
+a compiled `def` or expression lambda, Vim instead reports E1012 for a typed
+non-Number variable. E1282 remains the compiled result for primitive constants
+that Vim precomputes, including String, Float, Blob, Bool, Special, and typed
+null literals. Parentheses around such a literal do not change that result.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_expr.vim:1043-1050` distinguishes literal E1282 failures,
+  compiled variable E1012 failures, and the context-dependent `![]` cases.
+- `src/vim9expr.c:3428-3541` checks precomputed operands by runtime value type
+  while using compiled stack type checks for other expressions.
+- `src/eval.c:4417-4448,4490-4497` implements the evaluated operand checks and
+  bitshift operation.
+- `runtime/doc/eval.txt:1422-1432` documents Number operands and shift amounts.
+- `src/errors.h:3295-3296` defines the exact message.
