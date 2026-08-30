@@ -1141,3 +1141,32 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/testing.txt:362-365` defines `test_null_string()` as the
   zero-argument test builtin that returns a null String.
 - `src/errors.h:2791-2792` defines the exact message.
+
+## Incompatible comparison types: E1072
+
+E1072 means `Cannot compare {type} with {type}`. Analysis reports it for a
+Vim9 comparison when both operand types are statically known and Vim cannot
+select a valid comparison. This includes incompatible types, ordering or
+pattern operations on Bool, Special, List, or Blob values, and comparisons of
+`v:none` with a non-String value. The diagnostic selects the operator and uses
+Vim's lower-case type names in operand order.
+
+Number and Float remain mutually comparable. A String may be compared with
+`v:none`, and other null Special comparisons retain Vim's separate semantics.
+An operand without a concrete type fact stays unknown because its runtime value
+decides whether E1072 occurs. Legacy commands retain their historical
+conversion and container-specific errors instead of receiving this Vim9 code.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_expr.vim:1293-1313` covers List, Number, and Blob
+  values compared with `v:none` in both compiled and script evaluation.
+- `src/testdir/test_vim9_expr.vim:1316-1343` covers runtime-dependent `any`
+  values as well as the statically known Special/Bool and Bool/Bool failures.
+- `src/testdir/test_vim9_expr.vim:1634-1643` covers String/Number mismatch and
+  ordering two Bool values.
+- `src/vim9instr.c:495-589` selects compiled comparison instructions, permits
+  Number/Float and dynamic `any`, and emits E1072 for the rejected type pairs.
+- `src/typval.c:1619-1629,2016-2023` applies the corresponding Vim9 runtime
+  checks.
+- `src/errors.h:2793-2794` defines the exact message.

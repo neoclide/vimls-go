@@ -1068,6 +1068,44 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					op = result.File.Text(expression.Operator)
 				}
 				if expression.Kind == syntax.ExpressionBinary && command.Dialect == syntax.Vim9 &&
+					len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					base := strings.TrimRight(op, "#?")
+					comparison := base == "==" || base == "!=" || base == "=~" || base == "!~" || base == "is" || base == "isnot" ||
+						base == ">" || base == ">=" || base == "<" || base == "<="
+					if comparison && (base != "is" && base != "isnot" || base == op) {
+						leftExpression, rightExpression := expression.Children[0], expression.Children[1]
+						left, right := result.TypeOf(leftExpression), result.TypeOf(rightExpression)
+						leftKind, rightKind := builtinValueTypeKind(left), builtinValueTypeKind(right)
+						invalid := false
+						if !isUnknownType(left) && !isUnknownType(right) && leftKind != 0 && rightKind != 0 && left.Name != "void" && right.Name != "void" {
+							if left.Name == right.Name {
+								equality := base == "==" || base == "!=" || base == "is" || base == "isnot"
+								invalid = !equality && (left.Name == "bool" || left.Name == "special" || left.Name == "blob" || left.Name == "list")
+							} else if (left.Name == "number" || left.Name == "float") && (right.Name == "number" || right.Name == "float") {
+								// Number and Float comparisons use Vim's shared numeric path.
+							} else if left.Name == "special" || right.Name == "special" {
+								leftValue, rightValue := leftExpression, rightExpression
+								for leftValue.Kind == syntax.ExpressionParenthesized && len(leftValue.Children) == 1 {
+									leftValue = leftValue.Children[0]
+								}
+								for rightValue.Kind == syntax.ExpressionParenthesized && len(rightValue.Children) == 1 {
+									rightValue = rightValue.Children[0]
+								}
+								leftNone := leftValue.Kind == syntax.ExpressionIdentifier && leftValue.Value == "v:none"
+								rightNone := rightValue.Kind == syntax.ExpressionIdentifier && rightValue.Value == "v:none"
+								invalid = leftNone && right.Name != "string" || rightNone && left.Name != "string"
+							} else {
+								invalid = true
+							}
+						}
+						if invalid {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E1072", Message: "Cannot compare " + left.Name + " with " + right.Name, Span: expression.Operator,
+							})
+						}
+					}
+				}
+				if expression.Kind == syntax.ExpressionBinary && command.Dialect == syntax.Vim9 &&
 					(op == "is" || op == "isnot") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
 					if left.Name == right.Name && (left.Name == "bool" || left.Name == "special" || left.Name == "number" || left.Name == "float") {

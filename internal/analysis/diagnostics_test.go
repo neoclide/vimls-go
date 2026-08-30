@@ -311,6 +311,58 @@ func TestAnalyzeE1037InvalidIdentityComparison(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1072InvalidComparison(t *testing.T) {
+	for _, test := range []struct {
+		name, expression, message string
+	}{
+		{name: "list and special", expression: "[] == v:none", message: "Cannot compare list with special"},
+		{name: "number and special", expression: "123 == v:none", message: "Cannot compare number with special"},
+		{name: "blob and special", expression: "0z00 == v:none", message: "Cannot compare blob with special"},
+		{name: "special and bool", expression: "v:none == true", message: "Cannot compare special with bool"},
+		{name: "ordered bools", expression: "false >= true", message: "Cannot compare bool with bool"},
+		{name: "string and number", expression: "'' == 0", message: "Cannot compare string with number"},
+	} {
+		for _, context := range []string{"script", "def", "vim9cmd"} {
+			t.Run(test.name+"/"+context, func(t *testing.T) {
+				source := "vim9script\necho " + test.expression + "\n"
+				if context == "def" {
+					source = "vim9script\ndef F()\n  echo " + test.expression + "\nenddef\n"
+				} else if context == "vim9cmd" {
+					source = "vim9cmd echo " + test.expression + "\n"
+				}
+				file := syntax.Parse(source)
+				result := Analyze(file)
+				var got []syntax.Diagnostic
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == "vim/E1072" {
+						got = append(got, diagnostic)
+					}
+				}
+				if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != strings.Fields(test.expression)[1] {
+					t.Fatalf("E1072 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+				}
+			})
+		}
+	}
+
+	for _, source := range []string{
+		"echo [] == v:none\n",
+		"vim9script\necho 1 == 1.0\n",
+		"vim9script\necho '' == v:none\n",
+		"vim9script\necho true == false\n",
+		"vim9script\necho [] == []\n",
+		"vim9script\necho v:null == true\n",
+		"vim9script\necho (v:none) == ''\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1072" {
+				t.Fatalf("source %q unexpectedly received E1072: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1060ImportAliasRequiresDot(t *testing.T) {
 	for _, test := range []struct {
 		name, source, message, span string
