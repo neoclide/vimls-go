@@ -476,6 +476,9 @@ pending-fix.
 Commit `ece21fa` migrated the missing global-function-name variant. The
 authoritative syntax split is therefore 1013 migrated, zero ready, and 9
 pending-fix.
+Commit `b81c3bf` migrated the invalid SID-colon function-name variant. The
+authoritative syntax split is therefore 1014 migrated, zero ready, and 8
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1551,7 +1554,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 164 migrated and 9 pending-fix. In the
+Group D contains 173 syntax variants: 165 migrated and 8 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1733,7 +1736,7 @@ E488 M ready: 971:20965/script,3746:85903/script
 E488 M ready: 1755:38517/{def|vim9-script}
 E488 P recovery: 1748:38346/{def|vim9-script},2403:53812/script
 E720 M missing: 3539:81179/{def|vim9-script}
-E884 P mapping: 3740:85793/script
+E884 M mapping: 3740:85793/script
 ```
 
 Authority is `src/vim9expr.c`, `src/vim9type.c`, `src/vim9cmds.c`,
@@ -1817,6 +1820,10 @@ tail opaque, and preserves the multiline block plus later commands.
 Commit `ece21fa` migrates `3734:85678/script`. A Vim9 `def g:` header retains
 the incomplete qualified Function.Name, reports E129, and leaves its invalid
 tail opaque; the unclosed recovery block does not add a missing-end cascade.
+
+Commit `b81c3bf` migrates `3740:85793/script`. The invalid Vim9 `def <SID>:`
+header retains `<SID>:` as Function.Name and reports E884 on that span; its
+remaining type-like text stays opaque and no missing-end cascade is added.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
