@@ -1673,6 +1673,9 @@ func TestOfficialVim9CallMissingComma(t *testing.T) {
 			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Text(file.Diagnostics[0].Span) != "[" {
 				t.Fatalf("diagnostics = %#v", file.Diagnostics)
 			}
+			if test.code == "vim/E116" && file.Diagnostics[0].Message != "Invalid arguments for function" {
+				t.Fatalf("E116 diagnostic = %#v", file.Diagnostics[0])
+			}
 			var ref, after *Declaration
 			for index := range file.Commands {
 				declaration := file.Commands[index].Declaration
@@ -1702,6 +1705,12 @@ func TestOfficialVim9CallMissingComma(t *testing.T) {
 	valid := Parse("vim9script\nvar Ref = function('len', [1, 2])\n")
 	if len(valid.Diagnostics) != 0 || valid.Commands[1].Declaration == nil || len(valid.Commands[1].Declaration.Initializer.Children) != 3 {
 		t.Fatalf("valid call = %#v, diagnostics = %#v", valid.Commands, valid.Diagnostics)
+	}
+	legacy := Parse("let Ref = function('len', [1, 2])\nlet after = 1\n")
+	for _, diagnostic := range legacy.Diagnostics {
+		if diagnostic.Code == "vim/E116" {
+			t.Fatalf("legacy call unexpectedly reported E116: %#v", diagnostic)
+		}
 	}
 }
 
@@ -1743,6 +1752,9 @@ func TestOfficialTrailingMethodArrowStopsAtPhysicalLine(t *testing.T) {
 			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Span != (Span{Start: strings.Index(test.source, "->"), End: strings.Index(test.source, "->") + 2}) {
 				t.Fatalf("diagnostics = %#v", file.Diagnostics)
 			}
+			if test.code == "vim/E260" && file.Diagnostics[0].Message != "Missing name after ->" {
+				t.Fatalf("E260 diagnostic = %#v", file.Diagnostics[0])
+			}
 			if len(file.Commands) < 3 {
 				t.Fatalf("commands = %#v", file.Commands)
 			}
@@ -1767,6 +1779,12 @@ func TestOfficialTrailingMethodArrowStopsAtPhysicalLine(t *testing.T) {
 			}
 			assertFileSpans(t, file)
 		})
+	}
+	legacy := Parse("let value = [1]->len()\nlet after = 2\n")
+	for _, diagnostic := range legacy.Diagnostics {
+		if diagnostic.Code == "vim/E260" {
+			t.Fatalf("legacy source unexpectedly reported E260: %#v", diagnostic)
+		}
 	}
 }
 
