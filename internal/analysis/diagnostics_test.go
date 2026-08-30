@@ -632,6 +632,70 @@ func TestAnalyzeIndexofCallbackArityDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBuiltinCallbackArityDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name: "def rejects incompatible callback counts",
+			source: "vim9script\ndef Test()\n" +
+				"  echo [0, 1, 2]->map(() => 123)\n" +
+				"  echo [0, 1, 2]->map((_) => 123)\n" +
+				"  echo [0, 1, 2]->map((a, b, c) => a + b + c)\n" +
+				"  echo [0, 1, 2]->map((a, b, c, d) => a + b + c + d)\n" +
+				"  echo [0, 1, 2]->map((index, value, ...rest) => value)\n" +
+				"  def One(value: number): bool\n    return true\n  enddef\n" +
+				"  indexof([1, 2], One)\nenddef\n",
+			want: []string{
+				"() => 123",
+				"(_) => 123",
+				"(a, b, c) => a + b + c",
+				"(a, b, c, d) => a + b + c + d",
+				"(index, value, ...rest) => value",
+				"One",
+			},
+		},
+		{
+			name: "accepted callback shapes",
+			source: "vim9script\ndef Test()\n" +
+				"  echo [0, 1, 2]->map((index, value) => value)\n" +
+				"  echo [0, 1, 2]->map((...args) => args[1])\n" +
+				"  echo [0, 1, 2]->map((index, ...rest) => rest[0])\nenddef\n",
+		},
+		{
+			name:   "script uses its context-specific codes",
+			source: "vim9script\necho [0, 1, 2]->map((a, b, c) => a + b + c)\n",
+		},
+		{
+			name:   "sort callback is not E176",
+			source: "vim9script\ndef Test()\n  sort([1, 2], (a, b, c) => 0)\nenddef\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E176" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E176 diagnostics = %#v, want spans %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, test.want, file.Diagnostics, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "Invalid number of arguments" || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E176 diagnostic[%d] = %#v on %q, want %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index])
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string

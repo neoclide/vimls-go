@@ -2014,6 +2014,10 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 					if checker == "arg_map_func" && !scopeContainsDef(scope) {
 						expected.functionReturn = nil
 					}
+					if scopeContainsDef(scope) && callbackCheckerUsesE176(checker) && builtinCallbackArgumentCountInvalid(actual[index], expected) {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E176", Message: "Invalid number of arguments", Span: argument.Span})
+						continue
+					}
 					if builtinArgumentMismatch(actual[index], expected) {
 						// Vim9 script compilation reports the historical E118 when
 						// indexof() will pass more arguments than a statically known
@@ -2269,6 +2273,24 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 
 func callbackReceivesTooManyArguments(actual ValueType, expected builtinArgumentType) bool {
 	return len(expected.functionArguments) > 0 && actual.Name == "func" && actual.ArgumentCountKnown && !actual.Variadic && len(expected.functionArguments) > len(actual.Arguments)
+}
+
+func callbackCheckerUsesE176(checker string) bool {
+	switch checker {
+	case "arg_filter_func", "arg_map_func", "arg_foreach_func":
+		return true
+	default:
+		return false
+	}
+}
+
+func builtinCallbackArgumentCountInvalid(actual ValueType, expected builtinArgumentType) bool {
+	if len(expected.functionArguments) == 0 || actual.Name != "func" || !actual.ArgumentCountKnown {
+		return false
+	}
+	actualCount := len(actual.Arguments)
+	expectedCount := len(expected.functionArguments)
+	return actualCount != expectedCount && !(actual.Variadic && actualCount == expectedCount-1)
 }
 
 func functionDiagnosticTarget(file *syntax.File, expression *syntax.Expression) (string, syntax.Span) {

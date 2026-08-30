@@ -54,3 +54,40 @@ Representative source evidence:
   variadic Vim9 parameters together.
 - `src/testdir/test_vim9_builtin.vim:2343-2351` distinguishes E176 in a `def`
   from E118 at Vim9 script level for an `indexof()` callback.
+
+## Invalid argument count: E176
+
+Vim's message is `Invalid number of arguments`. E176 predates Vim9 script and
+has more than one static use, so the code alone does not identify a callable
+invocation error.
+
+A legacy or Vim9 `:command` definition produces E176 when its `-nargs` value is
+not one of `0`, `1`, `*`, `?`, `+`, or `_`. This validates the argument-count
+specification itself; it does not count arguments in a later invocation of the
+user command.
+
+Vim also uses E176 while compiling a `def` when `map()`, `filter()`,
+`foreach()`, or `indexof()` receives a statically known callback with an
+incompatible number of declared argument slots. These callbacks are invoked
+with an index or key and a value. A callback with exactly two slots is
+accepted. A single variadic slot is also accepted, because it can receive both
+values. More than two declared slots are rejected even when the last slot is
+variadic. Argument-type and return-type mismatches use their own diagnostics
+and are not E176.
+
+The equivalent callback mismatch does not unconditionally use E176 outside a
+compiled `def`. Depending on direction and context, Vim9 script uses E118,
+E1106, or E1190. Static analysis therefore applies E176 only to the exact
+contexts above.
+
+Representative source evidence:
+
+- `src/usercmd.c:1060-1094` defines the accepted `-nargs` values and emits E176
+  for every other value; `src/testdir/test_usercommands.vim:300-316` covers the
+  legacy failure.
+- `src/evalfunc.c:746-778` checks the callback argument slots used by
+  `map()`/`filter()`-style functions.
+- `src/testdir/test_vim9_builtin.vim:2799-2808` distinguishes E176 in a `def`
+  from E1190 at Vim9 script level.
+- `src/testdir/test_vim9_func.vim:4397-4406` distinguishes E176 in a `def` from
+  E1106 at Vim9 script level.

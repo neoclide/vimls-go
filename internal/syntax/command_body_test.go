@@ -81,6 +81,50 @@ func TestVim9UserCommandCompletionRequiresArguments(t *testing.T) {
 	}
 }
 
+func TestUserCommandInvalidArgumentCount(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "legacy invalid value",
+			source: "command! -nargs=x DoCmd :\nlet after = 1\n",
+			span:   "-nargs=x",
+		},
+		{
+			name:   "Vim9 invalid value",
+			source: "vim9script\ncommand! -nargs=12 DoCmd :\nvar after = 1\n",
+			span:   "-nargs=12",
+		},
+		{
+			name:   "empty value",
+			source: "command! -nargs= DoCmd :\necho after\n",
+			span:   "-nargs=",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E176" || file.Diagnostics[0].Message != "Invalid number of arguments" || file.Text(file.Diagnostics[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want E176 on %q", file.Diagnostics, test.span)
+			}
+			if len(file.Commands) < 2 || file.Commands[len(file.Commands)-1].Span.Start <= file.Diagnostics[0].Span.End {
+				t.Fatalf("parser did not recover after invalid -nargs: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, dialect := range []string{"", "vim9script\n"} {
+		for _, value := range []string{"0", "1", "*", "?", "+", "_"} {
+			file := Parse(dialect + "command! -nargs=" + value + " DoCmd :\n")
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E176" {
+					t.Fatalf("valid -nargs=%s produced E176: %#v", value, file.Diagnostics)
+				}
+			}
+		}
+	}
+}
+
 func TestVim9UserCommandBlockBody(t *testing.T) {
 	source := "vim9script\ncommand Foo {\n  var value = 1\n  if value == 1\n    echo 'ok'\n  endif\n}\necho done\n"
 	file := Parse(source)

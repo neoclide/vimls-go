@@ -2703,9 +2703,8 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	if command.Canonical == "command" {
 		if diagnoseUserCommandAttributes(file, command) {
-			// The name and its immediately attached '#' are one invalid
-			// Vim9 command header.  Keep the remainder opaque so it cannot
-			// produce same-line replacement-command cascades.
+			// Keep an invalid attribute or Vim9 command name opaque so its
+			// replacement text cannot produce same-line diagnostic cascades.
 			return
 		}
 		// A Vim9 command block is already represented by the top-level command
@@ -3694,9 +3693,6 @@ func userCommandBodySpan(source string, argument Span) (Span, bool) {
 }
 
 func diagnoseUserCommandAttributes(file *File, command *Command) bool {
-	if command.Dialect != Vim9 {
-		return false
-	}
 	allowArguments := false
 	complete := Span{}
 	start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
@@ -3712,11 +3708,19 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 				allowArguments = true
 			case "0":
 				allowArguments = false
+			default:
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E176", Message: "Invalid number of arguments", Span: Span{Start: start, End: end},
+				})
+				return true
 			}
 		} else if strings.HasPrefix(attribute, "-complete=") && len(attribute) > len("-complete=") {
 			complete = Span{Start: start, End: end}
 		}
 		start = skipSpace(file.Source, end, command.Argument.End)
+	}
+	if command.Dialect != Vim9 {
+		return false
 	}
 	if complete.Start < complete.End && !allowArguments {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
