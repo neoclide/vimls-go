@@ -1,5 +1,11 @@
 # vimls-go agent guide
 
+## Active handoff
+
+Before continuing the current milestone, read `docs/session-handoff.md`. It is
+the repository-owned continuation point for work that spans Codex sessions.
+Update or remove it when the recorded work is completed.
+
 ## Mission
 
 Build a Go language server for legacy Vim script and Vim9 script. The minimum
