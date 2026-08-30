@@ -460,6 +460,8 @@ syntax split is therefore 996 migrated, zero ready, and 26 pending-fix.
 Commit `ef1f2ca` migrated all three missing function-terminator variants. The
 authoritative syntax split is therefore 999 migrated, zero ready, and 23
 pending-fix.
+Commit `87f805d` migrated the variadic-default variant. The authoritative
+syntax split is therefore 1000 migrated, zero ready, and 22 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1535,7 +1537,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 150 migrated and 23 pending-fix. In the
+Group D contains 173 syntax variants: 151 migrated and 22 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1701,7 +1703,7 @@ E110 M ready: 2086:46156/def,2087:46235/def
 E1151 M mapping: 373:8000/script
 E1152 M recovery: 382:8151/script
 E1157 M ready: 1689:36926/{def|vim9-script}
-E1160 P missing: 2034:44861/script
+E1160 M missing: 2034:44861/script
 E1170 M ready: 73:1788/def
 E1172 P missing: 1626:35394/{def|vim9-script}
 E1173 M missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/script,2388:53495/script
@@ -1773,6 +1775,11 @@ Commit `ef1f2ca` migrates `408:8674/script`, `416:8808/script`, and
 `function` reports E126 on the retained header while their blocks, bodies, and
 invalid near-miss terminator commands remain in the syntax tree. Other block
 kinds keep the generic editor-recovery diagnostic.
+
+Commit `87f805d` migrates `2034:44861/script`. A default on a Vim9 variadic
+`def` parameter reports E1160 from its `=` through the retained default
+expression; the Parameter remains variadic and keeps its complete Default AST.
+Legacy function arguments are unchanged.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
