@@ -384,6 +384,9 @@ split is therefore 948 migrated, zero ready, and 87 pending-fix.
 Commit `dbfecbb` migrated the two `elseif` command-tail variants and the Vim9
 type-alias trailing-type variant. The authoritative parser split is therefore
 951 migrated, zero ready, and 84 pending-fix.
+Commit `f7001a3` migrated the two `exit_cb:` command-boundary variants. The
+authoritative parser split is therefore 953 migrated, zero ready, and 82
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -976,13 +979,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 109 | 92 | 0 | 17 |
+| `C-EXCMD` | 109 | 94 | 0 | 15 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **336** | **319** | **0** | **17** |
+| **Total** | **336** | **321** | **0** | **15** |
 
 ```text
 C-EXPR
@@ -1152,6 +1155,12 @@ Commit `dbfecbb` migrated `C:472:10765/{def|vim9-script}` and
 unexpected tail now reports E488 without discarding the condition AST. A Vim9
 type alias likewise maps its context-free trailing-type diagnostic to E488
 while retaining the parsed type and its generic arguments.
+
+Commit `f7001a3` migrated `S:4795:107577/{def|vim9-script}`. When an identifier
+extends a built-in Ex command name and is followed by a type-style colon, it is
+not promoted to a standalone expression. The scanner retains Vim's ASCII
+command boundary and reports E1144 for the attached argument; ordinary
+command-start calls and assignments keep their expression AST.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
