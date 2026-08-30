@@ -810,9 +810,21 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&
 					!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 					left, right := expression.Children[0], expression.Children[1]
-					diagnostic, ok := stringConversionDiagnostic(result.TypeOf(left), left.Span)
+					leftType, rightType := result.TypeOf(left), result.TypeOf(right)
+					diagnostic, ok := stringConversionDiagnostic(leftType, left.Span)
+					if !ok && command.Dialect == syntax.Vim9 && (leftType.Name == "job" || leftType.Name == "channel") {
+						diagnostic = syntax.Diagnostic{Code: "vim/E908", Message: "Using an invalid value as a String: " + leftType.Name, Span: left.Span}
+						ok = true
+					}
 					if !ok {
-						diagnostic, ok = stringConversionDiagnostic(result.TypeOf(right), right.Span)
+						leftConvertible := leftType.Name == "bool" || leftType.Name == "float" || leftType.Name == "number" || leftType.Name == "special" || leftType.Name == "string"
+						invalidRight := rightType.Name == "void" || rightType.Name == "job" || rightType.Name == "channel"
+						if command.Dialect == syntax.Vim9 && leftConvertible && invalidRight {
+							diagnostic = syntax.Diagnostic{Code: "vim/E908", Message: "Using an invalid value as a String: " + rightType.Name, Span: right.Span}
+							ok = true
+						} else {
+							diagnostic, ok = stringConversionDiagnostic(rightType, right.Span)
+						}
 					}
 					if ok {
 						result.Diagnostics = append(result.Diagnostics, diagnostic)

@@ -718,3 +718,28 @@ Representative source evidence:
 - `src/list.c:3154-3182` accepts only same-kind List, Dictionary, or Blob
   pairs and emits E896 otherwise.
 - `src/errors.h:2331-2333` defines the exact message template.
+
+## Invalid value used as a String: E908
+
+E908 means `Using an invalid value as a String: {type}`. Top-level Vim9
+script uses it when concatenation tries to convert a Job or Channel operand,
+or a right-hand Void operand, to String.
+
+Analysis reports E908 for statically known Job and Channel operands of Vim9
+`..` outside a compiled context. It also reports a right-hand Void, Job, or
+Channel only when the left operand is statically known to complete its own
+conversion first. This preserves left-to-right error precedence: a left Void
+or Blob does not cause a speculative E908 on the right. Legacy conversion is
+left untouched, and a compiled Vim9 `def` retains E1105 for these operator type
+errors.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:1954-1962` and `1986-1997` distinguish
+  compiled E1105 from script-level E908 for Void, Job, and Channel operands.
+- `src/testdir/test_vim9_expr.vim:2049-2068` repeats the same distinctions in
+  declaration expressions.
+- `src/eval.c:4545-4567` checks a right-hand Void, Job, or Channel before
+  concatenation, while `src/typval.c:1269-1296` defines the left-side value
+  conversions and their precedence.
+- `src/errors.h:2370-2371` defines the exact message template.
