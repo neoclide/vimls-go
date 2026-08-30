@@ -1391,6 +1391,11 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 	returnStart := -1
 	returnEnd := -1
 	if position < len(p.source) && p.source[position] == ':' {
+		if position+1 < len(p.source) && !isExpressionSpace(p.source[position+1]) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1069", Message: "white space required after ':'", Span: Span{Start: p.base + position, End: p.base + position + 1},
+			})
+		}
 		returnStart = skipVim9LambdaSpace(p.source, position+1)
 		arrowOffset := strings.Index(p.source[returnStart:], "=>")
 		if arrowOffset < 0 {
