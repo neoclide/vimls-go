@@ -86,6 +86,7 @@ GOPROXY=off GOSUMDB=off make test-official
 
 See [the roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
 [language support contract](docs/language-support.md), and
-[test strategy](docs/testing.md). The pinned Vim failure-phase research and
-implementation queue live in the
+[test strategy](docs/testing.md). Semantics derived from Vim's tests are
+recorded in the [static diagnostic reference](docs/diagnostics.md). The pinned
+Vim failure-phase research and implementation queue live in the
 [official syntax migration ledger](docs/official-syntax-migration.md).

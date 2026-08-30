@@ -241,3 +241,57 @@ func TestAnalyzeFunctionTypeImplicitVoidReturn(t *testing.T) {
 		t.Fatalf("parenthesized func type = %+v", declarations["VoidReturn"].Type)
 	}
 }
+
+func TestAnalyzeFunctionArityFacts(t *testing.T) {
+	tests := []struct {
+		name, source, declaration string
+		required, arguments       int
+		variadic                  bool
+	}{
+		{
+			name:        "legacy defaults and varargs",
+			source:      "function! Flexible(required, optional = 1, ...)\nendfunction\n",
+			declaration: "Flexible", required: 1, arguments: 3, variadic: true,
+		},
+		{
+			name:        "Vim9 defaults and varargs",
+			source:      "vim9script\ndef Flexible(required: number, optional: string = 'x', ...rest: list<any>)\nenddef\n",
+			declaration: "Flexible", required: 1, arguments: 3, variadic: true,
+		},
+		{
+			name:        "lambda",
+			source:      "vim9script\nvar Callback = (first: number, second: string) => first\n",
+			declaration: "Callback", required: 2, arguments: 2,
+		},
+		{
+			name:        "optional function type",
+			source:      "vim9script\nvar Callback: func(number, ?string)\n",
+			declaration: "Callback", required: 1, arguments: 2,
+		},
+		{
+			name:        "variadic function type",
+			source:      "vim9script\nvar Callback: func(number, ...list<any>)\n",
+			declaration: "Callback", required: 1, arguments: 2, variadic: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			var declaration *Declaration
+			for _, candidate := range result.Declarations {
+				if candidate.Name == test.declaration {
+					declaration = candidate
+					break
+				}
+			}
+			if declaration == nil {
+				t.Fatalf("missing declaration %q: %#v", test.declaration, result.Declarations)
+			}
+			typ := declaration.Type
+			if typ.Name != "func" || !typ.ArgumentCountKnown || typ.RequiredArguments != test.required || len(typ.Arguments) != test.arguments || typ.Variadic != test.variadic {
+				t.Fatalf("arity facts = %#v, want required=%d arguments=%d variadic=%t", typ, test.required, test.arguments, test.variadic)
+			}
+		})
+	}
+}

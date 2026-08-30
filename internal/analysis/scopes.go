@@ -1990,8 +1990,9 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 			return
 		}
 		seen[expression] = true
-		if expression.Kind == syntax.ExpressionCall && dialect == syntax.Vim9 && !expressionContainsMissing(expression) && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
-			if builtin, arguments, ok := builtinCallArguments(result.File, expression); ok {
+		if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
+			builtin, arguments, builtinCall := builtinCallArguments(result.File, expression)
+			if dialect == syntax.Vim9 && builtinCall {
 				actual := make([]ValueType, len(arguments))
 				for index, argument := range arguments {
 					actual[index] = result.TypeOf(argument)
@@ -2014,6 +2015,15 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						expected.functionReturn = nil
 					}
 					if builtinArgumentMismatch(actual[index], expected) {
+						// Vim9 script compilation reports the historical E118 when
+						// indexof() will pass more arguments than a statically known
+						// callback accepts. A def uses E176 for the same mismatch, so
+						// keep that context on its separate diagnostic path.
+						if builtin.Name == "indexof" && index == 1 && !scopeContainsDef(scope) && callbackReceivesTooManyArguments(actual[index], expected) {
+							name, span := functionDiagnosticTarget(result.File, argument)
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E118", Message: "Too many arguments for function: " + name, Span: span})
+							continue
+						}
 						// indexof() requires a predicate returning bool.  A known
 						// void function is a value-use error at the callback itself,
 						// rather than a generic callback signature mismatch.  Keep
@@ -2036,8 +2046,8 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 				}
 				collectMapCallbackReturnTypeDiagnostic(result, scope, builtin, arguments, actual)
 				collectBuiltinCompiledStringDiagnostics(result, scope, builtin, arguments, expression.Span.Start)
-			} else {
-				collectFunctionArgumentTypeDiagnostics(result, expression)
+			} else if !builtinCall {
+				collectFunctionCallDiagnostics(result, scope, expression, dialect == syntax.Vim9)
 			}
 		}
 		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
@@ -2196,15 +2206,45 @@ func walkCompiledStringExpression(result *FileAnalysis, scope *Scope, expression
 	}
 }
 
-func collectFunctionArgumentTypeDiagnostics(result *FileAnalysis, call *syntax.Expression) {
-	if result == nil || call == nil || call.Value != "" || len(call.Children) == 0 {
+func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *syntax.Expression, checkTypes bool) {
+	if result == nil || result.File == nil || call == nil || call.Value != "" && call.Value != "->" || len(call.Children) == 0 {
 		return
 	}
-	callable := result.TypeOf(call.Children[0])
+	callee := call.Children[0]
+	if callee == nil {
+		return
+	}
+	callable := result.TypeOf(callee)
+	arguments := call.Children[1:]
+	if callee.Kind == syntax.ExpressionMember && len(callee.Children) == 1 && result.File.Text(callee.Operator) == "->" {
+		declaration := resolve(scope, callee.Value, call.Span.Start, true, nil)
+		if declaration == nil || !checkTypes && declaration.Span.Start >= call.Span.Start {
+			return
+		}
+		callable = declaration.Type
+		arguments = append([]*syntax.Expression{callee.Children[0]}, arguments...)
+	} else if !checkTypes && callee.Kind == syntax.ExpressionIdentifier {
+		declaration := resolve(scope, callee.Value, call.Span.Start, true, nil)
+		if declaration == nil || declaration.Span.Start >= call.Span.Start {
+			return
+		}
+		callable = declaration.Type
+	}
 	if callable.Name != "func" || !callable.ArgumentCountKnown {
 		return
 	}
-	arguments := call.Children[1:]
+	name, span := functionDiagnosticTarget(result.File, callee)
+	if len(arguments) < callable.RequiredArguments {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E119", Message: "Not enough arguments for function: " + name, Span: span})
+		return
+	}
+	if !callable.Variadic && len(arguments) > len(callable.Arguments) {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E118", Message: "Too many arguments for function: " + name, Span: span})
+		return
+	}
+	if !checkTypes {
+		return
+	}
 	for index, argument := range arguments {
 		expectedIndex := index
 		if expectedIndex >= len(callable.Arguments) {
@@ -2227,31 +2267,97 @@ func collectFunctionArgumentTypeDiagnostics(result *FileAnalysis, call *syntax.E
 	}
 }
 
+func callbackReceivesTooManyArguments(actual ValueType, expected builtinArgumentType) bool {
+	return len(expected.functionArguments) > 0 && actual.Name == "func" && actual.ArgumentCountKnown && !actual.Variadic && len(expected.functionArguments) > len(actual.Arguments)
+}
+
+func functionDiagnosticTarget(file *syntax.File, expression *syntax.Expression) (string, syntax.Span) {
+	if expression == nil {
+		return "<function>", syntax.Span{}
+	}
+	span := expression.Span
+	if expression.Kind == syntax.ExpressionIdentifier && expression.Value != "" {
+		return expression.Value, span
+	}
+	if expression.Kind == syntax.ExpressionMember && expression.Value != "" && file.Text(expression.Operator) == "->" {
+		span.Start = span.End - len(expression.Value)
+		return expression.Value, span
+	}
+	for expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	if expression.Kind == syntax.ExpressionLambda {
+		return "<lambda>", span
+	}
+	if name := strings.TrimSpace(file.Text(span)); name != "" {
+		return name, span
+	}
+	return "<function>", span
+}
+
 // collectBuiltinCallArityDiagnostic reports arity errors only where the
-// callable is a plain, statically named builtin. Scoped, member, method, and
-// dynamically named calls deliberately remain unknown.
+// callable is a statically named builtin. A method receiver counts as one
+// argument, and any explicit arguments required before the receiver must still
+// be present. Scoped and dynamically named calls deliberately remain unknown.
 func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression) {
-	if result == nil || file == nil || call == nil || call.Value != "" || len(call.Children) == 0 || expressionContainsMissing(call) || syntaxDiagnosticTouchesCall(file.Diagnostics, call.Span) {
+	if result == nil || file == nil || call == nil || len(call.Children) == 0 || expressionContainsMissing(call) || syntaxDiagnosticTouchesCall(file.Diagnostics, call.Span) {
 		return
 	}
 	callee := call.Children[0]
-	if callee == nil || callee.Kind != syntax.ExpressionIdentifier || strings.Contains(callee.Value, ":") || !validNameSpan(file, callee.Span) {
+	if callee == nil {
 		return
 	}
-	builtin, ok := vimdata.LookupFunction(callee.Value)
+	name := ""
+	argumentCount := 0
+	explicitCount := 0
+	method := false
+	switch {
+	case call.Value == "" && callee.Kind == syntax.ExpressionIdentifier:
+		name = callee.Value
+		argumentCount = len(call.Children) - 1
+	case call.Value == "" && callee.Kind == syntax.ExpressionMember && len(callee.Children) == 1 && file.Text(callee.Operator) == "->":
+		name = callee.Value
+		explicitCount = len(call.Children) - 1
+		argumentCount = explicitCount + 1
+		method = true
+	case call.Value == "->" && callee.Kind == syntax.ExpressionIdentifier && len(call.Children) >= 2:
+		name = callee.Value
+		explicitCount = len(call.Children) - 2
+		argumentCount = explicitCount + 1
+		method = true
+	default:
+		return
+	}
+	if strings.Contains(name, ":") {
+		return
+	}
+	builtin, ok := vimdata.LookupFunction(name)
 	if !ok {
 		return
 	}
-	argumentCount := len(call.Children) - 1
+	if method && (builtin.MethodArgument == 0 || builtin.MethodArgument-1 > explicitCount) {
+		if builtin.MethodArgument == 0 {
+			return
+		}
+		_, span := functionDiagnosticTarget(file, callee)
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E119", Message: "Not enough arguments for function: " + builtin.Name, Span: span,
+		})
+		return
+	}
+	_, span := functionDiagnosticTarget(file, callee)
+	if !validNameSpan(file, span) {
+		return
+	}
 	if argumentCount < builtin.MinArgs {
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-			Code: "vim/E119", Message: "Not enough arguments for function: " + builtin.Name, Span: callee.Span,
+			Code: "vim/E119", Message: "Not enough arguments for function: " + builtin.Name, Span: span,
 		})
 		return
 	}
 	if builtin.MaxArgs >= 0 && argumentCount > builtin.MaxArgs {
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-			Code: "vim/E118", Message: "Too many arguments for function: " + builtin.Name, Span: callee.Span,
+			Code: "vim/E118", Message: "Too many arguments for function: " + builtin.Name, Span: span,
 		})
 	}
 }

@@ -450,6 +450,15 @@ func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 			},
 		},
 		{
+			name:   "legacy builtin methods",
+			source: "echo 'x'->len(2)\necho ''->printf()\necho 10->setwinvar()\n",
+			want: []syntax.Diagnostic{
+				{Code: "vim/E118", Message: "Too many arguments for function: len"},
+				{Code: "vim/E119", Message: "Not enough arguments for function: printf"},
+				{Code: "vim/E119", Message: "Not enough arguments for function: setwinvar"},
+			},
+		},
+		{
 			name:   "optional variadic and conservative targets",
 			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(null_object, 2, 3, 4)\nvar dynamic = call('len', [])\nMyFunction()\ns:len()\nitems->len()\n",
 		},
@@ -479,6 +488,145 @@ func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 					t.Fatalf("diagnostic[%d] span = %#v (%q), want %#v (%q)", index, diagnostic.Span, file.Text(diagnostic.Span), wantSpan, name)
 				}
 				last = start
+			}
+		})
+	}
+}
+
+func TestAnalyzeUserFunctionArityDiagnostics(t *testing.T) {
+	type wantDiagnostic struct {
+		code, message, text string
+	}
+	tests := []struct {
+		name   string
+		source string
+		want   []wantDiagnostic
+	}{
+		{
+			name: "legacy fixed default and variadic",
+			source: "function! Fixed(value)\nendfunction\n" +
+				"call Fixed()\ncall Fixed(1, 2)\n" +
+				"function! Flexible(required, optional = 1, ...)\nendfunction\n" +
+				"call Flexible()\ncall Flexible(1)\ncall Flexible(1, v:null, 3, 4)\n",
+			want: []wantDiagnostic{
+				{code: "vim/E119", message: "Not enough arguments for function: Fixed", text: "Fixed"},
+				{code: "vim/E118", message: "Too many arguments for function: Fixed", text: "Fixed"},
+				{code: "vim/E119", message: "Not enough arguments for function: Flexible", text: "Flexible"},
+			},
+		},
+		{
+			name: "legacy method receiver counts as an argument",
+			source: "function! Pair(first, second)\nendfunction\n" +
+				"echo 'one'->Pair()\necho 'one'->Pair('two', 'three')\n",
+			want: []wantDiagnostic{
+				{code: "vim/E119", message: "Not enough arguments for function: Pair", text: "Pair"},
+				{code: "vim/E118", message: "Too many arguments for function: Pair", text: "Pair"},
+			},
+		},
+		{
+			name:   "legacy forward function stays conservative",
+			source: "call Later()\nfunction! Later(value)\nendfunction\n",
+		},
+		{
+			name: "Vim9 nested def",
+			source: "vim9script\ndef Outer()\n" +
+				"  def Empty()\n  enddef\n  Empty(1)\n" +
+				"  def One(value: string)\n  enddef\n  One()\nenddef\n",
+			want: []wantDiagnostic{
+				{code: "vim/E118", message: "Too many arguments for function: Empty", text: "Empty"},
+				{code: "vim/E119", message: "Not enough arguments for function: One", text: "One"},
+			},
+		},
+		{
+			name: "Vim9 default and variadic",
+			source: "vim9script\n" +
+				"def Defaulted(required: number, optional: number = 1)\nenddef\n" +
+				"Defaulted()\nDefaulted(1)\nDefaulted(1, v:none)\nDefaulted(1, 2, 3)\n" +
+				"def Flexible(required: number, ...rest: list<any>)\nenddef\n" +
+				"Flexible()\nFlexible(1)\nFlexible(1, 2, 3)\n",
+			want: []wantDiagnostic{
+				{code: "vim/E119", message: "Not enough arguments for function: Defaulted", text: "Defaulted"},
+				{code: "vim/E118", message: "Too many arguments for function: Defaulted", text: "Defaulted"},
+				{code: "vim/E119", message: "Not enough arguments for function: Flexible", text: "Flexible"},
+			},
+		},
+		{
+			name: "Vim9 lambda and method receiver",
+			source: "vim9script\n" +
+				"var Ref = (value) => value\nRef()\nRef(1, 2)\n" +
+				"echo ((value) => value)()\n" +
+				"echo ((value) => value)(1, 2)\n" +
+				"echo 'one'->((value) => value)('two')\n",
+			want: []wantDiagnostic{
+				{code: "vim/E119", message: "Not enough arguments for function: Ref", text: "Ref"},
+				{code: "vim/E118", message: "Too many arguments for function: Ref", text: "Ref"},
+				{code: "vim/E119", message: "Not enough arguments for function: <lambda>", text: "((value) => value)"},
+				{code: "vim/E118", message: "Too many arguments for function: <lambda>", text: "((value) => value)"},
+				{code: "vim/E118", message: "Too many arguments for function: <lambda>", text: "((value) => value)"},
+			},
+		},
+		{
+			name:   "unknown and incomplete calls stay conservative",
+			source: "vim9script\nvar Unknown: func\nUnknown(1, 2)\ng:Dynamic()\nvar value: any\nvalue()\nvar missing = ((x) => x)(\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E118" || diagnostic.Code == "vim/E119" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("arity diagnostics = %#v, want %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, test.want, file.Diagnostics, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				want := test.want[index]
+				if diagnostic.Code != want.code || diagnostic.Message != want.message || file.Text(diagnostic.Span) != want.text {
+					t.Fatalf("arity diagnostic[%d] = %#v on %q, want %s %q on %q", index, diagnostic, file.Text(diagnostic.Span), want.code, want.message, want.text)
+				}
+			}
+		})
+	}
+}
+
+func TestAnalyzeIndexofCallbackArityDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		wantE118     bool
+	}{
+		{
+			name: "Vim9 script uses E118",
+			source: "vim9script\ndef TestIdx(value: dict<any>): bool\n  return true\nenddef\n" +
+				"indexof([{color: 'red'}], TestIdx)\n",
+			wantE118: true,
+		},
+		{
+			name: "def keeps its distinct callback diagnostic",
+			source: "vim9script\ndef Outer()\n  def TestIdx(value: dict<any>): bool\n    return true\n  enddef\n" +
+				"  indexof([{color: 'red'}], TestIdx)\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E118" {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.wantE118 {
+				if len(got) != 1 || got[0].Message != "Too many arguments for function: TestIdx" || file.Text(got[0].Span) != "TestIdx" {
+					t.Fatalf("E118 diagnostics = %#v, want one on TestIdx; all diagnostics = %#v", got, result.Diagnostics)
+				}
+			} else if len(got) != 0 {
+				t.Fatalf("def callback was incorrectly mapped to E118: %#v", result.Diagnostics)
 			}
 		})
 	}

@@ -15,6 +15,7 @@ type ValueType struct {
 	Arguments          []ValueType
 	Return             *ValueType
 	ArgumentCountKnown bool
+	RequiredArguments  int
 	Variadic           bool
 }
 
@@ -106,7 +107,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 					}
 				}
 				returnType := convertSyntaxType(command.Function.ReturnType)
-				declaration.Type = ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, Variadic: parametersAreVariadic(command.Function.Parameters)}
+				declaration.Type = ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, RequiredArguments: requiredParameterCount(command.Function.Parameters), Variadic: parametersAreVariadic(command.Function.Parameters)}
 			}
 		}
 		state.collectLambdaFactsCommands(command.Expressions)
@@ -660,11 +661,20 @@ func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) 
 			returnType = UnknownValueType
 		}
 	}
-	return ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, Variadic: parametersAreVariadic(expression.Parameters)}
+	return ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, RequiredArguments: requiredParameterCount(expression.Parameters), Variadic: parametersAreVariadic(expression.Parameters)}
 }
 
 func parametersAreVariadic(parameters []syntax.Parameter) bool {
 	return len(parameters) > 0 && parameters[len(parameters)-1].Variadic
+}
+
+func requiredParameterCount(parameters []syntax.Parameter) int {
+	for index, parameter := range parameters {
+		if parameter.Default != nil || parameter.Variadic {
+			return index
+		}
+	}
+	return len(parameters)
 }
 
 func (state *typeState) lambdaBodyReturnType(commands []syntax.Command, scope *Scope) ValueType {
@@ -759,6 +769,9 @@ func convertSyntaxType(typeNode *syntax.Type) ValueType {
 	for _, argument := range typeNode.Arguments {
 		typ.Arguments = append(typ.Arguments, convertSyntaxType(argument))
 	}
+	if typ.ArgumentCountKnown {
+		typ.RequiredArguments = requiredTypeArgumentCount(typeNode.Arguments)
+	}
 	if (typeNode.Kind == syntax.TypeFunction || typeNode.Name == "tuple") && len(typeNode.Arguments) > 0 {
 		typ.Variadic = typeNode.Arguments[len(typeNode.Arguments)-1].Kind == syntax.TypeVariadic
 	}
@@ -768,6 +781,15 @@ func convertSyntaxType(typeNode *syntax.Type) ValueType {
 		typ.Return = valueTypePointer(ValueType{Name: "void"})
 	}
 	return typ
+}
+
+func requiredTypeArgumentCount(arguments []*syntax.Type) int {
+	for index, argument := range arguments {
+		if argument.Kind == syntax.TypeOptional || argument.Kind == syntax.TypeVariadic {
+			return index
+		}
+	}
+	return len(arguments)
 }
 
 func initializerElement(initializer *syntax.Expression, index, count int) *syntax.Expression {
@@ -804,7 +826,12 @@ func mergeTypes(left, right ValueType) ValueType {
 	if left.Name != right.Name || len(left.Arguments) != len(right.Arguments) {
 		return UnknownValueType
 	}
-	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: left.ArgumentCountKnown && right.ArgumentCountKnown, Variadic: left.Variadic && right.Variadic}
+	argumentCountKnown := left.ArgumentCountKnown && right.ArgumentCountKnown && left.RequiredArguments == right.RequiredArguments && left.Variadic == right.Variadic
+	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: argumentCountKnown}
+	if argumentCountKnown {
+		result.RequiredArguments = left.RequiredArguments
+		result.Variadic = left.Variadic
+	}
 	for index := range result.Arguments {
 		result.Arguments[index] = mergeTypes(result.Arguments[index], right.Arguments[index])
 	}
