@@ -28,6 +28,7 @@ type FileAnalysis struct {
 	// suppressedSyntaxDiagnostics contains provisional parser diagnostics that
 	// Vim replaces after resolving an import namespace.
 	suppressedSyntaxDiagnostics map[syntax.Diagnostic]bool
+	enumValueExempt             map[syntax.Span]bool
 }
 
 // Scope is a lexical region. Root has Block == -1 and an empty Kind. Other
@@ -93,6 +94,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	result.lambdaScopes = make(map[*syntax.Expression]*Scope)
 	result.lambdaBodies = make(map[*syntax.Expression]bool)
 	result.unknownOptions = make(map[syntax.Span]bool)
+	result.enumValueExempt = make(map[syntax.Span]bool)
 	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
 	collectLambdaScopesCommands(result, root, file.Commands)
 
@@ -308,6 +310,19 @@ func appendMissingEnumValueDiagnostic(result *FileAnalysis, scope *Scope, expres
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1422", Message: "Enum value \"" + expression.Value + "\" not found in enum \"" + receiver.Value + "\"", Span: span,
+	})
+}
+
+func appendEnumAsValueDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
+	if result == nil || expression == nil || dialect != syntax.Vim9 || expression.Kind != syntax.ExpressionIdentifier || result.enumValueExempt[expression.Span] {
+		return
+	}
+	declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil)
+	if declaration == nil || declaration.Kind != SymbolKindEnum {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1421", Message: "Enum \"" + expression.Value + "\" cannot be used as a value", Span: expression.Span,
 	})
 }
 
@@ -2876,9 +2891,20 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		if len(expression.Children) == 0 {
 			return
 		}
-		walkAssignmentTarget(result, file, expression.Children[0], scope, skipped, dialect)
+		diagnosticsBefore := len(result.Diagnostics)
 		for _, child := range expression.Children[1:] {
 			walkExpression(result, file, child, scope, skipped, false, dialect)
+		}
+		walkAssignmentTarget(result, file, expression.Children[0], scope, skipped, dialect)
+		rhsUsesEnumAsValue := false
+		for _, diagnostic := range result.Diagnostics[diagnosticsBefore:] {
+			if diagnostic.Code == "vim/E1421" {
+				rhsUsesEnumAsValue = true
+				break
+			}
+		}
+		if !rhsUsesEnumAsValue && !scopeContainsDef(scope) {
+			appendEnumAsValueDiagnostic(result, scope, expression.Children[0], dialect)
 		}
 	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
@@ -2892,6 +2918,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			})
 			if !preferFunction && declaration != nil && functionSymbolKind(declaration.Kind) && declaration.TypeParameterCount > 0 {
 				appendMissingGenericTypeArgumentsDiagnostic(result, expression.Value, expression.Span)
+			}
+			if !preferFunction {
+				appendEnumAsValueDiagnostic(result, scope, expression, dialect)
 			}
 			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
 			unknownVimVariable := isUnknownVimVariable(expression.Value)
@@ -2910,6 +2939,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			appendMissingEnumValueDiagnostic(result, scope, expression)
 		}
 		if len(expression.Children) > 0 {
+			if expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
+				result.enumValueExempt[expression.Children[0].Span] = true
+			}
 			walkExpression(result, file, expression.Children[0], scope, skipped, false, dialect)
 		}
 	case syntax.ExpressionDictionary:
@@ -2929,6 +2961,14 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		appendNotEnoughGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		appendGenericFunctionCallWithoutTypesDiagnostic(result, expression, scope, skipped)
 		appendQuotedGenericFunctionDiagnostic(result, expression, scope, skipped)
+		if len(expression.Children) > 1 && expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier &&
+			(expression.Children[0].Value == "type" || expression.Children[0].Value == "typename") {
+			for _, argument := range expression.Children[1:] {
+				if argument != nil && argument.Kind == syntax.ExpressionIdentifier {
+					result.enumValueExempt[argument.Span] = true
+				}
+			}
+		}
 		for index, child := range expression.Children {
 			walkExpression(result, file, child, scope, skipped, index == 0, dialect)
 		}

@@ -304,6 +304,52 @@ func TestAnalyzeE1422EnumValueNotFound(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1421EnumCannotBeUsedAsValue(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "initializer", body: "var value = Fruit", want: "Fruit"},
+		{name: "binary operand", body: "var value = 1 + Fruit", want: "Fruit"},
+		{name: "concatenation operand", body: "var value = 'x' .. Fruit", want: "Fruit"},
+		{name: "script assignment target", body: "Fruit = 10", want: "Fruit"},
+		{name: "assignment rhs wins", body: "Fruit = Color", want: "Color"},
+		{name: "enum value", body: "var value = Fruit.Apple"},
+		{name: "enum values", body: "var values = Fruit.values"},
+		{name: "type builtin", body: "echo type(Fruit)\necho typename(Fruit)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\nenum Fruit\n  Apple\nendenum\nenum Color\n  Red\nendenum\n" + test.body + "\n"
+			file := syntax.Parse(source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1421" {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("E1421 diagnostics = %#v", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Message != "Enum \""+test.want+"\" cannot be used as a value" || file.Text(got[0].Span) != test.want {
+				t.Fatalf("E1421 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+		})
+	}
+
+	shadowed := Analyze(syntax.Parse("vim9script\nenum Fruit\n  Apple\nendenum\ndef Fn(Fruit: any)\n  echo Fruit\nenddef\n"))
+	for _, diagnostic := range shadowed.Diagnostics {
+		if diagnostic.Code == "vim/E1421" {
+			t.Fatalf("shadowed enum reported E1421: %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
