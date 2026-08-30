@@ -198,6 +198,16 @@ func buildBlocks(file *File) {
 			}
 		}
 		if kind, ok := openingBlock(file, command); ok {
+			if kind == BlockDef && command.Dialect == Vim9 && defBlock >= 0 {
+				argumentStart := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+				if argumentStart < command.Argument.End && file.Source[argumentStart] == '+' {
+					command.Block = stack[len(stack)-1]
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E476", Message: "Invalid command", Span: command.Name,
+					})
+					continue
+				}
+			}
 			// Vim9 enums are script-level declarations.  Keep the enum as a
 			// block for recovery, but report the declaration-context error when
 			// it appears inside a function definition.
