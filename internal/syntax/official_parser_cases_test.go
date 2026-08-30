@@ -156,6 +156,8 @@ func officialParserExpectedFailures() map[string]string {
 	// execution, type-checking, and other unclassified failures out of this
 	// allowlist until their parser phase is proven independently.
 	return map[string]string{
+		"src/testdir/test_vim9_enum.vim:84:2047/script":            "vim/E1420",
+		"src/testdir/test_vim9_enum.vim:100:2430/script":           "vim/E1420",
 		"src/testdir/test_vim9_enum.vim:214:5043/script":           "vim/E1419",
 		"src/testdir/test_vim9_enum.vim:224:5261/script":           "vim/E1419",
 		"src/testdir/test_vim9_enum.vim:264:6157/script":           "vim/E1419",
