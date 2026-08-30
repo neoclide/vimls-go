@@ -172,3 +172,16 @@ read-only and ask the primary agent for a corrected brief.
 - A local commit does not authorize push, release, issue closure, or PR creation.
 - Update the roadmap and language-support contract when a milestone changes what
   the server actually supports.
+
+## Go development workflow
+
+- For Go code, use the gopls MCP tools before broad text searches when
+  locating symbols, references, implementations, diagnostics, or callers.
+- Prefer gopls semantic rename over search-and-replace for Go identifiers.
+- After modifying a Go file, request gopls diagnostics for that file.
+- Use gopls results as development guidance, not as a replacement for tests.
+- Before completion, run:
+  - gofmt on modified Go files
+  - go test ./...
+  - go vet ./...
+- If the repository defines narrower validation commands, run those as well.
