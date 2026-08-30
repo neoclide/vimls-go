@@ -2499,6 +2499,29 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   `i_cc =` assignment.
 - `src/errors.h:3233-3234` defines the exact E1258 message.
 
+## Missing imported member name: E1259
+
+Analysis reports E1259 when a compiled Vim9 `def` or block-lambda assignment
+uses an imported namespace dot that is not followed by a valid member-name
+start. The diagnostic selects the alias, includes the trimmed assignment tail,
+and suppresses a provisional missing-member syntax diagnostic that describes
+the same malformed target. Recovery continues through an incomplete
+right-hand side.
+
+Whitespace after the namespace dot retains E1074 precedence. Valid member
+assignments, a missing-dot E1258 target, non-assignment reads and calls,
+top-level Vim9 evaluation, Legacy commands, and non-import receivers remain
+outside E1259.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:357-364` expects E1259 for the compiled
+  assignment `expo.99 = 9`.
+- `src/vim9compile.c:1817-1831` skips whitespace after the import dot and
+  emits E1259 when no valid name is consumed.
+- `runtime/doc/vim9.txt:3611-3621` documents E1259 with `i_cc.8 = 0`.
+- `src/errors.h:3235-3236` defines the exact E1259 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

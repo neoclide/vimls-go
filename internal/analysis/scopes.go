@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/vimdata"
@@ -73,12 +74,13 @@ type Declaration struct {
 // Reference is an identifier occurrence.  Declaration is nil when the name
 // is dynamic, explicitly scoped to a different namespace, or not visible yet.
 type Reference struct {
-	Name           string
-	Span           syntax.Span
-	Declaration    *Declaration
-	functionCallee bool
-	scope          *Scope
-	dialect        syntax.Dialect
+	Name             string
+	Span             syntax.Span
+	Declaration      *Declaration
+	functionCallee   bool
+	assignmentTarget bool
+	scope            *Scope
+	dialect          syntax.Dialect
 }
 
 // Analyze collects lexical scopes, declarations, and same-file references.
@@ -1511,6 +1513,25 @@ func collectImportNamespaceDiagnostics(result *FileAnalysis) {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1074", Message: "No white space allowed after dot", Span: importMemberWhitespaceSpan(source, dot),
 				})
+				continue
+			}
+			memberStart := dot + 1
+			for memberStart < len(source) && (source[memberStart] == ' ' || source[memberStart] == '\t') {
+				memberStart++
+			}
+			if reference.assignmentTarget && scopeUsesDefTypeRules(reference.scope) &&
+				(memberStart >= len(source) || !(source[memberStart] >= 'a' && source[memberStart] <= 'z' || source[memberStart] >= 'A' && source[memberStart] <= 'Z' || source[memberStart] == '_' || source[memberStart] >= utf8.RuneSelf)) {
+				for _, diagnostic := range result.File.Diagnostics {
+					if diagnostic.Code == "vimls/missing-member" && diagnostic.Span.Start >= dot && diagnostic.Span.Start <= memberStart {
+						result.suppressedSyntaxDiagnostics[diagnostic] = true
+					}
+				}
+				end := reference.Span.End
+				for end < len(source) && source[end] != '\n' && source[end] != '\r' {
+					end++
+				}
+				tail := strings.TrimRight(source[reference.Span.Start:end], " \t")
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1259", Message: "Missing name after imported name: " + tail, Span: reference.Span})
 			}
 			continue
 		}
@@ -5478,7 +5499,7 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, false, skipped)
 			result.References = append(result.References, &Reference{
-				Name: expression.Value, Span: expression.Span, Declaration: declaration, scope: scope, dialect: dialect,
+				Name: expression.Value, Span: expression.Span, Declaration: declaration, assignmentTarget: true, scope: scope, dialect: dialect,
 			})
 			if dialect == syntax.Vim9 && (vim9UnsupportedNamespace(expression.Value) || declaration == nil && isUnknownVimVariable(expression.Value)) {
 				appendVim9UnresolvedReadDiagnostic(result, scope, expression.Value, expression.Span)
