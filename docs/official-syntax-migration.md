@@ -435,6 +435,8 @@ E492 cases were then removed from syntax scope because deciding whether a
 command exists or what dynamically executed text means is not parsing. The
 authoritative syntax split is therefore 983 migrated, zero ready, and 45
 pending-fix.
+Commit `f99a3c6` migrated the nested-enum placement variant. The authoritative
+syntax split is therefore 984 migrated, zero ready, and 44 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1510,7 +1512,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 179 syntax variants: 134 migrated and 45 pending-fix. In the
+Group D contains 179 syntax variants: 135 migrated and 44 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1609,7 +1611,7 @@ E1418 M ready: 288:6615/script,298:6850/script
 E1419 P missing: 214:5043/script,264:6157/script
 E1419 P recovery: 224:5261/script
 E1420 P mapping: 84:2047/script,100:2430/script
-E1435 P missing: 1706:39098/script
+E1435 M missing: 1706:39098/script
 E488 M ready: 108:2615/script
 E488 M missing: 116:2820/script
 E488 M recovery: 123:3013/script
@@ -1635,6 +1637,10 @@ syntax migration. `noenum`, `enums`, and `Enum` are unknown or user-command
 candidates; whether they produce E492 depends on command definition state.
 The parser keeps such commands opaque as required for user-defined and future
 commands.
+
+Commit `f99a3c6` migrates `1706:39098/script`. A nested enum is retained as a
+complete child block for loose recovery, while its declaration name reports
+E1435 when the active block stack contains a Vim9 `def`.
 
 #### `test_vim9_func.vim` (74)
 
