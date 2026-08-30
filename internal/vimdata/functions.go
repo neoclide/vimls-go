@@ -29,6 +29,7 @@ type BuiltinFunction struct {
 	Name                string
 	MinArgs             int
 	MaxArgs             int
+	MethodArgument      int // one-based receiver position; zero disables method syntax
 	ReturnType          FunctionReturnType
 	Documentation       string
 	DocumentationSource string

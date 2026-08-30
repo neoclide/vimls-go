@@ -18,9 +18,9 @@ static argcheck_T arg2_instanceof[] = {
 static garray_T *current_type_gap = NULL;
 static const funcentry_T global_functions[] =
 {
-	{"zeta", 1, VARGS, 0, arg2_instanceof,
+	{"zeta", 1, VARGS, FEARG_1|FE_X, arg2_instanceof,
             ret_any, f_zeta},
-    {"alpha", 0, 2, 0, arg2_string,
+    {"alpha", 0, 2, FEARG_2, arg2_string,
             ret_list_string, f_alpha},
     {"guarded", 1, 1, 0, NULL,
             ret_number_bool,
@@ -38,7 +38,7 @@ static const funcentry_T global_functions[] =
 	if len(functions) != 3 || functions[0].Name != "alpha" || functions[1].Name != "guarded" || functions[2].Name != "zeta" {
 		t.Fatalf("functions = %#v", functions)
 	}
-	if functions[2].MaxArgs != -1 || functions[0].ReturnType != "ReturnList" || functions[1].ReturnType != "ReturnNumberOrBool" {
+	if functions[2].MaxArgs != -1 || functions[2].MethodArgument != 1 || functions[0].MethodArgument != 2 || functions[1].MethodArgument != 0 || functions[0].ReturnType != "ReturnList" || functions[1].ReturnType != "ReturnNumberOrBool" {
 		t.Fatalf("metadata = %#v", functions)
 	}
 	if got := strings.Join(functions[0].ArgumentChecks, ","); got != "arg_string,arg_string" {

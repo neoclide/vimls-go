@@ -21,6 +21,12 @@ func TestLookupFunctionMetadata(t *testing.T) {
 		{"instanceof", 2, -1, 2, ReturnBool, "arg_object", "varargs_class"},
 		{"xor", 2, 2, 2, ReturnNumber, "arg_number", "arg_number"},
 	}
+	if function, ok := LookupFunction("append"); !ok || function.MethodArgument != 2 {
+		t.Fatalf("append method metadata = %#v, %v", function, ok)
+	}
+	if function, ok := LookupFunction("argc"); !ok || function.MethodArgument != 0 {
+		t.Fatalf("argc method metadata = %#v, %v", function, ok)
+	}
 	for _, test := range tests {
 		function, ok := LookupFunction(test.name)
 		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType || len(function.ArgumentChecks) != test.checkCount || function.ArgumentChecks[0] != test.firstCheck || function.ArgumentChecks[len(function.ArgumentChecks)-1] != test.lastCheck || function.Documentation == "" || function.DocumentationSource == "" {
