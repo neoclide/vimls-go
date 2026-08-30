@@ -2021,6 +2021,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   variants.
 - `src/errors.h:3139-3140` defines the exact E1222 message.
 
+## String or Dictionary required for builtin argument: E1223
+
+Analysis reports E1223 at Vim9 script level when either ordering of the
+String-or-Dictionary builtin checker receives a known incompatible type. The
+diagnostic selects the complete normalized argument and uses its one-based
+position, including method receivers.
+
+String, Dictionary, and dynamically typed values are accepted. A mismatch in
+a compiled `def` or block lambda retains E1013, Legacy calls are not
+diagnosed, and the wider buffer-or-Dictionary union remains outside this
+rule.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:814-817` distinguishes compiled E1013
+  from script-level E1223 for `complete_add()`.
+- `src/testdir/test_vim9_builtin.vim:2948-2951` covers the opposite checker
+  spelling used by `mapset()`.
+- `src/evalfunc.c:595-610` and `src/evalfunc.c:1070-1085` define the two
+  checker orderings.
+- `src/errors.h:3141-3142` defines the exact E1223 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
