@@ -1362,6 +1362,30 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9type.c:1107-1138` formats variable-index type mismatches.
 - `src/errors.h:2983-2986` defines the exact E1163 message templates.
 
+## Missing vim9cmd command: E1164
+
+Syntax analysis reports E1164 when `vim9cmd`, including an accepted
+abbreviation, is the final command modifier and is not followed by a command.
+The diagnostic uses Vim's exact `vim9cmd must be followed by a command` message
+and selects the `vim9cmd` modifier.
+
+End of line, a command separator, and a comment in the file's root dialect all
+terminate the missing command. The scanner retains the empty command, modifier,
+comment or separator token, and following command for recovery. Other missing
+Vim9 command modifiers continue to use E1082, and a later modifier or valid
+command prevents E1164.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/ex_docmd.c:3237-3250` requires a command immediately after `vim9cmd` and
+  emits E1164 before enabling its one-command Vim9 context.
+- `src/ex_docmd.c:5945-5974` recognizes command termination with the comment
+  delimiter selected by the current file dialect.
+- `src/testdir/test_vim9_cmd.vim:5-17` expects E1164 for bare `vim9cmd` and
+  accepts its command-followed abbreviations.
+- `runtime/doc/vim9.txt:108-109` states that `vim9cmd` cannot stand alone.
+- `src/errors.h:2988-2989` defines the exact E1164 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

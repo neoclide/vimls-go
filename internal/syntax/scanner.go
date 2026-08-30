@@ -1122,11 +1122,19 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			}
 		}
 		missingVim9ModifierCommand := !invalidModifierRange && baseDialect == Vim9 && len(parsedModifiers) > 0 && (start >= end || start < end && isCommentStart(file.Source, start, start, end, Vim9, vimdata.Command{}))
+		missingVim9cmd := false
+		if !invalidModifierRange && len(parsedModifiers) > 0 && parsedModifiers[len(parsedModifiers)-1].Name == "vim9cmd" {
+			missingVim9cmd = start >= end || start < end && (file.Source[start] == '|' || isCommentStart(file.Source, start, start, end, baseDialect, vimdata.Command{}))
+		}
 		emptyPrefix := commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < end && file.Source[commandStart] == ':'
 		if start < end && file.Source[start] == '|' || start >= end && emptyPrefix {
-			if missingVim9ModifierCommand {
+			if missingVim9cmd || missingVim9ModifierCommand {
 				last := parsedModifiers[len(parsedModifiers)-1]
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
+				if missingVim9cmd {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1164", Message: "vim9cmd must be followed by a command", Span: last.Span})
+				} else {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
+				}
 			}
 			file.Commands = append(file.Commands, Command{
 				Kind: CommandEmpty, Dialect: dialect, baseDialect: baseDialect, Span: Span{Start: commandStart, End: start}, Range: commandRange, Modifiers: parsedModifiers, Block: -1,
@@ -1140,12 +1148,16 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			return
 		}
 		explicitHashCommand := dialect == Vim9 && start < end && start == commandStart+1 && file.Source[commandStart] == ':' && file.Source[start] == '#'
-		if start < end && ((!explicitHashCommand && isCommentStart(file.Source, start, start, end, dialect, vimdata.Command{})) || missingVim9ModifierCommand) {
+		if start < end && ((!explicitHashCommand && isCommentStart(file.Source, start, start, end, dialect, vimdata.Command{})) || missingVim9ModifierCommand || missingVim9cmd) {
 			file.Tokens = append(file.Tokens, Token{Kind: TokenComment, Span: Span{Start: start, End: end}})
 			if commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < start {
-				if missingVim9ModifierCommand {
+				if missingVim9cmd || missingVim9ModifierCommand {
 					last := parsedModifiers[len(parsedModifiers)-1]
-					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
+					if missingVim9cmd {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1164", Message: "vim9cmd must be followed by a command", Span: last.Span})
+					} else {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
+					}
 				}
 				file.Commands = append(file.Commands, Command{
 					Kind: CommandEmpty, Dialect: dialect, Span: Span{Start: commandStart, End: start},

@@ -2,6 +2,61 @@ package syntax
 
 import "testing"
 
+func TestVim9cmdMissingCommandDiagnostic(t *testing.T) {
+	tests := []struct {
+		name, source, span, following string
+		comment, separator            bool
+	}{
+		{"Legacy bare", "vim9cmd\nlet after = 1\n", "vim9cmd", "let", false, false},
+		{"abbreviation before bar", "vim9c | echo 1\n", "vim9c", "echo", false, true},
+		{"Vim9 comment", "vim9script\nvim9cmd # comment\nvar after = 1\n", "vim9cmd", "var", true, false},
+		{"Legacy comment", "vim9cmd \" comment\nlet after = 1\n", "vim9cmd", "let", true, false},
+		{"preceding modifier", "vim9script\nsilent vim9cm\nvar after = 1\n", "vim9cm", "var", false, false},
+		{"Legacy-root def", "def Func()\n  vim9cmd\n  var after = 1\nenddef\n", "vim9cmd", "var", false, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			foundEmpty := false
+			foundFollowing := false
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1164" {
+					got = append(got, diagnostic)
+				}
+			}
+			for _, command := range file.Commands {
+				foundEmpty = foundEmpty || command.Kind == CommandEmpty && len(command.Modifiers) > 0 && command.Modifiers[len(command.Modifiers)-1].Name == "vim9cmd"
+				foundFollowing = foundFollowing || command.Canonical == test.following
+			}
+			if len(file.Diagnostics) != 1 || len(got) != 1 || got[0].Message != "vim9cmd must be followed by a command" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want E1164 on %q", file.Diagnostics, test.span)
+			}
+			if !foundEmpty || !foundFollowing || (countTokens(file, TokenComment) > 0) != test.comment || (countTokens(file, TokenSeparator) > 0) != test.separator {
+				t.Fatalf("recovery commands = %#v, tokens = %#v", file.Commands, file.Tokens)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9cmd echo 1\n",
+		"vim9script\nvim9cmd echo 1\n",
+		"vim9cmd leftabove\nlet after = 1\n",
+		"vim9cmd legacy echo 'ok'\n",
+		"vim9cmd # Legacy text\n",
+		"vim9script\nvim9cmd \"Vim9 string\"\n",
+		"vim9script\nleftabove\n",
+		"vim9script\nlegacy\n",
+	} {
+		file := Parse(source)
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1164" {
+				t.Fatalf("source %q unexpectedly received E1164: %#v", source, file.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestVim9CommandModifierRequiresCommand(t *testing.T) {
 	tests := []struct {
 		name       string
