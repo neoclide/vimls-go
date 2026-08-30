@@ -651,6 +651,85 @@ func TestAnalyzeListLogicalDiagnosticsUseContextualVimCodes(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFloatModuloDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+	}{
+		{
+			name:   "vim9 script left Float",
+			source: "vim9script\nvar value = 1.0 % 2\n",
+		},
+		{
+			name:   "vim9 script right Float",
+			source: "vim9script\nvar value = 2 % 1.0\n",
+		},
+		{
+			name:   "legacy script",
+			source: "let value = 1.0 % 2\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E804" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use '%' with Float" || file.Text(got[0].Span) != "%" {
+				t.Fatalf("diagnostics = %#v, want one E804 on %% operator; all diagnostics = %#v", got, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value = 1.0 * 2\n",
+		"vim9script\nvar value = 1.0 / 2\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E804" {
+				t.Fatalf("source %q unexpectedly received E804: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+
+	compiled := Analyze(syntax.Parse("vim9script\ndef F()\n  var value = 1.0 % 2\nenddef\n"))
+	foundE1035 := false
+	for _, diagnostic := range compiled.Diagnostics {
+		if diagnostic.Code == "vim/E1035" {
+			foundE1035 = true
+		}
+		if diagnostic.Code == "vim/E804" {
+			t.Fatalf("compiled def retained E804: %#v", compiled.Diagnostics)
+		}
+	}
+	if !foundE1035 {
+		t.Fatalf("compiled def diagnostics = %#v, want E1035", compiled.Diagnostics)
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value = [] % 1.0\n",
+		"vim9script\nvar value = 1.0 % []\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		foundE745 := false
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E745" {
+				foundE745 = true
+			}
+			if diagnostic.Code == "vim/E804" {
+				t.Fatalf("source %q received E804 before E745: %#v", source, result.Diagnostics)
+			}
+		}
+		if !foundE745 {
+			t.Fatalf("source %q diagnostics = %#v, want E745 precedence", source, result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

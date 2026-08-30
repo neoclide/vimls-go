@@ -621,3 +621,24 @@ Representative source evidence:
   distinguish compiled arithmetic type errors from E745 at script level.
 - `src/typval.c:241-242` maps List numeric conversion to E745, and
   `src/errors.h:1899-1900` defines the exact message.
+
+## Cannot use percent with Float: E804
+
+E804 means `Cannot use '%' with Float`. Legacy Vim script and the top-level
+Vim9 script evaluator report it when both operands are numeric and either
+operand is a Float, because modulo is defined only for Numbers.
+
+Analysis reports E804 on the `%` operator when both operand types are
+statically known as Number or Float and at least one is Float. Operand
+conversion errors take precedence: for example, `1.0 % []` reports E745 on the
+List instead of E804. Unknown and otherwise unsupported operand types remain
+unknown so that a later error code is not guessed. A compiled Vim9 `def` uses
+E1035 for the same Float modulo expression.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:2293-2295` distinguishes E1035 in a compiled
+  `def` from E804 at top-level Vim9 script.
+- `src/eval.c:4803-4881` converts both operands before rejecting Float modulo,
+  establishing conversion-error precedence.
+- `src/errors.h:2071-2073` defines the exact message.

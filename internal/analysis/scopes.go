@@ -745,9 +745,17 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 							diagnostic, ok = numericConversionDiagnostic(left, leftOperand.Span)
 						}
 						if !ok {
-							leftNumeric := left.Name == "number" || left.Name == "float" && op != "%"
+							leftNumeric := left.Name == "number" || left.Name == "float"
 							if right.Name != "list" || leftNumeric {
 								diagnostic, ok = numericConversionDiagnostic(right, rightOperand.Span)
+							}
+						}
+						if !ok && op == "%" {
+							leftNumeric := left.Name == "number" || left.Name == "float"
+							rightNumeric := right.Name == "number" || right.Name == "float"
+							if leftNumeric && rightNumeric && (left.Name == "float" || right.Name == "float") {
+								diagnostic = syntax.Diagnostic{Code: "vim/E804", Message: "Cannot use '%' with Float", Span: expression.Operator}
+								ok = true
 							}
 						}
 						if ok {
