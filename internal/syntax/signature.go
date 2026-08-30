@@ -240,7 +240,17 @@ func parseFunctionSignature(file *File, command *Command) {
 		typeStart := skipSyntaxSpace(source, offset+1, len(source))
 		typeEnd := trimSyntaxSpaceEnd(source, typeStart, len(source))
 		function.ReturnTypeSpan = Span{Start: command.Argument.Start + typeStart, End: command.Argument.Start + typeEnd}
-		function.ReturnType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, source[typeStart:typeEnd], command.Argument.Start+typeStart)
+		if defSignature && typeStart >= typeEnd {
+			// Vim reports the missing return type during :def compilation as
+			// E1056. Keep the zero-width span at the point where the type would
+			// begin so recovery can continue with the next physical line.
+			function.ReturnType = &Type{Kind: TypeMissing, Span: function.ReturnTypeSpan}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1056", Message: "Expected a type: ", Span: function.ReturnTypeSpan,
+			})
+		} else {
+			function.ReturnType, file.Diagnostics = appendTypeDiagnostics(file.Diagnostics, source[typeStart:typeEnd], command.Argument.Start+typeStart)
+		}
 	} else if offset < len(rawSource) {
 		if rawSource[offset] == '#' {
 			validComment := spaceBeforeTail && vim9Context

@@ -72,6 +72,40 @@ func TestVim9MissingArgumentTypeDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9MissingReturnTypeDiagnostic(t *testing.T) {
+	source := "def Func():\n  return 1\nenddef\nvar after = 1\n"
+	file := Parse(source)
+	if !hasDiagnostic(file, "vim/E1056") {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	var missing Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1056" {
+			missing = diagnostic
+		}
+	}
+	if missing.Message != "Expected a type: " || missing.Span != (Span{Start: len("def Func():"), End: len("def Func():")}) || file.Text(missing.Span) != "" {
+		t.Fatalf("diagnostic = %#v (%q)", missing, file.Text(missing.Span))
+	}
+	if len(file.Commands) != 4 || file.Commands[1].Canonical != "return" || file.Commands[3].Declaration == nil {
+		t.Fatalf("recovery commands = %#v", file.Commands)
+	}
+	if function := file.Commands[0].Function; function == nil || function.ReturnType == nil || function.ReturnType.Kind != TypeMissing {
+		t.Fatalf("return type = %#v", file.Commands[0].Function)
+	}
+
+	for _, source := range []string{
+		"def Func()\nenddef\n",
+		"def Func(): void\nenddef\n",
+		"function Func():\nendfunction\n",
+	} {
+		valid := Parse(source)
+		if hasDiagnostic(valid, "vim/E1056") {
+			t.Fatalf("valid source reported E1056: %#v\n%s", valid.Diagnostics, source)
+		}
+	}
+}
+
 func TestParsesVim9GenericFunctionSignature(t *testing.T) {
 	file := (Vim9Parser{}).Parse("def Zip<T, U>(first: list<T>, second: list<U> = []): list<tuple<T, U>>\nenddef\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 {
