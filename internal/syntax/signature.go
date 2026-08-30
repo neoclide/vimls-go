@@ -38,11 +38,13 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
+	nestedDefNamespace := false
 	if vim9Context && !strings.Contains(source[nameStart:offset], ".") && command.Block >= 0 && command.Block < len(file.Blocks) {
 		block := file.Blocks[command.Block]
 		if block.Kind == BlockDef && block.Parent >= 0 && block.Parent < len(file.Blocks) && file.Blocks[block.Parent].Kind == BlockDef {
 			for _, namespace := range []string{"s:", "b:"} {
 				if strings.HasPrefix(source[nameStart:offset], namespace) {
+					nestedDefNamespace = true
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
 						Code: "vim/E1075", Message: "Namespace not supported: " + source[nameStart:offset], Span: function.Name,
 					})
@@ -68,14 +70,20 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 	}
 	name := source[nameStart:offset]
+	vim9ScriptNamespace := file.Dialect == Vim9 && command.Dialect == Vim9 && !nestedDefNamespace && strings.HasPrefix(name, "s:") && len(name) > len("s:")
+	if vim9ScriptNamespace {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1268", Message: "Cannot use s: in Vim9 script: " + name, Span: function.Name,
+		})
+	}
 	dictFunction := vim9Context && strings.Contains(name, ".")
-	if dictFunction {
+	if dictFunction && !vim9ScriptNamespace {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1182", Message: "Cannot define a dict function in Vim9 script: " + name,
 			Span: function.Name,
 		})
 	}
-	if command.Dialect == Vim9 && strings.Contains(name, "#") && !strings.HasSuffix(name, "#") {
+	if command.Dialect == Vim9 && !vim9ScriptNamespace && strings.Contains(name, "#") && !strings.HasSuffix(name, "#") {
 		exported := false
 		for _, modifier := range command.Modifiers {
 			exported = exported || modifier.Name == "export"
@@ -89,7 +97,7 @@ func parseFunctionSignature(file *File, command *Command) {
 	}
 	// Vim9 script function names begin with an ASCII capital. Direct object-type
 	// methods use different grammar, including private underscore names.
-	if command.Dialect == Vim9 && !directAggregateMethod && !dictFunction && !strings.Contains(name, "#") {
+	if command.Dialect == Vim9 && !vim9ScriptNamespace && !directAggregateMethod && !dictFunction && !strings.Contains(name, "#") {
 		capital := name[0]
 		checkCapital := !strings.Contains(name, ":")
 		if strings.HasPrefix(name, "g:") && len(name) > 2 {

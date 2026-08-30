@@ -712,6 +712,9 @@ func TestVim9CannotUnletVariable(t *testing.T) {
 			if len(got) != 1 || got[0].Message != "Cannot unlet "+test.target || file.Text(got[0].Span) != test.target {
 				t.Fatalf("E1081 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
 			}
+			if hasDiagnostic(file, "vim/E1268") {
+				t.Fatalf("E1081 case unexpectedly received E1268: %#v", file.Diagnostics)
+			}
 			assertFileSpans(t, file)
 		})
 	}
@@ -730,6 +733,97 @@ func TestVim9CannotUnletVariable(t *testing.T) {
 		file := Parse(source)
 		if hasDiagnostic(file, "vim/E1081") {
 			t.Fatalf("source %q unexpectedly received E1081: %#v", source, file.Diagnostics)
+		}
+	}
+}
+
+func TestVim9ScriptNamespaceDiagnostic(t *testing.T) {
+	message := func(name string) string { return "Cannot use s: in Vim9 script: " + name }
+	for _, test := range []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name:   "declarations",
+			source: "vim9script\nvar s:value = 1\nconst s:constant = 2\nfinal s:final = 3\nvar after = 4\n",
+			want:   []string{"s:value", "s:constant", "s:final"},
+		},
+		{
+			name:   "assignment reads and call",
+			source: "vim9script\ns:value = 1\necho [s:value, s:Call()]\n",
+			want:   []string{"s:value", "s:value", "s:Call"},
+		},
+		{
+			name:   "def body",
+			source: "vim9script\ndef Func()\n  var s:value = 1\n  echo s:value\nenddef\n",
+			want:   []string{"s:value", "s:value"},
+		},
+		{
+			name:   "block lambda body",
+			source: "vim9script\nvar Callback = () => {\n  var s:value = 1\n  echo s:value\n}\n",
+			want:   []string{"s:value", "s:value"},
+		},
+		{
+			name:   "script unlet",
+			source: "vim9script\nunlet s:value\n",
+			want:   []string{"s:value"},
+		},
+		{
+			name:   "for bindings",
+			source: "vim9script\nfor s:value in []\nendfor\nfor [item, s:other] in []\nendfor\n",
+			want:   []string{"s:value", "s:other"},
+		},
+		{
+			name:   "mapping expression",
+			source: "vim9script\nnnoremap <expr> x s:value\n",
+			want:   []string{"s:value"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1268" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1268 diagnostics = %#v", file.Diagnostics)
+			}
+			for index, name := range test.want {
+				if got[index].Message != message(name) || file.Text(got[index].Span) != name {
+					t.Fatalf("E1268 diagnostic = %#v on %q", got[index], file.Text(got[index].Span))
+				}
+				for _, diagnostic := range file.Diagnostics {
+					if diagnostic.Span == got[index].Span && (diagnostic.Code == "vim/E1069" || diagnostic.Code == "vim/E1081") {
+						t.Fatalf("E1268 retained competing diagnostic: %#v", file.Diagnostics)
+					}
+				}
+			}
+			if test.name == "declarations" {
+				foundAfter := false
+				for _, command := range file.Commands {
+					foundAfter = foundAfter || command.Declaration != nil && file.Text(command.Declaration.Name) == "after"
+				}
+				if !foundAfter {
+					t.Fatalf("following declaration was not retained: %#v", file.Commands)
+				}
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar dict = {s:name: 1}\necho 's:name' # s:name\necho dict.s:name\n",
+		"def Func()\n  var s:value = 1\n  echo s:value\nenddef\n",
+		"vim9script\nlegacy echo s:value\n",
+		"for s:value in []\nendfor\n",
+		"vim9script\nlegacy for s:value in []\nendfor\n",
+		"vim9script\nfunction Legacy()\n  echo s:value\nendfunction\n",
+		"vim9script\nvar s: = {}\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1268") {
+			t.Fatalf("source %q unexpectedly received E1268: %#v", source, file.Diagnostics)
 		}
 	}
 }

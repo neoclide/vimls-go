@@ -66,8 +66,46 @@ func TestVim9NestedUnsupportedFunctionNamespaces(t *testing.T) {
 			t.Fatalf("diagnostic = %#v", file.Diagnostics[i])
 		}
 	}
+	if hasDiagnostic(file, "vim/E1268") {
+		t.Fatalf("nested namespace precedence = %#v", file.Diagnostics)
+	}
 	if file.Commands[len(file.Commands)-1].Declaration == nil {
 		t.Fatalf("next-line recovery = %#v", file.Commands)
+	}
+}
+
+func TestVim9ScriptNamespaceFunctionDiagnostic(t *testing.T) {
+	message := func(name string) string { return "Cannot use s: in Vim9 script: " + name }
+	for _, test := range []struct {
+		name, source, function string
+	}{
+		{name: "def", source: "vim9script\ndef s:Name()\nenddef\nvar after = 1\n", function: "s:Name"},
+		{name: "function", source: "vim9script\nfunction s:Name()\nendfunction\nvar after = 1\n", function: "s:Name"},
+		{name: "dictionary-shaped name", source: "vim9script\ndef s:Object.Method()\nenddef\nvar after = 1\n", function: "s:Object.Method"},
+		{name: "autoload-shaped name", source: "vim9script\ndef s:name#Func()\nenddef\nvar after = 1\n", function: "s:name#Func"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1268" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1267" || diagnostic.Code == "vim/E1263" || diagnostic.Code == "vim/E1182" {
+					t.Fatalf("unexpected competing name diagnostic: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != message(test.function) || file.Text(got[0].Span) != test.function {
+				t.Fatalf("E1268 diagnostics = %#v", file.Diagnostics)
+			}
+			foundAfter := false
+			for _, command := range file.Commands {
+				foundAfter = foundAfter || command.Declaration != nil && file.Text(command.Declaration.Name) == "after"
+			}
+			if !foundAfter {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
 	}
 }
 

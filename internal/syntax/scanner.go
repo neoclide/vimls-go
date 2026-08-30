@@ -451,10 +451,114 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 	suppressInvalidInterfaceInitializers(file)
 	suppressDeferredDefDiagnosticsBeforeLegacyPoundError(file)
 	normalizeLambdaBodySources(file)
+	diagnoseVim9ScriptNamespaces(file)
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
 		return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start
 	})
 	return file
+}
+
+func diagnoseVim9ScriptNamespaces(file *File) {
+	if file == nil || file.Dialect != Vim9 {
+		return
+	}
+	reported := make(map[Span]bool)
+	expressions := make(map[*Expression]bool)
+	commands := make(map[*Command]bool)
+	var walkExpression func(*Expression)
+	var walkCommand func(*File, *Command)
+	report := func(name string, span Span) {
+		if !strings.HasPrefix(name, "s:") || len(name) == len("s:") || reported[span] {
+			return
+		}
+		reported[span] = true
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1268", Message: "Cannot use s: in Vim9 script: " + name, Span: span,
+		})
+	}
+	walkExpression = func(expression *Expression) {
+		if expression == nil || expressions[expression] {
+			return
+		}
+		expressions[expression] = true
+		if expression.Kind == ExpressionIdentifier {
+			report(expression.Value, expression.Span)
+		}
+		for index, child := range expression.Children {
+			// Vim9 Dictionary bare-name keys are literal keys, not variable
+			// expressions. Computed keys retain their own ExpressionList node.
+			if expression.Kind == ExpressionDictionary && index%2 == 0 {
+				continue
+			}
+			walkExpression(child)
+		}
+		for _, parameter := range expression.Parameters {
+			walkExpression(parameter.Default)
+		}
+		if expression.LambdaBody != nil {
+			for index := range expression.LambdaBody.Commands {
+				walkCommand(expression.LambdaBody, &expression.LambdaBody.Commands[index])
+			}
+		}
+	}
+	walkCommand = func(owner *File, command *Command) {
+		if command == nil || commands[command] || command.Dialect != Vim9 {
+			return
+		}
+		commands[command] = true
+		if command.Declaration != nil {
+			walkExpression(command.Declaration.Target)
+			walkExpression(command.Declaration.Initializer)
+		}
+		for _, expression := range command.Expressions {
+			walkExpression(expression)
+		}
+		for _, target := range command.Targets {
+			hasCannotUnlet := false
+			if command.Canonical == "unlet" {
+				for _, diagnostic := range file.Diagnostics {
+					if diagnostic.Code == "vim/E1081" && diagnostic.Span == target.Span {
+						hasCannotUnlet = true
+						break
+					}
+				}
+			}
+			if !hasCannotUnlet {
+				walkExpression(target)
+			}
+		}
+		if command.For != nil {
+			for _, binding := range command.For.Bindings {
+				report(owner.Text(binding.Name), binding.Name)
+			}
+			walkExpression(command.For.Iterable)
+		}
+		if command.Import != nil {
+			walkExpression(command.Import.Path)
+		}
+		for _, value := range command.EnumValues {
+			walkExpression(value.Initializer)
+			for _, argument := range value.Arguments {
+				walkExpression(argument)
+			}
+		}
+		if command.Function != nil {
+			for _, parameter := range command.Function.Parameters {
+				walkExpression(parameter.Default)
+			}
+		}
+		if command.Mapping != nil {
+			walkExpression(command.Mapping.RHSExpression)
+		}
+		if command.Embedded != nil {
+			for index := range command.Embedded.Commands {
+				walkCommand(owner, &command.Embedded.Commands[index])
+			}
+		}
+	}
+	for index := range file.Commands {
+		walkCommand(file, &file.Commands[index])
+	}
 }
 
 func normalizeVim9CallDiagnostics(file *File) {

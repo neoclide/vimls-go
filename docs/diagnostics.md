@@ -2621,6 +2621,34 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   autoload imports, so E1264 is not applied to paths that resolve.
 - `src/errors.h:3245-3246` defines the exact E1264 message.
 
+## Script namespace in Vim9 script: E1268
+
+Syntax analysis reports E1268 for a non-empty `s:name` used with Vim9 command
+semantics in a Vim9-root file. This covers function and variable definitions,
+reads, calls, assignments, loop bindings, expression mappings, and nested
+expressions. The diagnostic selects the complete scoped name and is emitted
+once even when one syntax node is retained by multiple owners.
+
+The root dialect remains significant. A Legacy-root `def`, an explicitly
+`legacy` command, and an ordinary Legacy `function` body in a Vim9 file retain
+their legacy namespace rules. A bare `s:` namespace dictionary is not a named
+item. Vim's special compiled `unlet s:name` path retains E1081, and a nested
+definition already rejected as an unsupported namespace retains E1075.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_script.vim:214-255` covers `s:` function and variable
+  definitions, calls, and reads at Vim9 script level.
+- `src/testdir/test_vim9_assign.vim:219-226` and `3054-3083` cover assignment
+  and read failures inside a Vim9 script `def`.
+- `src/testdir/test_vim9_assign.vim:2802-2841` distinguishes script-level
+  E1268 from the compiled `unlet` E1081 behavior and a Legacy function body.
+- `runtime/doc/vim9.txt:1495-1538` defines the root-script, `def`, and legacy
+  function namespace matrix, including explicit `legacy` commands.
+- `src/vim9compile.c:1870-1894`, `src/userfunc.c:5108-5130`, and
+  `src/eval.c:5328-5350` reject named `s:` uses in the applicable contexts.
+- `src/errors.h:3257-3258` defines the exact E1268 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
