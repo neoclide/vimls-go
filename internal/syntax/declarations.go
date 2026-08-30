@@ -317,6 +317,11 @@ func scanClassName(source string, start, end int) int {
 }
 
 func parseTypeAlias(file *File, command *Command) {
+	if command.baseDialect == Vim9 && command.Dialect == Legacy {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1393", Message: "Type can only be defined in Vim9 script", Span: command.Name,
+		})
+	}
 	source := file.Text(command.Argument)
 	nameStart := skipSpace(source, 0, len(source))
 	nameEnd := scanWord(source, nameStart, len(source))

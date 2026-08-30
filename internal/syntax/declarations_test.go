@@ -579,6 +579,18 @@ func TestVim9TypeAlias(t *testing.T) {
 	}
 }
 
+func TestVim9LegacyTypeAliasDiagnostic(t *testing.T) {
+	file := Parse("vim9script\nlegacy type Index = number\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1393" || file.Diagnostics[0].Message != "Type can only be defined in Vim9 script" || file.Text(file.Diagnostics[0].Span) != "type" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	alias := file.Commands[1].TypeAlias
+	if alias == nil || file.Text(alias.Name) != "Index" || alias.Type == nil || alias.Type.Name != "number" || len(file.Commands) != 3 || file.Commands[2].Declaration == nil {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9TypeAliasLowercaseNameDiagnostic(t *testing.T) {
 	file := Parse("vim9script\ntype index = number\nvar after = 1\n")
 	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1394" || file.Diagnostics[0].Message != "Type name must start with an uppercase letter: index = number" || file.Text(file.Diagnostics[0].Span) != "index" {
