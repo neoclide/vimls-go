@@ -2,6 +2,7 @@ package syntax
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -137,11 +138,13 @@ func TestOfficialVimTestFileCorpusMatchesPinnedSource(t *testing.T) {
 		if generated.Files[index].Path != path {
 			t.Fatalf("generated test-file %d path = %q, pinned source path = %q", index, generated.Files[index].Path, path)
 		}
-		source, err := exec.Command("git", "-C", vimRoot, "show", officialVimTag+":"+path).Output()
-		if err != nil {
-			t.Fatalf("read pinned Vim test file %s: %v", path, err)
-		}
-		if !bytes.Equal(generated.Files[index].Source, source) {
+	}
+	pinnedSources, err := readPinnedVimFiles(vimRoot, officialVimTag, paths)
+	if err != nil {
+		t.Fatalf("read pinned Vim test files: %v", err)
+	}
+	for index, path := range paths {
+		if !bytes.Equal(generated.Files[index].Source, pinnedSources[index]) {
 			t.Fatalf("generated test file %s differs from %s:%s", path, officialVimTag, path)
 		}
 	}
@@ -158,6 +161,52 @@ func TestOfficialVimTestFileCorpusMatchesPinnedSource(t *testing.T) {
 	if !bytes.Equal(license, pinnedLicense) {
 		t.Fatalf("copied Vim license differs from %s:LICENSE", officialVimTag)
 	}
+}
+
+func readPinnedVimFiles(vimRoot string, tag string, paths []string) ([][]byte, error) {
+	var requests strings.Builder
+	for _, path := range paths {
+		requests.WriteString(tag)
+		requests.WriteByte(':')
+		requests.WriteString(path)
+		requests.WriteByte('\n')
+	}
+	command := exec.Command("git", "-C", vimRoot, "cat-file", "--batch")
+	command.Stdin = strings.NewReader(requests.String())
+	output, err := command.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([][]byte, 0, len(paths))
+	for _, path := range paths {
+		headerEnd := bytes.IndexByte(output, '\n')
+		if headerEnd < 0 {
+			return nil, fmt.Errorf("read %s: missing object header", path)
+		}
+		header := strings.Fields(string(output[:headerEnd]))
+		if len(header) != 3 || header[1] != "blob" {
+			return nil, fmt.Errorf("read %s: invalid object header %q", path, output[:headerEnd])
+		}
+		size, err := strconv.Atoi(header[2])
+		if err != nil {
+			return nil, fmt.Errorf("read %s: invalid object size %q", path, header[2])
+		}
+		contentStart := headerEnd + 1
+		if size < 0 || size > len(output)-contentStart-1 {
+			return nil, fmt.Errorf("read %s: truncated object content", path)
+		}
+		contentEnd := contentStart + size
+		if output[contentEnd] != '\n' {
+			return nil, fmt.Errorf("read %s: invalid object delimiter", path)
+		}
+		files = append(files, output[contentStart:contentEnd])
+		output = output[contentEnd+1:]
+	}
+	if len(output) != 0 {
+		return nil, fmt.Errorf("read pinned Vim files: unexpected trailing output")
+	}
+	return files, nil
 }
 
 func listAllPinnedVimTestFiles(vimRoot string) ([]string, error) {
