@@ -3156,6 +3156,45 @@ func TestAnalyzeE1559RequiresGenericTypeArguments(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1557RequiresEveryGenericTypeArgument(t *testing.T) {
+	tests := []struct {
+		name string
+		use  string
+	}{
+		{name: "direct call", use: "Fn<number>()"},
+		{name: "function reference", use: "var Fx = function(Fn<number>)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\ndef Fn<A, B>()\nenddef\n" + test.use + "\n"
+			file := syntax.Parse(source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1557" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Not enough types specified for generic function 'Fn'" || file.Text(got[0].Span) != "Fn" {
+				t.Fatalf("E1557 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Fn<A, B>()\nenddef\nFn<number, string>()\n",
+		"vim9script\ndef Fn<A>()\nenddef\nFn<number, string>()\n",
+		"vim9script\ndef Fn<A>()\nenddef\nFn()\n",
+		"vim9script\nUnknown<number>()\n",
+		"vim9script\ndef Fn()\nenddef\nFn<number>()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1557" {
+				t.Fatalf("guard source reported E1557: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1093DestructuringCardinality(t *testing.T) {
 	tests := []struct {
 		name      string

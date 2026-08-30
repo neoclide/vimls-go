@@ -52,11 +52,11 @@ type Scope struct {
 // constants and for declarations that cannot be assigned to (functions,
 // types, imports, and aggregate members).
 type Declaration struct {
-	Name    string
-	Kind    SymbolKind
-	Span    syntax.Span
-	Mutable bool
-	Generic bool
+	Name               string
+	Kind               SymbolKind
+	Span               syntax.Span
+	Mutable            bool
+	TypeParameterCount int
 	// Parameter distinguishes a function or lambda argument from an ordinary
 	// mutable variable without changing its navigation symbol kind.
 	Parameter bool
@@ -2261,7 +2261,7 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 		if !emptySyntaxSpan(command.Function.Name) {
 			declaration := addDeclaration(result, declarationScope, file, command.Function.Name, functionKind(file, command, declarationScope), false)
 			if declaration != nil {
-				declaration.Generic = len(command.Function.TypeParameters) > 0
+				declaration.TypeParameterCount = len(command.Function.TypeParameters)
 			}
 		}
 		for _, parameter := range command.Function.Parameters {
@@ -2500,7 +2500,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				Name: expression.Value, Span: expression.Span,
 				Declaration: declaration, scope: scope, dialect: dialect,
 			})
-			if !preferFunction && declaration != nil && functionSymbolKind(declaration.Kind) && declaration.Generic {
+			if !preferFunction && declaration != nil && functionSymbolKind(declaration.Kind) && declaration.TypeParameterCount > 0 {
 				appendMissingGenericTypeArgumentsDiagnostic(result, expression.Value, expression.Span)
 			}
 			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
@@ -2531,6 +2531,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 	case syntax.ExpressionCall:
 		collectBuiltinCallArityDiagnostic(result, file, expression)
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
+		appendNotEnoughGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		appendGenericFunctionCallWithoutTypesDiagnostic(result, expression, scope, skipped)
 		appendQuotedGenericFunctionDiagnostic(result, expression, scope, skipped)
 		for index, child := range expression.Children {
@@ -2538,6 +2539,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		}
 	case syntax.ExpressionGenericReference:
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
+		appendNotEnoughGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		for index, child := range expression.Children {
 			walkExpression(result, file, child, scope, skipped, index == 0, dialect)
 		}
@@ -2583,11 +2585,33 @@ func appendNonGenericFunctionDiagnostic(result *FileAnalysis, expression *syntax
 		return
 	}
 	declaration := resolve(scope, callee.Value, callee.Span.Start, true, hidden)
-	if declaration == nil || !functionSymbolKind(declaration.Kind) || declaration.Generic {
+	if declaration == nil || !functionSymbolKind(declaration.Kind) || declaration.TypeParameterCount > 0 {
 		return
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1560", Message: "Not a generic function: " + callee.Value, Span: callee.Span,
+	})
+}
+
+func appendNotEnoughGenericTypeArgumentsDiagnostic(result *FileAnalysis, expression *syntax.Expression, scope *Scope, hidden map[syntax.Span]bool) {
+	if result == nil || expression == nil || len(expression.TypeArguments) == 0 || len(expression.Children) == 0 {
+		return
+	}
+	for _, argument := range expression.TypeArguments {
+		if argument == nil || argument.Kind == syntax.TypeMissing {
+			return
+		}
+	}
+	callee := expression.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionIdentifier {
+		return
+	}
+	declaration := resolve(scope, callee.Value, callee.Span.Start, true, hidden)
+	if declaration == nil || !functionSymbolKind(declaration.Kind) || len(expression.TypeArguments) >= declaration.TypeParameterCount {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1557", Message: "Not enough types specified for generic function '" + callee.Value + "'", Span: callee.Span,
 	})
 }
 
@@ -2600,7 +2624,7 @@ func appendGenericFunctionCallWithoutTypesDiagnostic(result *FileAnalysis, expre
 		return
 	}
 	declaration := resolve(scope, callee.Value, callee.Span.Start, true, hidden)
-	if declaration != nil && functionSymbolKind(declaration.Kind) && declaration.Generic {
+	if declaration != nil && functionSymbolKind(declaration.Kind) && declaration.TypeParameterCount > 0 {
 		appendMissingGenericTypeArgumentsDiagnostic(result, callee.Value, callee.Span)
 	}
 }
@@ -2618,7 +2642,7 @@ func appendQuotedGenericFunctionDiagnostic(result *FileAnalysis, expression *syn
 		return
 	}
 	declaration := resolve(scope, name, argument.Span.Start, true, hidden)
-	if declaration != nil && functionSymbolKind(declaration.Kind) && declaration.Generic {
+	if declaration != nil && functionSymbolKind(declaration.Kind) && declaration.TypeParameterCount > 0 {
 		appendMissingGenericTypeArgumentsDiagnostic(result, name, argument.Span)
 	}
 }
