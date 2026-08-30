@@ -1845,6 +1845,13 @@ func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 			message:  "Invalid type for len()",
 			argument: "v:none",
 		},
+		{
+			name:     "get container",
+			source:   "vim9script\nget('a', 1)\n",
+			code:     "vim/E1531",
+			message:  "Argument of get() must be a List, Tuple, Dictionary or Blob",
+			argument: "'a'",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1873,10 +1880,30 @@ func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 		})
 	}
 
-	positive := syntax.Parse("vim9script\nsubstitute('Hallo', 'a', 'e', '')\n{'a': 1}->keys()\nlen(123)\n")
+	positive := syntax.Parse("vim9script\nsubstitute('Hallo', 'a', 'e', '')\n{'a': 1}->keys()\nlen(123)\nget([1], 0)\n(1, 2)->get(0)\nget(0z12, 0)\nget({a: 1}, 'a')\nfunction('max')->get('name')\n")
 	for _, diagnostic := range Analyze(positive).Diagnostics {
-		if diagnostic.Code == "vim/E701" || diagnostic.Code == "vim/E1174" || diagnostic.Code == "vim/E1206" {
+		if diagnostic.Code == "vim/E701" || diagnostic.Code == "vim/E1174" || diagnostic.Code == "vim/E1206" || diagnostic.Code == "vim/E1531" {
 			t.Fatalf("valid builtin argument diagnostic = %#v", diagnostic)
+		}
+	}
+
+	def := syntax.Parse("vim9script\ndef F()\n  get('a', 1)\nenddef\n")
+	var e1013 int
+	for _, diagnostic := range Analyze(def).Diagnostics {
+		if diagnostic.Code == "vim/E1531" {
+			t.Fatalf("def mismatch reported script-level E1531: %#v", diagnostic)
+		}
+		if diagnostic.Code == "vim/E1013" {
+			e1013++
+		}
+	}
+	if e1013 != 1 {
+		t.Fatalf("def E1013 diagnostics = %d, want one", e1013)
+	}
+
+	for _, diagnostic := range Analyze(syntax.Parse("echo get('a', 1)\n")).Diagnostics {
+		if diagnostic.Code == "vim/E1531" {
+			t.Fatalf("legacy call reported static E1531: %#v", diagnostic)
 		}
 	}
 }
