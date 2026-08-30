@@ -192,6 +192,65 @@ func TestAnalyzeE1426EnumOrdinalCannotBeModified(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1423EnumValueCannotBeModified(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   string
+		inDef  bool
+	}{
+		{name: "enum value", target: "Foo.Apple", want: "Foo.Apple"},
+		{name: "enum value in def", target: "Foo.Apple", want: "Foo.Apple", inDef: true},
+		{name: "builtin name", target: "Foo.Apple.name", want: "Foo.name", inDef: true},
+		{name: "builtin ordinal", target: "Foo.Apple.ordinal", want: "Foo.ordinal", inDef: true},
+		{name: "instance member", target: "Foo.Apple.count", want: "Foo.count", inDef: true},
+		{name: "top level object member uses runtime diagnostic", target: "Foo.Apple.name"},
+		{name: "unknown enum value", target: "Foo.Pear", inDef: true},
+		{name: "unknown member", target: "Foo.Apple.missing", inDef: true},
+		{name: "ordinary receiver", target: "Other.Apple", inDef: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assignment := "  " + test.target + " = 20\n"
+			if test.inDef {
+				assignment = "def Fn()\n  " + test.target + " = 20\nenddef\n"
+			}
+			source := "vim9script\nenum Foo\n  Apple\n  var count: number\nendenum\n" + assignment
+			file := syntax.Parse(source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1423" {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("E1423 diagnostics = %#v", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Message != "Enum value \""+test.want+"\" cannot be modified" || file.Text(got[0].Span) != test.target {
+				t.Fatalf("E1423 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+		})
+	}
+
+	for name, source := range map[string]string{
+		"shadowed enum name": "vim9script\nenum Foo\n  Apple\nendenum\ndef Fn(Foo: any)\n  Foo.Apple = 20\nenddef\n",
+		"inside owning enum": "vim9script\nenum Foo\n  Apple\n  def Rename()\n    Foo.Apple.name = 'x'\n  enddef\nendenum\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1423" {
+					t.Fatalf("unexpected E1423 = %#v", diagnostic)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string

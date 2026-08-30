@@ -195,6 +195,83 @@ func enclosingVim9EnumName(file *syntax.File, scope *Scope) (string, bool) {
 	return "", false
 }
 
+func enumAssignmentTarget(result *FileAnalysis, scope *Scope, target *syntax.Expression) (string, string, bool) {
+	if result == nil || result.File == nil || scope == nil || target == nil || target.Kind != syntax.ExpressionMember || len(target.Children) != 1 || target.Children[0] == nil {
+		return "", "", false
+	}
+	file := result.File
+	receiver := target.Children[0]
+	if receiver.Kind == syntax.ExpressionIdentifier {
+		declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+		if declaration == nil || declaration.Kind != SymbolKindEnum {
+			return "", "", false
+		}
+		enum := localEnum(file, receiver.Value)
+		if enum != nil && enumHasValue(file, enum, target.Value) {
+			return receiver.Value, target.Value, true
+		}
+		return "", "", false
+	}
+	if receiver.Kind != syntax.ExpressionMember || len(receiver.Children) != 1 || receiver.Children[0] == nil || receiver.Children[0].Kind != syntax.ExpressionIdentifier {
+		return "", "", false
+	}
+	enumName := receiver.Children[0].Value
+	declaration := resolve(scope, enumName, receiver.Children[0].Span.Start, false, nil)
+	if declaration == nil || declaration.Kind != SymbolKindEnum {
+		return "", "", false
+	}
+	enum := localEnum(file, enumName)
+	if enum == nil || !enumHasValue(file, enum, receiver.Value) || !enumHasObjectMember(file, enum, target.Value) {
+		return "", "", false
+	}
+	return enumName, target.Value, true
+}
+
+func localEnum(file *syntax.File, name string) *syntax.Command {
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockEnum && file.Text(command.Aggregate.Name) == name {
+			return command
+		}
+	}
+	return nil
+}
+
+func enumHasValue(file *syntax.File, enum *syntax.Command, name string) bool {
+	for _, memberIndex := range enum.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		for _, value := range file.Commands[memberIndex].EnumValues {
+			if file.Text(value.Name) == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func enumHasObjectMember(file *syntax.File, enum *syntax.Command, name string) bool {
+	if name == "name" || name == "ordinal" {
+		return true
+	}
+	for _, memberIndex := range enum.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		declaration := file.Commands[memberIndex].Declaration
+		if declaration == nil {
+			continue
+		}
+		for _, binding := range declaration.Bindings {
+			if file.Text(binding.Name) == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
@@ -2203,7 +2280,12 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 	}
 	if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && expression.Children[1] != nil && expression.Children[1].Kind != syntax.ExpressionMissing {
 		target := expression.Children[0]
-		if target != nil && target.Kind == syntax.ExpressionMember && len(target.Children) == 1 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier && target.Children[0].Value == "this" {
+		if enumName, memberName, ok := enumAssignmentTarget(result, scope, target); ok &&
+			(target.Children[0].Kind != syntax.ExpressionMember || scopeContainsDef(scope) && !scopeWithinVim9Enum(result.File, scope, enumName)) {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1423", Message: "Enum value \"" + enumName + "." + memberName + "\" cannot be modified", Span: target.Span,
+			})
+		} else if target != nil && target.Kind == syntax.ExpressionMember && len(target.Children) == 1 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier && target.Children[0].Value == "this" {
 			if enumName, ok := enclosingVim9EnumName(result.File, scope); ok {
 				diagnostic := syntax.Diagnostic{Span: target.Span}
 				switch target.Value {
@@ -2247,6 +2329,11 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 	for _, child := range expression.Children {
 		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
+}
+
+func scopeWithinVim9Enum(file *syntax.File, scope *Scope, name string) bool {
+	enumName, ok := enclosingVim9EnumName(file, scope)
+	return ok && enumName == name
 }
 
 func isReadOnlyVimVariableTarget(target *syntax.Expression) bool {
