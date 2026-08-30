@@ -497,3 +497,26 @@ Representative source evidence:
   division, and remainder and their E1036/E1035 compiled counterparts.
 - `src/typval.c:225-249` selects E728 when numeric conversion receives a
   Dictionary, and `src/errors.h:1857-1858` defines the exact message.
+
+## Using a Funcref as a String: E729
+
+E729 means `Using a Funcref as a String`. Legacy Vim script and the Vim9
+script evaluator use it when concatenation tries to convert a Funcref or
+Partial to a String.
+
+Analysis reports E729 for a statically known Funcref or Partial operand of
+Legacy `.` or Vim9 `..` concatenation. The diagnostic selects the invalid
+operand, checking the left operand before the right. Unknown values remain
+unknown, and explicit operations such as `string()` are not treated as
+implicit concatenation conversions. A compiled Vim9 `def` does not receive
+E729; Vim uses E1105 for its operator type error, which is handled as a
+separate diagnostic.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:1964-1968` distinguishes E1105 in a compiled
+  `def` from E729 at Vim9 script level for a Funcref operand.
+- `src/testdir/test_vim9_expr.vim:2048-2054` covers both Funcref and Partial
+  concatenation.
+- `src/typval.c:1219-1224` maps Funcref and Partial string conversion to E729,
+  and `src/errors.h:1859-1860` defines the exact message.

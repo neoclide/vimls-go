@@ -120,7 +120,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	inferTypes(result)
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
-	collectArithmeticDiagnostics(result, file.Commands, root)
+	collectOperatorDiagnostics(result, file.Commands, root)
 	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
@@ -605,10 +605,10 @@ func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bo
 	})
 }
 
-// collectArithmeticDiagnostics keeps compiled Vim9 operator errors distinct
+// collectOperatorDiagnostics keeps compiled Vim9 operator errors distinct
 // from the historical conversion errors used by Legacy and script-level Vim9.
 // Unknown values remain deliberately opaque.
-func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
 	if result == nil || result.File == nil {
 		return
 	}
@@ -630,7 +630,7 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 					expressionScope = lambdaScope
 				}
 				if expression.LambdaBody != nil {
-					collectArithmeticDiagnostics(result, expression.LambdaBody.Commands, expressionScope)
+					collectOperatorDiagnostics(result, expression.LambdaBody.Commands, expressionScope)
 				}
 			}
 			if expression.Kind == syntax.ExpressionBinary || expression.Kind == syntax.ExpressionAssignment {
@@ -702,6 +702,22 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 						}
 					}
 				}
+				if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&
+					!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
+					operand := expression.Children[0]
+					left, right := result.TypeOf(operand), result.TypeOf(expression.Children[1])
+					if left.Name != "func" && left.Name != "partial" {
+						operand = expression.Children[1]
+						if right.Name != "func" && right.Name != "partial" {
+							operand = nil
+						}
+					}
+					if operand != nil {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E729", Message: "Using a Funcref as a String", Span: operand.Span,
+						})
+					}
+				}
 			}
 			for _, child := range expression.Children {
 				walk(child, expressionScope)
@@ -717,7 +733,7 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			walk(command.Declaration.Initializer, scope)
 		}
 		if command.Embedded != nil {
-			collectArithmeticDiagnostics(result, command.Embedded.Commands, scope)
+			collectOperatorDiagnostics(result, command.Embedded.Commands, scope)
 		}
 	}
 }

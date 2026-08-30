@@ -324,6 +324,51 @@ func TestAnalyzeDictionaryAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFuncrefAsStringDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script Funcref",
+			source: "vim9script\nvar value = 'a' .. function('len')\n",
+			span:   "function('len')",
+		},
+		{
+			name:   "vim9 script Partial",
+			source: "vim9script\nvar value = 'a' .. function('len', ['a'])\n",
+			span:   "function('len', ['a'])",
+		},
+		{
+			name:   "legacy Funcref",
+			source: "let value = 'a' . function('len')\n",
+			span:   "function('len')",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E729" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Funcref as a String" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E729 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef F()\n  var value = 'a' .. function('len')\nenddef\n")
+	result := Analyze(file)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E729" {
+			t.Fatalf("compiled def retained E729: %#v", result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string
