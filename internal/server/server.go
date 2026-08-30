@@ -695,7 +695,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File) {
 				Start: protocol.Position{Line: uint32(start.Line), Character: uint32(start.Character)},
 				End:   protocol.Position{Line: uint32(end.Line), Character: uint32(end.Character)},
 			},
-			Severity: protocol.DiagnosticSeverityError,
+			Severity: protocolDiagnosticSeverity(item.Code),
 			Code:     protocol.String(item.Code),
 			Source:   protocol.NewOptional(Name),
 			Message:  protocol.String(item.Message),
@@ -718,6 +718,23 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File) {
 	}
 	if err := client.PublishDiagnostics(analysis.Context, params); err != nil && analysis.Context.Err() == nil {
 		s.logf("vimls: publish diagnostics for %s: %v", documentURI, err)
+	}
+}
+
+func protocolDiagnosticSeverity(code string) protocol.DiagnosticSeverity {
+	definition, ok := syntax.LookupVimlsDiagnostic(code)
+	if !ok {
+		return protocol.DiagnosticSeverityError
+	}
+	switch definition.Severity {
+	case syntax.DiagnosticWarning:
+		return protocol.DiagnosticSeverityWarning
+	case syntax.DiagnosticInformation:
+		return protocol.DiagnosticSeverityInformation
+	case syntax.DiagnosticHint:
+		return protocol.DiagnosticSeverityHint
+	default:
+		return protocol.DiagnosticSeverityError
 	}
 }
 
