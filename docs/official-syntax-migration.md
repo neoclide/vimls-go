@@ -356,6 +356,8 @@ the authoritative current split 923 migrated, zero ready, and 134 pending-fix.
 A follow-up phase audit removed two E1008 failures whose generic function names
 are parsed from string arguments to `call()`. The authoritative parser split is
 therefore 923 migrated, zero ready, and 132 pending-fix.
+Commit `7902d4b` migrated four direct generic-reference recoveries, making the
+authoritative current split 927 migrated, zero ready, and 128 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -950,11 +952,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 103 | 65 | 0 | 38 |
+| `C-GENERIC` | 103 | 69 | 0 | 34 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **356** | **291** | **0** | **65** |
+| **Total** | **356** | **295** | **0** | **61** |
 
 ```text
 C-EXPR
@@ -1109,6 +1111,13 @@ type arguments, explicit missing nodes, and the following call AST. An absent
 outer `>` recovers only at an argument opener on the same physical line;
 comparisons, legacy expressions, valid generic calls, and existing empty-list
 handling remain unchanged.
+
+Commit `7902d4b` migrated the direct generic-reference recoveries at
+`G:{796:17462,2937:65010,2946:65198,2955:65397}/script`. When an enclosing
+call delimiter ends an incomplete generic type list, the parser retains that
+delimiter for the outer call, preserves any known type plus an explicit missing
+type node, and reports E1008 or E1069 on the same physical line. Generic names
+stored inside string arguments remain outside source-parser conformance.
 
 Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
 references at command start now reach the expression parser without requiring
