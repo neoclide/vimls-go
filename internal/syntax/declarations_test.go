@@ -226,6 +226,34 @@ func TestAggregateDialectGateIsContextual(t *testing.T) {
 	}
 }
 
+func TestVim9InterfaceInsideDefReportsE1436(t *testing.T) {
+	source := "vim9script\ndef Fn()\n  var x = 1\n  interface Foo\n  endinterface\nenddef\nvar after = 1\n"
+	file := Parse(source)
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1436" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Interface can only be used in a script" || file.Text(got[0].Span) != "interface" {
+		t.Fatalf("E1436 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+	}
+	if len(file.Blocks) != 2 || file.Blocks[0].Kind != BlockDef || file.Blocks[1].Kind != BlockInterface || file.Blocks[1].Parent != 0 {
+		t.Fatalf("blocks = %#v", file.Blocks)
+	}
+	if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands[len(file.Commands)-1])
+	}
+	assertFileSpans(t, file)
+
+	topLevel := Parse("vim9script\ninterface Foo\nendinterface\n")
+	for _, diagnostic := range topLevel.Diagnostics {
+		if diagnostic.Code == "vim/E1436" {
+			t.Fatalf("top-level interface reported E1436: %#v", diagnostic)
+		}
+	}
+}
+
 func TestVim9AggregateDeclarations(t *testing.T) {
 	source := "vim9script\nclass Child extends Base implements One, Two\nendclass\ninterface Item extends Parent\nendinterface\n"
 	file := Parse(source)
