@@ -982,13 +982,22 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		}
 		rangeStart := start
 		invalidVim9Range := false
+		invalidTabModifierRange := false
 		if baseDialect == Legacy || commandStart < end && file.Source[commandStart] == ':' {
 			start = scanRange(file.Source, start, end)
 		} else if rangeEnd := scanRange(file.Source, start, end); rangeEnd > start && vim9ModifierRangeRequiresColon(file.Source, start, rangeEnd, end) {
 			start = rangeEnd
 			invalidVim9Range = true
+			wordEnd := scanWord(file.Source, rangeEnd, end)
+			invalidTabModifierRange = file.Source[rangeEnd:wordEnd] == "tab"
+			code, message := "vim/E1050", "colon required before a range"
+			span := Span{Start: rangeStart, End: end}
+			if invalidTabModifierRange {
+				code, message = "vim/E16", "Invalid range"
+				span.End = rangeEnd
+			}
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E1050", Message: "colon required before a range", Span: Span{Start: rangeStart, End: end},
+				Code: code, Message: message, Span: span,
 			})
 		}
 		commandRange := Span{}
@@ -1427,7 +1436,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			// parsed as an expression or a conditional.  Keep the command itself
 			// in the AST, but report E481 and let the normal physical-line
 			// recovery path make the remainder opaque.
-			if commandRange.Start < commandRange.End {
+			if commandRange.Start < commandRange.End && !invalidTabModifierRange {
 				switch canonical {
 				case "eval", "if", "echo", "cd":
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E481", Message: "no range allowed", Span: commandRange})
