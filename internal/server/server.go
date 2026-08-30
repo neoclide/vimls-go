@@ -857,7 +857,9 @@ func (s *Server) analyzeDocument(documentURI string) {
 		file = syntax.Parse(work.Snapshot.Text())
 		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
 		fileAnalysis = analysis.Analyze(file)
-		file.Diagnostics = analysis.CombinedDiagnostics(file, fileAnalysis)
+		versionedAnalysis := *fileAnalysis
+		versionedAnalysis.Diagnostics = analysisDiagnosticsForTarget(file, fileAnalysis.Diagnostics, target)
+		file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
 		if work.Context.Err() != nil {
 			return
 		}
@@ -886,6 +888,20 @@ func (s *Server) analyzeDocument(documentURI string) {
 		})
 	}
 	s.publishSyntax(work, file, graphRevision)
+}
+
+func analysisDiagnosticsForTarget(file *syntax.File, diagnostics []syntax.Diagnostic, target TargetVersion) []syntax.Diagnostic {
+	if target.Major > 9 || target.Major == 9 && (target.Minor > 2 || target.Minor == 2 && target.Patch >= 507) {
+		return diagnostics
+	}
+	versioned := append([]syntax.Diagnostic(nil), diagnostics...)
+	for index := range versioned {
+		if versioned[index].Code == "vim/E1406" {
+			versioned[index].Code = "vim/E1369"
+			versioned[index].Message = "Duplicate variable: " + file.Text(versioned[index].Span)
+		}
+	}
+	return versioned
 }
 
 func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) bool {

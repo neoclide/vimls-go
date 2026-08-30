@@ -3113,6 +3113,49 @@ enddef
 	}
 }
 
+func TestAnalyzeE1406PublicProtectedMemberNames(t *testing.T) {
+	source := `vim9script
+class A
+  var inherited = 1
+endclass
+class B extends A
+endclass
+class C extends B
+  var _inherited = 2
+  var value = 1
+  var _value = 2
+  static var label = 'a'
+  static var _label = 'b'
+  var prefix = 1
+  var prefixLong = 2
+endclass
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1406" {
+			got = append(got, diagnostic)
+		}
+	}
+	want := []struct {
+		message string
+		span    string
+	}{
+		{"Public and protected member have the same name: inherited and _inherited", "_inherited"},
+		{"Public and protected member have the same name: value and _value", "_value"},
+		{"Public and protected member have the same name: label and _label", "_label"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("E1406 diagnostics = %#v, want %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, want, file.Diagnostics, result.Diagnostics)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Message != want[index].message || file.Text(diagnostic.Span) != want[index].span {
+			t.Fatalf("E1406 diagnostic[%d] = %#v on %q, want %#v", index, diagnostic, file.Text(diagnostic.Span), want[index])
+		}
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -485,6 +486,23 @@ func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {
 	cleared := waitForDiagnostics(t, client.published)
 	if len(cleared.Diagnostics) != 0 {
 		t.Fatalf("updated-target diagnostics = %#v", cleared)
+	}
+}
+
+func TestE1406DiagnosticHonorsTargetVersion(t *testing.T) {
+	file := syntax.Parse("vim9script\nclass C\n  var value = 1\n  var _value = 2\nendclass\n")
+	diagnostics := analysis.Analyze(file).Diagnostics
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1406" {
+		t.Fatalf("analysis diagnostics = %#v", diagnostics)
+	}
+
+	old := analysisDiagnosticsForTarget(file, diagnostics, TargetVersion{Major: 9, Minor: 2, Patch: 506})
+	if len(old) != 1 || old[0].Code != "vim/E1369" || old[0].Message != "Duplicate variable: _value" {
+		t.Fatalf("9.2.0506 diagnostics = %#v", old)
+	}
+	current := analysisDiagnosticsForTarget(file, diagnostics, TargetVersion{Major: 9, Minor: 2, Patch: 507})
+	if len(current) != 1 || current[0].Code != "vim/E1406" {
+		t.Fatalf("9.2.0507 diagnostics = %#v", current)
 	}
 }
 

@@ -116,6 +116,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectGenericMethodOverrideDiagnostics(result)
+	collectPublicProtectedMemberNameDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 
 	sortDeclarations(result)
@@ -144,6 +145,84 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	classes := localClasses(file)
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+			continue
+		}
+		var seen []classVariableMember
+		for _, memberIndex := range class.Aggregate.Members {
+			member, ok := classVariableAt(file, memberIndex)
+			if !ok {
+				continue
+			}
+			conflict := false
+			for _, previous := range seen {
+				if member.base == previous.base && member.protected != previous.protected {
+					appendPublicProtectedMemberNameDiagnostic(result, member)
+					conflict = true
+					break
+				}
+			}
+			seen = append(seen, member)
+			if conflict || member.static {
+				continue
+			}
+			visited := make(map[*syntax.Command]bool)
+			for parent := extendedClass(file, classes, class); parent != nil && !visited[parent]; parent = extendedClass(file, classes, parent) {
+				visited[parent] = true
+				for _, parentMemberIndex := range parent.Aggregate.Members {
+					parentMember, ok := classVariableAt(file, parentMemberIndex)
+					if ok && !parentMember.static && member.base == parentMember.base && member.protected != parentMember.protected {
+						appendPublicProtectedMemberNameDiagnostic(result, member)
+						conflict = true
+						break
+					}
+				}
+				if conflict {
+					break
+				}
+			}
+		}
+	}
+}
+
+type classVariableMember struct {
+	base      string
+	name      syntax.Span
+	protected bool
+	static    bool
+}
+
+func classVariableAt(file *syntax.File, index int) (classVariableMember, bool) {
+	if file == nil || index < 0 || index >= len(file.Commands) {
+		return classVariableMember{}, false
+	}
+	command := &file.Commands[index]
+	if command.Declaration == nil || command.Canonical != "var" && command.Canonical != "final" && command.Canonical != "const" {
+		return classVariableMember{}, false
+	}
+	name := file.Text(command.Declaration.Name)
+	protected := strings.HasPrefix(name, "_")
+	base := strings.TrimPrefix(name, "_")
+	if base == "" {
+		return classVariableMember{}, false
+	}
+	return classVariableMember{base: base, name: command.Declaration.Name, protected: protected, static: commandHasModifier(command, "static")}, true
+}
+
+func appendPublicProtectedMemberNameDiagnostic(result *FileAnalysis, member classVariableMember) {
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1406", Message: "Public and protected member have the same name: " + member.base + " and _" + member.base, Span: member.name,
+	})
 }
 
 func collectDuplicateEnumValueDiagnostics(result *FileAnalysis) {
