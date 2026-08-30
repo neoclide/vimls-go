@@ -1530,7 +1530,22 @@ func collectImportNamespaceDiagnostics(result *FileAnalysis) {
 			end++
 		}
 		after := strings.TrimLeft(source[reference.Span.End:end], " \t")
-		if strings.HasPrefix(after, "=") && !strings.HasPrefix(after, "==") && !strings.HasPrefix(after, "=~") {
+		plainAssignment := strings.HasPrefix(after, "=") && !strings.HasPrefix(after, "==") && !strings.HasPrefix(after, "=~")
+		compoundAssignment := false
+		for _, operator := range []string{"+=", "-=", "*=", "/=", "%=", "..="} {
+			if strings.HasPrefix(after, operator) {
+				compoundAssignment = true
+				break
+			}
+		}
+		if scopeUsesDefTypeRules(reference.scope) && (plainAssignment || compoundAssignment) {
+			tail := strings.TrimRight(source[reference.Span.Start:end], " \t")
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1258", Message: "No '.' after imported name: " + tail, Span: reference.Span,
+			})
+			continue
+		}
+		if plainAssignment {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1236", Message: "Cannot use " + reference.Name + " itself, it is imported", Span: reference.Span,
 			})
@@ -1543,7 +1558,7 @@ func collectImportNamespaceDiagnostics(result *FileAnalysis) {
 			continue
 		}
 		tail := strings.TrimRight(source[reference.Span.Start:end], " \t")
-		for _, operator := range []string{"+=", "-=", "*=", "/=", "%="} {
+		for _, operator := range []string{"+=", "-=", "*=", "/=", "%=", "..="} {
 			if strings.HasPrefix(after, operator) {
 				tail = reference.Name
 				break

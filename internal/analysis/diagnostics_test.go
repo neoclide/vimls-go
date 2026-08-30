@@ -898,6 +898,71 @@ func TestAnalyzeE1236ImportNamespaceDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1258CompiledImportNamespaceAssignmentDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, tail string
+		following          bool
+	}{
+		{"official def", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  expo = 9\nenddef\n", "expo = 9", false},
+		{"compound def", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  expo += 9\nenddef\n", "expo += 9", false},
+		{"block lambda", "vim9script\nimport './Xfoo.vim' as expo\nvar Callback = () => {\n  expo ..= 'x'\n}\n", "expo ..= 'x'", false},
+		{"incomplete rhs recovery", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  expo =\n  var after = 1\nenddef\n", "expo =", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1258" {
+					got = append(got, diagnostic)
+				}
+				if (diagnostic.Code == "vim/E1236" || diagnostic.Code == "vim/E1060") && file.Text(diagnostic.Span) == "expo" {
+					t.Fatalf("E1258 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "No '.' after imported name: "+test.tail || file.Text(got[0].Span) != "expo" {
+				t.Fatalf("E1258 diagnostics = %#v", got)
+			}
+			if test.following {
+				found := false
+				for _, declaration := range result.Declarations {
+					found = found || declaration.Name == "after"
+				}
+				if !found {
+					t.Fatalf("following declaration was not retained: %#v", result.Declarations)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"top-level direct retains E1236", "vim9script\nimport './Xfoo.vim' as expo\nexpo = 9\n", "vim/E1236"},
+		{"top-level compound retains E1060", "vim9script\nimport './Xfoo.vim' as expo\nexpo += 9\n", "vim/E1060"},
+		{"compiled bare read retains E1060", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  var value = expo\nenddef\n", "vim/E1060"},
+		{"compiled call retains E1236", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  expo()\nenddef\n", "vim/E1236"},
+		{"member assignment", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  expo.Member = 9\nenddef\n", ""},
+		{"spaced member assignment", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  expo . Member = 9\nenddef\n", ""},
+		{"Legacy", "import './Xfoo.vim' as expo\nlet expo = 9\n", ""},
+		{"legacy command in def", "vim9script\nimport './Xfoo.vim' as expo\ndef Func()\n  legacy let expo = 9\nenddef\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1258" {
+					t.Fatalf("guard unexpectedly received E1258: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1074ImportWhitespaceAfterDot(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

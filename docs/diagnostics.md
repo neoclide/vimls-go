@@ -2474,6 +2474,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   an E1256 `call()` example.
 - `src/errors.h:3229-3230` defines the exact E1256 message.
 
+## Assignment to an imported namespace: E1258
+
+Analysis reports E1258 when a compiled Vim9 `def` or block lambda assigns
+directly to an imported namespace alias instead of one of its members. The
+diagnostic selects the alias and includes the trimmed assignment tail. It
+applies to plain and compound assignment and remains available for an
+incomplete right-hand side so following commands can still be analyzed.
+
+At top-level Vim9 script, direct assignment retains E1236 and compound
+assignment retains E1060. A compiled bare read also retains E1060, while a
+compiled direct call retains E1236. Valid namespace-member assignments and
+Legacy commands remain outside E1258.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:342-356` creates an imported namespace and
+  expects E1258 when a compiled `def` assigns directly to it.
+- `src/vim9compile.c:1804-1823` emits E1258 when the imported assignment LHS
+  has no member dot.
+- `src/vim9compile.c:1340-1360` defines the compiled assignment operators that
+  reach this LHS path.
+- `runtime/doc/vim9.txt:3601-3611` documents E1258 with an incomplete
+  `i_cc =` assignment.
+- `src/errors.h:3233-3234` defines the exact E1258 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
