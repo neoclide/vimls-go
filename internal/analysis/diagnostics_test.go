@@ -3691,3 +3691,32 @@ func TestAnalyzeE1535DestructuringRequiresListOrTuple(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1533CannotSliceTuple(t *testing.T) {
+	for _, slice := range []string{"t[1 : 2]", "t[ : 2]", "t[ : ]"} {
+		t.Run(slice, func(t *testing.T) {
+			source := "vim9script\nvar t: tuple<...list<string>> = ('a', 'b', 'c', 'd')\n" + slice + " = ('x', 'y')\nvar after = 1\n"
+			file := syntax.Parse(source)
+			all := Analyze(file).Diagnostics
+			if len(all) != 1 || all[0].Code != "vim/E1533" || all[0].Message != "Cannot slice a tuple" || file.Text(all[0].Span) != slice {
+				t.Fatalf("diagnostics = %#v; syntax diagnostics = %#v", all, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar values = [1, 2, 3]\nvalues[1 : 2] = [4]\n",
+		"vim9script\nvar values: any\nvalues[1 : 2] = [4]\n",
+		"vim9script\nvar values = (1, 2, 3)\necho values[1 : 2]\n",
+		"vim9script\nvar values = (1, 2, 3)\nvalues[0] = 4\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1533" {
+				t.Fatalf("guard source reported E1533: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}

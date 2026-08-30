@@ -1662,6 +1662,12 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 		target := expression.Children[0]
+		if target != nil && target.Kind == syntax.ExpressionSlice && len(target.Children) > 0 && resolvedExpressionType(result, scope, target.Children[0]).Name == "tuple" {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1533", Message: "Cannot slice a tuple", Span: target.Span,
+			})
+			return
+		}
 		if !isReadOnlyVimVariableTarget(target) {
 			if expected := assignmentTargetType(result, scope, target); !isUnknownType(expected) {
 				if !scopeUsesDefTypeRules(scope) && expected.Name == "string" && target.Kind == syntax.ExpressionIdentifier && strings.HasPrefix(target.Value, "&") && result.TypeOf(expression.Children[1]).Name == "list" {
