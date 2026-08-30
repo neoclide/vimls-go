@@ -1225,6 +1225,40 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   callback return mismatch from script-level E1138.
 - `src/errors.h:2929-2930` defines the exact E1138 message.
 
+## Non-indexable assignment receiver: E1141
+
+Analysis reports E1141 when a compiled Vim9 `def` or lambda writes through a
+member, index, or slice whose statically known receiver is not a mutable
+indexable destination. This covers direct and compound assignments as well as
+`redir =>` and `redir =>>` targets. The diagnostic uses Vim's exact
+`Indexable type required` message and selects the complete invalid receiver.
+A `def` retained in a Legacy-root file follows the same compiled rule.
+
+List, Dictionary, Blob, Class, Object, and known local class or enum-object
+receivers remain valid destinations. Unknown and `any` receivers stay
+conservative. Tuple writes keep their more specific E1532 or E1533 immutability
+diagnostics, and direct Class or Typealias declarations are not reinterpreted
+through an underlying primitive type.
+
+The rule applies only to writes. Reading a String index is valid, while
+ordinary Vim9 script String-index writes keep their runtime E689 path. Legacy
+assignments and incomplete targets do not receive E1141. Nested recovering
+targets produce at most one E1141 on the first statically known invalid
+receiver.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:2730-2800` admits mutable List, Dictionary, Blob, Class,
+  Object, and `any` destinations, reserves Tuple for its immutability error,
+  and sends other known receiver types to E1141.
+- `src/testdir/test_listdict.vim:458-474` distinguishes script-level numeric
+  member assignment from compiled E1141.
+- `src/testdir/test_vim9_assign.vim:673-680,1844-1857` covers String index
+  assignment and both compound-assignment forms.
+- `src/testdir/test_vim9_cmd.vim:1990-2000` expects E1141 for a compiled
+  indexed `redir` target.
+- `src/errors.h:2935-2936` defines the exact E1141 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

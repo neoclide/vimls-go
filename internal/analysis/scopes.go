@@ -3506,6 +3506,11 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 		if scope == nil {
 			scope = parent
 		}
+		if command.Canonical == "redir" && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+			for _, target := range command.Targets {
+				appendIndexableAssignmentDiagnostic(result, scope, target)
+			}
+		}
 		if command.Declaration == nil || command.Dialect == syntax.Legacy && command.Canonical == "let" {
 			for _, expression := range command.Expressions {
 				collectAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect)
@@ -3602,10 +3607,71 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 				Code: "vim/E689", Message: "Index not allowed after a string: " + result.File.Text(expression.Span), Span: target.Span,
 			})
 		}
+		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+			appendIndexableAssignmentDiagnostic(result, scope, target)
+		}
 	}
 	for _, child := range expression.Children {
 		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
+}
+
+func appendIndexableAssignmentDiagnostic(result *FileAnalysis, scope *Scope, target *syntax.Expression) {
+	receiver := invalidAssignmentReceiver(result, scope, target)
+	if receiver == nil {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1141", Message: "Indexable type required", Span: receiver.Span,
+	})
+}
+
+func invalidAssignmentReceiver(result *FileAnalysis, scope *Scope, target *syntax.Expression) *syntax.Expression {
+	if result == nil || scope == nil || target == nil || expressionContainsMissing(target) {
+		return nil
+	}
+	for target.Kind == syntax.ExpressionMember || target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice {
+		if len(target.Children) == 0 || target.Children[0] == nil {
+			return nil
+		}
+		receiver := target.Children[0]
+		candidate := receiver
+		for candidate.Kind == syntax.ExpressionParenthesized && len(candidate.Children) == 1 {
+			candidate = candidate.Children[0]
+		}
+		if candidate.Kind == syntax.ExpressionIdentifier {
+			if declaration := resolve(scope, candidate.Value, candidate.Span.Start, false, nil); declaration != nil {
+				switch declaration.Kind {
+				case SymbolKindClass, SymbolKindEnum, SymbolKindTypeAlias:
+					return nil
+				}
+			}
+		}
+		typ := resolvedExpressionType(result, scope, receiver)
+		if isUnknownType(typ) {
+			if candidate.Kind == syntax.ExpressionMember || candidate.Kind == syntax.ExpressionIndex || candidate.Kind == syntax.ExpressionSlice {
+				target = candidate
+				continue
+			}
+			return nil
+		}
+		if typ.Name == "tuple" {
+			return nil
+		}
+		switch typ.Name {
+		case "list", "dict", "blob", "class", "object", "enum":
+			return nil
+		}
+		if result.classes[typ.Name] != nil {
+			return nil
+		}
+		if declaration := resolve(scope, typ.Name, receiver.Span.Start, false, nil); declaration != nil &&
+			(declaration.Kind == SymbolKindClass || declaration.Kind == SymbolKindEnum) {
+			return nil
+		}
+		return receiver
+	}
+	return nil
 }
 
 func readOnlyClassMemberAssignment(result *FileAnalysis, scope *Scope, target *syntax.Expression) (string, string, bool) {

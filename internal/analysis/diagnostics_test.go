@@ -1638,6 +1638,86 @@ func TestAnalyzeBoolAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeIndexableAssignmentDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name: "compiled direct compound and slice assignments",
+			source: "vim9script\ndef Func()\n  var lines: string = 'text'\n  lines[9] = 'asdf'\n  var n: number = 1\n  n.key = 0\n" +
+				"  var s = 'text'\n  s[1] += 'x'\n  s[2] ..= 'x'\n  lines[1 : 2] = 'x'\n  var after = 1\nenddef\n",
+			want: []string{"lines", "n", "s", "s", "lines"},
+		},
+		{
+			name:   "compiled redir and append redir targets",
+			source: "vim9script\ndef Func()\n  var ls = 'text'\n  redir => ls[1]\n  redir END\n  redir =>> ls[2]\n  redir END\n  var after = 1\nenddef\n",
+			want:   []string{"ls", "ls"},
+		},
+		{
+			name:   "Legacy-root def and Vim9 lambda",
+			source: "def LegacyDef()\n  var value: number = 1\n  value[0] = 1\nenddef\nvim9cmd var Callback = () => {\n  var text = 'x'\n  text[0] = 'y'\n}\n",
+			want:   []string{"value", "text"},
+		},
+		{
+			name:   "nested target reports first known invalid receiver once",
+			source: "vim9script\ndef Func()\n  var value: number = 1\n  value.member[0] = 1\nenddef\n",
+			want:   []string{"value"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1141" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1141 diagnostics = %#v, want spans %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, test.want, file.Diagnostics, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "Indexable type required" || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E1141[%d] = %#v on %q, want receiver %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index])
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+		wantCode     string
+	}{
+		{"Vim9 script assignment guards", "vim9script\nvar text = 'x'\ntext[0] = 'y'\nvar n = 1\nn.key = 1\n", ""},
+		{"Legacy assignment guard", "let text = 'x'\nlet text[0] = 'y'\n", ""},
+		{"valid list dict blob object and enum receivers", "vim9script\nclass Item\n  var value = 0\nendclass\nenum Choice\n  First\nendenum\ndef Func()\n  var list = [1]\n  list[0] = 2\n  var dict = {key: 1}\n  dict.key = 2\n  var blob = 0z12\n  blob[0] = 3\n  var object = Item.new()\n  object.value = 1\n  var choice: Choice = Choice.First\n  choice.value = 1\nenddef\n", ""},
+		{"tuple keeps existing immutability", "vim9script\ndef Func()\n  var tuple = (1, 2)\n  tuple[0] = 3\n  tuple[0 : 1] = 3\nenddef\n", "vim/E1532"},
+		{"Class and Typealias declarations are not receivers", "vim9script\nclass Item\nendclass\ntype Number = number\ndef Func()\n  Item.value = 1\n  Number.value = 1\nenddef\n", ""},
+		{"unknown receiver stays conservative", "vim9script\ndef Func()\n  unknown[0] = 1\nenddef\n", ""},
+		{"read does not diagnose", "vim9script\ndef Func()\n  var text = 'x'\n  var character = text[0]\nenddef\n", ""},
+		{"incomplete target does not cascade", "vim9script\ndef Func()\n  var text = 'x'\n  text[\nenddef\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			foundCode := test.wantCode == ""
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1141" {
+					t.Fatalf("source unexpectedly received E1141: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.wantCode {
+					foundCode = true
+				}
+			}
+			if !foundCode {
+				t.Fatalf("source diagnostics = %#v, want %s", result.Diagnostics, test.wantCode)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
