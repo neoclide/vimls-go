@@ -1200,3 +1200,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9expr.c:665-696` implements the compiled import-member lookup.
 - `src/eval.c:7656-7676` implements the corresponding evaluated lookup.
 - `src/errors.h:2797-2798` defines the exact message.
+
+## Cannot unlet a Vim9 variable: E1081
+
+E1081 means `Cannot unlet {name}`. A Vim9 `:unlet` command may directly remove
+only variables in the `g:`, `w:`, `t:`, or `b:` namespaces and environment
+variables. It cannot remove a local, script-local, argument, predefined, or
+otherwise unqualified variable, and `:unlet!` does not relax this rule. The
+diagnostic selects the direct target name.
+
+A direct `s:name` at Vim9 script level is rejected earlier as E1268. E1081
+applies when that target reaches compilation inside a Vim9 `def`; a Legacy-root
+script keeps the historical script-local behavior.
+
+Removing an item is different from removing its containing variable. List and
+Dictionary targets such as `items[0]`, `dict.key`, and `s:dict.key` remain
+valid E1081-wise and continue to their own index, key, mutability, or imported
+item checks. Legacy `:unlet` retains its historical behavior; an explicit
+`vim9cmd unlet` uses the Vim9 restriction.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_assign.vim:2636-2658` covers `unlet` and `unlet!` for
+  script-local and local variables, while allowing Dictionary item removal.
+- `src/testdir/test_vim9_assign.vim:2802-2843` covers script-level variables,
+  closed-over script variables, Legacy functions, and `vim9cmd` inside a def.
+- `src/vim9cmds.c:83-102` permits only direct `g:`, `w:`, `t:`, and `b:` names
+  under Vim9 semantics.
+- `src/vim9cmds.c:109-169` routes environment and indexed targets separately
+  before applying the direct-name restriction.
+- `src/errors.h:2812-2813` defines the exact message.

@@ -4289,6 +4289,7 @@ func trimEmbeddedCommandEnd(source string, start, end int) int {
 func parseVariableTargets(file *File, command *Command) {
 	source := file.Text(command.Argument)
 	consumed := skipSpace(source, 0, len(source))
+	reportedCannotUnlet := false
 	if command.Canonical == "lockvar" || command.Canonical == "unlockvar" {
 		end := consumed
 		for end < len(source) && source[end] >= '0' && source[end] <= '9' {
@@ -4310,12 +4311,30 @@ func parseVariableTargets(file *File, command *Command) {
 		target, diagnostics, length := parseExpressionPrefixWithVersion(source[consumed:], command.Argument.Start+consumed, command.Dialect, command.ScriptVersion)
 		command.Targets = append(command.Targets, target)
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		if !reportedCannotUnlet && len(diagnostics) == 0 && command.Canonical == "unlet" && command.Dialect == Vim9 && invalidVim9UnletTarget(file, command, target) {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1081", Message: "Cannot unlet " + target.Value, Span: target.Span,
+			})
+			reportedCannotUnlet = true
+		}
 		if len(diagnostics) > 0 || length <= 0 {
 			break
 		}
 		consumed += length
 		consumed = skipSpace(source, consumed, len(source))
 	}
+}
+
+func invalidVim9UnletTarget(file *File, command *Command, target *Expression) bool {
+	if target == nil || target.Kind != ExpressionIdentifier || strings.HasPrefix(target.Value, "$") {
+		return false
+	}
+	if strings.HasPrefix(target.Value, "s:") {
+		// A script-level s: name is rejected earlier as E1268.  E1081 applies
+		// when the same direct target reaches the compiler in a Vim9 def.
+		return file.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef)
+	}
+	return len(target.Value) < 2 || target.Value[1] != ':' || !strings.ContainsRune("gwtb", rune(target.Value[0]))
 }
 
 func parsePoundCommandTail(file *File, command *Command) {

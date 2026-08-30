@@ -629,6 +629,48 @@ func TestVariableCommandsSplitAtTopLevelBar(t *testing.T) {
 	}
 }
 
+func TestVim9CannotUnletVariable(t *testing.T) {
+	for _, test := range []struct {
+		name, source, target string
+	}{
+		{name: "script local", source: "vim9script\nvar value = 1\nunlet value\nvar after = 2\n", target: "value"},
+		{name: "compiled local", source: "def Func()\n  var value = 1\n  unlet value\nenddef\n", target: "value"},
+		{name: "compiled script namespace", source: "vim9script\nvar value = 1\ndef Func()\n  unlet! s:value\nenddef\n", target: "s:value"},
+		{name: "vim9cmd in def", source: "vim9script\nvar value = 1\ndef Func()\n  vim9cmd unlet s:value\nenddef\n", target: "s:value"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1081" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot unlet "+test.target || file.Text(got[0].Span) != test.target {
+				t.Fatalf("E1081 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	for _, source := range []string{
+		"let s:value = 1\nunlet s:value\n",
+		"vim9cmd unlet s:value\n",
+		"vim9script\nvar value = 1\nunlet s:value\n",
+		"vim9script\nunlet g:value w:value t:value b:value $VIMLS_E1081\n",
+		"vim9script\nvar value = {key: 1}\nunlet value.key value['key']\n",
+		"vim9script\ns:value = {key: 1}\nunlet s:value.key\n",
+		"vim9script\nlegacy unlet s:value\n",
+		"vim9script\nfunc Legacy()\n  unlet s:value\nendfunc\n",
+		"vim9script\nimport './Xfoo.vim' as module\nunlet module.member\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1081") {
+			t.Fatalf("source %q unexpectedly received E1081: %#v", source, file.Diagnostics)
+		}
+	}
+}
+
 func TestExpressionCommandsSplitAtTopLevelBar(t *testing.T) {
 	// This is the compact form used by Vim runtime scripts: :return owns an
 	// expression, but its command-table entry handles the following bar itself
