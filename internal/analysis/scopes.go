@@ -104,6 +104,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
+	collectMissingReturnValueDiagnostics(result, file.Commands)
 
 	sortDeclarations(result)
 	for index := range file.Commands {
@@ -129,6 +130,40 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.File == nil {
+		return
+	}
+	var walk func([]syntax.Command, []bool)
+	walk = func(commands []syntax.Command, functionNeedsValue []bool) {
+		for index := range commands {
+			command := &commands[index]
+			switch command.Canonical {
+			case "def":
+				needsValue := false
+				if function := command.Function; function != nil && function.ReturnType != nil {
+					needsValue = function.ReturnType.Kind != syntax.TypeMissing && function.ReturnType.Name != "void"
+				}
+				functionNeedsValue = append(functionNeedsValue, needsValue)
+			case "function":
+				functionNeedsValue = append(functionNeedsValue, false)
+			}
+			if command.Canonical == "return" && len(command.Expressions) == 0 && len(functionNeedsValue) > 0 && functionNeedsValue[len(functionNeedsValue)-1] {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1003", Message: "Missing return value", Span: command.Name,
+				})
+			}
+			if command.Embedded != nil {
+				walk(command.Embedded.Commands, functionNeedsValue)
+			}
+			if (command.Canonical == "enddef" || command.Canonical == "endfunction") && len(functionNeedsValue) > 0 {
+				functionNeedsValue = functionNeedsValue[:len(functionNeedsValue)-1]
+			}
+		}
+	}
+	walk(commands, nil)
 }
 
 func collectFuncrefVariableNameDiagnostics(result *FileAnalysis) {

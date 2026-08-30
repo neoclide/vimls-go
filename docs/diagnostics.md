@@ -810,3 +810,24 @@ Representative source evidence:
   before compiling an assignment, while `src/evalvars.c:1745-1764` implements
   the runtime option path.
 - `src/errors.h:2617-2626` defines the E996 message family.
+
+## Missing return value: E1003
+
+Analysis reports E1003 for a bare `return` inside a `def` whose declared
+return type is known and is not `void`. This applies whether the file has a
+Legacy or Vim9 root, because the `def` body uses compiled Vim9 return rules.
+The `return` command is selected.
+
+An omitted return type is treated as `void`, while a malformed return type
+remains unknown; neither triggers this rule. A non-void function with no
+`return` statement is the separate E1027 case, while returning a value from a
+void or untyped function is E1096.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:2434-2439` is the official E1003 compile
+  failure: `def Func(): number` contains a bare `return`.
+- `src/vim9cmds.c:2754-2760` emits E1003 when a bare return is compiled and
+  the function return type is neither `void` nor unknown.
+- `runtime/doc/vim9.txt:1388-1408` distinguishes E1003 from E1027 and E1096.
+- `src/errors.h:2644-2645` defines the exact message.

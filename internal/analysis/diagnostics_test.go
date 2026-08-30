@@ -2642,3 +2642,82 @@ func TestAnalyzeE1093DestructuringCardinality(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1003MissingReturnValue(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		want   int
+	}{
+		{
+			name:   "Vim9 root",
+			source: "vim9script\ndef Func(): number\n  return\nenddef\n",
+			want:   1,
+		},
+		{
+			name:   "Legacy root def",
+			source: "def Func(): number\n  return\nenddef\n",
+			want:   1,
+		},
+		{
+			name: "nested def uses innermost return type",
+			source: "vim9script\ndef Outer(): number\n" +
+				"  def Inner(): void\n" +
+				"    return\n" +
+				"  enddef\n" +
+				"  return\n" +
+				"enddef\n",
+			want: 1,
+		},
+		{
+			name:   "void return",
+			source: "vim9script\ndef Func(): void\n  return\nenddef\n",
+		},
+		{
+			name:   "omitted return type",
+			source: "vim9script\ndef Func()\n  return\nenddef\n",
+		},
+		{
+			name:   "malformed return type",
+			source: "vim9script\ndef Func():\n  return\nenddef\n",
+		},
+		{
+			name:   "any return type still requires a value",
+			source: "vim9script\ndef Func(): any\n  return\nenddef\n",
+			want:   1,
+		},
+		{
+			name:   "value supplied",
+			source: "vim9script\ndef Func(): number\n  return 1\nenddef\n",
+		},
+		{
+			name: "nested Legacy function is independent",
+			source: "vim9script\ndef Outer(): number\n" +
+				"  function Inner()\n" +
+				"    return\n" +
+				"  endfunction\n" +
+				"  return 1\n" +
+				"enddef\n",
+		},
+		{
+			name:   "missing return statement is E1027 territory",
+			source: "vim9script\ndef Func(): number\n  echo 'missing'\nenddef\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1003" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E1003 diagnostics = %#v, want %d", got, test.want)
+			}
+			if test.want == 1 && (got[0].Message != "Missing return value" || file.Text(got[0].Span) != "return") {
+				t.Fatalf("E1003 diagnostic = %#v", got[0])
+			}
+		})
+	}
+}

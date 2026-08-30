@@ -840,6 +840,33 @@ func TestVim9FunctionCloserTrailingText(t *testing.T) {
 	}
 }
 
+func TestBareReturnHasNoExpressionDiagnostic(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\ndef Func(): void\n  return\nenddef\n",
+		"function Func()\n  return\nendfunction\n",
+	} {
+		file := Parse(source)
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vimls/missing-expression" {
+				t.Fatalf("bare return diagnostics = %#v\n%s", file.Diagnostics, source)
+			}
+		}
+		var found bool
+		for index := range file.Commands {
+			command := &file.Commands[index]
+			if command.Canonical == "return" {
+				found = true
+				if len(command.Expressions) != 0 {
+					t.Fatalf("bare return expressions = %#v\n%s", command.Expressions, source)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("bare return command not parsed\n%s", source)
+		}
+	}
+}
+
 func countTokens(file *File, kind TokenKind) int {
 	count := 0
 	for _, token := range file.Tokens {
