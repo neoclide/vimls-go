@@ -30,6 +30,27 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
+	directClassMethod := false
+	if command.Block >= 0 && command.Block < len(file.Blocks) {
+		block := file.Blocks[command.Block]
+		directClassMethod = block.Kind == BlockDef && block.Parent >= 0 && block.Parent < len(file.Blocks) && file.Blocks[block.Parent].Kind == BlockClass
+	}
+	// Vim9 rejects an underscore-leading script function and requires a
+	// g:-qualified name to begin with an ASCII capital.  A direct class method
+	// is different grammar: its leading underscore denotes a private method.
+	if vim9Context && !directClassMethod {
+		name := source[nameStart:offset]
+		invalid := strings.HasPrefix(name, "_")
+		if strings.HasPrefix(name, "g:") && len(name) > 2 {
+			invalid = name[2] < 'A' || name[2] > 'Z'
+		}
+		if invalid {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1267", Message: "function name must start with a capital letter",
+				Span: function.Name,
+			})
+		}
+	}
 	beforeSpace := offset
 	offset = skipSyntaxSpace(source, offset, len(source))
 	spaceBeforeGeneric := defSignature && offset > beforeSpace && offset < len(source) && source[offset] == '<'
