@@ -67,7 +67,7 @@ func inferTypes(result *FileAnalysis) {
 
 	// A small fixed number of source-order passes lets a function return fact
 	// propagate through a forward call without creating a recursive solver.
-	for pass := 0; pass < 2; pass++ {
+	for range 2 {
 		state.walkCommands()
 		state.inferFunctionReturns()
 	}
@@ -107,7 +107,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 					}
 				}
 				returnType := convertSyntaxType(command.Function.ReturnType)
-				declaration.Type = ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, RequiredArguments: requiredParameterCount(command.Function.Parameters), Variadic: parametersAreVariadic(command.Function.Parameters)}
+				declaration.Type = ValueType{Name: "func", Arguments: arguments, Return: new(returnType), ArgumentCountKnown: true, RequiredArguments: requiredParameterCount(command.Function.Parameters), Variadic: parametersAreVariadic(command.Function.Parameters)}
 			}
 		}
 		state.collectLambdaFactsCommands(command.Expressions)
@@ -340,7 +340,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		case "null_dict":
 			typ = ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}
 		case "null_function", "null_partial":
-			typ = ValueType{Name: "func", Return: valueTypePointer(UnknownValueType)}
+			typ = ValueType{Name: "func", Return: new(UnknownValueType)}
 		case "null_job":
 			typ = ValueType{Name: "job"}
 		case "null_list":
@@ -608,7 +608,7 @@ func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueT
 	case vimdata.ReturnTuple:
 		return ValueType{Name: "tuple"}
 	case vimdata.ReturnFunction:
-		return ValueType{Name: "func", Return: valueTypePointer(UnknownValueType)}
+		return ValueType{Name: "func", Return: new(UnknownValueType)}
 	default:
 		return UnknownValueType
 	}
@@ -685,7 +685,7 @@ func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) 
 			returnType = UnknownValueType
 		}
 	}
-	return ValueType{Name: "func", Arguments: arguments, Return: valueTypePointer(returnType), ArgumentCountKnown: true, RequiredArguments: requiredParameterCount(expression.Parameters), Variadic: parametersAreVariadic(expression.Parameters)}
+	return ValueType{Name: "func", Arguments: arguments, Return: new(returnType), ArgumentCountKnown: true, RequiredArguments: requiredParameterCount(expression.Parameters), Variadic: parametersAreVariadic(expression.Parameters)}
 }
 
 func parametersAreVariadic(parameters []syntax.Parameter) bool {
@@ -800,9 +800,9 @@ func convertSyntaxType(typeNode *syntax.Type) ValueType {
 		typ.Variadic = typeNode.Arguments[len(typeNode.Arguments)-1].Kind == syntax.TypeVariadic
 	}
 	if typeNode.ReturnType != nil {
-		typ.Return = valueTypePointer(convertSyntaxType(typeNode.ReturnType))
+		typ.Return = new(convertSyntaxType(typeNode.ReturnType))
 	} else if typeNode.Kind == syntax.TypeFunction && typeNode.ArgumentCountKnown {
-		typ.Return = valueTypePointer(ValueType{Name: "void"})
+		typ.Return = new(ValueType{Name: "void"})
 	}
 	return typ
 }
@@ -873,8 +873,4 @@ func isFloatLiteral(value string) bool {
 
 func isUnknownType(typ ValueType) bool {
 	return typ.Name == "" || typ.Name == ValueTypeAny
-}
-
-func valueTypePointer(typ ValueType) *ValueType {
-	return &typ
 }
