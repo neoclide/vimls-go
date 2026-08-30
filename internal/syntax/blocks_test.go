@@ -38,6 +38,52 @@ func TestVim9MissingEnddefDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9MismatchedFunctionClosers(t *testing.T) {
+	tests := []struct {
+		name, source, code, message, span string
+	}{
+		{
+			name:   "endfunction in def",
+			source: "def Test()\n  echo 'test'\n  endfunc\nenddef\nvar after = 1\n",
+			code:   "vim/E1151", message: "Mismatched endfunction", span: "endfunc",
+		},
+		{
+			name:   "enddef in function",
+			source: "def Test()\n  func Nested()\n    echo 'test'\n  enddef\nenddef\nvar after = 1\n",
+			code:   "vim/E1152", message: "Mismatched enddef", span: "enddef",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := (Vim9Parser{}).Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == test.code {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, all = %#v", got, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	for _, source := range []string{
+		"def Test()\nenddef\n",
+		"function Test()\nendfunction\n",
+		"def Test()\nendfunction!\nenddef\n",
+	} {
+		file := (Vim9Parser{}).Parse(source)
+		if hasDiagnostic(file, "vim/E1151") || hasDiagnostic(file, "vim/E1152") {
+			t.Fatalf("valid or bang closer mismatch = %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestLegacyEndfunctionClosesUnterminatedControlBlocks(t *testing.T) {
 	file := (LegacyParser{}).Parse("function! Complete()\n  if 1\n    while 1\n      return\nendfunction\n")
 	if len(file.Diagnostics) != 0 {

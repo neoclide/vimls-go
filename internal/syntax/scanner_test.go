@@ -706,6 +706,55 @@ func TestVim9ExportDiagnostics(t *testing.T) {
 	}
 }
 
+func TestVim9FunctionCloserTrailingText(t *testing.T) {
+	tests := []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "top-level def",
+			source:  "def Bad()\n  echo 'hello'\nenddef there\nvar after = 1\n",
+			message: "Text found after enddef: there", span: "there",
+		},
+		{
+			name:    "nested def bar",
+			source:  "def Outer()\n  def Inner()\n  enddef|BBBB\nenddef\nvar after = 1\n",
+			message: "Text found after enddef: BBBB", span: "BBBB",
+		},
+		{
+			name:    "nested function bar",
+			source:  "def Outer()\n  func Inner()\n  endfunc|BBBB\nenddef\nvar after = 1\n",
+			message: "Text found after endfunction: BBBB", span: "BBBB",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := (Vim9Parser{}).Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1173" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1173 diagnostics = %#v, all = %#v", got, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	topLevelBar := (Vim9Parser{}).Parse("def Ok()\nenddef | echo 'there'\nvar after = 1\n")
+	if hasDiagnostic(topLevelBar, "vim/E1173") || len(topLevelBar.Commands) != 4 || topLevelBar.Commands[2].Canonical != "echo" || topLevelBar.Commands[3].Declaration == nil {
+		t.Fatalf("top-level bar = %#v, diagnostics = %#v", topLevelBar.Commands, topLevelBar.Diagnostics)
+	}
+	legacy := (LegacyParser{}).Parse("function Old()\nendfunction there\nlet after = 1\n")
+	if hasDiagnostic(legacy, "vim/E1173") {
+		t.Fatalf("legacy closer diagnostics = %#v", legacy.Diagnostics)
+	}
+}
+
 func countTokens(file *File, kind TokenKind) int {
 	count := 0
 	for _, token := range file.Tokens {

@@ -1343,7 +1343,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		} else {
 			argumentEnd, separator, comment, boundaryExpression = scanVim9CommandArgument(file.Source, argumentStart, end, scanMetadata, &parsedCommand)
 		}
-		if canonical == "enddef" || canonical == "endfunction" {
+		if (canonical == "enddef" || canonical == "endfunction") && (dialect == Vim9 || nestedFunction) {
 			trailing := skipSpace(file.Source, argumentStart, argumentEnd)
 			separatorTail := end
 			if nestedFunction && separator.Start < separator.End {

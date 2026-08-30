@@ -43,6 +43,35 @@ func TestVim9FunctionNameCapitalDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9MissingArgumentTypeDiagnostic(t *testing.T) {
+	// v9.2.1015 src/testdir/test_vim9_func.vim:2484.
+	file := (Vim9Parser{}).Parse("def Func5(items)\n  echo items\nenddef\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1077" || file.Diagnostics[0].Message != "Missing argument type for items" || file.Text(file.Diagnostics[0].Span) != "items" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 4 || file.Commands[0].Function == nil || len(file.Commands[0].Function.Parameters) != 1 || file.Commands[3].Declaration == nil {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	for _, source := range []string{
+		"def Func(items: list<any>)\nenddef\n",
+		"def Func(items = [])\nenddef\n",
+		"def Func(_)\nenddef\n",
+		"def Func(...items: list<any>)\nenddef\n",
+		"class Thing\n  var value: number\n  def new(this.value)\n  enddef\nendclass\n",
+	} {
+		valid := (Vim9Parser{}).Parse(source)
+		if hasDiagnostic(valid, "vim/E1077") {
+			t.Fatalf("valid parameter reported E1077: %#v\n%s", valid.Diagnostics, source)
+		}
+	}
+	legacy := (LegacyParser{}).Parse("function Func(items)\nendfunction\n")
+	if hasDiagnostic(legacy, "vim/E1077") {
+		t.Fatalf("legacy function diagnostics = %#v", legacy.Diagnostics)
+	}
+}
+
 func TestParsesVim9GenericFunctionSignature(t *testing.T) {
 	file := (Vim9Parser{}).Parse("def Zip<T, U>(first: list<T>, second: list<U> = []): list<tuple<T, U>>\nenddef\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 {
