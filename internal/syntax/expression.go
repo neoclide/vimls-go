@@ -1294,7 +1294,20 @@ func (p *expressionParser) parseParenthesized() *Expression {
 		p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: token.span})
 	}
 	if p.current().text != ")" {
-		children = append(children, p.parse(0))
+		if p.current().text == "," {
+			// A leading comma is a missing first tuple item. Keep the comma for
+			// the command-context diagnostic while retaining every later item.
+			comma := p.current()
+			hadComma = true
+			reportTupleDiagnostic("vimls/missing-expression", "expected tuple item", comma)
+			children = append(children, &Expression{Kind: ExpressionMissing, Span: comma.span})
+			p.advance()
+			if p.current().kind != expressionEOF && p.current().text != ")" {
+				children = append(children, p.parse(0))
+			}
+		} else {
+			children = append(children, p.parse(0))
+		}
 		for {
 			if p.current().text != "," {
 				if hadComma && p.current().kind != expressionEOF && p.current().text != ")" {

@@ -3171,12 +3171,15 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 		parsedExpression = command.Expressions[len(command.Expressions)-1]
 	}
 	missingOperand := false
+	leadingTupleItem := false
 	if parsedExpression != nil {
 		switch parsedExpression.Kind {
 		case ExpressionTernary, ExpressionIndex, ExpressionSlice:
 			missingOperand = len(parsedExpression.Children) >= 2 && parsedExpression.Children[len(parsedExpression.Children)-1].Kind == ExpressionMissing
 		case ExpressionParenthesized:
 			missingOperand = len(parsedExpression.Children) == 1 && parsedExpression.Children[0].Kind == ExpressionMissing
+		case ExpressionTuple:
+			leadingTupleItem = len(parsedExpression.Children) > 0 && parsedExpression.Children[0].Kind == ExpressionMissing
 		}
 	}
 	kept := diagnostics[:0]
@@ -3217,6 +3220,13 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 	for index := range diagnostics {
 		diagnostic := &diagnostics[index]
 		switch {
+		case leadingTupleItem && diagnostic.Code == "vimls/missing-expression":
+			diagnostic.Code = "vim/E15"
+			diagnostic.Message = "invalid expression"
+			if command.Dialect == Vim9 && inDef {
+				diagnostic.Code = "vim/E1015"
+				diagnostic.Message = "name expected"
+			}
 		case command.Dialect == Vim9 && missingOperand && diagnostic.Code == "vimls/missing-expression":
 			diagnostic.Code = "vim/E15"
 			diagnostic.Message = "invalid expression"
