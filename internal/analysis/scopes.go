@@ -53,8 +53,11 @@ type Declaration struct {
 	Kind    SymbolKind
 	Span    syntax.Span
 	Mutable bool
-	Scope   *Scope
-	Type    ValueType
+	// Parameter distinguishes a function or lambda argument from an ordinary
+	// mutable variable without changing its navigation symbol kind.
+	Parameter bool
+	Scope     *Scope
+	Type      ValueType
 }
 
 // Reference is an identifier occurrence.  Declaration is nil when the name
@@ -96,6 +99,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	// A malformed or partially parsed enum value may remain an opaque command.
 	// The enum block is still authoritative for its one-name-per-line members.
 	collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks)
+	collectArgumentRedeclarationDiagnostics(result)
 
 	sortDeclarations(result)
 	for index := range file.Commands {
@@ -656,7 +660,7 @@ func collectLambdaScopes(result *FileAnalysis, parent *Scope, expression *syntax
 		result.Scopes = append(result.Scopes, lambdaScope)
 		result.lambdaScopes[expression] = lambdaScope
 		for _, parameter := range expression.Parameters {
-			addDeclaration(result, lambdaScope, result.File, parameter.Name, SymbolKindVariable, true)
+			addParameterDeclaration(result, lambdaScope, result.File, parameter.Name)
 		}
 		if expression.LambdaBody != nil {
 			collectCommandScopes(result, lambdaScope, expression.LambdaBody.Commands, expression.LambdaBody.Blocks, nil)
@@ -760,7 +764,7 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 			addDeclaration(result, declarationScope, file, command.Function.Name, functionKind(file, command, declarationScope), false)
 		}
 		for _, parameter := range command.Function.Parameters {
-			addDeclaration(result, functionScope, file, parameterDeclarationSpan(file, parameter), SymbolKindVariable, true)
+			addParameterDeclaration(result, functionScope, file, parameterDeclarationSpan(file, parameter))
 		}
 	}
 	if command.Aggregate != nil {
@@ -854,6 +858,39 @@ func addDeclaration(result *FileAnalysis, scope *Scope, file *syntax.File, span 
 	scope.Declarations = append(scope.Declarations, declaration)
 	result.Declarations = append(result.Declarations, declaration)
 	return declaration
+}
+
+func addParameterDeclaration(result *FileAnalysis, scope *Scope, file *syntax.File, span syntax.Span) *Declaration {
+	declaration := addDeclaration(result, scope, file, span, SymbolKindVariable, true)
+	if declaration != nil {
+		declaration.Parameter = true
+	}
+	return declaration
+}
+
+func collectArgumentRedeclarationDiagnostics(result *FileAnalysis) {
+	if result == nil {
+		return
+	}
+	for _, declaration := range result.Declarations {
+		if declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
+			continue
+		}
+		for scope := declaration.Scope; scope != nil; scope = scope.Parent {
+			if scope.Kind != syntax.BlockDef {
+				continue
+			}
+			for _, candidate := range scope.Declarations {
+				if candidate.Parameter && candidate.Name == declaration.Name && candidate.Span.Start < declaration.Span.Start {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1006", Message: declaration.Name + " is used as an argument", Span: declaration.Span,
+					})
+					break
+				}
+			}
+			break
+		}
+	}
 }
 
 func sortDeclarations(result *FileAnalysis) {

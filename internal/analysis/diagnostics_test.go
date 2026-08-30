@@ -142,6 +142,15 @@ func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsRedeclaringDefArgument(t *testing.T) {
+	source := "vim9script\ndef F(value: number)\n  var value = 1\nenddef\n"
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	if len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "vim/E1006" || result.Diagnostics[0].Message != "value is used as an argument" || file.Text(result.Diagnostics[0].Span) != "value" {
+		t.Fatalf("diagnostics = %#v", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeMapCallbackReturnTypeDiagnostics(t *testing.T) {
 	source := `vim9script
 def StringMap(i: number, value: number): string
