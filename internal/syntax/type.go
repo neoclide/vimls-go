@@ -23,6 +23,9 @@ type Type struct {
 	Name       string
 	Arguments  []*Type
 	ReturnType *Type
+	// ArgumentCountKnown is true when a function type has an explicit
+	// parenthesized argument list. A bare func type leaves its arity unknown.
+	ArgumentCountKnown bool
 }
 
 // Vim9TypeParser parses the type grammar used by declarations, functions,
@@ -244,6 +247,7 @@ func (p *typeParser) parseType() *Type {
 			})
 		}
 		if p.offset < len(p.source) && p.source[p.offset] == '(' {
+			node.ArgumentCountKnown = true
 			p.offset++
 			if p.offset < len(p.source) && isExpressionSpace(p.source[p.offset]) {
 				p.diagnostics = append(p.diagnostics, Diagnostic{

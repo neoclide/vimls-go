@@ -96,7 +96,7 @@ func TestVim9TypeParserSingleMemberContainers(t *testing.T) {
 
 func TestVim9TypeParserBareFuncRemainsValid(t *testing.T) {
 	typeNode, diagnostics := (Vim9TypeParser{}).Parse("func")
-	if typeNode == nil || typeNode.Kind != TypeFunction || len(diagnostics) != 0 {
+	if typeNode == nil || typeNode.Kind != TypeFunction || typeNode.ArgumentCountKnown || len(diagnostics) != 0 {
 		t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
 	}
 }
@@ -110,6 +110,7 @@ func TestVim9TypeParserFunctionTypeSpacing(t *testing.T) {
 	}{
 		{source: "func"},
 		{source: "func()"},
+		{source: "func(number)", arguments: 1},
 		{source: "func(): void", returnType: "void"},
 		{source: "func: number", returnType: "number"},
 		{source: "func(number, string): bool", arguments: 2, returnType: "bool"},
@@ -117,7 +118,8 @@ func TestVim9TypeParserFunctionTypeSpacing(t *testing.T) {
 	for _, test := range valid {
 		t.Run("valid "+test.source, func(t *testing.T) {
 			typeNode, diagnostics := (Vim9TypeParser{}).Parse(test.source)
-			if typeNode == nil || typeNode.Kind != TypeFunction || len(typeNode.Arguments) != test.arguments || len(diagnostics) != 0 {
+			knownArguments := strings.Contains(test.source, "func(")
+			if typeNode == nil || typeNode.Kind != TypeFunction || typeNode.ArgumentCountKnown != knownArguments || len(typeNode.Arguments) != test.arguments || len(diagnostics) != 0 {
 				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
 			}
 			if test.returnType == "" && typeNode.ReturnType != nil || test.returnType != "" && (typeNode.ReturnType == nil || typeNode.ReturnType.Name != test.returnType) {
