@@ -1,6 +1,9 @@
 package syntax
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestLookupModifier(t *testing.T) {
 	for _, test := range []struct {
@@ -322,6 +325,37 @@ func TestOfficialVim9WhitespaceBeforeCallParen(t *testing.T) {
 	legacy := (LegacyParser{}).Parse("CallMe ('yes')\n")
 	if len(legacy.Diagnostics) != 0 || len(legacy.Commands) != 1 || legacy.Commands[0].Kind != CommandUser || legacy.Commands[0].Canonical != "CallMe" {
 		t.Fatalf("legacy user command = %#v", legacy)
+	}
+}
+
+func TestOfficialVim9InvalidCommandContexts(t *testing.T) {
+	compiled := Parse("def Func()\n  notexist:repl\n  ka\n  :1ka\n  Print\n  mode 4\nenddef\ndefcompile\n")
+	var gotCompiled []string
+	for _, diagnostic := range compiled.Diagnostics {
+		if diagnostic.Code == "vim/E476" {
+			gotCompiled = append(gotCompiled, compiled.Text(diagnostic.Span))
+		}
+		if diagnostic.Code == "vimls/trailing-expression" {
+			t.Fatalf("compiled trailing-expression diagnostic = %#v", diagnostic)
+		}
+	}
+	want := []string{"notexist:repl", "ka", "ka", "Print", "mode 4"}
+	if !slices.Equal(gotCompiled, want) {
+		t.Fatalf("compiled E476 spans = %q, want %q; diagnostics = %#v", gotCompiled, want, compiled.Diagnostics)
+	}
+
+	script := Parse("vim9script\nnotexist:repl\nka\n:1ka\nPrint\nmode 4\n")
+	var gotScript []string
+	for _, diagnostic := range script.Diagnostics {
+		if diagnostic.Code == "vim/E492" {
+			gotScript = append(gotScript, script.Text(diagnostic.Span))
+		}
+		if diagnostic.Code == "vim/E476" {
+			t.Fatalf("script E476 diagnostic = %#v", diagnostic)
+		}
+	}
+	if !slices.Equal(gotScript, want) {
+		t.Fatalf("script E492 spans = %q, want %q; diagnostics = %#v", gotScript, want, script.Diagnostics)
 	}
 }
 

@@ -413,6 +413,7 @@ func parseSource(source string, initial Dialect) *File {
 			_, closing := closingBlock(file, &file.Commands[index+1])
 			file.Commands[index].hasNextStatement = !closing
 		}
+		diagnoseVim9InvalidCommand(file, &file.Commands[index])
 		if file.Commands[index].detailsOpaque {
 			command := &file.Commands[index]
 			if logical := command.logical; logical != nil {
@@ -506,6 +507,28 @@ func normalizeVim9CallDiagnostics(file *File) {
 			diagnostic.Message = "Not an editor command"
 		}
 	}
+}
+
+func diagnoseVim9InvalidCommand(file *File, command *Command) {
+	if command == nil || command.Dialect != Vim9 {
+		return
+	}
+	invalid := command.Kind == CommandUnknown && command.TypedName == "ka" ||
+		command.Kind == CommandBuiltin && (command.Canonical == "mode" || command.Canonical == "Print")
+	if !invalid {
+		return
+	}
+	span := command.Name
+	if command.Argument.End > command.Argument.Start {
+		span.End = command.Argument.End
+	}
+	code := "vim/E492"
+	message := "Not an editor command: " + file.Text(span)
+	if commandInsideBlock(command, file.Blocks, BlockDef) {
+		code = "vim/E476"
+		message = "Invalid command: " + file.Text(span)
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
 }
 
 // coalesceLegacyEmbeddedBlocks models the source-line callback used by
@@ -2892,18 +2915,29 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
-		if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) && expression != nil && expression.Kind == ExpressionIdentifier && len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-expression" {
+		inDef := commandInsideBlock(command, file.Blocks, BlockDef)
+		if command.Dialect == Vim9 && expression != nil && expression.Kind == ExpressionIdentifier && len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-expression" {
 			nameEnd := expression.Span.End
 			if nameEnd >= command.Argument.Start && nameEnd < command.Argument.End {
 				tail := skipSpace(file.Source, nameEnd, command.Argument.End)
 				if tail < command.Argument.End && file.Source[tail] == ':' && tail+1 < command.Argument.End && !isSpace(file.Source[tail+1]) {
-					if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, expression.Span); ok {
-						diagnostics[0] = diagnostic
+					if inDef {
+						if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, expression.Span); ok {
+							diagnostics[0] = diagnostic
+						} else if !strings.Contains(expression.Value, ":") {
+							diagnostics[0] = Diagnostic{Code: "vim/E476", Message: "Invalid command: " + file.Text(command.Argument), Span: command.Argument}
+							command.Kind = CommandUnknown
+							command.Expressions = command.Expressions[:len(command.Expressions)-1]
+						}
+					} else if !strings.Contains(expression.Value, ":") {
+						diagnostics[0] = Diagnostic{Code: "vim/E492", Message: "Not an editor command: " + file.Text(command.Argument), Span: command.Argument}
+						command.Kind = CommandUnknown
+						command.Expressions = command.Expressions[:len(command.Expressions)-1]
 					}
 				}
 			}
 		}
-		if command.Dialect == Vim9 && !commandInsideBlock(command, file.Blocks, BlockDef) &&
+		if command.Dialect == Vim9 && !inDef &&
 			len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-expression" &&
 			expression != nil && expression.Kind == ExpressionIdentifier &&
 			(strings.HasPrefix(expression.Value, "g:") || strings.HasPrefix(expression.Value, "s:")) {

@@ -220,3 +220,27 @@ Representative source evidence:
   the skip expression in a `def` from E475 for the invalid script-level flags.
 - `src/testdir/test_search.vim:438-453` covers invalid literal flags for both
   `searchpair()` and `searchpairpos()`.
+
+## Invalid command: E476
+
+E476 means `Invalid command: {command}`. Vim uses it while compiling a `def`
+when text at command position cannot be interpreted as a valid Vim9 command.
+This includes declaration-like text without `var`, a command-like identifier
+that is not valid in Vim9, and whitespace that makes a function call look like
+an Ex command.
+
+The same source text does not always use E476 at script level. An invalid Ex
+command uses E492 there, while `call Name (` uses E1068 for the whitespace
+before the argument list. The parser keeps that context distinction instead
+of treating E476 as a generic unknown-command code.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_cmd.vim:2076` distinguishes E476 in a `def` from E492
+  at script level for declaration-like `name:replacement` text.
+- `src/testdir/test_vim9_expr.vim:4487` covers whitespace before a call that is
+  interpreted as an invalid command while compiling a `def`.
+- `src/testdir/test_vim9_func.vim:781` distinguishes E476 in a `def` from E1068
+  at script level for `call Name (`.
+- `src/testdir/test_vim9_script.vim:4836-4881` covers other command-position
+  forms and their E476/E492 context split.
