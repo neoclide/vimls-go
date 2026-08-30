@@ -2283,6 +2283,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   check and its `getcharstr('9')` example.
 - `src/errors.h:3171-3172` defines the exact E1235 message.
 
+## Using an import namespace itself: E1236
+
+Analysis reports E1236 when a resolved Vim9 import alias is used as the target
+of a direct assignment or as a function callee. Calls inside compiled `def` and
+block-lambda scopes follow the same rule. A nested `def` declaration also
+reports E1236 when its name resolves to a visible root import alias. The
+diagnostic selects the alias use and includes its spelling.
+
+Contiguous `Alias.Member` reads, calls, and assignments remain valid namespace
+access. Other bare namespace reads, compound assignments, indexing, and method
+arrows retain E1060, while script-scope declarations that redefine an imported
+name retain E1213.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_import.vim:501-507` and `:551-557` distinguish the
+  top-level E1236 assignment and call cases from their separately invalid
+  compiled-wrapper forms.
+- `src/testdir/test_vim9_import.vim:2234-2240` expects E1236 when a nested
+  `def` reuses an imported alias.
+- `src/vim9expr.c:1298-1309` rejects an imported namespace name before
+  compiling a direct call.
+- `src/evalvars.c:4182-4200` rejects assignment to an imported namespace
+  itself, and `src/userfunc.c:1974-1992` distinguishes imported-name function
+  use from a new script-scope redefinition.
+- `runtime/doc/vim9.txt:3586-3592` documents direct call use of an import
+  namespace as E1236.
+- `src/errors.h:3173-3174` defines the exact E1236 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

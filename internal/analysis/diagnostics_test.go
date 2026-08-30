@@ -846,6 +846,58 @@ func TestAnalyzeE1060ImportAliasRequiresDot(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1236ImportNamespaceDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"official assignment", "vim9script\nimport './Xfoo.vim' as foo\nfoo = 'bar'\n", "foo"},
+		{"official call", "vim9script\nimport './Xfoo.vim' as That\nThat()\n", "That"},
+		{"call inside def", "vim9script\nimport './Xfoo.vim' as That\ndef Func()\n  That()\nenddef\n", "That"},
+		{"nested def collision", "vim9script\nimport './Xfoo.vim' as That\ndef Outer()\n  def That()\n  enddef\nenddef\n", "That"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1236" {
+					got = append(got, diagnostic)
+				}
+				if (diagnostic.Code == "vim/E1060" || diagnostic.Code == "vim/E1213") && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1236 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use "+test.span+" itself, it is imported" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1236 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"member read", "vim9script\nimport './Xfoo.vim' as Item\nvar value = Item.Member\n", ""},
+		{"member call", "vim9script\nimport './Xfoo.vim' as Item\nItem.Member()\n", ""},
+		{"member assignment", "vim9script\nimport './Xfoo.vim' as Item\nItem.Member = 1\n", ""},
+		{"bare read keeps E1060", "vim9script\nimport './Xfoo.vim' as Item\nvar value = Item\n", "vim/E1060"},
+		{"compound assignment keeps E1060", "vim9script\nimport './Xfoo.vim' as Item\nItem += 1\n", "vim/E1060"},
+		{"top-level declaration keeps E1213", "vim9script\nimport './Xfoo.vim' as Item\ndef Item()\nenddef\n", "vim/E1213"},
+		{"unrelated local", "vim9script\nimport './Xfoo.vim' as Item\nvar Other = 1\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1236" {
+					t.Fatalf("guard unexpectedly received E1236: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1074ImportWhitespaceAfterDot(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

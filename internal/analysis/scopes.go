@@ -73,11 +73,12 @@ type Declaration struct {
 // Reference is an identifier occurrence.  Declaration is nil when the name
 // is dynamic, explicitly scoped to a different namespace, or not visible yet.
 type Reference struct {
-	Name        string
-	Span        syntax.Span
-	Declaration *Declaration
-	scope       *Scope
-	dialect     syntax.Dialect
+	Name           string
+	Span           syntax.Span
+	Declaration    *Declaration
+	functionCallee bool
+	scope          *Scope
+	dialect        syntax.Dialect
 }
 
 // Analyze collects lexical scopes, declarations, and same-file references.
@@ -1530,6 +1531,15 @@ func collectImportNamespaceDiagnostics(result *FileAnalysis) {
 		}
 		after := strings.TrimLeft(source[reference.Span.End:end], " \t")
 		if strings.HasPrefix(after, "=") && !strings.HasPrefix(after, "==") && !strings.HasPrefix(after, "=~") {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1236", Message: "Cannot use " + reference.Name + " itself, it is imported", Span: reference.Span,
+			})
+			continue
+		}
+		if reference.functionCallee {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1236", Message: "Cannot use " + reference.Name + " itself, it is imported", Span: reference.Span,
+			})
 			continue
 		}
 		tail := strings.TrimRight(source[reference.Span.Start:end], " \t")
@@ -2367,6 +2377,10 @@ func collectImportedItemRedefinitionDiagnostics(result *FileAnalysis, commands [
 				occupied[declaration.Name] = true
 			}
 			continue
+		}
+		if imported := imports[declaration.Name]; imported != nil && imported.Span.Start < declaration.Span.Start && declaration.Kind == SymbolKindFunction &&
+			scopeContainsDef(declaration.Scope) && resolve(declaration.Scope, declaration.Name, declaration.Span.Start, false, nil) == imported {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1236", Message: "Cannot use " + declaration.Name + " itself, it is imported", Span: declaration.Span})
 		}
 		if imported := imports[declaration.Name]; imported != nil && imported.Span.Start < declaration.Span.Start && importedItemScriptScope(result.Root, declaration.Scope) &&
 			(declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant || functionSymbolKind(declaration.Kind)) && !declaration.Parameter {
@@ -4792,7 +4806,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			declaration := resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped)
 			result.References = append(result.References, &Reference{
 				Name: expression.Value, Span: expression.Span,
-				Declaration: declaration, scope: scope, dialect: dialect,
+				Declaration: declaration, functionCallee: preferFunction, scope: scope, dialect: dialect,
 			})
 			if !preferFunction && declaration != nil && functionSymbolKind(declaration.Kind) && declaration.TypeParameterCount > 0 {
 				appendMissingGenericTypeArgumentsDiagnostic(result, expression.Value, expression.Span)
