@@ -27,6 +27,9 @@ func TestLookupFunctionMetadata(t *testing.T) {
 	if function, ok := LookupFunction("argc"); !ok || function.MethodArgument != 0 {
 		t.Fatalf("argc method metadata = %#v, %v", function, ok)
 	}
+	if function, ok := LookupFunction("copy"); !ok || function.ReturnHelper != "ret_copy" {
+		t.Fatalf("copy return metadata = %#v, %v", function, ok)
+	}
 	for _, test := range tests {
 		function, ok := LookupFunction(test.name)
 		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType || len(function.ArgumentChecks) != test.checkCount || function.ArgumentChecks[0] != test.firstCheck || function.ArgumentChecks[len(function.ArgumentChecks)-1] != test.lastCheck || function.Documentation == "" || function.DocumentationSource == "" {

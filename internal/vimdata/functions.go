@@ -31,6 +31,7 @@ type BuiltinFunction struct {
 	MaxArgs             int
 	MethodArgument      int // one-based receiver position; zero disables method syntax
 	ReturnType          FunctionReturnType
+	ReturnHelper        string // exact evalfunc.c ret_* helper
 	Documentation       string
 	DocumentationSource string
 	// ArgumentChecks preserves Vim's evalfunc.c checker names in argument

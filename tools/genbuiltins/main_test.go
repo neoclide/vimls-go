@@ -38,7 +38,7 @@ static const funcentry_T global_functions[] =
 	if len(functions) != 3 || functions[0].Name != "alpha" || functions[1].Name != "guarded" || functions[2].Name != "zeta" {
 		t.Fatalf("functions = %#v", functions)
 	}
-	if functions[2].MaxArgs != -1 || functions[2].MethodArgument != 1 || functions[0].MethodArgument != 2 || functions[1].MethodArgument != 0 || functions[0].ReturnType != "ReturnList" || functions[1].ReturnType != "ReturnNumberOrBool" {
+	if functions[2].MaxArgs != -1 || functions[2].MethodArgument != 1 || functions[0].MethodArgument != 2 || functions[1].MethodArgument != 0 || functions[0].ReturnType != "ReturnList" || functions[0].ReturnHelper != "ret_list_string" || functions[1].ReturnType != "ReturnNumberOrBool" {
 		t.Fatalf("metadata = %#v", functions)
 	}
 	if got := strings.Join(functions[0].ArgumentChecks, ","); got != "arg_string,arg_string" {

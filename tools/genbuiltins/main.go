@@ -38,6 +38,7 @@ type builtin struct {
 	MaxArgs             int
 	MethodArgument      int
 	ReturnType          string
+	ReturnHelper        string
 	ArgumentChecks      []string
 	Documentation       string
 	DocumentationSource string
@@ -187,7 +188,9 @@ func parseSource(source []byte) ([]builtin, error) {
 		}
 		helper := returnHelper.FindStringSubmatch(row)
 		returnType := "ReturnUnknown"
+		returnHelperName := ""
 		if helper != nil {
+			returnHelperName = helper[1]
 			returnType = returnTypeName(helper[1])
 		}
 		methodArgument, err := parseMethodArgument(strings.TrimSpace(match[4]))
@@ -206,7 +209,7 @@ func parseSource(source []byte) ([]builtin, error) {
 				return nil, fmt.Errorf("%s argument check table %s has %d entries, want %d", match[1], match[5], len(checks), maxArgs)
 			}
 		}
-		functions = append(functions, builtin{Name: match[1], MinArgs: minArgs, MaxArgs: maxArgs, MethodArgument: methodArgument, ReturnType: returnType, ArgumentChecks: checks})
+		functions = append(functions, builtin{Name: match[1], MinArgs: minArgs, MaxArgs: maxArgs, MethodArgument: methodArgument, ReturnType: returnType, ReturnHelper: returnHelperName, ArgumentChecks: checks})
 	}
 	if len(functions) == 0 {
 		return nil, fmt.Errorf("global_functions table is empty")
@@ -351,6 +354,9 @@ func writeOutput(path string, functions []builtin) error {
 			fmt.Fprintf(&generated, ", MethodArgument: %d", function.MethodArgument)
 		}
 		fmt.Fprintf(&generated, ", ReturnType: %s", function.ReturnType)
+		if function.ReturnHelper != "" {
+			fmt.Fprintf(&generated, ", ReturnHelper: %q", function.ReturnHelper)
+		}
 		if len(function.ArgumentChecks) > 0 {
 			fmt.Fprint(&generated, ", ArgumentChecks: []string{")
 			for index, check := range function.ArgumentChecks {
