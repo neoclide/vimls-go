@@ -1157,6 +1157,45 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   nested declaration without bang from E1117 for both nested header forms.
 - `src/errors.h:2886-2887` defines the exact E1117 message.
 
+## String used as a Boolean: E1135
+
+Analysis reports E1135 when a statically known String is consumed as a Boolean
+in Vim9 script. Covered contexts are `if`, `elseif`, and `while` conditions,
+ternary conditions, the operands of `&&` and `||` that are guaranteed to be
+evaluated, and String-returning predicate callbacks passed to `filter()` or
+`indexof()`. The diagnostic selects the condition, operand, or callback. A
+simple direct or parenthesized string literal includes its known value in the
+message; a value known only by type uses `Using a String as a Bool` without
+inventing a runtime value.
+
+Compiled `def` and lambda contexts keep Vim's constant-folding distinction. A
+literal String in a ternary, `if`, or `elseif` condition reports E1135, while
+logical operands and `while` conditions stay on the compile-time E1012 path.
+Nonliteral String conditions are not remapped to E1135. This also applies to a
+`def` retained in a Legacy-root file. Ordinary Legacy conditions do not receive
+E1135.
+
+Short-circuiting is respected: the right operand is diagnosed only when the
+left operand proves it will run. Unknown and `any` values remain conservative,
+and permissive `!value` conversion is unchanged. `map()` and `foreach()` do not
+consume callback results as predicates. Callback argument-count and parameter
+type errors also keep their existing E1106, E118, E176, or E1013 precedence.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/typval.c:197-244` rejects a String passed through Vim9's checked Boolean
+  conversion and emits E1135 with the runtime value.
+- `src/vim9expr.c:45-57,3666-3810,3905-3972` distinguishes strict logical
+  operand type checks from checked constant conversion in a ternary.
+- `src/testdir/test_vim9_expr.vim:136-193,688-859` covers literal ternaries,
+  logical operands, short-circuit behavior, and the E1012/E1135 context split.
+- `src/testdir/test_vim9_cmd.vim:438-510` distinguishes `if` and `elseif`
+  constant folding from compiled `while` behavior and Vim9 script evaluation.
+- `src/testdir/test_vim9_builtin.vim:1567-1574,2361-2369` expects E1135 for
+  String-returning `filter()` and `indexof()` predicates at script level while
+  compiled callers retain E1013.
+- `src/errors.h:2922-2923` defines the exact E1135 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

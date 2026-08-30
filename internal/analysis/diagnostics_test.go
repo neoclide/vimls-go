@@ -1448,6 +1448,117 @@ func TestAnalyzeE1023NumberAsBoolDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeStringAsBoolDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []struct{ message, text string }
+	}{
+		{
+			name:   "Vim9 script ternary and conditions",
+			source: "vim9script\nvar ternary = ('ternary') ? 1 : 0\nif 'if'\nelseif ('elseif')\nendif\nwhile 'while'\n  break\nendwhile\n",
+			want: []struct{ message, text string }{
+				{`Using a String as a Bool: "ternary"`, "('ternary')"},
+				{`Using a String as a Bool: "if"`, "'if'"},
+				{`Using a String as a Bool: "elseif"`, "('elseif')"},
+				{`Using a String as a Bool: "while"`, "'while'"},
+			},
+		},
+		{
+			name:   "compiled def literals except while",
+			source: "vim9script\ndef Func()\n  var ternary = ('ternary') ? 1 : 0\n  if 'if'\n  elseif ('elseif')\n  endif\n  while 'while'\n    break\n  endwhile\nenddef\n",
+			want: []struct{ message, text string }{
+				{`Using a String as a Bool: "ternary"`, "('ternary')"},
+				{`Using a String as a Bool: "if"`, "'if'"},
+				{`Using a String as a Bool: "elseif"`, "('elseif')"},
+			},
+		},
+		{
+			name:   "Legacy-root def and Vim9 lambda literals",
+			source: "def Func()\n  if 'legacy def'\n  elseif ('legacy elseif')\n  endif\nenddef\nvim9cmd var Callback = () => {\n  if 'lambda'\n  endif\n}\n",
+			want: []struct{ message, text string }{
+				{`Using a String as a Bool: "legacy def"`, "'legacy def'"},
+				{`Using a String as a Bool: "legacy elseif"`, "('legacy elseif')"},
+				{`Using a String as a Bool: "lambda"`, "'lambda'"},
+			},
+		},
+		{
+			name:   "Vim9 script logical evaluated operands",
+			source: "vim9script\nvar typed: string = 'typed'\nvar left = 'left' && false\nvar right = true && typed\n",
+			want: []struct{ message, text string }{
+				{`Using a String as a Bool: "left"`, "'left'"},
+				{"Using a String as a Bool", "typed"},
+			},
+		},
+		{
+			name:   "filter and indexof string callback returns",
+			source: "vim9script\ndef Predicate(index: number, value: number): string\n  return 'yes'\nenddef\nfilter([1], Predicate)\nindexof([1], Predicate)\n",
+			want: []struct{ message, text string }{
+				{"Using a String as a Bool", "Predicate"},
+				{"Using a String as a Bool", "Predicate"},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1135" {
+					got = append(got, diagnostic)
+				}
+				if (test.name == "filter and indexof string callback returns") && diagnostic.Code == "vim/E1013" {
+					t.Fatalf("callback E1135 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1135 diagnostics = %#v, want %#v; all diagnostics = %#v", got, test.want, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != test.want[index].message || file.Text(diagnostic.Span) != test.want[index].text {
+					t.Fatalf("E1135[%d] = %#v on %q, want %q on %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index].message, test.want[index].text)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+		wantCode     string
+	}{
+		{"compiled nonliteral if retains E1012", "vim9script\ndef Func()\n  var text: string = 'value'\n  if text\n  endif\nenddef\n", "vim/E1012"},
+		{"compiled nonliteral ternary is not remapped", "vim9script\ndef Func()\n  var text: string = 'value'\n  var ternary = text ? 1 : 0\nenddef\n", ""},
+		{"compiled nonliteral logical retains E1012", "vim9script\ndef Func()\n  var text: string = 'value'\n  var value = text && true\nenddef\n", "vim/E1012"},
+		{"compiled while literal retains E1012", "vim9script\ndef Func()\n  while 'text'\n    break\n  endwhile\nenddef\n", "vim/E1012"},
+		{"short-circuited right strings", "vim9script\nvar one = false && 'no'\nvar two = true || 'no'\n", ""},
+		{"invalid left keeps precedence", "vim9script\nvar value = 3 && 'right'\n", "vim/E1023"},
+		{"Legacy script and function", "if 'legacy'\nendif\nfunction Legacy()\n  if 'function'\n  endif\nendfunction\n", ""},
+		{"permissive not incomplete bool numbers any and unknown", "vim9script\nvar anything: any\nvar value = !'text'\nvar boolValue = true ? 1 : 0\nvar zero = 0 ? 1 : 0\nvar one = 1 ? 1 : 0\nvar anyValue = anything ? 1 : 0\nvar unknownValue = Unknown ? 1 : 0\nvar missing = 'text' ?\n", ""},
+		{"compiled filter string callback remains E1013", "vim9script\ndef Predicate(index: number, value: number): string\n  return 'yes'\nenddef\ndef Func()\n  filter([1], Predicate)\nenddef\n", "vim/E1013"},
+		{"map and foreach string callbacks are not E1135", "vim9script\ndef Predicate(index: number, value: number): string\n  return 'yes'\nenddef\nmap([1], Predicate)\nforeach([1], Predicate)\n", ""},
+		{"indexof wrong callback count keeps E118", "vim9script\ndef Predicate(value: number): string\n  return 'yes'\nenddef\nindexof([1], Predicate)\n", "vim/E118"},
+		{"filter wrong callback types keeps E1013", "vim9script\ndef Predicate(index: string, value: number): string\n  return 'yes'\nenddef\nfilter([1], Predicate)\n", "vim/E1013"},
+		{"map callback count keeps E1106", "vim9script\nmap([1], () => 'yes')\n", "vim/E1106"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			foundCode := test.wantCode == ""
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1135" {
+					t.Fatalf("source unexpectedly received E1135: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.wantCode {
+					foundCode = true
+				}
+			}
+			if !foundCode {
+				t.Fatalf("source diagnostics = %#v, want %s", result.Diagnostics, test.wantCode)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
