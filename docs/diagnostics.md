@@ -244,3 +244,30 @@ Representative source evidence:
   at script level for `call Name (`.
 - `src/testdir/test_vim9_script.vim:4836-4881` covers other command-position
   forms and their E476/E492 context split.
+
+## Trailing characters: E488
+
+E488 means `Trailing characters: {text}`. It is used when Vim has already
+recognized an expression or command but finds source text that cannot belong
+to it. This differs from E476 and E492, which reject the command itself.
+
+Most supported E488 cases are diagnosed directly by the Vim9 parser, including
+extra declaration text, invalid condition tails, unmatched delimiters, and
+text attached to a command without the required separation. Analysis adds two
+cases whose validity depends on expression meaning. A literal `\=` replacement
+passed to `substitute()` is parsed as a Vim9 expression and reports E488 for a
+trailing token. At script level, member syntax on a statically known String
+also reports E488; compiling the corresponding expression in a `def` uses the
+type-specific E1229 instead.
+
+Dynamic replacement strings and receivers with unknown types remain unknown.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_builtin.vim:4641` covers trailing text inside a
+  `substitute()` replacement expression in both a `def` and Vim9 script.
+- `src/testdir/test_vim9_expr.vim:4188` distinguishes E1229 in a `def` from
+  E488 at script level for member syntax on a String.
+- `src/testdir/test_vim9_assign.vim:1202` and
+  `src/testdir/test_vim9_cmd.vim:472` cover parser-level expression and command
+  tails.

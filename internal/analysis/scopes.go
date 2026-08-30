@@ -646,6 +646,15 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	if expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice {
 		collectIndexTypeMismatchDiagnostic(result, scope, expression)
 	}
+	if expression.Kind == syntax.ExpressionMember && !scopeUsesDefTypeRules(scope) && len(expression.Children) > 0 && result.File.Text(expression.Operator) == "." {
+		receiver := resolvedExpressionType(result, scope, expression.Children[0])
+		if receiver.Name == "string" {
+			span := syntax.Span{Start: expression.Operator.Start, End: expression.Span.End}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E488", Message: "Trailing characters: " + result.File.Text(span), Span: span,
+			})
+		}
+	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 		target := expression.Children[0]
 		if !isReadOnlyVimVariableTarget(target) {
@@ -2093,6 +2102,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 				}
 				collectMapCallbackReturnTypeDiagnostic(result, scope, builtin, arguments, actual)
 				collectSearchpairFlagsDiagnostic(result, scope, builtin, arguments)
+				collectSubstituteExpressionDiagnostic(result, builtin, arguments)
 				collectBuiltinCompiledStringDiagnostics(result, scope, builtin, arguments, expression.Span.Start)
 			} else if !builtinCall {
 				collectFunctionCallDiagnostics(result, scope, expression, dialect == syntax.Vim9)
@@ -2210,6 +2220,32 @@ func collectSearchpairFlagsDiagnostic(result *FileAnalysis, scope *Scope, functi
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E475", Message: "Invalid argument: " + flags, Span: literal.Span,
 	})
+}
+
+func collectSubstituteExpressionDiagnostic(result *FileAnalysis, function vimdata.BuiltinFunction, arguments []*syntax.Expression) {
+	if result == nil || result.File == nil || function.Name != "substitute" || len(arguments) < 3 {
+		return
+	}
+	literal := arguments[2]
+	if literal == nil || literal.Kind != syntax.ExpressionString || len(literal.Value) < 4 || literal.Value[0] != '\'' || literal.Value[len(literal.Value)-1] != '\'' {
+		return
+	}
+	content := literal.Value[1 : len(literal.Value)-1]
+	if !strings.HasPrefix(content, `\=`) || strings.Contains(content, "''") {
+		return
+	}
+	_, diagnostics := (syntax.Vim9ExpressionParser{}).Parse(content[2:])
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code != "vimls/trailing-expression" {
+			continue
+		}
+		base := literal.Span.Start + 3
+		span := syntax.Span{Start: base + diagnostic.Span.Start, End: base + diagnostic.Span.End}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E488", Message: "Trailing characters: " + result.File.Text(span), Span: span,
+		})
+		return
+	}
 }
 
 func collectBuiltinCompiledStringDiagnostics(result *FileAnalysis, scope *Scope, function vimdata.BuiltinFunction, arguments []*syntax.Expression, visibilityOffset int) {

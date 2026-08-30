@@ -1141,6 +1141,36 @@ enddef
 	}
 }
 
+func TestAnalyzeE488TrailingCharacters(t *testing.T) {
+	source := `vim9script
+assert_equal("4", substitute("3", '\d', '\="text" x', 'g'))
+assert_equal("4", substitute("3", '\d', '\=str2nr("3") + 1', 'g'))
+var text = ''
+var scriptMember = text.memb
+def Check()
+  assert_equal("4", substitute("3", '\d', '\="text" x', 'g'))
+  var localText = ''
+  var defMember = localText.memb
+enddef
+`
+	file := syntax.Parse(source)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E488" {
+			got = append(got, diagnostic)
+		}
+	}
+	want := []string{"x", ".memb", "x"}
+	if len(got) != len(want) {
+		t.Fatalf("E488 diagnostics = %#v, want %q", got, want)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Message != "Trailing characters: "+want[index] || file.Text(diagnostic.Span) != want[index] {
+			t.Fatalf("E488[%d] = %#v on %q, want %q", index, diagnostic, file.Text(diagnostic.Span), want[index])
+		}
+	}
+}
+
 func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
 	tests := []struct {
 		name   string
