@@ -372,6 +372,8 @@ the authoritative current split 934 migrated, zero ready, and 108 pending-fix.
 Commit `42c0ee1` migrated twelve Vim9 `:disassemble` generic command-tail
 cases, making the authoritative current split 946 migrated, zero ready, and 96
 pending-fix.
+Commit `cfb96da` migrated the final two Group C generic cases, making the
+authoritative current split 948 migrated, zero ready, and 94 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -966,11 +968,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 90 | 88 | 0 | 2 |
+| `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **343** | **314** | **0** | **29** |
+| **Total** | **343** | **316** | **0** | **27** |
 
 ```text
 C-EXPR
@@ -1169,6 +1171,13 @@ references or calls, retaining simple and member target AST. Ordinary function
 names, effective-legacy commands, separators, and comments keep their existing
 opaque Ex-command behavior; symbol-dependent generic errors remain outside
 syntax analysis.
+
+Commit `cfb96da` completed `C-GENERIC` with
+`C:{2057:42308,2071:42738}/vim9-script`. At a top-level Vim9 command boundary,
+an attached second colon after a parsed `g:` or `s:` scoped name now maps the
+trailing expression to E1069 when the following text lacks whitespace. The
+compiled-definition variants remain outside this lexical rule because Vim
+reports declaration-scope errors there first.
 
 Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
 references at command start now reach the expression parser without requiring
