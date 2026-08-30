@@ -238,7 +238,7 @@ func buildBlocks(file *File) {
 						continue
 					}
 				}
-				if command.Dialect == Vim9 && command.Canonical == "catch" {
+				if command.Dialect == Vim9 && command.Canonical == "catch" && !command.detailsOpaque {
 					start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
 					if start < command.Argument.End && scanGlobalRegexpEnd(file.Source, start+1, command.Argument.End, file.Source[start]) < 0 {
 						file.Diagnostics = append(file.Diagnostics, Diagnostic{
