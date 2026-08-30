@@ -6216,13 +6216,22 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 		if vim9 {
 			code, required = "vim/E1219", "Float or Number"
 		}
+	case "arg_string_or_nr", "arg_buffer", "arg_lnum":
+		if vim9 {
+			code, required = "vim/E1220", "String or Number"
+		}
 	case "arg_item_of_prev":
 		if vim9 && index > 0 && index <= len(actual)-1 && actual[index-1].Name == "blob" {
 			code, required = "vim/E1210", "Number"
 		}
 	case "arg_remove2":
-		if vim9 && index > 0 && len(actual) > 0 && (actual[0].Name == "list" || actual[0].Name == "blob") {
-			code, required = "vim/E1210", "Number"
+		if vim9 && index > 0 && len(actual) > 0 {
+			switch actual[0].Name {
+			case "list", "blob":
+				code, required = "vim/E1210", "Number"
+			case "dict":
+				code, required = "vim/E1220", "String or Number"
+			}
 		}
 	case "arg_len1":
 		return syntax.Diagnostic{Code: "vim/E701", Message: "Invalid type for len()", Span: span}, true

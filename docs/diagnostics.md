@@ -1948,6 +1948,34 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:2756-2769` documents the method-call diagnostic.
 - `src/errors.h:3133-3134` defines the exact E1219 message.
 
+## String or Number required for builtin argument: E1220
+
+Analysis reports E1220 at Vim9 script level for known mismatches in the
+String-or-Number, buffer, and line-number builtin checkers. It also reports
+E1220 for an invalid Dictionary key passed as the second argument of
+`remove()`. The diagnostic selects the complete normalized argument and uses
+its one-based position, including method calls and later arguments.
+
+String, Number, and dynamically typed values are accepted. `remove()` keeps
+E1210 when its first argument is a List or Blob, and stays conservative when
+the container type is unknown. A mismatch in a compiled `def` or block lambda
+retains E1013, Legacy calls are not diagnosed, and buffer-or-Dictionary unions
+remain outside this rule.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:223-249` distinguishes compiled E1013
+  from script-level E1220 for line-number and buffer arguments.
+- `src/testdir/test_vim9_builtin.vim:2584-2585` covers a later
+  String-or-Number argument.
+- `src/testdir/test_vim9_builtin.vim:3671-3674` covers the Dictionary branch
+  of `remove()`.
+- `src/evalfunc.c:493-555` defines the String-or-Number, buffer, and
+  line-number checkers.
+- `src/evalfunc.c:1142-1164` selects the second `remove()` argument checker
+  from the first argument's container type.
+- `src/errors.h:3135-3136` defines the exact E1220 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
