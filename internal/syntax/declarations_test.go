@@ -970,6 +970,35 @@ func TestVim9EnumEndTrailingCharacters(t *testing.T) {
 	})
 }
 
+func TestVim9MissingEndenumReportsE1420(t *testing.T) {
+	for name, source := range map[string]string{
+		"extra suffix": "vim9script\nenum Something\nendenums\n",
+		"wrong case":   "vim9script\nenum Something\nEndenum\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := Parse(source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1420" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Missing :endenum" || file.Text(got[0].Span) != "enum" {
+				t.Fatalf("E1420 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+			}
+			if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockEnum || file.Blocks[0].End != -1 || file.Commands[1].Aggregate == nil || file.Text(file.Commands[1].Aggregate.Name) != "Something" {
+				t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	valid := Parse("vim9script\nenum Something\nendenum\n")
+	if hasDiagnostic(valid, "vim/E1420") {
+		t.Fatalf("valid enum diagnostics = %#v", valid.Diagnostics)
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
