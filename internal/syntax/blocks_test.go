@@ -1,6 +1,9 @@
 package syntax
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildsNestedRecoveringBlocks(t *testing.T) {
 	file := Parse("vim9script\ndef Build(): number\n  if true\n    return 1\n  else\n    return 2\n  endif\nenddef\n")
@@ -375,6 +378,50 @@ func TestOfficialLegacyFunctionDefinitionAllowsSpaceBeforeParameters(t *testing.
 	if len(file.Diagnostics) != 0 || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockFunction || file.Blocks[0].End != 2 {
 		t.Fatalf("commands = %#v, blocks = %#v, diagnostics = %#v", file.Commands, file.Blocks, file.Diagnostics)
 	}
+}
+
+func TestFunctionNestingTooDeepDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, prefix, header, end, span string
+	}{
+		{name: "Legacy function", header: "function X()\n", end: "endfunction\n", span: "function"},
+		{name: "Vim9 def", prefix: "vim9script\n", header: "def X()\n", end: "enddef\n", span: "def"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, depth := range []int{50, 51} {
+				source := nestedNamedFunctionSource(test.prefix, test.header, test.end, depth)
+				file := Parse(source)
+				var got []Diagnostic
+				for _, diagnostic := range file.Diagnostics {
+					if diagnostic.Code == "vim/E1058" {
+						got = append(got, diagnostic)
+					}
+				}
+				if depth == 50 {
+					if len(got) != 0 {
+						t.Fatalf("depth 50 diagnostics = %#v", file.Diagnostics)
+					}
+					continue
+				}
+				wantStart := strings.LastIndex(source, strings.TrimSuffix(test.header, "\n"))
+				if len(got) != 1 || got[0].Message != "Function nesting too deep" || file.Text(got[0].Span) != test.span || got[0].Span.Start != wantStart {
+					t.Fatalf("depth 51 E1058 diagnostics = %#v, want one on final %s header; all diagnostics = %#v", got, test.span, file.Diagnostics)
+				}
+			}
+		})
+	}
+}
+
+func nestedNamedFunctionSource(prefix, header, end string, depth int) string {
+	var source strings.Builder
+	source.WriteString(prefix)
+	for index := 0; index < depth; index++ {
+		source.WriteString(header)
+	}
+	for index := 0; index < depth; index++ {
+		source.WriteString(end)
+	}
+	return source.String()
 }
 
 func TestVim9UnmatchedScopeEndRecovers(t *testing.T) {

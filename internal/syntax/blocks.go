@@ -231,6 +231,31 @@ func buildBlocks(file *File) {
 					Code: "vim/E1435", Message: "Enum can only be used in a script", Span: command.Name,
 				})
 			}
+			if kind == BlockFunction || kind == BlockDef {
+				outerKind := kind
+				for _, blockIndex := range stack {
+					ancestor := file.Blocks[blockIndex].Kind
+					if ancestor == BlockFunction || ancestor == BlockDef {
+						outerKind = ancestor
+						break
+					}
+				}
+				depth := 0
+				for _, blockIndex := range stack {
+					ancestor := file.Blocks[blockIndex].Kind
+					if ancestor == BlockFunction || outerKind == BlockDef && ancestor == BlockDef {
+						depth++
+					}
+				}
+				if kind == BlockFunction || outerKind == BlockDef && kind == BlockDef {
+					depth++
+				}
+				if depth == 51 {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1058", Message: "Function nesting too deep", Span: command.Name,
+					})
+				}
+			}
 			parent := -1
 			if len(stack) > 0 {
 				parent = stack[len(stack)-1]

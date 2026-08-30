@@ -1030,3 +1030,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9instr.c:495-585` selects comparison instructions and emits E1037
   only for these four same-type scalar comparisons.
 - `src/errors.h:2721-2722` defines the exact message.
+
+## Function nesting too deep: E1058
+
+E1058 means `Function nesting too deep`. Analysis reports it on the 51st
+nested named function definition, which is the point where Vim's function-body
+collector would exceed its 50-entry stack. Legacy `function` definitions and
+Vim9 `def` definitions use the same native error. Other control blocks do not
+contribute to this depth.
+
+The parser retains the over-deep block after reporting E1058 so later commands
+and closing tokens can still be recovered. Cross-dialect definitions retain
+their existing loose recovery, and the static rule does not claim inline block
+functions that are not represented as named syntax blocks.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vimscript.vim:7367-7403` dynamically enters 51 nested
+  Legacy `function` definitions and asserts E1058.
+- `runtime/doc/vim9.txt:1428-1431` documents the corresponding nested `def`
+  limit.
+- `src/userfunc.c:982-987,1203-1231` defines the 50-entry stack and rejects
+  the next nested named definition.
+- `src/userfunc.c:1254-1272` applies the same native limit while collecting
+  inline block functions.
+- `src/errors.h:2765-2766` defines the exact message.
