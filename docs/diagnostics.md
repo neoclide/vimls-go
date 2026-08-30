@@ -1104,6 +1104,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/builtin.txt:3683-3689,7114-7119` documents the two callback
   arguments and the strict Vim9-lambda E1106 behavior.
 
+## Invalid compiled index receiver: E1107
+
+Analysis reports E1107 when a compiled Vim9 `def` or lambda indexes or slices
+a statically known Number or Float. The message is Vim's historical
+`String, List, Dict or Blob required`, and the diagnostic selects the complete
+receiver expression. A `def` retained in a Legacy-root file still compiles as
+Vim9 and follows this rule.
+
+String, List, Tuple, Dictionary, and Blob receivers remain valid. Unknown and
+`any` receivers stay conservative. Funcref, Partial, Bool, Special, Job,
+Channel, Class, Object, Typealias, and Void values belong to other compiler
+error categories and are not mapped to E1107; a numeric Typealias is likewise
+not treated as its underlying Number or Float value. Incomplete bracket input
+keeps its recovery diagnostic without an E1107 cascade.
+
+At top-level Vim9 script, Number indexing remains E1062 and Float indexing
+remains E806. Legacy function and script expressions retain their existing
+behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9expr.c:75-318` implements compiled member access, admits the valid
+  receiver categories, and sends Number and Float to E1107 while preserving
+  the separate Funcref and special-variable errors.
+- `src/testdir/test_vim9_expr.vim:2283-2284,2589` distinguishes compiled
+  E1107 from script-level E1062 and E806 for hexadecimal Number, decimal
+  Number, and Float receivers.
+- `src/errors.h:2867-2868` defines the exact E1107 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

@@ -3006,6 +3006,83 @@ func TestAnalyzeVim9ScriptMapCallbackDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeCompiledIndexReceiverDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name: "Vim9 def number float and slice",
+			source: "vim9script\ndef Func()\n  var hex = 0xff[1]\n  var float = 0.7[1]\n" +
+				"  var number = 1234[3]\n  var grouped = (1234)[3]\n  var slice = 1.5[1 : 2]\nenddef\n",
+			want: []string{"0xff", "0.7", "1234", "(1234)", "1.5"},
+		},
+		{
+			name:   "Legacy-root def",
+			source: "def Func()\n  var value = 1234[3]\nenddef\n",
+			want:   []string{"1234"},
+		},
+		{
+			name:   "Vim9 lambda",
+			source: "vim9script\nvar Callback = () => 1234[3]\n",
+			want:   []string{"1234"},
+		},
+		{
+			name:   "valid unknown and incomplete receivers",
+			source: "vim9script\ndef Func()\n  var value: any\n  var a = value[1]\n  var b = 'x'[0]\n  var c = [1][0]\n  var d = {}['x']\n  var tuple = (1, 2)[0]\n  var blob = 0z12[0]\n  var e = 1[\nenddef\n",
+		},
+		{
+			name: "typealias and other invalid categories stay on their own paths",
+			source: "vim9script\ntype NumberAlias = number\ntype FloatAlias = float\ndef Func()\n" +
+				"  var direct = NumberAlias[0]\n  var grouped = (FloatAlias)[0]\n  var funcref = function('len')[0]\n" +
+				"  var partial = null_partial[0]\n  var boolean = true[0]\n  var special = v:none[0]\nenddef\n",
+		},
+		{
+			name:   "top-level Vim9 keeps E1062 and E806",
+			source: "vim9script\nvar number = 1234[3]\nvar float = 0.7[1]\n",
+		},
+		{
+			name:   "Legacy-root script and function are excluded",
+			source: "let script = 1234[3]\nfunction Legacy()\n  let local = 0.7[1]\nendfunction\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			e1062, e806 := 0, 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1107" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1062" {
+					e1062++
+				}
+				if diagnostic.Code == "vim/E806" {
+					e806++
+				}
+				if diagnostic.Code == "vim/E1062" || diagnostic.Code == "vim/E806" {
+					if len(test.want) > 0 {
+						t.Fatalf("compiled source retained %s: %#v", diagnostic.Code, diagnostic)
+					}
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1107 diagnostics = %#v, want %q", got, test.want)
+			}
+			if test.name == "top-level Vim9 keeps E1062 and E806" && (e1062 != 1 || e806 != 1) {
+				t.Fatalf("top-level diagnostics E1062=%d E806=%d; all diagnostics = %#v", e1062, e806, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "String, List, Dict or Blob required" || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E1107[%d] = %#v on %q, want %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index])
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string

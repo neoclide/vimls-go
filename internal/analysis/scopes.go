@@ -2777,6 +2777,24 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 			}
 			if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 &&
+				command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) && !expressionContainsMissing(expression) {
+				receiver := expression.Children[0]
+				receiverType := resolvedExpressionType(result, expressionScope, receiver)
+				candidate := receiver
+				for candidate.Kind == syntax.ExpressionParenthesized && len(candidate.Children) == 1 {
+					candidate = candidate.Children[0]
+				}
+				isTypeAlias := false
+				if candidate.Kind == syntax.ExpressionIdentifier {
+					declaration := resolve(expressionScope, candidate.Value, candidate.Span.Start, false, nil)
+					isTypeAlias = declaration != nil && declaration.Kind == SymbolKindTypeAlias
+				}
+				if !isTypeAlias && (receiverType.Name == "number" || receiverType.Name == "float") {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1107", Message: "String, List, Dict or Blob required", Span: receiver.Span,
+					})
+				}
+			} else if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 &&
 				!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 				receiver := expression.Children[0]
 				switch resolvedExpressionType(result, expressionScope, receiver).Name {
