@@ -473,6 +473,9 @@ pending-fix.
 Commit `777662d` migrated both already-correct lambda block-separator variants.
 The authoritative syntax split is therefore 1012 migrated, zero ready, and 10
 pending-fix.
+Commit `ece21fa` migrated the missing global-function-name variant. The
+authoritative syntax split is therefore 1013 migrated, zero ready, and 9
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1548,7 +1551,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 163 migrated and 10 pending-fix. In the
+Group D contains 173 syntax variants: 164 migrated and 9 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1721,7 +1724,7 @@ E1173 M missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/
 E125 M ready: 948:20577/script,955:20687/script
 E126 M mapping: 416:8808/script
 E1267 M missing: 99:2271/script,107:2406/script,1049:22663/script,1061:22873/script,1069:23011/script,1077:23147/script
-E129 P mapping: 3734:85678/script
+E129 M mapping: 3734:85678/script
 E15 M mapping: 828:17920/def
 E16 P mapping: 3817:87815/def
 E476 P mapping: 4520:103771/script,1298:27807/script
@@ -1810,6 +1813,10 @@ retain their accepted lambda AST.
 Commit `777662d` migrates `1755:38517/{def,vim9-script}`. A separator after a
 Vim9 inline-lambda block opener already reports one E488, keeps the same-line
 tail opaque, and preserves the multiline block plus later commands.
+
+Commit `ece21fa` migrates `3734:85678/script`. A Vim9 `def g:` header retains
+the incomplete qualified Function.Name, reports E129, and leaves its invalid
+tail opaque; the unclosed recovery block does not add a missing-end cascade.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
