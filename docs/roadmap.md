@@ -95,6 +95,12 @@ Exit gate: diagnostics match golden results and safe Vim oracle cases; unknown
 dynamic behavior does not create false undefined/type errors; stale diagnostics
 cannot publish after a newer edit or close.
 
+Current status (2026-08-30): lexical scopes, declarations, references,
+shadowing, mutability metadata, conservative type inference, bounded syntax
+diagnostics, and target-version diagnostics are implemented. M4 remains open
+for statically provable user-function arity diagnostics and broader type
+diagnostics; unresolved dynamic legacy names remain intentionally unknown.
+
 ## M5: navigation and workspace index
 
 Deliver:

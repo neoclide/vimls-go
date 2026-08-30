@@ -260,29 +260,35 @@ func (i *Index) Lookup(name string) []SymbolFact {
 // subsequence matches; ties use the index's stable fact ordering. An empty
 // query matches every symbol. A positive limit caps the result count.
 func (i *Index) Search(query string, limit int) []SymbolMatch {
+	type rankedMatch struct {
+		match SymbolMatch
+		rank  int
+	}
 	queryFolded := strings.ToLower(query)
 	i.mu.RLock()
-	matches := make([]SymbolMatch, 0)
+	ranked := make([]rankedMatch, 0)
 	for _, file := range i.files {
 		for _, fact := range file.facts {
-			_, ok := searchRank(query, queryFolded, fact.Name)
+			rank, ok := searchRank(query, queryFolded, fact.Name)
 			if !ok {
 				continue
 			}
-			matches = append(matches, SymbolMatch{Fact: fact, Source: file.source})
+			ranked = append(ranked, rankedMatch{match: SymbolMatch{Fact: fact, Source: file.source}, rank: rank})
 		}
 	}
 	i.mu.RUnlock()
-	sort.SliceStable(matches, func(left, right int) bool {
-		leftRank, _ := searchRank(query, queryFolded, matches[left].Fact.Name)
-		rightRank, _ := searchRank(query, queryFolded, matches[right].Fact.Name)
-		if leftRank != rightRank {
-			return leftRank < rightRank
+	sort.SliceStable(ranked, func(left, right int) bool {
+		if ranked[left].rank != ranked[right].rank {
+			return ranked[left].rank < ranked[right].rank
 		}
-		return factLess(matches[left].Fact, matches[right].Fact)
+		return factLess(ranked[left].match.Fact, ranked[right].match.Fact)
 	})
-	if limit > 0 && len(matches) > limit {
-		matches = matches[:limit]
+	if limit > 0 && len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	matches := make([]SymbolMatch, len(ranked))
+	for index := range ranked {
+		matches[index] = ranked[index].match
 	}
 	return matches
 }

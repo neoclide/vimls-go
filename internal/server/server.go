@@ -52,6 +52,7 @@ type Server struct {
 	input  io.Reader
 	output io.Writer
 	log    io.Writer
+	logMu  sync.Mutex
 
 	mu                sync.Mutex
 	state             state
@@ -80,6 +81,7 @@ type Server struct {
 	workspaceRoots    []string
 	runtimePaths      []string
 	workspaceIndex    *workspace.Index
+	workspaceResolver *workspace.PathResolver
 	workspaceFiles    map[string]struct{}
 	workspaceRevision uint64
 	workspaceRunning  bool
@@ -352,6 +354,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.mu.Unlock()
 	s.setWorkspaceRoots(workspaceRootsFromInitialize(params))
 	s.setRuntimePaths(runtimePaths)
+	s.refreshWorkspaceResolver()
 	workspaceFoldersSupported := true
 	completionResolve := true
 	documentLinkResolve := false
@@ -940,6 +943,8 @@ func (s *Server) stopAnalysis() {
 }
 
 func (s *Server) logf(format string, args ...any) {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
 	if s.log != nil {
 		_, _ = fmt.Fprintf(s.log, format+"\n", args...)
 	}

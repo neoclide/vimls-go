@@ -56,12 +56,13 @@ func (s *Server) workspaceNavigationState() (*workspace.PathResolver, *workspace
 	workspaceRoots := append([]string(nil), s.workspaceRoots...)
 	runtimePaths := append([]string(nil), s.runtimePaths...)
 	index := s.workspaceIndex
+	resolver := s.workspaceResolver
 	s.workspaceMu.Unlock()
 	searchPaths := runtimePaths
 	if len(searchPaths) == 0 {
 		searchPaths = workspaceRoots
 	}
-	return workspacePathResolver(workspaceRoots, runtimePaths), index, searchPaths
+	return resolver, index, searchPaths
 }
 
 func (s *Server) resolveWorkspaceReference(resolver *workspace.PathResolver, index *workspace.Index, reference workspace.ExternalReferenceFact) (workspaceNavigationTarget, bool) {
@@ -182,6 +183,7 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 		}
 	}
 	seenCandidates := make(map[workspace.ExternalReferenceFact]bool)
+	candidateSnapshots := make(map[string]*text.Snapshot)
 	for _, name := range names {
 		for _, candidate := range index.ExternalReferences(name) {
 			if seenCandidates[candidate.Fact] {
@@ -192,7 +194,11 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 				continue
 			}
 			candidateURI := uri.File(candidate.Fact.Path)
-			candidateSnapshot := text.NewSnapshot(candidateURI.String(), 0, nil, candidate.Source)
+			candidateSnapshot := candidateSnapshots[candidate.Fact.Path]
+			if candidateSnapshot == nil || candidateSnapshot.Text() != candidate.Source {
+				candidateSnapshot = text.NewSnapshot(candidateURI.String(), 0, nil, candidate.Source)
+				candidateSnapshots[candidate.Fact.Path] = candidateSnapshot
+			}
 			if rangeValue, ok := protocolRange(candidateSnapshot, document.encoding, candidate.Fact.Span); ok {
 				locations = append(locations, protocol.Location{URI: candidateURI, Range: rangeValue})
 			}

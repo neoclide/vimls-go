@@ -1,0 +1,2 @@
+[permissions]
+allow = ["Bash=cd /Users/chemzqm/vim-dev/vimls-go-navigation && git status && echo \"---BRANCH---\" && git branch --show-current && echo \"---LOG---\" && git log --oneline -10"]

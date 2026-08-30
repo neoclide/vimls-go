@@ -27,32 +27,30 @@ func NewStream(input io.Reader, output io.Writer) *Stream {
 }
 
 func (s *Stream) Read(ctx context.Context) (jsonrpc2.Message, int64, error) {
-	body, size, err := s.ReadFrame(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	message, err := jsonrpc2.DecodeMessage(body)
-	if err != nil {
-		return nil, 0, err
-	}
-	return message, size, nil
+	_, message, size, err := s.read(ctx)
+	return message, size, err
 }
 
 func (s *Stream) ReadFrame(ctx context.Context) ([]byte, int64, error) {
+	body, _, size, err := s.read(ctx)
+	return body, size, err
+}
+
+func (s *Stream) read(ctx context.Context) ([]byte, jsonrpc2.Message, int64, error) {
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 		body, size, err := s.reader.read()
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
-		if _, decodeErr := jsonrpc2.DecodeMessage(body); decodeErr == nil {
-			return body, size, nil
+		if message, decodeErr := jsonrpc2.DecodeMessage(body); decodeErr == nil {
+			return body, message, size, nil
 		} else {
 			response := jsonrpc2.NewResponse(jsonrpc2.ID{}, nil, decodeErr)
 			if _, err := s.Write(ctx, response); err != nil {
-				return nil, 0, err
+				return nil, nil, 0, err
 			}
 		}
 	}

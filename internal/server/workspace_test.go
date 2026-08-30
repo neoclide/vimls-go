@@ -261,6 +261,26 @@ func TestWorkspaceSymbolsHonorCancellation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceResolverIsReusedUntilRootsChange(t *testing.T) {
+	root := t.TempDir()
+	instance := initializeWorkspaceServer(t, root)
+	first, _, _ := instance.workspaceNavigationState()
+	second, _, _ := instance.workspaceNavigationState()
+	if first == nil || second != first {
+		t.Fatalf("resolver was rebuilt without a workspace change: %p, %p", first, second)
+	}
+	instance.setRuntimePaths([]string{root})
+	invalidated, _, _ := instance.workspaceNavigationState()
+	if invalidated != nil {
+		t.Fatalf("resolver was retained after runtimepath change: %p", invalidated)
+	}
+	instance.refreshWorkspaceResolver()
+	refreshed, _, _ := instance.workspaceNavigationState()
+	if refreshed == nil || refreshed == first {
+		t.Fatalf("resolver was not refreshed: before=%p after=%p", first, refreshed)
+	}
+}
+
 func initializeWorkspaceServer(t *testing.T, root string) *Server {
 	t.Helper()
 	instance := New(nil, nil, io.Discard)

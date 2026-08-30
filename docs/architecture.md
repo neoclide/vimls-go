@@ -147,7 +147,7 @@ that needs it.
 | `limits.maxPendingRequests` | 128 | Reject another request with JSON-RPC server error `-32000` |
 | `limits.maxParallelAnalysis` | min(`GOMAXPROCS`, 4), at least 1 | Queue bounded work |
 | `limits.maxDiagnosticsPerDocument` | 200 | Truncate deterministically within the cap |
-| `limits.maxCompletionItems` | 200 | Return a deterministic incomplete page |
+| `limits.maxCompletionItems` | 2,000 | Return a deterministic bounded result |
 | `limits.maxWorkspaceFiles` | 20,000 | Stop discovery and send one warning |
 | `limits.maxIndexBytes` | 256 MiB | Stop adding files and send one warning |
 

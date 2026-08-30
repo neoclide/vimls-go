@@ -39,6 +39,43 @@ type BuiltinFunction struct {
 	ArgumentChecks []string
 }
 
+// DisplayName returns the conservative Vim type name represented by the
+// metadata. Unknown intentionally has no display value.
+func (t FunctionReturnType) DisplayName() string {
+	switch t {
+	case ReturnAny:
+		return "any"
+	case ReturnVoid:
+		return "void"
+	case ReturnBool:
+		return "bool"
+	case ReturnNumber:
+		return "number"
+	case ReturnFloat:
+		return "float"
+	case ReturnString:
+		return "string"
+	case ReturnBlob:
+		return "blob"
+	case ReturnList:
+		return "list<any>"
+	case ReturnDict:
+		return "dict<any>"
+	case ReturnNumberOrBool:
+		return "number|bool"
+	case ReturnChannel:
+		return "channel"
+	case ReturnJob:
+		return "job"
+	case ReturnTuple:
+		return "tuple<any>"
+	case ReturnFunction:
+		return "func"
+	default:
+		return ""
+	}
+}
+
 // BuiltinFunctions returns the pinned built-in function table in its source
 // order. The returned slice is a copy and may be modified by the caller.
 func BuiltinFunctions() []BuiltinFunction {

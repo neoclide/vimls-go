@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +39,28 @@ func TestNegotiatePositionEncoding(t *testing.T) {
 				t.Fatalf("encoding = %v/%q, want %v/%q", got, wire, test.want, test.wire)
 			}
 		})
+	}
+}
+
+func TestLogfSerializesConcurrentWriters(t *testing.T) {
+	var output bytes.Buffer
+	instance := New(nil, nil, &output)
+	const workers = 16
+	const messages = 40
+	var group sync.WaitGroup
+	for worker := range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for message := range messages {
+				instance.logf("worker=%d message=%d", worker, message)
+			}
+		}()
+	}
+	group.Wait()
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != workers*messages {
+		t.Fatalf("log lines = %d, want %d", len(lines), workers*messages)
 	}
 }
 

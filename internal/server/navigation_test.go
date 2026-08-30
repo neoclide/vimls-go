@@ -103,6 +103,9 @@ func TestDocumentNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if hover == nil {
+		t.Fatal("hover is nil")
+	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
 	if !ok || content.Kind != protocol.MarkupKindPlainText || content.Value != "name: value\nkind: variable\ntype: number" || hover.Range == nil || *hover.Range != navigationRange(2, 11, 16) {
 		t.Fatalf("hover = %#v", hover)
@@ -282,9 +285,30 @@ func TestHoverOmitsUnknownType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if hover == nil {
+		t.Fatal("hover is nil")
+	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
 	if !ok || content.Value != "name: value\nkind: variable" {
 		t.Fatalf("hover = %#v", hover)
+	}
+}
+
+func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho argc()\n")
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 1, Character: 7},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil {
+		t.Fatal("builtin hover is nil")
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Value != "name: argc\nkind: builtin function\ntype: number" {
+		t.Fatalf("builtin hover = %#v", hover)
 	}
 }
 

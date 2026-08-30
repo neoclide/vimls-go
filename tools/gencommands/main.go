@@ -51,37 +51,7 @@ func main() {
 	fmt.Fprintln(&generated, "var commands = [...]Command{")
 	for _, match := range matches {
 		name := string(match[1])
-		flags := strings.FieldsFunc(string(match[2]), func(r rune) bool {
-			return r == '|' || r == ' ' || r == '\t' || r == '\r' || r == '\n'
-		})
-		var selected []string
-		for _, item := range flags {
-			switch item {
-			case "EX_BANG":
-				selected = append(selected, "AllowBang")
-			case "EX_TRLBAR":
-				selected = append(selected, "AllowBar")
-			case "EX_NOTRLCOM":
-				selected = append(selected, "NoTrailingComment")
-			case "EX_EXPR_ARG":
-				selected = append(selected, "ExpressionArgument")
-			case "EX_NEEDARG":
-				selected = append(selected, "NeedArgument")
-			case "EX_WHOLE":
-				selected = append(selected, "ExactInVim9")
-			case "EX_XFILE", "EX_FILES", "EX_FILE1":
-				selected = append(selected, "FileArgument")
-			case "EX_EXPORT":
-				selected = append(selected, "Exportable")
-			case "EX_NONWHITE_OK":
-				selected = append(selected, "AllowNonWhite")
-			}
-		}
-		flagExpression := "0"
-		if len(selected) > 0 {
-			flagExpression = strings.Join(selected, " | ")
-		}
-		fmt.Fprintf(&generated, "\t{Name: %q, Flags: %s},\n", name, flagExpression)
+		fmt.Fprintf(&generated, "\t{Name: %q, Flags: %s},\n", name, generatedFlagExpression(match[2]))
 	}
 	fmt.Fprintln(&generated, "}")
 
@@ -95,6 +65,39 @@ func main() {
 	if err := os.WriteFile(*output, formatted, 0o644); err != nil {
 		fatalf("write output: %v", err)
 	}
+}
+
+func generatedFlagExpression(value []byte) string {
+	flags := strings.FieldsFunc(string(value), func(r rune) bool {
+		return r == '|' || r == ' ' || r == '\t' || r == '\r' || r == '\n'
+	})
+	var selected []string
+	for _, item := range flags {
+		switch item {
+		case "EX_BANG":
+			selected = append(selected, "AllowBang")
+		case "EX_TRLBAR":
+			selected = append(selected, "AllowBar")
+		case "EX_NOTRLCOM":
+			selected = append(selected, "NoTrailingComment")
+		case "EX_EXPR_ARG":
+			selected = append(selected, "ExpressionArgument")
+		case "EX_NEEDARG":
+			selected = append(selected, "NeedArgument")
+		case "EX_WHOLE":
+			selected = append(selected, "ExactInVim9")
+		case "EX_XFILE", "EX_FILES", "EX_FILE1":
+			selected = append(selected, "FileArgument")
+		case "EX_EXPORT":
+			selected = append(selected, "Exportable")
+		case "EX_NONWHITE_OK":
+			selected = append(selected, "AllowNonWhite")
+		}
+	}
+	if len(selected) == 0 {
+		return "0"
+	}
+	return strings.Join(selected, " | ")
 }
 
 func fatalf(format string, arguments ...any) {

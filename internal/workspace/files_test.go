@@ -19,6 +19,8 @@ func TestDiscoverFilesFindsVimConventionsAndOrdersResults(t *testing.T) {
 	for _, directory := range []string{"plugin", "autoload", "import", "after", "ftplugin", "indent", "compiler", "syntax", "colors", "keymap", "pack/pkg/start/demo/plugin"} {
 		writeDiscoveryFile(t, filepath.Join(root, directory, "extensionless"), "echo 'runtime'\n")
 	}
+	writeDiscoveryFile(t, filepath.Join(root, "plugin", "README.md"), "not Vim\n")
+	writeDiscoveryFile(t, filepath.Join(root, "syntax", "metadata.json"), "{}\n")
 
 	files, truncated, err := DiscoverFiles(root, 0)
 	if err != nil {
@@ -42,6 +44,11 @@ func TestDiscoverFilesFindsVimConventionsAndOrdersResults(t *testing.T) {
 	}
 	if containsPath(files, filepath.Join(root, "ordinary.txt")) {
 		t.Fatalf("ordinary file was discovered: %#v", files)
+	}
+	for _, path := range []string{filepath.Join(root, "plugin", "README.md"), filepath.Join(root, "syntax", "metadata.json")} {
+		if containsPath(files, path) {
+			t.Fatalf("runtime non-script was discovered: %q", path)
+		}
 	}
 	if got := countRuntimeFiles(files, root); got != 11 {
 		t.Fatalf("runtime files = %d, want 11: %#v", got, files)

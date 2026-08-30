@@ -106,6 +106,13 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	if detail, ok := resolved.Detail.Get(); !ok || detail == "" {
 		t.Fatalf("resolved builtin = %#v", resolved)
 	}
+	argc, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "argc", Kind: protocol.CompletionItemKindFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail, ok := argc.Detail.Get(); !ok || detail != "builtin function (0..1 arguments): number" {
+		t.Fatalf("resolved argc = %#v", argc)
+	}
 }
 
 func TestCompletionReturnsStaticImportMembers(t *testing.T) {

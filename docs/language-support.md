@@ -170,6 +170,8 @@ contextual and bounded: command positions use the pinned Ex command table,
 expression positions use visible declarations and pinned builtin functions,
 and a statically resolved import namespace exposes only exported members.
 Unknown and dynamic contexts return no inferred candidates.
+Completion resolve and builtin-call hover include the pinned broad return type
+when Vim's metadata provides one; unknown dynamic return helpers are omitted.
 
 Signature help currently covers statically bound user functions using their
 parsed parameters, defaults, and return type. Rename covers same-file bound

@@ -18,18 +18,14 @@
 internal/<package>/*_test.go       focused unit and package integration tests
 testdata/legacy/                   accepted and rejected legacy scripts
 testdata/vim9/                     accepted and rejected Vim9 scripts
-testdata/mixed/                    cross-dialect smoke/recovery cases, not a matrix
-testdata/incomplete/               editor typing states and recovery
-testdata/unicode/                  byte/rune/UTF-16/line-ending boundaries
-testdata/workspace/                import, autoload, runtimepath projects
-testdata/fuzz/                     permanent crash and regression corpus
+testdata/official/                 pinned generated Vim corpus and metadata
 test/integration/                  subprocess JSON-RPC/LSP scenarios
-test/vim/                          curated side-effect-free Vim oracle cases
 ```
 
-Shared fixture directories are used when a case is large or reused across
-packages. Small focused cases may remain inline beside the package test; an
-empty fixture category is not by itself missing coverage.
+Mixed-dialect, incomplete-input, Unicode, workspace, and fuzz regression cases
+currently live beside their owning Go packages. Dedicated shared fixture and
+Vim-oracle directories should be introduced only when real cross-package cases
+need them.
 
 Fixture metadata records expected dialect, minimum Vim version/patch, expected
 diagnostics or AST snapshot, and upstream provenance when applicable.
@@ -167,8 +163,9 @@ and workspace-folder changes.
 
 ### Fuzz and properties
 
-Fuzz framing, position conversion, lexer, parser, and incremental edit
-application. Required properties:
+Current fuzz targets cover framing, position round trips, complete-file parser
+recovery, expressions, and Vim9 types. Dedicated lexer and incremental-edit
+application fuzz targets remain planned. Required properties:
 
 - No panic, deadlock, unbounded loop, or uncontrolled allocation.
 - Token and AST spans remain ordered and within the source.
@@ -176,8 +173,8 @@ application. Required properties:
 - Applying valid incremental edits matches full-text replacement.
 - Position round trips are stable at valid character boundaries.
 
-PR checks replay the committed corpus. Scheduled CI runs bounded live fuzzing;
-every discovered input becomes a regression seed.
+PR checks replay the committed corpus. A future scheduled lane will run bounded
+live fuzzing; every discovered input must become a regression seed.
 
 ### Vim oracle
 
@@ -199,7 +196,7 @@ Per change:
 - Vim 9.1.0000 and latest stable Vim for relevant oracle cases.
 - Build on Linux and macOS.
 
-Scheduled and release:
+Planned scheduled and release coverage:
 
 - Latest published 9.1 patch in addition to the minimum and latest stable.
 - Windows build and subprocess protocol test.
@@ -211,9 +208,9 @@ language oracle.
 
 ## Performance budgets
 
-Establish baselines at the milestone that introduces each operation rather than
-inventing numbers before code exists. Benchmarks include 1 KiB, 10 KiB, 100 KiB,
-and 1 MiB documents; small and large workspaces; full parse; one-line edit;
+Current benchmarks cover parser hot paths, command lookup, and the optional
+legacy reference comparison. Future baselines should add 1 KiB, 10 KiB,
+100 KiB, and 1 MiB documents; small and large workspaces; one-line edits;
 diagnostics; index replacement; completion; and references.
 
 On a pinned release runner, fail a confirmed median or p95 time regression above
@@ -262,9 +259,9 @@ go run -mod=readonly ./tools/covercheck -profile coverage.out -min 90
 go test -mod=readonly -run TestLSPSubprocess ./test/integration
 ```
 
-Scheduled/release gates add committed fuzz seeds, bounded fuzzing, benchmarks,
-Vim compatibility lanes, `govulncheck`, cross-platform builds, version output,
-and a clean stdio handshake.
+Planned scheduled/release gates add committed fuzz seeds, bounded fuzzing,
+benchmarks, Vim compatibility lanes, `govulncheck`, cross-platform builds,
+version output, and a clean stdio handshake.
 
 ## Release evidence
 

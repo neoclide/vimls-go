@@ -66,3 +66,15 @@ func TestBuiltinFunctionsReturnsOrderedCopy(t *testing.T) {
 		t.Fatalf("LookupFunction(%q) = %#v, %v after modifying enumeration", builtinFunctions[0].Name, function, ok)
 	}
 }
+
+func TestFunctionReturnTypeDisplayName(t *testing.T) {
+	if got := ReturnNumber.DisplayName(); got != "number" {
+		t.Fatalf("number return type = %q", got)
+	}
+	if got := ReturnList.DisplayName(); got != "list<any>" {
+		t.Fatalf("list return type = %q", got)
+	}
+	if got := ReturnUnknown.DisplayName(); got != "" {
+		t.Fatalf("unknown return type = %q", got)
+	}
+}

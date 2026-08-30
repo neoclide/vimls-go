@@ -167,7 +167,8 @@ func hasVimRuntimeDirectory(relative string) bool {
 
 func isVimFile(relative, name string, underRuntimeDirectory bool) bool {
 	if underRuntimeDirectory {
-		return true
+		extension := strings.ToLower(filepath.Ext(name))
+		return extension == "" || extension == ".vim"
 	}
 	if filepath.Dir(relative) == "." {
 		if _, ok := vimConfigNames[name]; ok {

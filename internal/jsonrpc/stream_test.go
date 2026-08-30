@@ -66,6 +66,32 @@ func TestStreamHonorsContextAndBounds(t *testing.T) {
 	}
 }
 
+func TestStreamSkipsMalformedMessageAndReturnsNextDecodedMessage(t *testing.T) {
+	valid := []byte(`{"jsonrpc":"2.0","method":"ready"}`)
+	input := append(frame([]byte(`{`)), frame(valid)...)
+	var output bytes.Buffer
+	stream := NewStream(bytes.NewReader(input), &output)
+	message, size, err := stream.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, ok := message.(jsonrpc2.RequestMessage)
+	if !ok || request.Method() != "ready" || size != frameSize(len(valid)) {
+		t.Fatalf("message = %#v, size = %d", message, size)
+	}
+	responseBody, err := NewReader(&output).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := jsonrpc2.DecodeMessage(responseBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := response.(*jsonrpc2.Response); !ok {
+		t.Fatalf("malformed-message response = %#v", response)
+	}
+}
+
 type closeReader struct {
 	*bytes.Reader
 	closes int

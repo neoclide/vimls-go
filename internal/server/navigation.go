@@ -8,6 +8,7 @@ import (
 	"github.com/chemzqm/vimls-go/internal/analysis"
 	"github.com/chemzqm/vimls-go/internal/syntax"
 	"github.com/chemzqm/vimls-go/internal/text"
+	"github.com/chemzqm/vimls-go/internal/vimdata"
 	"github.com/chemzqm/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -262,7 +263,26 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 		}, nil
 	}
 	if document.declaration == nil {
-		return nil, nil
+		call := callAt(document.analysis.File, document.occurrence.Start)
+		if call == nil || len(call.Children) == 0 || call.Children[0].Span != document.occurrence {
+			return nil, nil
+		}
+		function, ok := vimdata.LookupFunction(document.analysis.File.Text(document.occurrence))
+		if !ok {
+			return nil, nil
+		}
+		lines := []string{"name: " + function.Name, "kind: builtin function"}
+		if returnType := function.ReturnType.DisplayName(); returnType != "" {
+			lines = append(lines, "type: "+returnType)
+		}
+		rangeValue, ok := protocolRange(document.snapshot, document.encoding, document.occurrence)
+		if !ok {
+			return nil, document.checkCurrent(ctx)
+		}
+		if err := document.checkCurrent(ctx); err != nil {
+			return nil, err
+		}
+		return &protocol.Hover{Contents: &protocol.MarkupContent{Kind: protocol.MarkupKindPlainText, Value: strings.Join(lines, "\n")}, Range: &rangeValue}, nil
 	}
 	declaration := document.declaration
 	lines := []string{"name: " + declaration.Name, "kind: " + string(declaration.Kind)}

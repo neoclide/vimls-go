@@ -263,7 +263,11 @@ func builtinFunctionDetail(function vimdata.BuiltinFunction) string {
 	} else if function.MaxArgs != function.MinArgs {
 		args += fmt.Sprintf("..%d", function.MaxArgs)
 	}
-	return "builtin function (" + args + " arguments)"
+	detail := "builtin function (" + args + " arguments)"
+	if returnType := function.ReturnType.DisplayName(); returnType != "" {
+		detail += ": " + returnType
+	}
+	return detail
 }
 
 func visibleDeclarations(result *analysis.FileAnalysis, offset int) []*analysis.Declaration {

@@ -77,6 +77,7 @@ func normalizeWorkspaceRoots(roots []string) []string {
 func (s *Server) setWorkspaceRoots(roots []string) {
 	s.workspaceMu.Lock()
 	s.workspaceRoots = append([]string(nil), roots...)
+	s.workspaceResolver = nil
 	s.workspaceRevision++
 	s.workspaceMu.Unlock()
 }
@@ -84,12 +85,27 @@ func (s *Server) setWorkspaceRoots(roots []string) {
 func (s *Server) setRuntimePaths(paths []string) {
 	s.workspaceMu.Lock()
 	s.runtimePaths = append([]string(nil), paths...)
+	s.workspaceResolver = nil
 	s.workspaceRevision++
 	s.workspaceMu.Unlock()
 }
 
 func workspaceIndexRoots(workspaceRoots, runtimePaths []string) []string {
 	return normalizeWorkspaceRoots(append(append([]string(nil), workspaceRoots...), runtimePaths...))
+}
+
+func (s *Server) refreshWorkspaceResolver() {
+	s.workspaceMu.Lock()
+	revision := s.workspaceRevision
+	workspaceRoots := append([]string(nil), s.workspaceRoots...)
+	runtimePaths := append([]string(nil), s.runtimePaths...)
+	s.workspaceMu.Unlock()
+	resolver := workspacePathResolver(workspaceRoots, runtimePaths)
+	s.workspaceMu.Lock()
+	if revision == s.workspaceRevision {
+		s.workspaceResolver = resolver
+	}
+	s.workspaceMu.Unlock()
 }
 
 func (s *Server) scheduleWorkspaceRebuild() {
@@ -112,10 +128,14 @@ func (s *Server) workspaceIndexWorker() {
 		revision := s.workspaceRevision
 		workspaceRoots := append([]string(nil), s.workspaceRoots...)
 		runtimePaths := append([]string(nil), s.runtimePaths...)
+		resolver := s.workspaceResolver
 		s.workspaceMu.Unlock()
 		roots := workspaceIndexRoots(workspaceRoots, runtimePaths)
+		if resolver == nil {
+			resolver = workspacePathResolver(workspaceRoots, runtimePaths)
+		}
 
-		index, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, workspaceRoots, runtimePaths)
+		index, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, resolver)
 		if s.analysisContext.Err() != nil {
 			s.workspaceMu.Lock()
 			s.workspaceRunning = false
@@ -123,12 +143,8 @@ func (s *Server) workspaceIndexWorker() {
 			return
 		}
 
-		s.workspaceMu.Lock()
-		if revision != s.workspaceRevision {
-			s.workspaceMu.Unlock()
-			continue
-		}
-		for _, snapshot := range s.documents.Snapshots() {
+		openSnapshots := s.documents.Snapshots()
+		for _, snapshot := range openSnapshots {
 			path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
 			if !ok || !workspacePathInRoots(path, roots) {
 				continue
@@ -142,10 +158,24 @@ func (s *Server) workspaceIndexWorker() {
 				warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 			}
 		}
+
+		s.publishMu.Lock()
+		if !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
+			s.publishMu.Unlock()
+			continue
+		}
+		s.workspaceMu.Lock()
+		if revision != s.workspaceRevision {
+			s.workspaceMu.Unlock()
+			s.publishMu.Unlock()
+			continue
+		}
 		s.workspaceIndex = index
+		s.workspaceResolver = resolver
 		s.workspaceFiles = diskFiles
 		s.workspaceRunning = false
 		s.workspaceMu.Unlock()
+		s.publishMu.Unlock()
 		for _, warning := range warnings {
 			_ = s.sendWarning(s.analysisContext, warning)
 		}
@@ -153,7 +183,19 @@ func (s *Server) workspaceIndexWorker() {
 	}
 }
 
-func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, workspaceRoots, runtimePaths []string) (*workspace.Index, map[string]struct{}, []string) {
+func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
+	if len(current) != len(indexed) {
+		return false
+	}
+	for position := range current {
+		if current[position] != indexed[position] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolver *workspace.PathResolver) (*workspace.Index, map[string]struct{}, []string) {
 	index := workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes)
 	diskFiles := make(map[string]struct{})
 	if len(roots) == 0 || ctx.Err() != nil {
@@ -223,7 +265,6 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, workspaceRoots,
 	if ctx.Err() != nil {
 		return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
 	}
-	resolver := workspacePathResolver(workspaceRoots, runtimePaths)
 	for resolver != nil {
 		if ctx.Err() != nil {
 			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), map[string]struct{}{}, nil
@@ -416,6 +457,7 @@ func (s *Server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol
 		}
 	}
 	s.setWorkspaceRoots(normalizeWorkspaceRoots(next))
+	s.refreshWorkspaceResolver()
 	s.scheduleFileWatchRegistration()
 	s.scheduleWorkspaceRebuild()
 	return nil
@@ -426,6 +468,7 @@ func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRunt
 		return nil
 	}
 	s.setRuntimePaths(normalizeWorkspaceRoots(params.Runtimepath))
+	s.refreshWorkspaceResolver()
 	s.scheduleFileWatchRegistration()
 	s.scheduleWorkspaceRebuild()
 	return nil
@@ -532,12 +575,17 @@ func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolPa
 	s.mu.Unlock()
 	matches := index.Search(params.Query, maxWorkspaceSymbols)
 	result := make(protocol.WorkspaceSymbolSlice, 0, len(matches))
+	snapshots := make(map[string]*text.Snapshot)
 	for position, match := range matches {
 		if position%32 == 0 && ctx.Err() != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
 		documentURI := uri.File(match.Fact.Path)
-		snapshot := text.NewSnapshot(documentURI.String(), 0, nil, match.Source)
+		snapshot := snapshots[match.Fact.Path]
+		if snapshot == nil || snapshot.Text() != match.Source {
+			snapshot = text.NewSnapshot(documentURI.String(), 0, nil, match.Source)
+			snapshots[match.Fact.Path] = snapshot
+		}
 		rangeValue, ok := protocolRange(snapshot, encoding, match.Fact.SelectionRange)
 		if !ok {
 			continue

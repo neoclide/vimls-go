@@ -68,12 +68,15 @@ turn behavior observed only on a newer Vim into an unconditional Vim 9.1 rule.
 ## Architecture boundaries
 
 - `internal/jsonrpc`: message framing and JSON-RPC request lifecycle only.
-- `internal/lsp`: LSP wire types and encoding conversion only.
 - `internal/text`: immutable document snapshots and line/position indexes.
 - `internal/syntax`: dialect-aware tokens, AST, parser, and recovery.
 - `internal/analysis`: scopes, symbols, references, types, and diagnostics.
 - `internal/workspace`: open documents, file discovery, imports, and indexes.
 - `internal/server`: capability handlers that compose the packages above.
+
+LSP wire types come from the pinned `go.lsp.dev/protocol` dependency. Position
+encoding conversion stays at the `internal/server` and `internal/text`
+boundary; do not create an empty `internal/lsp` package in advance.
 
 Dependencies point from `server` toward the smaller packages; syntax and
 analysis must not depend on transport or process state. Do not create empty

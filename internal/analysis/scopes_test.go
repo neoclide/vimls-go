@@ -72,6 +72,21 @@ func TestAnalyzeVariableUseBeforeDeclarationStaysUnresolved(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFunctionDefaultReferencesEarlierParameter(t *testing.T) {
+	result := Analyze(syntax.Parse("vim9script\ndef Build(first: number, second = first)\n  echo second\nenddef\n"))
+	if len(result.Scopes) != 2 || len(result.Scopes[1].Declarations) != 2 {
+		t.Fatalf("function scope = %#v", result.Scopes)
+	}
+	first := result.Scopes[1].Declarations[0]
+	second := result.Scopes[1].Declarations[1]
+	if len(result.References) != 2 || result.References[0].Name != "first" || result.References[0].Declaration != first {
+		t.Fatalf("default reference = %#v", result.References)
+	}
+	if result.References[1].Name != "second" || result.References[1].Declaration != second {
+		t.Fatalf("body reference = %#v", result.References[1])
+	}
+}
+
 func TestAnalyzeInitializerUsesOuterShadowedDeclaration(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar value = 1\nif true\n  var value = value\n  echo value\nendif\n"))
 	if len(result.References) != 2 {

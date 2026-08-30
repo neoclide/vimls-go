@@ -23,9 +23,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
-      - run: go test -race ./...
-      - run: go vet ./...
-      - run: go build ./cmd/vimls
+      - run: make format-check test race vet build
 
   coverage:
     runs-on: ubuntu-latest
