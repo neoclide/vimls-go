@@ -4647,6 +4647,80 @@ func TestAnalyzeE1432ConcreteMethodOverridesGenericMethod(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1383MethodTypeMismatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+	}{
+		{
+			name:    "interface return",
+			source:  "vim9script\ninterface One\n  def IsEven(nr: number): bool\nendinterface\nclass Two implements One\n  def IsEven(nr: number): string\n  enddef\nendclass\n",
+			message: `Method "IsEven": type mismatch, expected func(number): bool but got func(number): string`,
+		},
+		{
+			name:    "interface argument",
+			source:  "vim9script\ninterface One\n  def IsEven(nr: number): bool\nendinterface\nclass Two implements One\n  def IsEven(nr: bool): bool\n  enddef\nendclass\n",
+			message: `Method "IsEven": type mismatch, expected func(number): bool but got func(bool): bool`,
+		},
+		{
+			name:    "interface variadic",
+			source:  "vim9script\ninterface One\n  def IsEven(nr: number): bool\nendinterface\nclass Two implements One\n  def IsEven(nr: number, ...extra: list<number>): bool\n  enddef\nendclass\n",
+			message: `Method "IsEven": type mismatch, expected func(number): bool but got func(number, ...list<number>): bool`,
+		},
+		{
+			name:    "inherited interface",
+			source:  "vim9script\ninterface One\n  def IsEven(nr: number): bool\nendinterface\ninterface Child extends One\nendinterface\nclass Two implements Child\n  def IsEven(nr: bool): bool\n  enddef\nendclass\n",
+			message: `Method "IsEven": type mismatch, expected func(number): bool but got func(bool): bool`,
+		},
+		{
+			name:    "parent override",
+			source:  "vim9script\nabstract class A\n  abstract def Foo(a: string, b: number): list<number>\nendclass\nclass B extends A\n  def Foo(a: number, b: string): list<string>\n    return []\n  enddef\nendclass\n",
+			message: `Method "Foo": type mismatch, expected func(string, number): list<number> but got func(number, string): list<string>`,
+		},
+		{
+			name:    "nested function return",
+			source:  "vim9script\ninterface I\n  def Apply(Fn: func(number): bool)\nendinterface\nclass C implements I\n  def Apply(Fn: func(number): string)\n  enddef\nendclass\n",
+			message: `Method "Apply": type mismatch, expected func(func(number): bool) but got func(func(number): string)`,
+		},
+		{
+			name:    "object argument",
+			source:  "vim9script\nclass B\nendclass\nabstract class A\n  abstract def Doit(value: B): B\nendclass\nclass C extends A\n  def Doit(value: C): B\n    return B.new()\n  enddef\nendclass\n",
+			message: `Method "Doit": type mismatch, expected func(object<B>): object<B> but got func(object<C>): object<B>`,
+		},
+		{
+			name:    "builtin empty protocol",
+			source:  "vim9script\nclass A\n  def empty()\n  enddef\nendclass\n",
+			message: `Method "empty": type mismatch, expected func(): bool but got func()`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1383" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("E1383 diagnostics=%#v; syntax diagnostics=%#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ninterface I\n  def F(n: number): bool\nendinterface\nclass C implements I\n  def F(n: number): bool\n    return true\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  def empty(): bool\n    return true\n  enddef\n  def len(): number\n    return 1\n  enddef\n  def string(): string\n    return ''\n  enddef\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1383" {
+				t.Fatalf("guard source reported E1383: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1384InheritedClassMethodBareCall(t *testing.T) {
 	source := "vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\nclass B extends A\n  def Bar()\n    Foo()\n  enddef\nendclass\n"
 	file := syntax.Parse(source)

@@ -123,6 +123,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectDuplicateTypeAliasDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
+	collectMethodTypeMismatchDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 
@@ -520,6 +521,227 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 			}
 		}
 	}
+}
+
+func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	interfaces := make(map[string]*syntax.Command)
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockInterface {
+			interfaces[file.Text(command.Aggregate.Name)] = command
+		}
+	}
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+			continue
+		}
+		reported := make(map[string]bool)
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			method := &file.Commands[memberIndex]
+			if method.Function == nil || commandIsClassMethod(file, method) {
+				continue
+			}
+			name := file.Text(method.Function.Name)
+			seenParents := make(map[*syntax.Command]bool)
+			for parent := extendedClass(file, result.classes, class); parent != nil; parent = extendedClass(file, result.classes, parent) {
+				if seenParents[parent] {
+					break
+				}
+				seenParents[parent] = true
+				expected := aggregateMethod(file, parent, name)
+				if expected == nil {
+					continue
+				}
+				if methodSignaturesMismatch(expected.Function, method.Function) {
+					appendMethodTypeMismatchDiagnostic(result, class, name, expected.Function, method.Function)
+					reported[name] = true
+				}
+				break
+			}
+		}
+		seenInterfaces := make(map[*syntax.Command]bool)
+		var checkInterface func(*syntax.Command)
+		checkInterface = func(iface *syntax.Command) {
+			if iface == nil || iface.Aggregate == nil || seenInterfaces[iface] {
+				return
+			}
+			seenInterfaces[iface] = true
+			for _, memberIndex := range iface.Aggregate.Members {
+				if memberIndex < 0 || memberIndex >= len(file.Commands) {
+					continue
+				}
+				required := &file.Commands[memberIndex]
+				if required.Function == nil {
+					continue
+				}
+				name := file.Text(required.Function.Name)
+				if reported[name] {
+					continue
+				}
+				actual := objectMethodInClassHierarchy(file, result.classes, class, name)
+				if actual != nil && methodSignaturesMismatch(required.Function, actual.Function) {
+					appendMethodTypeMismatchDiagnostic(result, class, name, required.Function, actual.Function)
+					reported[name] = true
+				}
+			}
+			for _, parent := range iface.Aggregate.Extends {
+				checkInterface(interfaces[file.Text(parent)])
+			}
+		}
+		for _, implemented := range class.Aggregate.Implements {
+			checkInterface(interfaces[file.Text(implemented)])
+		}
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			method := &file.Commands[memberIndex]
+			if method.Function == nil || commandIsClassMethod(file, method) {
+				continue
+			}
+			name := file.Text(method.Function.Name)
+			if reported[name] {
+				continue
+			}
+			var expected *syntax.Function
+			switch name {
+			case "empty":
+				expected = builtinObjectMethodSignature("bool")
+			case "len":
+				expected = builtinObjectMethodSignature("number")
+			case "string":
+				expected = builtinObjectMethodSignature("string")
+			}
+			if expected != nil && methodSignaturesMismatch(expected, method.Function) {
+				appendMethodTypeMismatchDiagnostic(result, class, name, expected, method.Function)
+			}
+		}
+	}
+}
+
+func objectMethodInClassHierarchy(file *syntax.File, classes map[string]*syntax.Command, class *syntax.Command, name string) *syntax.Command {
+	seen := make(map[*syntax.Command]bool)
+	for current := class; current != nil; current = extendedClass(file, classes, current) {
+		if seen[current] {
+			return nil
+		}
+		seen[current] = true
+		if method := aggregateMethod(file, current, name); method != nil {
+			return method
+		}
+	}
+	return nil
+}
+
+func methodSignaturesMismatch(expected, actual *syntax.Function) bool {
+	if expected == nil || actual == nil || len(expected.TypeParameters) > 0 || len(actual.TypeParameters) > 0 {
+		return false
+	}
+	if len(expected.Parameters) != len(actual.Parameters) || requiredParameterCount(expected.Parameters) != requiredParameterCount(actual.Parameters) ||
+		parametersAreVariadic(expected.Parameters) != parametersAreVariadic(actual.Parameters) {
+		return true
+	}
+	for index := range expected.Parameters {
+		if !sameMethodType(convertSyntaxType(expected.Parameters[index].Type), convertSyntaxType(actual.Parameters[index].Type)) {
+			return true
+		}
+	}
+	expectedReturn, actualReturn := ValueType{Name: "void"}, ValueType{Name: "void"}
+	if expected.ReturnType != nil {
+		expectedReturn = convertSyntaxType(expected.ReturnType)
+	}
+	if actual.ReturnType != nil {
+		actualReturn = convertSyntaxType(actual.ReturnType)
+	}
+	return !sameMethodType(expectedReturn, actualReturn)
+}
+
+func sameMethodType(expected, actual ValueType) bool {
+	if expected.Name != actual.Name || len(expected.Arguments) != len(actual.Arguments) || expected.ArgumentCountKnown != actual.ArgumentCountKnown ||
+		expected.RequiredArguments != actual.RequiredArguments || expected.Variadic != actual.Variadic || (expected.Return == nil) != (actual.Return == nil) {
+		return false
+	}
+	for index := range expected.Arguments {
+		if !sameMethodType(expected.Arguments[index], actual.Arguments[index]) {
+			return false
+		}
+	}
+	if expected.Return != nil && !sameMethodType(*expected.Return, *actual.Return) {
+		return false
+	}
+	return true
+}
+
+func methodSignatureDisplay(result *FileAnalysis, function *syntax.Function) string {
+	arguments := make([]string, 0, len(function.Parameters))
+	for _, parameter := range function.Parameters {
+		argument := methodTypeDisplay(result, convertSyntaxType(parameter.Type))
+		if parameter.Variadic {
+			argument = "..." + argument
+		} else if parameter.Default != nil {
+			argument = "?" + argument
+		}
+		arguments = append(arguments, argument)
+	}
+	signature := "func(" + strings.Join(arguments, ", ") + ")"
+	if function.ReturnType != nil {
+		signature += ": " + methodTypeDisplay(result, convertSyntaxType(function.ReturnType))
+	}
+	return signature
+}
+
+func methodTypeDisplay(result *FileAnalysis, typ ValueType) string {
+	if typ.Name == "func" && typ.ArgumentCountKnown {
+		arguments := make([]string, 0, len(typ.Arguments))
+		for index, argumentType := range typ.Arguments {
+			argument := methodTypeDisplay(result, argumentType)
+			if typ.Variadic && index == len(typ.Arguments)-1 {
+				argument = "..." + argument
+			} else if index >= typ.RequiredArguments {
+				argument = "?" + argument
+			}
+			arguments = append(arguments, argument)
+		}
+		display := "func(" + strings.Join(arguments, ", ") + ")"
+		if typ.Return != nil && typ.Return.Name != "void" {
+			display += ": " + methodTypeDisplay(result, *typ.Return)
+		}
+		return display
+	}
+	if result != nil && result.classes[typ.Name] != nil {
+		return "object<" + typ.Name + ">"
+	}
+	if len(typ.Arguments) == 0 {
+		return typ.Name
+	}
+	arguments := make([]string, 0, len(typ.Arguments))
+	for _, argument := range typ.Arguments {
+		if typ.Name == "object" || typ.Name == "class" {
+			arguments = append(arguments, argument.Name)
+		} else {
+			arguments = append(arguments, methodTypeDisplay(result, argument))
+		}
+	}
+	return typ.Name + "<" + strings.Join(arguments, ", ") + ">"
+}
+
+func appendMethodTypeMismatchDiagnostic(result *FileAnalysis, class *syntax.Command, name string, expected, actual *syntax.Function) {
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1383", Message: `Method "` + name + `": type mismatch, expected ` + methodSignatureDisplay(result, expected) + ` but got ` + methodSignatureDisplay(result, actual),
+		Span: aggregateEndSpan(result.File, class),
+	})
+}
+
+func builtinObjectMethodSignature(returnType string) *syntax.Function {
+	return &syntax.Function{ReturnType: &syntax.Type{Kind: syntax.TypeNamed, Name: returnType}}
 }
 
 func extendedClass(file *syntax.File, classes map[string]*syntax.Command, class *syntax.Command) *syntax.Command {
