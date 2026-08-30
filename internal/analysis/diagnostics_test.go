@@ -950,6 +950,49 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeStringIndexAssignmentDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name:   "vim9 script",
+			source: "vim9script\nvar s = 'abc'\ns[1] += 'x'\ns[2] ..= 'y'\n",
+			want:   []string{"s[1]", "s[2]"},
+		},
+		{
+			name:   "legacy script",
+			source: "let s = 'abc'\nlet s[1] = 5\n",
+			want:   []string{"s[1]"},
+		},
+		{
+			name:   "compiled def",
+			source: "vim9script\ndef F()\n  var s = 'abc'\n  s[1] += 'x'\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []string
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code != "vim/E689" {
+					continue
+				}
+				// The message retains the complete assignment, while the span
+				// selects only the invalid indexed target.
+				if !strings.HasPrefix(diagnostic.Message, "Index not allowed after a string: "+file.Text(diagnostic.Span)) {
+					t.Fatalf("diagnostic = %#v", diagnostic)
+				}
+				got = append(got, file.Text(diagnostic.Span))
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("E689 spans = %q, want %q; diagnostics = %#v", got, test.want, result.Diagnostics)
+			}
+		})
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]

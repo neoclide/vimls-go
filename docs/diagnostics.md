@@ -324,3 +324,25 @@ Representative source evidence:
 - `src/typval.c:257` emits E611 when Legacy-compatible numeric conversion sees
   a Special value.
 - `src/errors.h:1564-1565` defines the exact English message.
+
+## Index not allowed after a value: E689
+
+E689 means `Index not allowed after a {type}: {assignment}`. Legacy Vim script
+and the Vim9 script evaluator use it when an assignment target applies an index
+or slice to a value that cannot be mutated through indexing. A compiled Vim9
+`def` uses the context-specific E1141 for a String instead.
+
+Analysis currently reports E689 only for assignments through an index or slice
+whose receiver is statically known to be a String. Reading a String index is
+not an assignment error, and receivers with unknown types remain unknown. The
+diagnostic span selects the indexed target while the message retains the full
+assignment text, matching Vim's context.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_assign.vim:1845-1856` distinguishes E1141 in a
+  compiled `def` from E689 in Vim9 script for `+=` and `..=` String-index
+  assignments.
+- `src/testdir/test_let.vim:320-326` covers the Legacy String-index assignment.
+- `src/eval.c:1819-1840` rejects assignment indexes after unsupported value
+  types, and `src/errors.h:1779-1780` defines the exact E689 message.

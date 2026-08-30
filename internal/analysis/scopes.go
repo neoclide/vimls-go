@@ -122,7 +122,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
-	collectImmutableAssignmentDiagnostics(result, file.Commands, root)
+	collectAssignmentDiagnostics(result, file.Commands, root)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
@@ -927,11 +927,9 @@ func knownAssignmentType(name string) bool {
 	}
 }
 
-// collectImmutableAssignmentDiagnostics reports assignment to a direct
-// read-only predefined v: variable, a legacy function argument, or a lexically
-// resolved Vim9 const/final name. Other read-only declarations have distinct
-// Vim rules, and dynamic targets deliberately remain opaque here.
-func collectImmutableAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+// collectAssignmentDiagnostics reports statically provable assignment-target
+// errors. Dynamic targets deliberately remain opaque here.
+func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
 	if result == nil || result.File == nil {
 		return
 	}
@@ -943,16 +941,16 @@ func collectImmutableAssignmentDiagnostics(result *FileAnalysis, commands []synt
 		}
 		if command.Declaration == nil || command.Dialect == syntax.Legacy && command.Canonical == "let" {
 			for _, expression := range command.Expressions {
-				collectImmutableAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect)
+				collectAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect)
 			}
 		}
 		if command.Embedded != nil {
-			collectImmutableAssignmentDiagnostics(result, command.Embedded.Commands, scope)
+			collectAssignmentDiagnostics(result, command.Embedded.Commands, scope)
 		}
 	}
 }
 
-func collectImmutableAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
+func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
 	if expression == nil || scope == nil {
 		return
 	}
@@ -962,11 +960,11 @@ func collectImmutableAssignmentExpressionDiagnostics(result *FileAnalysis, scope
 			lambdaScope = scope
 		}
 		if expression.LambdaBody != nil {
-			collectImmutableAssignmentDiagnostics(result, expression.LambdaBody.Commands, lambdaScope)
+			collectAssignmentDiagnostics(result, expression.LambdaBody.Commands, lambdaScope)
 		}
 		for index, child := range expression.Children {
 			if index >= len(expression.Parameters) {
-				collectImmutableAssignmentExpressionDiagnostics(result, lambdaScope, child, dialect)
+				collectAssignmentExpressionDiagnostics(result, lambdaScope, child, dialect)
 			}
 		}
 		return
@@ -992,9 +990,15 @@ func collectImmutableAssignmentExpressionDiagnostics(result *FileAnalysis, scope
 				}
 			}
 		}
+		if target != nil && (target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) && len(target.Children) > 0 &&
+			!(dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope)) && resolvedExpressionType(result, scope, target.Children[0]).Name == "string" {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E689", Message: "Index not allowed after a string: " + result.File.Text(expression.Span), Span: target.Span,
+			})
+		}
 	}
 	for _, child := range expression.Children {
-		collectImmutableAssignmentExpressionDiagnostics(result, scope, child, dialect)
+		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
 }
 
