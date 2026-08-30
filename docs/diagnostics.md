@@ -1908,6 +1908,25 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:2756-2767` documents the method-call diagnostic.
 - `src/errors.h:3127-3129` defines the exact E1217 message.
 
+## Job required for builtin argument: E1218
+
+Analysis reports E1218 at Vim9 script level when an `arg_job` builtin
+argument has a known non-Job type. The diagnostic selects the complete
+normalized argument and uses its one-based position, including method calls.
+
+Job and dynamically typed values are accepted, while a Channel remains
+incompatible with this Job-only checker. A mismatch in a compiled `def` or
+block lambda retains E1013, Legacy calls are not diagnosed, and the broader
+Channel-or-Job checker remains on E1217.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:2541-2585` distinguishes compiled E1013
+  from script-level E1218 for the Job builtins and covers a Channel mismatch.
+- `src/evalfunc.c:978-988` defines the strict `arg_job` checker.
+- `runtime/doc/vim9.txt:2756-2768` documents the method-call diagnostic.
+- `src/errors.h:3130-3131` defines the exact E1218 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
