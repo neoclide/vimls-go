@@ -1662,6 +1662,12 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 		target := expression.Children[0]
+		if target != nil && target.Kind == syntax.ExpressionIndex && len(target.Children) > 0 && resolvedExpressionType(result, scope, target.Children[0]).Name == "tuple" {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1532", Message: "Cannot modify a tuple", Span: target.Span,
+			})
+			return
+		}
 		if target != nil && target.Kind == syntax.ExpressionSlice && len(target.Children) > 0 && resolvedExpressionType(result, scope, target.Children[0]).Name == "tuple" {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1533", Message: "Cannot slice a tuple", Span: target.Span,
@@ -1851,10 +1857,39 @@ func resolvedExpressionType(result *FileAnalysis, scope *Scope, expression *synt
 			return declaration.Type
 		}
 	}
-	if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionMember) && len(expression.Children) > 0 {
+	if expression.Kind == syntax.ExpressionIndex && len(expression.Children) > 0 {
+		receiver := resolvedExpressionType(result, scope, expression.Children[0])
+		if receiver.Name == "tuple" && len(expression.Children) > 1 {
+			if index, ok := staticTupleIndex(expression.Children[1]); ok {
+				if index < 0 {
+					index += len(receiver.Arguments)
+				}
+				if index >= 0 && index < len(receiver.Arguments) {
+					return receiver.Arguments[index]
+				}
+			}
+		}
+		return indexedType(receiver)
+	}
+	if expression.Kind == syntax.ExpressionMember && len(expression.Children) > 0 {
 		return indexedType(resolvedExpressionType(result, scope, expression.Children[0]))
 	}
 	return UnknownValueType
+}
+
+func staticTupleIndex(expression *syntax.Expression) (int, bool) {
+	if expression == nil {
+		return 0, false
+	}
+	if expression.Kind == syntax.ExpressionNumber {
+		index, err := strconv.Atoi(expression.Value)
+		return index, err == nil
+	}
+	if expression.Kind == syntax.ExpressionUnary && expression.Value == "-" && len(expression.Children) == 1 && expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionNumber {
+		index, err := strconv.Atoi(expression.Children[0].Value)
+		return -index, err == nil
+	}
+	return 0, false
 }
 
 func appendTypeMismatchDiagnostic(result *FileAnalysis, expected ValueType, expression *syntax.Expression) {

@@ -3720,3 +3720,57 @@ func TestAnalyzeE1533CannotSliceTuple(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1532CannotModifyTuple(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		span   string
+	}{
+		{
+			name:   "direct tuple",
+			source: "vim9script\nvar t = (1, 2)\nt[0] = 3\nvar after = 1\n",
+			span:   "t[0]",
+		},
+		{
+			name:   "tuple in typed list",
+			source: "vim9script\nvar values: list<tuple<string, string>> = [('a', 'b')]\nvalues[0][1] = 'x'\nvar after = 1\n",
+			span:   "values[0][1]",
+		},
+		{
+			name:   "nested tuple",
+			source: "vim9script\nvar values = ('a', ('b', 'c'))\nvalues[1][0] = 'x'\nvar after = 1\n",
+			span:   "values[1][0]",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1532" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot modify a tuple" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1532 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar values = [1, 2]\nvalues[0] = 3\n",
+		"vim9script\nvar values: any\nvalues[0] = 3\n",
+		"vim9script\nvar values = ([1, 2], [3])\nvalues[-2][-2] = 5\n",
+		"vim9script\nvar values = (1, 2)\nvalues[ : ] = (3, 4)\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1532" {
+				t.Fatalf("guard source reported E1532: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
