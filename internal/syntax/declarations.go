@@ -362,7 +362,7 @@ func parseTypeAlias(file *File, command *Command) {
 		typeNode = &Type{Kind: TypeMissing, Span: typeSpan}
 		if !nameDiagnostic {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E1398", Message: "missing type alias type", Span: typeSpan,
+				Code: "vim/E1398", Message: "Missing type alias type", Span: typeSpan,
 			})
 		}
 	} else {

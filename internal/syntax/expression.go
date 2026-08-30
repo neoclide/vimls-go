@@ -477,6 +477,13 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 	if p.dialect != Vim9 || p.current().span.Start != left.Span.End {
 		return nil, false
 	}
+	callName := left.Value
+	if callName == "" {
+		start, end := left.Span.Start-p.base, left.Span.End-p.base
+		if start >= 0 && end >= start && end <= len(p.source) {
+			callName = p.source[start:end]
+		}
+	}
 	open := p.current().span.Start - p.base
 	close := findGenericTypeEnd(p.source, open)
 	if close < 0 {
@@ -573,9 +580,9 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 					}
 				}
 				diagnosticsBeforeTypes := len(p.diagnostics)
-				types := p.parseGenericTypeArguments(open, end, false)
+				types := p.parseGenericTypeArguments(open, end, false, callName)
 				if p.source[delimiter] == ')' && len(p.diagnostics) == diagnosticsBeforeTypes {
-					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1553", Message: "Missing comma after type in generic function", Span: Span{Start: p.base + delimiter, End: p.base + delimiter}})
+					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1553", Message: "Missing comma after type in generic function: " + strings.TrimSpace(p.source[open+1:]), Span: Span{Start: p.base + delimiter, End: p.base + delimiter}})
 				}
 				if p.source[delimiter] == ',' && (len(types) == 0 || types[len(types)-1].Kind != TypeMissing) {
 					span := Span{Start: p.base + delimiter, End: p.base + delimiter}
@@ -629,7 +636,7 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 			return nil, false
 		}
 		p.lexer = cursor
-		types := p.parseGenericTypeArguments(open, argOpen, false)
+		types := p.parseGenericTypeArguments(open, argOpen, false, callName)
 		operator := Span{Start: p.base + open, End: p.base + argOpen}
 		call := p.parsePostfix(left)
 		call.Operator = operator
@@ -642,7 +649,7 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 	}
 
 	diagnosticsBeforeTypes := len(p.diagnostics)
-	types := p.parseGenericTypeArguments(open, close, true)
+	types := p.parseGenericTypeArguments(open, close, true, callName)
 	operator := Span{Start: p.base + open, End: closingEnd}
 	// Vim9 generic calls require the type-list delimiters and call opener to
 	// be tight. Keep the parsed type list (and therefore useful partial AST)
@@ -687,11 +694,11 @@ func (p *expressionParser) genericCallWhitespace(open, close, closingEnd int) (S
 	return Span{}, false
 }
 
-func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool) []*Type {
+func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool, functionName string) []*Type {
 	if closed && end == open+1 {
 		span := Span{Start: p.base + open + 1, End: p.base + open + 1}
 		p.diagnostics = append(p.diagnostics, Diagnostic{
-			Code: "vim/E1555", Message: "empty type list specified for generic function",
+			Code: "vim/E1555", Message: "Empty type list specified for generic function '" + functionName + "'",
 			Span: Span{Start: p.base + open, End: p.base + end + 1},
 		})
 		return []*Type{{Kind: TypeMissing, Span: span}}
@@ -1325,7 +1332,8 @@ func (p *expressionParser) parseParenthesized() *Expression {
 		for {
 			if p.current().text != "," {
 				if hadComma && p.current().kind != expressionEOF && p.current().text != ")" {
-					reportTupleDiagnostic("vim/E1527", "missing comma in tuple", p.current())
+					offset := p.current().span.Start - p.base
+					reportTupleDiagnostic("vim/E1527", "Missing comma in Tuple: "+p.source[offset:], p.current())
 					for p.current().kind != expressionEOF && p.current().text != ")" {
 						p.advance()
 					}
@@ -1374,7 +1382,12 @@ func (p *expressionParser) parseParenthesized() *Expression {
 		p.advance()
 	} else if hadComma {
 		if !tupleDiagnostic {
-			reportTupleDiagnostic("vim/E1526", "missing end of tuple ')'", p.current())
+			message := "Missing end of Tuple ')'"
+			offset := p.current().span.Start - p.base
+			if offset >= 0 && offset < len(p.source) {
+				message += ": " + p.source[offset:]
+			}
+			reportTupleDiagnostic("vim/E1526", message, p.current())
 		}
 	} else if !innerDictionaryError && !missingOperand {
 		end = p.consumeClosing(")", fallback)

@@ -450,17 +450,18 @@ func TestVim9TypeAliasMissingPartsRecoverNextLine(t *testing.T) {
 		name      string
 		source    string
 		code      string
+		message   string
 		wantAlias bool
 		wantName  string
 		wantType  TypeKind
 	}{
-		{name: "name", source: "vim9script\ntype\nvar after = 1\n", code: "vim/E1397"},
-		{name: "type", source: "vim9script\ntype MyType =\nvar after = 1\n", code: "vim/E1398", wantAlias: true, wantName: "MyType", wantType: TypeMissing},
+		{name: "name", source: "vim9script\ntype\nvar after = 1\n", code: "vim/E1397", message: "Missing type alias name"},
+		{name: "type", source: "vim9script\ntype MyType =\nvar after = 1\n", code: "vim/E1398", message: "Missing type alias type", wantAlias: true, wantName: "MyType", wantType: TypeMissing},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			file := Parse(test.source)
-			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Message != test.message {
 				t.Fatalf("diagnostics = %#v", file.Diagnostics)
 			}
 			if len(file.Commands) != 3 || file.Commands[2].Canonical != "var" || file.Commands[2].Declaration == nil {
@@ -473,8 +474,21 @@ func TestVim9TypeAliasMissingPartsRecoverNextLine(t *testing.T) {
 			if !test.wantAlias && alias != nil {
 				t.Fatalf("unexpected type alias = %#v", alias)
 			}
+			if test.code == "vim/E1397" && file.Text(file.Diagnostics[0].Span) != "type" {
+				t.Fatalf("name diagnostic span = %#v", file.Diagnostics[0])
+			}
+			if test.code == "vim/E1398" && (alias == nil || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End || file.Diagnostics[0].Span.Start != alias.Assignment.End) {
+				t.Fatalf("type diagnostic span = %#v, alias = %#v", file.Diagnostics[0], alias)
+			}
 			assertFileSpans(t, file)
 		})
+	}
+	for _, source := range []string{"type\nlet after = 1\n", "type MyType = number\nlet after = 1\n"} {
+		for _, diagnostic := range Parse(source).Diagnostics {
+			if diagnostic.Code == "vim/E1397" || diagnostic.Code == "vim/E1398" {
+				t.Fatalf("legacy source reported Vim9 type-alias diagnostic: %#v\n%s", diagnostic, source)
+			}
+		}
 	}
 }
 

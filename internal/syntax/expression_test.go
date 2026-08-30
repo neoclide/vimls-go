@@ -572,18 +572,50 @@ func TestTupleValue(t *testing.T) {
 	for _, dialect := range []Dialect{Legacy, Vim9} {
 		t.Run(dialect.String(), func(t *testing.T) {
 			missingComma, diagnostics := parseExpression("('a', 'b' 'c')", 0, dialect)
-			if missingComma.Kind != ExpressionTuple || len(missingComma.Children) != 2 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1527" {
+			if missingComma.Kind != ExpressionTuple || len(missingComma.Children) != 2 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1527" || diagnostics[0].Message != "Missing comma in Tuple: 'c')" || diagnostics[0].Span != (Span{Start: 10, End: 13}) {
 				t.Fatalf("missing comma = %#v, diagnostics = %#v", missingComma, diagnostics)
 			}
 
 			unclosed, diagnostics := parseExpression("('a', 'b',", 0, dialect)
-			if unclosed.Kind != ExpressionTuple || len(unclosed.Children) != 2 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1526" {
+			if unclosed.Kind != ExpressionTuple || len(unclosed.Children) != 2 || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1526" || diagnostics[0].Message != "Missing end of Tuple ')'" || diagnostics[0].Span != (Span{Start: len("('a', 'b',"), End: len("('a', 'b',")}) {
 				t.Fatalf("unclosed tuple = %#v, diagnostics = %#v", unclosed, diagnostics)
 			}
 			if unclosed.Span.End != len("('a', 'b'") {
 				t.Fatalf("unclosed tuple span = %#v", unclosed.Span)
 			}
 		})
+	}
+	for _, source := range []string{"()", "(1, 2)"} {
+		for _, dialect := range []Dialect{Legacy, Vim9} {
+			_, diagnostics := parseExpression(source, 0, dialect)
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "vim/E1526" || diagnostic.Code == "vim/E1527" {
+					t.Fatalf("valid %s tuple %q reported %#v", dialect, source, diagnostic)
+				}
+			}
+		}
+	}
+}
+
+func TestTupleDiagnosticRecoversNextLine(t *testing.T) {
+	tests := []struct {
+		source  string
+		code    string
+		message string
+	}{
+		{"vim9script\nvar value = ('a', 'b',\nvar after = 1\n", "vim/E1526", "Missing end of Tuple ')'"},
+		{"vim9script\nvar value = ('a', 'b' 'c')\nvar after = 1\n", "vim/E1527", "Missing comma in Tuple: 'c')"},
+	}
+	for _, test := range tests {
+		file := Parse(test.source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Message != test.message {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		last := file.Commands[len(file.Commands)-1]
+		if last.Canonical != "var" || last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+			t.Fatalf("next-line recovery = %#v", file.Commands)
+		}
+		assertFileSpans(t, file)
 	}
 }
 
@@ -2003,6 +2035,25 @@ func TestVim9GenericFunctionCalls(t *testing.T) {
 	comparison, diagnostics := (Vim9ExpressionParser{}).Parse(`left < number > (right)`)
 	if len(diagnostics) != 0 || comparison.Kind != ExpressionBinary || comparison.Value != ">" || comparison.Children[0].Value != "<" {
 		t.Fatalf("comparison = %#v, diagnostics = %#v", comparison, diagnostics)
+	}
+}
+
+func TestVim9GenericCallEmptyTypeListDiagnostic(t *testing.T) {
+	expression, diagnostics := (Vim9ExpressionParser{}).Parse("Fn<>()")
+	if expression == nil || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1555" || diagnostics[0].Message != "Empty type list specified for generic function 'Fn'" || diagnostics[0].Span != (Span{Start: 2, End: 4}) {
+		t.Fatalf("expression = %#v, diagnostics = %#v", expression, diagnostics)
+	}
+}
+
+func TestVim9GenericReferenceMissingCloseDiagnostic(t *testing.T) {
+	source := "vim9script\ndef Fn<A>()\nenddef\nvar Ref = function(Fn<number)\nvar after = 1\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1553" || file.Diagnostics[0].Message != "Missing comma after type in generic function: number)" || file.Diagnostics[0].Span.Start != file.Diagnostics[0].Span.End {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	last := file.Commands[len(file.Commands)-1]
+	if last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+		t.Fatalf("next-line recovery = %#v", file.Commands)
 	}
 }
 

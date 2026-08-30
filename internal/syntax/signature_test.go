@@ -50,6 +50,8 @@ func TestVim9GenericFunctionTypeParameterGrammar(t *testing.T) {
 	invalid := []struct {
 		signature  string
 		diagnostic string
+		message    string
+		span       string
 	}{
 		{signature: "Fn <A>()", diagnostic: "vim/E1068"},
 		{signature: "Fn <A> ()", diagnostic: "vim/E1068"},
@@ -63,10 +65,11 @@ func TestVim9GenericFunctionTypeParameterGrammar(t *testing.T) {
 		{signature: "Fn< , A>()", diagnostic: "vim/E1202"},
 		{signature: "Fn<A,B>()", diagnostic: "vim/E1069"},
 		{signature: "Fn<A , B>()", diagnostic: "vim/E1202"},
-		{signature: "Fn<t>()", diagnostic: "vim/E1552"},
-		{signature: "Fn<My-type>()", diagnostic: "vim/E1553"},
-		{signature: "Fn<>()", diagnostic: "vim/E1555"},
-		{signature: "Fn<T, A, T>()", diagnostic: "vim/E1561"},
+		{signature: "Fn<t>()", diagnostic: "vim/E1552", message: "Type variable name must start with an uppercase letter: t>()", span: "t"},
+		{signature: "Fn<My-type>()", diagnostic: "vim/E1553", message: "Missing comma after type in generic function: My-type>()", span: "-"},
+		{signature: "Fn<T()", diagnostic: "vim/E1553", message: "Missing comma after type in generic function: T()", span: "T"},
+		{signature: "Fn<>()", diagnostic: "vim/E1555", message: "Empty type list specified for generic function 'Fn'", span: "<>"},
+		{signature: "Fn<T, A, T>()", diagnostic: "vim/E1561", message: "Duplicate type variable name: T", span: "T"},
 	}
 	for _, test := range invalid {
 		t.Run("invalid "+test.signature, func(t *testing.T) {
@@ -74,6 +77,9 @@ func TestVim9GenericFunctionTypeParameterGrammar(t *testing.T) {
 			file := Parse(source)
 			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.diagnostic {
 				t.Fatalf("signature=%q diagnostics=%#v", test.signature, file.Diagnostics)
+			}
+			if test.message != "" && (file.Diagnostics[0].Message != test.message || file.Text(file.Diagnostics[0].Span) != test.span) {
+				t.Fatalf("signature=%q diagnostic=%#v span=%q", test.signature, file.Diagnostics[0], file.Text(file.Diagnostics[0].Span))
 			}
 			if len(file.Commands) == 0 || file.Commands[1].Function == nil {
 				t.Fatalf("signature=%q function recovery=%#v", test.signature, file.Commands)
@@ -83,6 +89,27 @@ func TestVim9GenericFunctionTypeParameterGrammar(t *testing.T) {
 				t.Fatalf("signature=%q next command=%#v", test.signature, last)
 			}
 		})
+	}
+}
+
+func TestVim9NestedGenericTypeVariableDuplicate(t *testing.T) {
+	file := Parse("vim9script\ndef Outer<T>()\n  def Inner<T>()\n  enddef\nenddef\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1561" || file.Diagnostics[0].Message != "Duplicate type variable name: T" || file.Text(file.Diagnostics[0].Span) != "T" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if file.Commands[len(file.Commands)-1].Declaration == nil {
+		t.Fatalf("next-line recovery = %#v", file.Commands)
+	}
+	for _, source := range []string{
+		"vim9script\ndef First<T>()\nenddef\ndef Second<T>()\nenddef\n",
+		"vim9script\ndef Outer<T>()\n  def Inner<U>()\n  enddef\nenddef\n",
+		"function Legacy<T>()\nendfunction\n",
+	} {
+		for _, diagnostic := range Parse(source).Diagnostics {
+			if diagnostic.Code == "vim/E1561" {
+				t.Fatalf("independent generic scopes reported E1561: %#v\n%s", diagnostic, source)
+			}
+		}
 	}
 }
 

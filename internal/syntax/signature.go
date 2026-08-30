@@ -130,13 +130,15 @@ func parseFunctionSignature(file *File, command *Command) {
 			recoveredGeneric = true
 		}
 		var diagnostics []Diagnostic
-		function.TypeParameters, diagnostics = parseFunctionTypeParameters(source, command.Argument.Start, offset, end)
+		function.TypeParameters, diagnostics = parseFunctionTypeParameters(source, command.Argument.Start, offset, end, source[nameStart:beforeSpace])
 		if recoveredGeneric && len(diagnostics) == 0 {
 			span := Span{Start: command.Argument.Start + end, End: command.Argument.Start + end + 1}
 			if count := len(function.TypeParameters); count > 0 {
 				span = function.TypeParameters[count-1].Span
 			}
-			diagnostics = append(diagnostics, Diagnostic{Code: "vim/E1553", Message: "missing comma in generic function", Span: span})
+			diagnostics = append(diagnostics, Diagnostic{
+				Code: "vim/E1553", Message: "Missing comma after type in generic function: " + strings.TrimSpace(source[offset+1:]), Span: span,
+			})
 		}
 		if !spaceBeforeGeneric {
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
@@ -330,13 +332,13 @@ func nestedGenericTypeParameterDiagnostic(file *File, command *Command) (Diagnos
 	}
 	for _, parameter := range parameters {
 		if _, exists := seen[parameter.Name]; exists {
-			return Diagnostic{Code: "vim/E1561", Message: "duplicate type variable name: " + parameter.Name, Span: parameter.Span}, true
+			return Diagnostic{Code: "vim/E1561", Message: "Duplicate type variable name: " + parameter.Name, Span: parameter.Span}, true
 		}
 	}
 	return Diagnostic{}, false
 }
 
-func parseFunctionTypeParameters(source string, base, open, close int) ([]TypeParameter, []Diagnostic) {
+func parseFunctionTypeParameters(source string, base, open, close int, functionName string) ([]TypeParameter, []Diagnostic) {
 	var parameters []TypeParameter
 	var diagnostics []Diagnostic
 	report := func(code, message string, start, end int) {
@@ -345,7 +347,7 @@ func parseFunctionTypeParameters(source string, base, open, close int) ([]TypePa
 		}
 	}
 	if open+1 == close {
-		report("vim/E1555", "empty type list for generic function", open, close+1)
+		report("vim/E1555", "Empty type list specified for generic function '"+functionName+"'", open, close+1)
 		return parameters, diagnostics
 	}
 
@@ -366,7 +368,7 @@ func parseFunctionTypeParameters(source string, base, open, close int) ([]TypePa
 		nameStart := offset
 		if source[offset] < 'A' || source[offset] > 'Z' {
 			if source[offset] >= 'a' && source[offset] <= 'z' {
-				report("vim/E1552", "type variable name must start with an uppercase letter", offset, offset+1)
+				report("vim/E1552", "Type variable name must start with an uppercase letter: "+source[nameStart:], offset, offset+1)
 			} else {
 				report("vim/E1008", "missing generic type", offset, offset+1)
 			}
@@ -382,7 +384,7 @@ func parseFunctionTypeParameters(source string, base, open, close int) ([]TypePa
 		parameter := TypeParameter{Name: name, Span: Span{Start: base + nameStart, End: base + offset}}
 		parameters = append(parameters, parameter)
 		if _, exists := seen[name]; exists {
-			report("vim/E1561", "duplicate type variable name", nameStart, offset)
+			report("vim/E1561", "Duplicate type variable name: "+name, nameStart, offset)
 		}
 		seen[name] = struct{}{}
 
@@ -394,7 +396,7 @@ func parseFunctionTypeParameters(source string, base, open, close int) ([]TypePa
 			break
 		}
 		if source[offset] != ',' {
-			report("vim/E1553", "missing comma in generic function", offset, offset+1)
+			report("vim/E1553", "Missing comma after type in generic function: "+strings.TrimSpace(source[open+1:]), offset, offset+1)
 			for offset < close && source[offset] != ',' {
 				offset++
 			}

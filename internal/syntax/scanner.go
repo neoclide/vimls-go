@@ -2583,7 +2583,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	if command.Argument.Start >= command.Argument.End {
 		if command.Dialect == Vim9 && command.Canonical == "type" {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E1397", Message: "missing type alias name", Span: command.Name,
+				Code: "vim/E1397", Message: "Missing type alias name", Span: command.Name,
 			})
 		}
 		if command.Canonical == "for" {
