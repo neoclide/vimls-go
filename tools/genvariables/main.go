@@ -150,7 +150,7 @@ func variableFlags(source string) ([]string, error) {
 		return nil, nil
 	}
 	var flags []string
-	for _, flag := range strings.Split(source, "+") {
+	for flag := range strings.SplitSeq(source, "+") {
 		switch strings.TrimSpace(flag) {
 		case "VV_COMPAT":
 			flags = append(flags, "VariableCompatible")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -221,7 +222,7 @@ func (s *Server) renameEdits(ctx context.Context, encoding text.Encoding, oldNam
 	for documentURI := range states {
 		uris = append(uris, documentURI)
 	}
-	sort.Slice(uris, func(i, j int) bool { return uris[i] < uris[j] })
+	slices.Sort(uris)
 	changes := make([]protocol.DocumentChange, 0, len(uris))
 	for _, documentURI := range uris {
 		state := states[documentURI]

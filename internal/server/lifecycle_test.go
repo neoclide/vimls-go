@@ -71,7 +71,7 @@ func TestServerLifecycleErrors(t *testing.T) {
 
 func TestServerLimitsPendingRequests(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
-	for index := 0; index < maxPendingRequests; index++ {
+	for index := range maxPendingRequests {
 		_, cancel := context.WithCancel(context.Background())
 		if !instance.registerCancellation(jsonrpc2.NewNumberID(int64(index)), cancel) {
 			t.Fatalf("request %d was rejected before the limit", index)

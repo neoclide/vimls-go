@@ -101,7 +101,7 @@ func (r *Reader) readHeader() ([]byte, error) {
 func parseContentLength(header []byte) (uint64, error) {
 	var value string
 	found := false
-	for _, line := range strings.Split(string(header), "\r\n") {
+	for line := range strings.SplitSeq(string(header), "\r\n") {
 		name, rawValue, ok := strings.Cut(line, ":")
 		if !ok || strings.TrimSpace(name) == "" {
 			return 0, fmt.Errorf("%w: malformed field", ErrInvalidHeader)

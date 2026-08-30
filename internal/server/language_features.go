@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -283,7 +284,7 @@ func visibleDeclarations(result *analysis.FileAnalysis, offset int) []*analysis.
 	}
 	declarations := make([]*analysis.Declaration, 0)
 	for current := scope; current != nil; current = current.Parent {
-		for index := len(current.Declarations) - 1; index >= 0; index-- {
+		for index := range slices.Backward(current.Declarations) {
 			declaration := current.Declarations[index]
 			if declaration.Span.Start > offset && declaration.Kind != analysis.SymbolKindFunction && declaration.Kind != analysis.SymbolKindMethod && declaration.Kind != analysis.SymbolKindConstructor {
 				continue

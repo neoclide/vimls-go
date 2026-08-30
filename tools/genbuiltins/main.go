@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"go/format"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,9 +119,7 @@ func addDocumentation(root string, functions []builtin) error {
 		if err != nil {
 			return err
 		}
-		for tag, doc := range docs {
-			documentation[tag] = doc
-		}
+		maps.Copy(documentation, docs)
 	}
 	for index := range functions {
 		doc := documentation[functions[index].Name+"()"]
@@ -158,7 +157,7 @@ func parseSource(source []byte) ([]builtin, error) {
 	lines := strings.Split(string(source[start:end]), "\n")
 	functions := make([]builtin, 0, 600)
 	usedArgumentChecks := make(map[string]bool, len(argumentChecks))
-	for index := 0; index < len(lines); index++ {
+	for index := range lines {
 		match := functionStart.FindStringSubmatch(lines[index])
 		if match == nil {
 			continue
@@ -176,17 +175,19 @@ func parseSource(source []byte) ([]builtin, error) {
 		}
 		// Rows are terminated by the next row or a preprocessor branch. The
 		// return helper is the only ret_* token in a row in the Vim table.
-		row := lines[index]
+		var row strings.Builder
+		row.WriteString(lines[index])
 		for next := index + 1; next < len(lines); next++ {
 			if functionStart.MatchString(lines[next]) {
 				break
 			}
-			row += "\n" + lines[next]
+			row.WriteByte('\n')
+			row.WriteString(lines[next])
 			if strings.Contains(lines[next], "},") {
 				break
 			}
 		}
-		helper := returnHelper.FindStringSubmatch(row)
+		helper := returnHelper.FindStringSubmatch(row.String())
 		returnType := "ReturnUnknown"
 		returnHelperName := ""
 		if helper != nil {
@@ -273,7 +274,7 @@ func parseArgumentChecks(source []byte) (map[string][]string, error) {
 		name := match[1]
 		body := match[2]
 		var entries []string
-		for _, entry := range strings.Split(body, ",") {
+		for entry := range strings.SplitSeq(body, ",") {
 			entry = strings.TrimSpace(entry)
 			if entry == "" {
 				continue

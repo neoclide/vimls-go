@@ -60,13 +60,7 @@ func parseWorkerCount(requested, sourceCount int) int {
 	if sourceCount <= 0 {
 		return 0
 	}
-	maximum := runtime.GOMAXPROCS(0)
-	if maximum > 4 {
-		maximum = 4
-	}
-	if maximum > sourceCount {
-		maximum = sourceCount
-	}
+	maximum := min(runtime.GOMAXPROCS(0), 4, sourceCount)
 	if requested > 0 && requested < maximum {
 		return requested
 	}

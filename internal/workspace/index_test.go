@@ -368,12 +368,9 @@ func TestIndexConcurrentOperations(t *testing.T) {
 	index := NewIndex(20, 100000)
 	root := t.TempDir()
 	var group sync.WaitGroup
-	for worker := 0; worker < 8; worker++ {
-		worker := worker
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			for iteration := 0; iteration < 100; iteration++ {
+	for worker := range 8 {
+		group.Go(func() {
+			for iteration := range 100 {
 				path := filepath.Join(root, "file", string(rune('a'+worker)), "doc.vim")
 				file := syntax.Parse("var shared = 1\n")
 				_ = index.Replace(path, file)
@@ -383,7 +380,7 @@ func TestIndexConcurrentOperations(t *testing.T) {
 					index.Remove(path)
 				}
 			}
-		}()
+		})
 	}
 	group.Wait()
 	if index.FileCount() < 0 || index.IndexedBytes() < 0 {

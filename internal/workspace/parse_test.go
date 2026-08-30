@@ -42,10 +42,7 @@ func TestParseSourcesReturnsNonNilEmptyResults(t *testing.T) {
 }
 
 func TestParseWorkerCountCapsRequestedWorkers(t *testing.T) {
-	maximum := runtime.GOMAXPROCS(0)
-	if maximum > 4 {
-		maximum = 4
-	}
+	maximum := min(runtime.GOMAXPROCS(0), 4)
 	cases := []struct {
 		name      string
 		requested int

@@ -62,7 +62,7 @@ func TestLookupMatchesFullOrderedTableForEveryPrefix(t *testing.T) {
 		}
 		assertLookupMatchesLinear(t, command.Name+"~")
 	}
-	for first := 0; first < 256; first++ {
+	for first := range 256 {
 		assertLookupMatchesLinear(t, string([]byte{byte(first), '~'}))
 	}
 }
@@ -94,7 +94,7 @@ func BenchmarkLookupCommands(b *testing.B) {
 	b.ResetTimer()
 	var command Command
 	var ok bool
-	for range b.N {
+	for b.Loop() {
 		for _, input := range inputs {
 			command, ok = Lookup(input)
 		}

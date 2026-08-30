@@ -415,10 +415,10 @@ func TestFunctionNestingTooDeepDiagnostic(t *testing.T) {
 func nestedNamedFunctionSource(prefix, header, end string, depth int) string {
 	var source strings.Builder
 	source.WriteString(prefix)
-	for index := 0; index < depth; index++ {
+	for range depth {
 		source.WriteString(header)
 	}
-	for index := 0; index < depth; index++ {
+	for range depth {
 		source.WriteString(end)
 	}
 	return source.String()

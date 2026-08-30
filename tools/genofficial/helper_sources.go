@@ -60,10 +60,7 @@ func scanHelperHeredocs(source []byte) []helperHeredoc {
 			}
 		}
 		bodyLines := make([][]byte, 0, endLine-lineIndex-1)
-		bodyLimit := endLine
-		if bodyLimit > len(lines) {
-			bodyLimit = len(lines)
-		}
+		bodyLimit := min(endLine, len(lines))
 		for bodyLine := lineIndex + 1; bodyLine < bodyLimit; bodyLine++ {
 			bodyLines = append(bodyLines, source[lines[bodyLine].Start:lines[bodyLine].ContentEnd])
 		}

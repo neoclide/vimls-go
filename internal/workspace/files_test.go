@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -160,10 +161,7 @@ func TestDiscoverFilesEnforcesDeterministicLimit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantLength := limit
-		if wantLength > len(all) {
-			wantLength = len(all)
-		}
+		wantLength := min(limit, len(all))
 		if len(got) != wantLength || !equalStrings(got, all[:wantLength]) {
 			t.Fatalf("limit %d = %#v, want %#v", limit, got, all[:wantLength])
 		}
@@ -255,12 +253,7 @@ func containsPath(paths []string, want string) bool {
 	} else {
 		want = filepath.Clean(want)
 	}
-	for _, path := range paths {
-		if path == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, want)
 }
 
 func equalStrings(left, right []string) bool {

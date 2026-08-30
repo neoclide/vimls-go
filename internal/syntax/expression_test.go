@@ -739,7 +739,7 @@ func TestVim9LambdaCommandBlockKeepsNestedBlocks(t *testing.T) {
 	if outer == nil || outer.LambdaBody == nil || len(outer.LambdaBody.Commands) != 3 {
 		t.Fatalf("outer lambda = %#v", outer)
 	}
-	for index := 0; index < 2; index++ {
+	for index := range 2 {
 		declaration := outer.LambdaBody.Commands[index].Declaration
 		if declaration == nil || declaration.Initializer == nil || declaration.Initializer.LambdaBody == nil {
 			t.Fatalf("nested lambda %d = %#v", index, outer.LambdaBody.Commands[index])

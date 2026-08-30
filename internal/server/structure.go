@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"slices"
 	"sort"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -133,7 +134,7 @@ func (s *Server) SelectionRange(ctx context.Context, params *protocol.SelectionR
 
 func selectionRangeChain(snapshot *text.Snapshot, encoding text.Encoding, spans []syntax.Span) protocol.SelectionRange {
 	var parent *protocol.SelectionRange
-	for index := len(spans) - 1; index >= 0; index-- {
+	for index := range slices.Backward(spans) {
 		rangeValue, ok := protocolRange(snapshot, encoding, spans[index])
 		if !ok {
 			continue

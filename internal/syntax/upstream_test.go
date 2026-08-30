@@ -166,7 +166,7 @@ func listAllPinnedVimTestFiles(vimRoot string) ([]string, error) {
 		return nil, err
 	}
 	var files []string
-	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for path := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if strings.HasPrefix(path, "src/testdir/") && strings.HasSuffix(path, ".vim") {
 			files = append(files, path)
 		}
@@ -181,7 +181,7 @@ func listPinnedVim9TestFiles(vimRoot string) ([]string, error) {
 		return nil, err
 	}
 	var files []string
-	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for path := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if path == "src/testdir/test_vimscript.vim" || path == "src/testdir/test_tuple.vim" ||
 			(strings.HasPrefix(path, "src/testdir/test_vim9") && strings.HasSuffix(path, ".vim")) {
 			files = append(files, path)

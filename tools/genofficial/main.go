@@ -214,7 +214,7 @@ func listTestFiles(root string) ([]string, error) {
 
 func selectTestFiles(output []byte) ([]string, error) {
 	var files []string
-	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for path := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if path == "src/testdir/test_vimscript.vim" || path == "src/testdir/test_tuple.vim" ||
 			(strings.HasPrefix(path, "src/testdir/test_vim9") && strings.HasSuffix(path, ".vim")) {
 			files = append(files, path)
@@ -237,7 +237,7 @@ func listAllTestFiles(root string) ([]string, error) {
 
 func selectAllTestFiles(output []byte) ([]string, error) {
 	seen := make(map[string]struct{})
-	for _, path := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for path := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if strings.HasPrefix(path, "src/testdir/") && strings.HasSuffix(path, ".vim") {
 			seen[path] = struct{}{}
 		}
@@ -379,7 +379,7 @@ func checkArgument(source, result, variable string) bool {
 func heredocMarker(source string) (string, bool, bool) {
 	trim := false
 	evaluate := false
-	for _, field := range strings.Fields(source) {
+	for field := range strings.FieldsSeq(source) {
 		if field == "trim" {
 			trim = true
 			continue
@@ -480,7 +480,7 @@ func buildHelperInventory(files testFilesCorpus) (helperInventory, error) {
 
 func exportedCheckHelpers(source []byte) []string {
 	var names []string
-	for _, line := range strings.Split(string(source), "\n") {
+	for line := range strings.SplitSeq(string(source), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 3 || fields[0] != "export" || (fields[1] != "func" && fields[1] != "def") {
 			continue

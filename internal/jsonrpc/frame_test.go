@@ -131,18 +131,16 @@ func TestWriterDoesNotInterleaveConcurrentFrames(t *testing.T) {
 	const count = 32
 	var group sync.WaitGroup
 	for range count {
-		group.Add(1)
-		go func() {
-			defer group.Done()
+		group.Go(func() {
 			if err := writer.Write([]byte("{}")); err != nil {
 				t.Errorf("write: %v", err)
 			}
-		}()
+		})
 	}
 	group.Wait()
 
 	reader := NewReader(&output)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		body, err := reader.Read()
 		if err != nil || string(body) != "{}" {
 			t.Fatalf("frame %d = %q, %v", i, body, err)

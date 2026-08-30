@@ -82,7 +82,7 @@ func BenchmarkScanVim9Continuation(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(source)))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkContinuationState = scanVim9Continuation(source, vim9ContinuationScan{})
 	}
 }
@@ -93,7 +93,7 @@ func BenchmarkVim9OpaqueHash(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(source) - start))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkOpaqueEnd, _, _ = scanVim9OpaqueArgument(source, start, len(source), vimdata.Command{})
 	}
 }
@@ -295,7 +295,7 @@ func BenchmarkParseMalformedVim9DeclarationInitializers(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(source)))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkParsedFile = Parse(source)
 	}
 }
@@ -309,7 +309,7 @@ func BenchmarkParseIncompleteAutocmdBlocks(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(source)))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkParsedFile = (LegacyParser{}).Parse(source)
 	}
 }
@@ -388,7 +388,7 @@ func BenchmarkParseGlobalEmbeddedCommands(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(source)))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkParsedFile = (LegacyParser{}).Parse(source)
 	}
 }
@@ -456,7 +456,7 @@ func BenchmarkParseVim9CommandStartCalls(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(source)))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkParsedFile = Parse(source)
 	}
 }
@@ -470,7 +470,7 @@ func BenchmarkParseVim9CommandStartAssignments(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(source)))
 	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		benchmarkParsedFile = Parse(source)
 	}
 }

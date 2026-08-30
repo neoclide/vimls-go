@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -32,16 +34,36 @@ func workspaceRootsFromInitialize(params *protocol.InitializeParams) []string {
 		}
 		return normalizeWorkspaceRoots(roots)
 	}
-	if params.RootURI != nil {
-		if path, ok := workspaceURIPath(*params.RootURI); ok {
+	legacy := legacyInitializeFields(params)
+	if legacy.RootURI != nil {
+		if path, ok := workspaceURIPath(*legacy.RootURI); ok {
 			return []string{path}
 		}
 		return nil
 	}
-	if rootPath, ok := params.RootPath.Get(); ok {
-		return normalizeWorkspaceRoots([]string{rootPath})
+	if legacy.RootPath != nil {
+		return normalizeWorkspaceRoots([]string{*legacy.RootPath})
 	}
 	return nil
+}
+
+type legacyInitializeRootFields struct {
+	RootPath *string  `json:"rootPath"`
+	RootURI  *uri.URI `json:"rootUri"`
+}
+
+// legacyInitializeFields reads deprecated initialization fields from the wire
+// representation for clients that have not adopted workspaceFolders.
+func legacyInitializeFields(params *protocol.InitializeParams) legacyInitializeRootFields {
+	encoded, err := protocol.Marshal(params)
+	if err != nil {
+		return legacyInitializeRootFields{}
+	}
+	var roots legacyInitializeRootFields
+	if err := json.Unmarshal(encoded, &roots); err != nil {
+		return legacyInitializeRootFields{}
+	}
+	return roots
 }
 
 func workspaceURIPath(documentURI uri.URI) (string, bool) {
@@ -500,10 +522,8 @@ func workspacePathResolver(workspaceRoots, runtimePaths []string) *workspace.Pat
 }
 
 func appendWarning(warnings []string, warning string) []string {
-	for _, existing := range warnings {
-		if existing == warning {
-			return warnings
-		}
+	if slices.Contains(warnings, warning) {
+		return warnings
 	}
 	return append(warnings, warning)
 }

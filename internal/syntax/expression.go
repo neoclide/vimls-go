@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -2560,8 +2561,8 @@ func (p *expressionParser) consumeClosing(expected string, fallback int) int {
 	// retain the established delimiter diagnostics for both nesting levels.
 	// The List-specific Vim diagnostic applies when the List itself is the
 	// expression recovery boundary.
-	for index := len(p.diagnostics) - 1; index >= 0; index-- {
-		if p.diagnostics[index].Code == "vimls/missing-list-end" {
+	for index, diagnostic := range slices.Backward(p.diagnostics) {
+		if diagnostic.Code == "vimls/missing-list-end" {
 			p.diagnostics[index].Code = "vimls/missing-delimiter"
 			p.diagnostics[index].Message = "expected ]"
 			break

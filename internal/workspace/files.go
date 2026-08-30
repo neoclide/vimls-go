@@ -237,7 +237,7 @@ func uniqueSorted(files []string) []string {
 }
 
 func hasVimRuntimeDirectory(relative string) bool {
-	for _, part := range strings.Split(relative, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(relative, string(filepath.Separator)) {
 		if _, ok := vimRuntimeDirectories[part]; ok {
 			return true
 		}

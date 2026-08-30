@@ -146,7 +146,7 @@ func TestLegacyOneLetterSubstituteDisambiguation(t *testing.T) {
 	if len(file.Commands) != 6 {
 		t.Fatalf("commands = %#v", file.Commands)
 	}
-	for index := 0; index < 4; index++ {
+	for index := range 4 {
 		if file.Commands[index].Canonical != "substitute" || file.Commands[index].Substitute == nil || file.Commands[index].Name.End-file.Commands[index].Name.Start != 1 {
 			t.Fatalf("legacy one-letter command %d = %#v", index, file.Commands[index])
 		}

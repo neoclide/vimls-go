@@ -86,7 +86,7 @@ func TestRenameStaticImportAcrossClosedAndOpenDocuments(t *testing.T) {
 	}
 }
 
-func pointerInt32(value int32) *int32 { return &value }
+func pointerInt32(value int32) *int32 { return new(value) }
 
 func TestRenameRejectsUnknownDynamicAndInvalidNames(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho unknown\n")

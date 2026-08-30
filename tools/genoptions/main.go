@@ -137,7 +137,7 @@ func parseSource(source []byte) ([]option, error) {
 
 func optionType(flags string) (string, error) {
 	result := ""
-	for _, f := range strings.Split(flags, "|") {
+	for f := range strings.SplitSeq(flags, "|") {
 		switch strings.TrimSpace(f) {
 		case "P_BOOL":
 			result = "OptionBool"

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +15,40 @@ import (
 	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
+
+func TestWorkspaceRootsFromInitializeLegacyFields(t *testing.T) {
+	root := t.TempDir()
+	rootPath := t.TempDir()
+	for name, fields := range map[string]map[string]string{
+		"rootUri takes precedence": {"rootUri": uri.File(root).String(), "rootPath": rootPath},
+		"rootPath fallback":        {"rootPath": rootPath},
+	} {
+		t.Run(name, func(t *testing.T) {
+			encoded, err := json.Marshal(fields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var params protocol.InitializeParams
+			if err := protocol.Unmarshal(encoded, &params); err != nil {
+				t.Fatal(err)
+			}
+			roots := workspaceRootsFromInitialize(&params)
+			wantRoot := rootPath
+			if name == "rootUri takes precedence" {
+				wantRoot = root
+			}
+			want, err := filepath.EvalSymlinks(wantRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(roots) != 1 || roots[0] != want {
+				t.Fatalf("roots = %#v, want %#v", roots, []string{want})
+			}
+		})
+	}
+}
 
 func TestNegotiatePositionEncoding(t *testing.T) {
 	tests := []struct {
@@ -46,13 +80,11 @@ func TestLogfSerializesConcurrentWriters(t *testing.T) {
 	const messages = 40
 	var group sync.WaitGroup
 	for worker := range workers {
-		group.Add(1)
-		go func() {
-			defer group.Done()
+		group.Go(func() {
 			for message := range messages {
 				instance.logf("worker=%d message=%d", worker, message)
 			}
-		}()
+		})
 	}
 	group.Wait()
 	lines := strings.Split(strings.TrimSpace(output.String()), "\n")

@@ -1343,7 +1343,7 @@ func officialParserCaseSelected(key string) bool {
 	if filter == "" {
 		return true
 	}
-	for _, part := range strings.Split(filter, ",") {
+	for part := range strings.SplitSeq(filter, ",") {
 		if part = strings.TrimSpace(part); part != "" && strings.Contains(key, part) {
 			return true
 		}
