@@ -173,7 +173,7 @@ E1414 E1526 E1527 E1539 E1552 E1553 E1555 E1561
 `
 
 const officialCompilePendingCodes = `
-E464 E475
+E475
 E476 E488 E492 E611 E689 E701 E703 E704 E716 E721 E728 E729
 E730 E731 E734 E745 E804 E805 E806 E896 E908 E974 E976 E996
 E1003 E1015 E1023 E1024 E1027 E1030 E1037
@@ -244,6 +244,7 @@ var officialCompileMigrationExclusions = map[string]bool{
 // pending syntax/type work and must not be added to the support inventory.
 var officialCompileStaticAnalysisExcludedCodes = map[string]string{
 	"vim/E155":  "depends on the runtime sign-definition registry",
+	"vim/E464":  "depends on mutable global and buffer-local user-command tables",
 	"vim/E1028": "compiler fallback after another compilation failure",
 	"vim/E1146": "internal command-dispatch fallback",
 	"vim/E1154": "requires compile-time constant evaluation",
