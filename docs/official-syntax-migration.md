@@ -437,6 +437,9 @@ authoritative syntax split is therefore 983 migrated, zero ready, and 45
 pending-fix.
 Commit `f99a3c6` migrated the nested-enum placement variant. The authoritative
 syntax split is therefore 984 migrated, zero ready, and 44 pending-fix.
+Commit `a5e3b9d` migrated all three closed enum-value-phase variants. The
+authoritative syntax split is therefore 987 migrated, zero ready, and 41
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1512,7 +1515,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 179 syntax variants: 135 migrated and 44 pending-fix. In the
+Group D contains 179 syntax variants: 138 migrated and 41 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1608,8 +1611,8 @@ E1315 M ready: 36:799/script
 E1414 M ready: 12:230/script
 E1415 M ready: 28:569/script
 E1418 M ready: 288:6615/script,298:6850/script
-E1419 P missing: 214:5043/script,264:6157/script
-E1419 P recovery: 224:5261/script
+E1419 M missing: 214:5043/script,264:6157/script
+E1419 M recovery: 224:5261/script
 E1420 P mapping: 84:2047/script,100:2430/script
 E1435 M missing: 1706:39098/script
 E488 M ready: 108:2615/script
@@ -1641,6 +1644,12 @@ commands.
 Commit `f99a3c6` migrates `1706:39098/script`. A nested enum is retained as a
 complete child block for loose recovery, while its declaration name reports
 E1435 when the active block stack contains a Vim9 `def`.
+
+Commit `a5e3b9d` migrates the three E1419 cases. Once a value without a
+trailing comma closes the enum value phase, a later non-member line is kept as
+recovery syntax but cannot become a new value or ordinary command. Its full
+command span owns E1419, including a leading comma, and the matched `endenum`
+still closes the block.
 
 #### `test_vim9_func.vim` (74)
 
