@@ -1088,3 +1088,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9expr.c:650-696`, `src/eval.c:7660-7675`, and
   `src/evalvars.c:3180-3205` implement the compiled and evaluated checks.
 - `src/errors.h:2769-2770` defines the exact message.
+
+## Cannot index a Number: E1062
+
+E1062 means `Cannot index a Number`. Analysis reports it when a Vim9
+script-level expression indexes or slices a receiver that is statically known
+to be a Number. The diagnostic selects the receiver. Literal and resolved
+Number values are supported, while `any` and otherwise unknown receivers stay
+unknown.
+
+Legacy expressions retain their historical Number indexing behavior. A
+compiled `def` rejects the same statically known receiver earlier with E1107,
+so it does not also receive E1062. A dynamically typed value can still produce
+E1062 while a `def` executes, but static analysis does not guess that runtime
+value. Float receivers remain E806 at script level rather than being folded
+into this rule.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_expr.vim:2283-2284` distinguishes script-level E1062
+  for a Number receiver from E806 for a Float and compiled E1107 for both.
+- `src/testdir/test_vim9_expr.vim:2589-2590` covers a Number literal and the
+  runtime-only dynamically typed `def` case.
+- A clean Vim v9.2.1015 source containing `var x = 1234[1 : 2]` reports E1062,
+  confirming that the shared runtime check also covers slices.
+- `src/eval.c:6083-6131` emits E1062 for a Number receiver only under Vim9
+  evaluation semantics.
+- `src/vim9expr.c:137-320` routes the statically compiled form to E1107.
+- `src/errors.h:2773-2774` defines the exact message.

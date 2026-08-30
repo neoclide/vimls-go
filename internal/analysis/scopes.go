@@ -1248,7 +1248,14 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 &&
 				!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 				receiver := expression.Children[0]
-				if resolvedExpressionType(result, expressionScope, receiver).Name == "float" {
+				switch resolvedExpressionType(result, expressionScope, receiver).Name {
+				case "number":
+					if command.Dialect == syntax.Vim9 {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1062", Message: "Cannot index a Number", Span: receiver.Span,
+						})
+					}
+				case "float":
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code: "vim/E806", Message: "Using a Float as a String", Span: receiver.Span,
 					})

@@ -383,6 +383,47 @@ func TestAnalyzeE1060ImportAliasRequiresDot(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1062CannotIndexNumber(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{name: "decimal literal", source: "vim9script\nvar x = 1234[3]\n", span: "1234"},
+		{name: "hex literal", source: "vim9script\nvar x = 0xff[1]\n", span: "0xff"},
+		{name: "declared number", source: "vim9script\nvar number: number = 1234\nvar x = number[3]\n", span: "number"},
+		{name: "slice", source: "vim9script\nvar x = 1234[1 : 2]\n", span: "1234"},
+		{name: "vim9cmd", source: "vim9cmd echo 1234[3]\n", span: "1234"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1062" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot index a Number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1062 diagnostics = %#v, want one on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let g:x = 1234[3]\n",
+		"vim9script\ndef F()\n  var x = 1234[3]\nenddef\n",
+		"vim9script\nvar x = 0.7[1]\n",
+		"vim9script\nvar x = '1234'[3]\n",
+		"vim9script\nvar value: any\nvar x = value[3]\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1062" {
+				t.Fatalf("source %q unexpectedly received E1062: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeSpecialAsNumberDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantCode, wantMessage string
