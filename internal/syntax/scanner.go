@@ -371,7 +371,7 @@ func parseSource(source string, initial Dialect) *File {
 			view = readVim9LogicalView(source, offset)
 		}
 		directAggregateMember := len(aggregateStack) > 0 && len(dialectStack) == 0
-		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateMember, scriptVersion)
+		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateMember, len(dialectStack) > 1, scriptVersion)
 		loadKeymapCommand, textBodyCommand := applyCommandState(before)
 		if loadKeymapCommand >= 0 {
 			offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, hasOpenVim9CommandBlock(file))
@@ -931,10 +931,10 @@ func vim9ScriptArgumentDiagnostic(source string, argument Span) (string, string,
 }
 
 func scanCommands(file *File, start, end int, baseDialect Dialect) {
-	scanCommandsWithContext(file, start, end, baseDialect, false, 1)
+	scanCommandsWithContext(file, start, end, baseDialect, false, false, 1)
 }
 
-func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, directAggregateMember bool, scriptVersion uint8) {
+func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, directAggregateMember, nestedFunction bool, scriptVersion uint8) {
 	for start < end {
 		diagnosticsBeforeCommand := len(file.Diagnostics)
 		start = skipSpaceToken(file, start, end)
@@ -1315,6 +1315,23 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			argumentEnd, separator, comment, boundaryExpression = scanLegacyCommandArgument(file.Source, argumentStart, end, scanMetadata, &parsedCommand)
 		} else {
 			argumentEnd, separator, comment, boundaryExpression = scanVim9CommandArgument(file.Source, argumentStart, end, scanMetadata, &parsedCommand)
+		}
+		if canonical == "enddef" || canonical == "endfunction" {
+			trailing := skipSpace(file.Source, argumentStart, argumentEnd)
+			separatorTail := end
+			if nestedFunction && separator.Start < separator.End {
+				separatorTail = skipSpace(file.Source, separator.End, end)
+			}
+			if trailing < argumentEnd || separatorTail < end {
+				span := Span{Start: trailing, End: argumentEnd}
+				if separatorTail < end {
+					span = Span{Start: separatorTail, End: end}
+				}
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E1173", Message: "Text found after " + canonical + ": " + file.Text(span), Span: span,
+				})
+				parsedCommand.detailsOpaque = true
+			}
 		}
 		if argumentStart < argumentEnd {
 			file.Tokens = append(file.Tokens, Token{Kind: TokenArgument, Span: Span{Start: argumentStart, End: argumentEnd}})
