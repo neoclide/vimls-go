@@ -1517,6 +1517,9 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 	switch expression.Kind {
 	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
+			if strings.HasPrefix(expression.Value, "&") {
+				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
+			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, false, skipped)
 			result.References = append(result.References, &Reference{Name: expression.Value, Span: expression.Span, Declaration: declaration})
 			if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && assignmentTargetNeedsDeclaration(expression.Value) && declaration == nil {
