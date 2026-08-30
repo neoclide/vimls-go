@@ -130,6 +130,7 @@ func collectTypeMismatchDiagnostics(result *FileAnalysis, commands []syntax.Comm
 		if command.Dialect == syntax.Vim9 {
 			collectDeclarationTypeMismatchDiagnostic(result, command)
 			collectForTypeMismatchDiagnostic(result, command)
+			collectConditionTypeMismatchDiagnostic(result, scope, command)
 			if command.Declaration != nil {
 				collectAssignmentTypeMismatchDiagnostics(result, scope, command.Declaration.Initializer)
 			} else {
@@ -203,6 +204,9 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	if expression.Kind == syntax.ExpressionCast && expression.CastType != nil && len(expression.Children) > 0 {
 		appendTypeMismatchDiagnostic(result, convertSyntaxType(expression.CastType), expression.Children[0])
 	}
+	if expression.Kind == syntax.ExpressionBinary && (expression.Value == "&&" || expression.Value == "||") && scopeUsesDefTypeRules(scope) {
+		collectLogicalTypeMismatchDiagnostic(result, expression)
+	}
 	if expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice {
 		collectIndexTypeMismatchDiagnostic(result, scope, expression)
 	}
@@ -214,6 +218,45 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	for _, child := range expression.Children {
 		collectAssignmentTypeMismatchDiagnostics(result, scope, child)
 	}
+}
+
+func collectConditionTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, command *syntax.Command) {
+	if command == nil || !scopeUsesDefTypeRules(scope) || command.Canonical != "if" && command.Canonical != "elseif" && command.Canonical != "while" || len(command.Expressions) == 0 {
+		return
+	}
+	condition := command.Expressions[0]
+	actual := result.TypeOf(condition)
+	if isUnknownType(actual) || actual.Name == "bool" || actual.Name == "number" {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1012", Message: "Type mismatch; expected bool but got " + valueTypeDisplay(actual), Span: condition.Span,
+	})
+}
+
+func collectLogicalTypeMismatchDiagnostic(result *FileAnalysis, expression *syntax.Expression) {
+	if len(expression.Children) < 2 {
+		return
+	}
+	for _, operand := range expression.Children[:2] {
+		actual := result.TypeOf(operand)
+		if isUnknownType(actual) || actual.Name == "bool" {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1012", Message: "Type mismatch; expected bool but got " + valueTypeDisplay(actual), Span: operand.Span,
+		})
+		return
+	}
+}
+
+func scopeUsesDefTypeRules(scope *Scope) bool {
+	for current := scope; current != nil; current = current.Parent {
+		if current.Kind == syntax.BlockDef || current.Lambda != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func collectLambdaReturnTypeMismatchDiagnostic(result *FileAnalysis, expression *syntax.Expression) {

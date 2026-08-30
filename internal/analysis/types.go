@@ -367,7 +367,12 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		} else {
 			typ = ValueType{Name: "number"}
 		}
-	case syntax.ExpressionString, syntax.ExpressionInterpolatedString:
+	case syntax.ExpressionString:
+		typ = ValueType{Name: "string"}
+	case syntax.ExpressionInterpolatedString:
+		for _, child := range expression.Children {
+			state.infer(child, scope)
+		}
 		typ = ValueType{Name: "string"}
 	case syntax.ExpressionBlob:
 		typ = ValueType{Name: "blob"}
