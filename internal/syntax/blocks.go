@@ -188,7 +188,7 @@ func buildBlocks(file *File) {
 			blockIndex := len(file.Blocks)
 			file.Blocks = append(file.Blocks, Block{Kind: kind, Span: Span{Start: command.Span.Start, End: len(file.Source)}, Header: commandIndex, End: -1, Parent: parent})
 			command.Block = blockIndex
-			if isInvalidAbstractHeader(command) {
+			if isInvalidAbstractHeader(command) || command.Kind == CommandBlockStart && command.detailsOpaque {
 				recoveryBlocks[blockIndex] = true
 			}
 			if kind == BlockFor {
@@ -293,6 +293,9 @@ func buildBlocks(file *File) {
 				}
 			}
 			if !closes {
+				if command.detailsOpaque {
+					continue
+				}
 				if command.Dialect == Vim9 && command.Canonical == "}" {
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1025", Message: "closing } without opening {", Span: command.Name})
 					continue

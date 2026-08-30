@@ -1124,6 +1124,25 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			return
 		}
 		if dialect == Vim9 && (file.Source[start] == '{' || file.Source[start] == '}') {
+			if start+1 < end && file.Source[start+1] == '#' {
+				name := Span{Start: start, End: start + 1}
+				kind := CommandBlockEnd
+				if file.Source[start] == '{' {
+					kind = CommandBlockStart
+				}
+				file.Tokens = append(file.Tokens,
+					Token{Kind: TokenCommand, Span: name},
+					Token{Kind: TokenOpaque, Span: Span{Start: start + 1, End: end}},
+				)
+				file.Commands = append(file.Commands, Command{
+					Kind: kind, Dialect: dialect, baseDialect: baseDialect, detailsOpaque: true,
+					Span: name, Name: name, TypedName: file.Source[start : start+1], Canonical: file.Source[start : start+1], Block: -1,
+				})
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E488", Message: "trailing characters", Span: Span{Start: start + 1, End: end},
+				})
+				return
+			}
 			after := skipSpace(file.Source, start+1, end)
 			if after == end || isCommentStart(file.Source, after, after, end, dialect, vimdata.Command{}) {
 				name := Span{Start: start, End: start + 1}
