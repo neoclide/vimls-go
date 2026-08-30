@@ -278,3 +278,29 @@ Representative source evidence:
 - `src/testdir/test_vim9_assign.vim:1202` and
   `src/testdir/test_vim9_cmd.vim:472` cover parser-level expression and command
   tails.
+
+## Not an editor command: E492
+
+E492 means `Not an editor command: {command}`. Vim reports it only after text
+at command position fails to resolve to either a builtin Ex command or a user
+command. In a compiled `def`, the corresponding statically invalid command
+usually uses E476 instead.
+
+The parser reports E492 only for source shapes that do not require the mutable
+user-command registry. Current Vim9 support covers a complete typed assignment
+that omitted `var`, the lowercase declaration-like `notexist:repl` form, and
+the pinned builtin-command forms `ka`, `:1ka`, and `mode 4`. Arbitrary unknown
+legacy commands, dynamically executed strings, and capitalized command
+candidates remain opaque. They can be classified only after every Vim file on
+runtimepath has contributed to an immutable user-command snapshot.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_assign.vim:3110-3112` reports E492 for the script-level
+  `MyVar: string = 'abc'` form that omitted `var`.
+- `src/testdir/test_vim9_cmd.vim:2073-2076` distinguishes script-level E492
+  from compiled E476 for `notexist:repl`.
+- `src/testdir/test_vim9_script.vim:4832-4841,4878-4881` covers the pinned
+  invalid command forms and their E476/E492 context split.
+- `runtime/doc/message.txt:797-801` defines E492 after builtin and user-command
+  lookup fails.
