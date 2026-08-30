@@ -2092,6 +2092,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 					}
 				}
 				collectMapCallbackReturnTypeDiagnostic(result, scope, builtin, arguments, actual)
+				collectSearchpairFlagsDiagnostic(result, scope, builtin, arguments)
 				collectBuiltinCompiledStringDiagnostics(result, scope, builtin, arguments, expression.Span.Start)
 			} else if !builtinCall {
 				collectFunctionCallDiagnostics(result, scope, expression, dialect == syntax.Vim9)
@@ -2175,8 +2176,44 @@ func collectMapCallbackReturnTypeDiagnostic(result *FileAnalysis, scope *Scope, 
 	})
 }
 
+func collectSearchpairFlagsDiagnostic(result *FileAnalysis, scope *Scope, function vimdata.BuiltinFunction, arguments []*syntax.Expression) {
+	if result == nil || scope != result.Root || function.Name != "searchpair" && function.Name != "searchpairpos" || len(arguments) < 4 {
+		return
+	}
+	literal := arguments[3]
+	if literal == nil || literal.Kind != syntax.ExpressionString || len(literal.Value) < 2 {
+		return
+	}
+	quote := literal.Value[0]
+	if literal.Value[len(literal.Value)-1] != quote || quote != '\'' && quote != '"' {
+		return
+	}
+	flags := literal.Value[1 : len(literal.Value)-1]
+	if quote == '"' && strings.Contains(flags, "\\") || quote == '\'' && strings.Contains(flags, "''") {
+		return
+	}
+	nomove, setmark, invalid := false, false, false
+	for index := 0; index < len(flags); index++ {
+		switch flags[index] {
+		case 'b', 'c', 'm', 'r', 'w', 'W', 'z':
+		case 'n':
+			nomove = true
+		case 's':
+			setmark = true
+		default:
+			invalid = true
+		}
+	}
+	if !invalid && !(nomove && setmark) {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E475", Message: "Invalid argument: " + flags, Span: literal.Span,
+	})
+}
+
 func collectBuiltinCompiledStringDiagnostics(result *FileAnalysis, scope *Scope, function vimdata.BuiltinFunction, arguments []*syntax.Expression, visibilityOffset int) {
-	if result == nil || result.File == nil || scope == nil || function.Name != "searchpair" && function.Name != "searchpairpos" || len(arguments) < 5 {
+	if result == nil || result.File == nil || scope == nil || !scopeContainsDef(scope) || function.Name != "searchpair" && function.Name != "searchpairpos" || len(arguments) < 5 {
 		return
 	}
 	literal := arguments[4]

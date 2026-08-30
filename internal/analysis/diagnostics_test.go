@@ -1094,6 +1094,53 @@ enddef
 	}
 }
 
+func TestAnalyzeSearchpairInvalidLiteralFlags(t *testing.T) {
+	source := `vim9script
+echo searchpair("a", "b", "c", "d", "f", 33)
+echo searchpairpos('a', 'b', 'c', 'ns')
+echo searchpair('a', 'b', 'c', 'bW')
+var flags = 'd'
+echo searchpair('a', 'b', 'c', flags)
+def Deferred()
+  echo searchpair("a", "b", "c", "d", "missing", 33)
+enddef
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var invalid []syntax.Diagnostic
+	var compiledMissing bool
+	for _, diagnostic := range result.Diagnostics {
+		switch diagnostic.Code {
+		case "vim/E475":
+			invalid = append(invalid, diagnostic)
+		case "vim/E1001":
+			if file.Text(diagnostic.Span) == "missing" {
+				compiledMissing = true
+			}
+		case "vim/E121":
+			t.Fatalf("script skip expression was compiled: %#v", diagnostic)
+		}
+	}
+	want := []struct {
+		message string
+		text    string
+	}{
+		{message: "Invalid argument: d", text: `"d"`},
+		{message: "Invalid argument: ns", text: "'ns'"},
+	}
+	if len(invalid) != len(want) {
+		t.Fatalf("E475 diagnostics = %#v, want %v; all diagnostics = %#v", invalid, want, result.Diagnostics)
+	}
+	for index, diagnostic := range invalid {
+		if diagnostic.Message != want[index].message || file.Text(diagnostic.Span) != want[index].text {
+			t.Fatalf("E475[%d] = %#v on %q, want %v", index, diagnostic, file.Text(diagnostic.Span), want[index])
+		}
+	}
+	if !compiledMissing {
+		t.Fatalf("def skip expression did not retain E1001: %#v", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
 	tests := []struct {
 		name   string

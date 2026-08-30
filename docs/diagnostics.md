@@ -190,3 +190,33 @@ Representative source evidence:
   from E1190 at Vim9 script level.
 - `src/testdir/test_vim9_func.vim:4397-4406` distinguishes E176 in a `def` from
   E1106 at Vim9 script level.
+
+## Invalid argument: E475
+
+E475 is Vim's historical general-purpose `Invalid argument: {value}` error,
+not a single Vim9 type rule. The language server emits it only for
+command-specific forms whose invalid value is present directly in the source.
+
+The official compile corpus includes a top-level Vim9 declaration such as
+`var $VAR: number`: an environment variable cannot have a type-only
+declaration without a value, so Vim9 script reports E475. The equivalent
+declaration in a `def` uses the context-specific E1016 instead.
+
+At Vim9 script root, a simple literal flags argument to `searchpair()` or
+`searchpairpos()` is also statically checkable. These functions accept `b`,
+`c`, `m`, `n`, `r`, `s`, `w`, `W`, and `z`; `n` and `s` cannot be combined.
+Unsupported flags, including the generic search flags `e` and `p`, produce
+E475 on the literal. Dynamic strings remain unknown. A skip expression string
+is compiled only inside a `def`; its unresolved names use E1001 and do not turn
+into script-level E475 diagnostics.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_assign.vim:217` distinguishes E1016 in a `def` from
+  E475 at Vim9 script level for the environment-variable declaration.
+- `src/evalfunc.c:10672-10716` parses search flags, and
+  `src/evalfunc.c:11116-11127` rejects flags that `searchpair()` cannot use.
+- `src/testdir/test_vim9_builtin.vim:3924` distinguishes E1001 while compiling
+  the skip expression in a `def` from E475 for the invalid script-level flags.
+- `src/testdir/test_search.vim:438-453` covers invalid literal flags for both
+  `searchpair()` and `searchpairpos()`.
