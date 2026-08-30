@@ -7,11 +7,12 @@ import (
 )
 
 func TestParseSourceFixture(t *testing.T) {
-	source := []byte(`static const funcentry_T global_functions[] =
+	source := []byte(`static argcheck_T arg2_string[] = {arg_string, arg_string};
+static const funcentry_T global_functions[] =
 {
     {"zeta", 1, VARGS, 0, NULL,
             ret_any, f_zeta},
-    {"alpha", 0, 2, 0, NULL,
+    {"alpha", 0, 2, 0, arg2_string,
             ret_list_string, f_alpha},
     {"guarded", 1, 1, 0, NULL,
             ret_number_bool,
@@ -31,6 +32,9 @@ func TestParseSourceFixture(t *testing.T) {
 	}
 	if functions[2].MaxArgs != -1 || functions[0].ReturnType != "ReturnList" || functions[1].ReturnType != "ReturnNumberOrBool" {
 		t.Fatalf("metadata = %#v", functions)
+	}
+	if got := strings.Join(functions[0].ArgumentChecks, ","); got != "arg_string,arg_string" {
+		t.Fatalf("alpha argument checks = %q", got)
 	}
 }
 
@@ -54,6 +58,10 @@ func TestPinnedRevisionAndGeneratedTable(t *testing.T) {
 	if len(functions) != 591 {
 		t.Fatalf("got %d functions, want 591", len(functions))
 	}
+	checks, err := parseArgumentChecks(source)
+	if err != nil || len(checks) != 148 {
+		t.Fatalf("argument check tables = %d, %v", len(checks), err)
+	}
 	for i := 1; i < len(functions); i++ {
 		if functions[i-1].Name >= functions[i].Name {
 			t.Fatalf("functions are not strictly sorted at %d: %q, %q", i, functions[i-1].Name, functions[i].Name)
@@ -70,5 +78,8 @@ func TestPinnedRevisionAndGeneratedTable(t *testing.T) {
 		if !found {
 			t.Errorf("missing builtin %q", name)
 		}
+	}
+	if got := strings.Join(functions[0].ArgumentChecks, ","); functions[0].Name != "abs" || got != "arg_float_or_nr" {
+		t.Fatalf("abs metadata = %#v", functions[0])
 	}
 }

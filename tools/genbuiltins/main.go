@@ -20,17 +20,21 @@ const (
 	vimCommit = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
 )
 
-// A table row starts with a quoted name and its two arity fields. The rest of
-// the row may contain feature-guarded C preprocessor branches, so parsing is
-// deliberately limited to the stable fields and the return helper token.
-var functionStart = regexp.MustCompile(`^\s*\{"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*([0-9]+)\s*,\s*([^,\s]+)\s*,`)
+// A table row starts with a quoted name, arity fields, method-argument flag,
+// and argument-check table. The return implementation may contain guarded C
+// preprocessor branches, so only the stable prefix and ret_* token are read.
+var functionStart = regexp.MustCompile(`^\s*\{"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*([0-9]+)\s*,\s*([^,\s]+)\s*,\s*[^,]+,\s*([^,\s]+)\s*,`)
 var returnHelper = regexp.MustCompile(`\b(ret_[A-Za-z0-9_]+)\b`)
+var argumentArray = regexp.MustCompile(`(?s)static\s+argcheck_T\s+([A-Za-z0-9_]+)\[\]\s*=\s*\{([^}]*)\};`)
+var cComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+var cIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type builtin struct {
-	Name       string
-	MinArgs    int
-	MaxArgs    int
-	ReturnType string
+	Name           string
+	MinArgs        int
+	MaxArgs        int
+	ReturnType     string
+	ArgumentChecks []string
 }
 
 func main() {
@@ -72,6 +76,10 @@ func verifyRevision(root string) error {
 }
 
 func parseSource(source []byte) ([]builtin, error) {
+	argumentChecks, err := parseArgumentChecks(source)
+	if err != nil {
+		return nil, err
+	}
 	start := bytes.Index(source, []byte("static const funcentry_T global_functions[]"))
 	if start < 0 {
 		return nil, fmt.Errorf("global_functions table not found")
@@ -116,7 +124,15 @@ func parseSource(source []byte) ([]builtin, error) {
 		if helper != nil {
 			returnType = returnTypeName(helper[1])
 		}
-		functions = append(functions, builtin{Name: match[1], MinArgs: minArgs, MaxArgs: maxArgs, ReturnType: returnType})
+		var checks []string
+		if match[4] != "NULL" {
+			var ok bool
+			checks, ok = argumentChecks[match[4]]
+			if !ok {
+				return nil, fmt.Errorf("%s argument check table %s not found", match[1], match[4])
+			}
+		}
+		functions = append(functions, builtin{Name: match[1], MinArgs: minArgs, MaxArgs: maxArgs, ReturnType: returnType, ArgumentChecks: checks})
 	}
 	if len(functions) == 0 {
 		return nil, fmt.Errorf("global_functions table is empty")
@@ -128,6 +144,36 @@ func parseSource(source []byte) ([]builtin, error) {
 		}
 	}
 	return functions, nil
+}
+
+func parseArgumentChecks(source []byte) (map[string][]string, error) {
+	checks := make(map[string][]string)
+	for _, match := range argumentArray.FindAllSubmatch(source, -1) {
+		name := string(match[1])
+		body := cComment.ReplaceAllString(string(match[2]), "")
+		var entries []string
+		for _, entry := range strings.Split(body, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			if !cIdentifier.MatchString(entry) {
+				return nil, fmt.Errorf("%s has unsupported argument checker %q", name, entry)
+			}
+			entries = append(entries, entry)
+		}
+		if len(entries) == 0 {
+			return nil, fmt.Errorf("%s argument check table is empty", name)
+		}
+		if _, duplicate := checks[name]; duplicate {
+			return nil, fmt.Errorf("duplicate argument check table %s", name)
+		}
+		checks[name] = entries
+	}
+	if len(checks) == 0 {
+		return nil, fmt.Errorf("argument check tables not found")
+	}
+	return checks, nil
 }
 
 func returnTypeName(helper string) string {
@@ -173,7 +219,18 @@ func writeOutput(path string, functions []builtin) error {
 	fmt.Fprintf(&generated, "const (\n\tBuiltinVimTag = %q\n\tBuiltinVimCommit = %q\n)\n\n", vimTag, vimCommit)
 	fmt.Fprintln(&generated, "var builtinFunctions = [...]BuiltinFunction{")
 	for _, function := range functions {
-		fmt.Fprintf(&generated, "\t{Name: %q, MinArgs: %d, MaxArgs: %d, ReturnType: %s},\n", function.Name, function.MinArgs, function.MaxArgs, function.ReturnType)
+		fmt.Fprintf(&generated, "\t{Name: %q, MinArgs: %d, MaxArgs: %d, ReturnType: %s", function.Name, function.MinArgs, function.MaxArgs, function.ReturnType)
+		if len(function.ArgumentChecks) > 0 {
+			fmt.Fprint(&generated, ", ArgumentChecks: []string{")
+			for index, check := range function.ArgumentChecks {
+				if index > 0 {
+					fmt.Fprint(&generated, ", ")
+				}
+				fmt.Fprintf(&generated, "%q", check)
+			}
+			fmt.Fprint(&generated, "}")
+		}
+		fmt.Fprintln(&generated, "},")
 	}
 	fmt.Fprintln(&generated, "}")
 	formatted, err := format.Source(generated.Bytes())

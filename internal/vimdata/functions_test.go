@@ -7,21 +7,22 @@ func TestLookupFunctionMetadata(t *testing.T) {
 		t.Fatalf("builtin provenance = %s/%s", BuiltinVimTag, BuiltinVimCommit)
 	}
 	tests := []struct {
-		name       string
-		min, max   int
-		returnType FunctionReturnType
+		name                  string
+		min, max, checkCount  int
+		returnType            FunctionReturnType
+		firstCheck, lastCheck string
 	}{
-		{"abs", 1, 1, ReturnAny},
-		{"argc", 0, 1, ReturnNumber},
-		{"printf", 1, 19, ReturnString},
-		{"range", 1, 3, ReturnList},
-		{"ch_open", 1, 2, ReturnChannel},
-		{"map", 2, 2, ReturnUnknown},
-		{"xor", 2, 2, ReturnNumber},
+		{"abs", 1, 1, 1, ReturnAny, "arg_float_or_nr", "arg_float_or_nr"},
+		{"argc", 0, 1, 1, ReturnNumber, "arg_number", "arg_number"},
+		{"printf", 1, 19, 19, ReturnString, "arg_string_or_nr", "arg_any"},
+		{"range", 1, 3, 3, ReturnList, "arg_number", "arg_number"},
+		{"ch_open", 1, 2, 2, ReturnChannel, "arg_string", "arg_dict_any"},
+		{"map", 2, 2, 2, ReturnUnknown, "arg_list_or_dict_or_blob_or_string_mod", "arg_map_func"},
+		{"xor", 2, 2, 2, ReturnNumber, "arg_number", "arg_number"},
 	}
 	for _, test := range tests {
 		function, ok := LookupFunction(test.name)
-		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType {
+		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType || len(function.ArgumentChecks) != test.checkCount || function.ArgumentChecks[0] != test.firstCheck || function.ArgumentChecks[len(function.ArgumentChecks)-1] != test.lastCheck {
 			t.Fatalf("LookupFunction(%q) = %#v, %v", test.name, function, ok)
 		}
 	}

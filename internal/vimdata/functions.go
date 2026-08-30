@@ -30,6 +30,9 @@ type BuiltinFunction struct {
 	MinArgs    int
 	MaxArgs    int
 	ReturnType FunctionReturnType
+	// ArgumentChecks preserves Vim's evalfunc.c checker names in argument
+	// order. A nil slice means Vim has no static checker for this function.
+	ArgumentChecks []string
 }
 
 // LookupFunction resolves a builtin function by its canonical name. Vim
