@@ -1261,7 +1261,11 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	}
 	if command.Canonical != "++" && command.Canonical != "--" {
 		for _, target := range command.Targets {
-			walkExpression(result, file, target, scope, nil, false, command.Dialect)
+			if command.Canonical == "redir" {
+				walkAssignmentTarget(result, file, target, scope, nil, command.Dialect)
+			} else {
+				walkExpression(result, file, target, scope, nil, false, command.Dialect)
+			}
 		}
 	}
 	if command.Embedded != nil {
@@ -1281,6 +1285,14 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		return
 	}
 	switch expression.Kind {
+	case syntax.ExpressionAssignment:
+		if len(expression.Children) == 0 {
+			return
+		}
+		walkAssignmentTarget(result, file, expression.Children[0], scope, skipped, dialect)
+		for _, child := range expression.Children[1:] {
+			walkExpression(result, file, child, scope, skipped, false, dialect)
+		}
 	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
 			if strings.HasPrefix(expression.Value, "&") {
@@ -1356,6 +1368,51 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	}
+}
+
+// walkAssignmentTarget resolves references contained in an assignment lhs,
+// while keeping the lhs binding itself separate from ordinary rhs reads.  Vim9
+// reports E1089 for a statically unknown root binding; index expressions remain
+// ordinary reads and can still produce E1001.
+func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *syntax.Expression, scope *Scope, skipped map[syntax.Span]bool, dialect syntax.Dialect) {
+	if expression == nil || scope == nil || file == nil {
+		return
+	}
+	switch expression.Kind {
+	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
+		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
+			declaration := resolve(scope, expression.Value, expression.Span.Start, false, skipped)
+			result.References = append(result.References, &Reference{Name: expression.Value, Span: expression.Span, Declaration: declaration})
+			if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && assignmentTargetNeedsDeclaration(expression.Value) && declaration == nil {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1089", Message: "Unknown variable: " + expression.Value, Span: expression.Span,
+				})
+			}
+		}
+	case syntax.ExpressionMember:
+		if len(expression.Children) > 0 {
+			walkAssignmentTarget(result, file, expression.Children[0], scope, skipped, dialect)
+		}
+	case syntax.ExpressionIndex, syntax.ExpressionSlice:
+		if len(expression.Children) > 0 {
+			walkAssignmentTarget(result, file, expression.Children[0], scope, skipped, dialect)
+		}
+		for _, child := range expression.Children[1:] {
+			walkExpression(result, file, child, scope, skipped, false, dialect)
+		}
+	case syntax.ExpressionList, syntax.ExpressionTuple:
+		for _, child := range expression.Children {
+			walkAssignmentTarget(result, file, child, scope, skipped, dialect)
+		}
+	default:
+		// A recovering or otherwise non-assignable lhs is still an expression.
+		// Walk it normally so a call name or operand is not mislabeled E1089.
+		walkExpression(result, file, expression, scope, skipped, false, dialect)
+	}
+}
+
+func assignmentTargetNeedsDeclaration(name string) bool {
+	return name != "this" && name != "super" && !strings.Contains(name, ":") && !strings.HasPrefix(name, "&") && !strings.HasPrefix(name, "$") && !strings.HasPrefix(name, "@")
 }
 
 func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span) {

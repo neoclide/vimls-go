@@ -255,6 +255,13 @@ func TestOfficialVim9BuiltinCommandArgumentIsNotAssignment(t *testing.T) {
 	if len(file.Diagnostics) != 0 || file.Commands[2].Canonical != "redir" || file.Commands[2].Kind != CommandBuiltin {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}
+	if len(file.Commands[2].Targets) != 1 || file.Commands[2].Targets[0].Kind != ExpressionIndex || file.Text(file.Commands[2].Targets[0].Span) != "l[0]" {
+		t.Fatalf("redir target = %#v", file.Commands[2].Targets)
+	}
+	appendTarget := Parse("vim9script\ndef Tredir()\n  var output = ''\n  redir =>> output\n  redir END\nenddef\n")
+	if len(appendTarget.Diagnostics) != 0 || len(appendTarget.Commands[3].Targets) != 1 || appendTarget.Text(appendTarget.Commands[3].Targets[0].Span) != "output" {
+		t.Fatalf("append redir commands = %#v, diagnostics = %#v", appendTarget.Commands, appendTarget.Diagnostics)
+	}
 }
 
 func TestOfficialUnnamedRegisterAssignmentCommand(t *testing.T) {

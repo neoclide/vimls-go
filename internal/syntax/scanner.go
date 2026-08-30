@@ -2744,6 +2744,24 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	switch command.Canonical {
+	case "redir":
+		if command.Dialect == Vim9 {
+			start := skipSpace(source, 0, len(source))
+			operatorLength := 0
+			if strings.HasPrefix(source[start:], "=>>") {
+				operatorLength = 3
+			} else if strings.HasPrefix(source[start:], "=>") {
+				operatorLength = 2
+			}
+			if operatorLength > 0 {
+				targetStart := skipSpace(source, start+operatorLength, len(source))
+				target, diagnostics, consumed := parseExpressionPrefixWithVersion(source[targetStart:], command.Argument.Start+targetStart, command.Dialect, command.ScriptVersion)
+				if len(diagnostics) == 0 && target != nil && target.Kind != ExpressionMissing && skipSpace(source, targetStart+consumed, len(source)) == len(source) {
+					command.Targets = append(command.Targets, target)
+				}
+			}
+		}
+		return
 	case "class":
 		if command.Dialect == Vim9 && (commandInsideBlock(command, file.Blocks, BlockDef) || commandInsideBlock(command, file.Blocks, BlockFunction)) {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1429", Message: "Class can only be used in a script", Span: command.Name})

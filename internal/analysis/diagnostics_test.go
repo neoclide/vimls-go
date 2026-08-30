@@ -593,6 +593,61 @@ echo outsideMissing
 	}
 }
 
+func TestAnalyzeE1089UnknownAssignmentTargets(t *testing.T) {
+	source := `vim9script
+var scriptValue = {}
+def Check(parameter: number)
+  var output = ''
+  missing = missingValue
+  [firstMissing, secondMissing] = [1, 2]
+  unknownMember.key = 1
+  unknownIndex['key'] = 1
+  scriptValue.key = 1
+  output[0] = 'x'
+  parameter = 2
+  redir => output
+  redir END
+  redir => redirMissing
+  redir END
+enddef
+function Legacy()
+  let legacyMissing = 1
+endfunction
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1089" {
+			got = append(got, diagnostic)
+		}
+	}
+	want := []string{"missing", "firstMissing", "secondMissing", "unknownMember", "unknownIndex", "redirMissing"}
+	if len(got) != len(want) {
+		t.Fatalf("E1089 diagnostics = %#v, want names %v; all diagnostics = %#v", got, want, result.Diagnostics)
+	}
+	for index, name := range want {
+		if got[index].Message != "Unknown variable: "+name || file.Text(got[index].Span) != name {
+			t.Fatalf("E1089[%d] = %#v (%q), want %q", index, got[index], file.Text(got[index].Span), name)
+		}
+	}
+	var rhs bool
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1001" && diagnostic.Message == "Variable not found: missingValue" && file.Text(diagnostic.Span) == "missingValue" {
+			rhs = true
+		}
+		if diagnostic.Code == "vim/E1089" {
+			switch file.Text(diagnostic.Span) {
+			case "scriptValue", "output", "parameter":
+				t.Fatalf("declared assignment target reported E1089: %#v", diagnostic)
+			}
+		}
+	}
+	if !rhs {
+		t.Fatalf("RHS E1001 was suppressed: %#v", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeSearchpairCompiledExpressionIdentifiers(t *testing.T) {
 	source := `vim9script
 def Check()
