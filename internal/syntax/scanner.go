@@ -4394,12 +4394,33 @@ func parseForLoop(file *File, command *Command) {
 	source := file.Text(command.Argument)
 	in := findTopLevelKeyword(source, 0, len(source), "in")
 	if in < 0 {
-		command.For = &ForLoop{IterableSpan: Span{Start: command.Argument.End, End: command.Argument.End}}
+		loop := &ForLoop{IterableSpan: Span{Start: command.Argument.End, End: command.Argument.End}}
+		diagnosticsBeforeType := len(file.Diagnostics)
+		// Vim9 reports the more specific type-delimiter error when a typed
+		// binding has whitespace before its colon, even if the malformed
+		// header then has no usable "in" clause.
+		if command.Dialect == Vim9 {
+			colon := findTopLevelByte(source, 0, len(source), ':')
+			if colon >= 0 {
+				leftEnd := trimExpressionSpaceEnd(source, 0, colon)
+				leftStart := skipExpressionSpace(source, 0)
+				segment := source[leftStart:leftEnd]
+				name, typeSpan := declarationSpans(segment, command.Argument.Start+leftStart, command.Dialect)
+				if name.Start < name.End {
+					diagnoseVim9TypeDelimiter(file, source, command.Argument.Start, name)
+					loop.Bindings = append(loop.Bindings, Binding{Name: name, Type: typeSpan})
+				}
+			}
+		}
+		command.For = loop
 		code, message := "vim/E690", `Missing "in" after :for`
 		lineEnd, _ := physicalLineEnd(file.Source, command.Name.End)
 		header := strings.TrimSpace(file.Source[command.Name.End:lineEnd])
 		if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) && scanWord(header, 0, len(header)) == len(header) {
 			code, message = "vim/E1097", "line incomplete"
+		}
+		if len(file.Diagnostics) > diagnosticsBeforeType && file.Diagnostics[len(file.Diagnostics)-1].Code == "vim/E1059" {
+			return
 		}
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: code, Message: message, Span: command.Name,
