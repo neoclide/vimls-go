@@ -2788,6 +2788,16 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	if command.Canonical == "def" || command.Canonical == "function" && isFunctionDefinition(source) {
 		parseFunctionSignature(file, command)
+		if command.Function != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockClass) && !strings.HasPrefix(file.Text(command.Function.Name), "new") {
+			for _, parameter := range command.Function.Parameters {
+				if parameter.Target != nil {
+					name := file.Text(parameter.Target.Span)
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1390", Message: `Cannot use an object variable "` + name + `" except with the "new" method`, Span: parameter.Target.Span,
+					})
+				}
+			}
+		}
 		if command.Canonical == "function" && command.Dialect == Vim9 && command.Bang.Start < command.Bang.End && command.Function != nil && !strings.HasPrefix(file.Text(command.Function.Name), "g:") {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "no ! allowed", Span: command.Bang})
 		}

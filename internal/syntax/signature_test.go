@@ -448,3 +448,29 @@ func TestVim9ConstructorParameterTarget(t *testing.T) {
 		t.Fatalf("legacy constructor parameter = %#v", legacy)
 	}
 }
+
+func TestVim9ObjectParameterRequiresNewMethod(t *testing.T) {
+	for _, modifier := range []string{"", "static "} {
+		source := "vim9script\nclass A\n  var val = 10\n  " + modifier + "def Foo(this.val: number)\n  enddef\nendclass\n"
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1390" || file.Diagnostics[0].Message != `Cannot use an object variable "this.val" except with the "new" method` || file.Text(file.Diagnostics[0].Span) != "this.val" {
+			t.Fatalf("modifier=%q diagnostics=%#v", modifier, file.Diagnostics)
+		}
+		function := file.Commands[3].Function
+		if function == nil || len(function.Parameters) != 1 || function.Parameters[0].Target == nil {
+			t.Fatalf("modifier=%q function=%#v", modifier, function)
+		}
+		assertFileSpans(t, file)
+	}
+	for _, source := range []string{
+		"vim9script\nclass A\n  var val = 10\n  def newVals(this.val)\n  enddef\nendclass\n",
+		"vim9script\ndef Foo(this.val: number)\nenddef\n",
+	} {
+		file := Parse(source)
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1390" {
+				t.Fatalf("source=%q unexpected E1390: %#v", source, diagnostic)
+			}
+		}
+	}
+}
