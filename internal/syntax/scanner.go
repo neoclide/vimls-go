@@ -4130,6 +4130,13 @@ func parseVariableTargets(file *File, command *Command) {
 		}
 	}
 	for consumed < len(source) {
+		if command.Dialect == Legacy && len(command.Targets) > 0 && source[consumed] == '#' {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E488", Message: "trailing characters",
+				Span: Span{Start: command.Argument.Start + consumed, End: command.Argument.End},
+			})
+			break
+		}
 		target, diagnostics, length := parseExpressionPrefixWithVersion(source[consumed:], command.Argument.Start+consumed, command.Dialect, command.ScriptVersion)
 		command.Targets = append(command.Targets, target)
 		file.Diagnostics = append(file.Diagnostics, diagnostics...)
