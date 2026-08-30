@@ -423,6 +423,9 @@ pending-fix.
 Commit `05e9d93` migrated all three leading-comma tuple variants. The
 authoritative parser split is therefore 978 migrated, zero ready, and 54
 pending-fix.
+Commit `ed1cc85` migrated the invalid enum `#{` comment variant. The
+authoritative parser split is therefore 979 migrated, zero ready, and 53
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1498,7 +1501,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 129 migrated and 54 pending-fix. In the
+Group D contains 183 syntax variants: 130 migrated and 53 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1583,7 +1586,7 @@ E1065 M ready: 60:1409/script,68:1610/script,76:1834/script
 E1068 M ready: 233:5465/script,1527:34659/script,1541:34927/script
 E1069 M ready: 242:5659/script
 E1123 M ready: 151:3717/script,161:3943/script,172:4190/script,182:4421/script,194:4637/script,204:4829/script,252:5905/script,378:8621/script
-E1170 P missing: 978:22009/script
+E1170 M missing: 978:22009/script
 E1315 M ready: 36:799/script
 E1414 M ready: 12:230/script
 E1415 M ready: 28:569/script
@@ -1602,6 +1605,11 @@ E492 P mapping: 44:1002/script,52:1215/script,92:2227/script
 Commit `1779234` migrated the already-ready enum header-separator case at
 `123:3013/script`; the enum declaration and same-line terminator recovery
 remain represented while E488 owns the malformed command boundary.
+
+Commit `ed1cc85` migrated `978:22009/script`. An invalid `#{` comment inside
+the enum value phase reports E1170 over those two bytes, stops only that
+physical value line, and retains the preceding values, `endenum`, and later
+commands. `#{{` and ordinary Vim9 comments keep their existing behavior.
 
 #### `test_vim9_func.vim` (75)
 
