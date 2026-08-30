@@ -149,6 +149,23 @@ func buildBlocks(file *File) {
 					continue
 				}
 			}
+			if file.Blocks[blockIndex].Kind == BlockEnum && !enumValuesOpen[blockIndex] {
+				closeKind, closing := closingBlock(file, command)
+				if (!closing || closeKind != BlockEnum) && !isDirectAggregateMember(command) {
+					command.Block = blockIndex
+					start, end := command.Span.Start, command.Span.End
+					kept := file.Diagnostics[:0]
+					for _, diagnostic := range file.Diagnostics {
+						if diagnostic.Code == "vim/E1050" && diagnostic.Span.Start >= command.Span.Start && diagnostic.Span.End <= command.Span.End {
+							continue
+						}
+						kept = append(kept, diagnostic)
+					}
+					file.Diagnostics = kept
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1419", Message: "Not a valid command in an Enum: " + file.Source[start:end], Span: Span{Start: start, End: end}})
+					continue
+				}
+			}
 		}
 		// Vim9 reports loop-control commands outside a loop at the command
 		// itself.  Mark the surrounding recovery blocks so an incomplete if
