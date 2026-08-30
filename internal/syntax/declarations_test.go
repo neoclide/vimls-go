@@ -1061,6 +1061,35 @@ func TestVim9InvalidEnumValueReportsE1418(t *testing.T) {
 	}
 }
 
+func TestVim9AbstractEnumMethodReportsE1417(t *testing.T) {
+	file := Parse("vim9script\nenum Foo\n  Apple\n  abstract def Bar()\nendenum\n")
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1417" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Abstract cannot be used in an Enum" || file.Text(got[0].Span) != "abstract" {
+		t.Fatalf("E1417 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+	}
+	if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockEnum || file.Blocks[0].End < 0 || file.Commands[file.Blocks[0].End].Canonical != "endenum" {
+		t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+	}
+	assertFileSpans(t, file)
+
+	for name, source := range map[string]string{
+		"value named abstract": "vim9script\nenum Foo\n  abstract\nendenum\n",
+		"concrete method":      "vim9script\nenum Foo\n  Apple\n  def Bar()\n  enddef\nendenum\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			valid := Parse(source)
+			if hasDiagnostic(valid, "vim/E1417") {
+				t.Fatalf("diagnostics = %#v", valid.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
