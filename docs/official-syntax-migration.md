@@ -484,6 +484,9 @@ syntax split is therefore 1016 migrated, zero ready, and 6 pending-fix.
 Commit `1dc0406` migrated the counted `tab` modifier range variant. The
 authoritative syntax split is therefore 1017 migrated, zero ready, and 5
 pending-fix.
+Commit `8ab022a` migrated the incomplete `cal` command inside a `def`. The
+authoritative syntax split is therefore 1018 migrated, zero ready, and 4
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1559,7 +1562,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 168 migrated and 5 pending-fix. In the
+Group D contains 173 syntax variants: 169 migrated and 4 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1735,7 +1738,8 @@ E1267 M missing: 99:2271/script,107:2406/script,1049:22663/script,1061:22873/scr
 E129 M mapping: 3734:85678/script
 E15 M mapping: 828:17920/def
 E16 M mapping: 3817:87815/def
-E476 P mapping: 4520:103771/script,1298:27807/script
+E476 M mapping: 4520:103771/script
+E476 P mapping: 1298:27807/script
 E476 M recovery: 781:16158/def
 E488 M ready: 971:20965/script,3746:85903/script
 E488 M ready: 1755:38517/{def|vim9-script}
@@ -1839,6 +1843,10 @@ Commit `1dc0406` migrates `3817:87815/def`. The tight `5tab` prefix retains its
 numeric Range and `tab` Modifier nodes but reports E16 on the count; the
 generic colon-required and no-range diagnostics are suppressed for that one
 Vim command shape.
+
+Commit `8ab022a` migrates `4520:103771/script`. The incomplete `cal`
+abbreviation remains a retained `call` command, but inside a compiled `def`
+its missing-argument recovery diagnostic is normalized to Vim's primary E476.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
