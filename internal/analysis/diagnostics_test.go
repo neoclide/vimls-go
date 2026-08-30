@@ -4647,6 +4647,34 @@ func TestAnalyzeE1432ConcreteMethodOverridesGenericMethod(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1386ObjectMethodThroughClass(t *testing.T) {
+	for _, use := range []string{"A.Foo()", "def Test()\n  A.Foo\nenddef"} {
+		source := "vim9script\nclass A\n  def Foo()\n  enddef\nendclass\n" + use + "\n"
+		file := syntax.Parse(source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E1386" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != `Object method "Foo" accessible only using class "A" object` || file.Text(got[0].Span) != "Foo" {
+			t.Fatalf("use=%q E1386 diagnostics=%#v; syntax diagnostics=%#v", use, got, file.Diagnostics)
+		}
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\nA.Foo()\n",
+		"vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nvar a = A.new()\na.Foo()\n",
+		"vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\nA._Foo()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1386" {
+				t.Fatalf("guard source reported E1386: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1431AbstractSuperMethodCall(t *testing.T) {
 	tests := []struct {
 		name    string

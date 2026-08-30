@@ -33,6 +33,7 @@ type FileAnalysis struct {
 	typeAliasExempt             map[syntax.Span]bool
 	classValueExempt            map[syntax.Span]bool
 	classAliases                map[string]string
+	classes                     map[string]*syntax.Command
 }
 
 // Scope is a lexical region. Root has Block == -1 and an empty Kind. Other
@@ -102,6 +103,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	result.typeAliasExempt = make(map[syntax.Span]bool)
 	result.classValueExempt = make(map[syntax.Span]bool)
 	result.classAliases = localClassAliases(file)
+	result.classes = localClasses(file)
 	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
 	collectLambdaScopesCommands(result, root, file.Commands)
 
@@ -3247,6 +3249,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		// receiver expression participates in same-file resolution.
 		if dialect == syntax.Vim9 {
 			appendMissingEnumValueDiagnostic(result, scope, expression)
+			appendObjectMethodThroughClassDiagnostic(result, scope, expression)
 		}
 		if len(expression.Children) > 0 {
 			if expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
@@ -3353,6 +3356,53 @@ func appendClassAsValueDiagnostic(result *FileAnalysis, declaration *Declaration
 		Code: "vim/E1405", Message: "Class \"" + className + "\" cannot be used as a value", Span: expression.Span,
 	})
 	return true
+}
+
+func appendObjectMethodThroughClassDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || member.Children[0].Kind != syntax.ExpressionIdentifier ||
+		result.File.Text(member.Operator) != "." || member.Value == "" || strings.HasPrefix(member.Value, "_") ||
+		strings.HasPrefix(member.Value, "new") {
+		return
+	}
+	receiver := member.Children[0]
+	declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+	if declaration == nil {
+		return
+	}
+	className := ""
+	switch declaration.Kind {
+	case SymbolKindClass:
+		className = declaration.Name
+	case SymbolKindTypeAlias:
+		className = result.classAliases[declaration.Name]
+	}
+	if className == "" {
+		return
+	}
+	file := result.File
+	seen := make(map[*syntax.Command]bool)
+	for class := result.classes[className]; class != nil; class = extendedClass(file, result.classes, class) {
+		if seen[class] {
+			return
+		}
+		seen[class] = true
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			method := &file.Commands[memberIndex]
+			if method.Function == nil || file.Text(method.Function.Name) != member.Value {
+				continue
+			}
+			if !commandHasModifier(method, "static") {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1386", Message: `Object method "` + member.Value + `" accessible only using class "` + className + `" object`, Span: memberNameSpan(file, member),
+				})
+			}
+			return
+		}
+	}
 }
 
 func appendAbstractSuperMethodDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
