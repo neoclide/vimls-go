@@ -381,6 +381,9 @@ pending-fix.
 A command-phase audit then removed six counted failures that depend on mutable
 user commands or dynamically executed command text. The authoritative parser
 split is therefore 948 migrated, zero ready, and 87 pending-fix.
+Commit `dbfecbb` migrated the two `elseif` command-tail variants and the Vim9
+type-alias trailing-type variant. The authoritative parser split is therefore
+951 migrated, zero ready, and 84 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -973,13 +976,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 109 | 89 | 0 | 20 |
+| `C-EXCMD` | 109 | 92 | 0 | 17 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **336** | **316** | **0** | **20** |
+| **Total** | **336** | **319** | **0** | **17** |
 
 ```text
 C-EXPR
@@ -1143,6 +1146,12 @@ Commit `7e748e2` migrated
 `if`, `elseif`, or `while` condition now maps to Vim's E488 only inside a
 compiled definition; comparisons, fat arrows, assignments, and legacy syntax
 retain their existing interpretation.
+
+Commit `dbfecbb` migrated `C:472:10765/{def|vim9-script}` and
+`T:125:3484/script`. An `elseif` condition with a parsed expression and an
+unexpected tail now reports E488 without discarding the condition AST. A Vim9
+type alias likewise maps its context-free trailing-type diagnostic to E488
+while retaining the parsed type and its generic arguments.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
