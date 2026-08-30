@@ -586,6 +586,13 @@ func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool)
 	var types []*Type
 	reportedMissing := false
 	for index, part := range splitTopLevel(p.source, open+1, end, ',') {
+		if p.dialect == Vim9 && index > 0 && part.Start > open+1 && p.source[part.Start-1] == ',' &&
+			part.Start < end && !isExpressionSpace(p.source[part.Start]) {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1069", Message: "white space required after ','",
+				Span: Span{Start: p.base + part.Start - 1, End: p.base + part.Start},
+			})
+		}
 		start := skipSpace(p.source, part.Start, part.End)
 		typeEnd := trimSpaceEnd(p.source, start, part.End)
 		// Keep the pre-existing explicit empty-list behavior for Fn<>.  This

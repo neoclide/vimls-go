@@ -4497,6 +4497,10 @@ func looksLikeVim9Expression(source string, nameStart, nameEnd, end int) bool {
 			if call < end && source[call] == '(' {
 				return true
 			}
+			// A generic reference is a valid command-start expression even
+			// without a call suffix (for example, Fn<>).  Keep the tight '<'
+			// boundary here so spaced comparisons continue through Ex parsing.
+			return true
 		} else {
 			// A tight, unterminated type list is an incomplete generic
 			// expression.  Route it through expression recovery instead of
