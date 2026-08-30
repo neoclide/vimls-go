@@ -30,6 +30,7 @@ type FileAnalysis struct {
 	// Vim replaces after resolving an import namespace.
 	suppressedSyntaxDiagnostics map[syntax.Diagnostic]bool
 	enumValueExempt             map[syntax.Span]bool
+	typeAliasExempt             map[syntax.Span]bool
 }
 
 // Scope is a lexical region. Root has Block == -1 and an empty Kind. Other
@@ -96,6 +97,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	result.lambdaBodies = make(map[*syntax.Expression]bool)
 	result.unknownOptions = make(map[syntax.Span]bool)
 	result.enumValueExempt = make(map[syntax.Span]bool)
+	result.typeAliasExempt = make(map[syntax.Span]bool)
 	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
 	collectLambdaScopesCommands(result, root, file.Commands)
 
@@ -3044,6 +3046,11 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			if !preferFunction {
 				appendEnumAsValueDiagnostic(result, scope, expression, dialect)
 			}
+			if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && declaration != nil && declaration.Kind == SymbolKindTypeAlias && !result.typeAliasExempt[expression.Span] {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1407", Message: "Cannot use a Typealias as a variable or value", Span: expression.Span,
+				})
+			}
 			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
 			unknownVimVariable := isUnknownVimVariable(expression.Value)
 			unsupportedNamespace := vim9UnsupportedNamespace(expression.Value)
@@ -3063,6 +3070,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		if len(expression.Children) > 0 {
 			if expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
 				result.enumValueExempt[expression.Children[0].Span] = true
+				result.typeAliasExempt[expression.Children[0].Span] = true
 			}
 			walkExpression(result, file, expression.Children[0], scope, skipped, false, dialect)
 		}
@@ -3088,6 +3096,21 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			for _, argument := range expression.Children[1:] {
 				if argument != nil && argument.Kind == syntax.ExpressionIdentifier {
 					result.enumValueExempt[argument.Span] = true
+				}
+			}
+		}
+		if len(expression.Children) > 1 && expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
+			firstArgument := 1
+			switch expression.Children[0].Value {
+			case "type", "typename", "string":
+			case "instanceof":
+				firstArgument = 2
+			default:
+				firstArgument = len(expression.Children)
+			}
+			for _, argument := range expression.Children[firstArgument:] {
+				if argument != nil && argument.Kind == syntax.ExpressionIdentifier {
+					result.typeAliasExempt[argument.Span] = true
 				}
 			}
 		}

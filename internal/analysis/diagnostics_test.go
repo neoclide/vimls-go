@@ -3063,6 +3063,56 @@ A.label = 'b'
 	}
 }
 
+func TestAnalyzeTypeAliasAsValueDiagnostic(t *testing.T) {
+	source := `vim9script
+type A = number
+def F(): any
+  var first = A
+  var second = A + 1
+  echo len(A)
+  return A
+enddef
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1407" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 4 {
+		t.Fatalf("E1407 diagnostics = %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics, result.Diagnostics)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Message != "Cannot use a Typealias as a variable or value" || file.Text(diagnostic.Span) != "A" {
+			t.Fatalf("E1407 diagnostic[%d] = %#v on %q", index, diagnostic, file.Text(diagnostic.Span))
+		}
+	}
+
+	valid := Analyze(syntax.Parse(`vim9script
+class C
+endclass
+type A = number
+type ClassAlias = C
+def F(value: A): A
+  var copy: A = value
+  echo type(A)
+  echo typename(A)
+  echo string(A)
+  var object = C.new()
+  echo instanceof(object, ClassAlias)
+  var aliasObject = ClassAlias.new()
+  return copy
+enddef
+`))
+	for _, diagnostic := range valid.Diagnostics {
+		if diagnostic.Code == "vim/E1407" {
+			t.Fatalf("type position reported E1407: %#v", valid.Diagnostics)
+		}
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]
