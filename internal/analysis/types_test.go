@@ -103,6 +103,40 @@ var after = forward
 	}
 }
 
+func TestAnalyzeInfersBuiltinAndVimVariableTypes(t *testing.T) {
+	source := `vim9script
+var count = len('text')
+var pieces = split('a b')
+var copied = ([1, 2],)->copy()
+var channel = test_null_channel()
+var truth = v:true
+var files = v:oldfiles
+var nullValue = v:null
+`
+	result := Analyze(syntax.Parse(source))
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Root.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	for name, want := range map[string]string{
+		"count": "number", "pieces": "list", "copied": "tuple", "channel": "channel",
+		"truth": "bool", "files": "list", "nullValue": "special",
+	} {
+		if declarations[name] == nil || declarations[name].Type.Name != want {
+			t.Fatalf("%s type = %#v, want %s", name, declarations[name], want)
+		}
+	}
+	if got := declarations["pieces"].Type.Arguments; len(got) != 1 || got[0].Name != "string" {
+		t.Fatalf("pieces type = %#v", declarations["pieces"].Type)
+	}
+	if got := declarations["copied"].Type.Arguments; len(got) != 1 || got[0].Name != "list" || len(got[0].Arguments) != 1 || got[0].Arguments[0].Name != "number" {
+		t.Fatalf("copied type = %#v", declarations["copied"].Type)
+	}
+	if got := declarations["files"].Type.Arguments; len(got) != 1 || got[0].Name != "string" {
+		t.Fatalf("files type = %#v", declarations["files"].Type)
+	}
+}
+
 func TestAnalyzeUnknownTypesStayConservativeAndNilSafe(t *testing.T) {
 	result := Analyze(nil)
 	if got := result.TypeOf(nil); got.Name != ValueTypeAny {

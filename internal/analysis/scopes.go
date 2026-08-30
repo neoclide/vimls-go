@@ -683,6 +683,8 @@ const (
 	builtinChannel
 	builtinJob
 	builtinObject
+	builtinSpecial
+	builtinVoid
 )
 
 func builtinValueTypeKind(typ ValueType) builtinValueKind {
@@ -711,6 +713,10 @@ func builtinValueTypeKind(typ ValueType) builtinValueKind {
 		return builtinJob
 	case "object":
 		return builtinObject
+	case "special":
+		return builtinSpecial
+	case "void":
+		return builtinVoid
 	default:
 		return 0
 	}

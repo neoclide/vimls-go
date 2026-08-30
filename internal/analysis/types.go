@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/chemzqm/vimls-go/internal/syntax"
+	"github.com/chemzqm/vimls-go/internal/vimdata"
 )
 
 // ValueType is the small, protocol-independent type fact used by analysis.
@@ -313,10 +314,32 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		switch strings.ToLower(expression.Value) {
 		case "true", "false":
 			typ = ValueType{Name: "bool"}
-		case "null", "null_blob", "null_channel", "null_class", "null_dict", "null_function", "null_job", "null_list", "null_object", "null_partial", "null_string":
-			typ = unknown
+		case "null":
+			typ = ValueType{Name: "special"}
+		case "null_blob":
+			typ = ValueType{Name: "blob"}
+		case "null_channel":
+			typ = ValueType{Name: "channel"}
+		case "null_class":
+			typ = ValueType{Name: "class"}
+		case "null_dict":
+			typ = ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}
+		case "null_function", "null_partial":
+			typ = ValueType{Name: "func", Return: valueTypePointer(UnknownValueType)}
+		case "null_job":
+			typ = ValueType{Name: "job"}
+		case "null_list":
+			typ = ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}
+		case "null_object":
+			typ = ValueType{Name: "object"}
+		case "null_string":
+			typ = ValueType{Name: "string"}
+		case "null_tuple":
+			typ = ValueType{Name: "tuple"}
 		default:
-			if reference := state.references[expression.Span]; reference != nil && reference.Declaration != nil {
+			if variable, ok := vimdata.LookupVariable(expression.Value); ok {
+				typ = builtinVariableValueType(variable)
+			} else if reference := state.references[expression.Span]; reference != nil && reference.Declaration != nil {
 				typ = reference.Declaration.Type
 			} else if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil {
 				typ = declaration.Type
@@ -385,7 +408,13 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			for _, argument := range expression.Children[1:] {
 				state.infer(argument, scope)
 			}
-			if callee.Name == "func" && callee.Return != nil {
+			if builtin, arguments, ok := builtinCallArguments(state.result.File, expression); ok {
+				argumentTypes := make([]ValueType, 0, len(arguments))
+				for _, argument := range arguments {
+					argumentTypes = append(argumentTypes, state.infer(argument, scope))
+				}
+				typ = builtinReturnValueType(builtin, argumentTypes)
+			} else if callee.Name == "func" && callee.Return != nil {
 				typ = *callee.Return
 			} else {
 				typ = unknown
@@ -414,6 +443,96 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	}
 	state.result.expressionTypes[expression] = typ
 	return typ
+}
+
+func builtinVariableValueType(variable vimdata.Variable) ValueType {
+	switch variable.Type {
+	case "number", "string", "bool":
+		return ValueType{Name: variable.Type}
+	case "list<string>":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}
+	case "dict<string>":
+		return ValueType{Name: "dict", Arguments: []ValueType{{Name: "string"}}}
+	case "dict<any>":
+		return ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}
+	case "list<dict<any>>":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "dict", Arguments: []ValueType{UnknownValueType}}}}
+	case "special":
+		if variable.Name == "v:null" || variable.Name == "v:none" {
+			return ValueType{Name: "special"}
+		}
+	}
+	return UnknownValueType
+}
+
+func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType) ValueType {
+	switch function.ReturnHelper {
+	case "ret_copy", "ret_first_arg", "ret_extend", "ret_slice":
+		if len(arguments) > 0 {
+			return arguments[0]
+		}
+	case "ret_first_cont":
+		if len(arguments) > 0 {
+			first := arguments[0]
+			if first.Name == "list" || first.Name == "dict" {
+				first.Arguments = []ValueType{UnknownValueType}
+			}
+			return first
+		}
+	case "ret_remove":
+		if len(arguments) > 0 {
+			return indexedType(arguments[0])
+		}
+	case "ret_repeat":
+		if len(arguments) > 0 {
+			if arguments[0].Name == "number" || arguments[0].Name == "string" {
+				return ValueType{Name: "string"}
+			}
+			return arguments[0]
+		}
+	case "ret_list_number":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "number"}}}
+	case "ret_list_string":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}
+	case "ret_list_dict_any":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "dict", Arguments: []ValueType{UnknownValueType}}}}
+	case "ret_list_any":
+		return ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}
+	case "ret_dict_number":
+		return ValueType{Name: "dict", Arguments: []ValueType{{Name: "number"}}}
+	case "ret_dict_string":
+		return ValueType{Name: "dict", Arguments: []ValueType{{Name: "string"}}}
+	case "ret_dict_any":
+		return ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}
+	}
+	switch function.ReturnType {
+	case vimdata.ReturnVoid:
+		return ValueType{Name: "void"}
+	case vimdata.ReturnBool:
+		return ValueType{Name: "bool"}
+	case vimdata.ReturnNumber:
+		return ValueType{Name: "number"}
+	case vimdata.ReturnFloat:
+		return ValueType{Name: "float"}
+	case vimdata.ReturnString:
+		return ValueType{Name: "string"}
+	case vimdata.ReturnBlob:
+		return ValueType{Name: "blob"}
+	case vimdata.ReturnList:
+		return ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}
+	case vimdata.ReturnDict:
+		return ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}
+	case vimdata.ReturnChannel:
+		return ValueType{Name: "channel"}
+	case vimdata.ReturnJob:
+		return ValueType{Name: "job"}
+	case vimdata.ReturnTuple:
+		return ValueType{Name: "tuple"}
+	case vimdata.ReturnFunction:
+		return ValueType{Name: "func", Return: valueTypePointer(UnknownValueType)}
+	default:
+		return UnknownValueType
+	}
 }
 
 func (state *typeState) binaryType(expression *syntax.Expression, scope *Scope) ValueType {
@@ -565,6 +684,13 @@ func initializerElement(initializer *syntax.Expression, index, count int) *synta
 func indexedType(typ ValueType) ValueType {
 	if len(typ.Arguments) > 0 && (typ.Name == "list" || typ.Name == "dict") {
 		return typ.Arguments[0]
+	}
+	if typ.Name == "tuple" && len(typ.Arguments) > 0 {
+		common := typ.Arguments[0]
+		for _, argument := range typ.Arguments[1:] {
+			common = mergeTypes(common, argument)
+		}
+		return common
 	}
 	if typ.Name == "string" {
 		return ValueType{Name: "string"}
