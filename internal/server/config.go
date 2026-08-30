@@ -1,17 +1,15 @@
 package server
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const DefaultTargetVersion = "9.1.0000"
@@ -148,112 +146,88 @@ func runtimepathFromOptions(raw any) ([]string, bool, string) {
 	return normalizeRuntimePaths(paths), true, ""
 }
 
-const defaultRuntimepathTimeout = 2 * time.Second
-
-func discoverDefaultRuntimePaths(parent context.Context) ([]string, error) {
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(parent, defaultRuntimepathTimeout)
-	defer cancel()
-
-	command := exec.CommandContext(ctx, "vim",
-		"--clean", "-u", "NONE", "-U", "NONE", "-i", "NONE",
-		"--noplugin", "-n", "-es", "-X", "--not-a-term",
-		"-c", "0put =json_encode(globpath(&runtimepath, '', 0, 1))",
-		"-c", "1print",
-		"-c", "qa!",
-	)
-	command.Env = cleanVimEnvironment(os.Environ())
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
-	if err == nil && ctx.Err() != nil {
-		err = ctx.Err()
-	}
-	if err != nil {
-		return runtimepathEnvironmentFallback(fmt.Errorf("query installed Vim runtimepath: %w%s", err, vimStderrDetail(stderr.String())))
-	}
-	paths, unmarshalErr := runtimeDirectoriesFromVimOutput(stdout.Bytes())
-	if unmarshalErr != nil {
-		return runtimepathEnvironmentFallback(fmt.Errorf("decode installed Vim runtimepath: %w", unmarshalErr))
-	}
-	if len(paths) == 0 {
-		return runtimepathEnvironmentFallback(errors.New("installed Vim returned no existing runtime directories"))
-	}
-	return paths, nil
+func defaultRuntimePaths() []string {
+	return defaultRuntimePathsIn(defaultVimInstallRoots(runtime.GOOS))
 }
 
-func runtimeDirectoriesFromVimOutput(output []byte) ([]string, error) {
-	output = bytes.TrimSpace(output)
-	if len(output) == 0 || output[0] != '[' {
-		return nil, errors.New("Vim runtimepath output is not a JSON array")
-	}
-	var paths []string
-	if err := json.Unmarshal(output, &paths); err != nil {
-		return nil, err
-	}
-	return existingRuntimeDirectories(paths), nil
-}
-
-func cleanVimEnvironment(environment []string) []string {
-	blocked := map[string]bool{
-		"EXINIT": true, "GVIMINIT": true, "LANG": true, "LC_ALL": true,
-		"VIM": true, "VIMINIT": true, "VIMRUNTIME": true, "XDG_CONFIG_HOME": true,
-	}
-	result := make([]string, 0, len(environment)+2)
-	for _, item := range environment {
-		name := item
-		if index := strings.IndexByte(item, '='); index >= 0 {
-			name = item[:index]
+func defaultVimInstallRoots(goos string) []string {
+	switch goos {
+	case "windows":
+		roots := make([]string, 0, 3)
+		for _, variable := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+			if value := strings.TrimSpace(os.Getenv(variable)); value != "" {
+				roots = append(roots, filepath.Join(value, "Vim"))
+			}
 		}
-		if blocked[strings.ToUpper(name)] {
+		if drive := strings.TrimSpace(os.Getenv("SystemDrive")); drive != "" {
+			roots = append(roots, filepath.Join(drive+string(filepath.Separator), "Vim"))
+		}
+		return roots
+	case "darwin":
+		return []string{
+			"/usr/local/share/vim",
+			"/opt/homebrew/share/vim",
+			"/usr/share/vim",
+			"/Applications/MacVim.app/Contents/Resources/vim/runtime",
+		}
+	default:
+		return []string{"/usr/local/share/vim", "/usr/share/vim"}
+	}
+}
+
+func defaultRuntimePathsIn(installRoots []string) []string {
+	for _, installRoot := range installRoots {
+		installRoot = filepath.Clean(installRoot)
+		if isInstalledVimRuntime(installRoot) {
+			return []string{installRoot}
+		}
+		entries, err := os.ReadDir(installRoot)
+		if err != nil {
 			continue
 		}
-		result = append(result, item)
-	}
-	return append(result, "LC_ALL=C", "LANG=C")
-}
-
-func existingRuntimeDirectories(paths []string) []string {
-	paths = normalizeRuntimePaths(paths)
-	result := paths[:0]
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		if err == nil && info.IsDir() {
-			result = append(result, path)
+		type versionDirectory struct {
+			version int
+			path    string
 		}
+		versions := make([]versionDirectory, 0)
+		for _, entry := range entries {
+			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "vim") {
+				continue
+			}
+			version, err := strconv.Atoi(strings.TrimPrefix(entry.Name(), "vim"))
+			if err != nil || version < 1 {
+				continue
+			}
+			path := filepath.Join(installRoot, entry.Name())
+			if isInstalledVimRuntime(path) {
+				versions = append(versions, versionDirectory{version: version, path: path})
+			}
+		}
+		if len(versions) == 0 {
+			continue
+		}
+		sort.Slice(versions, func(left, right int) bool { return versions[left].version > versions[right].version })
+		paths := make([]string, 0, 3)
+		vimfiles := filepath.Join(installRoot, "vimfiles")
+		if isDirectory(vimfiles) {
+			paths = append(paths, vimfiles)
+		}
+		paths = append(paths, versions[0].path)
+		if after := filepath.Join(vimfiles, "after"); isDirectory(after) {
+			paths = append(paths, after)
+		}
+		return normalizeRuntimePaths(paths)
 	}
-	return result
+	return nil
 }
 
-func runtimepathEnvironmentFallback(cause error) ([]string, error) {
-	path := strings.TrimSpace(os.Getenv("VIMRUNTIME"))
-	if path == "" {
-		return nil, cause
-	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return nil, cause
-	}
-	info, err := os.Stat(absolute)
-	if err != nil || !info.IsDir() {
-		return nil, cause
-	}
-	return []string{filepath.Clean(absolute)}, cause
+func isInstalledVimRuntime(path string) bool {
+	return isDirectory(path) && isDirectory(filepath.Join(path, "doc")) && isDirectory(filepath.Join(path, "syntax"))
 }
 
-func vimStderrDetail(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if len(value) > 512 {
-		value = value[:512]
-	}
-	return ": " + value
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func targetVersionFromSettings(raw []byte, previous TargetVersion) (TargetVersion, string) {

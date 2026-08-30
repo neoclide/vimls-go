@@ -1,15 +1,11 @@
 package server
 
 import (
-	"context"
 	"errors"
-	"io"
+	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
-
-	"go.lsp.dev/protocol"
 )
 
 func TestParseTargetVersion(t *testing.T) {
@@ -104,84 +100,35 @@ func TestRuntimepathFromOptions(t *testing.T) {
 	}
 }
 
-func TestRuntimeDirectoriesFromVimOutputAndEnvironment(t *testing.T) {
+func TestDefaultRuntimePathsUseFirstInstalledRootAndNewestVersion(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
-	missing := filepath.Join(t.TempDir(), "missing")
-	output := []byte(`["` + first + `","` + missing + `","` + second + `","` + first + `"]`)
-	paths, err := runtimeDirectoriesFromVimOutput(output)
-	if err != nil || !reflect.DeepEqual(paths, []string{filepath.Clean(first), filepath.Clean(second)}) {
-		t.Fatalf("runtime directories = %#v, %v", paths, err)
-	}
-	for _, output := range [][]byte{nil, []byte(`null`), []byte(`{"runtimepath":[]}`), []byte("[]\nnoise")} {
-		paths, err := runtimeDirectoriesFromVimOutput(output)
-		if err == nil {
-			t.Fatalf("invalid Vim output %q accepted as %#v", output, paths)
+	for _, path := range []string{
+		filepath.Join(first, "vimfiles", "after"),
+		filepath.Join(first, "vim91", "doc"), filepath.Join(first, "vim91", "syntax"),
+		filepath.Join(first, "vim92", "doc"), filepath.Join(first, "vim92", "syntax"),
+		filepath.Join(second, "vim99", "doc"), filepath.Join(second, "vim99", "syntax"),
+	} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
 		}
 	}
-
-	t.Setenv("VIMRUNTIME", first)
-	paths, cause := runtimepathEnvironmentFallback(errors.New("query failed"))
-	if !reflect.DeepEqual(paths, []string{filepath.Clean(first)}) || cause == nil {
-		t.Fatalf("environment fallback = %#v, %v", paths, cause)
+	want := []string{
+		filepath.Join(first, "vimfiles"),
+		filepath.Join(first, "vim92"),
+		filepath.Join(first, "vimfiles", "after"),
 	}
-}
-
-func TestCleanVimEnvironment(t *testing.T) {
-	environment := cleanVimEnvironment([]string{
-		"PATH=/bin", "VIMINIT=source bad.vim", "EXINIT=bad", "GVIMINIT=bad",
-		"VIM=/tmp/vim", "VIMRUNTIME=/tmp/runtime", "XDG_CONFIG_HOME=/tmp/config",
-		"LANG=zh_CN.UTF-8", "LC_ALL=zh_CN.UTF-8", "KEEP=value",
-	})
-	joined := strings.Join(environment, "\n")
-	for _, forbidden := range []string{"VIMINIT=", "EXINIT=", "GVIMINIT=", "VIM=", "VIMRUNTIME=", "XDG_CONFIG_HOME="} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("environment retained %q: %q", forbidden, joined)
+	if got := defaultRuntimePathsIn([]string{filepath.Join(first, "missing"), first, second}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("default runtimepath = %#v, want %#v", got, want)
+	}
+	direct := filepath.Join(t.TempDir(), "runtime")
+	for _, name := range []string{"doc", "syntax"} {
+		if err := os.MkdirAll(filepath.Join(direct, name), 0o700); err != nil {
+			t.Fatal(err)
 		}
 	}
-	for _, required := range []string{"PATH=/bin", "KEEP=value", "LC_ALL=C", "LANG=C"} {
-		if !strings.Contains(joined, required) {
-			t.Fatalf("environment omitted %q: %q", required, joined)
-		}
-	}
-	if count := strings.Count(joined, "LANG="); count != 1 {
-		t.Fatalf("LANG count = %d in %q", count, joined)
-	}
-}
-
-func TestInitializeDiscoversRuntimepathOnlyWhenAbsent(t *testing.T) {
-	discovered := t.TempDir()
-	instance := New(nil, nil, io.Discard)
-	t.Cleanup(instance.stopAnalysis)
-	calls := 0
-	instance.runtimepathFinder = func(context.Context) ([]string, error) {
-		calls++
-		return []string{discovered}, nil
-	}
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	instance.workspaceMu.Lock()
-	paths := append([]string(nil), instance.runtimePaths...)
-	instance.workspaceMu.Unlock()
-	if calls != 1 || !reflect.DeepEqual(paths, []string{filepath.Clean(discovered)}) {
-		t.Fatalf("discovered runtimepath = %#v, calls = %d", paths, calls)
-	}
-
-	explicit := New(nil, nil, io.Discard)
-	t.Cleanup(explicit.stopAnalysis)
-	explicit.runtimepathFinder = func(context.Context) ([]string, error) {
-		t.Fatal("runtimepath finder called for an explicitly empty runtimepath")
-		return nil, nil
-	}
-	if _, err := explicit.Initialize(context.Background(), &protocol.InitializeParams{InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`))}); err != nil {
-		t.Fatal(err)
-	}
-	explicit.workspaceMu.Lock()
-	paths = append(paths[:0], explicit.runtimePaths...)
-	explicit.workspaceMu.Unlock()
-	if len(paths) != 0 {
-		t.Fatalf("explicit empty runtimepath = %#v", paths)
+	if got := defaultRuntimePathsIn([]string{direct}); !reflect.DeepEqual(got, []string{direct}) {
+		t.Fatalf("direct runtimepath = %#v", got)
 	}
 }
 

@@ -118,10 +118,11 @@ Current status (2026-08-29): the document navigation surface, workspace symbol
 index, open-document overlay, client-driven watched-file refresh, static Vim9
 import navigation, and legacy/Vim9 autoload navigation are implemented. The
 server dynamically registers Vim file watchers when the client supports it;
-initialized and custom-notification runtimepath roots are included in the
-bounded index. The subprocess test covers watcher registration, runtimepath and
-workspace symbols, plus cross-file definition and references. M5 remains open
-for multi-target builtin metadata, which is currently deferred.
+client-provided or locally discovered runtimepath roots and later custom
+notification replacements are included in the canonical, bounded index. The
+subprocess test covers watcher registration, runtimepath and workspace symbols,
+plus cross-file definition and references. M5 remains open for multi-target
+builtin metadata, which is currently deferred.
 
 ## M6: completion and safe edits
 

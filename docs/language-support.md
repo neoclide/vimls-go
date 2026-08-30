@@ -142,8 +142,15 @@ old configuration revision are stale and cannot publish.
 The server currently provides document/workspace symbols, hover, definition,
 declaration, references, document highlights, folding ranges, and selection
 ranges. Workspace files come from initialized workspace folders (or `rootUri`),
-plus `initializationOptions.runtimepath`, with open snapshots overriding disk
-content. `runtimepath` is an array of filesystem path strings. When the client
+plus the effective runtimepath, with open snapshots overriding disk content.
+`initializationOptions.runtimepath` is an array of filesystem path strings; an
+explicit empty array disables runtime indexing. When the option is absent, the
+server checks the conventional local Vim installation directories for the host
+operating system and uses the newest installed runtime under the first matching
+location. It starts no Vim process, reads no user configuration, and leaves the
+runtimepath empty when none of those directories exists. Runtime and workspace
+roots are indexed by canonical realpath, so aliases are parsed once, while
+runtime lookup retains the first configured path's precedence. When the client
 advertises `workspace.didChangeWatchedFiles.dynamicRegistration`, the server
 uses `client/registerCapability` to ask the language client to watch `**/*.vim`
 below every workspace and runtimepath root. The client owns the filesystem
