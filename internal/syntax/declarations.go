@@ -293,25 +293,49 @@ func scanClassName(source string, start, end int) int {
 
 func parseTypeAlias(file *File, command *Command) {
 	source := file.Text(command.Argument)
+	nameStart := skipSpace(source, 0, len(source))
+	nameEnd := scanWord(source, nameStart, len(source))
+	nameDiagnostic := false
+	// ex_type() checks the alias name before looking for its assignment.  Keep
+	// that ordering here, since otherwise malformed separators can turn into
+	// a misleading missing-assignment or type diagnostic.
+	if nameStart < len(source) && (source[nameStart] < 'A' || source[nameStart] > 'Z') {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1394", Message: "Type name must start with an uppercase letter: " + source[nameStart:],
+			Span: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd},
+		})
+		nameDiagnostic = true
+	}
+	nameHasWhitespace := nameEnd >= len(source) || isSpace(source[nameEnd])
+	if !nameDiagnostic && nameStart < nameEnd && !nameHasWhitespace {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1315", Message: "White space required after name: " + source[nameStart:],
+			Span: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + len(source)},
+		})
+		nameDiagnostic = true
+		// A separator other than '=' makes the remainder opaque.  In
+		// particular, do not let a colon consume the next physical command.
+		if source[nameEnd] != '=' {
+			command.TypeAlias = &TypeAlias{
+				Name:       Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd},
+				Assignment: Span{Start: command.Argument.End, End: command.Argument.End},
+				TypeSpan:   Span{Start: command.Argument.End, End: command.Argument.End},
+			}
+			return
+		}
+	}
 	assignment := findAssignment(source)
 	if assignment.Start < 0 {
 		// Keep the alias name in the AST even when Vim9 reports E398.  The
 		// remainder of this physical line is intentionally not interpreted as
 		// a type: it may be incomplete or otherwise unrelated while editing.
-		nameStart := skipSpace(source, 0, len(source))
-		nameEnd := nameStart
-		for nameEnd < len(source) {
-			c := source[nameEnd]
-			if c == ' ' || c == '\t' || c == '\r' || c == '\n' {
-				break
-			}
-			nameEnd++
-		}
 		if nameStart < nameEnd {
 			name := Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd}
-			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E398", Message: "missing type alias assignment", Span: name,
-			})
+			if !nameDiagnostic {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E398", Message: "missing type alias assignment", Span: name,
+				})
+			}
 			command.TypeAlias = &TypeAlias{
 				Name:       name,
 				Assignment: Span{Start: command.Argument.End, End: command.Argument.End},
@@ -320,22 +344,33 @@ func parseTypeAlias(file *File, command *Command) {
 		}
 		return
 	}
-	nameStart := skipSpace(source, 0, assignment.Start)
-	nameEnd := trimSpaceEnd(source, nameStart, assignment.Start)
+	nameStart = skipSpace(source, 0, assignment.Start)
+	nameEnd = trimSpaceEnd(source, nameStart, assignment.Start)
 	typeStart := skipSpace(source, assignment.End, len(source))
 	typeEnd := trimSpaceEnd(source, typeStart, len(source))
+	if !nameDiagnostic && assignment.End < len(source) && !isSpace(source[assignment.End]) {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1069", Message: "white space required after '=': " + source[assignment.Start:],
+			Span: Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + len(source)},
+		})
+		nameDiagnostic = true
+	}
 	operator := Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + assignment.End}
 	typeSpan := Span{Start: command.Argument.Start + typeStart, End: command.Argument.Start + typeEnd}
 	var typeNode *Type
 	if command.Dialect == Vim9 && typeStart == typeEnd {
 		typeNode = &Type{Kind: TypeMissing, Span: typeSpan}
-		file.Diagnostics = append(file.Diagnostics, Diagnostic{
-			Code: "vim/E1398", Message: "missing type alias type", Span: typeSpan,
-		})
+		if !nameDiagnostic {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1398", Message: "missing type alias type", Span: typeSpan,
+			})
+		}
 	} else {
 		var diagnostics []Diagnostic
 		typeNode, diagnostics = parseTypeAt(source[typeStart:typeEnd], typeSpan.Start)
-		file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		if !nameDiagnostic {
+			file.Diagnostics = append(file.Diagnostics, diagnostics...)
+		}
 	}
 	command.TypeAlias = &TypeAlias{
 		Name:       Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd},
