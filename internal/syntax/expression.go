@@ -1106,6 +1106,16 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 				commaDiagnostic = true
 			}
 			p.advance()
+			if p.dialect == Vim9 && p.current().text == ")" {
+				children = append(children, &Expression{Kind: ExpressionMissing, Span: comma.span})
+				if !commaDiagnostic {
+					p.diagnostics = append(p.diagnostics, Diagnostic{
+						Code: "vim/E1069", Message: "white space required after ','", Span: comma.span,
+					})
+					commaDiagnostic = true
+				}
+				continue
+			}
 			if p.dialect == Vim9 && !commaDiagnostic && p.current().kind != expressionEOF && p.current().text != ")" && p.current().text != "," && (comma.span.End-p.base >= len(p.source) || !isExpressionSpace(p.source[comma.span.End-p.base])) {
 				p.diagnostics = append(p.diagnostics, Diagnostic{
 					Code: "vim/E1069", Message: "white space required after ','", Span: comma.span,
