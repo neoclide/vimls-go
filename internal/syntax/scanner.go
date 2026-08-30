@@ -105,8 +105,10 @@ func parseSource(source string, initial Dialect) *File {
 				dialectStack = append(dialectStack, active)
 				active = Vim9
 			case "function":
-				dialectStack = append(dialectStack, active)
-				active = Legacy
+				if isFunctionDefinition(file.Text(command.Argument)) {
+					dialectStack = append(dialectStack, active)
+					active = Legacy
+				}
 			case "enddef", "endfunction":
 				if len(dialectStack) > 0 {
 					active = dialectStack[len(dialectStack)-1]
