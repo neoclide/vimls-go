@@ -351,6 +351,8 @@ pending-fix.
 A generic-call phase audit then removed four failures that parse function names
 from string values inside `function()` or `call()`. The authoritative parser
 split is therefore 922 migrated, zero ready, and 135 pending-fix.
+Commit `0b68001` migrated the cross-line Vim9 `for` type-colon variant, making
+the authoritative current split 923 migrated, zero ready, and 134 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -945,11 +947,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 105 | 64 | 0 | 41 |
+| `C-GENERIC` | 105 | 65 | 0 | 40 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **358** | **290** | **0** | **68** |
+| **Total** | **358** | **291** | **0** | **67** |
 
 ```text
 C-EXPR
@@ -1110,8 +1112,10 @@ a comma while retaining the reference or call AST.
 Commit `c30bf4d` migrated `S:2823:58387/{def|vim9-script}`. When a Vim9 `for`
 binding is followed by whitespace and a type colon but no usable `in` clause,
 the retained binding now reports E1059 instead of the less specific missing-in
-diagnostic. The cross-line colon at `S:5621:125950/script` remains a separate
-continuation-boundary task.
+diagnostic. Commit `0b68001` migrated `S:5621:125950/script` by retaining an
+indented leading colon as part of the incomplete `for` header; independent
+following commands and the existing multiline `in` forms retain their recovery
+boundaries.
 
 Commit `c03403f` migrated the generic declaration recoveries at
 `G:{54:1052,62:1232,2605:57388}/script`. When a missing `>` is followed by an
