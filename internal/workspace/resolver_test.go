@@ -25,7 +25,7 @@ func TestPathResolverResolvesRelativeImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
-	if result.Dynamic || result.Path != filepath.Clean(target) || len(result.Candidates) != 1 {
+	if result.Dynamic || result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 1 {
 		t.Fatalf("relative import = %#v, want %q", result, target)
 	}
 }
@@ -51,7 +51,7 @@ func TestPathResolverSearchesRuntimeImportAndAutoloadInOrder(t *testing.T) {
 	}
 	for index, want := range []string{secondImport, secondAutoload} {
 		result := resolver.ResolveImport(from, file, file.Commands[index+1].Import)
-		if result.Path != filepath.Clean(want) || len(result.Candidates) != 2 {
+		if result.Path != mustResolverCanonical(t, want) || len(result.Candidates) != 2 {
 			t.Fatalf("runtime import %d = %#v, want %q", index, result, want)
 		}
 		if result.Candidates[0] != filepath.Clean(want) {
@@ -71,7 +71,7 @@ func TestPathResolverResolvesLegacyAutoloadName(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := resolver.ResolveAutoload("g:foo#bar#Run")
-	if result.Dynamic || result.Path != filepath.Clean(target) || len(result.Candidates) != 2 {
+	if result.Dynamic || result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 2 {
 		t.Fatalf("autoload resolution = %#v, want %q", result, target)
 	}
 	for _, name := range []string{"plain", "#Run", "foo#"} {
@@ -97,7 +97,7 @@ func TestPathResolverKeepsCanonicalRuntimePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
-	if result.Path != target || len(result.Candidates) != 1 {
+	if result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 1 {
 		t.Fatalf("canonical runtime path = %#v, want %q", result, target)
 	}
 }
@@ -162,7 +162,7 @@ func TestPathResolverSkipsExplicitAfterRuntimePath(t *testing.T) {
 	}
 	file := syntax.Parse(mustResolverRead(t, from))
 	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
-	if result.Path != want || len(result.Candidates) != 1 || result.Candidates[0] != want {
+	if result.Path != mustResolverCanonical(t, want) || len(result.Candidates) != 1 || result.Candidates[0] != want {
 		t.Fatalf("explicit after runtime path = %#v, want %q", result, want)
 	}
 	if !resolver.Allows(filepath.Join(after, "import", "private.vim")) {
@@ -183,7 +183,7 @@ func TestPathResolverForRootsUsesFirstRootAndAllowsAllRoots(t *testing.T) {
 	}
 	file := syntax.Parse(mustResolverRead(t, from))
 	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
-	if result.Path != target || len(result.Candidates) != 1 {
+	if result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 1 {
 		t.Fatalf("second-root relative import = %#v, want %q", result, target)
 	}
 	if result := resolver.ResolveSource("", "source.vim"); len(result.Candidates) != 1 || result.Candidates[0] != filepath.Join(first, "source.vim") {
@@ -212,14 +212,46 @@ func TestPathResolverAllowsMissingPathsAndRejectsEscapingSymlinks(t *testing.T) 
 	if !resolver.Allows(filepath.Join(root, "not-created", "file.vim")) {
 		t.Fatal("missing in-root path is not allowed")
 	}
+	missing := filepath.Join(root, "not-created", "file.vim")
+	if canonical, ok := resolver.Canonical(missing); !ok || canonical != mustResolverCanonical(t, missing) {
+		t.Fatalf("missing canonical path = %q, %v, want %q, true", canonical, ok, mustResolverCanonical(t, missing))
+	}
 	if err := os.Symlink(outside, filepath.Join(root, "outside")); err != nil {
 		t.Fatal(err)
 	}
 	if resolver.Allows(filepath.Join(root, "outside", "missing.vim")) {
 		t.Fatal("missing path through escaping symlink is allowed")
 	}
+	if canonical, ok := resolver.Canonical(filepath.Join(root, "outside", "missing.vim")); ok || canonical != "" {
+		t.Fatalf("escaping symlink canonical path = %q, %v", canonical, ok)
+	}
 	if resolver.Allows(filepath.Join(outside, "file.vim")) {
 		t.Fatal("outside path is allowed")
+	}
+}
+
+func TestPathResolverUsesCanonicalPathForSafeSymlinkedFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink targets are not portable on Windows")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "real.vim")
+	alias := filepath.Join(root, "alias.vim")
+	writeResolverFile(t, target, "vim9script\n")
+	if err := os.Symlink(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewPathResolver(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := resolver.ResolveSource("", "alias.vim")
+	if result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 1 || result.Candidates[0] != alias {
+		t.Fatalf("symlink source = %#v, want canonical path %q", result, target)
+	}
+	canonical, ok := resolver.Canonical(alias)
+	if !ok || canonical != result.Path {
+		t.Fatalf("canonical alias = %q, %v, want %q, true", canonical, ok, result.Path)
 	}
 }
 
@@ -298,7 +330,7 @@ func TestPathResolverResolvesSourceRelativeToRoot(t *testing.T) {
 		} else if spec == "trailing\\ " {
 			want = trailingTarget
 		}
-		if result.Path != filepath.Clean(want) || len(result.Candidates) != 1 {
+		if result.Path != mustResolverCanonical(t, want) || len(result.Candidates) != 1 {
 			t.Fatalf("source %q = %#v", spec, result)
 		}
 	}
@@ -321,7 +353,7 @@ func TestPathResolverUsesParsedSourceFilenameSemantics(t *testing.T) {
 		t.Fatalf("commands = %#v", file.Commands)
 	}
 	first := resolver.ResolveSource("", file.Text(file.Commands[0].Argument))
-	if first.Path != filepath.Join(root, "'plain.vim'") {
+	if first.Path != mustResolverCanonical(t, filepath.Join(root, "'plain.vim'")) {
 		t.Fatalf("single quote source = %#v", first)
 	}
 	second := resolver.ResolveSource("", file.Text(file.Commands[1].Argument))
@@ -396,4 +428,13 @@ func mustResolverRead(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(content)
+}
+
+func mustResolverCanonical(t *testing.T, path string) string {
+	t.Helper()
+	canonical, err := canonicalPathAllowMissing(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return canonical
 }

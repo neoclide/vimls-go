@@ -116,16 +116,25 @@ func NewPathResolverForRoots(roots []string, runtimePaths []string) (*PathResolv
 	return resolver, nil
 }
 
-// Allows reports whether path is safely contained in any configured workspace
-// or runtime boundary. It resolves existing symlinks and every existing parent
-// of a missing path, so a lexical in-root path through an escaping symlink is
-// rejected without opening or executing the target.
-func (r *PathResolver) Allows(path string) bool {
+// Canonical returns path with existing symlinks and existing parents resolved
+// when the resulting path remains within a configured boundary. Missing paths
+// retain their missing suffix after their nearest existing parent is resolved.
+func (r *PathResolver) Canonical(path string) (string, bool) {
 	if r == nil || strings.TrimSpace(path) == "" {
-		return false
+		return "", false
 	}
 	canonical, err := canonicalPathAllowMissing(path)
-	return err == nil && r.withinBoundary(canonical)
+	if err != nil || !r.withinBoundary(canonical) {
+		return "", false
+	}
+	return canonical, true
+}
+
+// Allows reports whether path has a canonical spelling within a configured
+// workspace or runtime boundary.
+func (r *PathResolver) Allows(path string) bool {
+	_, ok := r.Canonical(path)
+	return ok
 }
 
 // ResolveImport resolves a parsed :import command. Literal string imports
@@ -280,15 +289,13 @@ func (r *PathResolver) choose(candidates []string) PathResolution {
 			continue
 		}
 		seen[absolute] = struct{}{}
-		_, safe, regular := r.safeRegularFile(absolute)
+		resolved, safe, regular := r.safeRegularFile(absolute)
 		if !safe {
 			continue
 		}
 		result.Candidates = append(result.Candidates, absolute)
 		if result.Path == "" && regular {
-			// Keep the spelling used by the caller. A safe symlink is still a
-			// valid Vim path, and preserving it makes source locations stable.
-			result.Path = absolute
+			result.Path = resolved
 		}
 	}
 	return result
