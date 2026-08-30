@@ -3360,7 +3360,8 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 			diagnostic.Message = "invalid expression"
 			if command.Dialect == Vim9 && inDef {
 				diagnostic.Code = "vim/E1015"
-				diagnostic.Message = "name expected"
+				tail := file.Text(Span{Start: diagnostic.Span.Start, End: command.Argument.End})
+				diagnostic.Message = "Name expected: " + strings.TrimSpace(tail)
 			}
 		case command.Dialect == Vim9 && missingOperand && diagnostic.Code == "vimls/missing-expression":
 			diagnostic.Code = "vim/E15"

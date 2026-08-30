@@ -831,3 +831,24 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   the function return type is neither `void` nor unknown.
 - `runtime/doc/vim9.txt:1388-1408` distinguishes E1003 from E1027 and E1096.
 - `src/errors.h:2644-2645` defines the exact message.
+
+## Name expected: E1015
+
+Syntax analysis reports E1015 when a compiled `def` tuple starts with a
+missing item, such as `var value = (, 'a', 'b')`. The diagnostic selects the
+leading comma and includes the remaining expression text in Vim's message.
+The missing first child is retained so later tuple items and following
+commands remain available after recovery.
+
+The same expression uses E15 in Legacy script and at top-level Vim9 script.
+This distinction follows the compiled-expression context, not the file's root
+dialect: a `def` retained in a Legacy-root file still uses E1015.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_tuple.vim:156-162` expects E15, E1015, and E15 for the
+  Legacy, compiled `def`, and top-level Vim9 variants respectively.
+- `src/vim9expr.c:3134-3143` reports E1015 when a compiled expression expects
+  a name but sees another non-ending token; an empty expression instead uses
+  E1143.
+- `src/errors.h:2672-2673` defines the exact message template.

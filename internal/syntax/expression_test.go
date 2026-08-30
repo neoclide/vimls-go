@@ -619,6 +619,27 @@ func TestTupleDiagnosticRecoversNextLine(t *testing.T) {
 	}
 }
 
+func TestE1015LeadingTupleItem(t *testing.T) {
+	source := "def Func()\n  var value = (, 'a', 'b')\n  var after = 1\nenddef\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1015" || file.Diagnostics[0].Message != "Name expected: , 'a', 'b')" || file.Text(file.Diagnostics[0].Span) != "," {
+		t.Fatalf("E1015 diagnostics = %#v", file.Diagnostics)
+	}
+	if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+		t.Fatalf("next-line recovery = %#v", file.Commands)
+	}
+
+	for _, source := range []string{
+		"let value = (, 'a', 'b')\n",
+		"vim9script\nvar value = (, 'a', 'b')\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E15" {
+			t.Fatalf("non-compiled diagnostics = %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestOfficialLegacyLambdaExpressionInsideVim9(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_func.vim Test_abort_even_with_silent.
 	expression, diagnostics := (Vim9ExpressionParser{}).Parse("{-> ''}() .. {}['X']")
