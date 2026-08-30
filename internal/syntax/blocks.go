@@ -305,6 +305,24 @@ func buildBlocks(file *File) {
 			}
 		}
 		if closes {
+			// Vim reports a dedicated diagnostic for a function closer that
+			// mismatches the active function dialect. Keep the active block on
+			// the stack so its real closer and following blocks remain visible.
+			if len(stack) > 0 {
+				top := stack[len(stack)-1]
+				topKind := file.Blocks[top].Kind
+				if (topKind == BlockDef && closeKind == BlockFunction && command.Bang.Start == command.Bang.End) ||
+					(topKind == BlockFunction && closeKind == BlockDef && !recoveryBlocks[top]) {
+					code, message := "vim/E1151", "Mismatched endfunction"
+					if topKind == BlockFunction {
+						code, message = "vim/E1152", "Mismatched enddef"
+					}
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
+					command.Block = top
+					recoveryBlocks[top] = true
+					continue
+				}
+			}
 			match := -1
 			for index := len(stack) - 1; index >= 0; index-- {
 				if file.Blocks[stack[index]].Kind == closeKind {
