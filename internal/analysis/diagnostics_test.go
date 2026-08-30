@@ -3011,6 +3011,58 @@ func TestAnalyzeStringIndexAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeReadOnlyClassMemberDiagnostics(t *testing.T) {
+	source := `vim9script
+class A
+  final foo: string = 'a'
+  public final values: list<number> = [1]
+  public static final label: string = 'a'
+  const token: string
+  var mutable: string
+  def new()
+    this.foo = 'initialized'
+    this.token = 'initialized'
+  enddef
+  def Change()
+    this.foo = 'b'
+    this.values[0] = 2
+    this.mutable = 'b'
+  enddef
+  static def ChangeLabel()
+    label = 'b'
+  enddef
+endclass
+var a = A.new()
+a.values = [2]
+A.label = 'b'
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1409" {
+			got = append(got, diagnostic)
+		}
+	}
+	want := []struct {
+		message string
+		span    string
+	}{
+		{`Cannot change read-only variable "foo" in class "A"`, "foo"},
+		{`Cannot change read-only variable "label" in class "A"`, "label"},
+		{`Cannot change read-only variable "values" in class "A"`, "values"},
+		{`Cannot change read-only variable "label" in class "A"`, "label"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("E1409 diagnostics = %#v, want %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, want, file.Diagnostics, result.Diagnostics)
+	}
+	for index, diagnostic := range got {
+		if diagnostic.Message != want[index].message || file.Text(diagnostic.Span) != want[index].span {
+			t.Fatalf("E1409 diagnostic[%d] = %#v on %q, want %#v", index, diagnostic, file.Text(diagnostic.Span), want[index])
+		}
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]

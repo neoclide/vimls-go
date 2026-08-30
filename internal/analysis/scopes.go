@@ -2384,6 +2384,10 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1423", Message: "Enum value \"" + enumName + "." + memberName + "\" cannot be modified", Span: target.Span,
 			})
+		} else if className, memberName, ok := readOnlyClassMemberAssignment(result, scope, target); ok {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1409", Message: "Cannot change read-only variable \"" + memberName + "\" in class \"" + className + "\"", Span: memberNameSpan(result.File, target),
+			})
 		} else if target != nil && target.Kind == syntax.ExpressionMember && len(target.Children) == 1 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier && target.Children[0].Value == "this" {
 			if enumName, ok := enclosingVim9EnumName(result.File, scope); ok {
 				diagnostic := syntax.Diagnostic{Span: target.Span}
@@ -2428,6 +2432,79 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 	for _, child := range expression.Children {
 		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
+}
+
+func readOnlyClassMemberAssignment(result *FileAnalysis, scope *Scope, target *syntax.Expression) (string, string, bool) {
+	if result == nil || result.File == nil || scope == nil || target == nil {
+		return "", "", false
+	}
+	file := result.File
+	classes := localClasses(file)
+	var class *syntax.Command
+	static := false
+	if target.Kind == syntax.ExpressionIdentifier {
+		class = enclosingClassCommand(file, scope)
+		static = true
+	} else if target.Kind != syntax.ExpressionMember || len(target.Children) != 1 || target.Children[0] == nil || file.Text(target.Operator) != "." {
+		return "", "", false
+	} else if receiver := target.Children[0]; receiver.Kind == syntax.ExpressionIdentifier && receiver.Value == "this" {
+		if scopeWithinConstructor(file, scope) {
+			return "", "", false
+		}
+		class = enclosingClassCommand(file, scope)
+	} else if receiver.Kind == syntax.ExpressionIdentifier {
+		declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+		if declaration != nil && declaration.Kind == SymbolKindClass {
+			class = classes[receiver.Value]
+			static = true
+		} else {
+			class = classes[resolvedExpressionType(result, scope, receiver).Name]
+		}
+	}
+	for current := class; current != nil; current = extendedClass(file, classes, current) {
+		for _, memberIndex := range current.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Declaration == nil || file.Text(member.Declaration.Name) != target.Value || commandHasModifier(member, "static") != static {
+				continue
+			}
+			if member.Canonical == "const" || member.Canonical == "final" {
+				return file.Text(current.Aggregate.Name), target.Value, true
+			}
+			return "", "", false
+		}
+	}
+	return "", "", false
+}
+
+func scopeWithinConstructor(file *syntax.File, scope *Scope) bool {
+	for current := scope; file != nil && current != nil; current = current.Parent {
+		if current.Lambda != nil {
+			return false
+		}
+		if current.Kind != syntax.BlockDef || current.Block < 0 {
+			continue
+		}
+		commands, blocks := file.Commands, file.Blocks
+		if current.CommandList != nil {
+			commands, blocks = current.CommandList.Commands, current.CommandList.Blocks
+		}
+		if current.Block >= len(blocks) {
+			return false
+		}
+		header := blocks[current.Block].Header
+		if header < 0 || header >= len(commands) || commands[header].Function == nil {
+			return false
+		}
+		name := file.Text(commands[header].Function.Name)
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			name = name[dot+1:]
+		}
+		return name == "new"
+	}
+	return false
 }
 
 func scopeWithinVim9Enum(file *syntax.File, scope *Scope, name string) bool {
