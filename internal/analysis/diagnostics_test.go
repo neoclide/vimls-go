@@ -3019,6 +3019,82 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeUnreachableCodeDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []struct{ text, message string }
+	}{
+		{
+			name: "official all-return if branches",
+			source: "vim9script\ndef Func(): number\n  if true\n    return 1\n" +
+				"  else\n    return 2\n  endif\n  return 3\nenddef\n",
+			want: []struct{ text, message string }{{"return", "Unreachable code after :return"}},
+		},
+		{
+			name: "official legacy-root def all-return if branches",
+			source: "def Func(): number\n  if true\n    return 1\n" +
+				"  else\n    return 2\n  endif\n  return 3\nenddef\n",
+			want: []struct{ text, message string }{{"return", "Unreachable code after :return"}},
+		},
+		{
+			name: "official throw before catch command",
+			source: "vim9script\ndef Func()\n  try\n    throw 'failed'\n" +
+				"    echo 'unreachable'\n  catch\n    echo 'caught'\n  endtry\nenddef\n",
+			want: []struct{ text, message string }{{"echo", "Unreachable code after :throw"}},
+		},
+		{
+			name: "direct def and top-level returns",
+			source: "vim9script\ndef Direct()\n  return\n  echo 'def'\nenddef\n" +
+				"return\necho 'top'\n",
+			want: []struct{ text, message string }{{"echo", "Unreachable code after :return"}, {"echo", "Unreachable code after :return"}},
+		},
+		{
+			name: "all-return try catch followed by code",
+			source: "vim9script\ndef Func()\n  try\n    return\n  catch\n" +
+				"    return\n  endtry\n  echo 'after'\nenddef\n",
+			want: []struct{ text, message string }{{"echo", "Unreachable code after :return"}},
+		},
+		{
+			name: "Vim9 lambda command block",
+			source: "vim9script\nvar Callback = () => {\n  return\n" +
+				"  echo 'after'\n}\n",
+			want: []struct{ text, message string }{{"echo", "Unreachable code after :return"}},
+		},
+		{
+			name: "one-sided if loops legacy and malformed stay conservative",
+			source: "vim9script\ndef Conditional()\n  if true\n    return\n  endif\n  echo 'after if'\n" +
+				"enddef\ndef Loop()\n  while true\n    return\n  endwhile\n  echo 'after loop'\nenddef\n" +
+				"function Legacy()\n  return\n  echo 'legacy'\nendfunction\ndef Broken()\n  if true\n    return\n  echo 'editing'\n",
+		},
+		{
+			name: "separate defs are independent",
+			source: "vim9script\ndef First()\n  return\n  echo 'first'\nenddef\n" +
+				"def Second()\n  throw 'failed'\n  echo 'second'\nenddef\n",
+			want: []struct{ text, message string }{{"echo", "Unreachable code after :return"}, {"echo", "Unreachable code after :throw"}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1095" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1095 diagnostics = %#v, want %q; all diagnostics = %#v; syntax diagnostics = %#v", got, test.want, Analyze(file).Diagnostics, file.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				want := test.want[index]
+				if file.Text(diagnostic.Span) != want.text || diagnostic.Message != want.message {
+					t.Fatalf("E1095 diagnostic[%d] = %#v on %q, want %q on %q", index, diagnostic, file.Text(diagnostic.Span), want.message, want.text)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeVim9ParameterAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

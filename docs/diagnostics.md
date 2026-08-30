@@ -99,6 +99,32 @@ Representative source evidence, pinned to Vim 9.2.1015:
 - `runtime/doc/vim9.txt:3465-3472` documents the `function` and `def` scope
   restriction.
 
+## Unreachable Vim9 code: E1095
+
+Vim reports `E1095: Unreachable code after :return` or `E1095: Unreachable
+code after :throw` when compiled Vim9 code continues after a command that
+cannot fall through. Analysis reports the first unreachable command in each
+Vim9 script, `def`, or Vim9 lambda command sequence. Legacy `function` bodies
+remain outside this diagnostic.
+
+The same check applies after a complete `if`/`else` whose branches all
+terminate and after the statically provable `try`/catch forms already used by
+the missing-return analysis. Structural branch and closing commands are not
+reported as unreachable. Incomplete blocks, syntax-error spans, loops, and
+dynamic control flow remain conservative instead of inventing reachability.
+
+Representative source evidence, pinned to Vim 9.2.1015:
+
+- `src/vim9compile.c:4561-4585` rejects the next non-structural command after
+  the compiler records a return or throw and preserves throw state across an
+  `if`/`else` ending.
+- `src/testdir/test_vim9_func.vim:534-541` expects E1095 when all branches
+  return before another `:return`.
+- `src/testdir/test_vim9_script.vim:1101-1109,1198-1210` covers code after a
+  throw inside `try` and after an all-return `try`/catch.
+- `runtime/doc/userfunc.txt:198-210` documents the Vim9-only unreachable-code
+  rule and its lambda example.
+
 ## Unknown options: E113 and E518
 
 Vim uses different native error codes for an unknown option according to the

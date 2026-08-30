@@ -130,6 +130,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectInterfaceVariableAccessDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
+	collectUnreachableCodeDiagnostics(result)
 
 	sortDeclarations(result)
 	for index := range file.Commands {
@@ -1517,6 +1518,130 @@ func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []synta
 
 func returnTypeNeedsValue(returnType *syntax.Type) bool {
 	return returnType != nil && returnType.Kind != syntax.TypeMissing && returnType.Name != "void"
+}
+
+func collectUnreachableCodeDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	seenLambdas := make(map[*syntax.Expression]bool)
+	var walkSequence func([]syntax.Command, []syntax.Block, int, int, bool)
+	var walkExpression func(*syntax.Expression, bool)
+	var walkCommandExpressions func(*syntax.Command, bool)
+	var walkBlockBodies func([]syntax.Command, []syntax.Block, syntax.Block, bool)
+	walkExpression = func(expression *syntax.Expression, compiled bool) {
+		if expression == nil {
+			return
+		}
+		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil && !seenLambdas[expression] {
+			seenLambdas[expression] = true
+			walkSequence(expression.LambdaBody.Commands, expression.LambdaBody.Blocks, 0, len(expression.LambdaBody.Commands), compiled)
+		}
+		for _, child := range expression.Children {
+			walkExpression(child, compiled)
+		}
+	}
+	walkCommandExpressions = func(command *syntax.Command, compiled bool) {
+		if command == nil {
+			return
+		}
+		for _, expression := range command.Expressions {
+			walkExpression(expression, compiled && command.Dialect == syntax.Vim9)
+		}
+		for _, expression := range command.Targets {
+			walkExpression(expression, compiled && command.Dialect == syntax.Vim9)
+		}
+		if command.Declaration != nil {
+			walkExpression(command.Declaration.Initializer, compiled && command.Dialect == syntax.Vim9)
+		}
+		if command.Mapping != nil {
+			walkExpression(command.Mapping.RHSExpression, compiled && command.Dialect == syntax.Vim9)
+		}
+		if command.For != nil {
+			walkExpression(command.For.Iterable, compiled && command.Dialect == syntax.Vim9)
+		}
+		if command.Import != nil {
+			walkExpression(command.Import.Path, compiled && command.Dialect == syntax.Vim9)
+		}
+		for _, value := range command.EnumValues {
+			walkExpression(value.Initializer, compiled && command.Dialect == syntax.Vim9)
+			for _, argument := range value.Arguments {
+				walkExpression(argument, compiled && command.Dialect == syntax.Vim9)
+			}
+		}
+		if command.Function != nil {
+			for _, parameter := range command.Function.Parameters {
+				walkExpression(parameter.Default, compiled && command.Dialect == syntax.Vim9)
+			}
+		}
+	}
+	walkBlockBodies = func(commands []syntax.Command, blocks []syntax.Block, block syntax.Block, compiled bool) {
+		if block.Header < 0 || block.End <= block.Header || block.End >= len(commands) {
+			return
+		}
+		if block.Kind == syntax.BlockIf || block.Kind == syntax.BlockTry {
+			headers := append([]int{block.Header}, block.Branches...)
+			for index, header := range headers {
+				end := block.End
+				if index+1 < len(headers) {
+					end = headers[index+1]
+				}
+				walkSequence(commands, blocks, header+1, end, compiled)
+			}
+			return
+		}
+		walkSequence(commands, blocks, block.Header+1, block.End, compiled)
+	}
+	walkSequence = func(commands []syntax.Command, blocks []syntax.Block, start, end int, compiled bool) {
+		if start < 0 || end < start || end > len(commands) {
+			return
+		}
+		for index := start; index < end; {
+			command := &commands[index]
+			walkCommandExpressions(command, compiled)
+			next := index + 1
+			flow := functionFlowFallsThrough
+			if isBlockHeader(blocks, index, command.Block) {
+				block := blocks[command.Block]
+				switch block.Kind {
+				case syntax.BlockDef:
+					walkBlockBodies(commands, blocks, block, true)
+				case syntax.BlockFunction:
+					walkBlockBodies(commands, blocks, block, false)
+				default:
+					walkBlockBodies(commands, blocks, block, compiled)
+				}
+				if block.End > index && block.End < end {
+					next = block.End + 1
+					if compiled && command.Dialect == syntax.Vim9 && !syntaxDiagnosticOverlaps(file.Diagnostics, block.Span) {
+						flow = commandBlockFlow(commands, blocks, block)
+					}
+				} else {
+					return
+				}
+			} else if compiled && command.Dialect == syntax.Vim9 && !syntaxDiagnosticOverlaps(file.Diagnostics, command.Span) {
+				switch command.Canonical {
+				case "return":
+					flow = functionFlowReturns
+				case "throw":
+					flow = functionFlowThrows
+				}
+			}
+			if flow.terminates() {
+				if next < end {
+					message := "Unreachable code after :return"
+					if flow == functionFlowThrows {
+						message = "Unreachable code after :throw"
+					}
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1095", Message: message, Span: commands[next].Name})
+				}
+				return
+			}
+			index = next
+		}
+	}
+	walkSequence(file.Commands, file.Blocks, 0, len(file.Commands), file.Dialect == syntax.Vim9)
 }
 
 func syntaxDiagnosticOverlaps(diagnostics []syntax.Diagnostic, span syntax.Span) bool {
