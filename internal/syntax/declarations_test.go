@@ -1369,6 +1369,45 @@ func TestVim9InterfaceAbstractReportsE1404(t *testing.T) {
 	}
 }
 
+func TestVim9ConcreteClassAbstractMemberReportsE1372(t *testing.T) {
+	for _, member := range []string{
+		"abstract def Foo()",
+		"abstract static def Foo(): number",
+		"abstract this.val = 10",
+	} {
+		source := "vim9script\nclass A\n  " + member + "\nendclass\nvar after = 1\n"
+		file := Parse(source)
+		var got []Diagnostic
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1372" {
+				got = append(got, diagnostic)
+			}
+			if diagnostic.Code == "vim/E1371" {
+				t.Fatalf("member=%q also reported E1371: %#v", member, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != `Abstract method "`+member+`" cannot be defined in a concrete class` || file.Text(got[0].Span) != member {
+			t.Fatalf("member=%q E1372 diagnostics=%#v; all diagnostics=%#v", member, got, file.Diagnostics)
+		}
+		last := file.Commands[len(file.Commands)-1]
+		if last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+			t.Fatalf("member=%q commands=%#v", member, file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+
+	for _, source := range []string{
+		"vim9script\nabstract class A\n  abstract def Foo()\nendclass\nclass B extends A\n  def Foo()\n  enddef\nendclass\n",
+		"vim9script\nabstract class A\n  abstract static def Foo()\nendclass\n",
+		"vim9script\ninterface A\n  abstract def Foo()\nendinterface\n",
+		"vim9script\nenum A\n  abstract def Foo()\nendenum\n",
+	} {
+		if hasDiagnostic(Parse(source), "vim/E1372") {
+			t.Fatalf("guard source reported E1372: %s", source)
+		}
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +

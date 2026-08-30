@@ -438,6 +438,7 @@ func parseSource(source string, initial Dialect) *File {
 			}
 		}
 	}
+	diagnoseConcreteClassAbstractMembers(file)
 	suppressClassBodyCommandDiagnostics(file)
 	buildAggregateMembers(file)
 	suppressInvalidBlockMissingEnds(file)
@@ -4458,6 +4459,50 @@ func diagnoseClassMemberModifierOrder(file *File, command *Command) {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1368", Message: `Static must be followed by "var" or "def" or "final" or "const"`, Span: modifier.Span,
 		})
+	}
+}
+
+func diagnoseConcreteClassAbstractMembers(file *File) {
+	if file == nil {
+		return
+	}
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect != Vim9 || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockClass {
+			continue
+		}
+		block := &file.Blocks[command.Block]
+		if block.Header == index || block.Header < 0 || block.Header >= len(file.Commands) {
+			continue
+		}
+		abstractClass := false
+		for _, modifier := range file.Commands[block.Header].Modifiers {
+			if modifier.Name == "abstract" {
+				abstractClass = true
+				break
+			}
+		}
+		if abstractClass {
+			continue
+		}
+		for _, modifier := range command.Modifiers {
+			if modifier.Name != "abstract" {
+				continue
+			}
+			kept := file.Diagnostics[:0]
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code != "vim/E1371" || diagnostic.Span != modifier.Span {
+					kept = append(kept, diagnostic)
+				}
+			}
+			file.Diagnostics = kept
+			end := trimSpaceEnd(file.Source, modifier.Span.Start, command.Argument.End)
+			span := Span{Start: modifier.Span.Start, End: end}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1372", Message: `Abstract method "` + file.Text(span) + `" cannot be defined in a concrete class`, Span: span,
+			})
+			break
+		}
 	}
 }
 

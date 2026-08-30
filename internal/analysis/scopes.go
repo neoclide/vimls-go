@@ -547,7 +547,7 @@ func collectUnimplementedAbstractMethodDiagnostics(result *FileAnalysis) {
 				continue
 			}
 			member := &file.Commands[memberIndex]
-			if member.Function != nil && (commandHasModifier(member, "abstract") || commandHasModifier(member, "public")) {
+			if commandHasModifier(member, "abstract") || member.Function != nil && commandHasModifier(member, "public") {
 				invalidClassMethod = true
 				break
 			}
