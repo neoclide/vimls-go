@@ -126,6 +126,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectMethodAccessLevelDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
 	collectMethodTypeMismatchDiagnostics(result)
+	collectDuplicateClassVariableDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 
@@ -235,7 +236,7 @@ func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {
 			if conflict || member.static {
 				continue
 			}
-			visited := make(map[*syntax.Command]bool)
+			visited := map[*syntax.Command]bool{class: true}
 			for parent := extendedClass(file, classes, class); parent != nil && !visited[parent]; parent = extendedClass(file, classes, parent) {
 				visited[parent] = true
 				for _, parentMemberIndex := range parent.Aggregate.Members {
@@ -247,6 +248,61 @@ func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {
 					}
 				}
 				if conflict {
+					break
+				}
+			}
+		}
+	}
+}
+
+func collectDuplicateClassVariableDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	classes := localClasses(file)
+	for index := range file.Commands {
+		aggregate := &file.Commands[index]
+		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil ||
+			aggregate.Aggregate.Kind != syntax.BlockClass && aggregate.Aggregate.Kind != syntax.BlockInterface && aggregate.Aggregate.Kind != syntax.BlockEnum {
+			continue
+		}
+		seen := make(map[string]bool)
+		if aggregate.Aggregate.Kind == syntax.BlockEnum {
+			seen["name"] = true
+			seen["ordinal"] = true
+		}
+		for _, memberIndex := range aggregate.Aggregate.Members {
+			member, ok := classVariableAt(file, memberIndex)
+			if !ok {
+				continue
+			}
+			name := file.Text(member.name)
+			if seen[name] {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1369", Message: "Duplicate variable: " + name, Span: member.name,
+				})
+				continue
+			}
+			seen[name] = true
+			if aggregate.Aggregate.Kind != syntax.BlockClass || member.static {
+				continue
+			}
+			visited := map[*syntax.Command]bool{aggregate: true}
+			reported := false
+			for parent := extendedClass(file, classes, aggregate); parent != nil && !visited[parent]; parent = extendedClass(file, classes, parent) {
+				visited[parent] = true
+				for _, parentMemberIndex := range parent.Aggregate.Members {
+					parentMember, ok := classVariableAt(file, parentMemberIndex)
+					if ok && !parentMember.static && file.Text(parentMember.name) == name {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1369", Message: "Duplicate variable: " + name, Span: aggregateEndSpan(file, aggregate),
+						})
+						reported = true
+						break
+					}
+				}
+				if reported {
 					break
 				}
 			}

@@ -3156,6 +3156,77 @@ endclass
 	}
 }
 
+func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		source  string
+		message string
+		span    string
+	}{
+		{
+			name:    "object variable",
+			source:  "vim9script\nclass C\n  var val = 10\n  var val = 20\nendclass\n",
+			message: "Duplicate variable: val", span: "val",
+		},
+		{
+			name:    "protected variable",
+			source:  "vim9script\nclass C\n  var _val = 10\n  var _val = 20\nendclass\n",
+			message: "Duplicate variable: _val", span: "_val",
+		},
+		{
+			name:    "static and object variable",
+			source:  "vim9script\nclass C\n  static var val = 10\n  var val = 20\nendclass\n",
+			message: "Duplicate variable: val", span: "val",
+		},
+		{
+			name:    "interface variable",
+			source:  "vim9script\ninterface I\n  var val: number\n  var val: number\nendinterface\n",
+			message: "Duplicate variable: val", span: "val",
+		},
+		{
+			name:    "enum name variable",
+			source:  "vim9script\nenum Planet\n  Mercury\n  var name: string\nendenum\n",
+			message: "Duplicate variable: name", span: "name",
+		},
+		{
+			name:    "enum ordinal variable",
+			source:  "vim9script\nenum Planet\n  Mercury\n  var ordinal: number\nendenum\n",
+			message: "Duplicate variable: ordinal", span: "ordinal",
+		},
+		{
+			name:    "inherited object variable",
+			source:  "vim9script\nclass A\n  var val = 10\nendclass\nclass B extends A\nendclass\nclass C extends B\n  var val = 20\nendclass\n",
+			message: "Duplicate variable: val", span: "endclass",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1369" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1369 diagnostics=%#v; syntax diagnostics=%#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass C\n  var val = 10\n  var _val = 20\nendclass\n",
+		"vim9script\nclass A\n  static var val = 10\nendclass\nclass B extends A\n  static var val = 20\nendclass\n",
+		"vim9script\nclass C\n  var svar2 = 10\n  var svar = 20\n  def new()\n  enddef\nendclass\n",
+		"vim9script\nclass A extends B\n  var val = 10\nendclass\nclass B extends A\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1369" {
+				t.Fatalf("guard source reported E1369: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1377MethodAccessLevelMismatch(t *testing.T) {
 	for _, test := range []struct {
 		name       string
