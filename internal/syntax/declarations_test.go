@@ -282,6 +282,34 @@ func TestVim9EnumInsideDefReportsE1435(t *testing.T) {
 	}
 }
 
+func TestVim9ClassInsideDefReportsE1429(t *testing.T) {
+	source := "vim9script\ndef Fn()\n  class Foo\n  endclass\nenddef\nvar after = 1\n"
+	file := Parse(source)
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1429" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Class can only be used in a script" || file.Text(got[0].Span) != "class" {
+		t.Fatalf("E1429 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+	}
+	if len(file.Blocks) != 2 || file.Blocks[0].Kind != BlockDef || file.Blocks[1].Kind != BlockClass || file.Blocks[1].Parent != 0 {
+		t.Fatalf("blocks = %#v", file.Blocks)
+	}
+	if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands[len(file.Commands)-1])
+	}
+	assertFileSpans(t, file)
+
+	topLevel := Parse("vim9script\nclass Foo\nendclass\n")
+	for _, diagnostic := range topLevel.Diagnostics {
+		if diagnostic.Code == "vim/E1429" {
+			t.Fatalf("top-level class reported E1429: %#v", diagnostic)
+		}
+	}
+}
+
 func TestVim9AggregateDeclarations(t *testing.T) {
 	source := "vim9script\nclass Child extends Base implements One, Two\nendclass\ninterface Item extends Parent\nendinterface\n"
 	file := Parse(source)
