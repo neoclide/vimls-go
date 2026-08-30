@@ -20,6 +20,7 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 		{"buffer union matches", "vim9script\ndef F()\n  bufname(1)\n  bufname('x')\nenddef\n", 0},
 		{"len union", "vim9script\ndef F()\n  len(1)\n  len({})\n  len(1.0)\nenddef\n", 1},
 		{"method argument", "vim9script\ndef F()\n  ['x']->map(3)\nenddef\n", 1},
+		{"index container", "vim9script\ndef F()\n  index('x', 'x')\nenddef\n", 1},
 		{"join container", "vim9script\ndef F()\n  join('x')\nenddef\n", 1},
 		{"max container", "vim9script\ndef F()\n  max(5)\nenddef\n", 1},
 		{"null argument", "vim9script\ndef F()\n  assert_match('a', 'b', null)\nenddef\n", 1},
@@ -1848,6 +1849,20 @@ func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 			argument: "v:none",
 		},
 		{
+			name:     "index container",
+			source:   "vim9script\nindex('a', 'a')\n",
+			code:     "vim/E1528",
+			message:  "List or Tuple or Blob required for argument 1",
+			argument: "'a'",
+		},
+		{
+			name:     "indexof method receiver",
+			source:   "vim9script\n{}->indexof((_, _) => true)\n",
+			code:     "vim/E1528",
+			message:  "List or Tuple or Blob required for argument 1",
+			argument: "{}",
+		},
+		{
 			name:     "join container",
 			source:   "vim9script\njoin('abc')\n",
 			code:     "vim/E1529",
@@ -1910,9 +1925,9 @@ func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 		})
 	}
 
-	positive := syntax.Parse("vim9script\nsubstitute('Hallo', 'a', 'e', '')\n{'a': 1}->keys()\nlen(123)\njoin([1])\n(1, 2)->join()\nmax([1])\n(1, 2)->min()\nmax({a: 1})\nvar dynamic: any\njoin(dynamic)\nmax(dynamic)\nget([1], 0)\n(1, 2)->get(0)\nget(0z12, 0)\nget({a: 1}, 'a')\nfunction('max')->get('name')\n")
+	positive := syntax.Parse("vim9script\nsubstitute('Hallo', 'a', 'e', '')\n{'a': 1}->keys()\nlen(123)\nindex([1], 1)\nindex((1, 2), 1)\nindex(0z12, 1)\njoin([1])\n(1, 2)->join()\nmax([1])\n(1, 2)->min()\nmax({a: 1})\nvar dynamic: any\nindex(dynamic, 1)\njoin(dynamic)\nmax(dynamic)\nget([1], 0)\n(1, 2)->get(0)\nget(0z12, 0)\nget({a: 1}, 'a')\nfunction('max')->get('name')\n")
 	for _, diagnostic := range Analyze(positive).Diagnostics {
-		if diagnostic.Code == "vim/E701" || diagnostic.Code == "vim/E1174" || diagnostic.Code == "vim/E1206" || diagnostic.Code == "vim/E1529" || diagnostic.Code == "vim/E1530" || diagnostic.Code == "vim/E1531" {
+		if diagnostic.Code == "vim/E701" || diagnostic.Code == "vim/E1174" || diagnostic.Code == "vim/E1206" || diagnostic.Code == "vim/E1528" || diagnostic.Code == "vim/E1529" || diagnostic.Code == "vim/E1530" || diagnostic.Code == "vim/E1531" {
 			t.Fatalf("valid builtin argument diagnostic = %#v", diagnostic)
 		}
 	}

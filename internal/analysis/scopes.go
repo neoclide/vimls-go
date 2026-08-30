@@ -3407,6 +3407,8 @@ func builtinArgumentDiagnostic(checker string, index int, span syntax.Span) (syn
 		code, required = "vim/E1174", "String"
 	case "arg_dict_any":
 		code, required = "vim/E1206", "Dictionary"
+	case "arg_list_or_tuple_or_blob":
+		code, required = "vim/E1528", "List or Tuple or Blob"
 	case "arg_list_or_tuple":
 		code, required = "vim/E1529", "List or Tuple"
 	case "arg_list_or_tuple_or_dict":
