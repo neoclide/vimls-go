@@ -6066,7 +6066,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							})
 							continue
 						}
-						if !scopeUsesDefTypeRules(scope) {
+						if !scopeUsesDefTypeRules(scope) || strings.TrimSuffix(checker, "_mod") == "arg_string_list_tuple_or_dict" {
 							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, actual, argument.Span, dialect == syntax.Vim9); ok {
 								result.Diagnostics = append(result.Diagnostics, diagnostic)
 								continue
@@ -6239,6 +6239,10 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 	case "arg_str_or_nr_or_list", "arg_cursor1":
 		if vim9 {
 			code, required = "vim/E1224", "String, Number or List"
+		}
+	case "arg_string_list_tuple_or_dict":
+		if vim9 {
+			code, required = "vim/E1225", "String, List, Tuple or Dictionary"
 		}
 	case "arg_item_of_prev":
 		if vim9 && index > 0 && index <= len(actual)-1 && actual[index-1].Name == "blob" {

@@ -2068,6 +2068,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   `src/evalfunc.c:1218-1238` defines the cursor variant.
 - `src/errors.h:3143-3144` defines the exact E1224 message.
 
+## String, List, Tuple or Dictionary required for builtin argument: E1225
+
+Analysis reports E1225 when the first argument of `count()` has a known type
+other than String, List, Tuple, or Dictionary. The diagnostic selects the
+complete normalized argument, including a method receiver, and uses argument
+position one.
+
+Unlike most neighboring builtin checker diagnostics, E1225 is emitted during
+both Vim9 script evaluation and `def` or block-lambda compilation. String,
+List, Tuple, Dictionary, and dynamically typed values are accepted. Legacy
+calls and the separate five-kind checker that also accepts Blob remain outside
+this rule.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:887-890` requires E1225 in both compiled
+  and script contexts for `count()`.
+- `src/evalfunc.c:1197-1216` directly emits E1225 from the
+  `arg_string_list_tuple_or_dict` checker instead of using the generic type
+  mismatch helper.
+- `src/errors.h:3145-3146` defines the exact E1225 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
