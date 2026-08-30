@@ -742,6 +742,45 @@ func TestAnalyzeE1023NumberAsBoolDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{name: "filter", source: "vim9script\nfilter([1, 2], 4)\n"},
+		{name: "map", source: "vim9script\nmap([1, 2], 4)\n"},
+		{name: "method", source: "vim9script\n[1, 2]->filter(4)\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1024" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Number as a String" || file.Text(got[0].Span) != "4" {
+				t.Fatalf("E1024 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"call filter([1, 2], 4)\n",
+		"vim9script\ndef F()\n  filter([1, 2], 4)\nenddef\n",
+		"vim9script\nvar Callback = () => filter([1, 2], 4)\n",
+		"vim9script\nfilter(1.1, 4)\n",
+		"vim9script\nindexof({}, 4)\n",
+		"vim9script\nfilter([1, 2], '4')\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1024" {
+				t.Fatalf("source %q unexpectedly received E1024: %#v", source, diagnostic)
+			}
+		}
+	}
+}
+
 func TestAnalyzeFloatModuloDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

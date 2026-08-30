@@ -879,3 +879,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   Numbers used as Booleans.
 - `src/typval.c:205-223` implements the Vim9 value check, and
   `src/errors.h:2690-2693` defines the exact E1023 and E1024 messages.
+
+## Using a Number as a String: E1024
+
+At top-level Vim9 script, `filter()` and `map()` evaluate their second
+argument as either a String expression or a function. When a statically known
+valid List, Dictionary, Blob, or String container is followed by a Number,
+analysis reports E1024 on that Number. Method-call syntax follows the same
+rule.
+
+Legacy script still converts the Number to a String and does not receive this
+diagnostic. A compiled `def` or Vim9 lambda instead applies strict callback
+typing and uses E1256 for the same Number argument. If the first argument is
+already an invalid container, its diagnostic takes priority and analysis does
+not add E1024.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:1563-1564` distinguishes E1256 in a
+  compiled `def` from E1024 at Vim9 script level for `filter()`.
+- `src/testdir/test_vim9_builtin.vim:2713-2715` makes the same distinction for
+  `map()`.
+- `runtime/doc/vim9.txt:2501-2519` contrasts the accepted Legacy conversion
+  with the Vim9 E1024 behavior.
+- `src/typval.c:1206-1218` emits E1024 for strict Number-to-String conversion,
+  and `src/errors.h:2692-2693` defines the exact message.

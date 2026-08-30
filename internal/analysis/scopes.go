@@ -2650,6 +2650,13 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1031", Message: "Cannot use void value", Span: argument.Span})
 							continue
 						}
+						if !scopeUsesDefTypeRules(scope) && index == 1 && actual[index].Name == "number" && (builtin.Name == "filter" || builtin.Name == "map") && len(actual) > 0 {
+							switch actual[0].Name {
+							case "list", "dict", "blob", "string":
+								result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1024", Message: "Using a Number as a String", Span: argument.Span})
+								continue
+							}
+						}
 						if !scopeUsesDefTypeRules(scope) && strings.TrimSuffix(checker, "_mod") == "arg_string_or_func" && actual[index].Name == "list" {
 							diagnostic, _ := stringConversionDiagnostic(actual[index], argument.Span)
 							result.Diagnostics = append(result.Diagnostics, diagnostic)
@@ -2681,8 +2688,20 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 				collectFunctionCallDiagnostics(result, scope, expression, dialect == syntax.Vim9)
 			}
 		}
-		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
-			walkCommands(expression.LambdaBody.Commands, result.lambdaScopes[expression])
+		if expression.Kind == syntax.ExpressionLambda {
+			lambdaScope := result.lambdaScopes[expression]
+			if lambdaScope == nil {
+				lambdaScope = scope
+			}
+			if expression.LambdaBody != nil {
+				walkCommands(expression.LambdaBody.Commands, lambdaScope)
+			}
+			for index, child := range expression.Children {
+				if index >= len(expression.Parameters) {
+					walk(child, lambdaScope, dialect)
+				}
+			}
+			return
 		}
 		for _, child := range expression.Children {
 			walk(child, scope, dialect)
