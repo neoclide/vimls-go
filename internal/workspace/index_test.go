@@ -173,6 +173,14 @@ enddef
 	if ambiguousReferences := CollectExternalReferences(filepath.Join(root, "ambiguous.vim"), ambiguousImport); len(ambiguousReferences) != 0 {
 		t.Fatalf("ambiguous import references = %#v", ambiguousReferences)
 	}
+	forwardImport := syntax.Parse("vim9script\necho lib.Run()\nvar typed: lib.Public<number>\nimport './lib.vim' as lib\n")
+	if forwardReferences := CollectExternalReferences(filepath.Join(root, "forward.vim"), forwardImport); len(forwardReferences) != 0 {
+		t.Fatalf("forward import references = %#v", forwardReferences)
+	}
+	functionImport := syntax.Parse("vim9script\ndef Deferred()\n  import './lib.vim' as lib\n  echo lib.Run()\nenddef\n")
+	if functionReferences := CollectExternalReferences(filepath.Join(root, "function.vim"), functionImport); len(functionReferences) != 0 {
+		t.Fatalf("function-local import references = %#v", functionReferences)
+	}
 
 	legacyPath := filepath.Join(root, "legacy.vim")
 	legacySource := "call foo#bar#Run()\nlet value = g:foo#bar#Value\n"

@@ -818,7 +818,8 @@ func TestAnalyzeE1073NameAlreadyDefined(t *testing.T) {
 		{"script defs", "vim9script\ndef Func()\nenddef\ndef Func()\nenddef\n", "Func", 1},
 		{"script and nested def", "vim9script\ndef Func()\nenddef\ndef Outer()\n  def Func()\n  enddef\nenddef\n", "Func", 1},
 		{"import alias", "vim9script\nimport autoload 'one.vim' as one\nimport autoload 'two.vim' as one\n", "one", 1},
-		{"variable and import alias", "vim9script\nvar one = 1\nimport autoload 'one.vim' as one\n", "one", 1},
+		{"function and import alias", "vim9script\ndef one()\nenddef\nimport autoload 'one.vim' as one\n", "one", 1},
+		{"variable and import alias", "vim9script\nvar one = 1\nimport autoload 'one.vim' as one\n", "one", 0},
 		{"different functions", "vim9script\ndef A()\n  def Inner()\n  enddef\nenddef\ndef B()\n  def Inner()\n  enddef\nenddef\n", "Inner", 0},
 		{"legacy root def", "def Outer()\n  def Inner()\n  enddef\n  def Inner()\n  enddef\nenddef\n", "Inner", 1},
 		{"legacy function", "function Outer()\n  function Inner()\n  endfunction\n  function Inner()\n  endfunction\nendfunction\n", "Inner", 0},
@@ -834,6 +835,34 @@ func TestAnalyzeE1073NameAlreadyDefined(t *testing.T) {
 			}
 			if len(got) != test.want || test.want == 1 && (got[0].Message != "Name already defined: "+test.text || file.Text(got[0].Span) != test.text) {
 				t.Fatalf("E1073 diagnostics = %#v", got)
+			}
+		})
+	}
+}
+
+func TestAnalyzeE1054ImportAliasConflictsWithScriptItem(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		item   string
+	}{
+		{name: "variable", prefix: "var exported = 'something'", item: "exported"},
+		{name: "constant", prefix: "const exported = 'something'", item: "exported"},
+		{name: "final", prefix: "final exported = 'something'", item: "exported"},
+		{name: "class", prefix: "class Exported\nendclass", item: "Exported"},
+		{name: "type alias", prefix: "type Exported = number", item: "Exported"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse("vim9script\n" + test.prefix + "\nimport './Xexport.vim' as " + test.item + "\n")
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1054" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Variable already declared in the script: "+test.item || file.Text(got[0].Span) != test.item {
+				t.Fatalf("E1054 diagnostics = %#v", got)
 			}
 		})
 	}

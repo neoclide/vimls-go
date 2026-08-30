@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"sort"
 	"sync"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -828,6 +829,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		target, _ = ParseTargetVersion(MaximumTargetVersion)
 	}
 	var file *syntax.File
+	var fileAnalysis *analysis.FileAnalysis
 	if work.Snapshot.ByteLen() > maxFileBytes {
 		file = &syntax.File{
 			Source: work.Snapshot.Text(),
@@ -838,13 +840,8 @@ func (s *Server) analyzeDocument(documentURI string) {
 	} else {
 		file = syntax.Parse(work.Snapshot.Text())
 		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
-		file.Diagnostics = append(file.Diagnostics, analysis.Analyze(file).Diagnostics...)
-		if len(file.Diagnostics) > maxDiagnosticsPerDocument {
-			file.Diagnostics = append(file.Diagnostics[:maxDiagnosticsPerDocument-1], syntax.Diagnostic{
-				Code: "vimls/diagnostics-truncated", Message: "additional diagnostics were omitted",
-				Span: syntax.Span{Start: len(file.Source), End: len(file.Source)},
-			})
-		}
+		fileAnalysis = analysis.Analyze(file)
+		file.Diagnostics = append(file.Diagnostics, fileAnalysis.Diagnostics...)
 		if work.Context.Err() != nil {
 			return
 		}
@@ -852,10 +849,43 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if work.Context.Err() != nil {
 		return
 	}
-	s.publishSyntax(work, file)
+	if !s.prepareSyntax(work, file) {
+		return
+	}
+	graphRevision, graphReady, importDiagnostics := s.workspaceImportDiagnostics(work.Snapshot.URI(), file, fileAnalysis)
+	if !graphReady || work.Context.Err() != nil {
+		return
+	}
+	file.Diagnostics = append(file.Diagnostics, importDiagnostics...)
+	sort.SliceStable(file.Diagnostics, func(left, right int) bool {
+		if file.Diagnostics[left].Span.Start != file.Diagnostics[right].Span.Start {
+			return file.Diagnostics[left].Span.Start < file.Diagnostics[right].Span.Start
+		}
+		return file.Diagnostics[left].Span.End < file.Diagnostics[right].Span.End
+	})
+	if len(file.Diagnostics) > maxDiagnosticsPerDocument {
+		file.Diagnostics = append(file.Diagnostics[:maxDiagnosticsPerDocument-1], syntax.Diagnostic{
+			Code: "vimls/diagnostics-truncated", Message: "additional diagnostics were omitted",
+			Span: syntax.Span{Start: len(file.Source), End: len(file.Source)},
+		})
+	}
+	s.publishSyntax(work, file, graphRevision)
 }
 
-func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File) {
+func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) bool {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if !s.documents.IsCurrent(analysis) {
+		return false
+	}
+	documentURI := analysis.Snapshot.URI()
+	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: file}
+	dependents := s.replaceWorkspaceFile(documentURI, file)
+	s.startWorkspaceDependents(dependents)
+	return true
+}
+
+func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, graphRevision uint64) {
 	s.mu.Lock()
 	encoding := s.encoding
 	client := s.client
@@ -867,8 +897,13 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File) {
 		return
 	}
 	documentURI := analysis.Snapshot.URI()
-	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: file}
-	s.startWorkspaceDependents(s.replaceWorkspaceFile(documentURI, file))
+	s.workspaceMu.Lock()
+	currentGraphRevision := s.workspaceGraphView.Revision()
+	s.workspaceMu.Unlock()
+	if currentGraphRevision != graphRevision {
+		s.startAnalysis(documentURI)
+		return
+	}
 	diagnostics := make([]protocol.Diagnostic, 0, len(file.Diagnostics))
 	for _, item := range file.Diagnostics {
 		start, startError := analysis.Snapshot.Position(item.Span.Start, encoding)

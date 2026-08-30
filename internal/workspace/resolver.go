@@ -164,6 +164,19 @@ func (r *PathResolver) ResolveImportPath(from, raw string, autoload bool) PathRe
 	return r.choose(candidates)
 }
 
+// StaticImportPath decodes a literal import expression without executing
+// Vimscript. Dynamic expressions return ok=false.
+func StaticImportPath(raw string) (path string, ok bool) {
+	return decodeStaticPath(raw)
+}
+
+// RuntimeImport reports whether a literal import uses import/ or autoload/
+// lookup below 'runtimepath', rather than a relative or absolute path.
+func RuntimeImport(raw string) bool {
+	path, ok := decodeStaticPath(raw)
+	return ok && path != "" && !strings.HasPrefix(path, ".") && !isAbsolutePath(path)
+}
+
 // ResolveAutoload maps a legacy name such as foo#bar#Func to
 // autoload/foo/bar.vim in configured runtime-path order. This follows Vim's
 // autoload_name() rule and never guesses a name without a complete prefix.

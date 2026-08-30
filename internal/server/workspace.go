@@ -97,6 +97,8 @@ func normalizeWorkspaceRoots(roots []string) []string {
 }
 
 func (s *Server) setWorkspaceRoots(roots []string) {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
 	s.workspaceMu.Lock()
 	s.workspaceRoots = append([]string(nil), roots...)
 	s.workspaceResolver = nil
@@ -106,6 +108,8 @@ func (s *Server) setWorkspaceRoots(roots []string) {
 }
 
 func (s *Server) setRuntimePaths(paths []string) {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
 	s.workspaceMu.Lock()
 	s.runtimePaths = append([]string(nil), paths...)
 	s.workspaceResolver = nil
@@ -422,11 +426,12 @@ func collectWorkspaceImportFacts(importer string, file *syntax.File, resolver *w
 		return nil
 	}
 	facts := make([]workspace.ImportFact, 0)
-	var collect func([]syntax.Command)
-	collect = func(commands []syntax.Command) {
+	var collect func([]syntax.Command, []syntax.Block, bool)
+	collect = func(commands []syntax.Command, blocks []syntax.Block, deferred bool) {
 		for index := range commands {
 			command := &commands[index]
-			if command.Import != nil {
+			insideFunction := deferred || workspaceCommandInsideFunction(command, blocks)
+			if command.Import != nil && !insideFunction {
 				importNode := command.Import
 				resolution := workspace.PathResolution{Dynamic: true}
 				if resolver != nil {
@@ -449,12 +454,24 @@ func collectWorkspaceImportFacts(importer string, file *syntax.File, resolver *w
 				})
 			}
 			if command.Embedded != nil {
-				collect(command.Embedded.Commands)
+				collect(command.Embedded.Commands, command.Embedded.Blocks, insideFunction)
 			}
 		}
 	}
-	collect(file.Commands)
+	collect(file.Commands, file.Blocks, false)
 	return facts
+}
+
+func workspaceCommandInsideFunction(command *syntax.Command, blocks []syntax.Block) bool {
+	if command == nil {
+		return false
+	}
+	for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
+		if blocks[block].Kind == syntax.BlockDef || blocks[block].Kind == syntax.BlockFunction {
+			return true
+		}
+	}
+	return false
 }
 
 func retainWorkspaceImportTargets(facts []workspace.ImportFact, known func(string) bool) []workspace.ImportFact {

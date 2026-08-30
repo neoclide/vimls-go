@@ -28,6 +28,7 @@ type SymbolFact struct {
 	SelectionRange syntax.Span
 	Detail         string
 	Exported       bool
+	TopLevel       bool
 }
 
 // SymbolMatch is an immutable workspace symbol match. Source is the complete
@@ -354,12 +355,12 @@ func CollectSymbolFacts(path string, file *syntax.File) []SymbolFact {
 	}
 	exported := exportedSymbolSpans(file)
 	facts := make([]SymbolFact, 0)
-	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, &facts)
+	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, true, &facts)
 	sortFacts(facts)
 	return facts
 }
 
-func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[syntax.Span]bool, facts *[]SymbolFact) {
+func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[syntax.Span]bool, topLevel bool, facts *[]SymbolFact) {
 	for _, symbol := range symbols {
 		if symbol == nil || symbol.Name == "" {
 			continue
@@ -372,8 +373,9 @@ func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[sy
 			SelectionRange: symbol.SelectionRange,
 			Detail:         strings.Clone(symbol.Detail),
 			Exported:       exported[symbol.SelectionRange],
+			TopLevel:       topLevel,
 		})
-		collectSymbolFacts(path, symbol.Children, exported, facts)
+		collectSymbolFacts(path, symbol.Children, exported, false, facts)
 	}
 }
 
@@ -440,7 +442,7 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 	}
 	imports := make(map[syntax.Span]*syntax.Import)
 	var importNodes []*syntax.Import
-	collectImports(file.Commands, imports, &importNodes)
+	collectImports(file.Commands, file.Blocks, false, imports, &importNodes)
 	importsByName := make(map[string][]*syntax.Import)
 	for _, importNode := range importNodes {
 		name := ImportAlias(file, importNode)
@@ -465,17 +467,19 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 			return
 		}
 		reference := references[receiver.Span]
-		var importNode *syntax.Import
+		importNode := importCandidates[0]
 		if reference != nil && reference.Declaration != nil {
 			if reference.Declaration.Kind != analysis.SymbolKindImport {
 				return
 			}
-			importNode = imports[reference.Declaration.Span]
-			if importNode != importCandidates[0] {
+			if imports[reference.Declaration.Span] != importNode {
 				return
 			}
-		} else {
-			importNode = importCandidates[0]
+		} else if (!emptyIndexSpan(importNode.Alias) && !strings.HasPrefix(receiver.Value, "s:")) || importNode.PathSpan.End > receiver.Span.Start {
+			// An implicit filename alias has no lexical declaration, and a
+			// legacy s: spelling can name a script-local import. Other unbound
+			// receivers remain unknown instead of binding to a later import.
+			return
 		}
 		member := syntax.Span{Start: expression.Operator.End, End: expression.Span.End}
 		if importNode == nil || !validIndexSpan(file, member) || file.Text(member) != expression.Value || !validIndexSpan(file, importNode.PathSpan) {
@@ -502,7 +506,7 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 		alias := typeNode.Name[:separator]
 		importNodes := importsByName[alias]
 		member := syntax.Span{Start: typeNode.Span.Start + separator + 1, End: typeNode.Span.Start + len(typeNode.Name)}
-		if len(importNodes) != 1 || !validIndexSpan(file, member) || file.Text(member) != typeNode.Name[separator+1:] || !validIndexSpan(file, importNodes[0].PathSpan) {
+		if len(importNodes) != 1 || importNodes[0].PathSpan.End > typeNode.Span.Start || !validIndexSpan(file, member) || file.Text(member) != typeNode.Name[separator+1:] || !validIndexSpan(file, importNodes[0].PathSpan) {
 			return
 		}
 		facts = append(facts, ExternalReferenceFact{
@@ -531,19 +535,36 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 	return deduplicateExternalReferences(facts)
 }
 
-func collectImports(commands []syntax.Command, imports map[syntax.Span]*syntax.Import, all *[]*syntax.Import) {
+func emptyIndexSpan(span syntax.Span) bool {
+	return span.Start >= span.End
+}
+
+func collectImports(commands []syntax.Command, blocks []syntax.Block, deferred bool, imports map[syntax.Span]*syntax.Import, all *[]*syntax.Import) {
 	for index := range commands {
 		command := &commands[index]
-		if command.Import != nil {
+		insideFunction := deferred || indexCommandInsideFunction(command, blocks)
+		if command.Import != nil && !insideFunction {
 			*all = append(*all, command.Import)
 			if command.Import.Alias.Start < command.Import.Alias.End {
 				imports[command.Import.Alias] = command.Import
 			}
 		}
 		if command.Embedded != nil {
-			collectImports(command.Embedded.Commands, imports, all)
+			collectImports(command.Embedded.Commands, command.Embedded.Blocks, insideFunction, imports, all)
 		}
 	}
+}
+
+func indexCommandInsideFunction(command *syntax.Command, blocks []syntax.Block) bool {
+	if command == nil {
+		return false
+	}
+	for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
+		if blocks[block].Kind == syntax.BlockDef || blocks[block].Kind == syntax.BlockFunction {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultImportName(raw string) string {

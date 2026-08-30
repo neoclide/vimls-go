@@ -256,8 +256,14 @@ func collectVim9NameAlreadyDefinedDiagnostics(result *FileAnalysis, commands []s
 		}
 		if existing := resolve(declaration.Scope, declaration.Name, declaration.Span.Start, false, nil); existing != nil &&
 			!(declaration.Scope == result.Root && functionSymbolKind(declaration.Kind) && !functionSymbolKind(existing.Kind)) {
+			code := "vim/E1073"
+			message := "Name already defined: " + declaration.Name
+			if declaration.Kind == SymbolKindImport && existing.Kind != SymbolKindImport && !functionSymbolKind(existing.Kind) && declaration.Scope == result.Root {
+				code = "vim/E1054"
+				message = "Variable already declared in the script: " + declaration.Name
+			}
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-				Code: "vim/E1073", Message: "Name already defined: " + declaration.Name, Span: declaration.Span,
+				Code: code, Message: message, Span: declaration.Span,
 			})
 		}
 	}

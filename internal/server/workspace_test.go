@@ -285,6 +285,19 @@ func TestWorkspaceImportGraphOmitsUnreadableTarget(t *testing.T) {
 	}
 }
 
+func TestWorkspaceImportGraphIgnoresFunctionLocalImport(t *testing.T) {
+	root := t.TempDir()
+	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\ndef Deferred()\n  import './lib.vim' as Lib\n  echo Lib.Value\nenddef\n")
+	targetPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+	instance := initializeWorkspaceServer(t, root)
+	graph := currentImportGraph(instance)
+	mainPath = mustWorkspaceCanonicalPath(t, mainPath)
+	targetPath = mustWorkspaceCanonicalPath(t, targetPath)
+	if imports := graph.Imports(mainPath); len(imports) != 0 || len(graph.Outgoing(mainPath)) != 0 || len(graph.Incoming(targetPath)) != 0 {
+		t.Fatalf("function-local import entered graph: imports=%#v outgoing=%#v incoming=%#v", imports, graph.Outgoing(mainPath), graph.Incoming(targetPath))
+	}
+}
+
 func TestWorkspaceImportGraphTracksOpenDocumentChanges(t *testing.T) {
 	root := t.TempDir()
 	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './one.vim' as Lib\n")
