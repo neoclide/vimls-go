@@ -1028,6 +1028,39 @@ func TestVim9InvalidEnumBodyCommandReportsE1419(t *testing.T) {
 	}
 }
 
+func TestVim9InvalidEnumValueReportsE1418(t *testing.T) {
+	for name, source := range map[string]string{
+		"invalid token": "vim9script\nenum Fruit\n  Apple,\n  $%@\nendenum\n",
+		"bar command":   "vim9script\nenum Fruit\n  One, | var y = 10\nendenum\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := Parse(source)
+			want := "$%@"
+			valueName := "Apple"
+			if name == "bar command" {
+				want = "| var y = 10"
+				valueName = "One"
+			}
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1418" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Invalid enum value declaration: "+want || file.Text(got[0].Span) != want {
+				t.Fatalf("E1418 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+			}
+			if len(file.Commands) < 3 || len(file.Commands[2].EnumValues) != 1 || file.Text(file.Commands[2].EnumValues[0].Name) != valueName {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockEnum || file.Blocks[0].End < 0 || file.Commands[file.Blocks[0].End].Canonical != "endenum" {
+				t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
