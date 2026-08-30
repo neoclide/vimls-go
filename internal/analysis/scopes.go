@@ -2127,6 +2127,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 			}
 			if command.Dialect == syntax.Vim9 && expression.Kind == syntax.ExpressionMember {
+				appendObjectVariableThroughClassDiagnostic(result, expressionScope, expression)
 				appendClassMethodThroughObjectDiagnostic(result, expressionScope, expression)
 			}
 			if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) &&
@@ -3918,6 +3919,35 @@ func appendObjectMethodThroughClassDiagnostic(result *FileAnalysis, scope *Scope
 			}
 			return
 		}
+	}
+}
+
+func appendObjectVariableThroughClassDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || member.Children[0].Kind != syntax.ExpressionIdentifier ||
+		result.File.Text(member.Operator) != "." || member.Value == "" {
+		return
+	}
+	receiver := member.Children[0]
+	declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+	if declaration == nil {
+		return
+	}
+	className := ""
+	switch declaration.Kind {
+	case SymbolKindClass:
+		className = declaration.Name
+	case SymbolKindTypeAlias:
+		className = result.classAliases[declaration.Name]
+	}
+	class := result.classes[className]
+	if class == nil {
+		return
+	}
+	if _, found := classObjectVariableType(result, class, member.Value); found {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1376", Message: `Object variable "` + member.Value + `" accessible only using class "` + className + `" object`, Span: memberNameSpan(result.File, member),
+		})
 	}
 }
 

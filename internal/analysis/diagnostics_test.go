@@ -4915,6 +4915,52 @@ func TestAnalyzeE1386ObjectMethodThroughClass(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1376ObjectVariableThroughClass(t *testing.T) {
+	for _, use := range []string{
+		"var value = A.val",
+		"A.val = 2",
+		"def Test()\n  var value = A.val\nenddef",
+		"def Test()\n  A.val = 2\nenddef",
+		"type Alias = A\nvar value = Alias.val",
+	} {
+		source := "vim9script\nclass A\n  public var val: number = 1\nendclass\n" + use + "\n"
+		file := syntax.Parse(source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E1376" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != `Object variable "val" accessible only using class "A" object` || file.Text(got[0].Span) != "val" {
+			t.Fatalf("use=%q E1376 diagnostics=%#v; syntax diagnostics=%#v", use, got, file.Diagnostics)
+		}
+	}
+
+	inherited := syntax.Parse("vim9script\nclass A\n  var val: number = 1\nendclass\nclass B extends A\nendclass\nvar value = B.val\n")
+	var inheritedDiagnostics []syntax.Diagnostic
+	for _, diagnostic := range Analyze(inherited).Diagnostics {
+		if diagnostic.Code == "vim/E1376" {
+			inheritedDiagnostics = append(inheritedDiagnostics, diagnostic)
+		}
+	}
+	if len(inheritedDiagnostics) != 1 || inheritedDiagnostics[0].Message != `Object variable "val" accessible only using class "B" object` {
+		t.Fatalf("inherited E1376 diagnostics=%#v", inheritedDiagnostics)
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  static var val: number = 1\nendclass\nvar value = A.val\n",
+		"vim9script\nclass A\n  public var val: number = 1\nendclass\nvar a = A.new()\nvar value = a.val\n",
+		"vim9script\nclass A\nendclass\nvar value = A.missing\n",
+		"vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nA.Foo()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1376" {
+				t.Fatalf("guard source reported E1376: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1431AbstractSuperMethodCall(t *testing.T) {
 	tests := []struct {
 		name    string
