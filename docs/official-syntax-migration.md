@@ -378,6 +378,9 @@ A recovery-phase audit then removed the split-lambda use-after-free regression
 fixture whose later physical lines are deliberately incomplete. The
 authoritative parser split is therefore 948 migrated, zero ready, and 93
 pending-fix.
+A command-phase audit then removed six counted failures that depend on mutable
+user commands or dynamically executed command text. The authoritative parser
+split is therefore 948 migrated, zero ready, and 87 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -970,13 +973,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 115 | 89 | 0 | 26 |
+| `C-EXCMD` | 109 | 89 | 0 | 20 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **342** | **316** | **0** | **26** |
+| **Total** | **336** | **316** | **0** | **20** |
 
 ```text
 C-EXPR
@@ -1019,7 +1022,7 @@ C-EXCMD
   E1065 T:55:1659/script
   E1083 C:267:6525/def
   E1100 S:2043:42762/script,2045:42875/script,2047:42988/script,2049:43102/script,2051:43216/script,2053:43330/script,2055:43444/script,4846:108652/{def|vim9-script},4856:108819/{def|vim9-script},4861:108900/{def|vim9-script},4866:108981/{def|vim9-script},4871:109064/{def|vim9-script}
-  E1144 C:1500:31716/script,1508:31863/script; S:3590:76362/script,3610:76804/script,3618:76970/def,3624:77087/script,3629:77194/def,3641:77421/def,3647:77538/script,3660:77800/def,3666:77915/script,3678:78133/script,3724:79220/script,3859:82421/script,3905:83376/script,3997:85329/script,4795:107577/{def|vim9-script},4800:107662/{def|vim9-script}
+  E1144 S:3590:76362/script,3610:76804/script,3618:76970/def,3624:77087/script,3629:77194/def,3641:77421/def,3647:77538/script,3660:77800/def,3666:77915/script,3678:78133/script,3724:79220/script,3859:82421/script,3905:83376/script,3997:85329/script,4795:107577/{def|vim9-script},4800:107662/{def|vim9-script}
   E179 C:1865:38529/script,1873:38655/script
   E182 S:3886:82965/script,3890:83060/script
   E398 T:69:2004/script,97:2698/script
@@ -1030,14 +1033,11 @@ C-EXCMD
   E413 S:3694:78489/script
   E416 S:3686:78303/script,3705:78798/script
   E461 I:3151:77235/script; S:3131:66338/def,3139:66506/def
-  E464 C:1545:32592/{def|vim9-script}; S:5083:114089/script,5092:114275/script,5099:114475/script
   E474 S:3741:79578/script
-  E475 I:2972:73136/script,2984:73418/script; S:2381:49427/def,3732:79394/script,3778:80424/script,3805:81070/script,3813:81312/script,3848:82155/script
-  E476 C:2076:42938/def; G:346:7617/script; S:4836:108460/{def|vim9-script},4841:108556/{def|vim9-script},4876:109149/{def|vim9-script},4881:109297/{def|vim9-script},5550:124415/script
+  E475 I:2972:73136/script,2984:73418/script; S:3732:79394/script,3778:80424/script,3805:81070/script,3813:81312/script,3848:82155/script
   E477 S:4135:88194/script
   E481 S:72:1434/{def|vim9-script},78:1542/{def|vim9-script},83:1641/{def|vim9-script},88:1738/{def|vim9-script},4851:108739/{def|vim9-script}
   E488 C:472:10765/{def|vim9-script},1903:39368/def,1904:39418/def; S:2042:42704/script,2044:42817/script,2046:42930/script,2088:44163/def,2096:44294/def,2382:49493/def,2437:50783/def,2459:51306/def,3476:74196/def,3557:75701/script,3561:75787/script,3564:75852/script,3570:75953/def,3573:76014/def,3579:76110/def,3599:76552/def,3635:77305/def,3654:77678/def,3715:79011/script,3926:83957/script,3937:84202/script,3942:84304/script,3946:84394/script,3967:84795/script,4077:87087/script,4091:87356/script,4098:87482/script,4112:87742/script,4126:88011/script; T:125:3484/script
-  E492 C:22:487/script,2076:42938/vim9-script; G:296:6532/script,312:6869/script; S:4836:108460/vim9-script,4841:108556/vim9-script,4876:109149/vim9-script,4881:109297/vim9-script
   E1170 S:3541:75427/script
 
 C-GENERIC
@@ -1087,8 +1087,9 @@ Authority is distributed across `src/eval.c`, `src/vim9expr.c`,
 `src/vim9cmds.c`, `src/vim9compile.c`, `src/vim9generics.c`,
 `src/vim9class.c`, `src/ex_docmd.c`, `src/userfunc.c`, and `src/usercmd.c`.
 
-The Group C parser inventory excludes twenty-seven failures whose outcome requires
-state beyond the token stream. `S:57:1170/{def|vim9-script}` checks the current
+The Group C parser inventory excludes fifty failures whose outcome requires
+state beyond the token stream or would violate opaque unknown-command recovery.
+`S:57:1170/{def|vim9-script}` checks the current
 buffer range, `G:854:19046/script` asks whether a resolved funcref is generic,
 and `S:5454:122336/script` checks whether a resolved value is callable. The
 three `I:{512:13833,519:14018,525:14180}/script` E1060 failures require knowing
@@ -1103,6 +1104,18 @@ accepted the string. It also excludes E1069 at
 all fourteen errors arise only when `function()` or `call()` interprets a
 string value as a function name. These cases belong to runtime or semantic
 analysis, not parser-negative coverage.
+
+The same phase boundary excludes E1144 at
+`C:{1500:31716,1508:31863}/script` and E464 at
+`C:1545:32592/{def|vim9-script}` plus
+`S:{5083:114089,5092:114275,5099:114475}/script`, because their outcome depends
+on the mutable user-command registry. `S:2381:49427/def` constructs a command
+string for `:execute`, so its E475 is runtime-only. Finally, the E476/E492
+variants at `C:{22:487,2076:42938}`, `G:{296:6532,312:6869,346:7617}`, and
+`S:{4836:108460,4841:108556,4876:109149,4881:109297,5550:124415}` are invalid
+only after Vim resolves a command name and context. The syntax parser keeps
+unknown, user-defined, and future commands opaque instead of inventing those
+state-dependent errors.
 
 `S:2021:42097/script` remains in the pinned corpus as a parser-stability input
 but is excluded from exact negative conformance. Vim's test verifies that an
