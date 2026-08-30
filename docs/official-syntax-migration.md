@@ -426,6 +426,9 @@ pending-fix.
 Commit `ed1cc85` migrated the invalid enum `#{` comment variant. The
 authoritative parser split is therefore 979 migrated, zero ready, and 53
 pending-fix.
+Commit `8cd5b1b` migrated both unknown generic tuple-type variants. The
+authoritative parser split is therefore 981 migrated, zero ready, and 51
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1501,7 +1504,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 130 migrated and 53 pending-fix. In the
+Group D contains 183 syntax variants: 132 migrated and 51 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1561,7 +1564,7 @@ missing argument, and parsing resumes on the next physical line.
 E1004 M ready: 138:3809/def
 E1008 M ready: 62:1444/{def|vim9-script},67:1600/{def|vim9-script}
 E1010 M ready: 120:3271/{def|vim9-script}
-E1010 P missing: 167:4773/{def|vim9-script}
+E1010 M missing: 167:4773/{def|vim9-script}
 E1015 M recovery: 159:4498/def
 E1068 M ready: 82:2083/{def|vim9-script},92:2394/def,97:2538/{def|vim9-script},143:3972/def,151:4245/def
 E1069 M ready: 72:1754/{def|vim9-script},77:1924/{def|vim9-script},87:2239/{def|vim9-script}
@@ -1578,6 +1581,12 @@ continues parsing all later items through `)`. The command context maps that
 one structural error to E1015 inside a compiled `def` and E15 in legacy or
 top-level Vim9 script without changing empty, one-item, list, or Dictionary
 comma grammar.
+
+Commit `8cd5b1b` migrates `167:4773/{def,vim9-script}`. Vim 9.2.1015 supports
+generic container types but not generic classes, so an unknown type name
+followed by `<...>` reports E1010 over the complete retained TypeGeneric node.
+Ordinary user type names and expression-context generic function calls remain
+unchanged.
 
 #### `test_vim9_enum.vim` (34)
 
