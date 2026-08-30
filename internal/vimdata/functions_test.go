@@ -18,6 +18,7 @@ func TestLookupFunctionMetadata(t *testing.T) {
 		{"range", 1, 3, 3, ReturnList, "arg_number", "arg_number"},
 		{"ch_open", 1, 2, 2, ReturnChannel, "arg_string", "arg_dict_any"},
 		{"map", 2, 2, 2, ReturnUnknown, "arg_list_or_dict_or_blob_or_string_mod", "arg_map_func"},
+		{"instanceof", 2, -1, 2, ReturnBool, "arg_object", "varargs_class"},
 		{"xor", 2, 2, 2, ReturnNumber, "arg_number", "arg_number"},
 	}
 	for _, test := range tests {

@@ -249,7 +249,7 @@ var builtinFunctions = [...]BuiltinFunction{
 	{Name: "inputsave", MinArgs: 0, MaxArgs: 0, ReturnType: ReturnNumberOrBool},
 	{Name: "inputsecret", MinArgs: 1, MaxArgs: 2, ReturnType: ReturnString, ArgumentChecks: []string{"arg_string", "arg_string"}},
 	{Name: "insert", MinArgs: 2, MaxArgs: 3, ReturnType: ReturnUnknown, ArgumentChecks: []string{"arg_list_or_blob", "arg_item_of_prev", "arg_number"}},
-	{Name: "instanceof", MinArgs: 2, MaxArgs: -1, ReturnType: ReturnBool, ArgumentChecks: []string{"arg_object", "varargs_class", "NULL"}},
+	{Name: "instanceof", MinArgs: 2, MaxArgs: -1, ReturnType: ReturnBool, ArgumentChecks: []string{"arg_object", "varargs_class"}},
 	{Name: "interrupt", MinArgs: 0, MaxArgs: 0, ReturnType: ReturnVoid},
 	{Name: "invert", MinArgs: 1, MaxArgs: 1, ReturnType: ReturnNumber, ArgumentChecks: []string{"arg_number"}},
 	{Name: "isabsolutepath", MinArgs: 1, MaxArgs: 1, ReturnType: ReturnNumberOrBool, ArgumentChecks: []string{"arg_string"}},

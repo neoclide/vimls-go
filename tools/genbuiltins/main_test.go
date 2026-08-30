@@ -7,10 +7,15 @@ import (
 )
 
 func TestParseSourceFixture(t *testing.T) {
-	source := []byte(`static argcheck_T arg2_string[] = {arg_string, arg_string};
+	source := []byte(`/* Lists of functions that check the argument types of a builtin function. */
+static argcheck_T arg2_string[] = {arg_string, arg_string};
+static argcheck_T arg2_instanceof[] = {
+    arg_object, varargs_class, NULL
+};
+static garray_T *current_type_gap = NULL;
 static const funcentry_T global_functions[] =
 {
-    {"zeta", 1, VARGS, 0, NULL,
+	{"zeta", 1, VARGS, 0, arg2_instanceof,
             ret_any, f_zeta},
     {"alpha", 0, 2, 0, arg2_string,
             ret_list_string, f_alpha},
@@ -35,6 +40,9 @@ static const funcentry_T global_functions[] =
 	}
 	if got := strings.Join(functions[0].ArgumentChecks, ","); got != "arg_string,arg_string" {
 		t.Fatalf("alpha argument checks = %q", got)
+	}
+	if got := strings.Join(functions[2].ArgumentChecks, ","); got != "arg_object,varargs_class" {
+		t.Fatalf("zeta argument checks = %q", got)
 	}
 }
 

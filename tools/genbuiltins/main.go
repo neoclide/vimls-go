@@ -91,6 +91,7 @@ func parseSource(source []byte) ([]builtin, error) {
 	end += start
 	lines := strings.Split(string(source[start:end]), "\n")
 	functions := make([]builtin, 0, 600)
+	usedArgumentChecks := make(map[string]bool, len(argumentChecks))
 	for index := 0; index < len(lines); index++ {
 		match := functionStart.FindStringSubmatch(lines[index])
 		if match == nil {
@@ -131,11 +132,25 @@ func parseSource(source []byte) ([]builtin, error) {
 			if !ok {
 				return nil, fmt.Errorf("%s argument check table %s not found", match[1], match[4])
 			}
+			usedArgumentChecks[match[4]] = true
+			if maxArgs >= 0 && len(checks) != maxArgs {
+				return nil, fmt.Errorf("%s argument check table %s has %d entries, want %d", match[1], match[4], len(checks), maxArgs)
+			}
 		}
 		functions = append(functions, builtin{Name: match[1], MinArgs: minArgs, MaxArgs: maxArgs, ReturnType: returnType, ArgumentChecks: checks})
 	}
 	if len(functions) == 0 {
 		return nil, fmt.Errorf("global_functions table is empty")
+	}
+	if len(usedArgumentChecks) != len(argumentChecks) {
+		unused := make([]string, 0, len(argumentChecks)-len(usedArgumentChecks))
+		for name := range argumentChecks {
+			if !usedArgumentChecks[name] {
+				unused = append(unused, name)
+			}
+		}
+		sort.Strings(unused)
+		return nil, fmt.Errorf("unused argument check tables: %s", strings.Join(unused, ", "))
 	}
 	sort.Slice(functions, func(i, j int) bool { return functions[i].Name < functions[j].Name })
 	for i := 1; i < len(functions); i++ {
@@ -147,10 +162,24 @@ func parseSource(source []byte) ([]builtin, error) {
 }
 
 func parseArgumentChecks(source []byte) (map[string][]string, error) {
+	start := bytes.Index(source, []byte("Lists of functions that check the argument types"))
+	if start < 0 {
+		return nil, fmt.Errorf("argument check table section not found")
+	}
+	arraysStart := bytes.Index(source[start:], []byte("static argcheck_T"))
+	if arraysStart < 0 {
+		return nil, fmt.Errorf("argument check tables not found")
+	}
+	start += arraysStart
+	end := bytes.Index(source[start:], []byte("static garray_T *current_type_gap"))
+	if end < 0 {
+		return nil, fmt.Errorf("argument check table section terminator not found")
+	}
+	section := cComment.ReplaceAllString(string(source[start:start+end]), "")
 	checks := make(map[string][]string)
-	for _, match := range argumentArray.FindAllSubmatch(source, -1) {
-		name := string(match[1])
-		body := cComment.ReplaceAllString(string(match[2]), "")
+	for _, match := range argumentArray.FindAllStringSubmatch(section, -1) {
+		name := match[1]
+		body := match[2]
 		var entries []string
 		for _, entry := range strings.Split(body, ",") {
 			entry = strings.TrimSpace(entry)
@@ -161,6 +190,14 @@ func parseArgumentChecks(source []byte) (map[string][]string, error) {
 				return nil, fmt.Errorf("%s has unsupported argument checker %q", name, entry)
 			}
 			entries = append(entries, entry)
+		}
+		for index, entry := range entries {
+			if entry == "NULL" && index != len(entries)-1 {
+				return nil, fmt.Errorf("%s has non-terminal NULL argument checker", name)
+			}
+		}
+		if len(entries) > 0 && entries[len(entries)-1] == "NULL" {
+			entries = entries[:len(entries)-1]
 		}
 		if len(entries) == 0 {
 			return nil, fmt.Errorf("%s argument check table is empty", name)
