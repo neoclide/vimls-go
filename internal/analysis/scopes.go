@@ -5990,6 +5990,11 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 					}
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1232", Message: "Argument of exists_compiled() must be a literal string", Span: span})
 				}
+			} else if builtinCall && builtin.Name == "exists_compiled" && len(arguments) == 1 {
+				// Outside compiled Vim9 code exists_compiled() reaches its runtime
+				// builtin implementation, which rejects the otherwise valid arity.
+				_, span := functionDiagnosticTarget(result.File, callee)
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1233", Message: "exists_compiled() can only be used in a :def function", Span: span})
 			} else if builtinCall && dialect == syntax.Vim9 && builtin.Name == "flatten" {
 				// E1158 is emitted while walking the call and owns this builtin
 				// before its ordinary arity and argument-type checks.

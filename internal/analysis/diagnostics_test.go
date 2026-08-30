@@ -5123,6 +5123,67 @@ func TestAnalyzeE1232ExistsCompiledLiteralDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1233ExistsCompiledRuntimeDiagnostics(t *testing.T) {
+	const message = "exists_compiled() can only be used in a :def function"
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{"official number", "vim9script\nvar value = exists_compiled(10)\n"},
+		{"official identifier", "vim9script\nvar value = exists_compiled(v:progname)\n"},
+		{"top-level literal", "vim9script\nvar value = exists_compiled('feature')\n"},
+		{"Legacy script", "let value = exists_compiled('feature')\n"},
+		{"legacy command in def", "vim9script\ndef Func()\n  legacy echo exists_compiled('feature')\nenddef\n"},
+		{"method receiver", "vim9script\nvar value = 'feature'->exists_compiled()\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1233" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" {
+					t.Fatalf("E1233 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != "exists_compiled" {
+				t.Fatalf("E1233 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"compiled literal", "vim9script\ndef Func()\n  var value = exists_compiled('feature')\nenddef\n", ""},
+		{"compiled invalid", "vim9script\ndef Func()\n  var value = exists_compiled(10)\nenddef\n", "vim/E1232"},
+		{"block lambda invalid", "vim9script\nvar Callback = () => {\n  var value = exists_compiled(10)\n}\n", "vim/E1232"},
+		{"scoped call", "vim9script\nvar value = g:exists_compiled(10)\n", ""},
+		{"dynamic call", "vim9script\nvar Callback = (value) => value\nvar value = Callback(10)\n", ""},
+		{"missing runtime argument", "vim9script\nvar value = exists_compiled()\n", "vim/E119"},
+		{"extra runtime argument", "vim9script\nvar value = exists_compiled('one', 'two')\n", "vim/E118"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1233" {
+					t.Fatalf("guard unexpectedly received E1233: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},

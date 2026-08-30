@@ -2210,6 +2210,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   builtin to `:def` functions.
 - `src/errors.h:3163-3164` defines the exact E1232 message.
 
+## `exists_compiled()` outside compiled Vim9 code: E1233
+
+Analysis reports E1233 when a statically named `exists_compiled()` call with
+valid builtin arity reaches Vim's runtime implementation. This includes
+top-level Vim9 script, Legacy script and functions, Vim9-root `function`
+bodies, a one-command `legacy` inside a `def`, and method calls outside compiled
+Vim9 code. The diagnostic selects the function name.
+
+Compiled Vim9 `def` and block-lambda calls retain the E1232 literal-string
+check. Calls with missing or extra effective arguments retain E119 or E118,
+because Vim checks builtin arity before invoking the runtime implementation.
+The E1233 path owns the otherwise valid call and suppresses ordinary argument
+type diagnostics such as E1013.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:1071-1074` expects E1233 for Number and
+  identifier arguments at Vim9 script level, while compiled `def` forms use
+  E1232.
+- `src/evalfunc.c:4785-4788` implements the runtime builtin solely by emitting
+  E1233.
+- `runtime/doc/builtin.txt:2972-2984` limits `exists_compiled()` to `:def`
+  functions.
+- `src/errors.h:3165-3166` defines the exact E1233 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
