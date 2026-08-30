@@ -6,13 +6,13 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
-// ImportLoad describes one statically decoded import that did not resolve to
-// a readable target. Runtime is true for an autoload lookup through
-// 'runtimepath'; relative and absolute autoload failures use Vim's file-open
-// diagnostics instead of E1053.
+// ImportLoad describes one statically decoded import. Runtime is true for an
+// autoload lookup through 'runtimepath'; relative and absolute autoload
+// failures use Vim's file-open diagnostics instead of E1053.
 type ImportLoad struct {
 	Span     syntax.Span
 	Path     string
+	Self     bool
 	Missing  bool
 	Autoload bool
 	Runtime  bool
@@ -33,6 +33,12 @@ type ImportMember struct {
 func AnalyzeImports(loads []ImportLoad, members []ImportMember) []syntax.Diagnostic {
 	diagnostics := make([]syntax.Diagnostic, 0, len(loads)+len(members))
 	for _, load := range loads {
+		if load.Self {
+			diagnostics = append(diagnostics, syntax.Diagnostic{
+				Code: "vim/E1088", Message: "Script cannot import itself", Span: load.Span,
+			})
+			continue
+		}
 		if !load.Missing || load.Path == "" || load.Autoload && !load.Runtime {
 			continue
 		}

@@ -190,12 +190,13 @@ cannot publish after the import state changes.
 
 Import diagnostics currently cover provable `E1048` missing members, `E1049`
 non-exported members, `E1053` ordinary static load failures and runtimepath
-autoload load failures, and `E1054` when an import alias follows a conflicting
-script variable, constant, final, class, or type alias. Dynamic imports,
-unbound forward receivers, relative or absolute autoload load failures, and
-deferred autoload member access inside callable bodies remain conservative
-`unknown` where Vim's result depends on runtime state or uses another error
-contract.
+autoload load failures, `E1054` when an import alias follows a conflicting
+script variable, constant, final, class, or type alias, and `E1088` when a
+static import resolves to the importing script's canonical identity. Dynamic
+imports, unbound forward receivers, relative or absolute autoload load
+failures, and deferred autoload member access inside callable bodies remain
+conservative `unknown` where Vim's result depends on runtime state or uses
+another error contract.
 
 Static Vim9 import paths and direct `:source` filenames become document links
 only when the workspace resolver finds one safe regular file. Completion is

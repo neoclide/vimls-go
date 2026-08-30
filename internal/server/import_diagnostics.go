@@ -72,6 +72,7 @@ func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.Fil
 		name, static := workspace.StaticImportPath(importFact.ImportPath)
 		loads = append(loads, analysis.ImportLoad{
 			Span: importFact.PathSpan, Path: name,
+			Self:    importFact.Target != "" && importFact.Importer == importFact.Target,
 			Missing: importFact.Missing && static, Autoload: importFact.Autoload,
 			Runtime: workspace.RuntimeImport(importFact.ImportPath),
 		})

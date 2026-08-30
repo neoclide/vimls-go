@@ -129,6 +129,26 @@ Representative source evidence, pinned to Vim 9.2.1015:
 - `src/testdir/test_vim9_script.vim:210-211` covers number and string variable
   calls compiled in a `def`.
 
+## Script cannot import itself: E1088
+
+Vim reports `E1088: Script cannot import itself` after a static import resolves
+to the importing script. The language server compares the canonical realpath
+identities already retained by the workspace import graph, so equivalent path
+spellings and symbolic links cannot hide a self-import. The diagnostic selects
+the import path expression.
+
+Dynamic or unresolved import paths remain conservative `unknown`; analysis
+does not execute an expression to guess its target. E1088 takes precedence over
+ordinary missing-import diagnostics once the target identity is known.
+
+Representative source evidence, pinned to Vim 9.2.1015 (`5ab969f`):
+
+- `src/vim9script.c:528-538` rejects an imported script ID equal to the current
+  script ID after resolving the file.
+- `src/testdir/test_vim9_import.vim:574-582` writes and sources a script that
+  imports itself and asserts E1088.
+- `runtime/doc/vim9.txt:3577-3584` documents the self-import failure.
+
 ## Runtime sign lookup: E155
 
 E155 means `Unknown sign: {name}`. The language server does not emit it from

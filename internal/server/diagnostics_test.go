@@ -335,6 +335,28 @@ import dynamicPath as Dynamic
 	}
 }
 
+func TestServerPublishesE1088ForSelfImport(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "self.vim", "vim9script\nimport './self.vim' as Self\n")
+	instance, published := initializeWorkspaceDiagnosticServer(t, root)
+	documentURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\nimport './self.vim' as Self\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnosticsForURI(t, published, documentURI)
+	var selfImports []protocol.Diagnostic
+	for _, diagnostic := range params.Diagnostics {
+		if diagnostic.Code == protocol.String("vim/E1088") {
+			selfImports = append(selfImports, diagnostic)
+		}
+	}
+	if len(selfImports) != 1 || selfImports[0].Message != protocol.String("Script cannot import itself") || selfImports[0].Range.Start.Line != 1 {
+		t.Fatalf("E1088 diagnostics = %#v; all=%#v", selfImports, params.Diagnostics)
+	}
+}
+
 func TestServerKeepsDeferredAutoloadMembersConservative(t *testing.T) {
 	root := t.TempDir()
 	autoloadRoot := filepath.Join(root, "autoload")
