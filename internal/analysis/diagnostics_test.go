@@ -4306,6 +4306,64 @@ func TestAnalyzeE1211BuiltinListArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1212BuiltinBoolArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message, span string }{
+		{"first argument", "vim9script\ndigraph_getlist(2)\n", "Bool required for argument 1", "2"},
+		{"later argument", "vim9script\ndeepcopy('x', 2)\n", "Bool required for argument 2", "2"},
+		{"string", "vim9script\ndeepcopy('x', 'no')\n", "Bool required for argument 2", "'no'"},
+		{"container", "vim9script\ndeepcopy('x', [])\n", "Bool required for argument 2", "[]"},
+		{"method argument", "vim9script\n'x'->deepcopy(2)\n", "Bool required for argument 2", "2"},
+		{"vim9cmd", "vim9cmd deepcopy('x', 2)\n", "Bool required for argument 2", "2"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1212" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1212 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1212 diagnostics = %#v", got)
+			}
+		})
+	}
+	for _, test := range []struct{ name, source, want, forbid string }{
+		{"compiled def", "vim9script\ndef Func()\n  deepcopy('x', 2)\nenddef\n", "vim/E1013", ""},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  deepcopy('x', 2)\n}\n", "vim/E1013", ""},
+		{"literal zero one", "vim9script\ndeepcopy('x', 0)\ndeepcopy('x', (+1))\n", "", "vim/E1013"},
+		{"script variable number conservative", "vim9script\nvar value = 2\ndeepcopy('x', value)\n", "", "vim/E1013"},
+		{"def variable number", "vim9script\ndef Func()\n  var value = 2\n  deepcopy('x', value)\nenddef\n", "vim/E1013", ""},
+		{"Legacy", "let value = deepcopy('x', 2)\n", "", ""},
+		{"unknown", "vim9script\ndeepcopy('x', Unknown)\n", "", ""},
+		{"bool-or-number", "vim9script\ngetchar('x')\n", "", ""},
+		{"bool-or-dict", "vim9script\nlistener_add('Callback', 1, [])\n", "", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1212" {
+					t.Fatalf("guard unexpectedly received E1212: %#v", result.Diagnostics)
+				}
+				if test.forbid != "" && diagnostic.Code == test.forbid {
+					t.Fatalf("guard unexpectedly received %s: %#v", test.forbid, result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeCompiledIndexReceiverDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

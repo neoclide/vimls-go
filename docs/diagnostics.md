@@ -1810,6 +1810,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   check before validating its Number arguments.
 - `src/errors.h:3111-3112` defines the exact E1211 message.
 
+## Bool required for builtin argument: E1212
+
+Analysis reports E1212 at Vim9 script level when an `arg_bool` builtin
+argument has a known incompatible value. The diagnostic selects the complete
+argument and uses its normalized one-based position, including method calls.
+
+Vim's Bool argument contract also accepts Number values zero and one. Static
+zero and one expressions, including parenthesized and unary-plus forms, are
+therefore accepted in both script and compiled contexts. A different static
+Number reports E1212 during script evaluation and E1013 in a compiled `def` or
+block lambda. A script-level Number whose value is not statically known stays
+conservative because it may be zero or one at runtime; the same Number type in
+a compiled scope retains E1013. Bool-or-Number and Bool-or-Dictionary unions,
+Legacy calls, and dynamically typed arguments do not use E1212.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:370-373` distinguishes compiled E1013
+  from script-level E1212 for a first Bool argument.
+- `src/testdir/test_vim9_builtin.vim:470-472` covers a later Bool argument.
+- `src/testdir/test_vim9_builtin.vim:733-736` accepts Number one and rejects
+  Number two for the same Bool position.
+- `src/evalfunc.c:392-399` defines the compile-time `arg_bool` checker.
+- `src/typval.c:525-539` implements the runtime Bool check and its Number
+  zero-or-one exception.
+- `src/errors.h:3113-3114` defines the exact E1212 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

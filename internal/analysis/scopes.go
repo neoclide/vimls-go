@@ -5930,6 +5930,13 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						continue
 					}
 					if builtinArgumentMismatch(actual[index], expected) {
+						if dialect == syntax.Vim9 && strings.TrimSuffix(checker, "_mod") == "arg_bool" && actual[index].Name == "number" {
+							if value, ok := staticNumberValue(argument); ok && (value == 0 || value == 1) {
+								continue
+							} else if !ok && !scopeUsesDefTypeRules(scope) {
+								continue
+							}
+						}
 						if extendMismatch >= 0 {
 							continue
 						}
@@ -6061,6 +6068,10 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 	checker = strings.TrimSuffix(checker, "_mod")
 	var code, required string
 	switch checker {
+	case "arg_bool":
+		if vim9 {
+			code, required = "vim/E1212", "Bool"
+		}
 	case "arg_list_any":
 		if vim9 {
 			code, required = "vim/E1211", "List"
