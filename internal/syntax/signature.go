@@ -45,15 +45,19 @@ func parseFunctionSignature(file *File, command *Command) {
 		command.Function = function
 		return
 	}
-	directClassMethod := false
+	directAggregateMethod := false
 	if command.Block >= 0 && command.Block < len(file.Blocks) {
 		block := file.Blocks[command.Block]
-		directClassMethod = block.Kind == BlockDef && block.Parent >= 0 && block.Parent < len(file.Blocks) && file.Blocks[block.Parent].Kind == BlockClass
+		directAggregateMethod = block.Kind == BlockClass || block.Kind == BlockInterface || block.Kind == BlockEnum
+		if block.Kind == BlockDef && block.Parent >= 0 && block.Parent < len(file.Blocks) {
+			parent := file.Blocks[block.Parent].Kind
+			directAggregateMethod = parent == BlockClass || parent == BlockInterface || parent == BlockEnum
+		}
 	}
 	// Vim9 rejects an underscore-leading script function and requires a
-	// g:-qualified name to begin with an ASCII capital.  A direct class method
-	// is different grammar: its leading underscore denotes a private method.
-	if vim9Context && !directClassMethod {
+	// g:-qualified name to begin with an ASCII capital.  Direct object-type
+	// methods use different grammar, including private underscore names.
+	if command.Dialect == Vim9 && !directAggregateMethod {
 		name := source[nameStart:offset]
 		invalid := strings.HasPrefix(name, "_")
 		if strings.HasPrefix(name, "g:") && len(name) > 2 {
