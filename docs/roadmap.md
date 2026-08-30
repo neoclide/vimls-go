@@ -58,11 +58,16 @@ classes, interfaces, enums, type aliases, generics, imports/exports, complex
 expressions, mappings, autocommands, and embedded payload preservation.
 
 Current verified syntax is recorded once in `language-support.md` and in focused
-package tests. M3 remains open until every required form has equivalent legacy,
-Vim9, mixed-dialect, incomplete-input, and version-boundary evidence.
+package tests. Generated official positive and negative cases are the primary
+per-form evidence. Focused curated tests cover mixed-dialect transitions and
+incomplete-input recovery once per shared parser mechanism, rather than
+duplicating every syntax form across those contexts. Version-boundary evidence
+is required only for forms introduced after the 9.1 compatibility floor.
 
-Exit gate: every required construct has positive, negative, mixed-dialect, and
-version-boundary evidence. Parser fuzz seeds and the selected official Vim
+Exit gate: every required construct has official or focused acceptance evidence
+and relevant rejection evidence. Context switching and physical-line recovery
+have focused cross-cutting coverage, every version-gated form has its actual
+boundary covered, and parser fuzz seeds plus the selected official Vim
 runtime/source corpus produce no crashes or unbounded behavior.
 
 ## M4: semantics and diagnostics

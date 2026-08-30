@@ -27,6 +27,10 @@ test/integration/                  subprocess JSON-RPC/LSP scenarios
 test/vim/                          curated side-effect-free Vim oracle cases
 ```
 
+Shared fixture directories are used when a case is large or reused across
+packages. Small focused cases may remain inline beside the package test; an
+empty fixture category is not by itself missing coverage.
+
 Fixture metadata records expected dialect, minimum Vim version/patch, expected
 diagnostics or AST snapshot, and upstream provenance when applicable.
 
@@ -38,11 +42,14 @@ commits and must not modify that checkout or depend on its current HEAD.
 
 ### Syntax
 
-Lexer tests assert token kind, text, byte span, trivia, and dialect. Parser
-goldens assert a normalized AST and diagnostics for positive, negative, mixed,
-and incomplete input. Essential ambiguity cases include `|`, quotes versus
-comments, command abbreviations, ranges/modifiers, continuations, heredocs,
-mapping payloads, `vim9cmd`, `legacy`, `def`, and `function`.
+Lexer tests assert token kind, text, byte span, trivia, and dialect. Generated
+official cases and focused tests assert form-specific acceptance, rejection,
+AST shape, and diagnostics. Small cross-cutting goldens cover mixed dialects
+and incomplete-input recovery for the parser mechanisms that own those states;
+they are not repeated for every syntax form. Essential ambiguity cases include
+`|`, quotes versus comments, command abbreviations, ranges/modifiers,
+continuations, heredocs, mapping payloads, `vim9cmd`, `legacy`, `def`, and
+`function`.
 
 The default offline gate also reads generated v9.2.1015 artifacts below
 `testdata/official/`. The full-file corpus losslessly contains all 362 tracked

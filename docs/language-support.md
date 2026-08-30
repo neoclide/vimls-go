@@ -169,8 +169,9 @@ compatibility corpus contains at least:
 - Vim 9.1.0000 behavior for the minimum boundary.
 - The latest published 9.1 patch used by CI.
 - The latest stable Vim release.
-- Mixed legacy/Vim9 examples and official accept/fail examples for each syntax
-  feature added after 9.1.
+- Official accept/fail examples for each syntax feature added after 9.1, plus
+  mixed legacy/Vim9 examples where that feature actually crosses a dialect
+  boundary.
 
 When official help and observed behavior disagree, record a focused upstream
 test reproduction and treat the executable behavior for that exact version as
