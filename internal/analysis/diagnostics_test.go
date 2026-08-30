@@ -4082,6 +4082,64 @@ func TestAnalyzeVim9ScriptMapCallbackDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1190Vim9ScriptCallbackDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{"official method one too few", "vim9script\n[0, 1, 2]->map((a, b, c) => a)\n", "One argument too few", "(a, b, c) => a"},
+		{"official method plural", "vim9script\n[0, 1, 2]->map((a, b, c, d) => a)\n", "2 arguments too few", "(a, b, c, d) => a"},
+		{"direct filter", "vim9script\nfilter([1], (a, b, c) => true)\n", "One argument too few", "(a, b, c) => true"},
+		{"direct foreach", "vim9script\nforeach([1], (a, b, c, d) => 0)\n", "2 arguments too few", "(a, b, c, d) => 0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1190" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" {
+					t.Fatalf("E1190 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1190 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, wantCode string
+		wantCount              int
+	}{
+		{"zero and one slots retain E1106", "vim9script\nmap([1], () => 0)\nmap([1], (value) => value)\n", "vim/E1106", 2},
+		{"two slots and variadic rest", "vim9script\nmap([1], (index, value) => value)\nmap([1], (index, value, ...rest) => value)\n", "", 0},
+		{"compiled def retains E176", "vim9script\ndef Func()\n  map([1], (a, b, c) => a)\nenddef\n", "vim/E176", 1},
+		{"compiled block lambda", "vim9script\nvar Func = () => {\n  map([1], (a, b, c) => a)\n}\n", "", 0},
+		{"Legacy-root expression", "let Callback = {a, b, c -> a}\ncall map([1], Callback)\n", "", 0},
+		{"stored and dynamic callback", "vim9script\nvar Callback = (a, b, c) => a\nmap([1], Callback)\nvar Dynamic: any\nmap([1], Dynamic)\n", "", 0},
+		{"dynamic container", "vim9script\nvar Container: any\nmap(Container, (a, b, c) => a)\n", "", 0},
+		{"ordinary call keeps E119", "vim9script\ndef Func(a: number, b: number, c: number)\nenddef\nFunc(1)\n", "vim/E119", 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1190" {
+					t.Fatalf("guard unexpectedly received E1190: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.wantCode {
+					count++
+				}
+			}
+			if count != test.wantCount {
+				t.Fatalf("%s count = %d, want %d; diagnostics = %#v", test.wantCode, count, test.wantCount, result.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestAnalyzeCompiledIndexReceiverDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

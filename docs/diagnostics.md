@@ -1691,6 +1691,32 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   exactly those command indexes, and returns before compiling the command.
 - `src/errors.h:3048-3050` defines the exact E1189 message.
 
+## Too few callback arguments: E1190
+
+Analysis reports E1190 at Vim9 script level when `map()`, `filter()`, or
+`foreach()` receives a direct Vim9 lambda that requires more arguments than
+the two values supplied by the builtin: the index or key and the item value. A
+lambda with three required parameters reports `One argument too few`; four
+required parameters report `2 arguments too few`. The diagnostic selects the
+complete lambda.
+
+The calculation uses required parameters, so an accepted variadic rest after
+two required parameters does not cause E1190. Stored function values,
+dynamically typed callbacks or containers, Legacy expressions, and ordinary
+direct function calls remain on their existing conservative or general arity
+paths. The opposite callback mismatch keeps E1106, while a compiled `def`
+keeps E176 and compiled block-lambda scopes do not use this script-level code.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:2790-2808` distinguishes compiled E176
+  from the singular and plural E1190 messages for direct script lambdas.
+- `src/evalfunc.c:737-815` defines the two callback slots shared by `map()`,
+  `filter()`, and `foreach()` and performs the compiled signature check.
+- `src/vim9execute.c:585-612,6725-6742` computes missing required arguments
+  when invoking a compiled Vim9 callable and emits the pluralized error.
+- `src/errors.h:3052-3053` defines the exact E1190 messages.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
