@@ -257,11 +257,6 @@ func analyzeOfficialCompileSource(t *testing.T, testCase officialCompileCase) []
 	}()
 	source := testCase.Source
 	file := syntax.Parse(source)
-	if testCase.Context == "def" {
-		// CheckDefFailure-style variants are compiled as Vim9 even though their
-		// extracted wrapper does not begin with :vim9script.
-		file = (syntax.Vim9Parser{}).Parse(source)
-	}
 	if file.Source != source || len(file.Commands) == 0 {
 		t.Fatalf("%s: parser did not retain official compile source", testCase.ID)
 	}

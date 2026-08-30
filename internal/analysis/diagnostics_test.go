@@ -739,7 +739,8 @@ func TestAnalyzeE1073NameAlreadyDefined(t *testing.T) {
 		{"import alias", "vim9script\nimport autoload 'one.vim' as one\nimport autoload 'two.vim' as one\n", "one", 1},
 		{"variable and import alias", "vim9script\nvar one = 1\nimport autoload 'one.vim' as one\n", "one", 1},
 		{"different functions", "vim9script\ndef A()\n  def Inner()\n  enddef\nenddef\ndef B()\n  def Inner()\n  enddef\nenddef\n", "Inner", 0},
-		{"legacy", "def Outer()\n  def Inner()\n  enddef\n  def Inner()\n  enddef\nenddef\n", "Inner", 0},
+		{"legacy root def", "def Outer()\n  def Inner()\n  enddef\n  def Inner()\n  enddef\nenddef\n", "Inner", 1},
+		{"legacy function", "function Outer()\n  function Inner()\n  endfunction\n  function Inner()\n  endfunction\nendfunction\n", "Inner", 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
