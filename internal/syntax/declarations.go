@@ -56,7 +56,7 @@ func parseImport(file *File, command *Command) {
 		}
 	}
 	if hasInvalidAlias {
-		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1047", Message: "syntax error in import", Span: invalidAlias})
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1047", Message: "Syntax error in import: " + file.Text(invalidAlias), Span: invalidAlias})
 	}
 	command.Import = importNode
 }

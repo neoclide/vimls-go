@@ -510,6 +510,30 @@ func TestImportForms(t *testing.T) {
 	}
 }
 
+func TestVim9ImportInvalidAliasDiagnostics(t *testing.T) {
+	for _, alias := range []string{"9foo", "the#foo", "g:foo"} {
+		t.Run(alias, func(t *testing.T) {
+			file := Parse("vim9script\nimport './module.vim' as " + alias + "\nvar after = 1\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1047" || file.Diagnostics[0].Message != "Syntax error in import: "+alias || file.Text(file.Diagnostics[0].Span) != alias {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) != 3 || file.Commands[1].Import == nil || file.Commands[2].Declaration == nil {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	valid := Parse("vim9script\nimport './module.vim' as module_9\nvar after = 1\n")
+	if len(valid.Diagnostics) != 0 {
+		t.Fatalf("valid import diagnostics = %#v", valid.Diagnostics)
+	}
+	legacy := (LegacyParser{}).Parse("import './module.vim' as 9foo\nlet g:after = 1\n")
+	if hasDiagnostic(legacy, "vim/E1047") {
+		t.Fatalf("legacy import diagnostics = %#v", legacy.Diagnostics)
+	}
+}
+
 func TestDestructuringDeclarationsAndForLoop(t *testing.T) {
 	file := Parse("vim9script\nvar [first: number, second; rest] = values\nfor [key, value] in items\n  echo key value\nendfor\n")
 	if len(file.Diagnostics) != 0 {

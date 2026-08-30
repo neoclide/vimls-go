@@ -18,6 +18,26 @@ func TestBuildsNestedRecoveringBlocks(t *testing.T) {
 	}
 }
 
+func TestVim9MissingEnddefDiagnostic(t *testing.T) {
+	incomplete := Parse("vim9script\ndef Func()\n  return 1\n  var after = 1\n")
+	if len(incomplete.Diagnostics) != 1 || incomplete.Diagnostics[0].Code != "vim/E1057" || incomplete.Diagnostics[0].Message != "Missing :enddef" || incomplete.Text(incomplete.Diagnostics[0].Span) != "def" {
+		t.Fatalf("diagnostics = %#v", incomplete.Diagnostics)
+	}
+	if len(incomplete.Commands) != 4 || len(incomplete.Blocks) != 1 || incomplete.Blocks[0].Kind != BlockDef || incomplete.Blocks[0].End != -1 || incomplete.Commands[3].Declaration == nil || incomplete.Text(incomplete.Commands[3].Declaration.Name) != "after" {
+		t.Fatalf("commands = %#v, blocks = %#v", incomplete.Commands, incomplete.Blocks)
+	}
+	assertFileSpans(t, incomplete)
+
+	closed := Parse("vim9script\ndef Func()\n  return 1\nenddef\n")
+	if hasDiagnostic(closed, "vim/E1057") {
+		t.Fatalf("closed def diagnostics = %#v", closed.Diagnostics)
+	}
+	legacy := (LegacyParser{}).Parse("function! Func()\n  return 1\n")
+	if hasDiagnostic(legacy, "vim/E1057") {
+		t.Fatalf("legacy function diagnostics = %#v", legacy.Diagnostics)
+	}
+}
+
 func TestLegacyEndfunctionClosesUnterminatedControlBlocks(t *testing.T) {
 	file := (LegacyParser{}).Parse("function! Complete()\n  if 1\n    while 1\n      return\nendfunction\n")
 	if len(file.Diagnostics) != 0 {

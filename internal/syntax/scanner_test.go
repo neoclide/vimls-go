@@ -634,7 +634,7 @@ func TestOfficialScriptVersionState(t *testing.T) {
 
 func TestScriptVersionDialectRules(t *testing.T) {
 	legacyBeforeVim9 := Parse("scriptversion 2\nvim9script\n")
-	if len(legacyBeforeVim9.Diagnostics) != 1 || legacyBeforeVim9.Diagnostics[0].Code != "vim/E1039" {
+	if len(legacyBeforeVim9.Diagnostics) != 1 || legacyBeforeVim9.Diagnostics[0].Code != "vim/E1039" || legacyBeforeVim9.Diagnostics[0].Message != `"vim9script" must be the first command in a script` || legacyBeforeVim9.Text(legacyBeforeVim9.Diagnostics[0].Span) != "vim9script" {
 		t.Fatalf("scriptversion before vim9script diagnostics = %#v", legacyBeforeVim9.Diagnostics)
 	}
 	if len(legacyBeforeVim9.Commands) != 2 || legacyBeforeVim9.Commands[0].Dialect != Legacy || legacyBeforeVim9.Commands[1].Dialect != Legacy {
@@ -642,7 +642,7 @@ func TestScriptVersionDialectRules(t *testing.T) {
 	}
 
 	vim9ScriptVersion := Parse("vim9script\nscriptversion 2\nvar after = 1\n")
-	if len(vim9ScriptVersion.Diagnostics) != 1 || vim9ScriptVersion.Diagnostics[0].Code != "vim/E1040" {
+	if len(vim9ScriptVersion.Diagnostics) != 1 || vim9ScriptVersion.Diagnostics[0].Code != "vim/E1040" || vim9ScriptVersion.Diagnostics[0].Message != "Cannot use :scriptversion after :vim9script" || vim9ScriptVersion.Text(vim9ScriptVersion.Diagnostics[0].Span) != "scriptversion" {
 		t.Fatalf("scriptversion in Vim9 diagnostics = %#v", vim9ScriptVersion.Diagnostics)
 	}
 	if len(vim9ScriptVersion.Commands) != 3 || vim9ScriptVersion.Commands[1].Dialect != Vim9 || vim9ScriptVersion.Commands[2].ScriptVersion != 1 {
@@ -660,6 +660,42 @@ func TestScriptVersionDialectRules(t *testing.T) {
 	}
 	if len(vim9Modifier.Commands) != 2 || vim9Modifier.Commands[0].Dialect != Vim9 || vim9Modifier.Commands[1].Dialect != Legacy || vim9Modifier.Commands[1].ScriptVersion != 1 {
 		t.Fatalf("vim9cmd scriptversion commands = %#v", vim9Modifier.Commands)
+	}
+}
+
+func TestVim9ExportDiagnostics(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		code    string
+		message string
+		span    string
+	}{
+		{name: "command", source: "export echo 134", code: "vim/E1043", message: "Invalid command after :export", span: "echo"},
+		{name: "function call", source: "export function /a1b2c3", code: "vim/E1044", message: "Export with invalid argument", span: "/a1b2c3"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse("vim9script\n" + test.source + "\nvar after = 1\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code || file.Diagnostics[0].Message != test.message || file.Text(file.Diagnostics[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) != 3 || file.Commands[2].Canonical != "var" || file.Commands[2].Declaration == nil {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	valid := Parse("vim9script\nexport var Value = 1\nexport def Public()\nenddef\n")
+	if len(valid.Diagnostics) != 0 {
+		t.Fatalf("valid export diagnostics = %#v", valid.Diagnostics)
+	}
+	for _, source := range []string{"export echo 134\n", "export function /a1b2c3\n"} {
+		legacy := (LegacyParser{}).Parse(source)
+		if hasDiagnostic(legacy, "vim/E1043") || hasDiagnostic(legacy, "vim/E1044") {
+			t.Fatalf("legacy source reported Vim9 export diagnostic: %#v\n%s", legacy.Diagnostics, source)
+		}
 	}
 }
 

@@ -80,7 +80,7 @@ func parseSource(source string, initial Dialect) *File {
 					})
 				} else if initial == Legacy {
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
-						Code: "vim/E1039", Message: "vim9script must be the first command in the file", Span: command.Name,
+						Code: "vim/E1039", Message: `"vim9script" must be the first command in a script`, Span: command.Name,
 					})
 					if len(dialectStack) == 0 {
 						active = Vim9
@@ -128,7 +128,7 @@ func parseSource(source string, initial Dialect) *File {
 					}
 				} else {
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
-						Code: "vim/E1040", Message: "cannot use :scriptversion after :vim9script", Span: command.Name,
+						Code: "vim/E1040", Message: "Cannot use :scriptversion after :vim9script", Span: command.Name,
 					})
 				}
 			case "loadkeymap":
@@ -1377,14 +1377,14 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				break
 			}
 		}
-		if exported && builtIn && metadata.Flags&vimdata.Exportable == 0 {
+		if exported && dialect == Vim9 && builtIn && metadata.Flags&vimdata.Exportable == 0 {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E1043", Message: "invalid command after export", Span: nameSpan,
+				Code: "vim/E1043", Message: "Invalid command after :export", Span: nameSpan,
 			})
 			parsedCommand.detailsOpaque = true
-		} else if exported && canonical == "function" && !isFunctionDefinition(file.Text(parsedCommand.Argument)) && len(file.Diagnostics) == diagnosticsBeforeCommand {
+		} else if exported && dialect == Vim9 && canonical == "function" && !isFunctionDefinition(file.Text(parsedCommand.Argument)) && len(file.Diagnostics) == diagnosticsBeforeCommand {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E1044", Message: "export with invalid argument", Span: parsedCommand.Argument,
+				Code: "vim/E1044", Message: "Export with invalid argument", Span: parsedCommand.Argument,
 			})
 			parsedCommand.detailsOpaque = true
 		}
