@@ -2339,6 +2339,70 @@ func TestAnalyzeE1178LocalLockDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1181IgnoredUnderscoreDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+		following    bool
+	}{
+		{"script declaration", "vim9script\nvar _ = 1\nvar after = 2\n", true},
+		{"def declaration", "vim9script\ndef F()\n  var _ = 1\nenddef\n", false},
+		{"declaration owns rhs", "vim9script\nvar _ = _\n", false},
+		{"script read", "vim9script\nvar value = _\n", false},
+		{"def read", "vim9script\ndef F()\n  var value = _\nenddef\n", false},
+		{"assignment target", "vim9script\ndef F(_)\n  _ = 1\nenddef\n", false},
+		{"final declaration", "vim9script\nfinal _ = 1\n", false},
+		{"call", "vim9script\n_(1)\n", false},
+		{"operator", "vim9script\nvar value = _ + 1\n", false},
+		{"member", "vim9script\nvar value = _.member\n", false},
+		{"index", "vim9script\nvar value = _[0]\n", false},
+		{"Legacy-root def", "def F()\n  var value = _\nenddef\n", false},
+		{"vim9cmd", "vim9cmd var value = _\n", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1181" {
+					got = append(got, diagnostic)
+				}
+				if (diagnostic.Code == "vim/E1001" || diagnostic.Code == "vim/E121" || diagnostic.Code == "vim/E1089" || diagnostic.Code == "vim/E1090" || diagnostic.Code == "vim/E117") && file.Text(diagnostic.Span) == "_" {
+					t.Fatalf("underscore retained cascade: %#v", diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use an underscore here" || file.Text(got[0].Span) != "_" {
+				t.Fatalf("E1181 = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+			if test.following {
+				found := false
+				for _, declaration := range result.Declarations {
+					if declaration.Name == "after" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("following declaration was not retained: %#v", result.Declarations)
+				}
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\ndef F(_, _)\nenddef\nvar Callback = (_, _) => 1\n",
+		"vim9script\nfor _ in [1, 2]\nendfor\n",
+		"vim9script\nvar [_, value] = [1, 2]\n[_, value] = [3, 4]\n",
+		"vim9script\nvar dictionary = {_: 1}\nvar _value = dictionary._\nvar global = g:_\n",
+		"let _ = 1\necho _\n",
+		"vim9script\nlegacy echo _\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1181" {
+				t.Fatalf("valid ignored underscore received E1181: %#v", diagnostic)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

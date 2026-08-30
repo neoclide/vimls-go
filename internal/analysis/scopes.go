@@ -3759,6 +3759,9 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 	}
 	if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && expression.Children[1] != nil && expression.Children[1].Kind != syntax.ExpressionMissing {
 		target := expression.Children[0]
+		if dialect == syntax.Vim9 && target != nil && target.Kind == syntax.ExpressionIdentifier && target.Value == "_" {
+			return
+		}
 		if enumName, memberName, ok := enumAssignmentTarget(result, scope, target); ok &&
 			(target.Children[0].Kind != syntax.ExpressionMember || scopeContainsDef(scope) && !scopeWithinVim9Enum(result.File, scope, enumName)) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -4401,7 +4404,7 @@ func collectArgumentRedeclarationDiagnostics(result *FileAnalysis) {
 		return
 	}
 	for _, declaration := range result.Declarations {
-		if declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
+		if declaration.Parameter || declaration.Name == "_" || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
 			continue
 		}
 		for scope := declaration.Scope; scope != nil; scope = scope.Parent {
@@ -4438,6 +4441,14 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	if command == nil || scope == nil {
 		return
 	}
+	invalidUnderscoreDeclaration := false
+	if command.Dialect == syntax.Vim9 && command.Declaration != nil &&
+		(command.Canonical == "var" || command.Canonical == "const" || command.Canonical == "final") &&
+		len(command.Declaration.Bindings) == 1 && command.Declaration.Name == command.Declaration.Bindings[0].Name && file.Text(command.Declaration.Bindings[0].Name) == "_" &&
+		(command.Declaration.Target == nil || command.Declaration.Target.Kind == syntax.ExpressionIdentifier) && !syntaxDiagnosticOverlaps(file.Diagnostics, command.Span) {
+		span := command.Declaration.Bindings[0].Name
+		invalidUnderscoreDeclaration = appendUnderscoreDiagnostic(result, &syntax.Expression{Kind: syntax.ExpressionIdentifier, Value: "_", Span: span}, command.Dialect)
+	}
 	if command.Set != nil {
 		for _, option := range command.Set.Options {
 			appendUnknownSetOptionDiagnostic(result, file.Text(option.Name), option.Name)
@@ -4471,6 +4482,9 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 		}
 	}
 	for _, expression := range command.Expressions {
+		if invalidUnderscoreDeclaration {
+			continue
+		}
 		skip := map[syntax.Span]bool(nil)
 		if command.Declaration != nil {
 			skip = make(map[syntax.Span]bool, len(command.Declaration.Bindings))
@@ -4542,6 +4556,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			appendEnumAsValueDiagnostic(result, scope, expression.Children[0], dialect)
 		}
 	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
+		if appendUnderscoreDiagnostic(result, expression, dialect) {
+			return
+		}
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
 			if strings.HasPrefix(expression.Value, "&") {
 				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
@@ -5187,6 +5204,9 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 	}
 	switch expression.Kind {
 	case syntax.ExpressionIdentifier, syntax.ExpressionCurlyName:
+		if appendUnderscoreDiagnostic(result, expression, dialect) {
+			return
+		}
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
 			if strings.HasPrefix(expression.Value, "&") {
 				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
@@ -5221,6 +5241,9 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 		}
 	case syntax.ExpressionList, syntax.ExpressionTuple:
 		for _, child := range expression.Children {
+			if dialect == syntax.Vim9 && child != nil && child.Kind == syntax.ExpressionIdentifier && child.Value == "_" {
+				continue
+			}
 			walkAssignmentTarget(result, file, child, scope, skipped, dialect)
 		}
 	default:
@@ -5228,6 +5251,19 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 		// Walk it normally so a call name or operand is not mislabeled E1089.
 		walkExpression(result, file, expression, scope, skipped, false, dialect)
 	}
+}
+
+func appendUnderscoreDiagnostic(result *FileAnalysis, expression *syntax.Expression, dialect syntax.Dialect) bool {
+	if result == nil || expression == nil || expression.Kind != syntax.ExpressionIdentifier || expression.Value != "_" || dialect != syntax.Vim9 {
+		return false
+	}
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1181" && diagnostic.Span == expression.Span {
+			return true
+		}
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1181", Message: "Cannot use an underscore here", Span: expression.Span})
+	return true
 }
 
 func assignmentTargetNeedsDeclaration(name string) bool {
@@ -6065,6 +6101,9 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 	}
 	callee := call.Children[0]
 	if callee == nil {
+		return
+	}
+	if checkTypes && callee.Kind == syntax.ExpressionIdentifier && callee.Value == "_" {
 		return
 	}
 	if checkTypes && call.Value == "" && callee.Kind == syntax.ExpressionIdentifier {

@@ -1551,6 +1551,36 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   instead of `lockvar`.
 - `src/errors.h:3017-3018` defines the exact E1178 message.
 
+## Ignored underscore used as a variable: E1181
+
+Analysis reports E1181 when the Vim9 ignored-argument spelling `_` is used as
+an ordinary declaration, assignment target, or value. The diagnostic uses
+Vim's exact `Cannot use an underscore here` message and selects the bare
+underscore. A direct invalid declaration owns its command, and an underscore
+call does not also receive an unknown-function diagnostic.
+
+The underscore remains valid as a repeated `def` or lambda parameter, a `for`
+binding, and an item in a List or Tuple destructuring target. Dictionary keys,
+names that merely begin with `_`, scoped `g:_`, Legacy commands, and an
+explicit `legacy` command retain their ordinary meaning. The Vim9 rule also
+applies to a `def` retained under a Legacy root and to an explicit `vim9cmd`.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:4385-4395` expects E1181 for `var _ = 1`
+  and `var x = _` in both compiled and Vim9-script contexts.
+- `src/testdir/test_vim9_script.vim:2807-2815` accepts `_` as a loop binding
+  and then expects E1181 when code tries to read it.
+- `runtime/doc/vim9.txt:316-324` documents repeated ignored arguments and
+  states that they need no type.
+- `src/vim9compile.c:3658-3683` accepts underscore destructuring slots but
+  rejects a standalone assignment target.
+- `src/vim9expr.c:3137-3152` and `src/eval.c:5326-5340` reject compiled and
+  evaluated underscore reads before ordinary name resolution.
+- `src/evalvars.c:4164-4178` applies the corresponding rule to a standalone
+  Vim9 script assignment.
+- `src/errors.h:3027-3028` defines the exact E1181 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
