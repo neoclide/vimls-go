@@ -30,6 +30,13 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
+	if vim9Context && source[nameStart:offset] == "g:" {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E129", Message: "function name required", Span: function.Name,
+		})
+		command.Function = function
+		return
+	}
 	directClassMethod := false
 	if command.Block >= 0 && command.Block < len(file.Blocks) {
 		block := file.Blocks[command.Block]
