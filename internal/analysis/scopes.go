@@ -3605,6 +3605,22 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				appendIndexableAssignmentDiagnostic(result, scope, target)
 			}
 		}
+		if command.Canonical == "unlet" && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+			for _, target := range command.Targets {
+				if target == nil || target.Kind != syntax.ExpressionSlice || expressionContainsMissing(target) || len(target.Children) == 0 || target.Children[0] == nil {
+					continue
+				}
+				receiver := target.Children[0]
+				if receiver.Kind != syntax.ExpressionIdentifier || syntaxDiagnosticTouchesCall(result.File.Diagnostics, target.Span) || syntaxDiagnosticTouchesCall(result.Diagnostics, target.Span) || resolvedExpressionType(result, scope, receiver).Name != "dict" {
+					continue
+				}
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1166", Message: "Cannot use a range with a dictionary", Span: target.Span})
+				break
+			}
+		}
+		if command.Declaration != nil && command.Declaration.Initializer != nil && command.Declaration.Initializer.Kind == syntax.ExpressionLambda {
+			collectAssignmentExpressionDiagnostics(result, scope, command.Declaration.Initializer, command.Dialect)
+		}
 		if command.Declaration == nil || command.Dialect == syntax.Legacy && command.Canonical == "let" {
 			for _, expression := range command.Expressions {
 				collectAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect)

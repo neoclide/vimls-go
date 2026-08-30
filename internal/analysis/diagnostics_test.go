@@ -1971,6 +1971,80 @@ func TestAnalyzeE1165SliceAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1166DictionaryRangeUnletDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		recovery           bool
+	}{
+		{"official def recovery", "vim9script\ndef Func()\n  var dd = {a: 1}\n  unlet dd['a' : 'a']\n  var after = 1\nenddef\n", "dd['a' : 'a']", true},
+		{"typed dict", "vim9script\ndef Func()\n  var dd: dict<number> = {}\n  unlet dd['a' : 'a']\nenddef\n", "dd['a' : 'a']", false},
+		{"Legacy-root def", "def Func()\n  var dd = {}\n  unlet dd['a' : 'a']\nenddef\n", "dd['a' : 'a']", false},
+		{"lambda", "vim9script\nvar Callback = () => {\n  var dd = {}\n  unlet dd['a' : 'a']\n}\n", "dd['a' : 'a']", false},
+		{"bang after valid target", "vim9script\ndef Func()\n  var values = [1]\n  var dd = {}\n  unlet! values[0] dd['a' : 'a']\nenddef\n", "dd['a' : 'a']", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			all := CombinedDiagnostics(file, result)
+			for _, diagnostic := range all {
+				if diagnostic.Code == "vim/E1166" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(all) != 1 || len(got) != 1 || got[0].Message != "Cannot use a range with a dictionary" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E1166 on %q", all, test.span)
+			}
+			if test.recovery {
+				found := false
+				for index := range file.Commands {
+					declaration := file.Commands[index].Declaration
+					if declaration != nil && file.Text(declaration.Name) == "after" {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("following declaration not retained: %#v", file.Commands)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"ordinary Vim9 script", "vim9script\nvar d = {}\nunlet d['a' : 'a']\n", ""},
+		{"Legacy script and function", "let d = {}\nunlet d['a' : 'a']\nfunction F()\n  unlet d['a' : 'a']\nendfunction\n", ""},
+		{"legacy modifier", "vim9script\ndef F()\n  var d = {}\n  legacy unlet d['a' : 'a']\nenddef\n", ""},
+		{"List range", "vim9script\ndef F()\n  var values = [1]\n  unlet values[0 : 1]\nenddef\n", ""},
+		{"Blob range", "vim9script\ndef F()\n  var value = 0z12\n  unlet value[0 : 1]\nenddef\n", ""},
+		{"any receiver", "vim9script\ndef F()\n  var value: any\n  unlet value[0 : 1]\nenddef\n", ""},
+		{"unknown receiver", "vim9script\ndef F()\n  unlet unknown[0 : 1]\nenddef\n", "vim/E1001"},
+		{"dynamic receiver", "vim9script\ndef F()\n  unlet ({})['a' : 'a']\nenddef\n", ""},
+		{"Tuple receiver", "vim9script\ndef F()\n  var value = (1, 2)\n  unlet value[0 : 1]\nenddef\n", ""},
+		{"number receiver", "vim9script\ndef F()\n  var value = 1\n  unlet value[0 : 1]\nenddef\n", ""},
+		{"Dictionary index and member", "vim9script\ndef F()\n  var value = {}\n  unlet value['a'] value.a\nenddef\n", ""},
+		{"incomplete range", "vim9script\ndef F()\n  var value = {}\n  unlet value['a' :\nenddef\n", ""},
+		{"slice spacing precedence", "vim9script\ndef F()\n  var value = {}\n  unlet value['a':'a']\nenddef\n", "vim/E1004"},
+		{"unresolved bound precedence", "vim9script\ndef F()\n  var value = {}\n  unlet value[missing : 'a']\nenddef\n", "vim/E1001"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			all := CombinedDiagnostics(file, Analyze(file))
+			found := test.want == ""
+			for _, diagnostic := range all {
+				if diagnostic.Code == "vim/E1166" {
+					t.Fatalf("unexpected E1166: %#v", all)
+				}
+				if diagnostic.Code == test.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("diagnostics = %#v, want %s", all, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

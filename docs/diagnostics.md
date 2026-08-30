@@ -1412,6 +1412,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   with E1165.
 - `src/errors.h:2991-2992` defines the exact E1165 message template.
 
+## Dictionary range unlet: E1166
+
+Analysis reports E1166 when a compiled Vim9 `unlet` targets a range on a
+statically known Dictionary variable. The diagnostic uses Vim's exact `Cannot
+use a range with a dictionary` message and selects the complete slice target.
+Only the first provable invalid target in one command is reported.
+
+The check applies in `def` and block-lambda bodies, including `def` under a
+Legacy root and the bang form of `unlet`. It remains conservative for dynamic
+receivers, `any`, unresolved names, incomplete input, and non-Dictionary
+receivers. Ordinary Vim9 script execution and Legacy commands are not treated
+as compile-time E1166. List and Blob ranges and Dictionary item/member targets
+remain valid. Earlier parser or semantic failures inside the range retain
+precedence over E1166.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:2664-2704` compiles an `unlet` range first and then emits
+  E1166 only when the statically known destination is a Dictionary.
+- `src/testdir/test_vim9_assign.vim:2701-2704` expects E1166 for an inferred
+  local Dictionary range in a compiled `def`.
+- `runtime/doc/eval.txt:3165-3175` documents range operations and associates
+  them with E1166.
+- `src/errors.h:2993-2994` defines the exact E1166 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
