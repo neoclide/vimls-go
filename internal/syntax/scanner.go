@@ -2788,6 +2788,12 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	if command.Canonical == "def" || command.Canonical == "function" && isFunctionDefinition(source) {
 		parseFunctionSignature(file, command)
+		staticMethod := slices.ContainsFunc(command.Modifiers, func(modifier Modifier) bool { return modifier.Name == "static" })
+		if command.Function != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockInterface) && !staticMethod && strings.HasPrefix(file.Text(command.Function.Name), "_") {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1380", Message: "Protected method not supported in an interface", Span: command.Function.Name,
+			})
+		}
 		if command.Function != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockClass) && !strings.HasPrefix(file.Text(command.Function.Name), "new") {
 			for _, parameter := range command.Function.Parameters {
 				if parameter.Target != nil {

@@ -1202,6 +1202,27 @@ func TestVim9InterfaceImplementsReportsE1381(t *testing.T) {
 	assertFileSpans(t, file)
 }
 
+func TestVim9InterfaceProtectedMethodReportsE1380(t *testing.T) {
+	file := Parse("vim9script\ninterface A\n  def _Foo(d: dict<any>): list<string>\nendinterface\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1380" || file.Diagnostics[0].Message != "Protected method not supported in an interface" || file.Text(file.Diagnostics[0].Span) != "_Foo" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 5 || file.Commands[2].Function == nil || file.Text(file.Commands[2].Function.Name) != "_Foo" || file.Commands[4].Declaration == nil {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	for _, source := range []string{
+		"vim9script\ninterface A\n  def Foo()\nendinterface\n",
+		"vim9script\ninterface A\n  static def _Foo()\nendinterface\n",
+		"vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\n",
+	} {
+		if hasDiagnostic(Parse(source), "vim/E1380") {
+			t.Fatalf("guard source reported E1380: %s", source)
+		}
+	}
+}
+
 func TestVim9InterfaceConstReportsE1410(t *testing.T) {
 	file := Parse("vim9script\ninterface A\n  const foo: number = 10\nendinterface\n")
 	var got []Diagnostic
