@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -39,9 +40,9 @@ func buildBlocks(file *File) {
 	for commandIndex := range file.Commands {
 		command := &file.Commands[commandIndex]
 		defBlock := -1
-		for index := len(stack) - 1; index >= 0; index-- {
-			if file.Blocks[stack[index]].Kind == BlockDef {
-				defBlock = stack[index]
+		for _, blockIndex := range slices.Backward(stack) {
+			if file.Blocks[blockIndex].Kind == BlockDef {
+				defBlock = blockIndex
 				break
 			}
 		}
@@ -175,14 +176,14 @@ func buildBlocks(file *File) {
 				interfaceMethod[blockIndex] = false
 			}
 			if file.Blocks[blockIndex].Kind == BlockEnum && enumValuesOpen[blockIndex] {
-				if closeKind, closing := closingBlock(file, command); !closing || closeKind != BlockEnum {
+				if closeKind, closing := closingBlock(command); !closing || closeKind != BlockEnum {
 					command.Block = blockIndex
 					enumValuesOpen[blockIndex] = parseEnumValues(file, command)
 					continue
 				}
 			}
 			if file.Blocks[blockIndex].Kind == BlockEnum && !enumValuesOpen[blockIndex] {
-				closeKind, closing := closingBlock(file, command)
+				closeKind, closing := closingBlock(command)
 				if (!closing || closeKind != BlockEnum) && !isDirectAggregateMember(command) {
 					command.Block = blockIndex
 					start, end := command.Span.Start, command.Span.End
@@ -204,8 +205,8 @@ func buildBlocks(file *File) {
 		// does not add a cascading missing-end diagnostic.
 		if command.Dialect == Vim9 && (command.Canonical == "break" || command.Canonical == "continue") {
 			inLoop := false
-			for index := len(stack) - 1; index >= 0; index-- {
-				kind := file.Blocks[stack[index]].Kind
+			for _, blockIndex := range slices.Backward(stack) {
+				kind := file.Blocks[blockIndex].Kind
 				if kind == BlockFor || kind == BlockWhile {
 					inLoop = true
 					break
@@ -219,8 +220,7 @@ func buildBlocks(file *File) {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
 				if len(stack) > 0 {
 					command.Block = stack[len(stack)-1]
-					for index := len(stack) - 1; index >= 0; index-- {
-						blockIndex := stack[index]
+					for _, blockIndex := range slices.Backward(stack) {
 						if kind := file.Blocks[blockIndex].Kind; kind == BlockDef || kind == BlockFunction {
 							break
 						}
@@ -376,10 +376,10 @@ func buildBlocks(file *File) {
 			}
 			continue
 		}
-		closeKind, closes := closingBlock(file, command)
+		closeKind, closes := closingBlock(command)
 		if command.Kind == CommandBlockEnd {
-			for index := len(stack) - 1; index >= 0; index-- {
-				kind := file.Blocks[stack[index]].Kind
+			for _, blockIndex := range slices.Backward(stack) {
+				kind := file.Blocks[blockIndex].Kind
 				if kind == BlockCommand || kind == BlockScope {
 					closeKind = kind
 					closes = true
@@ -418,8 +418,8 @@ func buildBlocks(file *File) {
 				}
 			}
 			match := -1
-			for index := len(stack) - 1; index >= 0; index-- {
-				if file.Blocks[stack[index]].Kind == closeKind {
+			for index, blockIndex := range slices.Backward(stack) {
+				if file.Blocks[blockIndex].Kind == closeKind {
 					match = index
 					break
 				}
@@ -658,8 +658,8 @@ func blockWithinInvalidFor(file *File, blockIndex int, invalidFor map[int]bool) 
 }
 
 func recoverableBranchBlock(file *File, stack []int, kind BlockKind, invalidFor map[int]bool) int {
-	for index := len(stack) - 1; index >= 0; index-- {
-		if file.Blocks[stack[index]].Kind != kind {
+	for index, blockIndex := range slices.Backward(stack) {
+		if file.Blocks[blockIndex].Kind != kind {
 			continue
 		}
 		if stackHasInvalidFor(stack[index:], invalidFor) {
@@ -731,10 +731,7 @@ func suppressClassBodyCommandDiagnostics(file *File) {
 		if modifierCommands == nil {
 			modifierCommands = make(map[Span]Span)
 		}
-		end := command.Span.End
-		if command.Argument.End > end {
-			end = command.Argument.End
-		}
+		end := max(command.Span.End, command.Argument.End)
 		modifierCommands[command.Modifiers[0].Span] = Span{Start: command.Span.Start, End: end}
 	}
 
@@ -994,7 +991,7 @@ func branchBlock(command string) (BlockKind, bool) {
 	}
 }
 
-func closingBlock(file *File, command *Command) (BlockKind, bool) {
+func closingBlock(command *Command) (BlockKind, bool) {
 	switch command.Canonical {
 	case "endif":
 		return BlockIf, true

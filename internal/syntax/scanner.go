@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -15,7 +16,7 @@ type modifierInfo struct {
 }
 
 var modifierGroups = [26][]modifierInfo{
-	'a' - 'a': {{name: "aboveleft", min: 3}, {name: "abstract", min: 3}},
+	0:         {{name: "aboveleft", min: 3}, {name: "abstract", min: 3}},
 	'b' - 'a': {{name: "belowright", min: 3}, {name: "browse", min: 3}, {name: "botright", min: 2}},
 	'c' - 'a': {{name: "confirm", min: 4}},
 	'e' - 'a': {{name: "export", min: 6}},
@@ -296,10 +297,7 @@ func parseSource(source string, initial Dialect) *File {
 			command.Argument = logical.view.mapSpan(logical.command.Argument)
 			command.Span = logical.view.mapSpan(logical.command.Span)
 			command.boundaryExpression = boundaryExpression
-			continuationEnd := command.Argument.End
-			if continuationEnd < first {
-				continuationEnd = first
-			}
+			continuationEnd := max(command.Argument.End, first)
 			file.Tokens = append(file.Tokens, Token{Kind: TokenContinuation, Span: Span{Start: first, End: continuationEnd}})
 
 			newCommands := len(file.Commands)
@@ -410,7 +408,7 @@ func parseSource(source string, initial Dialect) *File {
 	normalizeVim9CallDiagnostics(file)
 	for index := range file.Commands {
 		if index+1 < len(file.Commands) {
-			_, closing := closingBlock(file, &file.Commands[index+1])
+			_, closing := closingBlock(&file.Commands[index+1])
 			file.Commands[index].hasNextStatement = !closing
 		}
 		diagnoseVim9InvalidCommand(file, &file.Commands[index])
@@ -711,7 +709,7 @@ func autocmdBodyCommandSpan(source string, argument Span, dialect Dialect) (Span
 }
 
 func nestedCommandBlockOpen(source string, body Span, dialect Dialect, limit int) (Span, bool) {
-	for depth := 0; depth < maxEmbeddedCommandDepth; depth++ {
+	for range maxEmbeddedCommandDepth {
 		start := skipSpace(source, body.Start, body.End)
 		if start >= body.End || start >= limit {
 			return Span{}, false
@@ -800,10 +798,10 @@ func legacyEmbeddedBlockEnd(file *File, outerIndex, bodyStart int) (int, bool) {
 					continue
 				}
 			}
-			if closed, closing := closingBlock(file, &command); closing {
+			if closed, closing := closingBlock(&command); closing {
 				match := -1
-				for index := len(stack) - 1; index >= 0; index-- {
-					if stack[index] == closed {
+				for index, kind := range slices.Backward(stack) {
+					if kind == closed {
 						match = index
 						break
 					}
@@ -881,8 +879,8 @@ func truncateAfterDirectFinish(file *File, scannerDiagnostics int) bool {
 }
 
 func hasOpenEnum(file *File) bool {
-	for index := len(file.Commands) - 1; index >= 0; index-- {
-		switch file.Commands[index].Canonical {
+	for _, command := range slices.Backward(file.Commands) {
+		switch command.Canonical {
 		case "endenum":
 			return false
 		case "enum":
@@ -1071,9 +1069,10 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			if dialect == Vim9 && (name == "export" || name == "public" || name == "abstract" || name == "static") && file.Source[start:wordEnd] != name {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1065", Message: "command cannot be shortened in Vim9 script", Span: Span{Start: start, End: wordEnd}})
 			}
-			if name == "legacy" {
+			switch name {
+			case "legacy":
 				dialect = Legacy
-			} else if name == "vim9cmd" {
+			case "vim9cmd":
 				dialect = Vim9
 			}
 			start = skipSpaceToken(file, spanEnd, end)
@@ -1243,7 +1242,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			malformedDeclaration = position < end && (file.Source[position] == ':' || file.Source[position] == '=')
 		}
 		if !builtIn || expressionNameEnd > nameEnd {
-			nameExpression = looksLikeVim9Expression(file.Source, nameStart, expressionNameEnd, end)
+			nameExpression = looksLikeVim9Expression(file.Source, expressionNameEnd, end)
 			// A colon after an identifier that extends a built-in command name is
 			// not a standalone typed declaration.  Vim falls back to the Ex
 			// command boundary and requires whitespace after that command, e.g.
@@ -1369,10 +1368,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if argumentStart < argumentEnd {
 			file.Tokens = append(file.Tokens, Token{Kind: TokenArgument, Span: Span{Start: argumentStart, End: argumentEnd}})
 		}
-		commandEnd := argumentEnd
-		if commandEnd < nameEnd {
-			commandEnd = nameEnd
-		}
+		commandEnd := max(argumentEnd, nameEnd)
 		parsedCommand.Span.End = commandEnd
 		parsedCommand.Argument.End = argumentEnd
 		parsedCommand.boundaryExpression = boundaryExpression
@@ -3825,7 +3821,7 @@ func isAutocmdEventToken(token string) bool {
 	if token == "*" {
 		return true
 	}
-	for _, event := range strings.Split(token, ",") {
+	for event := range strings.SplitSeq(token, ",") {
 		if event == "" {
 			return false
 		}
@@ -5009,7 +5005,7 @@ func staticallyInvalidVim9CommandName(name string) bool {
 	return !builtIn
 }
 
-func looksLikeVim9Expression(source string, nameStart, nameEnd, end int) bool {
+func looksLikeVim9Expression(source string, nameEnd, end int) bool {
 	if nameEnd >= end {
 		return false
 	}
@@ -5126,7 +5122,7 @@ func looksLikeVim9SigilExpression(source string, start, end int) bool {
 	if position >= end || source[position] == '#' && (position == start || isSpace(source[position-1])) {
 		return true
 	}
-	return looksLikeVim9AssignmentAfterName(source, nameEnd, end) || looksLikeVim9Expression(source, start, nameEnd, end)
+	return looksLikeVim9AssignmentAfterName(source, nameEnd, end) || looksLikeVim9Expression(source, nameEnd, end)
 }
 
 func scanVim9Sigil(source string, start, end int) (int, bool) {
@@ -5939,8 +5935,8 @@ func findVim9ScriptPrologue(source string) (Command, bool) {
 					}
 				case "endif":
 					guardDepth--
-					for block := len(blockStack) - 1; block >= 0; block-- {
-						if blockStack[block] == BlockIf {
+					for block, kind := range slices.Backward(blockStack) {
+						if kind == BlockIf {
 							blockStack = blockStack[:block]
 							break
 						}
@@ -5954,9 +5950,9 @@ func findVim9ScriptPrologue(source string) (Command, bool) {
 				default:
 					if kind, opening := openingBlock(file, &command); opening {
 						blockStack = append(blockStack, kind)
-					} else if kind, closing := closingBlock(file, &command); closing {
-						for block := len(blockStack) - 1; block >= 0; block-- {
-							if blockStack[block] == kind {
+					} else if kind, closing := closingBlock(&command); closing {
+						for block, openKind := range slices.Backward(blockStack) {
+							if openKind == kind {
 								blockStack = blockStack[:block]
 								break
 							}
