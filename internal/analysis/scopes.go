@@ -2340,6 +2340,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 			}
 			if command.Dialect == syntax.Vim9 && expression.Kind == syntax.ExpressionMember {
+				appendProtectedMethodAccessDiagnostic(result, expressionScope, expression)
 				appendObjectVariableThroughClassDiagnostic(result, expressionScope, expression)
 				appendClassVariableThroughObjectDiagnostic(result, expressionScope, expression)
 				appendClassMethodThroughObjectDiagnostic(result, expressionScope, expression)
@@ -4133,6 +4134,89 @@ func appendObjectMethodThroughClassDiagnostic(result *FileAnalysis, scope *Scope
 			}
 			return
 		}
+	}
+}
+
+func appendProtectedMethodAccessDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || result.File.Text(member.Operator) != "." ||
+		!strings.HasPrefix(member.Value, "_") {
+		return
+	}
+
+	receiver := member.Children[0]
+	className := ""
+	classReceiver := false
+	if receiver.Kind == syntax.ExpressionIdentifier {
+		if receiver.Value == "this" {
+			if current := enclosingClassCommand(result.File, scope); current != nil && current.Aggregate != nil {
+				className = result.File.Text(current.Aggregate.Name)
+			}
+		} else if declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil); declaration != nil {
+			switch declaration.Kind {
+			case SymbolKindClass:
+				className, classReceiver = declaration.Name, true
+			case SymbolKindTypeAlias:
+				className = result.classAliases[declaration.Name]
+				classReceiver = className != ""
+			}
+		}
+	}
+	if className == "" {
+		className = resolvedExpressionType(result, scope, receiver).Name
+	}
+	class := result.classes[className]
+	if class == nil {
+		return
+	}
+
+	file := result.File
+	owner, classMethod := (*syntax.Command)(nil), false
+	seen := make(map[*syntax.Command]bool)
+	for current := class; current != nil; current = extendedClass(file, result.classes, current) {
+		if seen[current] {
+			return
+		}
+		seen[current] = true
+		for _, memberIndex := range current.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			method := &file.Commands[memberIndex]
+			if method.Function == nil || file.Text(method.Function.Name) != member.Value {
+				continue
+			}
+			classMethod = commandIsClassMethod(file, method)
+			if current != class && classMethod {
+				return
+			}
+			owner = current
+			break
+		}
+		if owner != nil {
+			break
+		}
+	}
+	if owner == nil {
+		return
+	}
+
+	current := enclosingClassCommand(file, scope)
+	allowed := classReceiver == classMethod && current == owner
+	if classReceiver == classMethod && !classMethod {
+		allowed = false
+		for seen := make(map[*syntax.Command]bool); !allowed && current != nil; current = extendedClass(file, result.classes, current) {
+			if seen[current] {
+				return
+			}
+			seen[current] = true
+			allowed = current == class
+		}
+	}
+	if !allowed {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1366", Message: "Cannot access protected method: " + member.Value, Span: memberNameSpan(file, member),
+		})
 	}
 }
 

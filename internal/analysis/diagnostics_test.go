@@ -4996,6 +4996,85 @@ func TestAnalyzeE1384InheritedClassMethodBareCall(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1366ProtectedMethodAccess(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "object call",
+			source: "vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\nvar a = A.new()\na._Foo()\n",
+		},
+		{
+			name:   "object method reference",
+			source: "vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\nvar a = A.new()\nvar Fn = a._Foo\n",
+		},
+		{
+			name:   "class alias",
+			source: "vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\ntype Alias = A\nAlias._Foo()\n",
+		},
+		{
+			name:   "object method through class",
+			source: "vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\nA._Foo()\n",
+		},
+		{
+			name:   "class method through object",
+			source: "vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\nvar a = A.new()\na._Foo()\n",
+		},
+		{
+			name:   "protected static from child",
+			source: "vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\nclass B extends A\n  static def Test()\n    A._Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "protected object from unrelated class",
+			source: "vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\nclass B\n  def Test(a: A)\n    a._Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "object method through class inside owner",
+			source: "vim9script\nclass A\n  def _Foo()\n  enddef\n  static def Test()\n    A._Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "class method through object inside owner",
+			source: "vim9script\nclass A\n  static def _Foo()\n  enddef\n  def Test()\n    this._Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "base class through child object",
+			source: "vim9script\nclass A\n  def _Foo()\n  enddef\n  def Test(c: C)\n    c._Foo()\n  enddef\nendclass\nclass C extends A\nendclass\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1366" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1385" || diagnostic.Code == "vim/E1386" {
+					t.Fatalf("protected access reported lower-priority diagnostic: %#v", diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot access protected method: _Foo" || file.Text(got[0].Span) != "_Foo" {
+				t.Fatalf("E1366 diagnostics=%#v; syntax diagnostics=%#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  def _Foo()\n  enddef\n  def Test()\n    this._Foo()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\nclass B extends A\n  def Test(a: A)\n    a._Foo()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static def _Foo()\n  enddef\n  def Test()\n    A._Foo()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\nclass B extends A\nendclass\nB._Foo()\n",
+		"vim9script\nvar value: any\nvalue._Foo()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1366" {
+				t.Fatalf("guard source reported E1366: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1385ClassMethodThroughObject(t *testing.T) {
 	for _, use := range []string{
 		"var a = A.new()\na.Foo()",
