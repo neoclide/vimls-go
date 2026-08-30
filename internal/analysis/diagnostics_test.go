@@ -1960,6 +1960,63 @@ func TestAnalyzeBitshiftOperandDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeNegativeBitshiftAmountDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{"Legacy literal", "let value = 2 << -1\n", "-1"},
+		{"Vim9 script literal", "vim9script\nvar value = 2 >> (-1)\n", "(-1)"},
+		{"compiled def literal", "vim9script\ndef Func()\n  var value = 2 << -1\nenddef\n", "-1"},
+		{"compiled block lambda literal", "vim9script\nvar Callback = () => 2 >> -1\n", "-1"},
+		{"Legacy initializer", "let a = 2\nlet b = -1\nlet value = a << b\n", "b"},
+		{"Vim9 script initializer", "vim9script\nvar a = 2\nvar b = -1\nvar value = a << b\n", "b"},
+		{"compiled def initializer", "vim9script\ndef Func()\n  var a = 2\n  var b = -1\n  var value = a << b\nenddef\n", "b"},
+		{"parenthesized initializer", "vim9script\nvar a = 2\nvar b = -1\nvar value = a << (b)\n", "(b)"},
+		{"shadowed initializer", "vim9script\ndef Func()\n  var amount = 1\n  if true\n    var amount = -1\n    var value = 2 << amount\n  endif\nenddef\n", "amount"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1283" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Bitshift amount must be a positive number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1283 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value = 2 << 1\n",
+		"vim9script\ndef Func()\n  var amount = -1\n  amount = 1\n  var value = 2 << amount\nenddef\n",
+		"vim9script\ndef Func()\n  var amount = -1\n  if true\n    var value = 2 << amount\n  endif\nenddef\n",
+		"vim9script\nvar amount: any\nvar value = 2 << amount\n",
+		"vim9script\ndef Func()\n  var value = 'text' << -1\nenddef\n",
+		"vim9script\nvar value = 2 << -1 << -2\n",
+	} {
+		file := syntax.Parse(source)
+		result := Analyze(file)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1283" {
+				got = append(got, diagnostic)
+			}
+		}
+		if strings.Contains(source, "2 << -1 << -2") {
+			if len(got) != 1 || file.Text(got[0].Span) != "-1" {
+				t.Fatalf("left-associative chain diagnostics = %#v", result.Diagnostics)
+			}
+			continue
+		}
+		if len(got) != 0 {
+			t.Fatalf("source unexpectedly received E1283: %#v", result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeIndexableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

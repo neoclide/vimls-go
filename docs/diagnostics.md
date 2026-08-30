@@ -3042,3 +3042,30 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   bitshift operation.
 - `runtime/doc/eval.txt:1422-1432` documents Number operands and shift amounts.
 - `src/errors.h:3295-3296` defines the exact message.
+
+## Negative bitshift amount: E1283
+
+E1283 means `Bitshift amount must be a positive number`. Vim's implementation
+allows zero and rejects only a negative right operand. Analysis reports E1283
+on that right operand for `<<` and `>>` when its Number value is statically
+known.
+
+This covers signed Number literals and a simple same-scope binding whose
+static Number initializer remains unchanged before the shift. Reassigned,
+cross-scope, dynamic, `any`, and otherwise unresolved values stay quiet. A
+non-Number operand continues to use E1282 or the compiled E1012 rule first.
+For a left-associated chain, analysis exposes the first failing shift in Vim's
+evaluation order.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_expr.vim:1041-1042` covers a direct negative amount and a
+  negative amount loaded from a variable in Legacy, compiled, and script
+  contexts.
+- `src/vim9expr.c:3502-3530` rejects a negative precomputed right operand while
+  folding a compiled shift.
+- `src/vim9execute.c:5520-5539` rejects a negative amount loaded by compiled
+  bytecode at execution time.
+- `src/eval.c:4417-4448` implements the same check for evaluated expressions.
+- `runtime/doc/eval.txt:1422-1432` documents bitshift operands and amounts.
+- `src/errors.h:3297-3298` defines the exact message.

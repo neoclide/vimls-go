@@ -2802,6 +2802,28 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 	if result == nil || result.File == nil {
 		return
 	}
+	staticInitializers := make(map[*Declaration]*syntax.Expression)
+	for index := range commands {
+		command := &commands[index]
+		if command.Declaration == nil || len(command.Declaration.Bindings) != 1 || command.Declaration.Initializer == nil {
+			continue
+		}
+		scope := result.commandScopes[command]
+		if scope == nil {
+			scope = parent
+		}
+		binding := command.Declaration.Bindings[0]
+		var declaration *Declaration
+		for _, candidate := range scope.Declarations {
+			if candidate.Span == binding.Name {
+				declaration = candidate
+				break
+			}
+		}
+		if declaration != nil {
+			staticInitializers[declaration] = command.Declaration.Initializer
+		}
+	}
 	for index := range commands {
 		command := &commands[index]
 		scope := result.commandScopes[command]
@@ -2943,6 +2965,19 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 				if expression.Kind == syntax.ExpressionBinary && (op == "<<" || op == ">>") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					leftShift := expression.Children[0]
+					for leftShift.Kind == syntax.ExpressionParenthesized && len(leftShift.Children) == 1 {
+						leftShift = leftShift.Children[0]
+					}
+					if leftShift.Kind == syntax.ExpressionBinary && (leftShift.Value == "<<" || leftShift.Value == ">>") {
+						walk(leftShift, expressionScope)
+						for _, diagnostic := range result.Diagnostics {
+							if (diagnostic.Code == "vim/E1282" || diagnostic.Code == "vim/E1283" || diagnostic.Code == "vim/E1012") &&
+								diagnostic.Span.Start >= leftShift.Span.Start && diagnostic.Span.End <= leftShift.Span.End {
+								return
+							}
+						}
+					}
 					compiled := command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)
 					for _, operand := range expression.Children[:2] {
 						actual := result.TypeOf(operand)
@@ -2964,6 +2999,33 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						}
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 							Code: "vim/E1012", Message: "Type mismatch; expected number but got " + valueTypeDisplay(actual), Span: operand.Span,
+						})
+						return
+					}
+					amount, knownAmount := staticNumberValue(expression.Children[1])
+					right := expression.Children[1]
+					for right.Kind == syntax.ExpressionParenthesized && len(right.Children) == 1 {
+						right = right.Children[0]
+					}
+					if !knownAmount && right.Kind == syntax.ExpressionIdentifier {
+						declaration := resolve(expressionScope, right.Value, right.Span.Start, false, nil)
+						initializer := staticInitializers[declaration]
+						if declaration != nil && declaration.Scope == expressionScope && initializer != nil {
+							unchanged := true
+							for _, reference := range result.References {
+								if reference.Declaration == declaration && reference.assignmentTarget && reference.Span.Start > declaration.Span.End && reference.Span.Start < expression.Children[1].Span.Start {
+									unchanged = false
+									break
+								}
+							}
+							if unchanged {
+								amount, knownAmount = staticNumberValue(initializer)
+							}
+						}
+					}
+					if knownAmount && amount < 0 {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1283", Message: "Bitshift amount must be a positive number", Span: expression.Children[1].Span,
 						})
 						return
 					}
