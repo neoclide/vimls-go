@@ -1,6 +1,9 @@
 package vimdata
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestLookupVariableMetadata(t *testing.T) {
 	if VariableVimTag != "v9.2.1015" || VariableVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" {
@@ -29,5 +32,24 @@ func TestLookupVariableMetadata(t *testing.T) {
 	}
 	if BuiltinVariableCount() != 118 {
 		t.Fatalf("BuiltinVariableCount() = %d, want 118", BuiltinVariableCount())
+	}
+	seen := make(map[string]Variable, len(builtinVariables))
+	for _, variable := range builtinVariables {
+		if variable.Name == "" {
+			t.Fatalf("variable has empty name: %#v", variable)
+		}
+		if variable.Documentation == "" || variable.DocumentationSource == "" {
+			t.Fatalf("%s documentation/source = %q/%q", variable.Name, variable.Documentation, variable.DocumentationSource)
+		}
+		if variable.DocumentationSource != "eval.txt" {
+			t.Fatalf("%s documentation source = %q", variable.Name, variable.DocumentationSource)
+		}
+		if _, exists := seen[variable.Name]; exists {
+			t.Fatalf("duplicate builtin variable %q", variable.Name)
+		}
+		seen[variable.Name] = variable
+		if got, ok := LookupVariable(variable.Name); !ok || !reflect.DeepEqual(got, variable) {
+			t.Fatalf("LookupVariable(%q) = %#v, %v", variable.Name, got, ok)
+		}
 	}
 }

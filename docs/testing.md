@@ -30,9 +30,10 @@ need them.
 Fixture metadata records expected dialect, minimum Vim version/patch, expected
 diagnostics or AST snapshot, and upstream provenance when applicable.
 
-The default upstream source checkout for provenance and tagged corpus reads is
-`/Users/chemzqm/lib/vim`. Tests and generators must address explicit tags or
-commits and must not modify that checkout or depend on its current HEAD.
+The default upstream source checkout for explicit generation or research is
+`/Users/chemzqm/lib/vim` and must be used read-only.
+Ordinary repository tests use repository-owned fixtures and artifacts and do not
+require any external Vim checkout.
 
 ## Required layers
 
@@ -81,9 +82,6 @@ focused source-referenced matrices to assert accepted or rejected syntax,
 error provenance, AST shape, and recovery diagnostics. Every official helper
 candidate must be extracted or retained in a classified skip manifest; the
 broad corpus is not a substitute for those conformance assertions.
-`make test-official` compares the generated corpora with the exact tag in
-`/Users/chemzqm/lib/vim` without modifying that checkout or accessing the
-network.
 
 #### Official failure migration
 

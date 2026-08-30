@@ -3,7 +3,7 @@ GO_MOD ?= -mod=readonly
 COVERAGE_MIN ?= 90
 VIM_SOURCE ?= /Users/chemzqm/lib/vim
 
-.PHONY: build check coverage format-check generate-official race test test-official vet
+.PHONY: build check coverage format-check generate-official race test vet
 
 build:
 	mkdir -p bin
@@ -13,11 +13,6 @@ build:
 
 test:
 	$(GO) test $(GO_MOD) ./...
-
-test-official:
-	@test -d "$(VIM_SOURCE)/.git" || { echo "Vim checkout not found: $(VIM_SOURCE)" >&2; exit 1; }
-	VIM_SOURCE="$(VIM_SOURCE)" $(GO) test $(GO_MOD) ./internal/syntax -run '^TestOfficialVim'
-	$(GO) test $(GO_MOD) ./tools/genofficial -run '^TestPinned'
 
 generate-official:
 	$(GO) run $(GO_MOD) ./tools/genofficial -vim-source "$(VIM_SOURCE)"

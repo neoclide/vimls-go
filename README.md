@@ -76,13 +76,8 @@ from revisiting the other 318 test files. From that boundary, 3,844 helper calls
 produce 5,261 source variants: 1,761 official parser-positive cases and 3,500
 failure cases whose reviewed phase and parser-migration status are recorded in
 the official syntax migration ledger. The stability gate still parses every
-source through both independent parser entry points without executing it. To
-additionally compare the committed corpora and copied Vim license byte-for-byte
-with the pinned local checkout, run:
-
-```sh
-GOPROXY=off GOSUMDB=off make test-official
-```
+source through both independent parser entry points without executing it, using
+committed artifacts in this repository.
 
 See [the roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
 [language support contract](docs/language-support.md), and

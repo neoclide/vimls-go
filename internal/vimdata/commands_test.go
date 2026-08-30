@@ -35,6 +35,37 @@ func TestLookupUsesPinnedVimCommandOrder(t *testing.T) {
 	}
 }
 
+func TestCommandTableContracts(t *testing.T) {
+	if len(commands) != 600 {
+		t.Fatalf("commands = %d, want 600", len(commands))
+	}
+	for _, test := range []struct {
+		name string
+		want CommandFlags
+	}{
+		{name: "def", want: AllowBang | ExactInVim9 | Exportable},
+		{name: "function", want: AllowBang | Exportable},
+		{name: "read", want: AllowBang | FileArgument | AllowBar},
+		{name: "sort", want: AllowBang | NoTrailingComment},
+		{name: "vim9script", want: 0},
+		{name: "vim9cmd", want: NeedArgument | NoTrailingComment},
+	} {
+		command, ok := Lookup(test.name)
+		if !ok || command.Flags != test.want {
+			t.Fatalf("Lookup(%q) = %#v, %v want Flags=%v", test.name, command, ok, test.want)
+		}
+	}
+	for _, command := range commands {
+		got, ok := Lookup(command.Name)
+		if !ok {
+			t.Fatalf("Lookup(%q) = _, false", command.Name)
+		}
+		if got != command {
+			t.Fatalf("Lookup(%q) = %#v, want %#v", command.Name, got, command)
+		}
+	}
+}
+
 func TestCommandsReturnsOrderedCopy(t *testing.T) {
 	got := Commands()
 	if len(got) != len(commands) {

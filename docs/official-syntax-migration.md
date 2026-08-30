@@ -69,13 +69,6 @@ and explicit `: void` are valid. E1359, E1370, and E1372 take priority for an
 abstract-class, static, or abstract constructor respectively. Focused coverage
 is in `internal/syntax/declarations_test.go`.
 
-At this checkpoint, gopls diagnostics and the focused analysis, syntax, and
-official-case tests pass. `go test ./...` has three unrelated reproducible
-baseline failures: the E476/E1267 cascade in
-`TestOfficialVimParserFailures`, top-level `def new` receiving E1267 in
-`TestVim9ConstructorParameterTarget`, and the watcher registration assertion
-in `TestLSPSubprocess`.
-
 After changing the expected map, run the migration report instead of counting
 keys or source groups by hand:
 

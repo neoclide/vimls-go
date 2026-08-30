@@ -48,6 +48,25 @@ func TestLookupFunctionMetadata(t *testing.T) {
 	if BuiltinFunctionCount() != 591 {
 		t.Fatalf("BuiltinFunctionCount() = %d, want 591", BuiltinFunctionCount())
 	}
+	seen := make(map[string]BuiltinFunction, len(builtinFunctions))
+	for index, function := range builtinFunctions {
+		if function.Name == "" {
+			t.Fatalf("builtinFunctions[%d] has empty name", index)
+		}
+		if function.Documentation == "" || function.DocumentationSource == "" {
+			t.Fatalf("%s documentation/source = %q/%q", function.Name, function.Documentation, function.DocumentationSource)
+		}
+		if index > 0 && function.Name <= builtinFunctions[index-1].Name {
+			t.Fatalf("builtinFunctions unsorted at %d: %q, %q", index-1, builtinFunctions[index-1].Name, function.Name)
+		}
+		if _, exists := seen[function.Name]; exists {
+			t.Fatalf("duplicate builtin function %q", function.Name)
+		}
+		seen[function.Name] = function
+		if lookup, ok := LookupFunction(function.Name); !ok || !reflect.DeepEqual(lookup, function) {
+			t.Fatalf("LookupFunction(%q) = %#v, %v", function.Name, lookup, ok)
+		}
+	}
 }
 
 func TestBuiltinFunctionsReturnsOrderedCopy(t *testing.T) {
