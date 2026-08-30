@@ -417,6 +417,9 @@ pending-fix.
 Commit `3dd8912` migrated both mismatched function-closer variants. The
 authoritative parser split is therefore 970 migrated, zero ready, and 62
 pending-fix.
+Commit `df781ad` migrated all five function-closer trailing-text variants. The
+authoritative parser split is therefore 975 migrated, zero ready, and 57
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1492,7 +1495,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 183 syntax variants: 121 migrated and 62 pending-fix. In the
+Group D contains 183 syntax variants: 126 migrated and 57 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1616,7 +1619,7 @@ E1157 M ready: 1689:36926/{def|vim9-script}
 E1160 P missing: 2034:44861/script
 E1170 P missing: 73:1788/def
 E1172 P missing: 1626:35394/{def|vim9-script}
-E1173 P missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/script,2388:53495/script
+E1173 M missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/script,2388:53495/script
 E125 M ready: 948:20577/script,955:20687/script
 E126 P mapping: 416:8808/script
 E1267 P missing: 99:2271/script,107:2406/script,1049:22663/script,1061:22873/script,1069:23011/script,1077:23147/script
@@ -1642,6 +1645,13 @@ Commit `3dd8912` recognizes `endfunction` against an active `def` as E1151 and
 attached to the active block for recovery; its later real closer and outer
 blocks remain in the command and block trees without a same-line generic
 missing/unexpected-end cascade.
+
+Commit `df781ad` implements Vim's `define_function()`/compiler distinction for
+E1173. Inline text after `enddef` or `endfunction` is always invalid, while an
+Ex separator remains valid after a top-level definition. A separator payload
+after a nested definition is E1173 because the compiled definition cannot
+return `eap->nextcmd`; that tail stays opaque and the outer function continues
+on the next physical line.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
