@@ -704,6 +704,7 @@ func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool)
 				Code: "vim/E1069", Message: "white space required after ','",
 				Span: Span{Start: p.base + part.Start - 1, End: p.base + part.Start},
 			})
+			reportedMissing = true
 		}
 		start := skipSpace(p.source, part.Start, part.End)
 		typeEnd := trimSpaceEnd(p.source, start, part.End)
