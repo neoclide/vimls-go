@@ -4297,9 +4297,11 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 			if dialect == syntax.Vim9 && (vim9UnsupportedNamespace(expression.Value) || declaration == nil && isUnknownVimVariable(expression.Value)) {
 				appendVim9UnresolvedReadDiagnostic(result, scope, expression.Value, expression.Span)
 			} else if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && assignmentTargetNeedsDeclaration(expression.Value) && declaration == nil {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E1089", Message: "Unknown variable: " + expression.Value, Span: expression.Span,
-				})
+				if !appendInheritedClassVariableDiagnostic(result, scope, expression.Value, expression.Span) {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1089", Message: "Unknown variable: " + expression.Value, Span: expression.Span,
+					})
+				}
 			}
 		}
 	case syntax.ExpressionMember:
@@ -4332,6 +4334,9 @@ func assignmentTargetNeedsDeclaration(name string) bool {
 }
 
 func appendVim9UnresolvedReadDiagnostic(result *FileAnalysis, scope *Scope, name string, span syntax.Span) {
+	if appendInheritedClassVariableDiagnostic(result, scope, name, span) {
+		return
+	}
 	code := "vim/E121"
 	message := "Undefined variable: " + name
 	if scopeUsesDefTypeRules(scope) {
@@ -4343,6 +4348,39 @@ func appendVim9UnresolvedReadDiagnostic(result *FileAnalysis, scope *Scope, name
 		}
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
+}
+
+func appendInheritedClassVariableDiagnostic(result *FileAnalysis, scope *Scope, name string, span syntax.Span) bool {
+	if result == nil || result.File == nil || scope == nil {
+		return false
+	}
+	file := result.File
+	current := enclosingClassCommand(file, scope)
+	if current == nil {
+		return false
+	}
+	seen := make(map[*syntax.Command]bool)
+	for class := extendedClass(file, result.classes, current); class != nil && !seen[class]; class = extendedClass(file, result.classes, class) {
+		seen[class] = true
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Declaration == nil || !commandHasModifier(member, "static") {
+				continue
+			}
+			for _, binding := range member.Declaration.Bindings {
+				if file.Text(binding.Name) == name {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1374", Message: `Class variable "` + name + `" accessible only inside class "` + file.Text(class.Aggregate.Name) + `"`, Span: span,
+					})
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func isUnknownVimVariable(name string) bool {

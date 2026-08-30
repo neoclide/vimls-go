@@ -5003,6 +5003,56 @@ func TestAnalyzeE1375ClassVariableThroughObject(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1374InheritedClassVariableBareAccess(t *testing.T) {
+	for _, method := range []string{
+		"static def Test()\n    var value = count\n  enddef",
+		"static def Test()\n    count = 2\n  enddef",
+		"def Test()\n    var value = count\n  enddef",
+		"def Test()\n    count = 2\n  enddef",
+	} {
+		source := "vim9script\nclass A\n  static var count: number = 1\nendclass\nclass B extends A\n  " + method + "\nendclass\n"
+		file := syntax.Parse(source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E1374" {
+				got = append(got, diagnostic)
+			}
+			if diagnostic.Code == "vim/E1001" || diagnostic.Code == "vim/E1089" {
+				t.Fatalf("method=%q also reported generic unresolved diagnostic: %#v", method, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != `Class variable "count" accessible only inside class "A"` || file.Text(got[0].Span) != "count" {
+			t.Fatalf("method=%q E1374 diagnostics=%#v; syntax diagnostics=%#v", method, got, file.Diagnostics)
+		}
+	}
+
+	protected := syntax.Parse("vim9script\nclass A\n  static var _count: number = 1\nendclass\nclass B extends A\n  static def Test()\n    var value = _count\n  enddef\nendclass\n")
+	var protectedDiagnostics []syntax.Diagnostic
+	for _, diagnostic := range Analyze(protected).Diagnostics {
+		if diagnostic.Code == "vim/E1374" {
+			protectedDiagnostics = append(protectedDiagnostics, diagnostic)
+		}
+	}
+	if len(protectedDiagnostics) != 1 || protectedDiagnostics[0].Message != `Class variable "_count" accessible only inside class "A"` || protected.Text(protectedDiagnostics[0].Span) != "_count" {
+		t.Fatalf("protected E1374 diagnostics=%#v", protectedDiagnostics)
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  static var count: number = 1\n  static def Test()\n    var value = count\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  public static var count: number = 1\nendclass\nclass B extends A\n  static def Test()\n    var value = A.count\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static var count: number = 1\nendclass\nclass B extends A\n  static var count: number = 2\n  static def Test()\n    var value = count\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static var count: number = 1\nendclass\nclass B extends A\n  def Test(count: number)\n    var value = count\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  var count: number = 1\nendclass\nclass B extends A\n  def Test()\n    var value = count\n  enddef\nendclass\n",
+		"vim9script\nclass A extends B\nendclass\nclass B extends A\n  static def Test()\n    var value = count\n  enddef\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1374" {
+				t.Fatalf("guard source reported E1374: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1431AbstractSuperMethodCall(t *testing.T) {
 	tests := []struct {
 		name    string
