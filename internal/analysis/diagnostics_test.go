@@ -98,6 +98,51 @@ func TestAnalyzeE1428DuplicateEnumValue(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1427EnumNameCannotBeModified(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   int
+	}{
+		{
+			name:   "constructor",
+			source: "vim9script\nenum Planet\n  Mercury\n  def new()\n    this.name = 'foo'\n  enddef\nendenum\n",
+			want:   1,
+		},
+		{
+			name:   "ordinary enum method compound assignment",
+			source: "vim9script\nenum Planet\n  Mercury\n  def Rename()\n    this.name ..= '!'\n  enddef\nendenum\n",
+			want:   1,
+		},
+		{
+			name:   "read and ordinary member assignment",
+			source: "vim9script\nenum Planet\n  Mercury\n  var label: string\n  def Rename()\n    echo this.name\n    this.label = 'foo'\n  enddef\nendenum\n",
+		},
+		{
+			name:   "outside enum",
+			source: "vim9script\nenum Planet\n  Mercury\nendenum\ndef Rename()\n  Planet.Mercury.name = 'foo'\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1427" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E1427 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+			if test.want == 1 && (got[0].Message != "Enum \"Planet\" name cannot be modified" || file.Text(got[0].Span) != "this.name") {
+				t.Fatalf("E1427 diagnostic = %#v", got[0])
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string

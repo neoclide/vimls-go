@@ -170,18 +170,29 @@ func collectDuplicateEnumValueDiagnostics(result *FileAnalysis) {
 }
 
 func vim9EnumScope(file *syntax.File, scope *Scope) bool {
-	if file == nil || scope == nil || scope.Kind != syntax.BlockEnum || scope.Block < 0 {
-		return false
+	_, ok := enclosingVim9EnumName(file, scope)
+	return ok && scope.Kind == syntax.BlockEnum
+}
+
+func enclosingVim9EnumName(file *syntax.File, scope *Scope) (string, bool) {
+	for current := scope; file != nil && current != nil; current = current.Parent {
+		if current.Kind != syntax.BlockEnum || current.Block < 0 {
+			continue
+		}
+		commands, blocks := file.Commands, file.Blocks
+		if current.CommandList != nil {
+			commands, blocks = current.CommandList.Commands, current.CommandList.Blocks
+		}
+		if current.Block >= len(blocks) {
+			return "", false
+		}
+		header := blocks[current.Block].Header
+		if header < 0 || header >= len(commands) || commands[header].Dialect != syntax.Vim9 || commands[header].Aggregate == nil {
+			return "", false
+		}
+		return file.Text(commands[header].Aggregate.Name), true
 	}
-	commands, blocks := file.Commands, file.Blocks
-	if scope.CommandList != nil {
-		commands, blocks = scope.CommandList.Commands, scope.CommandList.Blocks
-	}
-	if scope.Block >= len(blocks) {
-		return false
-	}
-	header := blocks[scope.Block].Header
-	return header >= 0 && header < len(commands) && commands[header].Dialect == syntax.Vim9
+	return "", false
 }
 
 func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
@@ -2192,7 +2203,13 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 	}
 	if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && expression.Children[1] != nil && expression.Children[1].Kind != syntax.ExpressionMissing {
 		target := expression.Children[0]
-		if target != nil && target.Kind == syntax.ExpressionIdentifier && validNameSpan(result.File, target.Span) {
+		if target != nil && target.Kind == syntax.ExpressionMember && target.Value == "name" && len(target.Children) == 1 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier && target.Children[0].Value == "this" {
+			if enumName, ok := enclosingVim9EnumName(result.File, scope); ok {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1427", Message: "Enum \"" + enumName + "\" name cannot be modified", Span: target.Span,
+				})
+			}
+		} else if target != nil && target.Kind == syntax.ExpressionIdentifier && validNameSpan(result.File, target.Span) {
 			if isReadOnlyVimVariableTarget(target) || dialect == syntax.Legacy && isReadOnlyLegacyArgumentTarget(scope, target) {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E46", Message: "Cannot change read-only variable \"" + target.Value + "\"", Span: target.Span,
