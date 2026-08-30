@@ -2522,6 +2522,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:3611-3621` documents E1259 with `i_cc.8 = 0`.
 - `src/errors.h:3235-3236` defines the exact E1259 message.
 
+## Unlet of an imported item: E1260
+
+Analysis reports E1260 when `unlet` or `unlet!` directly targets a member of
+an imported namespace. This applies at top-level Vim9 script, in a compiled
+`def` or block lambda, and in a Legacy function inside a Vim9-root script. The
+diagnostic selects the member name and includes it in the message.
+
+Removing an item inside an exported List or Dictionary is different from
+removing the exported item itself. Nested member, index, and slice targets
+therefore remain outside E1260 and continue to their own type, range,
+mutability, or key checks. Bare aliases, malformed members, non-import
+receivers, lock commands, and Legacy-root files also keep their existing
+behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_assign.vim:2858-2892` covers E1260 in a compiled
+  `def`, at script level, and in a Legacy function inside a Vim9 script.
+- `src/vim9cmds.c:124-154` emits E1260 for a compiled imported member only
+  when no further index remains.
+- `src/evalvars.c:2125-2161` applies the corresponding runtime rule.
+- `runtime/doc/vim9.txt:3621-3630` documents the direct imported-item removal
+  and member-only message.
+- `src/errors.h:3237-3238` defines the exact E1260 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

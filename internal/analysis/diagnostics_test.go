@@ -2344,6 +2344,65 @@ func TestAnalyzeE1166DictionaryRangeUnletDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1260ImportedMemberUnletDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		recovery           bool
+	}{
+		{"top-level Vim9", "vim9script\nimport './Xfoo.vim' as Alias\nunlet Alias.Member\n", "Member", false},
+		{"compiled def", "vim9script\nimport './Xfoo.vim' as Alias\ndef Func()\n  unlet! Alias.Member\nenddef\n", "Member", false},
+		{"block lambda", "vim9script\nimport './Xfoo.vim' as Alias\nvar Callback = () => {\n  unlet Alias.Member\n}\n", "Member", false},
+		{"Legacy function", "vim9script\nimport './Xfoo.vim' as Alias\nfunction Legacy()\n  unlet Alias.Member\nendfunction\n", "Member", false},
+		{"multiple target recovery", "vim9script\nimport './Xfoo.vim' as Alias\nvar value = {}\nunlet value.key Alias.Member\nvar after = 1\n", "Member", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1260" {
+					got = append(got, diagnostic)
+				}
+				if (diagnostic.Code == "vim/E1081" || diagnostic.Code == "vim/E1060") && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1260 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot unlet an imported item: Member" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1260 diagnostics = %#v", got)
+			}
+			if test.recovery {
+				found := false
+				for _, declaration := range result.Declarations {
+					found = found || declaration.Name == "after"
+				}
+				if !found {
+					t.Fatalf("following declaration was not retained: %#v", result.Declarations)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"nested member", "vim9script\nimport './Xfoo.vim' as Alias\nunlet Alias.Member.key\n"},
+		{"nested index", "vim9script\nimport './Xfoo.vim' as Alias\nunlet Alias.Member[0]\n"},
+		{"nested slice", "vim9script\nimport './Xfoo.vim' as Alias\nunlet Alias.Member[0 : 1]\n"},
+		{"bare alias", "vim9script\nimport './Xfoo.vim' as Alias\nunlet Alias\n"},
+		{"non-import", "vim9script\nvar Alias = {}\nunlet Alias.Member\n"},
+		{"lockvar", "vim9script\nimport './Xfoo.vim' as Alias\nlockvar Alias.Member\n"},
+		{"numeric member", "vim9script\nimport './Xfoo.vim' as Alias\nunlet Alias.99\n"},
+		{"spacing", "vim9script\nimport './Xfoo.vim' as Alias\nunlet Alias. Member\n"},
+		{"Legacy root", "import './Xfoo.vim' as Alias\nunlet Alias.Member\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1260" {
+					t.Fatalf("guard unexpectedly received E1260: %#v", diagnostic)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1167ArgumentShadowDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source, span string

@@ -3978,6 +3978,30 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				appendIndexableAssignmentDiagnostic(result, scope, target)
 			}
 		}
+		if command.Canonical == "unlet" && result.File.Dialect == syntax.Vim9 {
+			for _, target := range command.Targets {
+				if target == nil || target.Kind != syntax.ExpressionMember || len(target.Children) != 1 || target.Children[0] == nil ||
+					target.Children[0].Kind != syntax.ExpressionIdentifier || result.File.Text(target.Operator) != "." || target.Value == "" ||
+					syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, target.Span) {
+					continue
+				}
+				member := syntax.Span{Start: target.Span.End - len(target.Value), End: target.Span.End}
+				if !validNameSpan(result.File, member) {
+					continue
+				}
+				first := result.File.Source[member.Start]
+				if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_' || first >= utf8.RuneSelf) {
+					continue
+				}
+				receiver := target.Children[0]
+				declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+				if declaration == nil || declaration.Kind != SymbolKindImport {
+					continue
+				}
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1260", Message: "Cannot unlet an imported item: " + target.Value, Span: member})
+				break
+			}
+		}
 		if command.Canonical == "unlet" && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
 			for _, target := range command.Targets {
 				if target == nil || target.Kind != syntax.ExpressionSlice || expressionContainsMissing(target) || len(target.Children) == 0 || target.Children[0] == nil {
