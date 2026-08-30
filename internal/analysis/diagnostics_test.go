@@ -2445,6 +2445,62 @@ func TestAnalyzeE1177UnsupportedForIterableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1254ScriptVariableForBindingDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"official def", "vim9script\ndef Func()\n  for s:item in [1]\n  endfor\nenddef\n", "s:item"},
+		{"block lambda", "vim9script\nvar Callback = () => {\n  for s:item in [1]\n  endfor\n}\n", "s:item"},
+		{"destructuring", "vim9script\ndef Func()\n  for [item, s:scriptItem] in [[1, 2]]\n  endfor\nenddef\n", "s:scriptItem"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1254" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use script variable in for loop" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1254 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"top-level Vim9", "vim9script\nfor s:item in [1]\nendfor\n"},
+		{"Legacy", "for s:item in [1]\nendfor\n"},
+		{"legacy command in def", "vim9script\ndef Func()\n  legacy for s:item in [1]\n  endfor\nenddef\n"},
+		{"ordinary and global", "vim9script\ndef Func()\n  for item in [1]\n  endfor\n  for g:item in [1]\n  endfor\nenddef\n"},
+		{"underscore", "vim9script\ndef Func()\n  for _ in [1]\n  endfor\nenddef\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1254" {
+					t.Fatalf("guard unexpectedly received E1254: %#v", diagnostic)
+				}
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef Func()\n  for s:item in 1\n  endfor\nenddef\n")
+	result := Analyze(file)
+	var e1254, e1177 int
+	for _, diagnostic := range result.Diagnostics {
+		switch diagnostic.Code {
+		case "vim/E1254":
+			e1254++
+			if file.Text(diagnostic.Span) != "s:item" {
+				t.Fatalf("E1254 = %#v", diagnostic)
+			}
+		case "vim/E1177":
+			e1177++
+		}
+	}
+	if e1254 != 1 || e1177 != 1 {
+		t.Fatalf("diagnostics = %#v, want E1254 and E1177", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeE1178LocalLockDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source, span string

@@ -2419,6 +2419,29 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   an E1253 `reverse()` example.
 - `src/errors.h:3221-3222` defines the exact E1253 message.
 
+## Script variable as a compiled loop binding: E1254
+
+Analysis reports E1254 when a compiled Vim9 `def` or block lambda uses an
+`s:` script variable as a `for` loop binding. The diagnostic selects the full
+binding name and checks each destructured binding independently without
+suppressing iterable diagnostics.
+
+Top-level Vim9 loops may use `s:name`, with or without the prefix, and remain
+outside this rule. Legacy loops, an explicit `legacy for`, ordinary local and
+underscore bindings, and allowed scoped targets such as `g:name` also keep
+their existing behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_script.vim:3214-3237` rejects `for s:var` in a
+  compiled `def` while explicitly permitting it at script level.
+- `src/vim9cmds.c:1153-1175` rejects the `s:` spelling after classifying the
+  compiled loop destination, while other non-local destinations use their
+  normal store path.
+- `runtime/doc/vim9.txt:1054-1064` documents the Vim9 loop-variable rules and
+  allowed global-variable target.
+- `src/errors.h:3223-3224` defines the exact E1254 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

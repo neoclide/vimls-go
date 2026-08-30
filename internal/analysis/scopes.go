@@ -3357,7 +3357,7 @@ func collectTypeMismatchDiagnostics(result *FileAnalysis, commands []syntax.Comm
 		}
 		if command.Dialect == syntax.Vim9 {
 			collectDeclarationTypeMismatchDiagnostic(result, command)
-			collectForTypeMismatchDiagnostic(result, command)
+			collectForTypeMismatchDiagnostic(result, scope, command)
 			collectConditionTypeMismatchDiagnostic(result, scope, command)
 			if command.Declaration != nil {
 				collectAssignmentTypeMismatchDiagnostics(result, scope, command.Declaration.Initializer)
@@ -3398,9 +3398,19 @@ func collectDeclarationTypeMismatchDiagnostic(result *FileAnalysis, command *syn
 	}
 }
 
-func collectForTypeMismatchDiagnostic(result *FileAnalysis, command *syntax.Command) {
+func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, command *syntax.Command) {
 	loop := command.For
-	if loop == nil || loop.Iterable == nil || expressionContainsMissing(loop.Iterable) {
+	if loop == nil {
+		return
+	}
+	if command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+		for _, binding := range loop.Bindings {
+			if strings.HasPrefix(result.File.Text(binding.Name), "s:") {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1254", Message: "Cannot use script variable in for loop", Span: binding.Name})
+			}
+		}
+	}
+	if loop.Iterable == nil || expressionContainsMissing(loop.Iterable) {
 		return
 	}
 	if syntaxDiagnosticOverlaps(result.File.Diagnostics, loop.Iterable.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, loop.Iterable.Span) {
