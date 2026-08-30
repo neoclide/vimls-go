@@ -3103,6 +3103,15 @@ func mapIncompleteExpressionDiagnostics(file *File, command *Command, diagnostic
 		case command.Dialect == Vim9 && inDef && assignmentExpression && diagnostic.Code == "vimls/trailing-expression":
 			diagnostic.Code = "vim/E488"
 			diagnostic.Message = "trailing characters"
+		case command.Dialect == Vim9 && inDef &&
+			(command.Canonical == "if" || command.Canonical == "elseif" || command.Canonical == "while") &&
+			diagnostic.Code == "vimls/trailing-expression" &&
+			diagnostic.Span.Start >= command.Argument.Start && diagnostic.Span.End <= command.Argument.End &&
+			diagnostic.Span.End == diagnostic.Span.Start+1 && file.Source[diagnostic.Span.Start] == '=' &&
+			(diagnostic.Span.Start == 0 || file.Source[diagnostic.Span.Start-1] != '=') &&
+			(diagnostic.Span.End >= len(file.Source) || file.Source[diagnostic.Span.End] != '=' && file.Source[diagnostic.Span.End] != '>'):
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
 		case command.Dialect == Vim9 && inDef && diagnostic.Code == "vim/E260":
 			diagnostic.Code = "vim/E488"
 			diagnostic.Message = "trailing characters"
