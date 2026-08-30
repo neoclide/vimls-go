@@ -1371,13 +1371,19 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		parsedCommand.Argument.End = argumentEnd
 		parsedCommand.boundaryExpression = boundaryExpression
 		exported := false
+		exportSpan := Span{}
 		for _, modifier := range parsedModifiers {
 			if modifier.Name == "export" {
 				exported = true
+				exportSpan = modifier.Span
 				break
 			}
 		}
-		if exported && dialect == Vim9 && builtIn && metadata.Flags&vimdata.Exportable == 0 {
+		if exported && dialect != Vim9 {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1042", Message: "Export can only be used in vim9script", Span: exportSpan,
+			})
+		} else if exported && dialect == Vim9 && builtIn && metadata.Flags&vimdata.Exportable == 0 {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1043", Message: "Invalid command after :export", Span: nameSpan,
 			})

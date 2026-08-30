@@ -706,6 +706,38 @@ func TestVim9ExportDiagnostics(t *testing.T) {
 	}
 }
 
+func TestLegacyExportDiagnostic(t *testing.T) {
+	for _, source := range []string{
+		"export var some = 123\nvar after = 1\n",
+		"export echo 1\nvar after = 1\n",
+		"vim9script\nlegacy export var some = 123\nvar after = 1\n",
+	} {
+		file := Parse(source)
+		var found bool
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1042" && diagnostic.Message == "Export can only be used in vim9script" && file.Text(diagnostic.Span) == "export" {
+				found = true
+			}
+			if diagnostic.Code == "vim/E1043" || diagnostic.Code == "vim/E1044" {
+				t.Fatalf("legacy export also reported %s: %#v\n%s", diagnostic.Code, file.Diagnostics, source)
+			}
+		}
+		if !found || file.Commands[len(file.Commands)-1].Canonical != "var" {
+			t.Fatalf("diagnostics = %#v, recovery commands = %#v\n%s", file.Diagnostics, file.Commands, source)
+		}
+	}
+
+	for _, source := range []string{
+		"vim9script\nexport var some = 123\n",
+		"vim9cmd export var Other = 1\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1042") {
+			t.Fatalf("unexpected E1042: %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestVim9FunctionCloserTrailingText(t *testing.T) {
 	tests := []struct {
 		name, source, message, span string
