@@ -169,10 +169,8 @@ func (s *Server) importMemberCompletions(documentURI string, file *syntax.File, 
 		return protocol.CompletionItemSlice{}
 	}
 	var facts []workspace.SymbolFact
-	targetURI := uri.File(targetPath).String()
 	s.publishMu.Lock()
-	snapshot, open := s.documents.Snapshot(targetURI)
-	parsed := s.parsed[targetURI]
+	snapshot, parsed, open := s.openWorkspaceSnapshotLocked(targetPath)
 	s.publishMu.Unlock()
 	if open {
 		targetFile := parsed.file

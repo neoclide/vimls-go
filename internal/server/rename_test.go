@@ -68,7 +68,7 @@ func TestRenameStaticImportAcrossClosedAndOpenDocuments(t *testing.T) {
 	if len(edit.DocumentChanges) != 3 {
 		t.Fatalf("document changes = %#v", edit.DocumentChanges)
 	}
-	wantVersions := map[uri.URI]*int32{uri.File(libPath): nil, mainURI: pointerInt32(3), otherURI: pointerInt32(7)}
+	wantVersions := map[uri.URI]*int32{canonicalTestURI(t, libPath): nil, mainURI: pointerInt32(3), otherURI: pointerInt32(7)}
 	for _, change := range edit.DocumentChanges {
 		documentEdit := change.(*protocol.TextDocumentEdit)
 		wantVersion, ok := wantVersions[documentEdit.TextDocument.URI]

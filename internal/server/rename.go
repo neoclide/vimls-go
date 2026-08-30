@@ -159,6 +159,7 @@ func renameNamespace(name string) string {
 
 func (s *Server) renameEdits(ctx context.Context, encoding text.Encoding, oldName, newName string, locations []protocol.Location) ([]protocol.DocumentChange, []*text.Snapshot, *workspace.Index, uint64, error) {
 	type documentState struct {
+		uri      uri.URI
 		snapshot *text.Snapshot
 		edits    []protocol.TextDocumentEditElement
 	}
@@ -172,15 +173,19 @@ func (s *Server) renameEdits(ctx context.Context, encoding text.Encoding, oldNam
 		}
 		state := states[location.URI]
 		if state == nil {
+			path, pathOK := workspaceURIPath(location.URI)
 			s.publishMu.Lock()
-			openSnapshot, open := s.documents.Snapshot(location.URI.String())
+			var openSnapshot *text.Snapshot
+			var open bool
+			if pathOK {
+				openSnapshot, _, open = s.openWorkspaceSnapshotLocked(path)
+			}
 			s.publishMu.Unlock()
 			if open {
-				state = &documentState{snapshot: openSnapshot}
+				state = &documentState{uri: uri.URI(openSnapshot.URI()), snapshot: openSnapshot}
 				openSnapshots = append(openSnapshots, openSnapshot)
 			} else {
-				path, ok := workspaceURIPath(location.URI)
-				if !ok {
+				if !pathOK {
 					return nil, nil, nil, 0, unsafeRenameError()
 				}
 				s.workspaceMu.Lock()
@@ -196,7 +201,7 @@ func (s *Server) renameEdits(ctx context.Context, encoding text.Encoding, oldNam
 				if !ok {
 					return nil, nil, nil, 0, unsafeRenameError()
 				}
-				state = &documentState{snapshot: text.NewSnapshot(location.URI.String(), 0, nil, source)}
+				state = &documentState{uri: location.URI, snapshot: text.NewSnapshot(location.URI.String(), 0, nil, source)}
 			}
 			states[location.URI] = state
 		}
@@ -234,7 +239,7 @@ func (s *Server) renameEdits(ctx context.Context, encoding text.Encoding, oldNam
 			versionPointer = &version
 		}
 		changes = append(changes, &protocol.TextDocumentEdit{
-			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: versionPointer},
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: state.uri}, Version: versionPointer},
 			Edits:        state.edits,
 		})
 	}

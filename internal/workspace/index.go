@@ -342,7 +342,7 @@ func normalizeIndexPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Clean(abs), nil
+	return CanonicalPath(filepath.Clean(abs))
 }
 
 // CollectSymbolFacts returns immutable symbol facts for file. Exported is set

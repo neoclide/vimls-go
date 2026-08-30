@@ -27,7 +27,10 @@ func TestDocumentLinkReturnsOnlyStaticResolvedFiles(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	rootURI := uri.File(root)
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI}); err != nil {
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	documentURI := uri.File(mainPath)
@@ -36,7 +39,14 @@ func TestDocumentLinkReturnsOnlyStaticResolvedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(links) != 2 || links[0].Target == nil || *links[0].Target != uri.File(modulePath) || links[1].Target == nil || *links[1].Target != uri.File(sourcedPath) {
+	canonicalURI := func(path string) uri.URI {
+		realpath, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return uri.File(realpath)
+	}
+	if len(links) != 2 || links[0].Target == nil || *links[0].Target != canonicalURI(modulePath) || links[1].Target == nil || *links[1].Target != canonicalURI(sourcedPath) {
 		t.Fatalf("links = %#v", links)
 	}
 	if links[0].Range != navigationRange(1, 7, 21) || links[1].Range != navigationRange(2, 7, 18) {

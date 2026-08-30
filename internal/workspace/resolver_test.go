@@ -54,7 +54,7 @@ func TestPathResolverSearchesRuntimeImportAndAutoloadInOrder(t *testing.T) {
 		if result.Path != mustResolverCanonical(t, want) || len(result.Candidates) != 2 {
 			t.Fatalf("runtime import %d = %#v, want %q", index, result, want)
 		}
-		if result.Candidates[0] != filepath.Clean(want) {
+		if result.Candidates[0] != mustResolverCanonical(t, want) {
 			t.Fatalf("runtime candidates %d = %#v", index, result.Candidates)
 		}
 	}
@@ -118,13 +118,13 @@ func TestPathResolverAllowsSymlinkRootAndMissingRuntimePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := resolver.ResolveSource("", "later.vim")
-	if len(result.Candidates) != 1 || result.Candidates[0] != filepath.Join(linkRoot, "later.vim") {
+	if len(result.Candidates) != 1 || result.Candidates[0] != mustResolverCanonical(t, filepath.Join(linkRoot, "later.vim")) {
 		t.Fatalf("symlink root candidate = %#v", result)
 	}
 	from := filepath.Join(linkRoot, "main.vim")
 	file := syntax.Parse("vim9script\nimport 'later.vim' as later\n")
 	result = resolver.ResolveImport(from, file, file.Commands[1].Import)
-	if len(result.Candidates) != 1 || result.Candidates[0] != filepath.Join(missingRuntime, "import", "later.vim") {
+	if len(result.Candidates) != 1 || result.Candidates[0] != mustResolverCanonical(t, filepath.Join(missingRuntime, "import", "later.vim")) {
 		t.Fatalf("missing runtime candidate = %#v", result)
 	}
 }
@@ -142,7 +142,7 @@ func TestPathResolverDoesNotUseAfterImportOrGuessExtensions(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
-	if result.Path != "" || len(result.Candidates) != 1 || result.Candidates[0] != filepath.Join(runtimePath, "import", "plain") {
+	if result.Path != "" || len(result.Candidates) != 1 || result.Candidates[0] != mustResolverCanonical(t, filepath.Join(runtimePath, "import", "plain")) {
 		t.Fatalf("extension/after handling = %#v", result)
 	}
 }
@@ -162,7 +162,7 @@ func TestPathResolverSkipsExplicitAfterRuntimePath(t *testing.T) {
 	}
 	file := syntax.Parse(mustResolverRead(t, from))
 	result := resolver.ResolveImport(from, file, file.Commands[1].Import)
-	if result.Path != mustResolverCanonical(t, want) || len(result.Candidates) != 1 || result.Candidates[0] != want {
+	if result.Path != mustResolverCanonical(t, want) || len(result.Candidates) != 1 || result.Candidates[0] != mustResolverCanonical(t, want) {
 		t.Fatalf("explicit after runtime path = %#v, want %q", result, want)
 	}
 	if !resolver.Allows(filepath.Join(after, "import", "private.vim")) {
@@ -186,7 +186,7 @@ func TestPathResolverForRootsUsesFirstRootAndAllowsAllRoots(t *testing.T) {
 	if result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 1 {
 		t.Fatalf("second-root relative import = %#v, want %q", result, target)
 	}
-	if result := resolver.ResolveSource("", "source.vim"); len(result.Candidates) != 1 || result.Candidates[0] != filepath.Join(first, "source.vim") {
+	if result := resolver.ResolveSource("", "source.vim"); len(result.Candidates) != 1 || result.Candidates[0] != mustResolverCanonical(t, filepath.Join(first, "source.vim")) {
 		t.Fatalf("source root = %#v, want first root %q", result, first)
 	}
 	for _, path := range []string{filepath.Join(first, "missing.vim"), filepath.Join(second, "missing.vim")} {
@@ -246,7 +246,7 @@ func TestPathResolverUsesCanonicalPathForSafeSymlinkedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := resolver.ResolveSource("", "alias.vim")
-	if result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 1 || result.Candidates[0] != alias {
+	if result.Path != mustResolverCanonical(t, target) || len(result.Candidates) != 1 || result.Candidates[0] != mustResolverCanonical(t, alias) {
 		t.Fatalf("symlink source = %#v, want canonical path %q", result, target)
 	}
 	canonical, ok := resolver.Canonical(alias)

@@ -91,10 +91,8 @@ func (s *Server) resolveWorkspaceReference(resolver *workspace.PathResolver, ind
 }
 
 func (s *Server) lookupWorkspaceTarget(index *workspace.Index, path string, accept func(workspace.SymbolFact) bool) (workspaceNavigationTarget, bool) {
-	documentURI := uri.File(path).String()
 	s.publishMu.Lock()
-	snapshot, open := s.documents.Snapshot(documentURI)
-	parsed := s.parsed[documentURI]
+	snapshot, parsed, open := s.openWorkspaceSnapshotLocked(path)
 	s.publishMu.Unlock()
 	var candidates []workspace.SymbolMatch
 	if open {

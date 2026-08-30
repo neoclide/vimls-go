@@ -81,7 +81,9 @@ func TestRuntimepathFromOptions(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
 	paths, configured, warning := runtimepathFromOptions([]byte(`{"runtimepath":["` + second + `","` + first + `","` + second + `"]}`))
-	if warning != "" || !configured || len(paths) != 2 || paths[0] != filepath.Clean(second) || paths[1] != filepath.Clean(first) {
+	secondReal, _ := filepath.EvalSymlinks(second)
+	firstReal, _ := filepath.EvalSymlinks(first)
+	if warning != "" || !configured || len(paths) != 2 || paths[0] != secondReal || paths[1] != firstReal {
 		t.Fatalf("runtimepath = %#v, configured = %v, warning = %q", paths, configured, warning)
 	}
 	for _, raw := range []any{
@@ -114,10 +116,11 @@ func TestDefaultRuntimePathsUseOneInstallationAndItsNewestVersion(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
+	firstReal, _ := filepath.EvalSymlinks(first)
 	want := []string{
-		filepath.Join(first, "vimfiles"),
-		filepath.Join(first, "vim92"),
-		filepath.Join(first, "vimfiles", "after"),
+		filepath.Join(firstReal, "vimfiles"),
+		filepath.Join(firstReal, "vim92"),
+		filepath.Join(firstReal, "vimfiles", "after"),
 	}
 	if got := firstInstalledVimRuntimePaths([]string{filepath.Join(first, "missing"), first, second}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("default runtimepath = %#v, want %#v", got, want)
@@ -128,7 +131,8 @@ func TestDefaultRuntimePathsUseOneInstallationAndItsNewestVersion(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	if got := firstInstalledVimRuntimePaths([]string{direct}); !reflect.DeepEqual(got, []string{direct}) {
+	directReal, _ := filepath.EvalSymlinks(direct)
+	if got := firstInstalledVimRuntimePaths([]string{direct}); !reflect.DeepEqual(got, []string{directReal}) {
 		t.Fatalf("direct runtimepath = %#v", got)
 	}
 }
@@ -149,7 +153,8 @@ func TestDefaultRuntimePathsSkipUnreadableCandidate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := firstInstalledVimRuntimePaths([]string{unreadable, installed}); !reflect.DeepEqual(got, []string{installed}) {
+	installedReal, _ := filepath.EvalSymlinks(installed)
+	if got := firstInstalledVimRuntimePaths([]string{unreadable, installed}); !reflect.DeepEqual(got, []string{installedReal}) {
 		t.Fatalf("default runtimepath = %#v, want only %#v", got, installed)
 	}
 }

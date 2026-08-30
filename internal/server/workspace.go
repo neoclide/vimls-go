@@ -48,22 +48,44 @@ func workspaceURIPath(documentURI uri.URI) (string, bool) {
 	if documentURI.IsZero() || !documentURI.IsFile() {
 		return "", false
 	}
-	path, err := filepath.Abs(documentURI.FsPath())
-	if err != nil || strings.TrimSpace(path) == "" {
+	if strings.TrimSpace(documentURI.FsPath()) == "" {
 		return "", false
 	}
-	return filepath.Clean(path), true
+	path, err := workspace.CanonicalPath(documentURI.FsPath())
+	if err != nil {
+		return "", false
+	}
+	return path, true
+}
+
+// openWorkspaceSnapshotLocked finds an open document by canonical filesystem
+// identity. The caller must hold publishMu so the snapshot and parsed result
+// are observed together.
+func (s *Server) openWorkspaceSnapshotLocked(path string) (*text.Snapshot, parsedDocument, bool) {
+	var snapshot *text.Snapshot
+	var parsed parsedDocument
+	for _, candidate := range s.documents.Snapshots() {
+		candidatePath, ok := workspaceURIPath(uri.URI(candidate.URI()))
+		if !ok || !sameWorkspacePath(candidatePath, path) {
+			continue
+		}
+		snapshot = candidate
+		parsed = s.parsed[candidate.URI()]
+	}
+	return snapshot, parsed, snapshot != nil
 }
 
 func normalizeWorkspaceRoots(roots []string) []string {
 	result := make([]string, 0, len(roots))
 	seen := make(map[string]struct{}, len(roots))
 	for _, root := range roots {
-		absolute, err := filepath.Abs(root)
-		if err != nil || strings.TrimSpace(root) == "" {
+		if strings.TrimSpace(root) == "" {
 			continue
 		}
-		absolute = filepath.Clean(absolute)
+		absolute, err := workspace.CanonicalPath(root)
+		if err != nil {
+			continue
+		}
 		if _, ok := seen[absolute]; ok {
 			continue
 		}
@@ -217,11 +239,15 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 			continue
 		}
 		for _, path := range files {
-			if _, ok := seen[path]; ok {
+			canonical, err := workspace.CanonicalPath(path)
+			if err != nil {
 				continue
 			}
-			seen[path] = struct{}{}
-			paths = append(paths, path)
+			if _, ok := seen[canonical]; ok {
+				continue
+			}
+			seen[canonical] = struct{}{}
+			paths = append(paths, canonical)
 		}
 		if truncated {
 			warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
@@ -286,7 +312,10 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 				if resolution.Path == "" {
 					continue
 				}
-				path := filepath.Clean(resolution.Path)
+				path, err := workspace.CanonicalPath(resolution.Path)
+				if err != nil {
+					continue
+				}
 				if _, ok := seen[path]; ok {
 					continue
 				}

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/chemzqm/vimls-go/internal/workspace"
 )
 
 const DefaultTargetVersion = "9.1.0000"
@@ -146,6 +148,35 @@ func runtimepathFromOptions(raw any) ([]string, bool, string) {
 	return normalizeRuntimePaths(paths), true, ""
 }
 
+// normalizeRuntimePaths keeps the caller's order while dropping paths that
+// cannot be used.  EvalSymlinks supplies the realpath identity used for
+// de-duplication, which is important on macOS where several spellings can
+// refer to the same runtime directory.
+func normalizeRuntimePaths(paths []string) []string {
+	result := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, raw := range paths {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		path, err := workspace.CanonicalPath(raw)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+	return result
+}
+
 func defaultRuntimePaths() []string {
 	return firstInstalledVimRuntimePaths(vimInstallCandidates(runtime.GOOS))
 }
@@ -180,7 +211,11 @@ func vimInstallCandidates(goos string) []string {
 
 func firstInstalledVimRuntimePaths(candidates []string) []string {
 	for _, installRoot := range candidates {
-		installRoot = filepath.Clean(installRoot)
+		canonicalRoot, err := workspace.CanonicalPath(installRoot)
+		if err != nil {
+			continue
+		}
+		installRoot = canonicalRoot
 		if isInstalledVimRuntime(installRoot) {
 			return []string{installRoot}
 		}

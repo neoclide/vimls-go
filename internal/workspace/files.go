@@ -55,15 +55,25 @@ var vimConfigNames = map[string]struct{}{
 //
 // Only regular files are returned. Symlinked directories are never traversed;
 // a symlink to a regular file is returned only when its resolved target stays
-// below root. Walk errors return no files.
+// below root. Permission-denied entries are skipped; other walk errors return
+// no files.
 func DiscoverFiles(root string, limit int) (files []string, truncated bool, err error) {
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve workspace root %q: %w", root, err)
 	}
 	absoluteRoot = filepath.Clean(absoluteRoot)
+	ignoredRoots := ignoredDiscoveryRoots()
+	if canonicalRoot, canonicalErr := canonicalPath(absoluteRoot); canonicalErr == nil {
+		if _, ignored := ignoredRoots[canonicalRoot]; ignored {
+			return []string{}, false, nil
+		}
+	}
 	rootInfo, err := os.Lstat(absoluteRoot)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return []string{}, false, nil
+		}
 		return nil, false, fmt.Errorf("stat workspace root %q: %w", absoluteRoot, err)
 	}
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
@@ -74,6 +84,9 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 	}
 	resolvedRoot, err := filepath.EvalSymlinks(absoluteRoot)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return []string{}, false, nil
+		}
 		return nil, false, fmt.Errorf("resolve workspace root %q: %w", absoluteRoot, err)
 	}
 	resolvedRoot, err = filepath.Abs(resolvedRoot)
@@ -82,8 +95,15 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 	}
 	resolvedRoot = filepath.Clean(resolvedRoot)
 
+	seenFiles := make(map[string]struct{})
 	walkErr := filepath.WalkDir(absoluteRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			if errors.Is(walkErr, os.ErrPermission) {
+				if entry != nil && entry.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
 			return walkErr
 		}
 		name := entry.Name()
@@ -94,6 +114,17 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 			return nil
 		}
 		if entry.IsDir() {
+			if name == "node_modules" {
+				return fs.SkipDir
+			}
+			relative, relativeErr := filepath.Rel(absoluteRoot, path)
+			if relativeErr != nil {
+				return relativeErr
+			}
+			canonicalDirectory := filepath.Clean(filepath.Join(resolvedRoot, relative))
+			if _, ignored := ignoredRoots[canonicalDirectory]; ignored {
+				return fs.SkipDir
+			}
 			return nil
 		}
 
@@ -106,6 +137,9 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 			resolved, err := filepath.EvalSymlinks(path)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
+					return nil
+				}
+				if errors.Is(err, os.ErrPermission) {
 					return nil
 				}
 				return err
@@ -123,6 +157,9 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 				if errors.Is(err, os.ErrNotExist) {
 					return nil
 				}
+				if errors.Is(err, os.ErrPermission) {
+					return nil
+				}
 				return err
 			}
 			if !info.Mode().IsRegular() {
@@ -131,6 +168,9 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 		} else {
 			info, err := entry.Info()
 			if err != nil {
+				if errors.Is(err, os.ErrPermission) {
+					return nil
+				}
 				return err
 			}
 			if !info.Mode().IsRegular() {
@@ -140,7 +180,18 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 		if !isVimFile(relative, name, underRuntimeDirectory) {
 			return nil
 		}
-		files = append(files, filepath.Clean(path))
+		canonical, canonicalErr := CanonicalPath(path)
+		if canonicalErr != nil {
+			if errors.Is(canonicalErr, os.ErrPermission) {
+				return nil
+			}
+			return canonicalErr
+		}
+		if _, seen := seenFiles[canonical]; seen {
+			return nil
+		}
+		seenFiles[canonical] = struct{}{}
+		files = append(files, canonical)
 		if limit > 0 && len(files) > limit {
 			return errDiscoveryLimit
 		}
@@ -149,11 +200,40 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 	if walkErr != nil && !errors.Is(walkErr, errDiscoveryLimit) {
 		return nil, false, fmt.Errorf("walk workspace root %q: %w", absoluteRoot, walkErr)
 	}
-	sort.Strings(files)
+	files = uniqueSorted(files)
 	if limit > 0 && len(files) > limit {
 		return files[:limit], true, nil
 	}
 	return files, false, nil
+}
+
+func ignoredDiscoveryRoots() map[string]struct{} {
+	roots := make(map[string]struct{}, 2)
+	candidates := []string{os.TempDir()}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, home)
+	}
+	for _, candidate := range candidates {
+		canonical, err := canonicalPath(candidate)
+		if err == nil {
+			roots[canonical] = struct{}{}
+		}
+	}
+	return roots
+}
+
+func uniqueSorted(files []string) []string {
+	sort.Strings(files)
+	if len(files) < 2 {
+		return files
+	}
+	out := files[:1]
+	for _, file := range files[1:] {
+		if file != out[len(out)-1] {
+			out = append(out, file)
+		}
+	}
+	return out
 }
 
 func hasVimRuntimeDirectory(relative string) bool {

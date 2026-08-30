@@ -285,15 +285,16 @@ func (r *PathResolver) choose(candidates []string) PathResolution {
 			continue
 		}
 		absolute = filepath.Clean(absolute)
-		if _, exists := seen[absolute]; exists {
-			continue
-		}
-		seen[absolute] = struct{}{}
 		resolved, safe, regular := r.safeRegularFile(absolute)
 		if !safe {
 			continue
 		}
-		result.Candidates = append(result.Candidates, absolute)
+		identity := resolved
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result.Candidates = append(result.Candidates, resolved)
 		if result.Path == "" && regular {
 			result.Path = resolved
 		}
@@ -337,6 +338,16 @@ func canonicalPath(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Abs(filepath.Clean(resolved))
+}
+
+// CanonicalPath returns the filesystem identity of path. Existing paths have
+// all symlinks resolved; a missing suffix is preserved after its nearest
+// existing parent is resolved.
+func CanonicalPath(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("empty path")
+	}
+	return canonicalPathAllowMissing(path)
 }
 
 // canonicalPathAllowMissing resolves every existing path component and then

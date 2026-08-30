@@ -11,6 +11,7 @@ import (
 
 func TestDiscoverFilesFindsVimConventionsAndOrdersResults(t *testing.T) {
 	root := t.TempDir()
+	canonicalRoot := mustResolverCanonical(t, root)
 	writeDiscoveryFile(t, filepath.Join(root, "vimrc"), "set nocompatible\n")
 	writeDiscoveryFile(t, filepath.Join(root, "gvimrc"), "set guioptions+=a\n")
 	writeDiscoveryFile(t, filepath.Join(root, "exrc"), "set number\n")
@@ -33,7 +34,7 @@ func TestDiscoverFilesFindsVimConventionsAndOrdersResults(t *testing.T) {
 		t.Fatalf("files are not sorted: %#v", files)
 	}
 	for _, path := range files {
-		if !pathWithin(root, path) {
+		if !pathWithin(canonicalRoot, path) {
 			t.Fatalf("file escaped root: %q", path)
 		}
 	}
@@ -50,7 +51,7 @@ func TestDiscoverFilesFindsVimConventionsAndOrdersResults(t *testing.T) {
 			t.Fatalf("runtime non-script was discovered: %q", path)
 		}
 	}
-	if got := countRuntimeFiles(files, root); got != 11 {
+	if got := countRuntimeFiles(files, canonicalRoot); got != 11 {
 		t.Fatalf("runtime files = %d, want 11: %#v", got, files)
 	}
 }
@@ -60,6 +61,7 @@ func TestDiscoverFilesSkipsVCSAndUnsafeSymlinks(t *testing.T) {
 		t.Skip("symlink permissions and targets are not portable on Windows")
 	}
 	root := t.TempDir()
+	canonicalRoot := mustResolverCanonical(t, root)
 	outside := t.TempDir()
 	inside := filepath.Join(root, "plugin", "inside-target")
 	writeDiscoveryFile(t, inside, "echo 'inside'\n")
@@ -82,6 +84,7 @@ func TestDiscoverFilesSkipsVCSAndUnsafeSymlinks(t *testing.T) {
 	writeDiscoveryFile(t, filepath.Join(root, ".svn", "entries"), "metadata\n")
 	writeDiscoveryFile(t, filepath.Join(root, "CVS", "Entries"), "metadata\n")
 	writeDiscoveryFile(t, filepath.Join(root, ".gitignore"), "*.swp\n")
+	writeDiscoveryFile(t, filepath.Join(root, "node_modules", "plugin", "dependency.vim"), "echo 'dependency'\n")
 	writeDiscoveryFile(t, filepath.Join(root, "plugin", "real.vim"), "echo 'real'\n")
 
 	files, truncated, err := DiscoverFiles(root, 0)
@@ -95,11 +98,29 @@ func TestDiscoverFilesSkipsVCSAndUnsafeSymlinks(t *testing.T) {
 		t.Fatalf("safe in-root symlink missing: %#v", files)
 	}
 	for _, path := range files {
-		if strings.Contains(path, "unsafe-") || strings.Contains(path, string(filepath.Separator)+".git"+string(filepath.Separator)) || strings.Contains(path, string(filepath.Separator)+".hg"+string(filepath.Separator)) || strings.Contains(path, string(filepath.Separator)+".svn"+string(filepath.Separator)) || strings.Contains(path, string(filepath.Separator)+"CVS"+string(filepath.Separator)) {
+		if strings.Contains(path, "unsafe-") || strings.Contains(path, string(filepath.Separator)+"node_modules"+string(filepath.Separator)) || strings.Contains(path, string(filepath.Separator)+".git"+string(filepath.Separator)) || strings.Contains(path, string(filepath.Separator)+".hg"+string(filepath.Separator)) || strings.Contains(path, string(filepath.Separator)+".svn"+string(filepath.Separator)) || strings.Contains(path, string(filepath.Separator)+"CVS"+string(filepath.Separator)) {
 			t.Fatalf("unsafe/VCS path discovered: %q", path)
 		}
-		if !pathWithin(root, path) {
+		if !pathWithin(canonicalRoot, path) {
 			t.Fatalf("file escaped root: %q", path)
+		}
+	}
+}
+
+func TestDiscoverFilesSkipsHomeAndSystemTempRoots(t *testing.T) {
+	home, homeErr := os.UserHomeDir()
+	roots := []string{os.TempDir()}
+	if homeErr == nil {
+		roots = append(roots, home)
+	}
+	for _, root := range roots {
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		files, truncated, err := DiscoverFiles(root, 1)
+		if err != nil || truncated || len(files) != 0 {
+			t.Fatalf("DiscoverFiles(%q) = %#v, truncated = %v, error = %v", root, files, truncated, err)
 		}
 	}
 }
@@ -152,6 +173,28 @@ func TestDiscoverFilesEnforcesDeterministicLimit(t *testing.T) {
 	}
 }
 
+func TestDiscoverFilesDeduplicatesCanonicalPathsBeforeLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks are not portable on Windows")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "z.vim")
+	writeDiscoveryFile(t, target, "let g:z = 1\n")
+	writeDiscoveryFile(t, filepath.Join(root, "m.vim"), "let g:m = 1\n")
+	if err := os.Symlink(target, filepath.Join(root, "a.vim")); err != nil {
+		t.Fatal(err)
+	}
+
+	all, truncated, err := DiscoverFiles(root, 0)
+	if err != nil || truncated || len(all) != 2 {
+		t.Fatalf("all = %#v, truncated = %v, error = %v", all, truncated, err)
+	}
+	limited, truncated, err := DiscoverFiles(root, 1)
+	if err != nil || !truncated || len(limited) != 1 || limited[0] != all[0] {
+		t.Fatalf("limited = %#v, truncated = %v, error = %v, want %#v", limited, truncated, err, all[:1])
+	}
+}
+
 func TestDiscoverFilesRejectsInvalidRootsWithoutPartialResults(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "root.vim")
 	writeDiscoveryFile(t, file, "echo 'not a root'\n")
@@ -169,7 +212,7 @@ func TestDiscoverFilesRejectsInvalidRootsWithoutPartialResults(t *testing.T) {
 	}
 }
 
-func TestDiscoverFilesDoesNotReturnPartialResultsOnWalkError(t *testing.T) {
+func TestDiscoverFilesSkipsPermissionErrors(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission errors are not portable on Windows")
 	}
@@ -184,12 +227,15 @@ func TestDiscoverFilesDoesNotReturnPartialResultsOnWalkError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
-	files, truncated, err := DiscoverFiles(root, 0)
-	if err == nil {
-		t.Skip("filesystem did not report the permission error")
+	if _, err := os.ReadDir(blocked); err == nil {
+		t.Skip("filesystem does not enforce the permission restriction")
 	}
-	if files != nil || truncated {
-		t.Fatalf("partial result after walk error: %#v, %v", files, truncated)
+	files, truncated, err := DiscoverFiles(root, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated || !containsPath(files, filepath.Join(root, "before.vim")) || containsPath(files, filepath.Join(blocked, "hidden.vim")) {
+		t.Fatalf("permission-filtered result = %#v, truncated = %v", files, truncated)
 	}
 }
 
@@ -204,8 +250,13 @@ func writeDiscoveryFile(t *testing.T, path, content string) {
 }
 
 func containsPath(paths []string, want string) bool {
+	if canonical, err := canonicalPathAllowMissing(want); err == nil {
+		want = canonical
+	} else {
+		want = filepath.Clean(want)
+	}
 	for _, path := range paths {
-		if path == filepath.Clean(want) {
+		if path == want {
 			return true
 		}
 	}

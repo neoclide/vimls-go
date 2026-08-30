@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -18,7 +19,7 @@ func TestIndexLookupIncludesNestedSymbols(t *testing.T) {
 		t.Fatal(err)
 	}
 	class := index.Lookup("Widget")
-	if len(class) != 1 || class[0].Path != filepath.Clean(path) || class[0].Kind != analysis.SymbolKindClass {
+	if len(class) != 1 || class[0].Path != mustResolverCanonical(t, path) || class[0].Kind != analysis.SymbolKindClass {
 		t.Fatalf("class lookup = %#v", class)
 	}
 	method := index.Lookup("run")
@@ -43,7 +44,7 @@ func TestIndexLookupOrdersSameNamesAndReplaceRemovesOldSymbols(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := index.Lookup("same")
-	if len(got) != 3 || got[0].Path != filepath.Clean(second) || got[1].Path != filepath.Clean(second) || got[2].Path != filepath.Clean(first) {
+	if len(got) != 3 || got[0].Path != mustResolverCanonical(t, second) || got[1].Path != mustResolverCanonical(t, second) || got[2].Path != mustResolverCanonical(t, first) {
 		t.Fatalf("same-name order = %#v", got)
 	}
 	if got[0].SelectionRange.Start >= got[1].SelectionRange.Start {
@@ -193,10 +194,10 @@ enddef
 	if err := index.Replace(legacyPath, legacy); err != nil {
 		t.Fatal(err)
 	}
-	if got := index.ExternalReferences("Run"); len(got) != 1 || got[0].Fact.Path != filepath.Clean(path) || got[0].Source != source {
+	if got := index.ExternalReferences("Run"); len(got) != 1 || got[0].Fact.Path != mustResolverCanonical(t, path) || got[0].Source != source {
 		t.Fatalf("indexed import references = %#v", got)
 	}
-	if got := index.ExternalReferences("foo#bar#Run"); len(got) != 1 || got[0].Fact.Path != filepath.Clean(legacyPath) || got[0].Source != legacySource {
+	if got := index.ExternalReferences("foo#bar#Run"); len(got) != 1 || got[0].Fact.Path != mustResolverCanonical(t, legacyPath) || got[0].Source != legacySource {
 		t.Fatalf("indexed autoload references = %#v", got)
 	}
 	if got := index.LookupFile(path, "Public"); len(got) != 1 || !got[0].Fact.Exported || got[0].Source != source {
@@ -207,6 +208,33 @@ enddef
 	}
 	if got := index.ExternalReferences("Run"); len(got) != 0 {
 		t.Fatalf("replaced references = %#v", got)
+	}
+}
+
+func TestIndexUsesCanonicalPathIdentity(t *testing.T) {
+	realRoot := t.TempDir()
+	aliasRoot := filepath.Join(t.TempDir(), "workspace")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	realPath := filepath.Join(realRoot, "main.vim")
+	aliasPath := filepath.Join(aliasRoot, "main.vim")
+	index := NewIndex(1, 1000)
+	if err := index.Replace(aliasPath, syntax.Parse("var old = 1\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := index.Source(realPath); !ok {
+		t.Fatal("canonical path did not find symlink-indexed source")
+	}
+	if err := index.Replace(realPath, syntax.Parse("var current = 1\n")); err != nil {
+		t.Fatal(err)
+	}
+	if index.FileCount() != 1 || len(index.Lookup("old")) != 0 || len(index.Lookup("current")) != 1 {
+		t.Fatalf("canonical replacement state: files=%d old=%#v current=%#v", index.FileCount(), index.Lookup("old"), index.Lookup("current"))
+	}
+	index.Remove(aliasPath)
+	if index.FileCount() != 0 {
+		t.Fatalf("canonical removal left %d files", index.FileCount())
 	}
 }
 

@@ -315,11 +315,14 @@ func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
 func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 	root := t.TempDir()
 	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\ndef Private()\nenddef\nexport class Box\nendclass\n")
+	libURI := canonicalTestURI(t, libPath)
 	mainSource := "vim9script\nimport './lib.vim' as lib\nvar result = lib.Run()\nvar hidden = lib.Private()\nvar path = './lib.vim'\nimport path as dynamic\necho dynamic.Run()\nvar item: lib.Box\n"
 	mainPath := writeWorkspaceFile(t, root, "main.vim", mainSource)
 	otherPath := writeWorkspaceFile(t, root, "other.vim", "vim9script\nimport './lib.vim' as module\necho module.Run()\n")
 	instance := initializeWorkspaceServer(t, root)
 	mainURI := uri.File(mainPath)
+	indexedMainURI := canonicalTestURI(t, mainPath)
+	otherURI := canonicalTestURI(t, otherPath)
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: mainURI, Version: 1, Text: mainSource,
 	}}); err != nil {
@@ -335,7 +338,7 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	definitionLocations := definition.(protocol.LocationSlice)
-	if len(definitionLocations) != 1 || definitionLocations[0].URI != uri.File(libPath) || definitionLocations[0].Range != navigationRange(1, 11, 14) {
+	if len(definitionLocations) != 1 || definitionLocations[0].URI != libURI || definitionLocations[0].Range != navigationRange(1, 11, 14) {
 		t.Fatalf("cross-file definition = %#v", definition)
 	}
 	declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: position})
@@ -354,9 +357,9 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []protocol.Location{
-		{URI: uri.File(libPath), Range: navigationRange(1, 11, 14)},
-		{URI: mainURI, Range: navigationRange(2, 17, 20)},
-		{URI: uri.File(otherPath), Range: navigationRange(2, 12, 15)},
+		{URI: libURI, Range: navigationRange(1, 11, 14)},
+		{URI: indexedMainURI, Range: navigationRange(2, 17, 20)},
+		{URI: otherURI, Range: navigationRange(2, 12, 15)},
 	}
 	if len(references) != len(want) {
 		t.Fatalf("cross-file references = %#v", references)
@@ -374,7 +377,7 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 		t.Fatalf("cross-file references without declaration = %#v, error = %v", withoutDeclaration, err)
 	}
 	for _, location := range withoutDeclaration {
-		if location.URI == uri.File(libPath) && location.Range == navigationRange(1, 11, 14) {
+		if location.URI == libURI && location.Range == navigationRange(1, 11, 14) {
 			t.Fatalf("declaration included when disabled: %#v", withoutDeclaration)
 		}
 	}
@@ -410,7 +413,7 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	typeLocations := typeDefinition.(protocol.LocationSlice)
-	if len(typeLocations) != 1 || typeLocations[0].URI != uri.File(libPath) || typeLocations[0].Range != navigationRange(6, 13, 16) {
+	if len(typeLocations) != 1 || typeLocations[0].URI != libURI || typeLocations[0].Range != navigationRange(6, 13, 16) {
 		t.Fatalf("imported type definition = %#v", typeDefinition)
 	}
 	typeReferences, err := instance.References(context.Background(), &protocol.ReferenceParams{
@@ -419,7 +422,7 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 		},
 		Context: protocol.ReferenceContext{IncludeDeclaration: true},
 	})
-	if err != nil || len(typeReferences) != 2 || typeReferences[0].URI != uri.File(libPath) || typeReferences[1].URI != mainURI {
+	if err != nil || len(typeReferences) != 2 || typeReferences[0].URI != libURI || typeReferences[1].URI != indexedMainURI {
 		t.Fatalf("imported type references = %#v, error = %v", typeReferences, err)
 	}
 	writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Changed()\nenddef\n")
@@ -440,6 +443,9 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 	otherPath := writeWorkspaceFile(t, root, "other.vim", "let value = foo#bar#Run()\n")
 	instance := initializeWorkspaceServer(t, root)
 	mainURI := uri.File(mainPath)
+	targetURI := canonicalTestURI(t, targetPath)
+	indexedMainURI := canonicalTestURI(t, mainPath)
+	otherURI := canonicalTestURI(t, otherPath)
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: mainURI, Version: 1, Text: "call foo#bar#Run()\n",
 	}}); err != nil {
@@ -454,7 +460,7 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(0, 9, 20) {
+	if len(locations) != 1 || locations[0].URI != targetURI || locations[0].Range != navigationRange(0, 9, 20) {
 		t.Fatalf("autoload definition = %#v", definition)
 	}
 	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
@@ -465,9 +471,9 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []protocol.Location{
-		{URI: uri.File(targetPath), Range: navigationRange(0, 9, 20)},
-		{URI: uri.File(otherPath), Range: navigationRange(0, 12, 23)},
-		{URI: mainURI, Range: navigationRange(0, 5, 16)},
+		{URI: targetURI, Range: navigationRange(0, 9, 20)},
+		{URI: otherURI, Range: navigationRange(0, 12, 23)},
+		{URI: indexedMainURI, Range: navigationRange(0, 5, 16)},
 	}
 	sort.SliceStable(want, func(left, right int) bool { return want[left].URI < want[right].URI })
 	if len(references) != len(want) {
@@ -487,6 +493,9 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 	importPath := writeWorkspaceFile(t, root, "plugin.vim", "vim9script\nimport autoload 'api.vim'\necho api.Run()\n")
 	instance := initializeWorkspaceServer(t, root)
 	legacyURI := uri.File(legacyPath)
+	targetURI := canonicalTestURI(t, targetPath)
+	indexedLegacyURI := canonicalTestURI(t, legacyPath)
+	importURI := canonicalTestURI(t, importPath)
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: legacyURI, Version: 1, Text: "call api#Run()\n",
 	}}); err != nil {
@@ -501,7 +510,7 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(1, 11, 14) {
+	if len(locations) != 1 || locations[0].URI != targetURI || locations[0].Range != navigationRange(1, 11, 14) {
 		t.Fatalf("Vim9 autoload definition = %#v", definition)
 	}
 	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
@@ -512,9 +521,9 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []protocol.Location{
-		{URI: uri.File(targetPath), Range: navigationRange(1, 11, 14)},
-		{URI: legacyURI, Range: navigationRange(0, 5, 12)},
-		{URI: uri.File(importPath), Range: navigationRange(2, 9, 12)},
+		{URI: targetURI, Range: navigationRange(1, 11, 14)},
+		{URI: indexedLegacyURI, Range: navigationRange(0, 5, 12)},
+		{URI: importURI, Range: navigationRange(2, 9, 12)},
 	}
 	sort.SliceStable(want, func(left, right int) bool { return want[left].URI < want[right].URI })
 	if len(references) != len(want) {
@@ -537,7 +546,8 @@ func TestCrossFileNavigationUsesNegotiatedEncodingAndInvalidatesOpenTarget(t *te
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
-		RootURI: &rootURI,
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
 		Capabilities: protocol.ClientCapabilities{General: &protocol.GeneralClientCapabilities{
 			PositionEncodings: []protocol.PositionEncodingKind{protocol.PositionEncodingKindUTF8},
 		}},
@@ -561,7 +571,7 @@ func TestCrossFileNavigationUsesNegotiatedEncodingAndInvalidatesOpenTarget(t *te
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(1, 11, 18) {
+	if len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(1, 11, 18) {
 		t.Fatalf("UTF-8 cross-file definition = %#v", definition)
 	}
 
@@ -604,7 +614,7 @@ func TestCrossFileNavigationHandlesCyclicAndAmbiguousImports(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != uri.File(bPath) || locations[0].Range != navigationRange(2, 11, 12) {
+	if len(locations) != 1 || locations[0].URI != canonicalTestURI(t, bPath) || locations[0].Range != navigationRange(2, 11, 12) {
 		t.Fatalf("cyclic import definition = %#v", definition)
 	}
 
@@ -639,7 +649,7 @@ func TestCrossFileLegacyImportUsesDefaultScriptLocalName(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(1, 16, 19) {
+	if len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(1, 16, 19) {
 		t.Fatalf("legacy default import definition = %#v", definition)
 	}
 }
@@ -665,7 +675,7 @@ func TestCrossFileIndexFollowsBoundedStaticImports(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != uri.File(targetPath) || locations[0].Range != navigationRange(2, 11, 14) {
+	if len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(2, 11, 14) {
 		t.Fatalf("transitive import definition = %#v", definition)
 	}
 }
@@ -678,6 +688,15 @@ func openNavigationDocument(t *testing.T, encoding text.Encoding, source string)
 	version := int32(1)
 	instance.documents.Open(documentURI.String(), version, source)
 	return instance, documentURI
+}
+
+func canonicalTestURI(t *testing.T, path string) uri.URI {
+	t.Helper()
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uri.File(canonical)
 }
 
 func navigationRange(line, start, end uint32) protocol.Range {

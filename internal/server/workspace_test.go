@@ -22,11 +22,13 @@ func TestWorkspaceFoldersOverrideRootURIAndBuildSymbolIndex(t *testing.T) {
 	writeWorkspaceFile(t, root, "root.vim", "vim9script\nvar rootOnly = 1\n")
 	writeWorkspaceFile(t, folder, "folder.vim", "vim9script\nvar prefix = '𐐀' | var folderOnly = 1\n")
 	rootURI := uri.File(root)
+	folderReal, _ := filepath.EvalSymlinks(folder)
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	result, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		WorkspaceFoldersInitializeParams: protocol.WorkspaceFoldersInitializeParams{WorkspaceFolders: protocol.NewNullable([]protocol.WorkspaceFolder{{URI: uri.File(folder), Name: "folder"}})},
 		RootURI:                          &rootURI,
+		InitializationOptions:            protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +46,7 @@ func TestWorkspaceFoldersOverrideRootURIAndBuildSymbolIndex(t *testing.T) {
 		t.Fatalf("folder symbols = %#v", symbols)
 	}
 	location, ok := symbols[0].Location.(*protocol.Location)
-	if !ok || location.URI != uri.File(filepath.Join(folder, "folder.vim")) || location.Range.Start != (protocol.Position{Line: 1, Character: 24}) || location.Range.End != (protocol.Position{Line: 1, Character: 34}) {
+	if !ok || location.URI != uri.File(filepath.Join(folderReal, "folder.vim")) || location.Range.Start != (protocol.Position{Line: 1, Character: 24}) || location.Range.End != (protocol.Position{Line: 1, Character: 34}) {
 		t.Fatalf("folder location = %#v", symbols[0].Location)
 	}
 	if symbols := workspaceSymbols(t, instance, "rootOnly"); len(symbols) != 0 {
@@ -140,7 +142,10 @@ func TestVimWatcherRegistrationHonorsClientCapabilities(t *testing.T) {
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
 	rootURI := uri.File(root)
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI}); err != nil {
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
@@ -175,7 +180,8 @@ func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
 	instance.workspaceMu.Lock()
 	paths := append([]string(nil), instance.runtimePaths...)
 	instance.workspaceMu.Unlock()
-	if len(paths) != 1 || paths[0] != filepath.Clean(runtimeRoot) {
+	runtimeRootReal, _ := filepath.EvalSymlinks(runtimeRoot)
+	if len(paths) != 1 || paths[0] != runtimeRootReal {
 		t.Fatalf("runtimepath = %#v", paths)
 	}
 }
@@ -286,7 +292,10 @@ func initializeWorkspaceServer(t *testing.T, root string) *Server {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	rootURI := uri.File(root)
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI}); err != nil {
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
