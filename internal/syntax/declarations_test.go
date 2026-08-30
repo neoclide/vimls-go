@@ -1191,6 +1191,17 @@ func TestVim9InterfacePublicMemberReportsE1387(t *testing.T) {
 	}
 }
 
+func TestVim9InterfaceImplementsReportsE1381(t *testing.T) {
+	file := Parse("vim9script\ninterface A\nendinterface\ninterface B implements A\nendinterface\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1381" || file.Diagnostics[0].Message != `Interface cannot use "implements"` || file.Text(file.Diagnostics[0].Span) != "implements" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 6 || file.Commands[3].Aggregate == nil || file.Text(file.Commands[3].Aggregate.Name) != "B" || len(file.Commands[3].Aggregate.Implements) != 0 || file.Commands[5].Declaration == nil {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9InterfaceConstReportsE1410(t *testing.T) {
 	file := Parse("vim9script\ninterface A\n  const foo: number = 10\nendinterface\n")
 	var got []Diagnostic
