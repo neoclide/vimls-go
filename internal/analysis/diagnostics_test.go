@@ -507,8 +507,44 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 			},
 		},
 		{
+			name:   "script read-only Vim variables",
+			source: "vim9script\nv:true = false\nv:false = true\nv:null = 11\nv:none = 22\n",
+			want: []syntax.Diagnostic{
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:true"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:false"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:null"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:none"`},
+			},
+		},
+		{
+			name:   "def read-only Vim variables",
+			source: "vim9script\ndef Test()\n  v:true = false\n  v:false = true\n  v:null = 11\n  v:none = 22\nenddef\n",
+			want: []syntax.Diagnostic{
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:true"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:false"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:null"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "v:none"`},
+			},
+		},
+		{
+			name:   "legacy read-only Vim variable",
+			source: "let v:true = 0\n",
+			want:   []syntax.Diagnostic{{Code: "vim/E46", Message: `Cannot change read-only variable "v:true"`}},
+		},
+		{
+			name:   "legacy function arguments",
+			source: "function Test(value, ...)\n  let a:value = 1\n  let a:000 += [1]\n  let a:0 = 1\n  let a:firstline = 2\n  let a:lastline = 3\nendfunction\n",
+			want: []syntax.Diagnostic{
+				{Code: "vim/E46", Message: `Cannot change read-only variable "a:value"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "a:000"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "a:0"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "a:firstline"`},
+				{Code: "vim/E46", Message: `Cannot change read-only variable "a:lastline"`},
+			},
+		},
+		{
 			name:   "conservative exclusions",
-			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [7]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\n",
+			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nv:errmsg = 'ok'\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [7]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\ndef Modern(value)\n  a:value = 1\nenddef\nfunction Legacy(value)\n  let a:missing = 1\n  let a:value[0] = 1\nendfunction\nlet a:value = 1\n",
 		},
 		{
 			name:   "embedded command",
@@ -530,7 +566,7 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 					t.Fatalf("diagnostic[%d] = %#v, want %#v", index, got[index], test.want[index])
 				}
 				name := immutableDiagnosticName(got[index].Message)
-				start := strings.LastIndex(test.source, name+" =")
+				start := strings.LastIndex(test.source, name)
 				wantSpan := syntax.Span{Start: start, End: start + len(name)}
 				if got[index].Span.Start <= last || got[index].Span != wantSpan || file.Text(got[index].Span) != name {
 					t.Fatalf("diagnostic[%d] span = %#v (%q), want %#v (%q)", index, got[index].Span, file.Text(got[index].Span), wantSpan, name)

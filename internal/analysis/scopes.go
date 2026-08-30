@@ -647,8 +647,11 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		collectIndexTypeMismatchDiagnostic(result, scope, expression)
 	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
-		if expected := assignmentTargetType(result, scope, expression.Children[0]); !isUnknownType(expected) {
-			appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
+		target := expression.Children[0]
+		if !isReadOnlyVimVariableTarget(target) {
+			if expected := assignmentTargetType(result, scope, target); !isUnknownType(expected) {
+				appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
+			}
 		}
 	}
 	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "..=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
@@ -907,9 +910,10 @@ func knownAssignmentType(name string) bool {
 	}
 }
 
-// collectImmutableAssignmentDiagnostics reports only direct Vim9 assignment to
-// a lexically resolved const/final name.  Other read-only declarations have
-// distinct Vim rules, and dynamic targets deliberately remain opaque here.
+// collectImmutableAssignmentDiagnostics reports assignment to a direct
+// read-only predefined v: variable, a legacy function argument, or a lexically
+// resolved Vim9 const/final name. Other read-only declarations have distinct
+// Vim rules, and dynamic targets deliberately remain opaque here.
 func collectImmutableAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
 	if result == nil || result.File == nil {
 		return
@@ -920,9 +924,9 @@ func collectImmutableAssignmentDiagnostics(result *FileAnalysis, commands []synt
 		if scope == nil {
 			scope = parent
 		}
-		if command.Dialect == syntax.Vim9 && command.Declaration == nil {
+		if command.Declaration == nil || command.Dialect == syntax.Legacy && command.Canonical == "let" {
 			for _, expression := range command.Expressions {
-				collectImmutableAssignmentExpressionDiagnostics(result, scope, expression)
+				collectImmutableAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect)
 			}
 		}
 		if command.Embedded != nil {
@@ -931,7 +935,7 @@ func collectImmutableAssignmentDiagnostics(result *FileAnalysis, commands []synt
 	}
 }
 
-func collectImmutableAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression) {
+func collectImmutableAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
 	if expression == nil || scope == nil {
 		return
 	}
@@ -945,30 +949,74 @@ func collectImmutableAssignmentExpressionDiagnostics(result *FileAnalysis, scope
 		}
 		for index, child := range expression.Children {
 			if index >= len(expression.Parameters) {
-				collectImmutableAssignmentExpressionDiagnostics(result, lambdaScope, child)
+				collectImmutableAssignmentExpressionDiagnostics(result, lambdaScope, child, dialect)
 			}
 		}
 		return
 	}
-	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && result.File.Text(expression.Operator) == "=" && len(expression.Children) >= 2 && expression.Children[1] != nil && expression.Children[1].Kind != syntax.ExpressionMissing {
+	if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && expression.Children[1] != nil && expression.Children[1].Kind != syntax.ExpressionMissing {
 		target := expression.Children[0]
-		if target != nil && target.Kind == syntax.ExpressionIdentifier && !strings.Contains(target.Value, ":") && validNameSpan(result.File, target.Span) {
-			if declaration := resolve(scope, target.Value, target.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindConstant {
-				diagnostic := syntax.Diagnostic{Span: target.Span}
-				if scopeContainsDef(scope) {
-					diagnostic.Code = "vim/E1018"
-					diagnostic.Message = "Cannot assign to a constant: " + target.Value
-				} else {
-					diagnostic.Code = "vim/E46"
-					diagnostic.Message = "Cannot change read-only variable \"" + target.Value + "\""
+		if target != nil && target.Kind == syntax.ExpressionIdentifier && validNameSpan(result.File, target.Span) {
+			if isReadOnlyVimVariableTarget(target) || dialect == syntax.Legacy && isReadOnlyLegacyArgumentTarget(scope, target) {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E46", Message: "Cannot change read-only variable \"" + target.Value + "\"", Span: target.Span,
+				})
+			} else if dialect == syntax.Vim9 && expression.Value == "=" && result.File.Text(expression.Operator) == "=" && !strings.Contains(target.Value, ":") {
+				if declaration := resolve(scope, target.Value, target.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindConstant {
+					diagnostic := syntax.Diagnostic{Span: target.Span}
+					if scopeContainsDef(scope) {
+						diagnostic.Code = "vim/E1018"
+						diagnostic.Message = "Cannot assign to a constant: " + target.Value
+					} else {
+						diagnostic.Code = "vim/E46"
+						diagnostic.Message = "Cannot change read-only variable \"" + target.Value + "\""
+					}
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
 				}
-				result.Diagnostics = append(result.Diagnostics, diagnostic)
 			}
 		}
 	}
 	for _, child := range expression.Children {
-		collectImmutableAssignmentExpressionDiagnostics(result, scope, child)
+		collectImmutableAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
+}
+
+func isReadOnlyVimVariableTarget(target *syntax.Expression) bool {
+	if target == nil || target.Kind != syntax.ExpressionIdentifier {
+		return false
+	}
+	variable, ok := vimdata.LookupVariable(target.Value)
+	return ok && variable.Flags&vimdata.VariableReadOnly != 0
+}
+
+func isReadOnlyLegacyArgumentTarget(scope *Scope, target *syntax.Expression) bool {
+	if target == nil || target.Kind != syntax.ExpressionIdentifier || !strings.HasPrefix(target.Value, "a:") {
+		return false
+	}
+	var functionScope *Scope
+	for current := scope; current != nil; current = current.Parent {
+		if current.Kind == syntax.BlockDef {
+			return false
+		}
+		if current.Kind == syntax.BlockFunction {
+			functionScope = current
+			break
+		}
+	}
+	if functionScope == nil {
+		return false
+	}
+	name := strings.TrimPrefix(target.Value, "a:")
+	switch name {
+	case "0", "000", "firstline", "lastline":
+		return true
+	}
+	for _, declaration := range functionScope.Declarations {
+		if declaration.Parameter && declaration.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func scopeContainsDef(scope *Scope) bool {
