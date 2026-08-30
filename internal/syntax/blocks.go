@@ -176,6 +176,19 @@ commands:
 							continue commands
 						}
 					}
+					for _, modifier := range command.Modifiers {
+						if modifier.Name == "static" {
+							command.Block = blockIndex
+							command.detailsOpaque = true
+							file.Diagnostics = append(file.Diagnostics, Diagnostic{
+								Code: "vim/E1378", Message: "Static member not supported in an interface", Span: modifier.Span,
+							})
+							if command.Canonical == "def" {
+								interfaceMethod[blockIndex] = true
+							}
+							continue commands
+						}
+					}
 				}
 				if command.Canonical == "final" || command.Canonical == "const" {
 					static := false

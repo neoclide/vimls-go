@@ -1246,6 +1246,39 @@ func TestVim9InterfaceProtectedVariableReportsE1379(t *testing.T) {
 	}
 }
 
+func TestVim9InterfaceStaticMemberReportsE1378(t *testing.T) {
+	for _, member := range []string{
+		"static var num: number",
+		"static var _num: number",
+		"static def Foo(d: dict<any>): list<string>",
+		"static def _Foo()",
+		"static final value: number = 1",
+		"static const value: number = 1",
+	} {
+		source := "vim9script\ninterface A\n  " + member + "\nendinterface\nvar after = 1\n"
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1378" || file.Diagnostics[0].Message != "Static member not supported in an interface" || file.Text(file.Diagnostics[0].Span) != "static" {
+			t.Fatalf("member=%q diagnostics=%#v", member, file.Diagnostics)
+		}
+		last := file.Commands[len(file.Commands)-1]
+		if last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+			t.Fatalf("member=%q commands=%#v", member, file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+
+	for _, source := range []string{
+		"vim9script\ninterface A\n  var num: number\n  def Foo()\nendinterface\n",
+		"vim9script\nclass A\n  static var num: number\n  static def Foo()\n  enddef\nendclass\n",
+		"vim9script\ninterface A\n  public static var num: number\nendinterface\n",
+		"vim9script\ninterface A\n  abstract static def Foo()\n  enddef\nendinterface\n",
+	} {
+		if hasDiagnostic(Parse(source), "vim/E1378") {
+			t.Fatalf("guard source reported E1378: %s", source)
+		}
+	}
+}
+
 func TestVim9InterfaceConstReportsE1410(t *testing.T) {
 	file := Parse("vim9script\ninterface A\n  const foo: number = 10\nendinterface\n")
 	var got []Diagnostic
