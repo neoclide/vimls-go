@@ -1126,6 +1126,28 @@ func TestVim9EnumExtendsReportsE1416(t *testing.T) {
 	}
 }
 
+func TestVim9LowercaseEnumNameReportsE1415(t *testing.T) {
+	file := Parse("vim9script\nenum foo\nendenum\n")
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1415" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Enum name must start with an uppercase letter: foo" || file.Text(got[0].Span) != "foo" {
+		t.Fatalf("E1415 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+	}
+	if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockEnum || file.Blocks[0].End < 0 || file.Commands[1].Aggregate == nil || file.Text(file.Commands[1].Aggregate.Name) != "foo" {
+		t.Fatalf("commands = %#v, blocks = %#v", file.Commands, file.Blocks)
+	}
+	assertFileSpans(t, file)
+
+	valid := Parse("vim9script\nenum Foo\n  lowercase\nendenum\n")
+	if hasDiagnostic(valid, "vim/E1415") {
+		t.Fatalf("valid enum diagnostics = %#v", valid.Diagnostics)
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
