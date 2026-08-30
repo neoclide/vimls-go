@@ -450,6 +450,9 @@ pending-fix.
 Commit `a4f36f6` migrated the missing Vim9 parameter-type variant. The
 authoritative syntax split is therefore 992 migrated, zero ready, and 30
 pending-fix.
+Commit `8bb5b34` migrated the missing default-expression variant. The
+authoritative syntax split is therefore 993 migrated, zero ready, and 29
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1525,7 +1528,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 143 migrated and 30 pending-fix. In the
+Group D contains 173 syntax variants: 144 migrated and 29 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1694,7 +1697,7 @@ E125 M ready: 948:20577/script,955:20687/script
 E126 P mapping: 416:8808/script
 E1267 P missing: 99:2271/script,107:2406/script,1049:22663/script,1061:22873/script,1069:23011/script,1077:23147/script
 E129 P mapping: 3734:85678/script
-E15 P mapping: 828:17920/def
+E15 M mapping: 828:17920/def
 E16 P mapping: 3817:87815/def
 E476 P mapping: 4520:103771/script,1298:27807/script
 E476 P recovery: 781:16158/def
@@ -1742,6 +1745,11 @@ Commit `a4f36f6` migrates `2484:56080/script`. A Vim9 `def` parameter without
 either an explicit type or a default expression reports E1077 on its retained
 name. Ignored `_` parameters, constructor `this.member` targets, defaults, and
 typed parameters remain valid; a named variadic parameter still needs a type.
+
+Commit `8bb5b34` migrates `828:17920/def`. A `def` parameter whose `=` has no
+following expression retains a zero-width ExpressionMissing node and reports
+E15 at that insertion point; legacy function argument handling keeps its E125
+classification.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
