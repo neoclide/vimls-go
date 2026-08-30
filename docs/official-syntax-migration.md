@@ -387,6 +387,9 @@ type-alias trailing-type variant. The authoritative parser split is therefore
 Commit `f7001a3` migrated the two `exit_cb:` command-boundary variants. The
 authoritative parser split is therefore 953 migrated, zero ready, and 82
 pending-fix.
+Commit `e76ef03` migrated the two Vim9 substitute replacement-expression tail
+variants. The authoritative parser split is therefore 955 migrated, zero
+ready, and 80 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -979,13 +982,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 109 | 94 | 0 | 15 |
+| `C-EXCMD` | 109 | 96 | 0 | 13 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **336** | **321** | **0** | **15** |
+| **Total** | **336** | **323** | **0** | **13** |
 
 ```text
 C-EXPR
@@ -1161,6 +1164,12 @@ extends a built-in Ex command name and is followed by a type-style colon, it is
 not promoted to a standalone expression. The scanner retains Vim's ASCII
 command boundary and reports E1144 for the attached argument; ordinary
 command-start calls and assignments keep their expression AST.
+
+Commit `e76ef03` migrated `C:{1903:39368,1904:39418}/def`. A Vim9 substitute
+replacement expression now owns and diagnoses an unmatched expression tail as
+E488 while retaining its parsed expression. A numeric tail after that
+replacement is likewise E488 instead of being misclassified as a substitute
+count; ordinary and legacy counts remain unchanged.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
