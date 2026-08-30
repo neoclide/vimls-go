@@ -632,3 +632,64 @@ func TestAugroupEndDoesNotCloseTryBlock(t *testing.T) {
 		t.Fatalf("commands around augroup END = %#v, %#v", file.Commands[3], file.Commands[4])
 	}
 }
+
+func TestVim9LegacyFlowControlDiagnostic(t *testing.T) {
+	for _, test := range []struct{ command string }{
+		{"if true"}, {"elseif true"}, {"else"}, {"endif"},
+		{"for item in []"}, {"endfor"}, {"continue"}, {"break"},
+		{"while true"}, {"endwhile"}, {"try"}, {"catch /error/"}, {"finally"}, {"endtry"},
+	} {
+		t.Run(test.command, func(t *testing.T) {
+			source := "vim9script\ndef Func()\n  legacy " + test.command + "\nenddef\nvar after = 1\n"
+			file := Parse(source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1189" {
+					got = append(got, diagnostic)
+				}
+				switch diagnostic.Code {
+				case "vimls/missing-end", "vimls/unexpected-branch", "vimls/unexpected-end", "vim/E580", "vim/E581", "vim/E582", "vim/E586", "vim/E587", "vim/E588", "vim/E602", "vim/E603", "vim/E606":
+					t.Fatalf("legacy %s retained structural cascade %s: %#v", test.command, diagnostic.Code, file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use :legacy with this command: "+test.command || file.Text(got[0].Span) != test.command {
+				t.Fatalf("legacy %s diagnostics = %#v", test.command, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+				t.Fatalf("legacy %s did not retain following declaration: %#v", test.command, file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+		want         bool
+	}{
+		{"Legacy-root def", "def Func()\n  legacy if true\nenddef\n", true},
+		{"nearest legacy function", "vim9script\ndef Outer()\n  function Inner()\n    legacy if true\n    endif\n  endfunction\nenddef\n", false},
+		{"top-level Vim9", "vim9script\nlegacy if true\nendif\n", false},
+		{"allowed legacy call", "vim9script\ndef Func()\n  legacy call DoThing()\nenddef\n", false},
+		{"final vim9cmd", "vim9script\ndef Func()\n  legacy vim9cmd if true\n  endif\nenddef\n", false},
+		{"final legacy", "vim9script\ndef Func()\n  vim9cmd legacy if true\nenddef\n", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			got := hasDiagnostic(file, "vim/E1189")
+			if got != test.want {
+				t.Fatalf("E1189=%v, want %v: %#v", got, test.want, file.Diagnostics)
+			}
+		})
+	}
+
+	recovered := Parse("vim9script\ndef Func()\n  if true\n    legacy endif\nenddef\nvar after = 1\n")
+	for _, diagnostic := range recovered.Diagnostics {
+		if diagnostic.Code != "vim/E1189" {
+			t.Fatalf("invalid legacy closer retained cascade %s: %#v", diagnostic.Code, recovered.Diagnostics)
+		}
+	}
+	if len(recovered.Diagnostics) != 1 || recovered.Commands[len(recovered.Commands)-1].Declaration == nil || recovered.Text(recovered.Commands[len(recovered.Commands)-1].Declaration.Name) != "after" {
+		t.Fatalf("invalid legacy closer recovery = %#v, commands = %#v", recovered.Diagnostics, recovered.Commands)
+	}
+	assertFileSpans(t, recovered)
+}

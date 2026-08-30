@@ -1666,6 +1666,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   shared multi-expression checker.
 - `src/errors.h:3039-3040` defines the exact E1186 message.
 
+## Legacy flow-control command in a compiled body: E1189
+
+Syntax analysis reports E1189 when `:legacy` is applied to a flow-control
+command in a compiled Vim9 body. The forbidden commands are `if`, `elseif`,
+`else`, `endif`, `for`, `endfor`, `continue`, `break`, `while`, `endwhile`,
+`try`, `catch`, `finally`, and `endtry`. The diagnostic retains the original
+command spelling and arguments in Vim's `Cannot use :legacy with this command:
+{command}` message.
+
+An invalid command does not open, branch, or close a syntax block, so recovery
+continues at the next command without adding missing-end or mismatched-block
+diagnostics. The rule applies inside a `def`, including one declared from a
+Legacy-root file, and inside a compiled block lambda. It does not apply at
+Vim9 script level, inside a nested Legacy `function`, or to allowed commands
+such as `legacy call`. When both dialect modifiers occur, only the final
+effective modifier state controls this diagnostic.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:3568-3575` checks all fourteen forbidden
+  commands with `legacy {command} expr` inside a compiled `def`.
+- `src/vim9compile.c:4510-4534` checks the final `CMOD_LEGACY` state, rejects
+  exactly those command indexes, and returns before compiling the command.
+- `src/errors.h:3048-3050` defines the exact E1189 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

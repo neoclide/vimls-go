@@ -1535,7 +1535,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 			// function boundary, retain the incomplete block, and leave the
 			// enclosing command stream intact.
 			bodyEnd := len(p.source)
-			body := (Vim9Parser{}).Parse(p.source[blockStart+1 : bodyEnd])
+			body := parseSourceContext(p.source[blockStart+1:bodyEnd], Vim9, true)
 			bodyOffset, ok := safeLambdaOffset(p.base, blockStart+1)
 			if !ok {
 				bodyOffset = 0
@@ -1597,7 +1597,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 						bodyParseStart++
 					}
 				}
-				body := (Vim9Parser{}).Parse(p.source[bodyParseStart:blockEnd])
+				body := parseSourceContext(p.source[bodyParseStart:blockEnd], Vim9, true)
 				bodyOffset, ok := safeLambdaOffset(p.base, bodyParseStart)
 				if !ok {
 					bodyOffset = 0
@@ -1624,7 +1624,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 				}
 				return lambda, true
 			}
-			body := (Vim9Parser{}).Parse(p.source[bodyStart:blockEnd])
+			body := parseSourceContext(p.source[bodyStart:blockEnd], Vim9, true)
 			// Vim9Parser parses the block slice independently.  Rebase the
 			// complete result once before exposing it: commands, tokens, blocks,
 			// diagnostics, typed AST, embedded command lists, and nested lambdas

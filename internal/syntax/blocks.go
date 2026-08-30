@@ -47,6 +47,24 @@ commands:
 				break
 			}
 		}
+		if legacyFlowControlInCompiledContext(file, stack, command) {
+			tail := Span{Start: command.Name.Start, End: command.Span.End}
+			command.detailsOpaque = true
+			if len(stack) > 0 {
+				command.Block = stack[len(stack)-1]
+				for _, blockIndex := range slices.Backward(stack) {
+					kind := file.Blocks[blockIndex].Kind
+					if kind == BlockDef || kind == BlockFunction {
+						break
+					}
+					recoveryBlocks[blockIndex] = true
+				}
+			}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1189", Message: "Cannot use :legacy with this command: " + file.Text(tail), Span: tail,
+			})
+			continue
+		}
 		if defBlock >= 0 && command.Dialect == Vim9 && command.Canonical == "redir" {
 			argument := strings.TrimSpace(file.Text(command.Argument))
 			if argument == "END" {
@@ -686,6 +704,39 @@ commands:
 			Code: "vimls/missing-end", Message: "block is missing its end command", Span: file.Commands[block.Header].Name,
 		})
 	}
+}
+
+// legacyFlowControlInCompiledContext mirrors the command-index check in Vim's
+// compiler. Interpreted script and Legacy function bodies keep their ordinary
+// block behavior.
+func legacyFlowControlInCompiledContext(file *File, stack []int, command *Command) bool {
+	if file == nil || command == nil || command.Dialect != Legacy || command.detailsOpaque {
+		return false
+	}
+	lastDialectModifier := ""
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == "legacy" || modifier.Name == "vim9cmd" {
+			lastDialectModifier = modifier.Name
+		}
+	}
+	if lastDialectModifier != "legacy" {
+		return false
+	}
+	switch command.Canonical {
+	case "if", "elseif", "else", "endif", "for", "endfor", "continue", "break", "while", "endwhile", "try", "catch", "finally", "endtry":
+	default:
+		return false
+	}
+	compiled := file.lambdaBody
+	for _, blockIndex := range slices.Backward(stack) {
+		switch file.Blocks[blockIndex].Kind {
+		case BlockDef:
+			return true
+		case BlockFunction:
+			return false
+		}
+	}
+	return compiled
 }
 
 // isInvalidAbstractHeader identifies the Vim9 form where the abstract

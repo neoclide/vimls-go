@@ -2371,3 +2371,20 @@ func TestOfficialVim9InvalidDotKeyBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestVim9LambdaLegacyFlowControlDiagnostic(t *testing.T) {
+	file := Parse("vim9script\nvar Callback = () => {\n  legacy while true\n}\nvar after = 1\n")
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1189" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Cannot use :legacy with this command: while true" || file.Text(got[0].Span) != "while true" {
+		t.Fatalf("E1189 diagnostics = %#v", file.Diagnostics)
+	}
+	if file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+		t.Fatalf("following declaration was not retained: %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}

@@ -34,7 +34,11 @@ var modifierGroups = [26][]modifierInfo{
 }
 
 func parseSource(source string, initial Dialect) *File {
-	file := &File{Dialect: initial, Source: source}
+	return parseSourceContext(source, initial, false)
+}
+
+func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
+	file := &File{Dialect: initial, Source: source, lambdaBody: lambdaBody}
 	active := initial
 	scriptVersion := uint8(1)
 	vim9Prologue := initial == Vim9 && startsWithVim9Script(source)

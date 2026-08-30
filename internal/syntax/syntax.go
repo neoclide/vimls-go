@@ -555,6 +555,7 @@ type Diagnostic struct {
 type File struct {
 	Dialect     Dialect
 	Source      string
+	lambdaBody  bool
 	Commands    []Command
 	Tokens      []Token
 	Blocks      []Block
