@@ -19,6 +19,14 @@ func parseFunctionSignature(file *File, command *Command) {
 	}
 	offset := skipSyntaxSpace(source, 0, len(source))
 	nameStart := offset
+	if vim9Context && strings.HasPrefix(source[nameStart:], "<SID>:") {
+		function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameStart + len("<SID>:")}}
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E884", Message: "function name cannot contain a colon", Span: function.Name,
+		})
+		command.Function = function
+		return
+	}
 	for offset < len(source) {
 		r, size := utf8.DecodeRuneInString(source[offset:])
 		if r == '(' || r == '<' || unicode.IsSpace(r) {
