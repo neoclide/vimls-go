@@ -174,10 +174,14 @@ func TestOfficialVimCompileFailures(t *testing.T) {
 		}
 		seen[record.ExpectedCode]++
 	}
-	for code := range supported {
-		if seen[code] == 0 {
-			t.Fatalf("supported compile code %s has no pinned official case", code)
+	if strings.TrimSpace(*officialCompileCaseFilter) == "" {
+		for code := range supported {
+			if seen[code] == 0 {
+				t.Fatalf("supported compile code %s has no pinned official case", code)
+			}
 		}
+	} else if len(seen) == 0 {
+		t.Fatalf("no supported official compile case matches -official-compile-case=%q", *officialCompileCaseFilter)
 	}
 }
 
@@ -225,6 +229,7 @@ func officialCompileSupportedCodes() map[string]bool {
 		"vim/E1007": true,
 		"vim/E1008": true,
 		"vim/E1009": true,
+		"vim/E1018": true,
 		"vim/E1021": true,
 		"vim/E1022": true,
 		"vim/E1025": true,

@@ -442,8 +442,13 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 		}
 	}
 	if command.For != nil {
+		mutable := command.Dialect != syntax.Vim9
+		kind := SymbolKindVariable
+		if !mutable {
+			kind = SymbolKindConstant
+		}
 		for _, binding := range command.For.Bindings {
-			addDeclaration(result, commandScope, file, binding.Name, SymbolKindVariable, true)
+			addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
 		}
 	}
 	for _, value := range command.EnumValues {
