@@ -4364,6 +4364,64 @@ func TestAnalyzeE1212BuiltinBoolArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1216DigraphSetlistDiagnostics(t *testing.T) {
+	const message = "digraph_setlist() argument must be a list of lists with two items"
+	for _, test := range []struct{ name, source, span string }{
+		{"script outer non-list", "vim9script\ndigraph_setlist('bad')\n", "'bad'"},
+		{"script short inner list", "vim9script\ndigraph_setlist([['aa']])\n", "[['aa']]"},
+		{"def non-list inner", "vim9script\ndef Func()\n  digraph_setlist([1])\nenddef\n", "[1]"},
+		{"def null list inner", "vim9script\ndef Func()\n  digraph_setlist([null_list])\nenddef\n", "[null_list]"},
+		{"parenthesized outer", "vim9script\ndigraph_setlist((['aa']))\n", "(['aa'])"},
+		{"method receiver", "vim9script\n['aa']->digraph_setlist()\n", "['aa']"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1216" {
+					got = append(got, diagnostic)
+				}
+				if (diagnostic.Code == "vim/E1211" || diagnostic.Code == "vim/E1013") && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1216 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1216 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"compiled outer non-list", "vim9script\ndef Func()\n  digraph_setlist('bad')\nenddef\n", "vim/E1013"},
+		{"valid nested literal", "vim9script\ndigraph_setlist([['aa', 'き'], ['bb', 'く']])\n", ""},
+		{"empty outer list", "vim9script\ndigraph_setlist([])\n", ""},
+		{"null outer list", "vim9script\ndigraph_setlist(null_list)\n", ""},
+		{"dynamic list", "vim9script\nvar values: list<any> = []\ndigraph_setlist(values)\n", ""},
+		{"dynamic inner list", "vim9script\nvar pair: list<string> = []\ndigraph_setlist([pair])\n", ""},
+		{"unrelated list string checker", "vim9script\ncomplete_info([1])\n", "vim/E1013"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1216" {
+					t.Fatalf("guard unexpectedly received E1216: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},

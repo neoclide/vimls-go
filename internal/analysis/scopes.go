@@ -5967,6 +5967,18 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 					if checker == "arg_map_func" && !scopeContainsDef(scope) {
 						expected.functionReturn = nil
 					}
+					if builtin.Name == "digraph_setlist" && index == 0 && dialect == syntax.Vim9 {
+						invalid, knownList := digraphSetlistArgumentInvalid(result, argument, actual[index])
+						if invalid {
+							if !scopeUsesDefTypeRules(scope) || knownList {
+								result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1216", Message: "digraph_setlist() argument must be a list of lists with two items", Span: argument.Span})
+								continue
+							}
+						}
+						if knownList {
+							continue
+						}
+					}
 					if scopeContainsDef(scope) && callbackCheckerUsesE176(checker) && builtinCallbackArgumentCountInvalid(actual[index], expected) {
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E176", Message: "Invalid number of arguments", Span: argument.Span})
 						continue
@@ -6121,6 +6133,47 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		}
 	}
 	walkCommands(commands, parent)
+}
+
+func digraphSetlistArgumentInvalid(result *FileAnalysis, expression *syntax.Expression, actual ValueType) (bool, bool) {
+	for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	if expression == nil || isUnknownType(actual) {
+		return false, false
+	}
+	if expression.Kind == syntax.ExpressionIdentifier && expression.Value == "null_list" {
+		return false, true
+	}
+	if actual.Name != "list" {
+		return true, false
+	}
+	if expression.Kind != syntax.ExpressionList {
+		return false, true
+	}
+	for _, item := range expression.Children {
+		candidate := item
+		for candidate != nil && candidate.Kind == syntax.ExpressionParenthesized && len(candidate.Children) == 1 {
+			candidate = candidate.Children[0]
+		}
+		if candidate == nil {
+			return false, true
+		}
+		if candidate.Kind == syntax.ExpressionIdentifier && candidate.Value == "null_list" {
+			return true, true
+		}
+		if candidate.Kind == syntax.ExpressionList {
+			if len(candidate.Children) != 2 {
+				return true, true
+			}
+			continue
+		}
+		candidateType := result.TypeOf(candidate)
+		if !isUnknownType(candidateType) && candidateType.Name != "list" {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 // builtinArgumentDiagnostic mirrors the concrete Vim compile-time checker

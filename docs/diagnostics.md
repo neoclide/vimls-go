@@ -1862,6 +1862,32 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/userfunc.c:1959-1988` applies the same distinction to functions.
 - `src/errors.h:3115-3116` defines the exact E1213 message.
 
+## Invalid digraph list structure: E1216
+
+Analysis reports E1216 for a Vim9 `digraph_setlist()` argument whose outer
+List has a statically provable invalid item: a direct inner List with other
+than two items, a known non-List inner value, or `null_list` as an inner item.
+It also reports E1216 for a known non-List outer argument at script level.
+The diagnostic selects the complete outer argument, including a normalized
+method receiver.
+
+A known outer List suppresses the generated `list<string>` element check,
+because the builtin actually requires a List of two-item Lists and validates
+their contents separately. Empty and null outer Lists, valid direct pairs,
+and dynamically shaped Lists are accepted conservatively. A compiled
+non-List outer argument retains E1013, and E1214/E1215 string-content checks
+remain outside this rule.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_digraph.vim:580-592` covers valid pairs, invalid inner
+  lengths, non-List items, a null inner List, and a null outer List.
+- `src/testdir/test_vim9_builtin.vim:1002-1003` distinguishes compiled E1013
+  from script-level E1216 for known non-List outer arguments.
+- `src/digraph.c:2163-2213` requires an outer List and exactly two values in
+  every non-null inner List before delegating content validation.
+- `src/errors.h:3123-3124` defines the exact E1216 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
