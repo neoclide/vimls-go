@@ -18,7 +18,7 @@ func scanSubstituteArgument(source string, start, end int, dialect Dialect, comm
 		return start, Span{}, Span{}, nil
 	}
 	if command.Canonical == "~" {
-		return scanSubstituteTail(source, start, end, node, start)
+		return scanSubstituteTail(source, start, end, node, start, dialect)
 	}
 
 	first := source[start]
@@ -93,7 +93,7 @@ func scanSubstituteArgument(source string, start, end int, dialect Dialect, comm
 		}
 	}
 
-	return scanSubstituteTail(source, replacementEnd+1, end, node, start)
+	return scanSubstituteTail(source, replacementEnd+1, end, node, start, dialect)
 }
 
 func substituteRepeatByte(character byte) bool {
@@ -139,7 +139,7 @@ func scanSubstitutePrevious(source string, start, end int, dialect Dialect, node
 			return end, Span{}, Span{}, substituteBoundary(node)
 		}
 	}
-	return scanSubstituteTail(source, replacementEnd+1, end, node, start)
+	return scanSubstituteTail(source, replacementEnd+1, end, node, start, dialect)
 }
 
 func scanSubstituteRepeat(source string, start, end int, node *Substitute) (int, Span, Span, *expressionBoundary) {
@@ -148,7 +148,7 @@ func scanSubstituteRepeat(source string, start, end int, node *Substitute) (int,
 	if source[start] == '|' {
 		return start, Span{Start: start, End: start + 1}, Span{}, substituteBoundary(node)
 	}
-	return scanSubstituteTail(source, start, end, node, start)
+	return scanSubstituteTail(source, start, end, node, start, Legacy)
 }
 
 func scanSubstituteReplacementEnd(source string, start, end int, delimiter byte) int {
@@ -165,7 +165,7 @@ func scanSubstituteReplacementEnd(source string, start, end int, delimiter byte)
 	return -1
 }
 
-func scanSubstituteTail(source string, start, end int, node *Substitute, argumentStart int) (int, Span, Span, *expressionBoundary) {
+func scanSubstituteTail(source string, start, end int, node *Substitute, argumentStart int, dialect Dialect) (int, Span, Span, *expressionBoundary) {
 	position := start
 	flagsStart := -1
 	if position < end && source[position] == '&' {
@@ -192,6 +192,10 @@ func scanSubstituteTail(source string, start, end int, node *Substitute, argumen
 		countEnd := countStart + 1
 		for countEnd < end && source[countEnd] >= '0' && source[countEnd] <= '9' {
 			countEnd++
+		}
+		if dialect == Vim9 && node.ReplacementExpression {
+			node.diagnostics = append(node.diagnostics, Diagnostic{Code: "vim/E488", Message: "trailing characters", Span: Span{Start: countStart, End: end}})
+			return end, Span{}, Span{}, substituteBoundary(node)
 		}
 		node.Count = Span{Start: countStart, End: countEnd}
 		position = skipSpace(source, countEnd, end)
@@ -229,7 +233,16 @@ func parseSubstituteExpression(source string, replacementStart, expressionEnd in
 	node.ReplacementExpression = true
 	expression, diagnostics := parseExpression(source[node.ExpressionSpan.Start:node.ExpressionSpan.End], node.ExpressionSpan.Start, dialect)
 	node.Expression = expression
-	node.diagnostics = append(node.diagnostics, diagnostics...)
+	for _, diagnostic := range diagnostics {
+		// In a Vim9 substitute replacement, text after the complete expression
+		// belongs to the Ex command and is reported as E488. Keep the expression
+		// AST and its span so completion/recovery can still use the valid prefix.
+		if dialect == Vim9 && diagnostic.Code == "vimls/trailing-expression" {
+			diagnostic.Code = "vim/E488"
+			diagnostic.Message = "trailing characters"
+		}
+		node.diagnostics = append(node.diagnostics, diagnostic)
+	}
 	if expression != nil && command != nil {
 		command.Expressions = append(command.Expressions, expression)
 		command.expressionsParsed = true
