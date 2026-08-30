@@ -2655,6 +2655,27 @@ func scopeContainsDef(scope *Scope) bool {
 	return false
 }
 
+func enclosingDefHeaderSpan(file *syntax.File, scope *Scope) syntax.Span {
+	for current := scope; file != nil && current != nil; current = current.Parent {
+		if current.Kind != syntax.BlockDef || current.Block < 0 {
+			continue
+		}
+		commands, blocks := file.Commands, file.Blocks
+		if current.CommandList != nil {
+			commands, blocks = current.CommandList.Commands, current.CommandList.Blocks
+		}
+		if current.Block >= len(blocks) {
+			return syntax.Span{}
+		}
+		header := blocks[current.Block].Header
+		if header >= 0 && header < len(commands) {
+			return commands[header].Span
+		}
+		return syntax.Span{}
+	}
+	return syntax.Span{}
+}
+
 func collectOpaqueEnumDeclarations(result *FileAnalysis, commands []syntax.Command, blocks []syntax.Block) {
 	if result == nil || result.File == nil {
 		return
@@ -2897,6 +2918,16 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 		}
 	}
 	if command.TypeAlias != nil {
+		if command.Dialect == syntax.Vim9 && scopeContainsDef(commandScope) {
+			span := enclosingDefHeaderSpan(file, commandScope)
+			if emptySyntaxSpan(span) {
+				span = command.Name
+			}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1399", Message: "Type can only be used in a script", Span: span,
+			})
+			return
+		}
 		addDeclaration(result, commandScope, file, command.TypeAlias.Name, SymbolKindTypeAlias, false)
 	}
 	if command.Import != nil {

@@ -3247,6 +3247,39 @@ T += 2
 	}
 }
 
+func TestAnalyzeTypeAliasInsideDefDiagnostic(t *testing.T) {
+	source := `vim9script
+def F()
+  if true
+    type Nested = list<string>
+  endif
+enddef
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1399" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Type can only be used in a script" || file.Text(got[0].Span) != "def F()" {
+		t.Fatalf("E1399 diagnostics = %#v; syntax diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics, result.Diagnostics)
+	}
+	for _, declaration := range result.Declarations {
+		if declaration.Name == "Nested" {
+			t.Fatalf("invalid local type alias was declared: %#v", declaration)
+		}
+	}
+
+	valid := Analyze(syntax.Parse("vim9script\nif true\n  type ScriptType = list<string>\nendif\n"))
+	for _, diagnostic := range valid.Diagnostics {
+		if diagnostic.Code == "vim/E1399" {
+			t.Fatalf("script type alias reported E1399: %#v", valid.Diagnostics)
+		}
+	}
+}
+
 func immutableDiagnosticName(message string) string {
 	if index := strings.LastIndex(message, ": "); index >= 0 {
 		return message[index+2:]
