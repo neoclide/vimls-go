@@ -589,3 +589,35 @@ Representative source evidence:
 - `src/vim9compile.c:3488-3506` rejects compound assignment on a Dictionary
   type, while `src/eval.c:2749-2796` applies the runtime type matrix.
 - `src/errors.h:1869-1870` defines the exact message template.
+
+## Using a List as a Number: E745
+
+E745 means `Using a List as a Number`. Legacy Vim script and the top-level
+Vim9 script evaluator use it when an evaluated operand requires numeric or
+Boolean conversion from a List.
+
+Analysis reports E745 for a statically known List operand of numeric binary
+operators outside a compiled `def`. List-plus-List remains valid
+concatenation. For a right operand, analysis requires a statically valid
+numeric left operand so that an earlier Blob or otherwise unsupported operand
+does not receive the wrong error. Analysis also reports E745 for a List used by
+`&&` or `||`, including a right operand only when a Boolean literal left
+operand proves that short-circuit evaluation reaches it. Unknown values remain
+unknown.
+
+Compiled Vim9 uses its type-checking errors instead: the three List-valued
+logical forms below use E1012 in a `def` and E745 at top-level `vim9script`.
+They do not use E1013. Arithmetic forms use E1035, E1036, or E1051 in a
+compiled `def`, depending on the operator and other operand.
+
+Representative source evidence:
+
+- `src/testdir/util/vim9.vim:121-137` defines paired errors as the compiled
+  `def` error followed by the top-level Vim9 script error.
+- `src/testdir/test_vim9_expr.vim:686-697` and `861` distinguish E1012 from
+  E745 for `[] || false`, an evaluated `false || []`, and an evaluated
+  `true && []`, including interpolated expressions.
+- `src/testdir/test_vim9_expr.vim:1881-1884`, `2041-2045`, and `2271-2277`
+  distinguish compiled arithmetic type errors from E745 at script level.
+- `src/typval.c:241-242` maps List numeric conversion to E745, and
+  `src/errors.h:1899-1900` defines the exact message.

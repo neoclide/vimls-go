@@ -618,6 +618,39 @@ func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnos
 	}
 }
 
+func numericConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnostic, bool) {
+	switch typ.Name {
+	case "special":
+		return syntax.Diagnostic{Code: "vim/E611", Message: "Using a Special as a Number", Span: span}, true
+	case "func":
+		return syntax.Diagnostic{Code: "vim/E703", Message: "Using a Funcref as a Number", Span: span}, true
+	case "dict":
+		return syntax.Diagnostic{Code: "vim/E728", Message: "Using a Dictionary as a Number", Span: span}, true
+	case "list":
+		return syntax.Diagnostic{Code: "vim/E745", Message: "Using a List as a Number", Span: span}, true
+	default:
+		return syntax.Diagnostic{}, false
+	}
+}
+
+func logicalRightOperandIsEvaluated(expression *syntax.Expression) bool {
+	if expression == nil || expression.Kind != syntax.ExpressionBinary || len(expression.Children) < 2 {
+		return false
+	}
+	left := expression.Children[0]
+	if left == nil || left.Kind != syntax.ExpressionIdentifier {
+		return false
+	}
+	switch expression.Value {
+	case "||":
+		return left.Value == "false" || left.Value == "v:false"
+	case "&&":
+		return left.Value == "true" || left.Value == "v:true"
+	default:
+		return false
+	}
+}
+
 // collectOperatorDiagnostics keeps compiled Vim9 operator errors distinct
 // from the historical conversion errors used by Legacy and script-level Vim9.
 // Unknown values remain deliberately opaque.
@@ -705,32 +738,36 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
 						}
 					} else if expression.Kind == syntax.ExpressionBinary {
-						operand := expression.Children[0]
-						code, message := "", ""
-						switch left.Name {
-						case "special":
-							code, message = "vim/E611", "Using a Special as a Number"
-						case "func":
-							code, message = "vim/E703", "Using a Funcref as a Number"
-						case "dict":
-							code, message = "vim/E728", "Using a Dictionary as a Number"
+						leftOperand, rightOperand := expression.Children[0], expression.Children[1]
+						containerConcat := op == "+" && left.Name == right.Name && (left.Name == "list" || left.Name == "tuple" || left.Name == "blob")
+						diagnostic, ok := syntax.Diagnostic{}, false
+						if !containerConcat {
+							diagnostic, ok = numericConversionDiagnostic(left, leftOperand.Span)
 						}
-						if code == "" {
-							operand = expression.Children[1]
-							switch right.Name {
-							case "special":
-								code, message = "vim/E611", "Using a Special as a Number"
-							case "func":
-								code, message = "vim/E703", "Using a Funcref as a Number"
-							case "dict":
-								code, message = "vim/E728", "Using a Dictionary as a Number"
+						if !ok {
+							leftNumeric := left.Name == "number" || left.Name == "float" && op != "%"
+							if right.Name != "list" || leftNumeric {
+								diagnostic, ok = numericConversionDiagnostic(right, rightOperand.Span)
 							}
 						}
-						if code != "" {
-							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-								Code: code, Message: message, Span: operand.Span,
-							})
+						if ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
 						}
+					}
+				}
+				if expression.Kind == syntax.ExpressionBinary && (op == "&&" || op == "||") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&
+					!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
+					left, right := expression.Children[0], expression.Children[1]
+					operand := left
+					if result.TypeOf(left).Name != "list" {
+						operand = nil
+						if logicalRightOperandIsEvaluated(expression) && result.TypeOf(right).Name == "list" {
+							operand = right
+						}
+					}
+					if operand != nil {
+						diagnostic, _ := numericConversionDiagnostic(ValueType{Name: "list"}, operand.Span)
+						result.Diagnostics = append(result.Diagnostics, diagnostic)
 					}
 				}
 				if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&

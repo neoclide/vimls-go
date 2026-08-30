@@ -545,6 +545,112 @@ func TestAnalyzeWrongVariableTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeListAsNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script left arithmetic operand",
+			source: "vim9script\nvar value = [] - 33\n",
+			span:   "[]",
+		},
+		{
+			name:   "vim9 script right arithmetic operand",
+			source: "vim9script\nvar value = 33 * []\n",
+			span:   "[]",
+		},
+		{
+			name:   "legacy arithmetic operand",
+			source: "let value = 33 % []\n",
+			span:   "[]",
+		},
+		{
+			name:   "logical left operand",
+			source: "vim9script\nvar value = [] || false\n",
+			span:   "[]",
+		},
+		{
+			name:   "evaluated logical right operand",
+			source: "vim9script\nvar value = false || []\n",
+			span:   "[]",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E745" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a List as a Number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E745 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value = [1] + [2]\n",
+		"vim9script\nvar value = true || []\n",
+		"vim9script\nvar value = false && []\n",
+		"vim9script\nvar value = 0z01 + []\n",
+		"vim9script\ndef F()\n  var value = [] - 33\nenddef\n",
+	} {
+		file := syntax.Parse(source)
+		result := Analyze(file)
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E745" {
+				t.Fatalf("source %q unexpectedly received E745: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
+func TestAnalyzeListLogicalDiagnosticsUseContextualVimCodes(t *testing.T) {
+	for _, expression := range []string{
+		"[] || false",
+		"$'{false || []}'",
+		"$'{true && []}'",
+	} {
+		for _, test := range []struct {
+			name, source, want string
+		}{
+			{
+				name:   "vim9 script",
+				source: "vim9script\nvar value = " + expression + "\n",
+				want:   "vim/E745",
+			},
+			{
+				name:   "compiled def",
+				source: "vim9script\ndef F()\n  var value = " + expression + "\nenddef\n",
+				want:   "vim/E1012",
+			},
+		} {
+			t.Run(test.name+" "+expression, func(t *testing.T) {
+				result := Analyze(syntax.Parse(test.source))
+				found := false
+				wrongContext := "vim/E745"
+				if test.want == "vim/E745" {
+					wrongContext = "vim/E1012"
+				}
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == test.want {
+						found = true
+					}
+					if diagnostic.Code == "vim/E1013" || diagnostic.Code == wrongContext {
+						t.Fatalf("source %q received wrong contextual diagnostic: %#v", test.source, result.Diagnostics)
+					}
+				}
+				if !found {
+					t.Fatalf("source %q diagnostics = %#v, want %s", test.source, result.Diagnostics, test.want)
+				}
+			})
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string
