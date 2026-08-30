@@ -1559,6 +1559,85 @@ func TestAnalyzeStringAsBoolDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBoolAsNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name: "Vim9 script bool spellings operands and parentheses",
+			source: "vim9script\nvar one = 1 + v:true\nvar two = 1 + v:false\nvar three = 1 + true\n" +
+				"var four = 1 + false\nvar left = (true) + 1\nvar value: bool = true\nvar identifier = 1 + value\n",
+			want: []string{"v:true", "v:false", "true", "false", "(true)", "value"},
+		},
+		{
+			name:   "Vim9 script compound assignment",
+			source: "vim9script\nvar value = 1\nvalue += true\nvar flag: bool = true\nflag += 1\n",
+			want:   []string{"true", "flag"},
+		},
+		{
+			name:   "Vim9 script sort direct and named callbacks",
+			source: "vim9script\ndef Compare(first: number, second: number): bool\n  return true\nenddef\nsort([2, 1], (first, second) => true)\nsort([2, 1], Compare)\n",
+			want:   []string{"(first, second) => true", "Compare"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1138" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && test.name == "Vim9 script sort direct and named callbacks" {
+					t.Fatalf("script sort E1138 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1138 diagnostics = %#v, want spans %#v; all diagnostics = %#v", got, test.want, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "Using a Bool as a Number" || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E1138[%d] = %#v on %q, want Bool-as-Number on %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index])
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+		wantCode     string
+	}{
+		{"compiled def arithmetic retains E1051", "vim9script\ndef Func()\n  var value = true + 1\nenddef\n", "vim/E1051"},
+		{"compiled lambda arithmetic retains E1051", "vim9script\nvar Callback = () => true + 1\n", "vim/E1051"},
+		{"compiled sort bool callback retains E1013", "vim9script\ndef Func()\n  sort([2, 1], (first, second) => true)\nenddef\n", "vim/E1013"},
+		{"lambda sort bool callback retains E1013", "vim9script\nvar Callback = () => sort([2, 1], (first, second) => true)\n", "vim/E1013"},
+		{"Legacy arithmetic", "let value = v:true + 1\n", ""},
+		{"wrong sort signatures retain E1013", "vim9script\nsort([2, 1], (value) => true)\nsort([2, 1], (first: string, second: number) => true)\n", "vim/E1013"},
+		{"number sort callback is accepted", "vim9script\nsort([2, 1], (first, second) => first - second)\n", ""},
+		{"map filter and indexof Bool callbacks", "vim9script\nmap([1], (index, value) => true)\nfilter([1], (index, value) => true)\nindexof([1], (index, value) => true)\n", ""},
+		{"Bool conditions logical assignment concatenation any and incomplete", "vim9script\nvar value: bool = true\nif value\nendif\nvar logical = value && false\nvar ternary = value ? 1 : 0\nvar copy: bool = value\nvar text = value .. ''\nvar anything: any\nvar unknown = anything + 1\nvar unknownRight = anything + true\nvar tupleRight = (1, 2) + true\nvar missing = 1 +\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			foundCode := test.wantCode == ""
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1138" {
+					t.Fatalf("source unexpectedly received E1138: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.wantCode {
+					foundCode = true
+				}
+			}
+			if !foundCode {
+				t.Fatalf("source diagnostics = %#v, want %s", result.Diagnostics, test.wantCode)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

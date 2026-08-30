@@ -2414,6 +2414,13 @@ func stringAsBoolDiagnostic(result *FileAnalysis, expression *syntax.Expression)
 	return syntax.Diagnostic{Code: "vim/E1135", Message: message, Span: expression.Span}, true
 }
 
+func boolAsNumberDiagnostic(typ ValueType, expression *syntax.Expression) (syntax.Diagnostic, bool) {
+	if expression == nil || expressionContainsMissing(expression) || typ.Name != "bool" {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{Code: "vim/E1138", Message: "Using a Bool as a Number", Span: expression.Span}, true
+}
+
 func staticNumberValue(expression *syntax.Expression) (int64, bool) {
 	if expression == nil {
 		return 0, false
@@ -2647,7 +2654,19 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					if expression.Kind == syntax.ExpressionAssignment {
 						left = assignmentTargetType(result, expressionScope, expression.Children[0])
 					}
-					if command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) {
+					boolAsNumber := false
+					if command.Dialect == syntax.Vim9 && !scopeUsesDefTypeRules(expressionScope) {
+						if diagnostic, ok := boolAsNumberDiagnostic(left, expression.Children[0]); ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
+							boolAsNumber = true
+						} else if left.Name == "number" || left.Name == "float" {
+							if diagnostic, ok := boolAsNumberDiagnostic(right, expression.Children[1]); ok {
+								result.Diagnostics = append(result.Diagnostics, diagnostic)
+								boolAsNumber = true
+							}
+						}
+					}
+					if !boolAsNumber && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) {
 						base := strings.TrimSuffix(op, "=")
 						invalid := false
 						code, message := "", ""
@@ -2677,7 +2696,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 							}
 							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
 						}
-					} else if expression.Kind == syntax.ExpressionBinary {
+					} else if !boolAsNumber && expression.Kind == syntax.ExpressionBinary {
 						leftOperand, rightOperand := expression.Children[0], expression.Children[1]
 						containerConcat := op == "+" && left.Name == right.Name && (left.Name == "list" || left.Name == "tuple" || left.Name == "blob")
 						diagnostic, ok := syntax.Diagnostic{}, false
@@ -5308,6 +5327,18 @@ func builtinFunctionSignatureMismatch(actual ValueType, expected builtinArgument
 	return expected.functionReturn != nil && actual.Return != nil && !compatibleTypes(*expected.functionReturn, *actual.Return)
 }
 
+func builtinCallbackParametersMatch(actual ValueType, expected builtinArgumentType) bool {
+	if actual.Name != "func" || !actual.ArgumentCountKnown || actual.Variadic || len(actual.Arguments) != len(expected.functionArguments) {
+		return false
+	}
+	for index := range expected.functionArguments {
+		if !compatibleTypes(actual.Arguments[index], expected.functionArguments[index]) {
+			return false
+		}
+	}
+	return true
+}
+
 func valueTypeDisplay(typ ValueType) string {
 	if isUnknownType(typ) {
 		return "any"
@@ -5449,19 +5480,14 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							continue
 						}
 						if dialect == syntax.Vim9 && !scopeUsesDefTypeRules(scope) && (builtin.Name == "filter" || builtin.Name == "indexof") && checker == "arg_filter_func" &&
-							actual[index].Name == "func" && actual[index].ArgumentCountKnown && !actual[index].Variadic && actual[index].Return != nil && actual[index].Return.Name == "string" &&
-							len(actual[index].Arguments) == len(expected.functionArguments) {
-							argumentsMatch := true
-							for argumentIndex := range expected.functionArguments {
-								if !compatibleTypes(actual[index].Arguments[argumentIndex], expected.functionArguments[argumentIndex]) {
-									argumentsMatch = false
-									break
-								}
-							}
-							if argumentsMatch {
-								result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1135", Message: "Using a String as a Bool", Span: argument.Span})
-								continue
-							}
+							actual[index].Return != nil && actual[index].Return.Name == "string" && builtinCallbackParametersMatch(actual[index], expected) {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1135", Message: "Using a String as a Bool", Span: argument.Span})
+							continue
+						}
+						if dialect == syntax.Vim9 && !scopeUsesDefTypeRules(scope) && builtin.Name == "sort" && checker == "arg_sort_how" &&
+							actual[index].Return != nil && actual[index].Return.Name == "bool" && builtinCallbackParametersMatch(actual[index], expected) {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1138", Message: "Using a Bool as a Number", Span: argument.Span})
+							continue
 						}
 						if !scopeUsesDefTypeRules(scope) && index == 1 && actual[index].Name == "number" && (builtin.Name == "filter" || builtin.Name == "map") && len(actual) > 0 {
 							switch actual[0].Name {

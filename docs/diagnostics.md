@@ -1196,6 +1196,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   compiled callers retain E1013.
 - `src/errors.h:2922-2923` defines the exact E1135 message.
 
+## Bool used as a Number: E1138
+
+Analysis reports E1138 when a Vim9 script numeric binary or compound operator
+consumes a statically known Bool as a Number. The diagnostic selects the first
+offending operand and uses Vim's exact `Using a Bool as a Number` message. The
+four Bool spellings
+`true`, `false`, `v:true`, and `v:false`, parenthesized values, and identifiers
+with a known Bool type follow the same rule.
+
+The same script-level diagnostic applies when a `sort()` comparison callback
+has the correct parameter signature but a statically known Bool return type;
+the callback expression is selected. Parameter-count and parameter-type
+mismatches retain their existing errors. Compiled `def` and lambda arithmetic
+or callbacks remain strict compile-time type mismatches such as E1051, E1036,
+or E1013. Ordinary Legacy arithmetic, unknown values, and valid Boolean
+contexts do not receive E1138.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/typval.c:197-263` rejects Bool-to-Number conversion in Vim9 while
+  retaining Legacy conversion behavior.
+- `src/list.c:2207-2253` passes a `sort()` callback result through checked
+  Number conversion.
+- `src/testdir/test_vim9_expr.vim:2058-2061` distinguishes compiled E1051 from
+  script-level E1138 for all four Bool spellings.
+- `src/testdir/test_vim9_builtin.vim:4427-4434` distinguishes a compiled
+  callback return mismatch from script-level E1138.
+- `src/errors.h:2929-2930` defines the exact E1138 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
