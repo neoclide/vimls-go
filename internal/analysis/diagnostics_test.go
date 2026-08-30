@@ -3019,6 +3019,50 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeVim9ParameterAssignmentDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name: "official direct and compound def assignments",
+			source: "vim9script\ndef Func(arg: number)\n" +
+				"  arg = 3\n  arg += 1\nenddef\n",
+			want: []string{"arg", "arg"},
+		},
+		{
+			name:   "lambda parameter assignment",
+			source: "vim9script\nvar Callback = (arg: number) => {\n  arg = 3\n}\n",
+			want:   []string{"arg"},
+		},
+		{
+			name: "container mutation and legacy arguments",
+			source: "vim9script\ndef Modern(listArg: list<number>, dictArg: dict<number>)\n" +
+				"  listArg[0] = 3\n  dictArg.key = 3\nenddef\n" +
+				"function Legacy(value)\n  let a:value[0] = 1\nendfunction\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1090" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1090 diagnostics = %#v, want %q; syntax diagnostics = %#v", got, test.want, file.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "Cannot assign to argument "+test.want[index] || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E1090 diagnostic[%d] = %#v on %q, want argument %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index])
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeStringIndexAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

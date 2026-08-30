@@ -3277,7 +3277,11 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 				})
 			} else if dialect == syntax.Vim9 && !strings.Contains(target.Value, ":") {
 				declaration := resolve(scope, target.Value, target.Span.Start, false, nil)
-				if declaration != nil && declaration.Kind == SymbolKindTypeAlias {
+				if declaration != nil && declaration.Parameter {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1090", Message: "Cannot assign to argument " + target.Value, Span: target.Span,
+					})
+				} else if declaration != nil && declaration.Kind == SymbolKindTypeAlias {
 					diagnostic := syntax.Diagnostic{Span: target.Span}
 					if scopeUsesDefTypeRules(scope) {
 						diagnostic.Code = "vim/E46"

@@ -37,6 +37,23 @@ Representative source evidence:
   (E742).
 - `src/errors.h:124-126` defines the unnamed and named E46 messages.
 
+## Vim9 parameter rebinding: E1090
+
+Vim reports `E1090: Cannot assign to argument {name}` for direct `=` and
+compound reassignment of a `def` or Vim9 lambda parameter. The analyzer emits
+E1090 only for a resolved direct identifier target. Index and member mutation
+of a List or Dictionary argument is allowed, while Legacy `a:` argument
+rebinding retains its E46 diagnostic.
+
+Representative source evidence, pinned to Vim 9.2.1015:
+
+- `src/vim9compile.c:2360-2380` checks direct argument assignment after
+  parsing the assignment left-hand side.
+- `src/testdir/test_vim9_func.vim:2143-2152` permits List/Dictionary contents
+  to change and reports E1090 for direct parameter rebinding.
+- `runtime/doc/userfunc.txt:240-245` describes fixed argument bindings and
+  mutable composite contents.
+
 ## Unknown options: E113 and E518
 
 Vim uses different native error codes for an unknown option according to the
