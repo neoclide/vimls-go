@@ -833,14 +833,6 @@ func (p *expressionParser) parsePrefix() *Expression {
 	switch token.kind {
 	case expressionIdentifier:
 		p.advance()
-		if p.dialect == Vim9 {
-			for _, namespace := range []string{"a:", "l:", "x:"} {
-				if strings.HasPrefix(token.text, namespace) {
-					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1075", Message: "Namespace not supported: " + token.text, Span: token.span})
-					break
-				}
-			}
-		}
 		if p.dialect == Vim9 && strings.HasPrefix(token.text, "$") && (len(token.text) == 1 || strings.Trim(token.text, "$") == "") {
 			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vimls/invalid-atom", Message: "invalid atom", Span: token.span})
 		}

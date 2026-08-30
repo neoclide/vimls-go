@@ -492,7 +492,7 @@ func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "optional variadic and conservative targets",
-			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(null_object, 2, 3, 4)\nvar dynamic = call('len', [])\ng:MyFunction()\ns:len()\nitems->len()\n",
+			source: "vim9script\nvar optional = range(1)\nvar variadic = instanceof(null_object, 2, 3, 4)\nvar dynamic = call('len', [])\ng:MyFunction()\ns:len()\ng:items->len()\n",
 		},
 		{
 			name:   "incomplete calls do not cascade",
@@ -853,7 +853,7 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "conservative exclusions",
-			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nv:errmsg = 'ok'\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [7]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\ndef Modern(value)\n  a:value = 1\nenddef\nfunction Legacy(value)\n  let a:missing = 1\n  let a:value[0] = 1\nendfunction\nlet a:value = 1\n",
+			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nv:errmsg = 'ok'\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [7]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\ndef Modern(value)\n  a:value = 1\nenddef\nfunction Legacy(value)\n  let a:missing = 1\n  let a:value[0] = 1\nendfunction\nlegacy let a:value = 1\n",
 		},
 		{
 			name:   "embedded command",
@@ -934,6 +934,64 @@ echo outsideMissing
 		diagnostic := got[index]
 		if diagnostic.Message != "Variable not found: "+name || file.Text(diagnostic.Span) != name {
 			t.Fatalf("diagnostic[%d] = %#v (%q), want %q", index, diagnostic, file.Text(diagnostic.Span), name)
+		}
+	}
+}
+
+func TestAnalyzeUndefinedVim9ScriptIdentifiers(t *testing.T) {
+	source := `vim9script
+var known = 1
+var ordinary = missing
+var member = root.value
+var interpolation = $"foo{inside}"
+var indexed = g:items[indexMissing]
+echo a:somevar
+echo l:somevar
+echo x:somevar
+var vimVariable = v:nosuch
+v:another += 1
+echo g:dynamic
+echo s:maybe
+def Check()
+  echo defMissing
+  echo a:argument
+enddef
+var Lambda = () => lambdaMissing
+legacy echo legacyMissing
+echo known
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	wantE121 := []string{"missing", "root", "inside", "indexMissing", "a:somevar", "l:somevar", "x:somevar", "v:nosuch", "v:another"}
+	var gotE121 []syntax.Diagnostic
+	var gotCompiled []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		switch diagnostic.Code {
+		case "vim/E121":
+			gotE121 = append(gotE121, diagnostic)
+		case "vim/E1001", "vim/E1075":
+			gotCompiled = append(gotCompiled, diagnostic)
+		}
+	}
+	if len(gotE121) != len(wantE121) {
+		t.Fatalf("E121 diagnostics = %#v, want %v; syntax diagnostics = %#v; all diagnostics = %#v", gotE121, wantE121, file.Diagnostics, result.Diagnostics)
+	}
+	for index, name := range wantE121 {
+		if gotE121[index].Message != "Undefined variable: "+name || file.Text(gotE121[index].Span) != name {
+			t.Fatalf("E121[%d] = %#v on %q, want %q", index, gotE121[index], file.Text(gotE121[index].Span), name)
+		}
+	}
+	wantCompiled := []struct{ code, message, text string }{
+		{code: "vim/E1001", message: "Variable not found: defMissing", text: "defMissing"},
+		{code: "vim/E1075", message: "Namespace not supported: a:argument", text: "a:argument"},
+		{code: "vim/E1001", message: "Variable not found: lambdaMissing", text: "lambdaMissing"},
+	}
+	if len(gotCompiled) != len(wantCompiled) {
+		t.Fatalf("compiled diagnostics = %#v, want %#v; all diagnostics = %#v", gotCompiled, wantCompiled, result.Diagnostics)
+	}
+	for index, want := range wantCompiled {
+		if gotCompiled[index].Code != want.code || gotCompiled[index].Message != want.message || file.Text(gotCompiled[index].Span) != want.text {
+			t.Fatalf("compiled diagnostic[%d] = %#v on %q, want %#v", index, gotCompiled[index], file.Text(gotCompiled[index].Span), want)
 		}
 	}
 }

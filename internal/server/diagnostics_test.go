@@ -45,13 +45,13 @@ func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{
 			URI: documentURI, Version: 1,
-			Text: "vim9script\ndoesnotexist()\ndef Test()\n  echo missingValue\nenddef\n",
+			Text: "vim9script\ndoesnotexist()\necho missingScript\ndef Test()\n  echo missingValue\nenddef\n",
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) != 2 || first.Diagnostics[0].Code != protocol.String("vim/E117") || first.Diagnostics[1].Code != protocol.String("vim/E1001") {
+	if len(first.Diagnostics) != 3 || first.Diagnostics[0].Code != protocol.String("vim/E117") || first.Diagnostics[1].Code != protocol.String("vim/E121") || first.Diagnostics[2].Code != protocol.String("vim/E1001") {
 		t.Fatalf("default unresolved diagnostics = %#v", first.Diagnostics)
 	}
 	for _, diagnostic := range first.Diagnostics {
@@ -66,7 +66,7 @@ func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {
 		t.Fatal(err)
 	}
 	updated := waitForDiagnostics(t, client.published)
-	if len(updated.Diagnostics) != 2 {
+	if len(updated.Diagnostics) != 3 {
 		t.Fatalf("configured unresolved diagnostics = %#v", updated.Diagnostics)
 	}
 	for _, diagnostic := range updated.Diagnostics {

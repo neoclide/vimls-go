@@ -1494,15 +1494,10 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				Declaration: declaration,
 			})
 			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
-			unknownVimVariable := strings.HasPrefix(expression.Value, "v:")
-			if unknownVimVariable {
-				_, known := vimdata.LookupVariable(expression.Value)
-				unknownVimVariable = !known
-			}
-			if declaration == nil && !preferFunction && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && (unscoped || unknownVimVariable) && expression.Value != "this" && expression.Value != "super" {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E1001", Message: "Variable not found: " + expression.Value, Span: expression.Span,
-				})
+			unknownVimVariable := isUnknownVimVariable(expression.Value)
+			unsupportedNamespace := vim9UnsupportedNamespace(expression.Value)
+			if !preferFunction && dialect == syntax.Vim9 && (unsupportedNamespace || declaration == nil && (unscoped || unknownVimVariable)) && expression.Value != "this" && expression.Value != "super" {
+				appendVim9UnresolvedReadDiagnostic(result, scope, expression.Value, expression.Span)
 			}
 		}
 		for _, child := range expression.Children {
@@ -1576,7 +1571,9 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, false, skipped)
 			result.References = append(result.References, &Reference{Name: expression.Value, Span: expression.Span, Declaration: declaration})
-			if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && assignmentTargetNeedsDeclaration(expression.Value) && declaration == nil {
+			if dialect == syntax.Vim9 && (vim9UnsupportedNamespace(expression.Value) || declaration == nil && isUnknownVimVariable(expression.Value)) {
+				appendVim9UnresolvedReadDiagnostic(result, scope, expression.Value, expression.Span)
+			} else if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && assignmentTargetNeedsDeclaration(expression.Value) && declaration == nil {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1089", Message: "Unknown variable: " + expression.Value, Span: expression.Span,
 				})
@@ -1606,6 +1603,32 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 
 func assignmentTargetNeedsDeclaration(name string) bool {
 	return name != "this" && name != "super" && !strings.Contains(name, ":") && !strings.HasPrefix(name, "&") && !strings.HasPrefix(name, "$") && !strings.HasPrefix(name, "@")
+}
+
+func appendVim9UnresolvedReadDiagnostic(result *FileAnalysis, scope *Scope, name string, span syntax.Span) {
+	code := "vim/E121"
+	message := "Undefined variable: " + name
+	if scopeUsesDefTypeRules(scope) {
+		code = "vim/E1001"
+		message = "Variable not found: " + name
+		if vim9UnsupportedNamespace(name) {
+			code = "vim/E1075"
+			message = "Namespace not supported: " + name
+		}
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
+}
+
+func isUnknownVimVariable(name string) bool {
+	if !strings.HasPrefix(name, "v:") {
+		return false
+	}
+	_, known := vimdata.LookupVariable(name)
+	return !known
+}
+
+func vim9UnsupportedNamespace(name string) bool {
+	return strings.HasPrefix(name, "a:") || strings.HasPrefix(name, "l:") || strings.HasPrefix(name, "x:")
 }
 
 func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span) {
@@ -2193,13 +2216,10 @@ func walkCompiledStringExpression(result *FileAnalysis, scope *Scope, expression
 		if !isLiteralIdentifier(expression.Value) {
 			declaration := resolve(scope, expression.Value, visibilityOffset, preferFunction, nil)
 			unscoped := !strings.Contains(expression.Value, ":")
-			_, knownVimVariable := vimdata.LookupVariable(expression.Value)
-			unknownVimVariable := strings.HasPrefix(expression.Value, "v:") && !knownVimVariable
-			if declaration == nil && !preferFunction && (unscoped || unknownVimVariable) && expression.Value != "this" && expression.Value != "super" {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E1001", Message: "Variable not found: " + expression.Value,
-					Span: syntax.Span{Start: base + expression.Span.Start, End: base + expression.Span.End},
-				})
+			unknownVimVariable := isUnknownVimVariable(expression.Value)
+			unsupportedNamespace := vim9UnsupportedNamespace(expression.Value)
+			if !preferFunction && (unsupportedNamespace || declaration == nil && (unscoped || unknownVimVariable)) && expression.Value != "this" && expression.Value != "super" {
+				appendVim9UnresolvedReadDiagnostic(result, scope, expression.Value, syntax.Span{Start: base + expression.Span.Start, End: base + expression.Span.End})
 			}
 		}
 	case syntax.ExpressionMember:

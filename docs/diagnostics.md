@@ -51,6 +51,19 @@ at Vim9 script level produces E117. The analyzer preserves this distinction.
 Functions whose availability depends on Vim build features also remain outside
 the E117 rule unless the server has matching feature information.
 
+E121 is the Vim9 script-level error for an undefined variable read. A missing
+unscoped variable or unknown `v:` variable produces
+`E121: Undefined variable: {name}` when evaluated at script level; compiling
+the same read in a `def` or lambda produces E1001 instead. The unsupported
+`a:`, `l:`, and `x:` namespaces follow the same contextual split: Vim9 script
+uses E121, while a compiled expression uses E1075. Ordinary undeclared
+assignment targets have their separate E1089 rule.
+
+Legacy Vim script and externally scoped Vim9 names such as `g:`, `s:`, `b:`,
+`w:`, and `t:` remain conservative `unknown`, because another script or the
+editor can create them dynamically. For a member or index expression, only an
+unresolved unscoped root or index expression is diagnosed.
+
 Unresolved-symbol diagnostics are warnings by default. Clients can set
 `vimls.unresolvedSeverity` to `error`, `warning`, `information`, or `hint`.
 The same value applies to E117 and the unknown-variable codes E121, E1001, and
@@ -63,8 +76,13 @@ in `initializationOptions` as the initial value.
 Representative source evidence:
 
 - `src/errors.h:284-285` defines E117.
+- `src/errors.h:292-295` defines E121.
 - `src/testdir/test_vim9_expr.vim:3885-3897` shows that an unscoped call does
   not resolve a `g:` function.
+- `src/testdir/test_vim9_expr.vim:4179-4181` distinguishes E1075 in a `def`
+  from E121 at Vim9 script level for unsupported namespaces.
+- `src/testdir/test_vim9_expr.vim:4491-4493` distinguishes E1001 in a `def`
+  from E121 at script level for unknown `v:` variables.
 - `src/testdir/test_vim9_expr.vim:4498-4499` distinguishes the long-name
   E1011/E117 pair and covers an ordinary missing function.
 

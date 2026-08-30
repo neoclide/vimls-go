@@ -1961,21 +1961,16 @@ func TestOfficialNamespaceDictionaryExpression(t *testing.T) {
 	}
 }
 
-func TestVim9UnsupportedNamespacesAndLongNames(t *testing.T) {
+func TestVim9NamespaceExpressionsAndLongNames(t *testing.T) {
 	longName := "Func" + strings.Repeat("x", 196)
 	validName := longName[:len(longName)-1]
 	source := "vim9script\necho a:somevar\necho l:somevar\necho x:somevar\necho " + longName + "\necho " + validName + "()\necho " + longName + "()\nvar after = 1\n"
 	file := Parse(source)
-	if len(file.Diagnostics) != 3 {
+	if len(file.Diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
-	for i, name := range []string{"a:somevar", "l:somevar", "x:somevar"} {
-		if file.Diagnostics[i].Code != "vim/E1075" || file.Diagnostics[i].Message != "Namespace not supported: "+name || file.Text(file.Diagnostics[i].Span) != name {
-			t.Fatalf("namespace diagnostic = %#v", file.Diagnostics[i])
-		}
-	}
-	// The parser retains long direct call names. Vim9 script and def compilation
-	// use different errors for the same spelling, so analysis owns that context.
+	// Namespace and long-call diagnostics depend on whether the expression is
+	// evaluated at script level or compiled in a def, so analysis owns them.
 	if file.Commands[len(file.Commands)-1].Declaration == nil {
 		t.Fatalf("long-name recovery = %#v", file.Commands)
 	}
