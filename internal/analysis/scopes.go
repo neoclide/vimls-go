@@ -10,11 +10,14 @@ import (
 // FileAnalysis is the protocol-independent lexical information collected from
 // one syntax tree.  All spans are byte spans in File.Source.
 type FileAnalysis struct {
-	File            *syntax.File
-	Root            *Scope
-	Scopes          []*Scope
-	Declarations    []*Declaration
-	References      []*Reference
+	File         *syntax.File
+	Root         *Scope
+	Scopes       []*Scope
+	Declarations []*Declaration
+	References   []*Reference
+	// Diagnostics contains protocol-independent semantic diagnostics with byte
+	// spans in File.Source.
+	Diagnostics     []syntax.Diagnostic
 	expressionTypes map[*syntax.Expression]ValueType
 	commandScopes   map[*syntax.Command]*Scope
 	lambdaScopes    map[*syntax.Expression]*Scope
@@ -103,7 +106,84 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
 	inferTypes(result)
+	collectImmutableAssignmentDiagnostics(result, file.Commands, root)
+	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
+		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
+	})
 	return result
+}
+
+// collectImmutableAssignmentDiagnostics reports only direct Vim9 assignment to
+// a lexically resolved const/final name.  Other read-only declarations have
+// distinct Vim rules, and dynamic targets deliberately remain opaque here.
+func collectImmutableAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	if result == nil || result.File == nil {
+		return
+	}
+	for index := range commands {
+		command := &commands[index]
+		scope := result.commandScopes[command]
+		if scope == nil {
+			scope = parent
+		}
+		if command.Dialect == syntax.Vim9 && command.Declaration == nil {
+			for _, expression := range command.Expressions {
+				collectImmutableAssignmentExpressionDiagnostics(result, scope, expression)
+			}
+		}
+		if command.Embedded != nil {
+			collectImmutableAssignmentDiagnostics(result, command.Embedded.Commands, scope)
+		}
+	}
+}
+
+func collectImmutableAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression) {
+	if expression == nil || scope == nil {
+		return
+	}
+	if expression.Kind == syntax.ExpressionLambda {
+		lambdaScope := result.lambdaScopes[expression]
+		if lambdaScope == nil {
+			lambdaScope = scope
+		}
+		if expression.LambdaBody != nil {
+			collectImmutableAssignmentDiagnostics(result, expression.LambdaBody.Commands, lambdaScope)
+		}
+		for index, child := range expression.Children {
+			if index >= len(expression.Parameters) {
+				collectImmutableAssignmentExpressionDiagnostics(result, lambdaScope, child)
+			}
+		}
+		return
+	}
+	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && result.File.Text(expression.Operator) == "=" && len(expression.Children) >= 2 && expression.Children[1] != nil && expression.Children[1].Kind != syntax.ExpressionMissing {
+		target := expression.Children[0]
+		if target != nil && target.Kind == syntax.ExpressionIdentifier && !strings.Contains(target.Value, ":") && validNameSpan(result.File, target.Span) {
+			if declaration := resolve(scope, target.Value, target.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindConstant {
+				diagnostic := syntax.Diagnostic{Span: target.Span}
+				if scopeContainsDef(scope) {
+					diagnostic.Code = "vim/E1018"
+					diagnostic.Message = "Cannot assign to a constant: " + target.Value
+				} else {
+					diagnostic.Code = "vim/E46"
+					diagnostic.Message = "Cannot change read-only variable \"" + target.Value + "\""
+				}
+				result.Diagnostics = append(result.Diagnostics, diagnostic)
+			}
+		}
+	}
+	for _, child := range expression.Children {
+		collectImmutableAssignmentExpressionDiagnostics(result, scope, child)
+	}
+}
+
+func scopeContainsDef(scope *Scope) bool {
+	for current := scope; current != nil; current = current.Parent {
+		if current.Kind == syntax.BlockDef {
+			return true
+		}
+	}
+	return false
 }
 
 func collectOpaqueEnumDeclarations(result *FileAnalysis, commands []syntax.Command, blocks []syntax.Block) {

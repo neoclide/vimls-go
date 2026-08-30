@@ -634,8 +634,8 @@ func (s *Server) wakeAnalysisLocked() {
 }
 
 func (s *Server) analyzeDocument(documentURI string) {
-	analysis, ok := s.documents.BeginAnalysis(s.analysisContext, documentURI)
-	if !ok || analysis.Context.Err() != nil {
+	work, ok := s.documents.BeginAnalysis(s.analysisContext, documentURI)
+	if !ok || work.Context.Err() != nil {
 		return
 	}
 	target := s.TargetVersion()
@@ -643,30 +643,31 @@ func (s *Server) analyzeDocument(documentURI string) {
 		target, _ = ParseTargetVersion(MaximumTargetVersion)
 	}
 	var file *syntax.File
-	if analysis.Snapshot.ByteLen() > maxFileBytes {
+	if work.Snapshot.ByteLen() > maxFileBytes {
 		file = &syntax.File{
-			Source: analysis.Snapshot.Text(),
+			Source: work.Snapshot.Text(),
 			Diagnostics: []syntax.Diagnostic{{
 				Code: "vimls/file-too-large", Message: "file exceeds the 4 MiB analysis limit",
 			}},
 		}
 	} else {
-		file = syntax.Parse(analysis.Snapshot.Text())
+		file = syntax.Parse(work.Snapshot.Text())
 		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
+		file.Diagnostics = append(file.Diagnostics, analysis.Analyze(file).Diagnostics...)
 		if len(file.Diagnostics) > maxDiagnosticsPerDocument {
 			file.Diagnostics = append(file.Diagnostics[:maxDiagnosticsPerDocument-1], syntax.Diagnostic{
 				Code: "vimls/diagnostics-truncated", Message: "additional diagnostics were omitted",
 				Span: syntax.Span{Start: len(file.Source), End: len(file.Source)},
 			})
 		}
-		if analysis.Context.Err() != nil {
+		if work.Context.Err() != nil {
 			return
 		}
 	}
-	if analysis.Context.Err() != nil {
+	if work.Context.Err() != nil {
 		return
 	}
-	s.publishSyntax(analysis, file)
+	s.publishSyntax(work, file)
 }
 
 func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File) {
