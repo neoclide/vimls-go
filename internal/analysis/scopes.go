@@ -1617,6 +1617,9 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					collectOperatorDiagnostics(result, expression.LambdaBody.Commands, expressionScope)
 				}
 			}
+			if command.Dialect == syntax.Vim9 && expression.Kind == syntax.ExpressionMember {
+				appendClassMethodThroughObjectDiagnostic(result, expressionScope, expression)
+			}
 			if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) &&
 				!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 				builtin, arguments, ok := builtinCallArguments(result.File, expression)
@@ -3402,6 +3405,42 @@ func appendObjectMethodThroughClassDiagnostic(result *FileAnalysis, scope *Scope
 			}
 			return
 		}
+	}
+}
+
+func appendClassMethodThroughObjectDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || result.File.Text(member.Operator) != "." ||
+		member.Value == "" || strings.HasPrefix(member.Value, "_") {
+		return
+	}
+	receiver := member.Children[0]
+	if receiver.Kind == syntax.ExpressionIdentifier {
+		declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+		if declaration != nil && (declaration.Kind == SymbolKindClass || declaration.Kind == SymbolKindTypeAlias && result.classAliases[declaration.Name] != "") {
+			return
+		}
+	}
+	className := resolvedExpressionType(result, scope, receiver).Name
+	class := result.classes[className]
+	if class == nil || class.Aggregate == nil {
+		return
+	}
+	file := result.File
+	for _, memberIndex := range class.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		method := &file.Commands[memberIndex]
+		if method.Function == nil || file.Text(method.Function.Name) != member.Value {
+			continue
+		}
+		if commandHasModifier(method, "static") || strings.HasPrefix(member.Value, "new") {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1385", Message: `Class method "` + member.Value + `" accessible only using class "` + className + `"`, Span: memberNameSpan(file, member),
+			})
+		}
+		return
 	}
 }
 

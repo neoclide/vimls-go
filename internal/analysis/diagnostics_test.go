@@ -4647,6 +4647,38 @@ func TestAnalyzeE1432ConcreteMethodOverridesGenericMethod(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1385ClassMethodThroughObject(t *testing.T) {
+	for _, use := range []string{
+		"var a = A.new()\na.Foo()",
+		"def Test()\n  var a = A.new()\n  a.Foo\nenddef",
+	} {
+		source := "vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\n" + use + "\n"
+		file := syntax.Parse(source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E1385" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != `Class method "Foo" accessible only using class "A"` || file.Text(got[0].Span) != "Foo" {
+			t.Fatalf("use=%q E1385 diagnostics=%#v; syntax diagnostics=%#v", use, got, file.Diagnostics)
+		}
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\nA.Foo()\n",
+		"vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nvar a = A.new()\na.Foo()\n",
+		"vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\nvar a = A.new()\na._Foo()\n",
+		"vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nb.Foo()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1385" {
+				t.Fatalf("guard source reported E1385: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1386ObjectMethodThroughClass(t *testing.T) {
 	for _, use := range []string{"A.Foo()", "def Test()\n  A.Foo\nenddef"} {
 		source := "vim9script\nclass A\n  def Foo()\n  enddef\nendclass\n" + use + "\n"
