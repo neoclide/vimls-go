@@ -5077,6 +5077,52 @@ func TestAnalyzeE1229CompiledMemberAccessDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1232ExistsCompiledLiteralDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"official number", "vim9script\ndef Func()\n  var value = exists_compiled(10)\nenddef\n", "10"},
+		{"official identifier", "vim9script\ndef Func()\n  var value = exists_compiled(v:progname)\nenddef\n", "v:progname"},
+		{"string expression", "vim9script\ndef Func()\n  var value = exists_compiled('a' .. 'b')\nenddef\n", "'a' .. 'b'"},
+		{"parenthesized literal", "vim9script\ndef Func()\n  var value = exists_compiled(('feature'))\nenddef\n", "('feature')"},
+		{"missing argument", "vim9script\ndef Func()\n  var value = exists_compiled()\nenddef\n", "exists_compiled"},
+		{"extra argument", "vim9script\ndef Func()\n  var value = exists_compiled('feature', 'extra')\nenddef\n", "'extra'"},
+		{"method form", "vim9script\ndef Func()\n  var value = 'feature'->exists_compiled()\nenddef\n", "exists_compiled"},
+		{"block lambda", "vim9script\nvar Callback = () => {\n  var value = exists_compiled(10)\n}\n", "10"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1232" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1232 source retained E1013: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == "vim/E118" || diagnostic.Code == "vim/E119" {
+					t.Fatalf("E1232 source retained an arity diagnostic: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Argument of exists_compiled() must be a literal string" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1232 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []string{
+		"vim9script\ndef Func()\n  var single = exists_compiled('feature')\n  var double = exists_compiled(\"feature\")\nenddef\n",
+		"vim9script\nvar value = exists_compiled(10)\n",
+		"vim9script\ndef Func()\n  legacy echo exists_compiled(10)\nenddef\n",
+	} {
+		result := Analyze(syntax.Parse(test))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1232" {
+				t.Fatalf("guard unexpectedly received E1232: %#v", result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},

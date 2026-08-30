@@ -4847,7 +4847,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	case syntax.ExpressionCall:
-		collectBuiltinCallArityDiagnostic(result, file, expression, dialect)
+		collectBuiltinCallArityDiagnostic(result, file, expression, scope, dialect)
 		appendUnqualifiedClassMethodDiagnostic(result, file, expression, scope, dialect)
 		appendAbstractSuperMethodDiagnostic(result, file, expression, scope, dialect)
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
@@ -5968,7 +5968,29 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		seen[expression] = true
 		if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
 			builtin, arguments, builtinCall := builtinCallArguments(result.File, expression)
-			if builtinCall && dialect == syntax.Vim9 && builtin.Name == "flatten" {
+			callee := (*syntax.Expression)(nil)
+			if len(expression.Children) > 0 {
+				callee = expression.Children[0]
+			}
+			if builtinCall && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && builtin.Name == "exists_compiled" {
+				explicit := arguments
+				switch {
+				case expression.Value == "" && callee != nil && callee.Kind == syntax.ExpressionMember:
+					explicit = expression.Children[1:]
+				case expression.Value == "->" && callee != nil && callee.Kind == syntax.ExpressionIdentifier && len(expression.Children) >= 2:
+					explicit = expression.Children[2:]
+				}
+				valid := len(explicit) == 1 && explicit[0] != nil && explicit[0].Kind == syntax.ExpressionString
+				if !valid {
+					_, span := functionDiagnosticTarget(result.File, callee)
+					if len(explicit) == 1 && explicit[0] != nil {
+						span = explicit[0].Span
+					} else if len(explicit) > 1 && explicit[1] != nil {
+						span = explicit[1].Span
+					}
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1232", Message: "Argument of exists_compiled() must be a literal string", Span: span})
+				}
+			} else if builtinCall && dialect == syntax.Vim9 && builtin.Name == "flatten" {
 				// E1158 is emitted while walking the call and owns this builtin
 				// before its ordinary arity and argument-type checks.
 			} else if builtinCall && (dialect == syntax.Vim9 || builtin.Name == "len") {
@@ -6613,7 +6635,7 @@ func functionDiagnosticTarget(file *syntax.File, expression *syntax.Expression) 
 // callable is a statically named builtin. A method receiver counts as one
 // argument, and any explicit arguments required before the receiver must still
 // be present. Scoped and dynamically named calls deliberately remain unknown.
-func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression, dialect syntax.Dialect) {
+func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
 	if result == nil || file == nil || call == nil || len(call.Children) == 0 || expressionContainsMissing(call) || syntaxDiagnosticTouchesCall(file.Diagnostics, call.Span) {
 		return
 	}
@@ -6647,6 +6669,11 @@ func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, 
 	}
 	builtin, ok := vimdata.LookupFunction(name)
 	if !ok {
+		return
+	}
+	if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && builtin.Name == "exists_compiled" {
+		// The Vim9 compiler handles this builtin before ordinary call arity
+		// checks and reports E1232 for every non-literal argument form.
 		return
 	}
 	_, span := functionDiagnosticTarget(file, callee)

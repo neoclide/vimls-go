@@ -2183,6 +2183,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   `set_nextcmd()` consumers.
 - `src/errors.h:3160-3161` defines the exact E1231 message.
 
+## Literal argument required for `exists_compiled()`: E1232
+
+Analysis reports E1232 for `exists_compiled()` calls compiled inside a `def`
+or block lambda unless the parentheses contain exactly one direct single- or
+double-quoted string literal. Number and identifier arguments, concatenations,
+parenthesized strings, missing or extra arguments, and method forms retain the
+compiler's E1232 path. The diagnostic selects the invalid argument, the extra
+argument for an overfull call, or the function name when no direct argument is
+present.
+
+This special compile-time check owns the call before ordinary builtin arity and
+argument-type checks, so it does not cascade to E118, E119, or E1013. Top-level
+and one-command `legacy` calls are excluded because they reach the runtime
+E1233 path instead.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:1071-1074` expects E1232 for Number and
+  identifier arguments compiled in a `def`, while the same top-level forms use
+  E1233.
+- `src/vim9expr.c:1310-1357` handles `exists_compiled()` before ordinary call
+  compilation and accepts only a directly parsed quoted string followed by the
+  closing parenthesis.
+- `runtime/doc/builtin.txt:2972-2984` requires a literal string and limits the
+  builtin to `:def` functions.
+- `src/errors.h:3163-3164` defines the exact E1232 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
