@@ -87,9 +87,11 @@ Deliver:
 Current implementation has same-file scopes, declarations, references,
 shadowing, conservative type facts, document symbols, target-version
 diagnostics, direct Vim9 `const`/`final` reassignment diagnostics, and arity
-diagnostics for direct statically named Vim built-in calls. User-function arity,
-full Vim9 type checking, import resolution, and the remaining mutation forms are
-still M4 work; unresolved or dynamic targets remain unknown.
+diagnostics for direct statically named Vim built-in calls. It also has
+graph-backed Vim9 import resolution and the statically provable `E1048`,
+`E1049`, `E1053`, and import-alias `E1054` diagnostics. User-function arity,
+full Vim9 type checking, and the remaining mutation forms are still M4 work;
+unresolved or dynamic targets remain unknown.
 
 Exit gate: diagnostics match golden results and safe Vim oracle cases; unknown
 dynamic behavior does not create false undefined/type errors; stale diagnostics
@@ -97,9 +99,10 @@ cannot publish after a newer edit or close.
 
 Current status (2026-08-30): lexical scopes, declarations, references,
 shadowing, mutability metadata, conservative type inference, bounded syntax
-diagnostics, and target-version diagnostics are implemented. M4 remains open
-for statically provable user-function arity diagnostics and broader type
-diagnostics; unresolved dynamic legacy names remain intentionally unknown.
+diagnostics, target-version diagnostics, and graph-backed static import
+diagnostics are implemented. M4 remains open for statically provable
+user-function arity diagnostics and broader type diagnostics; unresolved
+dynamic names remain intentionally unknown.
 
 ## M5: navigation and workspace index
 
@@ -114,15 +117,17 @@ Exit gate: cross-file legacy autoload and Vim9 import navigation works through a
 subprocess LSP test; duplicate, missing, cyclic, symlinked, and out-of-root files
 have deterministic behavior; canceled index work leaves no partial state.
 
-Current status (2026-08-29): the document navigation surface, workspace symbol
+Current status (2026-08-30): the document navigation surface, workspace symbol
 index, open-document overlay, client-driven watched-file refresh, static Vim9
-import navigation, and legacy/Vim9 autoload navigation are implemented. The
-server dynamically registers Vim file watchers when the client supports it;
-client-provided or locally discovered runtimepath roots and later custom
-notification replacements are included in the canonical, bounded index. The
-subprocess test covers watcher registration, runtimepath and workspace symbols,
-plus cross-file definition and references. M5 remains open for multi-target
-builtin metadata, which is currently deferred.
+import navigation, and legacy/Vim9 autoload navigation are implemented. A
+directed import graph is published as immutable, revisioned snapshots alongside
+the index; it uses canonical identity, open-buffer overlays, and transitive
+reverse invalidation. The server dynamically registers Vim file watchers when
+the client supports it; client-provided or locally discovered runtimepath roots
+and later custom notification replacements are included in the canonical,
+bounded index. The subprocess test covers watcher registration, runtimepath and
+workspace symbols, plus cross-file definition and references. M5 remains open
+for multi-target builtin metadata, which is currently deferred.
 
 ## M6: completion and safe edits
 

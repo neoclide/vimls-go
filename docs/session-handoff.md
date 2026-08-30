@@ -6,9 +6,8 @@ tests remain the source of truth.
 
 ## Repository state
 
-- `main` is at `2e5707f` after `codex/navigation` was rebased onto the parser
-  work and fast-forwarded into the main worktree. Nothing was pushed.
-- Preserve the user-owned untracked `vim-lsp-errors.md`. It is the merged
+- `main` is at `cefc2ed`. Nothing was pushed.
+- Preserve the user-owned untracked `vim-lsp-pending-errors.md`. It is the merged
   static-error reference that replaces the earlier
   `vim-lsp-detectable-errors.md` and `vim9_compile_errors.md` files.
 - Vim 9.2.1015 source is `/Users/chemzqm/lib/vim` and is read-only for this
@@ -18,11 +17,13 @@ tests remain the source of truth.
 
 The latest integration commits are:
 
-- `d48242c` canonical workspace/runtime paths, safe scanning, and open-buffer
-  overlay fixes.
-- `4fcbe42` unknown-option warnings on assignment targets.
-- `6f86b44` deep comparison for generated builtin-function metadata tests.
-- `2e5707f` split the oversized server test suite by responsibility.
+- `e1c28c9` changed the Go module and internal imports to
+  `github.com/neoclide/vimls-go`.
+- `ed4449d` added the directed Vim9 import graph and server lifecycle wiring.
+- `976a3b6` kept unknown or unreadable import targets out of graph edges and
+  made reverse-dependent traversal transitive.
+- `6df66b5` is the user's agent-guide update and must be preserved.
+- `cefc2ed` added the statically provable import diagnostics described below.
 
 The navigation branch now provides async workspace indexing, static import and
 autoload resolution, navigation, rename, completion, structure, semantic-token
@@ -63,40 +64,42 @@ The missing work includes readonly `v:true`/`v:false`/`v:null`/`v:none`
 assignments and statically resolvable nested def/lambda arity. Exclude only
 truly dynamic or test-harness-global variants.
 
-## Next implementation: directed import graph
+## Completed import dependency milestone
 
-Build the Vim9 import dependency model before implementing graph-dependent
-diagnostics. It is a directed graph, never a dependency tree.
+The Vim9 import dependency model is a directed graph, never a dependency tree.
+Published snapshots are immutable. A Vim9 file or workspace state change
+creates a newer graph revision; callers never mutate a published snapshot.
 
-Required graph behavior:
+Implemented behavior:
 
-- Canonical realpath is node identity.
-- Store importer-to-imported edges and reverse edges. Shared dependencies,
-  diamonds, and cycles are valid.
-- Replacing a file atomically replaces all of its outgoing edges and matching
-  reverse edges. Removal leaves no stale reverse edge.
-- Expose an immutable snapshot with a monotonically increasing revision and a
-  ready state. Graph revision participates in stale-diagnostic rejection.
-- Retain enough static import metadata for diagnostics, including importer,
-  target, path span, alias, and autoload form.
-- Dynamic imports, missing files, unreadable files, and unresolved paths remain
-  unknown; they do not invent dependency edges or block graph readiness.
-- Build the graph during the existing asynchronous workspace pass after
-  `initialized`; do not block stdio. Build index and graph off-thread and swap
-  the consistent pair atomically.
-- Open-buffer snapshots override disk. A changed target reanalyzes reverse
-  dependents. The server owns no filesystem watcher; it only registers watchers
-  with the client.
+- Canonical realpath is node identity. Importer-to-imported and reverse edges
+  support shared dependencies, diamonds, and cycles.
+- Replacing or removing a file atomically updates both edge directions. Reverse
+  dependent traversal is transitive and deterministic.
+- The asynchronous workspace pass builds the index and graph together and
+  swaps the consistent pair atomically. Open snapshots override disk content.
+- Static import facts are retained even when no edge can be proven. Dynamic,
+  missing, unreadable, unsafe, or unindexed targets do not invent edges or
+  block graph readiness.
+- Changes reanalyze all open reverse dependents. Graph revision participates in
+  stale-diagnostic rejection, including non-file documents.
+- Imports nested in `def` or `function` bodies do not create graph edges or
+  cross-file diagnostic cascades.
+- Static analysis now reports provable `E1048`, `E1049`, and `E1053` cases, plus
+  `E1054` when an import alias follows a conflicting script variable, `const`,
+  `final`, class, or type alias. Forward receivers, dynamic imports, and
+  deferred autoload member resolution remain conservative `unknown`.
 
-Existing syntax and index data should be reused: `syntax.Import` already keeps
-path/alias/autoload spans, `workspace.SymbolFact.Exported` records exports, and
-`ExternalReferenceImportMember` records module-member uses. Vim import syntax
-is `import {filename} [as {name}]` or `import autoload ...`; there is no
-JavaScript-style named import list.
+The focused workspace, analysis, and server selections passed with
+`-count=1 -timeout=3s`. Full tests, race, and vet were intentionally not run
+during this fast iteration.
 
-After the graph is stable, implement the graph-dependent compile diagnostics
-`E1048`, `E1049`, `E1053`, and the import-dependent parts of `E1054`. Keep them
-pending until then.
+## Next implementation
+
+Return to the remaining `false` entries in the official compile ledger. The
+next bounded slices are the statically provable `E46` readonly special-value
+assignments, followed by `E118`/`E119` user-function arity. Preserve dynamic
+calls and test-harness-global variants as `unknown` rather than guessing.
 
 ## Language contracts
 
@@ -133,11 +136,7 @@ pending until then.
 Recommended continuation order:
 
 1. Inspect `git status`, this handoff, and the compile ledger.
-2. Add focused graph tests for a chain, diamond, cycle, atomic replace/remove,
-   missing/dynamic import, realpath alias, revision, and ready state.
-3. Integrate the graph into the existing async workspace build and open-buffer
-   update path with focused server tests.
-4. Implement `E1048`, `E1049`, `E1053`, and applicable `E1054` cases.
-5. Continue the remaining `false` entries in the compile ledger in independent
-   syntax/analysis batches.
-6. Only after that, run the deferred full correctness and performance gates.
+2. Implement the provable `E46` special-value assignments with focused tests.
+3. Implement statically resolved `E118`/`E119` user-function arity cases.
+4. Continue remaining `false` ledger entries in independent analysis batches.
+5. Only after that, run the deferred full correctness and performance gates.

@@ -171,6 +171,32 @@ expressions, private or ambiguous items, missing files, unsafe symlink targets,
 and paths outside initialized workspace/runtimepath roots return empty results
 without executing Vim script or guessing runtime state.
 
+## Implemented import dependency analysis
+
+Statically resolved Vim9 imports form a directed workspace graph keyed by
+canonical realpath. Published graph snapshots are immutable; an import-relevant
+file or workspace change publishes a newer revision. The graph stores both
+edge directions, supports shared dependencies and cycles, and computes
+transitive reverse dependents so a changed target reanalyzes affected open
+importers. The asynchronous workspace build swaps its index and graph as one
+consistent pair, and open document snapshots override disk content.
+
+Only readable, safely indexed targets produce dependency edges. Static import
+facts with dynamic, missing, unreadable, unsafe, or unindexed targets are kept
+without inventing an edge. Imports nested in `def` or `function` bodies likewise
+produce no cross-file relationship or diagnostic cascade. The graph revision
+is part of stale-diagnostic rejection, so a result computed from an older graph
+cannot publish after the import state changes.
+
+Import diagnostics currently cover provable `E1048` missing members, `E1049`
+non-exported members, `E1053` ordinary static load failures and runtimepath
+autoload load failures, and `E1054` when an import alias follows a conflicting
+script variable, constant, final, class, or type alias. Dynamic imports,
+unbound forward receivers, relative or absolute autoload load failures, and
+deferred autoload member access inside callable bodies remain conservative
+`unknown` where Vim's result depends on runtime state or uses another error
+contract.
+
 Static Vim9 import paths and direct `:source` filenames become document links
 only when the workspace resolver finds one safe regular file. Completion is
 contextual and bounded: command positions use the pinned Ex command table,
