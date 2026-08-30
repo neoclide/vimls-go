@@ -1259,6 +1259,30 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   indexed `redir` target.
 - `src/errors.h:2935-2936` defines the exact E1141 message.
 
+## Invalid object comparison: E1153
+
+Analysis reports E1153 when both operands of a Vim9 comparison are statically
+known Object values and the operator is `>`, `>=`, `<`, `<=`, `=~`, or `!~`.
+The diagnostic uses Vim's exact `Invalid operation for object` message and
+selects the comparison operator. It applies at script level and in compiled
+`def` and lambda bodies, including a `def` retained in a Legacy-root file.
+
+Object equality and identity comparisons with `==`, `!=`, `is`, and `isnot`
+remain valid. Mixed Object and non-Object comparisons keep their existing type
+mismatch diagnostics, while direct Class, Enum, and Typealias declarations are
+not treated as Object values. Unknown and incomplete operands remain
+conservative. Invalid comparisons of Bool, Special, List, and Blob values keep
+their existing E1072 behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9instr.c:489-577` selects the Object comparison instruction and
+  rejects every operation except equality, inequality, and identity.
+- `src/testdir/test_vim9_class.vim:1580-1608` accepts Object equality and
+  identity at script and compiled scope, then expects E1153 for all six invalid
+  operators in both contexts.
+- `src/errors.h:2959-2960` defines the exact E1153 message template.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

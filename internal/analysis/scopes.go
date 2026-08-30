@@ -2577,6 +2577,13 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					if comparison && (base != "is" && base != "isnot" || base == op) {
 						leftExpression, rightExpression := expression.Children[0], expression.Children[1]
 						left, right := result.TypeOf(leftExpression), result.TypeOf(rightExpression)
+						objectOperation := base == ">" || base == ">=" || base == "<" || base == "<=" || base == "=~" || base == "!~"
+						if objectOperation && objectComparisonValue(result, expressionScope, leftExpression) && objectComparisonValue(result, expressionScope, rightExpression) {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E1153", Message: "Invalid operation for object", Span: expression.Operator,
+							})
+							return
+						}
 						leftKind, rightKind := builtinValueTypeKind(left), builtinValueTypeKind(right)
 						invalid := false
 						if !isUnknownType(left) && !isUnknownType(right) && leftKind != 0 && rightKind != 0 && left.Name != "void" && right.Name != "void" {
@@ -2936,6 +2943,24 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			collectOperatorDiagnostics(result, command.Embedded.Commands, scope)
 		}
 	}
+}
+
+func objectComparisonValue(result *FileAnalysis, scope *Scope, expression *syntax.Expression) bool {
+	if result == nil || scope == nil || expression == nil {
+		return false
+	}
+	candidate := expression
+	for candidate.Kind == syntax.ExpressionParenthesized && len(candidate.Children) == 1 {
+		candidate = candidate.Children[0]
+	}
+	if candidate.Kind == syntax.ExpressionIdentifier {
+		if declaration := resolve(scope, candidate.Value, candidate.Span.Start, false, nil); declaration != nil &&
+			(declaration.Kind == SymbolKindClass || declaration.Kind == SymbolKindEnum || declaration.Kind == SymbolKindTypeAlias) {
+			return false
+		}
+	}
+	typ := resolvedExpressionType(result, scope, expression)
+	return typ.Name == "object" || result.classes[typ.Name] != nil
 }
 
 func objectCompoundAssignment(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (*syntax.Expression, bool) {

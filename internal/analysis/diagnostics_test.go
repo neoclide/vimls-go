@@ -1718,6 +1718,72 @@ func TestAnalyzeIndexableAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeObjectComparisonDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name: "Vim9 script all object operations",
+			source: "vim9script\nclass Item\nendclass\nvar left = Item.new()\nvar right = Item.new()\n" +
+				"var one = left > right\nvar two = left >= right\nvar three = left < right\nvar four = left <= right\nvar five = left =~ right\nvar six = left !~ right\n",
+			want: []string{">", ">=", "<", "<=", "=~", "!~"},
+		},
+		{
+			name: "compiled def all object operations",
+			source: "vim9script\nclass Item\nendclass\ndef Func()\n  var left = Item.new()\n  var right = Item.new()\n" +
+				"  var one = left > right\n  var two = left >= right\n  var three = left < right\n  var four = left <= right\n  var five = left =~ right\n  var six = left !~ right\nenddef\n",
+			want: []string{">", ">=", "<", "<=", "=~", "!~"},
+		},
+		{
+			name:   "Legacy-root def",
+			source: "class LegacyItem\nendclass\ndef LegacyDef()\n  var left = LegacyItem.new()\n  var right = LegacyItem.new()\n  var value = left > right\nenddef\n",
+			want:   []string{">"},
+		},
+		{
+			name:   "Vim9 lambda",
+			source: "vim9script\nclass LambdaItem\nendclass\nvar Callback = () => {\n  var left = LambdaItem.new()\n  var right = LambdaItem.new()\n  var value = left =~ right\n}\n",
+			want:   []string{"=~"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1153" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1153 diagnostics = %#v, want operators %#v; all diagnostics = %#v", got, test.want, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "Invalid operation for object" || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E1153[%d] = %#v on %q, want operator %q", index, diagnostic, file.Text(diagnostic.Span), test.want[index])
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"valid object comparisons", "vim9script\nclass Item\nendclass\ndef Func()\n  var left = Item.new()\n  var right = Item.new()\n  var one = left == right\n  var two = left != right\n  var three = left is right\n  var four = left isnot right\nenddef\n"},
+		{"mixed object and number", "vim9script\nclass Item\nendclass\ndef Func()\n  var object = Item.new()\n  var value = object > 1\nenddef\n"},
+		{"ordered Bool keeps E1072", "vim9script\nvar value = true > false\n"},
+		{"direct class enum and typealias declarations", "vim9script\nclass Item\nendclass\nenum Choice\n  First\nendenum\ntype Number = number\nvar one = Item > Item\nvar two = Choice > Choice\nvar three = Number > Number\n"},
+		{"unknown and incomplete", "vim9script\nvar one = Unknown > Other\nvar two = 1 >\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1153" {
+					t.Fatalf("source unexpectedly received E1153: %#v", diagnostic)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
