@@ -422,7 +422,7 @@ func parseSource(source string, initial Dialect) *File {
 	if truncateAfterDirectFinish(file, scannerDiagnostics) {
 		buildBlocks(file)
 	}
-	normalizeVim9SpacedCallDiagnostics(file)
+	normalizeVim9CallDiagnostics(file)
 	for index := range file.Commands {
 		if index+1 < len(file.Commands) {
 			_, closing := closingBlock(file, &file.Commands[index+1])
@@ -465,9 +465,22 @@ func parseSource(source string, initial Dialect) *File {
 	return file
 }
 
-func normalizeVim9SpacedCallDiagnostics(file *File) {
+func normalizeVim9CallDiagnostics(file *File) {
 	for diagnosticIndex := range file.Diagnostics {
 		diagnostic := &file.Diagnostics[diagnosticIndex]
+		if diagnostic.Code == "vimls/missing-argument" {
+			commandIndex := sort.Search(len(file.Commands), func(index int) bool {
+				return file.Commands[index].Name.Start >= diagnostic.Span.Start
+			})
+			if commandIndex < len(file.Commands) {
+				command := &file.Commands[commandIndex]
+				if command.Name == diagnostic.Span && command.Canonical == "call" && command.TypedName == "cal" && commandInsideBlock(command, file.Blocks, BlockDef) {
+					diagnostic.Code = "vim/E476"
+					diagnostic.Message = "Invalid command"
+				}
+			}
+			continue
+		}
 		if diagnostic.Code == "vim/E1068" && diagnostic.Message == "no white space allowed before function arguments" {
 			commandIndex := sort.Search(len(file.Commands), func(index int) bool {
 				return file.Commands[index].Argument.End >= diagnostic.Span.End
