@@ -365,6 +365,8 @@ parser split is therefore 927 migrated, zero ready, and 115 pending-fix.
 Commit `6fdfe8a` migrated two incomplete generic references inside call
 arguments, making the authoritative current split 929 migrated, zero ready,
 and 113 pending-fix.
+Commit `7456791` migrated the Vim9 trailing call-argument comma case, making
+the authoritative current split 930 migrated, zero ready, and 112 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -959,11 +961,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 90 | 71 | 0 | 19 |
+| `C-GENERIC` | 90 | 72 | 0 | 18 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **343** | **297** | **0** | **46** |
+| **Total** | **343** | **298** | **0** | **45** |
 
 ```text
 C-EXPR
@@ -1137,6 +1139,11 @@ from a stray top-level `)`: `function(Fn<number)` reports E1553 and
 `function(Fn<number,)` reports E1069 while retaining the outer call and partial
 type AST. A top-level incomplete generic reference keeps its E1554 line-local
 recovery.
+
+Commit `7456791` migrated `G:1394:30506/script`. A trailing comma after an
+ordinary Vim9 call argument now reports E1069 and retains an explicit missing
+argument node; the valid generic type list and enclosing member-call AST remain
+unchanged.
 
 Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
 references at command start now reach the expression parser without requiring
