@@ -1143,7 +1143,9 @@ recovery.
 Commit `7456791` migrated `G:1394:30506/script`. A trailing comma after an
 ordinary Vim9 call argument now reports E1069 and retains an explicit missing
 argument node; the valid generic type list and enclosing member-call AST remain
-unchanged.
+unchanged. Commit `e228d76` keeps the different comma in
+`function(Fn<number,)` owned by the incomplete generic list, preventing the
+outer call from reporting the same E1069 twice.
 
 Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
 references at command start now reach the expression parser without requiring
