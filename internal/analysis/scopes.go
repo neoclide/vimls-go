@@ -384,9 +384,11 @@ func assignmentExpressionMismatch(result *FileAnalysis, expected ValueType, expr
 					return expression.Span, result.TypeOf(expression), true
 				}
 				for index, child := range expression.Children {
-					member := expected.Arguments[index]
+					var member ValueType
 					if expected.Variadic && index >= fixed {
 						member = indexedType(expected.Arguments[len(expected.Arguments)-1])
+					} else {
+						member = expected.Arguments[index]
 					}
 					if span, actual, mismatch := assignmentExpressionMismatch(result, member, child); mismatch {
 						return span, actual, true

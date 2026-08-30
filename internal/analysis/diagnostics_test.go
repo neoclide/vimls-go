@@ -88,6 +88,18 @@ func TestAnalyzeTypeMismatchDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMalformedVariadicTupleDoesNotPanic(t *testing.T) {
+	source := "vim9script\nvar t: tuple<number, ...number> = (1, 2, 3)\n"
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	for _, diagnostic := range append(file.Diagnostics, result.Diagnostics...) {
+		if diagnostic.Code == "vim/E1539" {
+			return
+		}
+	}
+	t.Fatalf("diagnostics = %#v, want E1539", append(file.Diagnostics, result.Diagnostics...))
+}
+
 func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
