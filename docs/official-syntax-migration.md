@@ -369,6 +369,9 @@ Commit `7456791` migrated the Vim9 trailing call-argument comma case, making
 the authoritative current split 930 migrated, zero ready, and 112 pending-fix.
 Commit `f6d3c44` migrated four Vim9 type-alias lexical validation cases, making
 the authoritative current split 934 migrated, zero ready, and 108 pending-fix.
+Commit `42c0ee1` migrated twelve Vim9 `:disassemble` generic command-tail
+cases, making the authoritative current split 946 migrated, zero ready, and 96
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -963,11 +966,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 90 | 76 | 0 | 14 |
+| `C-GENERIC` | 90 | 88 | 0 | 2 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **343** | **302** | **0** | **41** |
+| **Total** | **343** | **314** | **0** | **29** |
 
 ```text
 C-EXPR
@@ -1157,6 +1160,15 @@ Vim's lexical validation order: an ASCII-uppercase name, whitespace after the
 name, and whitespace after `=` are checked before type diagnostics. The parser
 still retains every safe name, assignment, and type node, and malformed
 same-line separators remain opaque without hiding the next physical command.
+
+Commit `42c0ee1` migrated E1554 at
+`G:{2087:45368,2099:45711,2105:45860,2226:48986,2244:49426,2254:49642,2354:52131,2364:52374,2374:52597}/script`
+and E1555 at `G:{2145:46759,2304:50718,2424:53708}/script`. Vim9
+`:disassemble` now parses only command tails recognized as generic function
+references or calls, retaining simple and member target AST. Ordinary function
+names, effective-legacy commands, separators, and comments keep their existing
+opaque Ex-command behavior; symbol-dependent generic errors remain outside
+syntax analysis.
 
 Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
 references at command start now reach the expression parser without requiring
