@@ -2476,6 +2476,11 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		command.boundaryExpression = nil
 		return
 	}
+	if command.Dialect == Vim9 && command.Canonical == "match" {
+		if diagnoseVim9MatchArgument(file, command) {
+			return
+		}
+	}
 	if findPatternCommand(command.Canonical) {
 		if boundary := command.boundaryExpression; boundary != nil {
 			file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
@@ -2950,6 +2955,54 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		}
 	}
+}
+
+// diagnoseVim9MatchArgument validates the small, command-specific grammar of
+// :match.  Unlike pattern commands, :match has an optional group name and a
+// special "none" form; its regexp must still be consumed with Vim's delimiter
+// rules so a delimiter in a collection or escaped sequence is not mistaken for
+// the end of the pattern.
+func diagnoseVim9MatchArgument(file *File, command *Command) bool {
+	start, end := command.Argument.Start, command.Argument.End
+	position := skipSpace(file.Source, start, end)
+	if position >= end || file.Source[position] == '#' {
+		return false
+	}
+	wordEnd := position
+	for wordEnd < end && file.Source[wordEnd] > ' ' {
+		wordEnd++
+	}
+	if strings.EqualFold(file.Source[position:wordEnd], "none") {
+		next := skipSpace(file.Source, wordEnd, end)
+		if next >= end || file.Source[next] == '#' {
+			return false
+		}
+	}
+	patternStart := skipSpace(file.Source, wordEnd, end)
+	if patternStart >= end || file.Source[patternStart] == '#' {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E475", Message: "Invalid argument", Span: command.Argument})
+		return true
+	}
+	delimiter := file.Source[patternStart]
+	if (delimiter >= 'A' && delimiter <= 'Z') || (delimiter >= 'a' && delimiter <= 'z') {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E475", Message: "Invalid argument", Span: command.Argument})
+		return true
+	}
+	closing := scanGlobalRegexpEnd(file.Source, patternStart+1, end, delimiter)
+	if closing < 0 {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E475", Message: "Invalid argument", Span: command.Argument})
+		return true
+	}
+	tail := skipSpace(file.Source, closing+1, end)
+	if tail < end && file.Source[tail] != '#' {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E488", Message: "Trailing characters", Span: Span{Start: tail, End: end}})
+		return true
+	}
+	if tail < end && file.Source[tail] == '#' && tail == closing+1 {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E488", Message: "Trailing characters", Span: Span{Start: tail, End: end}})
+		return true
+	}
+	return false
 }
 
 // Vim reports a top-level Vim9 object type with multiple arguments as
