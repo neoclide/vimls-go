@@ -61,7 +61,7 @@ func TestOfficialCompileFilterMatchesErrorCodesExactly(t *testing.T) {
 }
 
 func TestOfficialVimCompileInventory(t *testing.T) {
-	statuses := officialCompileSupportedCodes()
+	statuses := officialCompileCodeStatuses()
 	for code, reason := range officialCompileStaticAnalysisExcludedCodes {
 		if reason == "" {
 			t.Fatalf("static-analysis exclusion %s has no reason", code)
@@ -137,7 +137,7 @@ func TestOfficialVimCompileFailureTriage(t *testing.T) {
 }
 
 func TestOfficialVimCompileFailures(t *testing.T) {
-	supported := officialCompileSupportedCodes()
+	supported := officialCompileCodeStatuses()
 	include := func(testCase officialCompileCase) bool {
 		if !supported[testCase.Code] {
 			return false
@@ -157,220 +157,55 @@ func TestOfficialVimCompileFailures(t *testing.T) {
 	}
 }
 
-func officialCompileSupportedCodes() map[string]bool {
-	// True means focused Go tests cover the static rule and the pinned
-	// representatives produce the expected diagnostic. False is an explicit
-	// pending item. Errors outside static analysis remain in the exclusion map.
-	return map[string]bool{
-		"vim/E15":   true,
-		"vim/E16":   true,
-		"vim/E107":  true,
-		"vim/E109":  true,
-		"vim/E110":  true,
-		"vim/E111":  true,
-		"vim/E114":  true,
-		"vim/E115":  true,
-		"vim/E170":  true,
-		"vim/E171":  true,
-		"vim/E274":  true,
-		"vim/E354":  true,
-		"vim/E481":  true,
-		"vim/E580":  true,
-		"vim/E581":  true,
-		"vim/E582":  true,
-		"vim/E583":  true,
-		"vim/E584":  true,
-		"vim/E586":  true,
-		"vim/E587":  true,
-		"vim/E588":  true,
-		"vim/E600":  true,
-		"vim/E602":  true,
-		"vim/E603":  true,
-		"vim/E606":  true,
-		"vim/E607":  true,
-		"vim/E690":  true,
-		"vim/E696":  true,
-		"vim/E697":  true,
-		"vim/E720":  true,
-		"vim/E722":  true,
-		"vim/E723":  true,
-		"vim/E973":  true,
-		"vim/E1001": true,
-		"vim/E1002": true,
-		"vim/E1004": true,
-		"vim/E1005": true,
-		"vim/E1006": true,
-		"vim/E1007": true,
-		"vim/E1008": true,
-		"vim/E1009": true,
-		"vim/E1010": true,
-		"vim/E1012": true,
-		"vim/E1013": true,
-		"vim/E1016": true,
-		"vim/E1018": true,
-		"vim/E1019": true,
-		"vim/E1020": true,
-		"vim/E1021": true,
-		"vim/E1022": true,
-		"vim/E1025": true,
-		"vim/E1026": true,
-		"vim/E1031": true,
-		"vim/E1032": true,
-		"vim/E1033": true,
-		"vim/E1034": true,
-		"vim/E1035": true,
-		"vim/E1036": true,
-		"vim/E1038": true,
-		"vim/E1050": true,
-		"vim/E1051": true,
-		"vim/E1052": true,
-		"vim/E1059": true,
-		"vim/E1065": true,
-		"vim/E1066": true,
-		"vim/E1067": true,
-		"vim/E1068": true,
-		"vim/E1069": true,
-		"vim/E1080": true,
-		"vim/E1082": true,
-		"vim/E1083": true,
-		"vim/E1087": true,
-		"vim/E1097": true,
-		"vim/E1100": true,
-		"vim/E1104": true,
-		"vim/E1123": true,
-		"vim/E1125": true,
-		"vim/E1126": true,
-		"vim/E1127": true,
-		"vim/E1139": true,
-		"vim/E1143": true,
-		"vim/E1144": true,
-		"vim/E1145": true,
-		"vim/E1157": true,
-		"vim/E1170": true,
-		"vim/E1171": true,
-		"vim/E1172": true,
-		"vim/E1174": true,
-		"vim/E1176": true,
-		"vim/E1180": true,
-		"vim/E1185": true,
-		"vim/E1202": true,
-		"vim/E1206": true,
-		"vim/E1241": true,
-		"vim/E1242": true,
-		"vim/E1278": true,
-		"vim/E1279": true,
-		"vim/E1539": true,
+// Completed codes have focused Go coverage. Pending codes are statically
+// analyzable Vim compile errors that still need implementation or test review.
+const officialCompileCompletedCodes = `
+E15 E16 E107 E109 E110 E111 E114 E115 E170 E171 E274 E354
+E481 E580 E581 E582 E583 E584 E586 E587 E588 E600 E602 E603
+E606 E607 E690 E696 E697 E720 E722 E723 E973 E1001 E1002 E1004
+E1005 E1006 E1007 E1008 E1009 E1010 E1012 E1013 E1016 E1018 E1019 E1020
+E1021 E1022 E1025 E1026 E1031 E1032 E1033 E1034 E1035 E1036 E1038 E1050
+E1051 E1052 E1059 E1065 E1066 E1067 E1068 E1069 E1080 E1082 E1083 E1087
+E1097 E1100 E1104 E1123 E1125 E1126 E1127 E1139 E1143 E1144 E1145 E1157
+E1170 E1171 E1172 E1174 E1176 E1180 E1185 E1202 E1206 E1241 E1242 E1278
+E1279 E1539
+`
 
-		// Present in the pinned static corpus but not fully supported yet.
-		"vim/E46":   false,
-		"vim/E113":  false,
-		"vim/E116":  false,
-		"vim/E117":  false,
-		"vim/E118":  false,
-		"vim/E119":  false,
-		"vim/E121":  false,
-		"vim/E155":  false,
-		"vim/E176":  false,
-		"vim/E260":  false,
-		"vim/E464":  false,
-		"vim/E475":  false,
-		"vim/E476":  false,
-		"vim/E488":  false,
-		"vim/E492":  false,
-		"vim/E611":  false,
-		"vim/E689":  false,
-		"vim/E701":  false,
-		"vim/E703":  false,
-		"vim/E704":  false,
-		"vim/E716":  false,
-		"vim/E721":  false,
-		"vim/E728":  false,
-		"vim/E729":  false,
-		"vim/E730":  false,
-		"vim/E731":  false,
-		"vim/E734":  false,
-		"vim/E745":  false,
-		"vim/E804":  false,
-		"vim/E805":  false,
-		"vim/E806":  false,
-		"vim/E896":  false,
-		"vim/E908":  false,
-		"vim/E974":  false,
-		"vim/E976":  false,
-		"vim/E996":  false,
-		"vim/E1011": false,
-		"vim/E1017": false,
-		"vim/E1023": false,
-		"vim/E1024": false,
-		"vim/E1027": false,
-		"vim/E1030": false,
-		"vim/E1041": false,
-		"vim/E1062": false,
-		"vim/E1072": false,
-		"vim/E1073": false,
-		"vim/E1075": false,
-		"vim/E1085": false,
-		"vim/E1089": false,
-		"vim/E1092": false,
-		"vim/E1093": false,
-		"vim/E1094": false,
-		"vim/E1095": false,
-		"vim/E1101": false,
-		"vim/E1105": false,
-		"vim/E1106": false,
-		"vim/E1107": false,
-		"vim/E1117": false,
-		"vim/E1135": false,
-		"vim/E1138": false,
-		"vim/E1141": false,
-		"vim/E1158": false,
-		"vim/E1163": false,
-		"vim/E1165": false,
-		"vim/E1166": false,
-		"vim/E1167": false,
-		"vim/E1177": false,
-		"vim/E1178": false,
-		"vim/E1181": false,
-		"vim/E1190": false,
-		"vim/E1207": false,
-		"vim/E1210": false,
-		"vim/E1211": false,
-		"vim/E1212": false,
-		"vim/E1216": false,
-		"vim/E1217": false,
-		"vim/E1218": false,
-		"vim/E1219": false,
-		"vim/E1220": false,
-		"vim/E1221": false,
-		"vim/E1222": false,
-		"vim/E1223": false,
-		"vim/E1224": false,
-		"vim/E1225": false,
-		"vim/E1226": false,
-		"vim/E1228": false,
-		"vim/E1229": false,
-		"vim/E1232": false,
-		"vim/E1233": false,
-		"vim/E1235": false,
-		"vim/E1236": false,
-		"vim/E1238": false,
-		"vim/E1251": false,
-		"vim/E1253": false,
-		"vim/E1254": false,
-		"vim/E1256": false,
-		"vim/E1301": false,
-		"vim/E1306": false,
-		"vim/E1307": false,
-		"vim/E1330": false,
-		"vim/E1353": false,
-		"vim/E1528": false,
-		"vim/E1529": false,
-		"vim/E1530": false,
-		"vim/E1531": false,
-		"vim/E1532": false,
-		"vim/E1533": false,
-		"vim/E1535": false,
+const officialCompilePendingCodes = `
+E46 E113 E116 E117 E118 E119 E121 E155 E176 E260 E464 E475
+E476 E488 E492 E611 E689 E701 E703 E704 E716 E721 E728 E729
+E730 E731 E734 E745 E804 E805 E806 E896 E908 E974 E976 E996
+E1003 E1011 E1015 E1017 E1023 E1024 E1027 E1030 E1037 E1039 E1040 E1041
+E1042 E1043 E1044 E1047 E1048 E1049 E1053 E1054 E1055 E1056 E1057 E1058
+E1060 E1062 E1071 E1072 E1073 E1074 E1075 E1077 E1081 E1085 E1088 E1089
+E1090 E1092 E1093 E1094 E1095 E1096 E1101 E1105 E1106 E1107 E1117 E1128
+E1135 E1138 E1141 E1151 E1152 E1153 E1158 E1160 E1163 E1164 E1165 E1166
+E1167 E1168 E1173 E1177 E1178 E1181 E1182 E1183 E1186 E1189 E1190 E1207
+E1208 E1210 E1211 E1212 E1213 E1216 E1217 E1218 E1219 E1220 E1221 E1222
+E1223 E1224 E1225 E1226 E1228 E1229 E1231 E1232 E1233 E1234 E1235 E1236
+E1238 E1247 E1251 E1253 E1254 E1256 E1257 E1258 E1259 E1260 E1261 E1262
+E1263 E1264 E1267 E1268 E1274 E1282 E1283 E1301 E1306 E1307 E1314 E1315
+E1316 E1317 E1318 E1325 E1326 E1328 E1329 E1330 E1331 E1332 E1333 E1335
+E1337 E1340 E1341 E1342 E1343 E1344 E1345 E1346 E1347 E1348 E1349 E1350
+E1351 E1352 E1353 E1354 E1355 E1356 E1357 E1358 E1359 E1360 E1363 E1365
+E1366 E1367 E1368 E1369 E1370 E1371 E1372 E1373 E1374 E1375 E1376 E1377
+E1378 E1379 E1380 E1381 E1382 E1383 E1384 E1385 E1386 E1387 E1388 E1389
+E1390 E1393 E1394 E1396 E1397 E1398 E1399 E1403 E1404 E1405 E1406 E1407
+E1408 E1409 E1410 E1411 E1414 E1415 E1416 E1417 E1418 E1419 E1420 E1421
+E1422 E1423 E1426 E1427 E1428 E1429 E1431 E1432 E1433 E1434 E1435 E1436
+E1526 E1527 E1528 E1529 E1530 E1531 E1532 E1533 E1535 E1536 E1537 E1538
+E1552 E1553 E1554 E1555 E1556 E1557 E1559 E1560 E1561 E1579
+`
+
+func officialCompileCodeStatuses() map[string]bool {
+	statuses := make(map[string]bool)
+	for _, code := range strings.Fields(officialCompileCompletedCodes) {
+		statuses["vim/"+code] = true
 	}
+	for _, code := range strings.Fields(officialCompilePendingCodes) {
+		statuses["vim/"+code] = false
+	}
+	return statuses
 }
 
 // These upstream cases depend on functions defined elsewhere in Vim's test
