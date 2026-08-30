@@ -13,6 +13,7 @@ func buildBlocks(file *File) {
 	var stack []int
 	enumValuesOpen := make(map[int]bool)
 	invalidFor := make(map[int]bool)
+	catchAll := make(map[int]bool)
 	recoveryBlocks := make(map[int]bool)
 	var multipleFinally map[int]bool
 	interfaceMethod := make(map[int]bool)
@@ -21,6 +22,20 @@ func buildBlocks(file *File) {
 	// state per definition so nested definitions do not affect one another.
 	var redirOpen map[int]bool
 	var classMethods map[int]uint8
+	recordCatch := func(blockIndex int, commandIndex int) {
+		command := &file.Commands[commandIndex]
+		if command.Dialect != Vim9 || command.Canonical != "catch" || command.detailsOpaque {
+			return
+		}
+		if catchAll[blockIndex] {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1033", Message: "Catch unreachable after catch-all", Span: command.Name,
+			})
+		}
+		if strings.TrimSpace(file.Text(command.Argument)) == "" {
+			catchAll[blockIndex] = true
+		}
+	}
 	for commandIndex := range file.Commands {
 		command := &file.Commands[commandIndex]
 		defBlock := -1
@@ -282,10 +297,12 @@ func buildBlocks(file *File) {
 						recoveryBlocks[blockIndex] = true
 					}
 				}
+				recordCatch(blockIndex, commandIndex)
 				file.Blocks[blockIndex].Branches = append(file.Blocks[blockIndex].Branches, commandIndex)
 				command.Block = blockIndex
 			} else if match := recoverableBranchBlock(file, stack, branchKind, invalidFor); match >= 0 {
 				blockIndex := stack[match]
+				recordCatch(blockIndex, commandIndex)
 				file.Blocks[blockIndex].Branches = append(file.Blocks[blockIndex].Branches, commandIndex)
 				command.Block = blockIndex
 				for _, recovered := range stack[match+1:] {

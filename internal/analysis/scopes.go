@@ -114,6 +114,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
 	inferTypes(result)
+	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
 	collectImmutableAssignmentDiagnostics(result, file.Commands, root)
@@ -121,6 +122,57 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+// collectVoidValueDiagnostics reports E1031 only for the Vim9 contexts where
+// a statically known void result must produce a value.  Effect-only calls are
+// valid, and unknown values remain deliberately conservative.
+func collectVoidValueDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.File == nil {
+		return
+	}
+	seen := make(map[syntax.Span]bool)
+	appendDiagnostic := func(expression *syntax.Expression) {
+		if expression == nil || expression.Span.End <= expression.Span.Start || seen[expression.Span] || result.TypeOf(expression).Name != "void" {
+			return
+		}
+		seen[expression.Span] = true
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1031", Message: "Cannot use void value", Span: expression.Span,
+		})
+	}
+	var walkExpression func(*syntax.Expression)
+	walkExpression = func(expression *syntax.Expression) {
+		if expression == nil {
+			return
+		}
+		if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 {
+			target, value := expression.Children[0], expression.Children[1]
+			if target != nil && (target.Kind == syntax.ExpressionList || target.Kind == syntax.ExpressionTuple) {
+				appendDiagnostic(value)
+			}
+		}
+		for _, child := range expression.Children {
+			walkExpression(child)
+		}
+	}
+	for index := range commands {
+		command := &commands[index]
+		if command.Dialect == syntax.Vim9 {
+			if declaration := command.Declaration; declaration != nil && declaration.Initializer != nil && declaration.ParsedType == nil {
+				appendDiagnostic(declaration.Initializer)
+			}
+			for _, expression := range command.Expressions {
+				walkExpression(expression)
+			}
+			for _, target := range command.Targets {
+				walkExpression(target)
+			}
+		}
+		if command.Embedded != nil {
+			collectVoidValueDiagnostics(result, command.Embedded.Commands)
+		}
+	}
 }
 
 func collectTypeMismatchDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
@@ -1473,6 +1525,14 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						expected.functionReturn = nil
 					}
 					if builtinArgumentMismatch(actual[index], expected) {
+						// indexof() requires a predicate returning bool.  A known
+						// void function is a value-use error at the callback itself,
+						// rather than a generic callback signature mismatch.  Keep
+						// def-local callback checks on their existing E1013 path.
+						if builtin.Name == "indexof" && index == 1 && !scopeContainsDef(scope) && actual[index].Name == "func" && actual[index].Return != nil && actual[index].Return.Name == "void" {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1031", Message: "Cannot use void value", Span: argument.Span})
+							continue
+						}
 						if !scopeUsesDefTypeRules(scope) {
 							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, argument.Span); ok {
 								result.Diagnostics = append(result.Diagnostics, diagnostic)

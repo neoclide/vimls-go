@@ -217,6 +217,53 @@ func TestVim9BareForRecovery(t *testing.T) {
 	}
 }
 
+func TestVim9E1033CatchAfterCatchAll(t *testing.T) {
+	for _, source := range []string{
+		"try\necho 0\ncatch\ncatch\nendtry\n",
+		"try\necho 0\ncatch\ncatch /later/\nendtry\n",
+	} {
+		file := (Vim9Parser{}).Parse(source)
+		wantSpan := file.Commands[3].Name
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1033" || file.Diagnostics[0].Message != "Catch unreachable after catch-all" || file.Diagnostics[0].Span != wantSpan {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		if len(file.Blocks) != 1 || len(file.Blocks[0].Branches) != 2 || file.Commands[file.Blocks[0].Branches[1]].Canonical != "catch" {
+			t.Fatalf("try block = %#v, commands = %#v", file.Blocks, file.Commands)
+		}
+	}
+}
+
+func TestVim9E1033PatternedCatchesRemainReachable(t *testing.T) {
+	file := (Vim9Parser{}).Parse("try\ncatch /first/\ncatch /second/\nendtry\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+}
+
+func TestVim9E1033CatchAllStateIsScopedToTryBlock(t *testing.T) {
+	file := (Vim9Parser{}).Parse("try\ncatch\n  try\n  catch /inner/\n  catch /inner-again/\n  endtry\nendtry\ntry\ncatch /later/\ncatch /later-again/\nendtry\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+}
+
+func TestVim9E1033CatchAfterCatchAllSurvivesRecovery(t *testing.T) {
+	file := (Vim9Parser{}).Parse("try\necho 0\ncatch\ncatch\n")
+	wantSpan := file.Commands[3].Name
+	var unreachable, missingEnd bool
+	for _, diagnostic := range file.Diagnostics {
+		switch diagnostic.Code {
+		case "vim/E1033":
+			unreachable = diagnostic.Message == "Catch unreachable after catch-all" && diagnostic.Span == wantSpan
+		case "vimls/missing-end":
+			missingEnd = true
+		}
+	}
+	if !unreachable || !missingEnd {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+}
+
 func TestVim9ClassMemberPrefixesExposeUnderlyingSyntax(t *testing.T) {
 	file := (Vim9Parser{}).Parse("abstract class Shape\n  public static final Count: number = 1\n  abstract def Draw()\nendclass\n")
 	if len(file.Diagnostics) != 0 || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockClass {

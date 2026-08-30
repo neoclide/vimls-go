@@ -339,7 +339,9 @@ func officialCompileSupportedCodes() map[string]bool {
 		"vim/E1022": true,
 		"vim/E1025": true,
 		"vim/E1026": true,
+		"vim/E1031": true,
 		"vim/E1032": true,
+		"vim/E1033": true,
 		"vim/E1038": true,
 		"vim/E1050": true,
 		"vim/E1059": true,
@@ -422,8 +424,6 @@ func officialCompileSupportedCodes() map[string]bool {
 		"vim/E1024": false,
 		"vim/E1027": false,
 		"vim/E1030": false,
-		"vim/E1031": false,
-		"vim/E1033": false,
 		"vim/E1034": false,
 		"vim/E1035": false,
 		"vim/E1036": false,
@@ -523,9 +523,9 @@ var officialCompileMigrationExclusions = map[string]string{
 	"src/testdir/test_vim9_func.vim:2903:66816": "depends on a test-defined global function",
 }
 
-// These compiler errors are intentionally outside pure language-server
-// analysis. Keep the reasons beside the official coverage gate so future
-// implementation batches do not treat them as missing syntax/type work.
+// These compiler errors are permanently outside pure language-server static
+// analysis. Keep the reasons beside the official coverage gate; they are not
+// pending syntax/type work and must not be added to the support inventory.
 var officialCompileStaticAnalysisExcludedCodes = map[string]string{
 	"vim/E1028": "compiler fallback after another compilation failure",
 	"vim/E1146": "internal command-dispatch fallback",

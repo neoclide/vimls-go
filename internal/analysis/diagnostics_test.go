@@ -51,6 +51,72 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		text   string
+	}{
+		{
+			name:   "inferred initializer",
+			source: "vim9script\ndef F()\n  var name = feedkeys(\"0\")\nenddef\n",
+			text:   "feedkeys(\"0\")",
+		},
+		{
+			name:   "destructuring assignment",
+			source: "vim9script\ndef F()\n  var v1: number\n  var v2: number\n  [v1, v2] = popup_clear()\nenddef\n",
+			text:   "popup_clear()",
+		},
+		{
+			name:   "indexof callback",
+			source: "vim9script\ndef TestIdx(k: number, v: dict<any>)\nenddef\nindexof([{color: \"red\"}], TestIdx)\n",
+			text:   "TestIdx",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1031" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use void value" || file.Text(got[0].Span) != test.text {
+				t.Fatalf("E1031 diagnostics = %#v, want one on %q; all diagnostics = %#v", got, test.text, result.Diagnostics)
+			}
+			if test.name == "indexof callback" {
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.text {
+						t.Fatalf("indexof void callback retained E1013: %#v", result.Diagnostics)
+					}
+				}
+			}
+		})
+	}
+
+	t.Run("guards", func(t *testing.T) {
+		source := "vim9script\ndef F()\n  feedkeys(\"0\")\n  var n: number = feedkeys(\"0\")\nenddef\n"
+		file := syntax.Parse(source)
+		result := Analyze(file)
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1031" {
+				t.Fatalf("effect-only or typed void use reported E1031: %#v", result.Diagnostics)
+			}
+		}
+		var typed []syntax.Diagnostic
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1012" {
+				typed = append(typed, diagnostic)
+			}
+		}
+		if len(typed) != 1 || file.Text(typed[0].Span) != "feedkeys(\"0\")" {
+			t.Fatalf("typed void initializer E1012 = %#v, want one on call; all diagnostics = %#v", typed, result.Diagnostics)
+		}
+	})
+}
+
 func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name     string
