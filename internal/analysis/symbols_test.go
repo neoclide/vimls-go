@@ -26,7 +26,7 @@ interface Runnable
   def execute()
 endinterface
 enum Color
-  Red
+  Red,
   Green
 endenum
 type Pair = tuple<number, string>
