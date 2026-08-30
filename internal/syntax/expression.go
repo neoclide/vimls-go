@@ -1424,6 +1424,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 	lambda := &Expression{Kind: ExpressionLambda, Operator: Span{Start: p.base + position, End: p.base + position + 2}}
 	parts := splitTopLevel(p.source, openOffset+1, closeOffset, ',')
 	commaDiagnostic := false
+	defaultDiagnostic := false
 	for index, part := range parts {
 		if index+1 < len(parts) && !commaDiagnostic {
 			comma := part.End
@@ -1449,12 +1450,36 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 		nameEnd := scanWord(p.source, start, end)
 		parameter.Name = Span{Start: p.base + start, End: p.base + nameEnd}
 		lambda.Children = append(lambda.Children, &Expression{Kind: ExpressionIdentifier, Span: parameter.Name, Value: p.source[start:nameEnd]})
-		typeColon := findTopLevelByte(p.source, nameEnd, end, ':')
+		equals := -1
+		if assignment := findAssignment(p.source[nameEnd:end]); assignment.Start >= 0 && assignment.End == assignment.Start+1 {
+			equals = nameEnd + assignment.Start
+		}
+		parameterHeadEnd := end
+		if equals >= 0 {
+			parameterHeadEnd = equals
+		}
+		typeColon := findTopLevelByte(p.source, nameEnd, parameterHeadEnd, ':')
 		if typeColon >= 0 {
 			typeStart := skipVim9LambdaSpace(p.source, typeColon+1)
-			typeEnd := trimExpressionSpaceEnd(p.source, typeStart, end)
+			typeEnd := trimExpressionSpaceEnd(p.source, typeStart, parameterHeadEnd)
 			parameter.TypeSpan = Span{Start: p.base + typeStart, End: p.base + typeEnd}
 			parameter.Type, p.diagnostics = appendTypeDiagnostics(p.diagnostics, p.source[typeStart:typeEnd], p.base+typeStart)
+		}
+		if equals >= 0 {
+			defaultStart := skipVim9LambdaSpace(p.source, equals+1)
+			parameter.DefaultSpan = Span{Start: p.base + defaultStart, End: p.base + end}
+			if defaultStart >= end {
+				parameter.Default = &Expression{Kind: ExpressionMissing, Span: parameter.DefaultSpan}
+			} else {
+				parameter.Default, p.diagnostics = appendExpressionDiagnostics(p.diagnostics, p.source[defaultStart:end], p.base+defaultStart, Vim9)
+			}
+			if !defaultDiagnostic {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E1172", Message: "cannot use default values in a lambda",
+					Span: Span{Start: p.base + equals, End: p.base + end},
+				})
+				defaultDiagnostic = true
+			}
 		}
 		lambda.Parameters = append(lambda.Parameters, parameter)
 	}
