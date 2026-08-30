@@ -490,6 +490,23 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 		scanLineEnd += open
 		delimiter := -1
 		roundDepth, squareDepth, braceDepth, angleDepth := 0, 0, 0, 0
+		// A closing delimiter belongs to an enclosing call only when that call
+		// opener is already unmatched before the generic reference.  Keep a
+		// top-level `echo Fn<number)` on the existing E1554 path.
+		enclosingDepth := 0
+		prefix := newExpressionLexerWithVersion(p.source, p.base, p.dialect, p.scriptVersion)
+		for prefix.current.kind != expressionEOF && prefix.current.span.Start < p.base+open {
+			switch prefix.current.text {
+			case "(":
+				enclosingDepth++
+			case ")":
+				if enclosingDepth > 0 {
+					enclosingDepth--
+				}
+			}
+			prefix.advance()
+		}
+		enclosingCall := enclosingDepth > 0
 		for index := open + 1; index < scanLineEnd; index++ {
 			switch p.source[index] {
 			case '<':
@@ -503,7 +520,7 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 			case ')':
 				if roundDepth > 0 {
 					roundDepth--
-				} else if squareDepth == 0 && braceDepth == 0 && angleDepth == 0 && skipExpressionSpace(p.source, open+1) == index {
+				} else if enclosingCall && squareDepth == 0 && braceDepth == 0 && angleDepth == 0 {
 					delimiter = index
 				}
 			case '[':
@@ -523,7 +540,7 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 				// list; only recognize the enclosing call's comma when its
 				// next argument starts with a list (the official incomplete
 				// form) or another delimiter.
-				if roundDepth == 0 && squareDepth == 0 && braceDepth == 0 && angleDepth == 0 {
+				if enclosingCall && roundDepth == 0 && squareDepth == 0 && braceDepth == 0 && angleDepth == 0 {
 					next := index + 1
 					for next < scanLineEnd && (p.source[next] == ' ' || p.source[next] == '\t') {
 						next++
@@ -544,8 +561,22 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 			}
 			if cursor.current.span.Start == p.base+delimiter {
 				p.lexer = cursor
-				types := p.parseGenericTypeArguments(open, delimiter, false)
-				if len(types) == 0 || types[len(types)-1].Kind != TypeMissing {
+				end := delimiter
+				if p.source[delimiter] == ',' {
+					next := delimiter + 1
+					for next < scanLineEnd && (p.source[next] == ' ' || p.source[next] == '\t') {
+						next++
+					}
+					if next < scanLineEnd && p.source[next] == ')' {
+						end++
+					}
+				}
+				diagnosticsBeforeTypes := len(p.diagnostics)
+				types := p.parseGenericTypeArguments(open, end, false)
+				if p.source[delimiter] == ')' && len(p.diagnostics) == diagnosticsBeforeTypes {
+					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1553", Message: "Missing comma after type in generic function", Span: Span{Start: p.base + delimiter, End: p.base + delimiter}})
+				}
+				if p.source[delimiter] == ',' && (len(types) == 0 || types[len(types)-1].Kind != TypeMissing) {
 					span := Span{Start: p.base + delimiter, End: p.base + delimiter}
 					types = append(types, &Type{Kind: TypeMissing, Span: span})
 					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1008", Message: "Missing <type> after generic function", Span: span})
