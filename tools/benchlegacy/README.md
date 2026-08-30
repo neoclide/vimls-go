@@ -45,6 +45,25 @@ add personal runtimepath or plugin roots to routine A/B commands. Those trees
 may be useful as occasional correctness smoke inputs, but their changing files
 and size make them unsuitable as the parser performance gate.
 
+### Group C checkpoint
+
+Commit `7564306` was measured on 2026-08-30 with Go 1.26.5 on an Intel
+i7-9750H. Each lane used the pinned `v9.2.1015` runtime root, two untimed
+warmups, `-benchtime=1x`, and five samples. Values below are medians; discovery
+and file I/O are outside the timed section.
+
+| Lane | GOMAXPROCS | Workers | Time | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| vimls-go common legacy | 1 | 1 | 631.146 ms | 395,261,312 | 1,204,983 |
+| go-vimlparser common legacy | 1 | 1 | 5.424 s | 5,566,981,080 | 37,342,334 |
+| vimls-go complete runtime | 4 | 1 | 1.238 s | 940,360,216 | 3,396,528 |
+| vimls-go complete runtime | 4 | 2 | 626.908 ms | 940,397,736 | 3,396,534 |
+| vimls-go complete runtime | 4 | 4 | 488.711 ms | 940,434,664 | 3,396,541 |
+
+On the common-success corpus, vimls-go was 8.6 times faster than
+go-vimlparser at this checkpoint. The complete-runtime lanes measure bounded
+workspace scheduling and are not compared with the reference parser.
+
 Discovery, file reads, line splitting, dialect classification, and the
 common-success intersection are outside the timed section. The reference lane
 does include `NewStringReader`, because it is required preprocessing and its
