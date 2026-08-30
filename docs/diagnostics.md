@@ -1927,6 +1927,27 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:2756-2768` documents the method-call diagnostic.
 - `src/errors.h:3130-3131` defines the exact E1218 message.
 
+## Float or Number required for builtin argument: E1219
+
+Analysis reports E1219 at Vim9 script level when an `arg_float_or_nr`
+builtin argument has a known incompatible type. The diagnostic selects the
+complete normalized argument and uses its one-based position, including
+method receivers and later arguments.
+
+Float, Number, and dynamically typed values are accepted. A mismatch in a
+compiled `def` or block lambda retains E1013, Legacy calls are not diagnosed,
+and strict Number-only checkers remain on their own diagnostic path.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:65-69` distinguishes compiled E1013 from
+  script-level E1219 for `abs()`.
+- `src/testdir/test_vim9_builtin.vim:1441-1517` covers first and later
+  Float-or-Number arguments across the math builtins.
+- `src/evalfunc.c:281-293` defines the `arg_float_or_nr` checker.
+- `runtime/doc/vim9.txt:2756-2769` documents the method-call diagnostic.
+- `src/errors.h:3133-3134` defines the exact E1219 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
