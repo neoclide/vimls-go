@@ -487,6 +487,9 @@ pending-fix.
 Commit `8ab022a` migrated the incomplete `cal` command inside a `def`. The
 authoritative syntax split is therefore 1018 migrated, zero ready, and 4
 pending-fix.
+Commit `27590ba` migrated the invalid nested-`def` head variant. The
+authoritative syntax split is therefore 1019 migrated, zero ready, and 3
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1562,7 +1565,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 169 migrated and 4 pending-fix. In the
+Group D contains 173 syntax variants: 170 migrated and 3 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1739,7 +1742,7 @@ E129 M mapping: 3734:85678/script
 E15 M mapping: 828:17920/def
 E16 M mapping: 3817:87815/def
 E476 M mapping: 4520:103771/script
-E476 P mapping: 1298:27807/script
+E476 M recovery: 1298:27807/script
 E476 M recovery: 781:16158/def
 E488 M ready: 971:20965/script,3746:85903/script
 E488 M ready: 1755:38517/{def|vim9-script}
@@ -1847,6 +1850,11 @@ Vim command shape.
 Commit `8ab022a` migrates `4520:103771/script`. The incomplete `cal`
 abbreviation remains a retained `call` command, but inside a compiled `def`
 its missing-argument recovery diagnostic is normalized to Vim's primary E476.
+
+Commit `27590ba` migrates `1298:27807/script`. An invalid nested `def +Func+`
+retains its Function.Name and E476 diagnostic but does not open a false inner
+block, so the real `enddef` closes the outer function and later commands remain
+at script scope.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
