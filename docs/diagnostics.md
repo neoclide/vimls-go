@@ -75,6 +75,30 @@ Representative source evidence, pinned to Vim 9.2.1015:
 - `runtime/doc/various.txt:610-620` documents variable redirection and the
   E1092 marker.
 
+## Function-local import: E1094
+
+Vim reports `E1094: Import can only be used in a script` when `:import` appears
+inside a `def` or `function`. Syntax analysis selects the command name and
+retains the Import AST for recovery and editor features, but does not cascade
+path, alias, or expression diagnostics from a command Vim rejects before
+parsing its import arguments.
+
+Top-level imports continue through the normal Vim9 path and alias rules. A
+Legacy-root file is not rejected solely for retaining an import command; the
+placement diagnostic applies only when the command is nested in a callable
+body.
+
+Representative source evidence, pinned to Vim 9.2.1015:
+
+- `src/vim9compile.c:4638-4645` emits E1094 immediately for CMD_import while
+  compiling a `def`.
+- `src/vim9script.c:646-656` applies the same error when `:import` executes
+  outside script sourcing.
+- `src/testdir/test_vim9_import.vim:499-506,549-556` covers misplaced imports
+  followed by assignment and call uses.
+- `runtime/doc/vim9.txt:3465-3472` documents the `function` and `def` scope
+  restriction.
+
 ## Unknown options: E113 and E518
 
 Vim uses different native error codes for an unknown option according to the

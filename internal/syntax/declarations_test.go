@@ -668,6 +668,79 @@ func TestImportForms(t *testing.T) {
 	}
 }
 
+func TestNestedImportDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		wantE1094    bool
+		malformed    bool
+	}{
+		{
+			name: "official def import before assignment",
+			source: "vim9script\ndef Func()\n  import './module.vim' as module\n" +
+				"  module = 1\nenddef\n",
+			wantE1094: true,
+		},
+		{
+			name: "official def import before call",
+			source: "vim9script\ndef Func()\n  import './module.vim' as module\n" +
+				"  module.Func()\nenddef\n",
+			wantE1094: true,
+		},
+		{
+			name: "legacy function body",
+			source: "function Legacy()\n  import './module.vim' as module\n" +
+				"endfunction\n",
+			wantE1094: true,
+		},
+		{
+			name: "malformed nested import retains AST only",
+			source: "vim9script\ndef Func()\n  import [] as 9module\n" +
+				"enddef\n",
+			wantE1094: true,
+			malformed: true,
+		},
+		{
+			name:   "top level import remains valid",
+			source: "vim9script\nimport './module.vim' as module\n",
+		},
+		{
+			name:   "legacy root import remains valid",
+			source: "import './module.vim' as module\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var imports []*Import
+			var e1094 []Diagnostic
+			for index := range file.Commands {
+				command := &file.Commands[index]
+				if command.Import != nil {
+					imports = append(imports, command.Import)
+				}
+			}
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1094" {
+					e1094 = append(e1094, diagnostic)
+				}
+			}
+			if len(imports) != 1 || imports[0].Path == nil || imports[0].PathSpan.Start >= imports[0].PathSpan.End {
+				t.Fatalf("import recovery = %#v", imports)
+			}
+			if test.wantE1094 {
+				if len(file.Diagnostics) != 1 || len(e1094) != 1 || e1094[0].Message != "Import can only be used in a script" || file.Text(e1094[0].Span) != "import" {
+					t.Fatalf("diagnostics = %#v", file.Diagnostics)
+				}
+			} else if len(e1094) != 0 || len(file.Diagnostics) != 0 {
+				t.Fatalf("top-level import diagnostics = %#v", file.Diagnostics)
+			}
+			if test.malformed && (imports[0].Path.Kind != ExpressionList || file.Text(imports[0].PathSpan) != "[]" || file.Text(imports[0].Alias) != "") {
+				t.Fatalf("malformed import AST = %#v", imports[0])
+			}
+		})
+	}
+}
+
 func TestVim9ImportInvalidAliasDiagnostics(t *testing.T) {
 	for _, alias := range []string{"9foo", "the#foo", "g:foo"} {
 		t.Run(alias, func(t *testing.T) {

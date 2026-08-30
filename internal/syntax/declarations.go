@@ -3,6 +3,8 @@ package syntax
 import "strings"
 
 func parseImport(file *File, command *Command) {
+	diagnosticStart := len(file.Diagnostics)
+	misplaced := commandInsideBlock(command, file.Blocks, BlockDef) || commandInsideBlock(command, file.Blocks, BlockFunction)
 	source := file.Text(command.Argument)
 	start := skipSpace(source, 0, len(source))
 	importNode := &Import{}
@@ -66,6 +68,11 @@ func parseImport(file *File, command *Command) {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1047", Message: "Syntax error in import: " + file.Text(invalidAlias), Span: invalidAlias})
 	}
 	command.Import = importNode
+	if misplaced {
+		file.Diagnostics = append(file.Diagnostics[:diagnosticStart], Diagnostic{
+			Code: "vim/E1094", Message: "Import can only be used in a script", Span: command.Name,
+		})
+	}
 }
 
 func invalidImportPath(expression *Expression) bool {
