@@ -481,7 +481,7 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 	}
 	if defSignature && parameter.Variadic && equals >= 0 {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
-			Code: "vim/E1160", Message: "cannot use a default for variable arguments",
+			Code: "vim/E1160", Message: "Cannot use a default for variable arguments",
 			Span: Span{Start: command.Argument.Start + equals, End: command.Argument.Start + end},
 		})
 	}

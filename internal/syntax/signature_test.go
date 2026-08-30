@@ -2,6 +2,60 @@ package syntax
 
 import "testing"
 
+func TestVim9VariadicDefaultDiagnostic(t *testing.T) {
+	tests := []struct {
+		name, source, span, defaultText string
+	}{
+		{"typed", "vim9script\ndef Func(...items: list<any> = [1])\nenddef\nvar after = 1\n", "= [1]", "[1]"},
+		{"untyped", "vim9script\ndef Func(...items = 'value')\nenddef\nvar after = 1\n", "= 'value'", "'value'"},
+		{"official multiline", "vim9script\ndef Func(  # some comment\n          ...items = []\n          )\n  echo items\nenddef\nvar after = 1\n", "= []", "[]"},
+		{"Legacy-root def", "def Func(...items: list<any> = [1])\nenddef\nlet after = 1\n", "= [1]", "[1]"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1160" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(file.Diagnostics) != 1 || len(got) != 1 {
+				t.Fatalf("diagnostics = %#v, want one E1160", file.Diagnostics)
+			}
+			if got[0].Message != "Cannot use a default for variable arguments" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1160 diagnostic = %#v on %q", got[0], file.Text(got[0].Span))
+			}
+			var function *Function
+			foundEnd := false
+			for index := range file.Commands {
+				if file.Commands[index].Function != nil {
+					function = file.Commands[index].Function
+				}
+				foundEnd = foundEnd || file.Commands[index].Canonical == "enddef"
+			}
+			if function == nil || len(function.Parameters) != 1 || !function.Parameters[0].Variadic ||
+				file.Text(function.Parameters[0].Name) != "items" || function.Parameters[0].Default == nil ||
+				file.Text(function.Parameters[0].DefaultSpan) != test.defaultText || file.Text(function.Parameters[0].Default.Span) != test.defaultText ||
+				!foundEnd || file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("parameter/recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Func(...items: list<any>)\nenddef\n",
+		"vim9script\ndef Func(item: number = 1)\nenddef\n",
+		"function Func(...)\nendfunction\n",
+		"vim9script\nvar Callback = (item: number = 1) => item\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1160") {
+			t.Fatalf("source unexpectedly received E1160: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9NestedUnsupportedFunctionNamespaces(t *testing.T) {
 	file := Parse("vim9script\ndef Outer()\n  def s:Nested()\n  enddef\n  def b:Nested()\n  enddef\nenddef\nvar after = 1\n")
 	if len(file.Diagnostics) != 2 {

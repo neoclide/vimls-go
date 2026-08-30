@@ -1309,6 +1309,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   prohibition with `vim9cmd` method syntax.
 - `src/errors.h:2971-2972` defines the exact E1158 message.
 
+## Variadic parameter default: E1160
+
+Syntax analysis reports E1160 when a Vim9 `def` variadic parameter has a
+default value. The diagnostic uses Vim's exact `Cannot use a default for
+variable arguments` message and selects the `=` through the retained default
+expression. Typed, inferred, multiline, and Legacy-root `def` signatures use
+the same rule.
+
+The parameter remains variadic and retains its name, optional type, default
+span, and parsed default expression so the function body, terminator, and
+following commands remain available during recovery. A valid variadic
+parameter without a default and an ordinary optional parameter remain valid.
+Legacy `function` arguments and Vim9 lambda defaults keep their separate
+grammar and diagnostic ownership.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/userfunc.c:279-317` recognizes a Vim9 variadic parameter and rejects an
+  immediately following default before continuing ordinary argument parsing.
+- `src/testdir/test_vim9_func.vim:2027-2034` expects E1160 for the official
+  multiline variadic-default signature.
+- `runtime/doc/vim9.txt:300-314` defines variable arguments as the final named
+  parameter with a List type and documents optional arguments separately.
+- `src/errors.h:2977-2978` defines the exact E1160 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
