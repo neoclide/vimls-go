@@ -381,6 +381,12 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			}
 		}
 		typ = ValueType{Name: "dict", Arguments: []ValueType{state.commonElementType(values, scope)}}
+	case syntax.ExpressionMember:
+		if len(expression.Children) > 0 {
+			typ = indexedType(state.infer(expression.Children[0], scope))
+		} else {
+			typ = unknown
+		}
 	case syntax.ExpressionTuple:
 		typ = ValueType{Name: "tuple", Arguments: state.childTypes(expression.Children, scope)}
 	case syntax.ExpressionParenthesized:
@@ -709,7 +715,7 @@ func convertSyntaxType(typeNode *syntax.Type) ValueType {
 	for _, argument := range typeNode.Arguments {
 		typ.Arguments = append(typ.Arguments, convertSyntaxType(argument))
 	}
-	if typeNode.Kind == syntax.TypeFunction && len(typeNode.Arguments) > 0 {
+	if (typeNode.Kind == syntax.TypeFunction || typeNode.Name == "tuple") && len(typeNode.Arguments) > 0 {
 		typ.Variadic = typeNode.Arguments[len(typeNode.Arguments)-1].Kind == syntax.TypeVariadic
 	}
 	if typeNode.ReturnType != nil {

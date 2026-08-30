@@ -108,12 +108,240 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
 	inferTypes(result)
+	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
 	collectImmutableAssignmentDiagnostics(result, file.Commands, root)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectTypeMismatchDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	if result == nil || result.File == nil {
+		return
+	}
+	for index := range commands {
+		command := &commands[index]
+		scope := result.commandScopes[command]
+		if scope == nil {
+			scope = parent
+		}
+		if command.Dialect == syntax.Vim9 {
+			collectDeclarationTypeMismatchDiagnostic(result, command)
+			collectForTypeMismatchDiagnostic(result, command)
+			if command.Declaration != nil {
+				collectAssignmentTypeMismatchDiagnostics(result, scope, command.Declaration.Initializer)
+			} else {
+				for _, expression := range command.Expressions {
+					collectAssignmentTypeMismatchDiagnostics(result, scope, expression)
+				}
+			}
+		}
+		if command.Embedded != nil {
+			collectTypeMismatchDiagnostics(result, command.Embedded.Commands, scope)
+		}
+	}
+}
+
+func collectDeclarationTypeMismatchDiagnostic(result *FileAnalysis, command *syntax.Command) {
+	declaration := command.Declaration
+	if declaration == nil || declaration.Initializer == nil || expressionContainsMissing(declaration.Initializer) {
+		return
+	}
+	for index, binding := range declaration.Bindings {
+		expected := convertSyntaxType(binding.ParsedType)
+		if isUnknownType(expected) {
+			continue
+		}
+		value := initializerElement(declaration.Initializer, index, len(declaration.Bindings))
+		appendTypeMismatchDiagnostic(result, expected, value)
+	}
+}
+
+func collectForTypeMismatchDiagnostic(result *FileAnalysis, command *syntax.Command) {
+	loop := command.For
+	if loop == nil || loop.Iterable == nil || expressionContainsMissing(loop.Iterable) {
+		return
+	}
+	actual := indexedType(result.TypeOf(loop.Iterable))
+	for _, binding := range loop.Bindings {
+		expected := convertSyntaxType(binding.ParsedType)
+		if isUnknownType(expected) || assignmentTypesCompatible(expected, actual) {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1012", Message: "Type mismatch; expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: loop.Iterable.Span,
+		})
+		return
+	}
+}
+
+func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression) {
+	if expression == nil {
+		return
+	}
+	if expression.Kind == syntax.ExpressionLambda {
+		if expression.LambdaBody != nil {
+			lambdaScope := result.lambdaScopes[expression]
+			if lambdaScope == nil {
+				lambdaScope = scope
+			}
+			collectTypeMismatchDiagnostics(result, expression.LambdaBody.Commands, lambdaScope)
+		}
+		for index, child := range expression.Children {
+			if index >= len(expression.Parameters) {
+				collectAssignmentTypeMismatchDiagnostics(result, scope, child)
+			}
+		}
+		return
+	}
+	if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+		if expected := assignmentTargetType(result, scope, expression.Children[0]); !isUnknownType(expected) {
+			appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
+		}
+	}
+	for _, child := range expression.Children {
+		collectAssignmentTypeMismatchDiagnostics(result, scope, child)
+	}
+}
+
+func assignmentTargetType(result *FileAnalysis, scope *Scope, target *syntax.Expression) ValueType {
+	if result == nil || target == nil {
+		return UnknownValueType
+	}
+	switch target.Kind {
+	case syntax.ExpressionIdentifier:
+		return resolvedExpressionType(result, scope, target)
+	case syntax.ExpressionIndex, syntax.ExpressionMember:
+		if len(target.Children) > 0 {
+			return indexedType(resolvedExpressionType(result, scope, target.Children[0]))
+		}
+	case syntax.ExpressionSlice:
+		if len(target.Children) > 0 {
+			return resolvedExpressionType(result, scope, target.Children[0])
+		}
+	}
+	return UnknownValueType
+}
+
+func resolvedExpressionType(result *FileAnalysis, scope *Scope, expression *syntax.Expression) ValueType {
+	if result == nil || expression == nil {
+		return UnknownValueType
+	}
+	if typ := result.TypeOf(expression); !isUnknownType(typ) {
+		return typ
+	}
+	if expression.Kind == syntax.ExpressionIdentifier {
+		if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil {
+			return declaration.Type
+		}
+	}
+	if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionMember) && len(expression.Children) > 0 {
+		return indexedType(resolvedExpressionType(result, scope, expression.Children[0]))
+	}
+	return UnknownValueType
+}
+
+func appendTypeMismatchDiagnostic(result *FileAnalysis, expected ValueType, expression *syntax.Expression) {
+	span, actual, mismatch := assignmentExpressionMismatch(result, expected, expression)
+	if !mismatch {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1012", Message: "Type mismatch; expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: span,
+	})
+}
+
+func assignmentExpressionMismatch(result *FileAnalysis, expected ValueType, expression *syntax.Expression) (syntax.Span, ValueType, bool) {
+	if result == nil || expression == nil || expressionContainsMissing(expression) || isUnknownType(expected) {
+		return syntax.Span{}, UnknownValueType, false
+	}
+	if len(expected.Arguments) > 0 {
+		switch expected.Name {
+		case "list":
+			if expression.Kind == syntax.ExpressionList {
+				for _, child := range expression.Children {
+					if span, actual, mismatch := assignmentExpressionMismatch(result, expected.Arguments[0], child); mismatch {
+						return span, actual, true
+					}
+				}
+				return syntax.Span{}, UnknownValueType, false
+			}
+		case "dict":
+			if expression.Kind == syntax.ExpressionDictionary {
+				for index := 1; index < len(expression.Children); index += 2 {
+					if span, actual, mismatch := assignmentExpressionMismatch(result, expected.Arguments[0], expression.Children[index]); mismatch {
+						return span, actual, true
+					}
+				}
+				return syntax.Span{}, UnknownValueType, false
+			}
+		case "tuple":
+			if expression.Kind == syntax.ExpressionTuple {
+				fixed := len(expected.Arguments)
+				if expected.Variadic {
+					fixed--
+				}
+				if len(expression.Children) < fixed || !expected.Variadic && len(expression.Children) != fixed {
+					return expression.Span, result.TypeOf(expression), true
+				}
+				for index, child := range expression.Children {
+					member := expected.Arguments[index]
+					if expected.Variadic && index >= fixed {
+						member = indexedType(expected.Arguments[len(expected.Arguments)-1])
+					}
+					if span, actual, mismatch := assignmentExpressionMismatch(result, member, child); mismatch {
+						return span, actual, true
+					}
+				}
+				return syntax.Span{}, UnknownValueType, false
+			}
+		}
+	}
+	actual := result.TypeOf(expression)
+	if assignmentTypesCompatible(expected, actual) {
+		return syntax.Span{}, actual, false
+	}
+	return expression.Span, actual, true
+}
+
+func assignmentTypesCompatible(expected, actual ValueType) bool {
+	if isUnknownType(expected) || isUnknownType(actual) {
+		return true
+	}
+	if !knownAssignmentType(expected.Name) || !knownAssignmentType(actual.Name) {
+		return true
+	}
+	if expected.Name == "float" && actual.Name == "number" {
+		return true
+	}
+	if expected.Name != actual.Name {
+		return false
+	}
+	if expected.Name == "func" && expected.ArgumentCountKnown && actual.ArgumentCountKnown && !expected.Variadic && !actual.Variadic && len(expected.Arguments) != len(actual.Arguments) {
+		return false
+	}
+	if len(expected.Arguments) > 0 && len(actual.Arguments) > 0 {
+		if len(expected.Arguments) != len(actual.Arguments) {
+			return false
+		}
+		for index := range expected.Arguments {
+			if !assignmentTypesCompatible(expected.Arguments[index], actual.Arguments[index]) {
+				return false
+			}
+		}
+	}
+	return expected.Return == nil || actual.Return == nil || assignmentTypesCompatible(*expected.Return, *actual.Return)
+}
+
+func knownAssignmentType(name string) bool {
+	switch name {
+	case "blob", "bool", "channel", "class", "dict", "enum", "float", "func", "job", "list", "number", "object", "partial", "special", "string", "tuple", "typealias", "void":
+		return true
+	default:
+		return false
+	}
 }
 
 // collectImmutableAssignmentDiagnostics reports only direct Vim9 assignment to
