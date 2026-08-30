@@ -136,8 +136,30 @@ func TestOfficialVimCompileStaticAnalysisExclusions(t *testing.T) {
 		if reason == "" {
 			t.Fatalf("static-analysis exclusion %s has no reason", code)
 		}
-		if supported[code] {
-			t.Fatalf("static-analysis exclusion %s is also marked supported", code)
+		if _, tracked := supported[code]; tracked {
+			t.Fatalf("static-analysis exclusion %s is also in the support inventory", code)
+		}
+	}
+}
+
+func TestOfficialVimCompileSupportInventory(t *testing.T) {
+	statuses := officialCompileSupportedCodes()
+	want := make(map[string]bool)
+	for _, record := range readOfficialCompileCases(t).Records {
+		for _, variant := range record.Cases {
+			code := variant.ExpectedCode
+			if code == "" || officialCompileStaticAnalysisExcludedCodes[code] != "" {
+				continue
+			}
+			want[code] = true
+			if _, ok := statuses[code]; !ok {
+				t.Errorf("compile code %s is missing from the support inventory", code)
+			}
+		}
+	}
+	for code := range statuses {
+		if !want[code] {
+			t.Errorf("support inventory code %s has no pinned compile case", code)
 		}
 	}
 }
@@ -228,7 +250,13 @@ func TestOfficialVimCompileFailureTriage(t *testing.T) {
 
 func TestOfficialVimCompileFailures(t *testing.T) {
 	supported := officialCompileSupportedCodes()
-	if len(supported) == 0 {
+	enabled := 0
+	for _, value := range supported {
+		if value {
+			enabled++
+		}
+	}
+	if enabled == 0 {
 		t.Skip("no official compile diagnostic family has representative coverage")
 	}
 	seen := make(map[string]int, len(supported))
@@ -244,8 +272,8 @@ func TestOfficialVimCompileFailures(t *testing.T) {
 		seen[variant.ExpectedCode]++
 	}
 	if strings.TrimSpace(*officialCompileCaseFilter) == "" {
-		for code := range supported {
-			if seen[code] == 0 {
+		for code, value := range supported {
+			if value && seen[code] == 0 {
 				t.Fatalf("supported compile code %s has no pinned official case", code)
 			}
 		}
@@ -255,8 +283,9 @@ func TestOfficialVimCompileFailures(t *testing.T) {
 }
 
 func officialCompileSupportedCodes() map[string]bool {
-	// A code is added after focused Go tests cover its static rule and the pinned
-	// self-contained representatives below produce the expected diagnostic.
+	// True means focused Go tests cover the static rule and the pinned
+	// representatives produce the expected diagnostic. False is an explicit
+	// pending item. Errors outside static analysis remain in the exclusion map.
 	return map[string]bool{
 		"vim/E15":   true,
 		"vim/E16":   true,
@@ -347,6 +376,125 @@ func officialCompileSupportedCodes() map[string]bool {
 		"vim/E1278": true,
 		"vim/E1279": true,
 		"vim/E1539": true,
+
+		// Present in the pinned static corpus but not fully supported yet.
+		"vim/E46":   false,
+		"vim/E113":  false,
+		"vim/E116":  false,
+		"vim/E117":  false,
+		"vim/E118":  false,
+		"vim/E119":  false,
+		"vim/E121":  false,
+		"vim/E155":  false,
+		"vim/E176":  false,
+		"vim/E260":  false,
+		"vim/E464":  false,
+		"vim/E475":  false,
+		"vim/E476":  false,
+		"vim/E488":  false,
+		"vim/E492":  false,
+		"vim/E611":  false,
+		"vim/E689":  false,
+		"vim/E701":  false,
+		"vim/E703":  false,
+		"vim/E704":  false,
+		"vim/E716":  false,
+		"vim/E721":  false,
+		"vim/E728":  false,
+		"vim/E729":  false,
+		"vim/E730":  false,
+		"vim/E731":  false,
+		"vim/E734":  false,
+		"vim/E745":  false,
+		"vim/E804":  false,
+		"vim/E805":  false,
+		"vim/E806":  false,
+		"vim/E896":  false,
+		"vim/E908":  false,
+		"vim/E974":  false,
+		"vim/E976":  false,
+		"vim/E996":  false,
+		"vim/E1011": false,
+		"vim/E1017": false,
+		"vim/E1019": false,
+		"vim/E1020": false,
+		"vim/E1023": false,
+		"vim/E1024": false,
+		"vim/E1027": false,
+		"vim/E1030": false,
+		"vim/E1031": false,
+		"vim/E1033": false,
+		"vim/E1034": false,
+		"vim/E1035": false,
+		"vim/E1036": false,
+		"vim/E1041": false,
+		"vim/E1051": false,
+		"vim/E1052": false,
+		"vim/E1062": false,
+		"vim/E1072": false,
+		"vim/E1073": false,
+		"vim/E1075": false,
+		"vim/E1085": false,
+		"vim/E1089": false,
+		"vim/E1092": false,
+		"vim/E1093": false,
+		"vim/E1094": false,
+		"vim/E1095": false,
+		"vim/E1101": false,
+		"vim/E1105": false,
+		"vim/E1106": false,
+		"vim/E1107": false,
+		"vim/E1117": false,
+		"vim/E1135": false,
+		"vim/E1138": false,
+		"vim/E1141": false,
+		"vim/E1158": false,
+		"vim/E1163": false,
+		"vim/E1165": false,
+		"vim/E1166": false,
+		"vim/E1167": false,
+		"vim/E1177": false,
+		"vim/E1178": false,
+		"vim/E1181": false,
+		"vim/E1190": false,
+		"vim/E1207": false,
+		"vim/E1210": false,
+		"vim/E1211": false,
+		"vim/E1212": false,
+		"vim/E1216": false,
+		"vim/E1217": false,
+		"vim/E1218": false,
+		"vim/E1219": false,
+		"vim/E1220": false,
+		"vim/E1221": false,
+		"vim/E1222": false,
+		"vim/E1223": false,
+		"vim/E1224": false,
+		"vim/E1225": false,
+		"vim/E1226": false,
+		"vim/E1228": false,
+		"vim/E1229": false,
+		"vim/E1232": false,
+		"vim/E1233": false,
+		"vim/E1235": false,
+		"vim/E1236": false,
+		"vim/E1238": false,
+		"vim/E1251": false,
+		"vim/E1253": false,
+		"vim/E1254": false,
+		"vim/E1256": false,
+		"vim/E1301": false,
+		"vim/E1306": false,
+		"vim/E1307": false,
+		"vim/E1330": false,
+		"vim/E1353": false,
+		"vim/E1528": false,
+		"vim/E1529": false,
+		"vim/E1530": false,
+		"vim/E1531": false,
+		"vim/E1532": false,
+		"vim/E1533": false,
+		"vim/E1535": false,
 	}
 }
 
