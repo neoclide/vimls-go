@@ -5346,6 +5346,17 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E176", Message: "Invalid number of arguments", Span: argument.Span})
 						continue
 					}
+					if dialect == syntax.Vim9 && !scopeUsesDefTypeRules(scope) && (builtin.Name == "map" || builtin.Name == "filter" || builtin.Name == "foreach") &&
+						argument.Kind == syntax.ExpressionLambda && actual[index].Name == "func" && actual[index].ArgumentCountKnown && !actual[index].Variadic &&
+						len(actual[index].Arguments) < len(expected.functionArguments) {
+						difference := len(expected.functionArguments) - len(actual[index].Arguments)
+						message := "One argument too many"
+						if difference > 1 {
+							message = strconv.Itoa(difference) + " arguments too many"
+						}
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1106", Message: message, Span: argument.Span})
+						continue
+					}
 					if builtinArgumentMismatch(actual[index], expected) {
 						if extendMismatch >= 0 {
 							continue

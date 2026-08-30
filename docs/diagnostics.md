@@ -1074,6 +1074,36 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/testdir/test_vim9_typealias.vim:274-286` covers the Typealias
   interpolation precedence case.
 
+## Too many callback arguments: E1106
+
+Analysis reports E1106 at Vim9 script level when `map()`, `filter()`, or
+`foreach()` receives a direct Vim9 lambda that cannot accept both callback
+arguments supplied by the builtin: the index or key and the item value. A
+zero-slot lambda reports `2 arguments too many`; a one-slot lambda reports
+`One argument too many`. The diagnostic selects the complete lambda.
+
+This rule is deliberately limited to direct lambda arguments with statically
+known, non-variadic parameter lists. A two-slot lambda and a one-slot lambda
+with variadic rest are accepted. Stored or dynamically typed callbacks remain
+outside this direct-lambda rule: stored callbacks keep their existing general
+type-mismatch path, while dynamically typed callbacks remain unknown. A lambda
+declaring more than two slots is the opposite mismatch, not E1106.
+
+Context-specific errors remain separate. The same callback shapes in a
+compiled `def` use E176, `indexof()` retains its script-level E118 path, and
+Legacy-root expressions do not receive E1106.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:4397-4406` expects E176 in a `def`, then the
+  singular and plural E1106 messages for the equivalent Vim9 script lambdas.
+- `src/evalfunc.c:740-778` defines the two callback slots used by
+  `map()`/`filter()`-style builtins and their compiled argument-count check.
+- `src/vim9execute.c:585-612,6725-6742` emits the pluralized too-many and
+  too-few argument diagnostics when invoking compiled Vim9 callables.
+- `runtime/doc/builtin.txt:3683-3689,7114-7119` documents the two callback
+  arguments and the strict Vim9-lambda E1106 behavior.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

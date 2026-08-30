@@ -2926,6 +2926,86 @@ func TestAnalyzeBuiltinCallbackArityDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeVim9ScriptMapCallbackDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source       string
+		want               []struct{ message, text string }
+		wantE176, wantE118 int
+	}{
+		{
+			name: "official method callbacks",
+			source: "vim9script\n[0, 1, 2]->map(() => 123)\n" +
+				"[0, 1, 2]->map((_) => 123)\n",
+			want: []struct{ message, text string }{{"2 arguments too many", "() => 123"}, {"One argument too many", "(_) => 123"}},
+		},
+		{
+			name: "direct filter and foreach callbacks",
+			source: "vim9script\nfilter([1], () => true)\n" +
+				"foreach([1], (_) => 0)\n",
+			want: []struct{ message, text string }{{"2 arguments too many", "() => true"}, {"One argument too many", "(_) => 0"}},
+		},
+		{
+			name: "compiled def keeps E176",
+			source: "vim9script\ndef Compiled()\n  map([1], () => 0)\n" +
+				"  map([1], (_) => 0)\nenddef\n",
+			wantE176: 2,
+		},
+		{
+			name:     "indexof retains E118",
+			source:   "vim9script\nindexof([1], () => true)\n",
+			wantE118: 1,
+		},
+		{
+			name:   "Legacy-root lambda is excluded",
+			source: "call map([1], { -> 0 })\n",
+		},
+		{
+			name: "accepted and too-many Vim9 lambda shapes are excluded",
+			source: "vim9script\nmap([1], (index, value) => value)\n" +
+				"map([1], (index, ...rest) => rest[0])\nmap([1], (a, b, c) => a)\n",
+		},
+		{
+			name: "stored and any callbacks are excluded",
+			source: "vim9script\nvar Callback = () => 0\nmap([1], Callback)\n" +
+				"var Dynamic: any\nmap([1], Dynamic)\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			e176, e118 := 0, 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1106" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E176" {
+					e176++
+				}
+				if diagnostic.Code == "vim/E118" {
+					e118++
+				}
+				if diagnostic.Code == "vim/E1013" && len(test.want) > 0 {
+					t.Fatalf("E1106 source retained E1013: %#v", diagnostic)
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1106 diagnostics = %#v, want %#v; all diagnostics = %#v", got, test.want, result.Diagnostics)
+			}
+			if e176 != test.wantE176 || e118 != test.wantE118 {
+				t.Fatalf("guard diagnostics E176=%d E118=%d, want E176=%d E118=%d; all diagnostics = %#v", e176, e118, test.wantE176, test.wantE118, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				want := test.want[index]
+				if diagnostic.Message != want.message || file.Text(diagnostic.Span) != want.text {
+					t.Fatalf("E1106[%d] = %#v on %q, want %q on %q", index, diagnostic, file.Text(diagnostic.Span), want.message, want.text)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
