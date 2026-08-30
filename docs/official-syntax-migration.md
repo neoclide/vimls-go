@@ -464,6 +464,9 @@ Commit `87f805d` migrated the variadic-default variant. The authoritative
 syntax split is therefore 1000 migrated, zero ready, and 22 pending-fix.
 Commit `07b6abc` migrated both lambda-default variants. The authoritative
 syntax split is therefore 1002 migrated, zero ready, and 20 pending-fix.
+Commit `f4f2a44` migrated all six Vim9 function-name capitalization variants.
+The authoritative syntax split is therefore 1008 migrated, zero ready, and 14
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1539,7 +1542,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 153 migrated and 20 pending-fix. In the
+Group D contains 173 syntax variants: 159 migrated and 14 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1711,7 +1714,7 @@ E1172 M missing: 1626:35394/{def|vim9-script}
 E1173 M missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/script,2388:53495/script
 E125 M ready: 948:20577/script,955:20687/script
 E126 M mapping: 416:8808/script
-E1267 P missing: 99:2271/script,107:2406/script,1049:22663/script,1061:22873/script,1069:23011/script,1077:23147/script
+E1267 M missing: 99:2271/script,107:2406/script,1049:22663/script,1061:22873/script,1069:23011/script,1077:23147/script
 E129 P mapping: 3734:85678/script
 E15 M mapping: 828:17920/def
 E16 P mapping: 3817:87815/def
@@ -1787,6 +1790,11 @@ Commit `07b6abc` migrates `1626:35394/{def,vim9-script}`. A Vim9 lambda
 parameter default reports one E1172 while retaining its name, optional type,
 DefaultSpan, and parsed Default expression. The arrow, body, and following
 physical command remain available after recovery.
+
+Commit `f4f2a44` migrates the six E1267 variants. Vim9 script functions whose
+retained names begin with `_`, and `g:` names whose local component is not
+ASCII-capitalized, report E1267 without losing their signatures or blocks.
+Direct class methods keep Vim's distinct private-method `_Name` grammar.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
