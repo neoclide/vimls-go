@@ -993,6 +993,12 @@ func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bo
 		})
 		return
 	}
+	if !defRules && rhs.Kind == syntax.ExpressionTuple && !rest && got > expected {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1537", Message: "Less targets than Tuple items", Span: rhs.Span,
+		})
+		return
+	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1093", Message: "Expected " + strconv.Itoa(expected) + " items but got " + strconv.Itoa(got), Span: rhs.Span,
 	})

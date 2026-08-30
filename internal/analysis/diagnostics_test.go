@@ -3553,3 +3553,49 @@ func TestAnalyzeE1538MoreTargetsThanTupleItems(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1537LessTargetsThanTupleItems(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "declaration",
+			source: "vim9script\nvar [v1, v2] = ('a', 'b', 'c')\nvar after = 1\n",
+		},
+		{
+			name:   "assignment",
+			source: "vim9script\nvar v1: string\nvar v2: string\n[v1, v2] = ('a', 'b', 'c')\nvar after = 1\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1537" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Less targets than Tuple items" || file.Text(got[0].Span) != "('a', 'b', 'c')" {
+				t.Fatalf("E1537 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("next-line recovery = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  var [v1, v2] = ('a', 'b', 'c')\nenddef\n",
+		"vim9script\nvar [v1, v2] = ['a', 'b', 'c']\n",
+		"vim9script\nvar values: tuple<string, string, string>\nvar [v1, v2] = values\n",
+		"vim9script\nvar [v1; rest] = ('a', 'b', 'c')\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1537" {
+				t.Fatalf("guard source reported E1537: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
