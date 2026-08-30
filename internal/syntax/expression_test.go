@@ -807,7 +807,7 @@ func TestOfficialVim9InlineFunctionMissingHeredocEnd(t *testing.T) {
 }
 
 func TestVim9InlineFunctionCompleteHeredoc(t *testing.T) {
-	file := Parse("vim9script\nvar Func = (nr: number): int => {\n    var ll =<< ENDIT\n       nothing\n    ENDIT\n}\nvar after = 1\n")
+	file := Parse("vim9script\nvar Func = (nr: number): number => {\n    var ll =<< ENDIT\n       nothing\n    ENDIT\n}\nvar after = 1\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) < 2 || file.Commands[1].Declaration == nil {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}

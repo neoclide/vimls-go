@@ -118,6 +118,11 @@ func (p *typeParser) parseType() *Type {
 	node := &Type{Kind: TypeNamed, Span: p.span(start, p.offset), Name: name}
 	containerType := name == "list" || name == "dict" || name == "tuple" || name == "object"
 	singleMemberContainer := name == "list" || name == "dict" || name == "object"
+	if (p.offset >= len(p.source) || p.source[p.offset] != '<') && !isBuiltinTypeName(name) && !strings.Contains(name, ".") && !startsWithUppercase(name) {
+		p.diagnostics = append(p.diagnostics, Diagnostic{
+			Code: "vim/E1010", Message: "Type not recognized: " + name, Span: node.Span,
+		})
+	}
 	// Vim9 does not allow whitespace between a container type name and its
 	// type argument opener.  Whitespace inside the angle brackets is fine,
 	// and retaining the opener lets recovery consume the complete type.
@@ -374,6 +379,20 @@ func isKnownNonListType(node *Type) bool {
 	default:
 		return false
 	}
+}
+
+func isBuiltinTypeName(name string) bool {
+	switch name {
+	case "any", "blob", "bool", "channel", "dict", "float", "func", "job", "list", "number", "object", "string", "tuple", "void":
+		return true
+	default:
+		return false
+	}
+}
+
+func startsWithUppercase(name string) bool {
+	first, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(first)
 }
 
 func (p *typeParser) skipSpace() {

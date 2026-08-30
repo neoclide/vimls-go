@@ -1422,6 +1422,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 	}
 
 	lambda := &Expression{Kind: ExpressionLambda, Operator: Span{Start: p.base + position, End: p.base + position + 2}}
+	lambdaTypeDiagnosticsStart := len(p.diagnostics)
 	parts := splitTopLevel(p.source, openOffset+1, closeOffset, ',')
 	commaDiagnostic := false
 	defaultDiagnostic := false
@@ -1507,6 +1508,13 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 		blockStart := p.current().span.Start - p.base
 		blockEnd := findVim9LambdaBlockEnd(p.source, blockStart)
 		if blockEnd < 0 {
+			kept := p.diagnostics[:lambdaTypeDiagnosticsStart]
+			for _, diagnostic := range p.diagnostics[lambdaTypeDiagnosticsStart:] {
+				if diagnostic.Code != "vim/E1010" {
+					kept = append(kept, diagnostic)
+				}
+			}
+			p.diagnostics = kept
 			// A missing inline-function close must not turn the opening brace
 			// into a dictionary.  Parse the commands collected before an outer
 			// function boundary, retain the incomplete block, and leave the

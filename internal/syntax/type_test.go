@@ -31,6 +31,24 @@ func TestVim9TypeParserCoversContainersTuplesAndFunctions(t *testing.T) {
 	}
 }
 
+func TestVim9TypeParserRejectsUnknownLowercaseTypes(t *testing.T) {
+	for _, source := range []string{"int", "nothing", "list<nothing>"} {
+		t.Run(source, func(t *testing.T) {
+			typeNode, diagnostics := (Vim9TypeParser{}).Parse(source)
+			if typeNode == nil || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1010" {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+	for _, source := range []string{"number", "CustomType", "T", "module.CustomType"} {
+		t.Run(source, func(t *testing.T) {
+			if typeNode, diagnostics := (Vim9TypeParser{}).Parse(source); typeNode == nil || len(diagnostics) != 0 {
+				t.Fatalf("type = %#v, diagnostics = %#v", typeNode, diagnostics)
+			}
+		})
+	}
+}
+
 func TestVim9TypeParserRecoversFromIncompleteTypes(t *testing.T) {
 	typeNode, diagnostics := (Vim9TypeParser{}).Parse("list<dict<number>")
 	if typeNode == nil || len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1009" {
