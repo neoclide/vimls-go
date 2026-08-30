@@ -401,6 +401,9 @@ zero ready, and 74 pending-fix.
 Commit `372dfc2` migrated the attached Vim9 `catch` pattern-tail variant. The
 authoritative parser split is therefore 959 migrated, zero ready, and 73
 pending-fix.
+Commit `983bf00` migrated the three Ex pound-command tail variants. The
+authoritative parser split is therefore 962 migrated, zero ready, and 70
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -993,13 +996,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 106 | 100 | 0 | 6 |
+| `C-EXCMD` | 106 | 103 | 0 | 3 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **333** | **327** | **0** | **6** |
+| **Total** | **333** | **330** | **0** | **3** |
 
 ```text
 C-EXPR
@@ -1200,6 +1203,12 @@ now distinguishes an attached hash after a completed pattern from a
 whitespace-delimited Vim9 comment. The former remains owned by `catch` and
 reports E488; opaque or unterminated patterns still avoid secondary block
 diagnostics, and recovery resumes at the following physical line.
+
+Commit `983bf00` migrated `S:{3557:75701,3561:75787,3564:75852}/script`. A hash
+immediately following an explicit colon is parsed as the Ex pound command,
+while whitespace between the colon and hash still starts a Vim9 comment. The
+pound command now consumes its optional count and `l`, `p`, or `#` flags and
+reports E488 only for an unconsumed tail.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
