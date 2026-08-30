@@ -787,3 +787,26 @@ Representative source evidence:
 - `src/typval.c:1206-1250` rejects Blob-to-String conversion in both strict and
   non-strict paths.
 - `src/errors.h:2565-2566` defines the exact message.
+
+## Cannot lock an option: E996
+
+E996 is shared by several `const` and `final` targets. The option form means
+`Cannot lock an option`.
+
+Syntax analysis reports E996 when Legacy `const`, Vim9 `const`, or Vim9
+`final` targets an option such as `&filetype`. The option span is selected. A
+Vim9 `final &option` without an initializer keeps E996 priority instead of the
+generic E1125 `Final requires a value`; ordinary final declarations without a
+value remain E1125. Other E996 target messages are not inferred from this
+option rule.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_script.vim:267-272` distinguishes an ordinary final
+  declaration without a value from `final &option` in a compiled `def`.
+- `src/testdir/test_const.vim:277-282` covers Legacy `const` assignments to
+  environment, register, and scoped option targets.
+- `src/vim9compile.c:1498-1521` rejects `const` and `final` option destinations
+  before compiling an assignment, while `src/evalvars.c:1745-1764` implements
+  the runtime option path.
+- `src/errors.h:2617-2626` defines the E996 message family.

@@ -28,6 +28,56 @@ func TestVim9OptionDeclaration(t *testing.T) {
 	}
 }
 
+func TestCannotLockOptionDeclaration(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 final without assignment",
+			source: "vim9script\ndef F()\n  final &option\nenddef\n",
+			span:   "&option",
+		},
+		{
+			name:   "vim9 const assignment",
+			source: "vim9script\nconst &filetype = 'vim'\n",
+			span:   "&filetype",
+		},
+		{
+			name:   "legacy const assignment",
+			source: "const &filetype = 'vim'\n",
+			span:   "&filetype",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E996" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1125" {
+					t.Fatalf("option lock retained E1125: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot lock an option" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E996 on %q; all diagnostics = %#v", got, test.span, file.Diagnostics)
+			}
+		})
+	}
+
+	file := Parse("vim9script\ndef F()\n  final name\nenddef\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1125" {
+		t.Fatalf("ordinary final diagnostics = %#v", file.Diagnostics)
+	}
+
+	file = Parse("final &filetype = 'vim'\n")
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E996" {
+			t.Fatalf("Legacy cross-dialect final diagnostics = %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9DeclarationDiagnosticGuards(t *testing.T) {
 	file := Parse("vim9script\nvar truthful = 1\nconst nullValue = 2\n&tabstop = 4\nfinal &option\nlegacy let true = 1\n")
 	for _, diagnostic := range file.Diagnostics {

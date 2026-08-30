@@ -2990,6 +2990,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if assignment.Start < 0 {
 			diagnosticsStart := len(file.Diagnostics)
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
+			cannotLockOption := diagnoseCannotLockOption(file, command, declaration)
 			diagnoseVim9ScopeDeclaration(file, command, declaration, false)
 			diagnoseVim9IllegalDeclarationName(file, command, declaration)
 			diagnoseVim9ReservedDeclarationName(file, command, declaration)
@@ -2999,7 +3000,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			diagnoseInvalidClassDeclaration(file, command, declaration)
 			diagnoseVim9DeclarationShape(file, command, declaration, directAggregateMember)
 			command.Declaration = declaration
-			if command.Dialect == Vim9 && command.Canonical == "final" && !directAggregateMember {
+			if command.Dialect == Vim9 && command.Canonical == "final" && !directAggregateMember && !cannotLockOption {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{
 					Code: "vim/E1125", Message: "Final requires a value", Span: command.Name,
 				})
@@ -3011,6 +3012,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		left := file.Source[command.Argument.Start:assignment.Start]
 		diagnosticsStart := len(file.Diagnostics)
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
+		diagnoseCannotLockOption(file, command, declaration)
 		diagnoseVim9ScopeDeclaration(file, command, declaration, true)
 		diagnoseVim9IllegalDeclarationName(file, command, declaration)
 		diagnoseVim9ReservedDeclarationName(file, command, declaration)
@@ -4530,22 +4532,20 @@ func parseDeclarationHead(file *File, source string, base int, dialect Dialect) 
 		source = maskVim9Comments(source)
 	}
 	name, typeSpan := declarationSpans(source, base, dialect)
-	if dialect == Vim9 {
-		start := skipSpace(source, 0, len(source))
-		if start < len(source) && source[start] == '&' {
-			end := start + 1
-			for end < len(source) && (isVimIdentifierByte(source[end]) || source[end] == ':') {
-				end++
-			}
-			if end > start+1 {
-				name = Span{Start: base + start, End: base + end}
-			}
+	start := skipSpace(source, 0, len(source))
+	if start < len(source) && source[start] == '&' {
+		end := start + 1
+		for end < len(source) && (isVimIdentifierByte(source[end]) || source[end] == ':') {
+			end++
 		}
-		if start < len(source) && source[start] == '@' {
-			_, size := utf8.DecodeRuneInString(source[start+1:])
-			if size > 0 {
-				name = Span{Start: base + start, End: base + start + 1 + size}
-			}
+		if end > start+1 {
+			name = Span{Start: base + start, End: base + end}
+		}
+	}
+	if start < len(source) && source[start] == '@' {
+		_, size := utf8.DecodeRuneInString(source[start+1:])
+		if size > 0 {
+			name = Span{Start: base + start, End: base + start + 1 + size}
 		}
 	}
 	declaration := &Declaration{Name: name, Type: typeSpan}
@@ -4778,6 +4778,21 @@ func diagnoseVim9OptionDeclaration(file *File, command *Command, declaration *De
 	if strings.HasPrefix(name, "&") && len(name) > 1 {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1052", Message: "Cannot declare an option: " + name, Span: declaration.Name})
 	}
+}
+
+func diagnoseCannotLockOption(file *File, command *Command, declaration *Declaration) bool {
+	if file == nil || command == nil || declaration == nil {
+		return false
+	}
+	if command.Canonical != "const" && (command.Canonical != "final" || command.Dialect != Vim9) {
+		return false
+	}
+	name := file.Text(declaration.Name)
+	if !strings.HasPrefix(name, "&") || len(name) < 2 {
+		return false
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E996", Message: "Cannot lock an option", Span: declaration.Name})
+	return true
 }
 
 // vim9ScopeDeclarationDiagnostic mirrors vim9_declare_error() for the
