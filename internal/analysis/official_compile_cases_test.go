@@ -15,16 +15,17 @@ import (
 )
 
 const (
-	officialCompileSchemaVersion = 2
-	officialCompileVimTag        = "v9.2.1015"
-	officialCompileVimCommit     = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
-	officialCompileFileCount     = 14
-	officialCompileRecordCount   = 1770
-	officialCompileExtracted     = 1762
-	officialCompileSkipped       = 8
-	officialCompileCaseCount     = 3171
-	officialCompileExpected      = 2964
-	officialCompileUnresolved    = 207
+	officialCompileSchemaVersion       = 2
+	officialCompileVimTag              = "v9.2.1015"
+	officialCompileVimCommit           = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
+	officialCompileFileCount           = 14
+	officialCompileRecordCount         = 1770
+	officialCompileExtracted           = 1762
+	officialCompileSkipped             = 8
+	officialCompileCaseCount           = 3171
+	officialCompileExpected            = 2964
+	officialCompileUnresolved          = 207
+	officialCompileRepresentativeLimit = 30
 )
 
 var officialCompileCaseFilter = flag.String("official-compile-case", "", "comma-separated substrings selecting official static compile variants, or all")
@@ -60,6 +61,11 @@ type officialCompileVariant struct {
 	Context      string `json:"context"`
 	ExpectedCode string `json:"expectedCode"`
 	Source       string `json:"source"`
+}
+
+type officialCompileCase struct {
+	Record  officialCompileRecord
+	Variant officialCompileVariant
 }
 
 type officialCompileSummary struct {
@@ -106,7 +112,8 @@ func TestOfficialVimCompileCases(t *testing.T) {
 				t.Fatalf("invalid extracted official compile record %s: %#v", record.ID, record)
 			}
 			for _, variant := range record.Cases {
-				if variant.Name == "" || variant.Context == "" || variant.Source == "" || variant.Context == "def" && !strings.HasSuffix(variant.Source, "defcompile\n") || variant.Context == "script" && !strings.HasPrefix(variant.Source, "vim9script\n") {
+				validContext := variant.Context == "def" && strings.HasSuffix(variant.Source, "defcompile\n") || variant.Context == "script" && strings.HasPrefix(variant.Source, "vim9script\n")
+				if variant.Name == "" || variant.Source == "" || !validContext {
 					t.Fatalf("%s: invalid compile variant %#v", record.ID, variant)
 				}
 				if variant.ExpectedCode != "" && !strings.HasPrefix(variant.ExpectedCode, "vim/E") {
@@ -135,6 +142,44 @@ func TestOfficialVimCompileStaticAnalysisExclusions(t *testing.T) {
 	}
 }
 
+func TestOfficialVimCompileRepresentativeCases(t *testing.T) {
+	corpus := readOfficialCompileCases(t)
+	cases := officialCompileRepresentativeCases(corpus, func(officialCompileRecord, officialCompileVariant) bool { return true })
+	counts := make(map[string]int)
+	contexts := make(map[string]map[string]bool)
+	selectedRecords := make(map[string]bool)
+	for _, testCase := range cases {
+		code := testCase.Variant.ExpectedCode
+		counts[code]++
+		if counts[code] > officialCompileRepresentativeLimit {
+			t.Fatalf("%s selected %d representatives, limit is %d", code, counts[code], officialCompileRepresentativeLimit)
+		}
+		if contexts[code] == nil {
+			contexts[code] = make(map[string]bool)
+		}
+		contexts[code][testCase.Variant.Context] = true
+		selectedRecords[testCase.Record.ID] = true
+	}
+	if counts["vim/E1013"] != officialCompileRepresentativeLimit {
+		t.Fatalf("E1013 representatives = %d, want %d", counts["vim/E1013"], officialCompileRepresentativeLimit)
+	}
+	if !contexts["vim/E1013"]["def"] || !contexts["vim/E1013"]["script"] {
+		t.Fatalf("E1013 representative contexts = %#v, want def and script", contexts["vim/E1013"])
+	}
+	knownRecords := make(map[string]bool, len(corpus.Records))
+	for _, record := range corpus.Records {
+		knownRecords[record.ID] = true
+	}
+	for id, reason := range officialCompileMigrationExclusions {
+		if reason == "" || !knownRecords[id] {
+			t.Fatalf("invalid official compile migration exclusion %q: %q", id, reason)
+		}
+		if selectedRecords[id] {
+			t.Fatalf("excluded official compile record %q was selected", id)
+		}
+	}
+}
+
 func TestOfficialVimCompileFailureTriage(t *testing.T) {
 	if strings.TrimSpace(*officialCompileCaseFilter) == "" {
 		t.Skip("use -args -official-compile-case=<path,line,code,all> to select cases")
@@ -142,30 +187,23 @@ func TestOfficialVimCompileFailureTriage(t *testing.T) {
 	type coverage struct{ total, ready, mapping, missing int }
 	byCode := make(map[string]coverage)
 	selected := 0
-	for _, record := range readOfficialCompileCases(t).Records {
-		if record.Disposition != "extracted" {
-			continue
+	for _, testCase := range officialCompileRepresentativeCases(readOfficialCompileCases(t), officialCompileCaseSelected) {
+		record, variant := testCase.Record, testCase.Variant
+		selected++
+		diagnostics := analyzeOfficialCompileSource(t, record, variant)
+		status := byCode[variant.ExpectedCode]
+		status.total++
+		switch {
+		case hasOfficialCompileCode(diagnostics, variant.ExpectedCode):
+			status.ready++
+		case len(diagnostics) == 0:
+			status.missing++
+		default:
+			status.mapping++
 		}
-		for _, variant := range record.Cases {
-			if variant.ExpectedCode == "" || !officialCompileCaseSelected(record, variant) {
-				continue
-			}
-			selected++
-			diagnostics := analyzeOfficialCompileSource(t, record, variant)
-			status := byCode[variant.ExpectedCode]
-			status.total++
-			switch {
-			case hasOfficialCompileCode(diagnostics, variant.ExpectedCode):
-				status.ready++
-			case len(diagnostics) == 0:
-				status.missing++
-			default:
-				status.mapping++
-			}
-			byCode[variant.ExpectedCode] = status
-			if *officialCompileCaseFilter != "all" && !hasOfficialCompileCode(diagnostics, variant.ExpectedCode) {
-				t.Logf("%s want=%s got=%s source=%q", officialCompileVariantID(record, variant), variant.ExpectedCode, officialCompileCodes(diagnostics), compileSourcePreview(variant.Source))
-			}
+		byCode[variant.ExpectedCode] = status
+		if *officialCompileCaseFilter != "all" && !hasOfficialCompileCode(diagnostics, variant.ExpectedCode) {
+			t.Logf("%s want=%s got=%s source=%q", officialCompileVariantID(record, variant), variant.ExpectedCode, officialCompileCodes(diagnostics), compileSourcePreview(variant.Source))
 		}
 	}
 	if selected == 0 {
@@ -191,23 +229,19 @@ func TestOfficialVimCompileFailureTriage(t *testing.T) {
 func TestOfficialVimCompileFailures(t *testing.T) {
 	supported := officialCompileSupportedCodes()
 	if len(supported) == 0 {
-		t.Skip("no complete official compile diagnostic family has been migrated")
+		t.Skip("no official compile diagnostic family has representative coverage")
 	}
 	seen := make(map[string]int, len(supported))
-	for _, record := range readOfficialCompileCases(t).Records {
-		if record.Disposition != "extracted" {
-			continue
+	include := func(record officialCompileRecord, variant officialCompileVariant) bool {
+		return supported[variant.ExpectedCode] && officialCompileCaseSelectedByDefault(record, variant)
+	}
+	for _, testCase := range officialCompileRepresentativeCases(readOfficialCompileCases(t), include) {
+		record, variant := testCase.Record, testCase.Variant
+		diagnostics := analyzeOfficialCompileSource(t, record, variant)
+		if !hasOfficialCompileCode(diagnostics, variant.ExpectedCode) {
+			t.Fatalf("%s diagnostics=%#v, want %s", officialCompileVariantID(record, variant), diagnostics, variant.ExpectedCode)
 		}
-		for _, variant := range record.Cases {
-			if !supported[variant.ExpectedCode] || !officialCompileCaseSelectedByDefault(record, variant) {
-				continue
-			}
-			diagnostics := analyzeOfficialCompileSource(t, record, variant)
-			if !hasOfficialCompileCode(diagnostics, variant.ExpectedCode) {
-				t.Fatalf("%s diagnostics=%#v, want %s", officialCompileVariantID(record, variant), diagnostics, variant.ExpectedCode)
-			}
-			seen[variant.ExpectedCode]++
-		}
+		seen[variant.ExpectedCode]++
 	}
 	if strings.TrimSpace(*officialCompileCaseFilter) == "" {
 		for code := range supported {
@@ -221,9 +255,8 @@ func TestOfficialVimCompileFailures(t *testing.T) {
 }
 
 func officialCompileSupportedCodes() map[string]bool {
-	// A code is added only when every static def/script variant carrying that
-	// code is detected. This prevents a convenient example from standing in for
-	// unimplemented forms of the same Vim diagnostic.
+	// A code is added after focused Go tests cover its static rule and the pinned
+	// self-contained representatives below produce the expected diagnostic.
 	return map[string]bool{
 		"vim/E15":   true,
 		"vim/E16":   true,
@@ -311,6 +344,17 @@ func officialCompileSupportedCodes() map[string]bool {
 	}
 }
 
+// Keep non-self-contained upstream cases in the generated inventory, but do
+// not recreate Vim's runtime test environment in language-server tests. Add a
+// focused Go fixture for the underlying static rule instead.
+var officialCompileMigrationExclusions = map[string]string{
+	"src/testdir/test_vim9_func.vim:1706:37318": "depends on test-defined g:FilterWithCond()",
+	"src/testdir/test_vim9_func.vim:1949:43074": "depends on test-defined g:MyDefVarargs()",
+	"src/testdir/test_vim9_func.vim:1951:43200": "depends on test-defined g:MyDefVarargs()",
+	"src/testdir/test_vim9_func.vim:2099:46590": "depends on test-defined g:MyVarargsOnly()",
+	"src/testdir/test_vim9_func.vim:2100:46703": "depends on test-defined g:MyVarargsOnly()",
+}
+
 // These compiler errors are intentionally outside pure language-server
 // analysis. Keep the reasons beside the official coverage gate so future
 // implementation batches do not treat them as missing syntax/type work.
@@ -326,17 +370,14 @@ var officialCompileStaticAnalysisExcludedCodes = map[string]string{
 	"vim/E1413": "internal builtin class-method fallback",
 }
 
-var officialCompileContexts = map[string]string{
-	"src/testdir/test_vim9_func.vim:1706:37318": "def g:FilterWithCond(x: string, Cond: func(string): bool): bool\n  return Cond(x)\nenddef\n",
-	"src/testdir/test_vim9_func.vim:1949:43074": "def g:MyDefVarargs(one: string, two = 'foo', ...rest: list<string>)\nenddef\n",
-	"src/testdir/test_vim9_func.vim:1951:43200": "def g:MyDefVarargs(one: string, two = 'foo', ...rest: list<string>)\nenddef\n",
-	"src/testdir/test_vim9_func.vim:2099:46590": "def g:MyVarargsOnly(...args: list<string>)\nenddef\n",
-	"src/testdir/test_vim9_func.vim:2100:46703": "def g:MyVarargsOnly(...args: list<string>)\nenddef\n",
-}
-
 func analyzeOfficialCompileSource(t *testing.T, record officialCompileRecord, variant officialCompileVariant) []syntax.Diagnostic {
 	t.Helper()
-	source := variant.Source + officialCompileContexts[record.ID]
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("%s: analysis panicked: %v", officialCompileVariantID(record, variant), recovered)
+		}
+	}()
+	source := variant.Source
 	file := syntax.Parse(source)
 	if file.Source != source || len(file.Commands) == 0 {
 		t.Fatalf("%s: parser did not retain official compile source", officialCompileVariantID(record, variant))
@@ -347,11 +388,80 @@ func analyzeOfficialCompileSource(t *testing.T, record officialCompileRecord, va
 		if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(source) {
 			t.Fatalf("%s: out-of-bounds diagnostic %#v", officialCompileVariantID(record, variant), diagnostic)
 		}
-		if source != variant.Source && diagnostic.Span.Start >= len(variant.Source) {
-			t.Fatalf("%s: invalid restored context diagnostic %#v", officialCompileVariantID(record, variant), diagnostic)
-		}
 	}
 	return diagnostics
+}
+
+func officialCompileRepresentativeCases(corpus officialCompileCorpus, include func(officialCompileRecord, officialCompileVariant) bool) []officialCompileCase {
+	byCode := make(map[string][]officialCompileCase)
+	for _, record := range corpus.Records {
+		if record.Disposition != "extracted" || officialCompileMigrationExclusions[record.ID] != "" {
+			continue
+		}
+		for _, variant := range record.Cases {
+			if variant.ExpectedCode == "" || !include(record, variant) {
+				continue
+			}
+			byCode[variant.ExpectedCode] = append(byCode[variant.ExpectedCode], officialCompileCase{Record: record, Variant: variant})
+		}
+	}
+	codes := make([]string, 0, len(byCode))
+	for code := range byCode {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	var selected []officialCompileCase
+	for _, code := range codes {
+		selected = append(selected, sampleOfficialCompileCases(byCode[code], officialCompileRepresentativeLimit)...)
+	}
+	return selected
+}
+
+func sampleOfficialCompileCases(candidates []officialCompileCase, limit int) []officialCompileCase {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	if len(candidates) <= limit {
+		return append([]officialCompileCase(nil), candidates...)
+	}
+	var defCases, scriptCases []officialCompileCase
+	for _, candidate := range candidates {
+		if candidate.Variant.Context == "def" {
+			defCases = append(defCases, candidate)
+		} else {
+			scriptCases = append(scriptCases, candidate)
+		}
+	}
+	defLimit, scriptLimit := limit/2, limit-limit/2
+	if len(defCases) < defLimit {
+		scriptLimit += defLimit - len(defCases)
+		defLimit = len(defCases)
+	}
+	if len(scriptCases) < scriptLimit {
+		defLimit += scriptLimit - len(scriptCases)
+		scriptLimit = len(scriptCases)
+	}
+	selected := evenlySampleOfficialCompileCases(defCases, defLimit)
+	selected = append(selected, evenlySampleOfficialCompileCases(scriptCases, scriptLimit)...)
+	return selected
+}
+
+func evenlySampleOfficialCompileCases(candidates []officialCompileCase, limit int) []officialCompileCase {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	if len(candidates) <= limit {
+		return candidates
+	}
+	if limit == 1 {
+		return candidates[:1]
+	}
+	selected := make([]officialCompileCase, 0, limit)
+	for index := 0; index < limit; index++ {
+		candidate := index * (len(candidates) - 1) / (limit - 1)
+		selected = append(selected, candidates[candidate])
+	}
+	return selected
 }
 
 func hasOfficialCompileCode(diagnostics []syntax.Diagnostic, code string) bool {

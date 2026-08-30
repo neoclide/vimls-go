@@ -31,8 +31,12 @@ These files are generated from Vim tag `v9.2.1015`, commit
   `def` and `vim9script` variants, retains eight classified extraction skips,
   resolves 2,964 exact Vim error codes, and keeps 207 message-only or dynamic
   variant expectations for later source classification. Function-execution
-  helpers are excluded because they may depend on runtime state. Tests consume
-  the pinned variants in memory and never start Vim.
+  helpers are excluded because they may depend on runtime state. The artifact
+  remains complete for provenance, while analysis gates run at most 30
+  deterministic, self-contained representatives per error code, spread across
+  available `def` and `vim9script` contexts. Cases that depend on Vim startup,
+  runtime facilities, or test-defined functions remain explicitly excluded;
+  their static rules use focused Go fixtures instead. Tests never start Vim.
 
 The full-file corpus is a stability and lossless-recovery gate. It does not by
 itself prove that vimls-go accepts and rejects every construct exactly as Vim

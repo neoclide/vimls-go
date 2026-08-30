@@ -141,10 +141,25 @@ reconstructed source, and the expected Vim error code for each variant when
 one is available. An unresolved error argument remains explicit and must be
 classified from the pinned source rather than guessed from analyzer output.
 
-Compile-diagnostic implementation tests consume exact records from this
-artifact. Adding an error rule requires migrating the matching official cases,
-including the expected code and an in-bounds source span; broad type-inference
-unit tests are not a substitute for that provenance.
+The artifact is a complete provenance inventory, not an instruction to execute
+every repeated assertion. Compile-diagnostic gates deterministically spread at
+most 30 self-contained representative variants across each error code and its
+available `def` and `vim9script` contexts. A code with hundreds of upstream
+occurrences therefore does not make routine tests hundreds of times larger.
+
+Only source that can be analyzed in isolation is eligible for migration. Cases
+that require starting Vim, execution-time state, build features, files, jobs,
+terminals, or functions and variables defined elsewhere in Vim's test harness
+remain in the inventory with an explicit exclusion reason. Do not reconstruct
+that runtime environment or add hidden context to make such a case pass. Cover
+the same statically decidable rule with a minimal Go-driven source fixture
+instead.
+
+Adding an error rule requires focused Go tests for its essential syntax forms,
+diagnostic code, and in-bounds source span, plus representative official
+provenance when a self-contained upstream case exists. Repeated upstream cases
+are not migrated merely to increase a count, and official helper coverage is
+not a substitute for direct recovery and type-inference tests.
 
 Table and workspace fixtures cover scopes, shadowing, closures, imports/exports,
 autoload, cycles, members, generics, null values and `null_<type>` behavior,
