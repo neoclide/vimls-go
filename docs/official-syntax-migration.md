@@ -470,6 +470,9 @@ pending-fix.
 Commit `b414c57` migrated both named legacy-lambda variants in Vim9. The
 authoritative syntax split is therefore 1010 migrated, zero ready, and 12
 pending-fix.
+Commit `777662d` migrated both already-correct lambda block-separator variants.
+The authoritative syntax split is therefore 1012 migrated, zero ready, and 10
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1545,7 +1548,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 161 migrated and 12 pending-fix. In the
+Group D contains 173 syntax variants: 163 migrated and 10 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1724,7 +1727,7 @@ E16 P mapping: 3817:87815/def
 E476 P mapping: 4520:103771/script,1298:27807/script
 E476 P recovery: 781:16158/def
 E488 M ready: 971:20965/script,3746:85903/script
-E488 P missing: 1755:38517/{def|vim9-script}
+E488 M ready: 1755:38517/{def|vim9-script}
 E488 P recovery: 1748:38346/{def|vim9-script},2403:53812/script
 E720 M missing: 3539:81179/{def|vim9-script}
 E884 P mapping: 3740:85793/script
@@ -1803,6 +1806,10 @@ Commit `b414c57` migrates `3539:81179/{def,vim9-script}`. In Vim9, a named
 legacy `{x -> expr}` form is parsed as a malformed Dictionary and reports E720;
 the historical no-argument `{-> expr}` form and explicit `legacy` commands
 retain their accepted lambda AST.
+
+Commit `777662d` migrates `1755:38517/{def,vim9-script}`. A separator after a
+Vim9 inline-lambda block opener already reports one E488, keeps the same-line
+tail opaque, and preserves the multiline block plus later commands.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
