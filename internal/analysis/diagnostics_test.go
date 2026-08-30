@@ -459,6 +459,75 @@ func TestAnalyzeE1031VoidValueDiagnostics(t *testing.T) {
 	})
 }
 
+func TestAnalyzeE1186VoidEchoExpressionDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		recovery           bool
+	}{
+		{"official top-level echo recovery", "vim9script\ndef NoReturn()\nenddef\necho NoReturn()\nvar after = 1\n", "NoReturn()", true},
+		{"compiled def echo", "vim9script\ndef NoReturn()\nenddef\ndef Func()\n  echo NoReturn()\nenddef\n", "NoReturn()", false},
+		{"echon", "vim9script\ndef NoReturn()\nenddef\nechon NoReturn()\n", "NoReturn()", false},
+		{"later expression item", "vim9script\ndef NoReturn()\nenddef\necho 1 NoReturn()\n", "NoReturn()", false},
+		{"Legacy-root def echo", "def NoReturn()\nenddef\necho NoReturn()\n", "NoReturn()", false},
+		{"typed lambda", "vim9script\ndef NoReturn()\nenddef\nvar Callback: func = () => {\n  echo NoReturn()\n}\n", "NoReturn()", false},
+		{"assigned lambda", "vim9script\ndef NoReturn()\nenddef\nvar Callback: func\nCallback = () => {\n  echo NoReturn()\n}\n", "NoReturn()", false},
+		{"explicit legacy echo", "vim9script\ndef NoReturn()\nenddef\nlegacy echo NoReturn()\n", "NoReturn()", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1186" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1031" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1186 source retained E1031: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Expression does not result in a value: "+test.span || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1186 diagnostics = %#v", got)
+			}
+			if test.recovery && (file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after") {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, command := range []string{"echomsg", "echoerr", "echoconsole", "echowindow", "execute"} {
+		t.Run("compiled "+command, func(t *testing.T) {
+			file := syntax.Parse("vim9script\ndef NoReturn()\nenddef\ndef Func()\n  " + command + " NoReturn()\nenddef\n")
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1186" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Expression does not result in a value: NoReturn()" || file.Text(got[0].Span) != "NoReturn()" {
+				t.Fatalf("E1186 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef NoReturn()\nenddef\nNoReturn()\n",
+		"vim9script\ndef NoReturn()\nenddef\nechomsg NoReturn()\nechoerr NoReturn()\nechoconsole NoReturn()\nechowindow NoReturn()\nexecute NoReturn()\n",
+		"vim9script\ndef NoReturn()\nenddef\ndef Func()\n  legacy echomsg NoReturn()\nenddef\n",
+		"vim9script\necho len([])\n",
+		"vim9script\ndef NoReturn()\nenddef\necho NoReturn(\n",
+		"vim9script\ndef NoReturn()\nenddef\ndef Func()\n  var value = NoReturn()\nenddef\n",
+	} {
+		file := syntax.Parse(source)
+		result := Analyze(file)
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1186" {
+				t.Fatalf("guard unexpectedly received E1186: %#v", result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeArithmeticDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, code, message, span string

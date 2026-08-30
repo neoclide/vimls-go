@@ -1635,6 +1635,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   compound operator, before compiling the right-hand expression.
 - `src/errors.h:3031-3032` defines the exact E1183 message.
 
+## Echo expression without a value: E1186
+
+Analysis reports E1186 when an echo-family command must display or consume an
+expression whose static type is `void`. The diagnostic uses Vim's `Expression
+does not result in a value: {expression}` message and selects the void
+expression item.
+
+`echo` and `echon` check their evaluated result in every dialect, so the rule
+also applies at Vim9 script level, to a Legacy command that calls a known
+`def`, and to an explicit `legacy echo`. Vim's compiled multi-expression path
+applies the same check to `echomsg`, `echoerr`, `echoconsole`, `echowindow`,
+and `execute` inside a `def` or compiled lambda. Their evaluated top-level and
+explicit-`legacy` forms do not use E1186. Each whitespace-separated expression
+is checked independently; unknown return types remain conservative.
+
+This is distinct from E1031: inferred initializers and destructuring
+assignments that consume a void value keep that code, while an effect-only
+standalone call remains valid.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_cmd.vim:2017-2037` expects E1186 for a no-return `def`
+  called by `echo` at Vim9 script level and inside a compiled `def`.
+- `src/eval.c:8010-8044` evaluates each `echo` or `echon` expression and emits
+  E1186 when its result is `VAR_VOID`.
+- `src/vim9cmds.c:2145-2179` performs the corresponding per-expression void
+  check while compiling echo-family commands and `execute`.
+- `src/vim9compile.c:4712-4732` routes those compiled commands through the
+  shared multi-expression checker.
+- `src/errors.h:3039-3040` defines the exact E1186 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

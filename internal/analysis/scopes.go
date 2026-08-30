@@ -3090,9 +3090,9 @@ func expressionContainsInvalidPlus(result *FileAnalysis, expression *syntax.Expr
 	return false
 }
 
-// collectVoidValueDiagnostics reports E1031 only for the Vim9 contexts where
-// a statically known void result must produce a value.  Effect-only calls are
-// valid, and unknown values remain deliberately conservative.
+// collectVoidValueDiagnostics reports E1031 and E1186 where a statically known
+// void result must produce a value. Effect-only calls are valid, and unknown
+// values remain deliberately conservative.
 func collectVoidValueDiagnostics(result *FileAnalysis, commands []syntax.Command) {
 	if result == nil || result.File == nil {
 		return
@@ -3107,10 +3107,23 @@ func collectVoidValueDiagnostics(result *FileAnalysis, commands []syntax.Command
 			Code: "vim/E1031", Message: "Cannot use void value", Span: expression.Span,
 		})
 	}
+	seenE1186 := make(map[syntax.Span]bool)
+	appendE1186 := func(expression *syntax.Expression) {
+		if expression == nil || expression.Span.End <= expression.Span.Start || expressionContainsMissing(expression) || seenE1186[expression.Span] || result.TypeOf(expression).Name != "void" {
+			return
+		}
+		seenE1186[expression.Span] = true
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1186", Message: "Expression does not result in a value: " + result.File.Text(expression.Span), Span: expression.Span,
+		})
+	}
 	var walkExpression func(*syntax.Expression)
 	walkExpression = func(expression *syntax.Expression) {
 		if expression == nil {
 			return
+		}
+		if expression.LambdaBody != nil {
+			collectVoidValueDiagnostics(result, expression.LambdaBody.Commands)
 		}
 		if expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) >= 2 {
 			target, value := expression.Children[0], expression.Children[1]
@@ -3124,15 +3137,31 @@ func collectVoidValueDiagnostics(result *FileAnalysis, commands []syntax.Command
 	}
 	for index := range commands {
 		command := &commands[index]
+		scope := result.commandScopes[command]
 		if command.Dialect == syntax.Vim9 {
-			if declaration := command.Declaration; declaration != nil && declaration.Initializer != nil && declaration.ParsedType == nil {
-				appendDiagnostic(declaration.Initializer)
+			if declaration := command.Declaration; declaration != nil && declaration.Initializer != nil {
+				if declaration.ParsedType == nil {
+					appendDiagnostic(declaration.Initializer)
+				}
+				walkExpression(declaration.Initializer)
 			}
 			for _, expression := range command.Expressions {
 				walkExpression(expression)
 			}
 			for _, target := range command.Targets {
 				walkExpression(target)
+			}
+		}
+		multiExpression := command.Canonical == "echo" || command.Canonical == "echon"
+		if !multiExpression && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+			switch command.Canonical {
+			case "echomsg", "echoerr", "echoconsole", "echowindow", "execute":
+				multiExpression = true
+			}
+		}
+		if multiExpression {
+			for _, expression := range command.Expressions {
+				appendE1186(expression)
 			}
 		}
 		if command.Embedded != nil {
