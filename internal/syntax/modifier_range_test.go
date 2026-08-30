@@ -57,6 +57,69 @@ func TestVim9cmdMissingCommandDiagnostic(t *testing.T) {
 	}
 }
 
+func TestLegacyMissingCommandDiagnostic(t *testing.T) {
+	tests := []struct {
+		name, source, span, following string
+		comment, separator            bool
+	}{
+		{"Legacy bare", "legacy\nlet after = 1\n", "legacy", "let", false, false},
+		{"abbreviation before bar", "leg | echo 1\nlet after = 1\n", "leg", "echo", false, true},
+		{"Vim9 comment", "vim9script\nlegacy # comment\nvar after = 1\n", "legacy", "var", true, false},
+		{"Legacy comment", "legacy \" comment\nlet after = 1\n", "legacy", "let", true, false},
+		{"preceding modifier", "vim9script\nsilent legacy\nvar after = 1\n", "legacy", "var", false, false},
+		{"vim9cmd legacy", "vim9cmd legacy\nlet after = 1\n", "legacy", "let", false, false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			foundEmpty := false
+			foundFollowing := false
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1234" {
+					got = append(got, diagnostic)
+				}
+			}
+			for _, command := range file.Commands {
+				foundEmpty = foundEmpty || command.Kind == CommandEmpty && len(command.Modifiers) > 0 && command.Modifiers[len(command.Modifiers)-1].Name == "legacy"
+				foundFollowing = foundFollowing || command.Canonical == test.following
+			}
+			if len(file.Diagnostics) != 1 || len(got) != 1 || got[0].Message != "legacy must be followed by a command" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want E1234 on %q", file.Diagnostics, test.span)
+			}
+			if !foundEmpty || !foundFollowing || (countTokens(file, TokenComment) > 0) != test.comment || (countTokens(file, TokenSeparator) > 0) != test.separator {
+				t.Fatalf("recovery commands = %#v, tokens = %#v", file.Commands, file.Tokens)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"following command", "legacy echo 1\n", ""},
+		{"range followed by command", "legacy 3delete\n", ""},
+		{"Vim9 double quote is not a comment", "vim9script\nlegacy \" text\n", ""},
+		{"Legacy hash is not a comment", "legacy # text\n", ""},
+		{"legacy then vim9cmd", "legacy vim9cmd\n", "vim/E1164"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			count := 0
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1234" {
+					t.Fatalf("guard unexpectedly received E1234: %#v", file.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", file.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestVim9CommandModifierRequiresCommand(t *testing.T) {
 	tests := []struct {
 		name       string

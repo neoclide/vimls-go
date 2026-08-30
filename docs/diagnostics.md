@@ -2235,6 +2235,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   functions.
 - `src/errors.h:3165-3166` defines the exact E1233 message.
 
+## Bare `legacy` command modifier: E1234
+
+Syntax analysis reports E1234 when `legacy`, including an accepted abbreviation
+such as `leg`, is immediately followed by the end of a command, a bar, or a
+comment in the enclosing command dialect. The diagnostic selects the written
+modifier and preserves the existing empty-command recovery so the following
+command is still parsed.
+
+The check runs before optional range parsing and only when `legacy` is the last
+modifier. Thus `legacy 3delete` remains valid, `legacy vim9cmd` with no final
+command retains E1164, and `vim9cmd legacy` with no final command uses E1234.
+For comments, Vim9 context recognizes `#` and Legacy context recognizes `"`;
+the one-command dialect switch does not change that decision.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_cmd.vim:14-15` expects E1234 for bare `legacy`.
+- `src/ex_docmd.c:3144-3161` accepts `legacy` abbreviations down to three
+  characters and emits E1234 immediately when `ends_excmd2()` sees a command
+  terminator.
+- `src/ex_docmd.c:5959-5970` defines the enclosing-dialect-aware terminator and
+  comment rules used by that check.
+- `runtime/doc/vim9.txt:146-147` states that `:legacy` cannot stand alone.
+- `src/errors.h:3168-3169` defines the exact E1234 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
