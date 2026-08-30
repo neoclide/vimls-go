@@ -983,6 +983,34 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:1388-1408` distinguishes E1003 from E1027 and E1096.
 - `src/errors.h:2644-2645` defines the exact message.
 
+## Value returned without a return type: E1096
+
+Analysis reports E1096 when an ordinary Vim9 `def` with no declared return
+type, or with the return type `void`, uses `:return` with a value. The
+diagnostic selects the `return` command. This rule also applies to a `def` in
+a Legacy-root file because its body is compiled as Vim9.
+
+A bare `:return` continues to use E1003 when the function requires a value.
+Non-void and malformed return types, Legacy `function` bodies, Vim9 lambda
+command blocks, and top-level script commands remain outside E1096.
+Constructor-like `new*` and `_new*` definitions in class, interface, and enum
+aggregates are also excluded: valid constructors receive an implicit object
+return type, while invalid aggregate forms keep their earlier structural
+diagnostic instead of cascading E1096.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9cmds.c:2699-2709` emits E1096 before compiling the return
+  expression when the ordinary function return type is void, while explicitly
+  excluding lambdas.
+- `src/testdir/test_vim9_func.vim:478-490,2419-2431` covers omitted and
+  explicit `void` return types.
+- `src/vim9class.c:2470-2487,2564-2569` identifies `new*` and `_new*` methods
+  as constructors, and `src/vim9compile.c:4919-4936` assigns the constructed
+  object return type.
+- `runtime/doc/vim9.txt:1388-1409` distinguishes E1096 from missing return
+  value and missing return statement diagnostics.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

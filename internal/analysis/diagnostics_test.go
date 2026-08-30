@@ -3095,6 +3095,71 @@ func TestAnalyzeUnreachableCodeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeReturningValueWithoutReturnTypeDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         int
+	}{
+		{
+			name:   "omitted return type",
+			source: "vim9script\ndef Func()\n  return 1\nenddef\n",
+			want:   1,
+		},
+		{
+			name:   "explicit void return type",
+			source: "vim9script\ndef Func(): void\n  return 1\nenddef\n",
+			want:   1,
+		},
+		{
+			name:   "legacy-root def",
+			source: "def Func()\n  return 1\nenddef\n",
+			want:   1,
+		},
+		{
+			name: "nested defs remain independent",
+			source: "vim9script\ndef Outer()\n  def Inner()\n    return 1\n" +
+				"  enddef\n  return 2\nenddef\n",
+			want: 2,
+		},
+		{
+			name:   "top-level def named new is not a constructor",
+			source: "vim9script\ndef new()\n  return 1\nenddef\n",
+			want:   1,
+		},
+		{
+			name:   "top-level def named newName is not a constructor",
+			source: "vim9script\ndef newName()\n  return 1\nenddef\n",
+			want:   1,
+		},
+		{
+			name: "non-void missing bare legacy lambda and constructor returns are exempt",
+			source: "vim9script\ndef Typed(): number\n  return 1\nenddef\n" +
+				"def Missing():\n  return 1\nenddef\ndef Bare(): void\n  return\nenddef\n" +
+				"var Callback = () => {\n  return 1\n}\nclass Item\n  def new()\n    return 1\n  enddef\n  def newName()\n    return 1\n  enddef\n  def _new()\n    return 1\n  enddef\nendclass\n" +
+				"function Legacy()\n  return 1\nendfunction\nreturn 1\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1096" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E1096 diagnostics = %#v, want %d; all diagnostics = %#v", got, test.want, Analyze(file).Diagnostics)
+			}
+			for _, diagnostic := range got {
+				if diagnostic.Message != "Returning a value in a function without a return type" || file.Text(diagnostic.Span) != "return" {
+					t.Fatalf("E1096 diagnostic = %#v on %q", diagnostic, file.Text(diagnostic.Span))
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeVim9ParameterAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

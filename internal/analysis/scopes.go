@@ -1425,9 +1425,9 @@ func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []synta
 		return
 	}
 	seenLambdas := make(map[*syntax.Expression]bool)
-	var walkCommands func([]syntax.Command, []syntax.Block, []bool)
-	var walkExpression func(*syntax.Expression, []bool)
-	walkExpression = func(expression *syntax.Expression, functionNeedsValue []bool) {
+	var walkCommands func([]syntax.Command, []syntax.Block, []bool, []bool)
+	var walkExpression func(*syntax.Expression, []bool, []bool)
+	walkExpression = func(expression *syntax.Expression, functionNeedsValue, functionRejectsValue []bool) {
 		if expression == nil || seenLambdas[expression] {
 			return
 		}
@@ -1445,19 +1445,29 @@ func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []synta
 					Code: "vim/E1027", Message: "Missing return statement", Span: span,
 				})
 			}
-			walkCommands(body.Commands, body.Blocks, append(functionNeedsValue, needsValue))
+			walkCommands(body.Commands, body.Blocks, append(functionNeedsValue, needsValue), append(functionRejectsValue, false))
 		}
 		for _, child := range expression.Children {
-			walkExpression(child, functionNeedsValue)
+			walkExpression(child, functionNeedsValue, functionRejectsValue)
 		}
 	}
-	walkCommands = func(commands []syntax.Command, blocks []syntax.Block, functionNeedsValue []bool) {
+	walkCommands = func(commands []syntax.Command, blocks []syntax.Block, functionNeedsValue, functionRejectsValue []bool) {
 		for index := range commands {
 			command := &commands[index]
 			switch command.Canonical {
 			case "def":
 				needsValue := command.Function != nil && returnTypeNeedsValue(command.Function.ReturnType)
 				functionNeedsValue = append(functionNeedsValue, needsValue)
+				functionScope := result.commandScopes[command]
+				declarationScope := functionScope
+				if functionScope != nil && (functionScope.Kind == syntax.BlockFunction || functionScope.Kind == syntax.BlockDef) && functionScope.Parent != nil {
+					declarationScope = functionScope.Parent
+				}
+				constructorLike := declarationScope != nil && (declarationScope.Kind == syntax.BlockClass || declarationScope.Kind == syntax.BlockInterface || declarationScope.Kind == syntax.BlockEnum) && command.Function != nil &&
+					(strings.HasPrefix(result.File.Text(command.Function.Name), "new") || strings.HasPrefix(result.File.Text(command.Function.Name), "_new"))
+				rejectsValue := command.Function != nil && (command.Function.ReturnType == nil || command.Function.ReturnType.Kind != syntax.TypeMissing && command.Function.ReturnType.Name == "void") &&
+					!constructorLike
+				functionRejectsValue = append(functionRejectsValue, rejectsValue)
 				if needsValue && validBlock(blocks, command.Block) {
 					block := blocks[command.Block]
 					if block.Kind == syntax.BlockDef && block.Header == index && block.End > index && block.End < len(commands) &&
@@ -1470,50 +1480,56 @@ func collectMissingReturnValueDiagnostics(result *FileAnalysis, commands []synta
 				}
 			case "function":
 				functionNeedsValue = append(functionNeedsValue, false)
+				functionRejectsValue = append(functionRejectsValue, false)
 			}
 			if command.Canonical == "return" && len(command.Expressions) == 0 && len(functionNeedsValue) > 0 && functionNeedsValue[len(functionNeedsValue)-1] {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1003", Message: "Missing return value", Span: command.Name,
 				})
+			} else if command.Canonical == "return" && len(command.Expressions) > 0 && len(functionRejectsValue) > 0 && functionRejectsValue[len(functionRejectsValue)-1] {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1096", Message: "Returning a value in a function without a return type", Span: command.Name,
+				})
 			}
 			for _, expression := range command.Expressions {
-				walkExpression(expression, functionNeedsValue)
+				walkExpression(expression, functionNeedsValue, functionRejectsValue)
 			}
 			for _, expression := range command.Targets {
-				walkExpression(expression, functionNeedsValue)
+				walkExpression(expression, functionNeedsValue, functionRejectsValue)
 			}
 			if command.Mapping != nil {
-				walkExpression(command.Mapping.RHSExpression, functionNeedsValue)
+				walkExpression(command.Mapping.RHSExpression, functionNeedsValue, functionRejectsValue)
 			}
 			if command.Declaration != nil {
-				walkExpression(command.Declaration.Initializer, functionNeedsValue)
+				walkExpression(command.Declaration.Initializer, functionNeedsValue, functionRejectsValue)
 			}
 			if command.For != nil {
-				walkExpression(command.For.Iterable, functionNeedsValue)
+				walkExpression(command.For.Iterable, functionNeedsValue, functionRejectsValue)
 			}
 			if command.Import != nil {
-				walkExpression(command.Import.Path, functionNeedsValue)
+				walkExpression(command.Import.Path, functionNeedsValue, functionRejectsValue)
 			}
 			for _, value := range command.EnumValues {
-				walkExpression(value.Initializer, functionNeedsValue)
+				walkExpression(value.Initializer, functionNeedsValue, functionRejectsValue)
 				for _, argument := range value.Arguments {
-					walkExpression(argument, functionNeedsValue)
+					walkExpression(argument, functionNeedsValue, functionRejectsValue)
 				}
 			}
 			if command.Function != nil {
 				for _, parameter := range command.Function.Parameters {
-					walkExpression(parameter.Default, functionNeedsValue)
+					walkExpression(parameter.Default, functionNeedsValue, functionRejectsValue)
 				}
 			}
 			if command.Embedded != nil {
-				walkCommands(command.Embedded.Commands, command.Embedded.Blocks, functionNeedsValue)
+				walkCommands(command.Embedded.Commands, command.Embedded.Blocks, functionNeedsValue, functionRejectsValue)
 			}
 			if (command.Canonical == "enddef" || command.Canonical == "endfunction") && len(functionNeedsValue) > 0 {
 				functionNeedsValue = functionNeedsValue[:len(functionNeedsValue)-1]
+				functionRejectsValue = functionRejectsValue[:len(functionRejectsValue)-1]
 			}
 		}
 	}
-	walkCommands(commands, blocks, nil)
+	walkCommands(commands, blocks, nil, nil)
 }
 
 func returnTypeNeedsValue(returnType *syntax.Type) bool {
