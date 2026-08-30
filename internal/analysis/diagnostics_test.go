@@ -199,6 +199,8 @@ def Check(value: number)
   echo s:scoped
   echo this
   echo super
+  echo v:nosuch
+  var validVimVariable = v:version
   var lambda = (item: number) => item + lambdaMissing
   legacy echo legacyMissing
 enddef
@@ -206,7 +208,7 @@ echo outsideMissing
 `
 	file := syntax.Parse(source)
 	result := Analyze(file)
-	want := []string{"missing", "missing", "blockMissing", "lambdaMissing"}
+	want := []string{"missing", "missing", "blockMissing", "v:nosuch", "lambdaMissing"}
 	var got []syntax.Diagnostic
 	for _, diagnostic := range result.Diagnostics {
 		if diagnostic.Code == "vim/E1001" {
@@ -221,5 +223,25 @@ echo outsideMissing
 		if diagnostic.Message != "Variable not found: "+name || file.Text(diagnostic.Span) != name {
 			t.Fatalf("diagnostic[%d] = %#v (%q), want %q", index, diagnostic, file.Text(diagnostic.Span), name)
 		}
+	}
+}
+
+func TestAnalyzeSearchpairCompiledExpressionIdentifiers(t *testing.T) {
+	source := `vim9script
+def Check()
+  var flag = true
+  searchpair("a", "b", "c", "d", "missing", 33)
+  searchpair('a', 'b', 'c', 'd', 'flag && v:true', 33)
+enddef
+`
+	file := syntax.Parse(source)
+	var diagnostics []syntax.Diagnostic
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E1001" {
+			diagnostics = append(diagnostics, diagnostic)
+		}
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Message != "Variable not found: missing" || file.Text(diagnostics[0].Span) != "missing" {
+		t.Fatalf("E1001 diagnostics = %#v", diagnostics)
 	}
 }

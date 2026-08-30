@@ -601,7 +601,13 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				Name: expression.Value, Span: expression.Span,
 				Declaration: declaration,
 			})
-			if declaration == nil && !preferFunction && dialect == syntax.Vim9 && scopeContainsDef(scope) && !strings.Contains(expression.Value, ":") && expression.Value != "this" && expression.Value != "super" {
+			unscoped := !strings.Contains(expression.Value, ":")
+			unknownVimVariable := strings.HasPrefix(expression.Value, "v:")
+			if unknownVimVariable {
+				_, known := vimdata.LookupVariable(expression.Value)
+				unknownVimVariable = !known
+			}
+			if declaration == nil && !preferFunction && dialect == syntax.Vim9 && scopeContainsDef(scope) && (unscoped || unknownVimVariable) && expression.Value != "this" && expression.Value != "super" {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1001", Message: "Variable not found: " + expression.Value, Span: expression.Span,
 				})
@@ -1040,6 +1046,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
 					}
 				}
+				collectBuiltinCompiledStringDiagnostics(result, scope, builtin, arguments, expression.Span.Start)
 			} else {
 				collectFunctionArgumentTypeDiagnostics(result, expression)
 			}
@@ -1079,6 +1086,84 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		}
 	}
 	walkCommands(commands, parent)
+}
+
+func collectBuiltinCompiledStringDiagnostics(result *FileAnalysis, scope *Scope, function vimdata.BuiltinFunction, arguments []*syntax.Expression, visibilityOffset int) {
+	if result == nil || result.File == nil || scope == nil || function.Name != "searchpair" && function.Name != "searchpairpos" || len(arguments) < 5 {
+		return
+	}
+	literal := arguments[4]
+	if literal == nil || literal.Kind != syntax.ExpressionString || len(literal.Value) < 2 {
+		return
+	}
+	quote := literal.Value[0]
+	if literal.Value[len(literal.Value)-1] != quote || quote != '\'' && quote != '"' {
+		return
+	}
+	content := literal.Value[1 : len(literal.Value)-1]
+	if content == "" || quote == '"' && strings.Contains(content, "\\") || quote == '\'' && strings.Contains(content, "''") {
+		return
+	}
+	expression, diagnostics := (syntax.Vim9ExpressionParser{}).Parse(content)
+	if expression == nil || len(diagnostics) != 0 || expressionTreeContainsLambda(expression) {
+		return
+	}
+	walkCompiledStringExpression(result, scope, expression, literal.Span.Start+1, visibilityOffset, false)
+}
+
+func expressionTreeContainsLambda(expression *syntax.Expression) bool {
+	if expression == nil {
+		return false
+	}
+	if expression.Kind == syntax.ExpressionLambda {
+		return true
+	}
+	for _, child := range expression.Children {
+		if expressionTreeContainsLambda(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func walkCompiledStringExpression(result *FileAnalysis, scope *Scope, expression *syntax.Expression, base, visibilityOffset int, preferFunction bool) {
+	if expression == nil {
+		return
+	}
+	switch expression.Kind {
+	case syntax.ExpressionIdentifier:
+		if !isLiteralIdentifier(expression.Value) {
+			declaration := resolve(scope, expression.Value, visibilityOffset, preferFunction, nil)
+			unscoped := !strings.Contains(expression.Value, ":")
+			_, knownVimVariable := vimdata.LookupVariable(expression.Value)
+			unknownVimVariable := strings.HasPrefix(expression.Value, "v:") && !knownVimVariable
+			if declaration == nil && !preferFunction && (unscoped || unknownVimVariable) && expression.Value != "this" && expression.Value != "super" {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1001", Message: "Variable not found: " + expression.Value,
+					Span: syntax.Span{Start: base + expression.Span.Start, End: base + expression.Span.End},
+				})
+			}
+		}
+	case syntax.ExpressionMember:
+		if len(expression.Children) > 0 {
+			walkCompiledStringExpression(result, scope, expression.Children[0], base, visibilityOffset, false)
+		}
+	case syntax.ExpressionDictionary:
+		for index, child := range expression.Children {
+			if index%2 == 0 && child != nil && child.Kind == syntax.ExpressionIdentifier {
+				continue
+			}
+			walkCompiledStringExpression(result, scope, child, base, visibilityOffset, false)
+		}
+	case syntax.ExpressionCall, syntax.ExpressionGenericReference:
+		for index, child := range expression.Children {
+			walkCompiledStringExpression(result, scope, child, base, visibilityOffset, index == 0)
+		}
+	default:
+		for _, child := range expression.Children {
+			walkCompiledStringExpression(result, scope, child, base, visibilityOffset, false)
+		}
+	}
 }
 
 func collectFunctionArgumentTypeDiagnostics(result *FileAnalysis, call *syntax.Expression) {
