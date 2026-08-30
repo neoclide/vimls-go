@@ -370,8 +370,11 @@ func parseSource(source string, initial Dialect) *File {
 		} else {
 			view = readVim9LogicalView(source, offset)
 		}
-		directAggregateMember := len(aggregateStack) > 0 && len(dialectStack) == 0
-		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateMember, len(dialectStack) > 1, scriptVersion)
+		var directAggregateKind BlockKind
+		if len(aggregateStack) > 0 && len(dialectStack) == 0 {
+			directAggregateKind = aggregateStack[len(aggregateStack)-1]
+		}
+		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateKind, len(dialectStack) > 1, scriptVersion)
 		loadKeymapCommand, textBodyCommand := applyCommandState(before)
 		if loadKeymapCommand >= 0 {
 			offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, hasOpenVim9CommandBlock(file))
@@ -931,10 +934,11 @@ func vim9ScriptArgumentDiagnostic(source string, argument Span) (string, string,
 }
 
 func scanCommands(file *File, start, end int, baseDialect Dialect) {
-	scanCommandsWithContext(file, start, end, baseDialect, false, false, 1)
+	scanCommandsWithContext(file, start, end, baseDialect, "", false, 1)
 }
 
-func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, directAggregateMember, nestedFunction bool, scriptVersion uint8) {
+func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, directAggregateKind BlockKind, nestedFunction bool, scriptVersion uint8) {
+	directAggregateMember := directAggregateKind != ""
 	for start < end {
 		diagnosticsBeforeCommand := len(file.Diagnostics)
 		start = skipSpaceToken(file, start, end)
@@ -1371,7 +1375,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		// Vim9 aggregate terminators do not accept an argument.  Keep the
 		// terminator command in the stream so block pairing remains intact, but
 		// make the rest of this physical command opaque after reporting E488.
-		if dialect == Vim9 && (canonical == "endclass" || canonical == "endinterface") {
+		openEnumTerminator := canonical == "endenum" && directAggregateKind == BlockEnum
+		if dialect == Vim9 && (canonical == "endclass" || canonical == "endinterface" || openEnumTerminator && separator.Start < separator.End) {
 			trailing := skipSpace(file.Source, argumentStart, argumentEnd)
 			if trailing < argumentEnd || separator.Start < separator.End {
 				spanEnd := argumentEnd
