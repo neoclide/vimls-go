@@ -367,6 +367,8 @@ arguments, making the authoritative current split 929 migrated, zero ready,
 and 113 pending-fix.
 Commit `7456791` migrated the Vim9 trailing call-argument comma case, making
 the authoritative current split 930 migrated, zero ready, and 112 pending-fix.
+Commit `f6d3c44` migrated four Vim9 type-alias lexical validation cases, making
+the authoritative current split 934 migrated, zero ready, and 108 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -961,11 +963,11 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | `C-DECL` | 3 | 3 | 0 | 0 |
 | `C-EXCMD` | 115 | 89 | 0 | 26 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
-| `C-GENERIC` | 90 | 72 | 0 | 18 |
+| `C-GENERIC` | 90 | 76 | 0 | 14 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 57 | 56 | 0 | 1 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **343** | **298** | **0** | **45** |
+| **Total** | **343** | **302** | **0** | **41** |
 
 ```text
 C-EXPR
@@ -1146,6 +1148,13 @@ argument node; the valid generic type list and enclosing member-call AST remain
 unchanged. Commit `e228d76` keeps the different comma in
 `function(Fn<number,)` owned by the incomplete generic list, preventing the
 outer call from reporting the same E1069 twice.
+
+Commit `f6d3c44` migrated
+`T:{83:2341,90:2522,111:3055,118:3270}/script`. Type-alias parsing now follows
+Vim's lexical validation order: an ASCII-uppercase name, whitespace after the
+name, and whitespace after `=` are checked before type diagnostics. The parser
+still retains every safe name, assignment, and type node, and malformed
+same-line separators remain opaque without hiding the next physical command.
 
 Commit `b6095b4` migrated `G:{264:5880,389:8598}/script`. Tight generic
 references at command start now reach the expression parser without requiring
