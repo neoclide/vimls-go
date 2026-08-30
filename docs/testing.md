@@ -132,6 +132,19 @@ new Vim-source research pass.
 
 ### Semantics
 
+The pinned `v9.2.1015-compile-cases.json.gz` corpus is the starting inventory
+for Vim9 compile diagnostics. It includes only official helpers that invoke
+`:defcompile`; it never executes the generated function bodies. Every record
+retains the upstream helper coordinate, complete reconstructed source, and the
+static expected Vim error code when one is available. An unresolved error
+argument remains explicit and must be classified from the pinned source rather
+than guessed from analyzer output.
+
+Compile-diagnostic implementation tests consume exact records from this
+artifact. Adding an error rule requires migrating the matching official cases,
+including the expected code and an in-bounds source span; broad type-inference
+unit tests are not a substitute for that provenance.
+
 Table and workspace fixtures cover scopes, shadowing, closures, imports/exports,
 autoload, cycles, members, generics, null values and `null_<type>` behavior,
 empty containers, mutability, arity, version gates, and safe/unsafe rename.

@@ -104,6 +104,7 @@ func main() {
 	helperOutput := flag.String("helper-inventory-output", "testdata/official/v9.2.1015-helper-inventory.json.gz", "generated Check helper inventory path")
 	parserFileManifestPath := flag.String("parser-file-manifest", "testdata/official/v9.2.1015-parser-files.json", "reviewed parser test-file allowlist")
 	parserCasesOutput := flag.String("parser-cases-output", "testdata/official/v9.2.1015-parser-cases.json.gz", "generated official parser helper cases")
+	compileCasesOutput := flag.String("compile-cases-output", "testdata/official/v9.2.1015-compile-cases.json.gz", "generated explicit defcompile failure cases")
 	flag.Parse()
 
 	commit, err := gitOutput(*source, "rev-list", "-n", "1", vimTag)
@@ -176,10 +177,20 @@ func main() {
 	if err := validatePinnedParserCaseCorpus(parserCases); err != nil {
 		fatal(err)
 	}
+	compileCases, err := buildCompileCaseCorpus(testCorpus, inventory)
+	if err != nil {
+		fatal(err)
+	}
+	if err := checkCompileCaseCorpus(compileCases); err != nil {
+		fatal(err)
+	}
 	if err := writeJSONGzip(*helperOutput, inventory); err != nil {
 		fatal(err)
 	}
 	if err := writeJSONGzip(*parserCasesOutput, parserCases); err != nil {
+		fatal(err)
+	}
+	if err := writeJSONGzip(*compileCasesOutput, compileCases); err != nil {
 		fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Dir(*licenseOutput), 0o755); err != nil {
@@ -193,6 +204,7 @@ func main() {
 	fmt.Printf("wrote upstream Vim license to %s\n", *licenseOutput)
 	fmt.Printf("wrote %d Check helper lexemes from %s (%s) to %s\n", len(inventory.Records), inventory.Tag, inventory.Commit, *helperOutput)
 	fmt.Printf("wrote %d parser cases from %d allowlisted helper calls to %s\n", parserCases.Summary.Cases, parserCases.Summary.Calls, *parserCasesOutput)
+	fmt.Printf("wrote %d explicit defcompile failure cases to %s\n", compileCases.Summary.ExtractedCalls, *compileCasesOutput)
 }
 
 func listTestFiles(root string) ([]string, error) {

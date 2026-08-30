@@ -20,12 +20,19 @@ These files are generated from Vim tag `v9.2.1015`, commit
   use this allowlist instead of rescanning all 362 files.
 - `v9.2.1015-parser-cases.json.gz` is generated only from that allowlist and is
   bound to the canonical manifest JSON SHA-256. It accounts for all 3,844
-selected helper calls: 3,805 are statically extracted into 5,261 source
-variants and 39 retain an explicit skip reason. The 1,761 success variants are
-parser-positive tests. The other 3,500 deliberately remain unclassified in the
-generated artifact; their reviewed phase classification and parser-negative
-migration status are maintained in
-[`docs/official-syntax-migration.md`](../../docs/official-syntax-migration.md).
+  selected helper calls: 3,805 are statically extracted into 5,261 source
+  variants and 39 retain an explicit skip reason. The 1,761 success variants
+  are parser-positive tests. The other 3,500 deliberately remain unclassified
+  in the generated artifact; their reviewed phase classification and
+  parser-negative migration status are maintained in
+  [`docs/official-syntax-migration.md`](../../docs/official-syntax-migration.md).
+- `v9.2.1015-compile-cases.json.gz` separately inventories all 1,770 official
+  helper calls that explicitly expect `:defcompile` to fail. It statically
+  reconstructs 1,762 complete functions, retains eight classified extraction
+  skips, resolves 1,662 exact Vim error codes, and keeps 100 message-only or
+  dynamic error arguments for later source classification. Script-source and
+  function-execution failures are excluded because they may depend on runtime
+  state.
 
 The full-file corpus is a stability and lossless-recovery gate. It does not by
 itself prove that vimls-go accepts and rejects every construct exactly as Vim
