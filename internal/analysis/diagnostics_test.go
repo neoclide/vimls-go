@@ -3988,3 +3988,56 @@ func TestAnalyzeE1432ConcreteMethodOverridesGenericMethod(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeE1431AbstractSuperMethodCall(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		message string
+		span    string
+	}{
+		{
+			name:    "generic call",
+			source:  "vim9script\nabstract class A\n  abstract def F1()\nendclass\nclass B extends A\n  def F1()\n  enddef\n  def Foo()\n    super.F1<number, string>()\n  enddef\nendclass\n",
+			message: `Abstract method "F1" in class "A" cannot be accessed directly`, span: "F1",
+		},
+		{
+			name:    "direct abstract parent",
+			source:  "vim9script\nabstract class B\n  abstract def ToString(): string\nendclass\nclass C extends B\n  def ToString(): string\n    return super.ToString()\n  enddef\nendclass\n",
+			message: `Abstract method "ToString" in class "B" cannot be accessed directly`, span: "ToString",
+		},
+		{
+			name:    "nearest abstract override",
+			source:  "vim9script\nclass A\n  def ToString(): string\n    return 'A'\n  enddef\nendclass\nabstract class B extends A\n  abstract def ToString(): string\nendclass\nclass C extends B\n  def ToString(): string\n    return super.ToString()\n  enddef\nendclass\n",
+			message: `Abstract method "ToString" in class "B" cannot be accessed directly`, span: "ToString",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1431" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1431 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nabstract class A\n  abstract def F1()\nendclass\nclass B extends A\n  def F1()\n  enddef\n  def Foo()\n    this.F1()\n  enddef\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def F1()\nendclass\nclass B extends A\n  def F1()\n  enddef\nendclass\nclass C extends B\n  def F1()\n    super.F1()\n  enddef\nendclass\n",
+		"vim9script\nclass B extends Missing\n  def F1()\n    super.F1()\n  enddef\nendclass\n",
+		"vim9script\nabstract class A\n  abstract def F1()\nendclass\ndef Outside()\n  super.F1()\nenddef\n",
+		"vim9script\nabstract class A\n  abstract def F1()\nendclass\nclass B extends A\n  def F1()\n  enddef\n  def Foo()\n    super.()\n  enddef\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1431" {
+				t.Fatalf("guard source reported E1431: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}

@@ -145,13 +145,7 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := make(map[string]*syntax.Command)
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockClass {
-			classes[file.Text(command.Aggregate.Name)] = command
-		}
-	}
+	classes := localClasses(file)
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Extends) == 0 {
@@ -2730,6 +2724,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		}
 	case syntax.ExpressionCall:
 		collectBuiltinCallArityDiagnostic(result, file, expression)
+		appendAbstractSuperMethodDiagnostic(result, file, expression, scope, dialect)
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
 		appendTooManyGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
 		appendNotEnoughGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
@@ -2771,6 +2766,81 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	}
+}
+
+func appendAbstractSuperMethodDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
+	if result == nil || file == nil || call == nil || dialect != syntax.Vim9 || call.Kind != syntax.ExpressionCall || len(call.Children) == 0 || expressionContainsMissing(call) {
+		return
+	}
+	callee := call.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionMember || file.Text(callee.Operator) != "." || len(callee.Children) != 1 || callee.Value == "" {
+		return
+	}
+	receiver := callee.Children[0]
+	if receiver == nil || receiver.Kind != syntax.ExpressionIdentifier || receiver.Value != "super" {
+		return
+	}
+	class := enclosingClassCommand(file, scope)
+	if class == nil || class.Aggregate == nil || len(class.Aggregate.Extends) == 0 {
+		return
+	}
+	classes := localClasses(file)
+	seen := make(map[*syntax.Command]bool)
+	for current := classes[file.Text(class.Aggregate.Extends[0])]; current != nil; current = extendedClass(file, classes, current) {
+		if seen[current] {
+			return
+		}
+		seen[current] = true
+		method := aggregateMethod(file, current, callee.Value)
+		if method == nil {
+			continue
+		}
+		if commandHasModifier(method, "abstract") {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1431", Message: "Abstract method \"" + callee.Value + "\" in class \"" + file.Text(current.Aggregate.Name) + "\" cannot be accessed directly",
+				Span: memberNameSpan(file, callee),
+			})
+		}
+		return
+	}
+}
+
+func localClasses(file *syntax.File) map[string]*syntax.Command {
+	classes := make(map[string]*syntax.Command)
+	if file == nil {
+		return classes
+	}
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockClass {
+			classes[file.Text(command.Aggregate.Name)] = command
+		}
+	}
+	return classes
+}
+
+func enclosingClassCommand(file *syntax.File, scope *Scope) *syntax.Command {
+	for current := scope; file != nil && current != nil; current = current.Parent {
+		if current.Kind != syntax.BlockClass || current.CommandList != nil || current.Block < 0 || current.Block >= len(file.Blocks) {
+			continue
+		}
+		header := file.Blocks[current.Block].Header
+		if header >= 0 && header < len(file.Commands) {
+			return &file.Commands[header]
+		}
+	}
+	return nil
+}
+
+func memberNameSpan(file *syntax.File, member *syntax.Expression) syntax.Span {
+	if file == nil || member == nil || member.Value == "" {
+		return syntax.Span{}
+	}
+	text := file.Text(member.Span)
+	if offset := strings.LastIndex(text, member.Value); offset >= 0 {
+		return syntax.Span{Start: member.Span.Start + offset, End: member.Span.Start + offset + len(member.Value)}
+	}
+	return member.Span
 }
 
 func appendNonGenericFunctionDiagnostic(result *FileAnalysis, expression *syntax.Expression, scope *Scope, hidden map[syntax.Span]bool) {
