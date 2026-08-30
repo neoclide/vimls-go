@@ -1343,6 +1343,10 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if selfSplittingVariableCommand(canonical) {
 			scanMetadata.Flags |= vimdata.AllowBar
 		}
+		if canonical == "import" || canonical == "delfunction" ||
+			(canonical == "def" || canonical == "function") && unambiguousFunctionDefinitionHead(file.Source, argumentStart, end) {
+			scanMetadata.Flags |= vimdata.AllowBar
+		}
 		// These commands evaluate their argument and consume a trailing bar
 		// themselves in Vim.  Most carry EX_EXPR_ARG in the command table, but
 		// :return, :throw, :final and a few related commands intentionally do
@@ -1362,6 +1366,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		var boundaryExpression *expressionBoundary
 		if canonical == "autocmd" {
 			argumentEnd, separator = scanAutocmdCommandArgument(file.Source, argumentStart, end)
+		} else if canonical == "wincmd" {
+			argumentEnd, separator, comment = scanWincmdArgument(file.Source, argumentStart, end, dialect)
 		} else if dialect == Legacy {
 			argumentEnd, separator, comment, boundaryExpression = scanLegacyCommandArgument(file.Source, argumentStart, end, scanMetadata, &parsedCommand)
 		} else {
@@ -1502,6 +1508,12 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			parseLegacyTextCommandHeader(file, &parsedCommand)
 		}
 		detectHeredoc(file, &parsedCommand)
+		if hasOpenVim9CommandBlock(file) && separator.Start < separator.End && collectedBlockBarConflict(file.Source, &parsedCommand) {
+			lineEnd, _ := physicalLineEnd(file.Source, separator.Start)
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1231", Message: "Cannot use a bar to separate commands here: " + strings.TrimSpace(file.Source[separator.Start:lineEnd]), Span: separator,
+			})
+		}
 		dynamicHeredoc := parsedCommand.Heredoc != nil && parsedCommand.Canonical == "execute"
 		if !dynamicHeredoc && parsedCommand.Canonical == "execute" {
 			dynamicHeredoc = detectExecuteHeredoc(file, &parsedCommand)
@@ -1557,6 +1569,57 @@ func selfSplittingVariableCommand(name string) bool {
 	default:
 		return false
 	}
+}
+
+func collectedBlockBarConflict(source string, command *Command) bool {
+	if command == nil || command.Argument.Start >= command.Argument.End {
+		return false
+	}
+	metadata, ok := vimdata.Lookup(command.Canonical)
+	if ok && metadata.Flags&(vimdata.AllowBar|vimdata.ExpressionArgument) != 0 {
+		return false
+	}
+	switch command.Canonical {
+	case "unlet", "lockvar", "unlockvar", "substitute", "smagic", "snomagic", "wincmd", "import", "delfunction", "final", "throw":
+		return true
+	case "syntax":
+		return true
+	case "def", "function":
+		argument := source[command.Argument.Start:command.Argument.End]
+		return isFunctionDefinition(argument) && strings.Contains(argument, ")")
+	default:
+		return findPatternCommand(command.Canonical)
+	}
+}
+
+func scanWincmdArgument(source string, start, end int, dialect Dialect) (int, Span, Span) {
+	if start >= end {
+		return start, Span{}, Span{}
+	}
+	after := start + 1
+	// CTRL-W g and CTRL-W CTRL-G consume one additional window command byte
+	// before ex_wincmd() asks set_nextcmd() to recognize a trailing bar.
+	if (source[start] == 'g' || source[start] == 0x07) && after < end {
+		after++
+	}
+	metadata := vimdata.Command{Flags: vimdata.AllowBar}
+	if dialect == Legacy {
+		argumentEnd, separator, comment := scanLegacyOpaqueArgument(source, after, end, metadata)
+		return argumentEnd, separator, comment
+	}
+	argumentEnd, separator, comment := scanVim9OpaqueArgument(source, after, end, metadata)
+	return argumentEnd, separator, comment
+}
+
+func unambiguousFunctionDefinitionHead(source string, start, end int) bool {
+	if start >= end {
+		return false
+	}
+	if bar := strings.IndexByte(source[start:end], '|'); bar >= 0 {
+		end = start + bar
+	}
+	argument := source[start:end]
+	return isFunctionDefinition(argument) && strings.Contains(argument, ")")
 }
 
 func substituteCommand(name string) bool {
@@ -4150,10 +4213,75 @@ func parseVim9AutocmdBlockCommandList(file *File, span Span, depth int) *Command
 	// file after parsing.
 	embedded := parseSource(file.Source[span.Start:span.End], Vim9)
 	rebaseLambdaFile(embedded, file.Source, span.Start)
+	diagnoseCollectedBlockBarSeparators(embedded)
 	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	list.Commands = embedded.Commands
 	list.Blocks = embedded.Blocks
 	return list
+}
+
+func diagnoseCollectedBlockBarSeparators(file *File) {
+	if file == nil {
+		return
+	}
+	removed := make(map[int]bool)
+	reported := make(map[int]bool)
+	for index := 0; index+1 < len(file.Commands); index++ {
+		if removed[index] {
+			continue
+		}
+		command := &file.Commands[index]
+		next := &file.Commands[index+1]
+		lineEnd, _ := physicalLineEnd(file.Source, command.Span.Start)
+		if reported[lineEnd] || next.Span.Start >= lineEnd || !collectedBlockBarConflict(file.Source, command) {
+			continue
+		}
+		bar := strings.IndexByte(file.Source[command.Span.End:next.Span.Start], '|')
+		if bar < 0 {
+			continue
+		}
+		span := Span{Start: command.Span.End + bar, End: command.Span.End + bar + 1}
+		reported[lineEnd] = true
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1231", Message: "Cannot use a bar to separate commands here: " + strings.TrimSpace(file.Source[span.Start:lineEnd]), Span: span,
+		})
+		kept := file.Diagnostics[:0]
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code != "vim/E1231" && diagnostic.Span.Start >= span.End && diagnostic.Span.Start < lineEnd {
+				continue
+			}
+			kept = append(kept, diagnostic)
+		}
+		file.Diagnostics = kept
+		for nextIndex := index + 1; nextIndex < len(file.Commands) && file.Commands[nextIndex].Span.Start < lineEnd; nextIndex++ {
+			removed[nextIndex] = true
+		}
+		keptTokens := file.Tokens[:0]
+		for _, token := range file.Tokens {
+			if token.Span.Start >= span.End && token.Span.Start < lineEnd {
+				continue
+			}
+			keptTokens = append(keptTokens, token)
+		}
+		file.Tokens = append(keptTokens, Token{Kind: TokenOpaque, Span: Span{Start: span.End, End: lineEnd}})
+	}
+	if len(removed) > 0 {
+		kept := file.Commands[:0]
+		for index, command := range file.Commands {
+			if !removed[index] {
+				kept = append(kept, command)
+			}
+		}
+		file.Commands = kept
+		file.Blocks = nil
+		for index := range file.Commands {
+			file.Commands[index].Block = -1
+		}
+		buildBlocks(file)
+		sort.SliceStable(file.Tokens, func(left, right int) bool {
+			return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start
+		})
+	}
 }
 
 // parseLegacyDoCommandList keeps the physical command boundaries that

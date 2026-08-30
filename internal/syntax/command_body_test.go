@@ -2,6 +2,97 @@ package syntax
 
 import "testing"
 
+func TestCollectedCommandBlockBarSeparatorDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, tail string
+	}{
+		{
+			name:   "user command unlet",
+			source: "vim9script\ncommand Foo {\n  unlet value | echo 'after'\n}\nvar after = 1\n",
+			tail:   "| echo 'after'",
+		},
+		{
+			name:   "user command final",
+			source: "vim9script\ncommand Foo {\n  final value = 1 | echo 'after'\n}\nvar after = 1\n",
+			tail:   "| echo 'after'",
+		},
+		{
+			name:   "user command substitute",
+			source: "vim9script\ncommand Foo {\n  substitute /a/b/ | echo 'after'\n}\nvar after = 1\n",
+			tail:   "| echo 'after'",
+		},
+		{
+			name:   "user command wincmd",
+			source: "vim9script\ncommand Foo {\n  wincmd w | echo 'after'\n}\nvar after = 1\n",
+			tail:   "| echo 'after'",
+		},
+		{
+			name:   "user command legacy unlet",
+			source: "vim9script\ncommand Foo {\n  legacy unlet value | echo 'after'\n}\nvar after = 1\n",
+			tail:   "| echo 'after'",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1231" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || file.Text(got[0].Span) != "|" || got[0].Message != "Cannot use a bar to separate commands here: "+test.tail {
+				t.Fatalf("E1231 diagnostics = %#v", got)
+			}
+			lineEnd, _ := physicalLineEnd(file.Source, got[0].Span.Start)
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code != "vim/E1231" && diagnostic.Span.Start >= got[0].Span.End && diagnostic.Span.Start < lineEnd {
+					t.Fatalf("post-bar diagnostic = %#v", diagnostic)
+				}
+			}
+			if len(file.Commands) == 0 || file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+			for _, command := range file.Commands {
+				if command.Canonical == "echo" {
+					t.Fatalf("post-bar echo was retained: %#v", file.Commands)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{"echo remains valid", "vim9script\ncommand Foo {\n  echo 'hello' | echo 'there'\n}\n"},
+		{"wincmd operand bar", "vim9script\ncommand Foo {\n  wincmd |\n}\n"},
+		{"wincmd g operand bar", "vim9script\ncommand Foo {\n  wincmd g|\n}\n"},
+		{"outside block remains split", "vim9script\nwincmd w | echo 'after'\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1231" {
+					t.Fatalf("unexpected E1231: %#v", file.Diagnostics)
+				}
+			}
+			if test.name == "outside block remains split" && len(file.Commands) != 3 {
+				t.Fatalf("outside consumer did not split: %#v", file.Commands)
+			}
+			if test.name == "wincmd operand bar" || test.name == "wincmd g operand bar" {
+				count := 0
+				for _, command := range file.Commands {
+					if command.Canonical == "wincmd" {
+						count++
+					}
+				}
+				if count != 1 {
+					t.Fatalf("wincmd operand was split: %#v", file.Commands)
+				}
+			}
+		})
+	}
+}
+
 func TestUserCommandReplacementBody(t *testing.T) {
 	source := "command! -nargs=* -complete=command Foo echo one | echo two\n" +
 		"command Bar map x foo\\|bar\n"

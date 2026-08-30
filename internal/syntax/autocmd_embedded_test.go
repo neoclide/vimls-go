@@ -5,6 +5,36 @@ import (
 	"testing"
 )
 
+func TestCollectedAutocmdBlockBarSeparatorDiagnostic(t *testing.T) {
+	file := (LegacyParser{}).Parse("autocmd BufEnter * {\n  throw 'bad' | echo 'after'\n}\nlet after = 1\n")
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1231" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || file.Text(got[0].Span) != "|" || got[0].Message != "Cannot use a bar to separate commands here: | echo 'after'" {
+		t.Fatalf("E1231 diagnostics = %#v", got)
+	}
+	lineEnd, _ := physicalLineEnd(file.Source, got[0].Span.Start)
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code != "vim/E1231" && diagnostic.Span.Start >= got[0].Span.End && diagnostic.Span.Start < lineEnd {
+			t.Fatalf("post-bar diagnostic = %#v", diagnostic)
+		}
+	}
+	if len(file.Commands) == 0 || file.Commands[0].Embedded == nil {
+		t.Fatalf("autocmd block body was not retained: %#v", file.Commands)
+	}
+	for _, command := range file.Commands[0].Embedded.Commands {
+		if command.Canonical == "echo" {
+			t.Fatalf("post-bar echo was retained: %#v", file.Commands[0].Embedded.Commands)
+		}
+	}
+	if len(file.Commands) < 2 || file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after" {
+		t.Fatalf("following declaration was not retained: %#v", file.Commands)
+	}
+}
+
 func TestAutocmdEmbeddedBody(t *testing.T) {
 	for _, source := range []string{
 		"autocmd BufEnter * echo value\n",

@@ -2154,6 +2154,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   receiver types and directly emits E1229 for other compiled types.
 - `src/errors.h:3153-3154` defines the exact E1229 message.
 
+## Bar separator in a collected command block: E1231
+
+Syntax analysis reports E1231 when a command inside a collected `:command {}`
+or `:autocmd {}` body recognizes a top-level `|` itself after the block reader
+has already selected the following physical line as the next command. The
+diagnostic selects the conflicting bar, keeps its same-line tail opaque, and
+resumes at the next physical line.
+
+The check is limited to command consumers that call Vim's `set_nextcmd()`,
+including variable deletion and locking, substitute and syntax commands,
+find-pattern commands, `wincmd`, imports, function deletion, unambiguous
+function definitions, and the `final` and `throw` expression consumers. The
+generated command flags remain authoritative: commands with `EX_TRLBAR` or
+`EX_EXPR_ARG` are exempt, so `echo 'hello' | echo 'there'` remains valid in a
+collected block. A one-command `legacy` modifier does not leave the collected
+block context.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `runtime/doc/map.txt:1875-1889` documents E1231 and the collected user-command
+  block restriction.
+- `src/ex_docmd.c:2337-2361` records the following physical line for a
+  non-`EX_EXPR_ARG` command inside a block, while `src/ex_docmd.c:6005-6027`
+  emits E1231 when that command later finds another separator.
+- `src/evalvars.c:2109-2113`, `src/vim9script.c:657-662`, and
+  `src/ex_cmds.c:4322-4331` are representative command-local
+  `set_nextcmd()` consumers.
+- `src/errors.h:3160-3161` defines the exact E1231 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
