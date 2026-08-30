@@ -1996,6 +1996,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/evalfunc.c:612-627` defines the `arg_string_or_blob` checker.
 - `src/errors.h:3137-3138` defines the exact E1221 message.
 
+## String or List required for builtin argument: E1222
+
+Analysis reports E1222 at Vim9 script level when a String-or-List builtin
+argument has a known incompatible outer type. The diagnostic selects the
+complete normalized argument and uses its one-based position, including
+method receivers and later arguments.
+
+String, List, and dynamically typed values are accepted. For a
+`list<string>` checker, a List with a known incompatible element type remains
+on its existing type/content path rather than E1222. A mismatch in a compiled
+`def` or block lambda retains E1013, Legacy calls are not diagnosed, and the
+cursor checker's distinct String-or-Number-or-List contract remains separate.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:289-292` covers a later String-or-List
+  argument.
+- `src/testdir/test_vim9_builtin.vim:1038-1045` distinguishes an outer-type
+  E1222 failure from a compiled List element-type E1013 failure.
+- `src/testdir/test_vim9_builtin.vim:4297-4301` covers both outer-type and
+  List element behavior for `sign_undefine()`.
+- `src/evalfunc.c:555-593` defines the `list<string>` and List-of-any checker
+  variants.
+- `src/errors.h:3139-3140` defines the exact E1222 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

@@ -4690,6 +4690,61 @@ func TestAnalyzeE1221StringOrBlobBuiltinArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1222StringOrListBuiltinArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message, span string }{
+		{"string or list", "vim9script\nmatch(1, 'x')\n", "String or List required for argument 1", "1"},
+		{"list string", "vim9script\nexecute(1)\n", "String or List required for argument 1", "1"},
+		{"later argument", "vim9script\nassert_fails('x', true)\n", "String or List required for argument 2", "true"},
+		{"method receiver", "vim9script\n1->match('x')\n", "String or List required for argument 1", "1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1222" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1222 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1222 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"compiled def", "vim9script\ndef Func()\n  match(1, 'x')\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  match(1, 'x')\n}\n", "vim/E1013"},
+		{"string", "vim9script\nmatch('text', 'x')\n", ""},
+		{"list", "vim9script\nmatch(['text'], 'x')\n", ""},
+		{"unknown", "vim9script\nmatch(Unknown, 'x')\n", ""},
+		{"Legacy", "let value = match(1, 'x')\n", ""},
+		{"list element mismatch", "vim9script\nexecute([1])\n", "vim/E1013"},
+		{"cursor checker", "vim9script\ncursor(0z10)\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1222" {
+					t.Fatalf("guard unexpectedly received E1222: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},
