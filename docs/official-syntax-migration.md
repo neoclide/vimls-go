@@ -453,6 +453,8 @@ pending-fix.
 Commit `8bb5b34` migrated the missing default-expression variant. The
 authoritative syntax split is therefore 993 migrated, zero ready, and 29
 pending-fix.
+Commit `e1179fe` migrated the postfix optional-type variant. The authoritative
+syntax split is therefore 994 migrated, zero ready, and 28 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1528,7 +1530,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 144 migrated and 29 pending-fix. In the
+Group D contains 173 syntax variants: 145 migrated and 28 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1675,7 +1677,7 @@ so a primary E488, E1415, or E1416 is not followed by a false missing-end.
 E1005 M ready: 2887:66332/def
 E1007 M ready: 2078:45879/def
 E1008 M ready: 2462:55226/script,2464:55349/script,2481:55796/script
-E1010 P recovery: 2077:45815/def
+E1010 M recovery: 2077:45815/def
 E1055 M ready: 2482:55906/script
 E1057 P mapping: 408:8674/script,2466:55472/script
 E1059 M ready: 2448:54929/script,2455:55077/script
@@ -1750,6 +1752,11 @@ Commit `8bb5b34` migrates `828:17920/def`. A `def` parameter whose `=` has no
 following expression retains a zero-width ExpressionMissing node and reports
 E15 at that insertion point; legacy function argument handling keeps its E125
 classification.
+
+Commit `e1179fe` migrates `2077:45815/def`. A postfix `?` is invalid Vim9 type
+grammar, so the type parser retains `string?` as the argument span, reports one
+E1010, consumes the real function-type `)`, and resumes at the next command.
+The valid prefix optional form `?string` is unchanged.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
