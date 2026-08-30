@@ -3227,6 +3227,76 @@ func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1367InterfaceVariableAccessMismatch(t *testing.T) {
+	for _, member := range []string{
+		"public var val = 10",
+		"public final val = 10",
+		"public const val = 10",
+	} {
+		source := "vim9script\ninterface A\n  var val: number\nendinterface\nclass B implements A\n  " + member + "\nendclass\n"
+		file := syntax.Parse(source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E1367" {
+				got = append(got, diagnostic)
+			}
+			if diagnostic.Code == "vim/E1382" {
+				t.Fatalf("member=%q also reported E1382: %#v", member, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != `Access level of variable "val" of interface "A" is different` || file.Text(got[0].Span) != "endclass" {
+			t.Fatalf("member=%q E1367 diagnostics=%#v; syntax diagnostics=%#v", member, got, file.Diagnostics)
+		}
+	}
+
+	for _, test := range []struct {
+		name    string
+		source  string
+		message string
+	}{
+		{
+			name: "inherited class variable",
+			source: "vim9script\ninterface A\n  var val: number\nendinterface\nclass Parent\n  public var val = 10\nendclass\n" +
+				"class B extends Parent implements A\nendclass\n",
+			message: `Access level of variable "val" of interface "A" is different`,
+		},
+		{
+			name: "inherited interface requirement",
+			source: "vim9script\ninterface A\n  var val: number\nendinterface\ninterface I extends A\nendinterface\n" +
+				"class B implements I\n  public var val = 10\nendclass\n",
+			message: `Access level of variable "val" of interface "I" is different`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1367" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("E1367 diagnostics=%#v; syntax diagnostics=%#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ninterface A\n  var val: number\nendinterface\nclass B implements A\n  var val = 10\nendclass\n",
+		"vim9script\ninterface A\n  var val: number\nendinterface\nclass B implements A\n  final val = 10\nendclass\n",
+		"vim9script\ninterface A\n  var val: number\nendinterface\nclass B implements A\n  static var val = 10\nendclass\n",
+		"vim9script\ninterface A\n  var val: number\nendinterface\nclass B implements A\nendclass\n",
+		"vim9script\ninterface A\n  var val: number\nendinterface\nclass B implements A\n  var val: string = 'x'\nendclass\n",
+		"vim9script\ninterface A\n  var val: number\nendinterface\nclass Parent\n  var val: number = 1\nendclass\nclass B extends Parent implements A\n  public var val: number = 1\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1367" {
+				t.Fatalf("guard source reported E1367: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1377MethodAccessLevelMismatch(t *testing.T) {
 	for _, test := range []struct {
 		name       string

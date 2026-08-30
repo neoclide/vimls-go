@@ -128,6 +128,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectMethodTypeMismatchDiagnostics(result)
 	collectDuplicateClassVariableDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
+	collectInterfaceVariableAccessDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 
 	sortDeclarations(result)
@@ -793,6 +794,11 @@ func collectVariableTypeMismatchDiagnostics(result *FileAnalysis) {
 					if name == "" || strings.HasPrefix(name, "_") || reported[name] {
 						continue
 					}
+					implementation, _, found := classObjectVariableBinding(result, class, name)
+					if found && commandHasModifier(implementation, "public") {
+						reported[name] = true
+						continue
+					}
 					expected := aggregateBindingType(result, member, bindingIndex)
 					actual, found := classObjectVariableType(result, class, name)
 					if found && !isUnknownType(expected) && !isUnknownType(actual) && !memberTypesCompatible(result, expected, actual) {
@@ -809,6 +815,72 @@ func collectVariableTypeMismatchDiagnostics(result *FileAnalysis) {
 			checkInterface(interfaces[file.Text(implemented)])
 		}
 	}
+}
+
+func collectInterfaceVariableAccessDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	interfaces := localInterfaces(file)
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+			continue
+		}
+		reported := make(map[string]bool)
+		for _, implemented := range class.Aggregate.Implements {
+			interfaceName := file.Text(implemented)
+			seenInterfaces := make(map[*syntax.Command]bool)
+			var checkInterface func(*syntax.Command)
+			checkInterface = func(iface *syntax.Command) {
+				if iface == nil || iface.Aggregate == nil || seenInterfaces[iface] {
+					return
+				}
+				seenInterfaces[iface] = true
+				for _, memberIndex := range iface.Aggregate.Members {
+					if memberIndex < 0 || memberIndex >= len(file.Commands) {
+						continue
+					}
+					member := &file.Commands[memberIndex]
+					if member.Declaration == nil || commandHasModifier(member, "static") {
+						continue
+					}
+					for _, binding := range member.Declaration.Bindings {
+						name := file.Text(binding.Name)
+						if name == "" || strings.HasPrefix(name, "_") || reported[name] {
+							continue
+						}
+						implementation, _, found := classObjectVariableBinding(result, class, name)
+						if found && commandHasModifier(implementation, "public") && !classHasDuplicateVariableDiagnostic(result, class, name) {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E1367", Message: `Access level of variable "` + name + `" of interface "` + interfaceName + `" is different`, Span: aggregateEndSpan(file, class),
+							})
+							reported[name] = true
+						}
+					}
+				}
+				for _, parent := range iface.Aggregate.Extends {
+					checkInterface(interfaces[file.Text(parent)])
+				}
+			}
+			checkInterface(interfaces[interfaceName])
+		}
+	}
+}
+
+func classHasDuplicateVariableDiagnostic(result *FileAnalysis, class *syntax.Command, name string) bool {
+	if result == nil || result.File == nil || class == nil || class.Block < 0 || class.Block >= len(result.File.Blocks) {
+		return false
+	}
+	classSpan := result.File.Blocks[class.Block].Span
+	message := "Duplicate variable: " + name
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1369" && diagnostic.Message == message && diagnostic.Span.Start >= classSpan.Start && diagnostic.Span.End <= classSpan.End {
+			return true
+		}
+	}
+	return false
 }
 
 func localInterfaces(file *syntax.File) map[string]*syntax.Command {
@@ -860,17 +932,39 @@ func aggregateObjectVariableType(result *FileAnalysis, aggregate *syntax.Command
 }
 
 func classObjectVariableType(result *FileAnalysis, class *syntax.Command, name string) (ValueType, bool) {
+	member, bindingIndex, found := classObjectVariableBinding(result, class, name)
+	if !found {
+		return UnknownValueType, false
+	}
+	return aggregateBindingType(result, member, bindingIndex), true
+}
+
+func classObjectVariableBinding(result *FileAnalysis, class *syntax.Command, name string) (*syntax.Command, int, bool) {
+	if result == nil || result.File == nil {
+		return nil, 0, false
+	}
 	seen := make(map[*syntax.Command]bool)
 	for current := class; current != nil; current = extendedClass(result.File, result.classes, current) {
 		if seen[current] {
-			return UnknownValueType, false
+			return nil, 0, false
 		}
 		seen[current] = true
-		if typ, found := aggregateObjectVariableType(result, current, name); found {
-			return typ, true
+		for _, memberIndex := range current.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(result.File.Commands) {
+				continue
+			}
+			member := &result.File.Commands[memberIndex]
+			if member.Declaration == nil || commandHasModifier(member, "static") {
+				continue
+			}
+			for bindingIndex, binding := range member.Declaration.Bindings {
+				if result.File.Text(binding.Name) == name {
+					return member, bindingIndex, true
+				}
+			}
 		}
 	}
-	return UnknownValueType, false
+	return nil, 0, false
 }
 
 func memberTypesCompatible(result *FileAnalysis, expected, actual ValueType) bool {
