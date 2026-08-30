@@ -1097,6 +1097,8 @@ func officialParserExpectedFailures() map[string]string {
 		"src/testdir/test_listdict.vim:1521:47598/legacy":          "vim/E15",
 		"src/testdir/test_listdict.vim:1521:47598/def":             "vim/E1127",
 		"src/testdir/test_listdict.vim:1521:47598/vim9-script":     "vim/E15",
+		"src/testdir/test_listdict.vim:1530:48090/def":             "vim/E15",
+		"src/testdir/test_listdict.vim:1530:48090/vim9-script":     "vim/E15",
 		"src/testdir/test_listdict.vim:1532:48170/def":             "vim/E1097",
 		"src/testdir/test_tuple.vim:138:3809/def":                  "vim/E1004",
 		"src/testdir/test_tuple.vim:143:3972/vim9-script":          "vim/E1068",

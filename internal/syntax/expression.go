@@ -112,6 +112,7 @@ type expressionParser struct {
 	diagnostics    []Diagnostic
 	depth          int
 	unaryPairError bool
+	lambdaBody     bool
 }
 
 // expressionBoundary retains the expression already parsed while finding an
@@ -1071,6 +1072,14 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 	switch token.text {
 	case "(":
 		p.advance()
+		if p.dialect == Vim9 && p.lambdaBody && p.current().text == "]" {
+			// A call opener in a lambda body can be the malformed endpoint of an
+			// enclosing slice. Keep the outer delimiter available for recovery.
+			closing := p.current()
+			p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E15", Message: "invalid expression", Span: closing.span})
+			missing := &Expression{Kind: ExpressionMissing, Span: Span{Start: closing.span.Start, End: closing.span.Start}}
+			return &Expression{Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: token.span.End}, Children: []*Expression{left, missing}}
+		}
 		children := []*Expression{left}
 		missingComma := false
 		commaDiagnostic := false
@@ -1556,7 +1565,10 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 			return lambda, true
 		}
 	}
+	previousLambdaBody := p.lambdaBody
+	p.lambdaBody = true
 	body := p.parse(0)
+	p.lambdaBody = previousLambdaBody
 	lambda.Children = append(lambda.Children, body)
 	lambda.Span = Span{Start: open.span.Start, End: body.Span.End}
 	return lambda, true
