@@ -455,6 +455,8 @@ authoritative syntax split is therefore 993 migrated, zero ready, and 29
 pending-fix.
 Commit `e1179fe` migrated the postfix optional-type variant. The authoritative
 syntax split is therefore 994 migrated, zero ready, and 28 pending-fix.
+Commit `ad45d88` migrated both legacy tuple-gap variants. The authoritative
+syntax split is therefore 996 migrated, zero ready, and 26 pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1530,7 +1532,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 145 migrated and 28 pending-fix. In the
+Group D contains 173 syntax variants: 147 migrated and 26 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1595,7 +1597,7 @@ E1015 M recovery: 159:4498/def
 E1068 M ready: 82:2083/{def|vim9-script},92:2394/def,97:2538/{def|vim9-script},143:3972/def,151:4245/def
 E1069 M ready: 72:1754/{def|vim9-script},77:1924/{def|vim9-script},87:2239/{def|vim9-script}
 E15 M mapping: 143:3972/vim9-script,151:4245/vim9-script
-E15 P missing: 143:3972/legacy,151:4245/legacy
+E15 M missing: 143:3972/legacy,151:4245/legacy
 E15 M recovery: 159:4498/{legacy|vim9-script}
 E1526 M ready: 112:3010/{legacy|def|vim9-script}
 E1527 M ready: 104:2756/{legacy|def|vim9-script}
@@ -1613,6 +1615,11 @@ generic container types but not generic classes, so an unknown type name
 followed by `<...>` reports E1010 over the complete retained TypeGeneric node.
 Ordinary user type names and expression-context generic function calls remain
 unchanged.
+
+Commit `ad45d88` migrates `143:3972/legacy` and `151:4245/legacy`. A second
+tuple comma reports E15 and remains represented by an ExpressionMissing child;
+the parser then retains later tuple items and the real closing parenthesis.
+Vim9 comma-spacing diagnostics and list/Dictionary recovery are unchanged.
 
 #### `test_vim9_enum.vim` (31)
 
