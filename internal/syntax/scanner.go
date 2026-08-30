@@ -441,6 +441,7 @@ func parseSource(source string, initial Dialect) *File {
 	diagnoseConcreteClassAbstractMembers(file)
 	suppressClassBodyCommandDiagnostics(file)
 	buildAggregateMembers(file)
+	diagnoseStaticConstructors(file)
 	suppressInvalidBlockMissingEnds(file)
 	suppressInvalidInterfaceInitializers(file)
 	suppressDeferredDefDiagnosticsBeforeLegacyPoundError(file)
@@ -2808,7 +2809,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if command.Canonical == "function" && command.Dialect == Vim9 && command.Bang.Start < command.Bang.End && command.Function != nil && !strings.HasPrefix(file.Text(command.Function.Name), "g:") {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "no ! allowed", Span: command.Bang})
 		}
-		if command.Function != nil && command.Function.ReturnType != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockClass) {
+		if command.Function != nil && command.Function.ReturnType != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockClass) && !staticMethod {
 			name := file.Text(command.Function.Name)
 			if strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new") {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1365", Message: `Cannot use a return type with the "new" method`, Span: command.Function.ReturnTypeSpan})
@@ -4502,6 +4503,49 @@ func diagnoseConcreteClassAbstractMembers(file *File) {
 				Code: "vim/E1372", Message: `Abstract method "` + file.Text(span) + `" cannot be defined in a concrete class`, Span: span,
 			})
 			break
+		}
+	}
+}
+
+func diagnoseStaticConstructors(file *File) {
+	if file == nil {
+		return
+	}
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != Vim9 || class.Aggregate == nil || class.Aggregate.Kind != BlockClass {
+			continue
+		}
+		abstractClass := false
+		for _, modifier := range class.Modifiers {
+			if modifier.Name == "abstract" {
+				abstractClass = true
+				break
+			}
+		}
+		if abstractClass {
+			continue
+		}
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Function == nil || slices.ContainsFunc(member.Modifiers, func(modifier Modifier) bool { return modifier.Name == "abstract" }) {
+				continue
+			}
+			name := file.Text(member.Function.Name)
+			if !strings.HasPrefix(name, "new") && !strings.HasPrefix(name, "_new") {
+				continue
+			}
+			for _, modifier := range member.Modifiers {
+				if modifier.Name == "static" {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1370", Message: `Cannot define a "new" method as static`, Span: modifier.Span,
+					})
+					break
+				}
+			}
 		}
 	}
 }

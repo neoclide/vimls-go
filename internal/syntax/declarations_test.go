@@ -1437,6 +1437,39 @@ func TestVim9AbstractClassInvalidAbstractMemberReportsE1371(t *testing.T) {
 	}
 }
 
+func TestVim9StaticConstructorReportsE1370(t *testing.T) {
+	for _, method := range []string{"new", "newOther", "_new", "_newPrivate"} {
+		source := "vim9script\nclass A\n  static def " + method + "()\n  enddef\nendclass\nvar after = 1\n"
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1370" || file.Diagnostics[0].Message != `Cannot define a "new" method as static` || file.Text(file.Diagnostics[0].Span) != "static" {
+			t.Fatalf("method=%q diagnostics=%#v", method, file.Diagnostics)
+		}
+		last := file.Commands[len(file.Commands)-1]
+		if last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+			t.Fatalf("method=%q commands=%#v", method, file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+
+	withReturn := Parse("vim9script\nclass A\n  static def new(): number\n  enddef\nendclass\n")
+	if len(withReturn.Diagnostics) != 1 || withReturn.Diagnostics[0].Code != "vim/E1370" {
+		t.Fatalf("return diagnostics=%#v", withReturn.Diagnostics)
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  def new()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static def New()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static def Build()\n  enddef\nendclass\n",
+		"vim9script\nabstract class A\n  static def new()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  abstract static def new()\nendclass\n",
+		"vim9script\ninterface A\n  static def new()\nendinterface\n",
+	} {
+		if hasDiagnostic(Parse(source), "vim/E1370") {
+			t.Fatalf("guard source reported E1370: %s", source)
+		}
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
