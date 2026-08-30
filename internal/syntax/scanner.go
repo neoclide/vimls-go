@@ -1108,7 +1108,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			}
 			return
 		}
-		if start < end && (isCommentStart(file.Source, start, start, end, dialect, vimdata.Command{}) || missingVim9ModifierCommand) {
+		explicitHashCommand := dialect == Vim9 && start < end && start == commandStart+1 && file.Source[commandStart] == ':' && file.Source[start] == '#'
+		if start < end && ((!explicitHashCommand && isCommentStart(file.Source, start, start, end, dialect, vimdata.Command{})) || missingVim9ModifierCommand) {
 			file.Tokens = append(file.Tokens, Token{Kind: TokenComment, Span: Span{Start: start, End: end}})
 			if commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < start {
 				if missingVim9ModifierCommand {
@@ -2810,6 +2811,8 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	switch command.Canonical {
+	case "#":
+		parsePoundCommandTail(file, command)
 	case "let", "var", "const", "final":
 		directAggregateMember := false
 		if command.Block >= 0 && command.Block < len(file.Blocks) {
@@ -4116,6 +4119,26 @@ func parseVariableTargets(file *File, command *Command) {
 		}
 		consumed += length
 		consumed = skipSpace(source, consumed, len(source))
+	}
+}
+
+func parsePoundCommandTail(file *File, command *Command) {
+	position := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+	countStart := position
+	for position < command.Argument.End && file.Source[position] >= '0' && file.Source[position] <= '9' {
+		position++
+	}
+	if position > countStart {
+		command.Count = Span{Start: countStart, End: position}
+		position = skipSpace(file.Source, position, command.Argument.End)
+	}
+	for position < command.Argument.End && strings.ContainsRune("lp#", rune(file.Source[position])) {
+		position = skipSpace(file.Source, position+1, command.Argument.End)
+	}
+	if position < command.Argument.End {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E488", Message: "trailing characters", Span: Span{Start: position, End: command.Argument.End},
+		})
 	}
 }
 
