@@ -404,6 +404,9 @@ pending-fix.
 Commit `983bf00` migrated the three Ex pound-command tail variants. The
 authoritative parser split is therefore 962 migrated, zero ready, and 70
 pending-fix.
+Commit `66ba656` migrated the two attached Vim9 block-delimiter variants. The
+authoritative parser split is therefore 964 migrated, zero ready, and 68
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -996,13 +999,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 106 | 103 | 0 | 3 |
+| `C-EXCMD` | 106 | 105 | 0 | 1 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **333** | **330** | **0** | **3** |
+| **Total** | **333** | **332** | **0** | **1** |
 
 ```text
 C-EXPR
@@ -1209,6 +1212,12 @@ immediately following an explicit colon is parsed as the Ex pound command,
 while whitespace between the colon and hash still starts a Vim9 comment. The
 pound command now consumes its optional count and `l`, `p`, or `#` flags and
 reports E488 only for an unconsumed tail.
+
+Commit `66ba656` migrated `S:{3570:75953,3573:76014}/def`. An attached hash
+after `{` or `}` is retained as an opaque malformed tail and reports E488,
+while a whitespace-delimited hash remains a comment. The delimiters still
+participate in scope recovery, but their primary diagnostic suppresses a
+cascading missing- or unexpected-brace error on the same edit.
 
 Commit `a2e0aca` migrated `S:{3715:79011,3732:79394}/script`. The independent
 Ex `:match` command now validates its optional group and delimited regexp: an
