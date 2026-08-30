@@ -229,11 +229,12 @@ def Check(value: number)
   var lambda = (item: number) => item + lambdaMissing
   legacy echo legacyMissing
 enddef
+var outsideLambda = (item: number) => item + outsideLambdaMissing
 echo outsideMissing
 `
 	file := syntax.Parse(source)
 	result := Analyze(file)
-	want := []string{"missing", "missing", "blockMissing", "v:nosuch", "lambdaMissing"}
+	want := []string{"missing", "missing", "blockMissing", "v:nosuch", "lambdaMissing", "outsideLambdaMissing"}
 	var got []syntax.Diagnostic
 	for _, diagnostic := range result.Diagnostics {
 		if diagnostic.Code == "vim/E1001" {

@@ -932,7 +932,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				_, known := vimdata.LookupVariable(expression.Value)
 				unknownVimVariable = !known
 			}
-			if declaration == nil && !preferFunction && dialect == syntax.Vim9 && scopeContainsDef(scope) && (unscoped || unknownVimVariable) && expression.Value != "this" && expression.Value != "super" {
+			if declaration == nil && !preferFunction && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && (unscoped || unknownVimVariable) && expression.Value != "this" && expression.Value != "super" {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1001", Message: "Variable not found: " + expression.Value, Span: expression.Span,
 				})
