@@ -423,6 +423,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		typ = state.binaryType(expression, scope)
 	case syntax.ExpressionTernary:
 		if len(expression.Children) == 3 {
+			state.infer(expression.Children[0], scope)
 			left := state.infer(expression.Children[1], scope)
 			right := state.infer(expression.Children[2], scope)
 			typ = mergeTypes(left, right)
@@ -432,9 +433,11 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	case syntax.ExpressionAssignment:
 		if len(expression.Children) > 1 {
 			typ = state.infer(expression.Children[1], scope)
-			if len(expression.Children) > 0 {
-				state.assign(expression.Children[0], typ)
+			target := expression.Children[0]
+			for _, child := range target.Children {
+				state.infer(child, scope)
 			}
+			state.assign(target, typ)
 		} else {
 			typ = unknown
 		}

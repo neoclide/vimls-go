@@ -730,6 +730,102 @@ func TestAnalyzeFloatModuloDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFloatAsNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script ternary condition",
+			source: "vim9script\nvar value = 0.1 ? 'one' : 'two'\n",
+			span:   "0.1",
+		},
+		{
+			name:   "compiled def ternary condition",
+			source: "vim9script\ndef F()\n  var value = 0.1 ? 'one' : 'two'\nenddef\n",
+			span:   "0.1",
+		},
+		{
+			name:   "legacy ternary condition",
+			source: "let value = 0.1 ? 'one' : 'two'\n",
+			span:   "0.1",
+		},
+		{
+			name:   "vim9 script builtin Number argument",
+			source: "vim9script\nextendnew(0z0102, 0z03, 1.1)\n",
+			span:   "1.1",
+		},
+		{
+			name:   "vim9 script List index",
+			source: "vim9script\nvar values = [1, 2, 3]\nvalues[1.1] = 4\n",
+			span:   "1.1",
+		},
+		{
+			name:   "legacy List index",
+			source: "let values = [1, 2, 3]\nlet item = values[1.1]\n",
+			span:   "1.1",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E805" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("script-level Float retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Float as a Number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E805 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		source, want string
+	}{
+		{
+			source: "vim9script\ndef F()\n  extendnew(0z0102, 0z03, 1.1)\nenddef\n",
+			want:   "vim/E1013",
+		},
+		{
+			source: "vim9script\ndef F()\n  var values = [1, 2, 3]\n  values[1.1] = 4\nenddef\n",
+			want:   "vim/E1012",
+		},
+	} {
+		file := syntax.Parse(test.source)
+		result := Analyze(file)
+		found := false
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == test.want {
+				found = true
+			}
+			if diagnostic.Code == "vim/E805" {
+				t.Fatalf("compiled def retained E805: %#v", result.Diagnostics)
+			}
+		}
+		if !found {
+			t.Fatalf("compiled def diagnostics = %#v, want %s", result.Diagnostics, test.want)
+		}
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value = 1.0 * 2\n",
+		"vim9script\nvar value = !!0.1 ? 'one' : 'two'\n",
+		"vim9script\nvar value = 1.0 % 2\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E805" {
+				t.Fatalf("source %q unexpectedly received E805: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

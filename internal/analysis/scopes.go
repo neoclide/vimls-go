@@ -790,6 +790,27 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 			}
+			if expression.Kind == syntax.ExpressionTernary && len(expression.Children) == 3 && !expressionContainsMissing(expression) {
+				condition := expression.Children[0]
+				if result.TypeOf(condition).Name == "float" {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E805", Message: "Using a Float as a Number", Span: condition.Span,
+					})
+				}
+			}
+			if command.Dialect == syntax.Legacy && (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 {
+				receiver := resolvedExpressionType(result, expressionScope, expression.Children[0])
+				if receiver.Name == "blob" || receiver.Name == "list" || receiver.Name == "string" || receiver.Name == "tuple" {
+					for _, index := range expression.Children[1:] {
+						if resolvedExpressionType(result, expressionScope, index).Name == "float" {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E805", Message: "Using a Float as a Number", Span: index.Span,
+							})
+							break
+						}
+					}
+				}
+			}
 			if expression.Kind == syntax.ExpressionDictionary && !(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 				for keyIndex := 0; keyIndex+1 < len(expression.Children); keyIndex += 2 {
 					key := expression.Children[keyIndex]
@@ -1106,11 +1127,19 @@ func collectIndexTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, expr
 		if index == nil || index.Kind == syntax.ExpressionMissing {
 			continue
 		}
-		if !scopeUsesDefTypeRules(scope) && resolvedExpressionType(result, scope, index).Name == "func" {
-			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-				Code: "vim/E703", Message: "Using a Funcref as a Number", Span: index.Span,
-			})
-			return
+		if !scopeUsesDefTypeRules(scope) {
+			switch resolvedExpressionType(result, scope, index).Name {
+			case "func":
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E703", Message: "Using a Funcref as a Number", Span: index.Span,
+				})
+				return
+			case "float":
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E805", Message: "Using a Float as a Number", Span: index.Span,
+				})
+				return
+			}
 		}
 		before := len(result.Diagnostics)
 		appendTypeMismatchDiagnostic(result, expected, index)
@@ -2451,6 +2480,12 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						if !scopeUsesDefTypeRules(scope) && strings.TrimSuffix(checker, "_mod") == "arg_string_or_func" && actual[index].Name == "list" {
 							diagnostic, _ := stringConversionDiagnostic(actual[index], argument.Span)
 							result.Diagnostics = append(result.Diagnostics, diagnostic)
+							continue
+						}
+						if !scopeUsesDefTypeRules(scope) && expected.kinds == builtinNumber && actual[index].Name == "float" {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E805", Message: "Using a Float as a Number", Span: argument.Span,
+							})
 							continue
 						}
 						if !scopeUsesDefTypeRules(scope) {

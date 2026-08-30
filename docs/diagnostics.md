@@ -642,3 +642,30 @@ Representative source evidence:
 - `src/eval.c:4803-4881` converts both operands before rejecting Float modulo,
   establishing conversion-error precedence.
 - `src/errors.h:2071-2073` defines the exact message.
+
+## Using a Float as a Number: E805
+
+E805 means `Using a Float as a Number`. Vim uses it when a runtime operation
+requires a Number but receives a Float.
+
+Analysis reports E805 for a statically known Float ternary condition in
+Legacy, top-level Vim9, and a compiled `def`. Unlike logical `&&` and `||`, the
+compiled ternary form retains E805. Analysis also reports E805 for a Float
+List, Blob, String, or Tuple index outside a compiled `def`, and for a
+top-level Vim9 builtin argument whose generated checker requires exactly a
+Number. The corresponding compiled contexts remain E1012 for an index and
+E1013 for a builtin argument. Ordinary Float arithmetic is valid, while Float
+modulo remains E804; Boolean conversion through `!` does not receive E805.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:193-206` uses E805 for a Float ternary
+  condition in both a compiled `def` and top-level Vim9 script.
+- `src/testdir/test_vim9_builtin.vim:1344-1350` distinguishes E1013 in a
+  compiled `def` from E805 at script level for `extendnew()`'s Number
+  argument.
+- `src/testdir/test_listdict.vim:1537-1540`, together with
+  `src/testdir/util/vim9.vim:249-265`, distinguishes Legacy and script-level
+  E805 from compiled E1012 for Float List indexes and slice bounds.
+- `src/typval.c:214-226` maps Float-to-Number conversion to E805, and
+  `src/errors.h:2074-2075` defines the exact message.
