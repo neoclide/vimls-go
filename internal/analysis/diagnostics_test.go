@@ -3062,6 +3062,56 @@ func TestAnalyzeE1054ImportAliasConflictsWithScriptItem(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1560RejectsTypeArgumentsForNonGenericFunction(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		span   string
+	}{
+		{
+			name: "direct call",
+			source: "vim9script\ndef Fn(x: number)\nenddef\n" +
+				"def Use()\n  Fn<number>(10)\nenddef\n",
+			span: "Fn",
+		},
+		{
+			name: "function reference",
+			source: "vim9script\ndef Fn()\nenddef\n" +
+				"var Fx = function(Fn<number>)\n",
+			span: "Fn",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			all := Analyze(file).Diagnostics
+			var got []syntax.Diagnostic
+			for _, diagnostic := range all {
+				if diagnostic.Code == "vim/E1560" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(all) != 1 || len(got) != 1 || got[0].Message != "Not a generic function: Fn" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v; syntax diagnostics = %#v", all, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Fn<T>(x: T)\nenddef\nFn<number>(1)\n",
+		"vim9script\nUnknown<number>(1)\n",
+		"vim9script\nvar Fn = (x) => x\nFn<number>(1)\n",
+		"vim9script\ndef Fn()\nenddef\nFn<>()\n",
+		"vim9script\nvar object: any\nobject.Fn<number>(1)\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1560" {
+				t.Fatalf("guard source reported E1560: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1093DestructuringCardinality(t *testing.T) {
 	tests := []struct {
 		name      string
