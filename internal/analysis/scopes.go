@@ -3711,6 +3711,19 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				break
 			}
 		}
+		if (command.Canonical == "lockvar" || command.Canonical == "unlockvar") && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+			for _, target := range command.Targets {
+				if target == nil || target.Kind != syntax.ExpressionIdentifier || target.Value == "this" || syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, target.Span) {
+					continue
+				}
+				declaration := resolve(scope, target.Value, target.Span.Start, false, nil)
+				if declaration == nil || declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant || declaration.Scope == nil || !scopeUsesDefTypeRules(declaration.Scope) {
+					continue
+				}
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1178", Message: "Cannot lock or unlock a local variable", Span: target.Span})
+				break
+			}
+		}
 		if command.Declaration != nil && command.Declaration.Initializer != nil && command.Declaration.Initializer.Kind == syntax.ExpressionLambda {
 			collectAssignmentExpressionDiagnostics(result, scope, command.Declaration.Initializer, command.Dialect)
 		}

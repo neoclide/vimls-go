@@ -1522,6 +1522,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   the message.
 - `src/errors.h:3015-3016` defines the exact E1177 message template.
 
+## Cannot lock or unlock a local variable: E1178
+
+Analysis reports E1178 when a compiled Vim9 `lockvar` or `unlockvar` command
+directly targets a bare local variable or constant. The diagnostic uses Vim's
+exact `Cannot lock or unlock a local variable` message and selects the first
+invalid target in the command.
+
+The check applies in `def` and block-lambda bodies, including captured locals
+and a `def` retained under a Legacy root. A function argument may be locked,
+as may bare `this`, a local value's member or indexed item, a script variable,
+an aggregate member, and explicitly scoped state. Top-level Vim9 script and
+Legacy commands retain their runtime behavior. Incomplete targets and earlier
+diagnostics keep precedence.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_cmd.vim:1813-1824` expects E1178 for both `lockvar`
+  and `unlockvar` on an inferred local List in a compiled `def`.
+- `src/testdir/test_vim9_class.vim:4062-4095` accepts bare `this` but rejects
+  ordinary four- and five-character method locals.
+- `src/testdir/test_tuple.vim:1349-1361` distinguishes the compiled local
+  failure from the corresponding Legacy and Vim9-script runtime behavior.
+- `src/vim9cmds.c:176-345` resolves the root target, rejects only a bare local,
+  and routes parameters, `this`, members, indexes, class members, and script
+  variables through their supported paths.
+- `runtime/doc/vim9.txt:523-525` directs local bindings to `const` and `final`
+  instead of `lockvar`.
+- `src/errors.h:3017-3018` defines the exact E1178 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

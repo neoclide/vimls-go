@@ -2272,6 +2272,73 @@ func TestAnalyzeE1177UnsupportedForIterableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1178LocalLockDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		following          bool
+	}{
+		{"lock local", "vim9script\ndef F()\n  var values = [1]\n  lockvar values\n  var after = 1\nenddef\n", "values", true},
+		{"unlock local", "vim9script\ndef F()\n  var values = [1]\n  unlockvar values\nenddef\n", "values", false},
+		{"nested final", "vim9script\ndef F()\n  if true\n    final value = [1]\n    lockvar value\n  endif\nenddef\n", "value", false},
+		{"for binding", "vim9script\ndef F()\n  for value in [1]\n    lockvar value\n  endfor\nenddef\n", "value", false},
+		{"captured local", "vim9script\ndef F()\n  var value = [1]\n  var Lock = () => {\n    unlockvar value\n  }\nenddef\n", "value", false},
+		{"Legacy-root def count", "def F()\n  var values = [1]\n  lockvar 2 values\nenddef\n", "values", false},
+		{"bang first target", "vim9script\ndef F()\n  var first = [1]\n  var second = [2]\n  lockvar! first second\nenddef\n", "first", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1178" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot lock or unlock a local variable" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1178 = %#v", got)
+			}
+			if test.following {
+				found := false
+				for _, declaration := range result.Declarations {
+					if declaration.Name == "after" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("following declaration was not retained: %#v", result.Declarations)
+				}
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\ndef F(value: list<number>)\n  lockvar value\n  var Lock = (argument: list<number>) => {\n    unlockvar argument\n  }\nenddef\n",
+		"vim9script\nclass C\n  def Lock()\n    lockvar this\n  enddef\nendclass\n",
+		"vim9script\ndef F()\n  var values = [{key: 1}]\n  lockvar values[0]\n  lockvar values[:]\n  lockvar values[0].key\nenddef\n",
+		"vim9script\nvar script = [1]\ndef F()\n  lockvar script\nenddef\n",
+		"vim9script\nclass C\n  var value = [1]\n  def Lock()\n    lockvar value\n  enddef\nendclass\n",
+		"vim9script\ndef F()\n  lockvar g:value\n  lockvar b:value\n  lockvar $VIM\n  lockvar &tabstop\n  lockvar @a\n  lockvar unknown\nenddef\n",
+		"vim9script\nvar value = [1]\nlockvar value\n",
+		"let value = [1]\nfunction F()\n  let local = [1]\n  lockvar local\nendfunction\n",
+		"vim9script\ndef F()\n  var value = [1]\n  legacy lockvar value\nenddef\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1178" {
+				t.Fatalf("unexpected E1178: %#v", diagnostic)
+			}
+		}
+	}
+	malformed := syntax.Parse("vim9script\ndef F()\n  var value = [1]\n  lockvar value[)\nenddef\n")
+	if len(malformed.Diagnostics) == 0 {
+		t.Fatal("malformed lock target did not retain a syntax diagnostic")
+	}
+	for _, diagnostic := range Analyze(malformed).Diagnostics {
+		if diagnostic.Code == "vim/E1178" {
+			t.Fatalf("malformed target received E1178: %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
