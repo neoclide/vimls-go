@@ -1784,6 +1784,66 @@ func TestAnalyzeObjectComparisonDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFlattenVim9Diagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name:   "Vim9 script direct method and arity precedence",
+			source: "vim9script\nflatten([1])\n[[1]]->flatten()\nflatten()\nflatten(1, 2, 3)\n",
+			want:   []string{"flatten", "flatten", "flatten", "flatten"},
+		},
+		{
+			name:   "compiled def lambda vim9cmd and Legacy-root def",
+			source: "vim9script\ndef Func()\n  flatten([1])\nenddef\nvar Callback = () => flatten([1])\nvim9cmd flatten([1])\n",
+			want:   []string{"flatten", "flatten", "flatten"},
+		},
+		{
+			name:   "Legacy-root def",
+			source: "def Func()\n  flatten([1])\nenddef\n",
+			want:   []string{"flatten"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1158" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E118" || diagnostic.Code == "vim/E119" || diagnostic.Code == "vim/E1013" {
+					if test.name == "Vim9 script direct method and arity precedence" {
+						t.Fatalf("E1158 source retained %s: %#v", diagnostic.Code, result.Diagnostics)
+					}
+				}
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("E1158 diagnostics = %#v, want spans %#v; all diagnostics = %#v", got, test.want, result.Diagnostics)
+			}
+			for index, diagnostic := range got {
+				if diagnostic.Message != "Cannot use flatten() in Vim9 script, use flattennew()" || file.Text(diagnostic.Span) != test.want[index] {
+					t.Fatalf("E1158[%d] = %#v on %q", index, diagnostic, file.Text(diagnostic.Span))
+				}
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"flatten([1])\nfunction Legacy()\n  flatten([1])\nendfunction\n",
+		"vim9script\nlegacy call flatten([1])\nflattennew([1])\ng:flatten([1])\ns:flatten([1])\nobj.flatten([1])\ncall('flatten', [1])\n",
+		"vim9script\nflatten(\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1158" {
+				t.Fatalf("source %q unexpectedly received E1158: %#v", source, diagnostic)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

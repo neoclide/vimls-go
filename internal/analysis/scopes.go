@@ -4400,7 +4400,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			walkExpression(result, file, child, scope, skipped, false, dialect)
 		}
 	case syntax.ExpressionCall:
-		collectBuiltinCallArityDiagnostic(result, file, expression)
+		collectBuiltinCallArityDiagnostic(result, file, expression, dialect)
 		appendUnqualifiedClassMethodDiagnostic(result, file, expression, scope, dialect)
 		appendAbstractSuperMethodDiagnostic(result, file, expression, scope, dialect)
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
@@ -5502,7 +5502,10 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		seen[expression] = true
 		if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
 			builtin, arguments, builtinCall := builtinCallArguments(result.File, expression)
-			if builtinCall && (dialect == syntax.Vim9 || builtin.Name == "len") {
+			if builtinCall && dialect == syntax.Vim9 && builtin.Name == "flatten" {
+				// E1158 is emitted while walking the call and owns this builtin
+				// before its ordinary arity and argument-type checks.
+			} else if builtinCall && (dialect == syntax.Vim9 || builtin.Name == "len") {
 				actual := make([]ValueType, len(arguments))
 				for index, argument := range arguments {
 					actual[index] = result.TypeOf(argument)
@@ -5987,7 +5990,7 @@ func functionDiagnosticTarget(file *syntax.File, expression *syntax.Expression) 
 // callable is a statically named builtin. A method receiver counts as one
 // argument, and any explicit arguments required before the receiver must still
 // be present. Scoped and dynamically named calls deliberately remain unknown.
-func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression) {
+func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression, dialect syntax.Dialect) {
 	if result == nil || file == nil || call == nil || len(call.Children) == 0 || expressionContainsMissing(call) || syntaxDiagnosticTouchesCall(file.Diagnostics, call.Span) {
 		return
 	}
@@ -6023,6 +6026,16 @@ func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, 
 	if !ok {
 		return
 	}
+	_, span := functionDiagnosticTarget(file, callee)
+	if !validNameSpan(file, span) {
+		return
+	}
+	if dialect == syntax.Vim9 && builtin.Name == "flatten" {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1158", Message: "Cannot use flatten() in Vim9 script, use flattennew()", Span: span,
+		})
+		return
+	}
 	if method && (builtin.MethodArgument == 0 || builtin.MethodArgument-1 > explicitCount) {
 		if builtin.MethodArgument == 0 {
 			return
@@ -6031,10 +6044,6 @@ func collectBuiltinCallArityDiagnostic(result *FileAnalysis, file *syntax.File, 
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vim/E119", Message: "Not enough arguments for function: " + builtin.Name, Span: span,
 		})
-		return
-	}
-	_, span := functionDiagnosticTarget(file, callee)
-	if !validNameSpan(file, span) {
 		return
 	}
 	if argumentCount < builtin.MinArgs {

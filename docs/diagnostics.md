@@ -1283,6 +1283,32 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   operators in both contexts.
 - `src/errors.h:2959-2960` defines the exact E1153 message template.
 
+## Forbidden flatten call: E1158
+
+Analysis reports E1158 when a Vim9 command calls the builtin `flatten()`
+directly or through method syntax. The diagnostic uses Vim's exact `Cannot use
+flatten() in Vim9 script, use flattennew()` message and selects the builtin
+name. It applies at script level and in compiled `def` and lambda bodies,
+including `vim9cmd` and a `def` retained in a Legacy-root file.
+
+E1158 owns the call before ordinary builtin arity and argument-type checks, so
+an otherwise invalid `flatten()` argument list still receives the prohibition
+diagnostic. Ordinary Legacy commands, a one-command `legacy` override,
+`flattennew()`, scoped or member names, dynamic calls, and incomplete calls do
+not receive E1158.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9expr.c:1380-1413` emits E1158 after parsing arguments and before
+  normal builtin dispatch and checking.
+- `src/list.c:1104-1113` rejects `flatten()` while executing Vim9 script and
+  otherwise retains the Legacy implementation.
+- `src/testdir/test_vim9_builtin.vim:1416-1421` expects E1158 at both script
+  and compiled `def` scope.
+- `runtime/doc/vim9.txt:2688-2695` requires `flattennew()` and demonstrates the
+  prohibition with `vim9cmd` method syntax.
+- `src/errors.h:2971-2972` defines the exact E1158 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
