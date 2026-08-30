@@ -2,6 +2,52 @@ package syntax
 
 import "testing"
 
+func TestLookupModifier(t *testing.T) {
+	for _, test := range []struct {
+		word string
+		name string
+		ok   bool
+	}{
+		{word: "abo", name: "aboveleft", ok: true}, {word: "bel", name: "belowright", ok: true},
+		{word: "bro", name: "browse", ok: true}, {word: "bo", name: "botright", ok: true},
+		{word: "conf", name: "confirm", ok: true}, {word: "kee", name: "keepmarks", ok: true},
+		{word: "keepa", name: "keepalt", ok: true}, {word: "keepp", name: "keeppatterns", ok: true},
+		{word: "keepj", name: "keepjumps", ok: true}, {word: "filt", name: "filter", ok: true},
+		{word: "hor", name: "horizontal", ok: true}, {word: "hid", name: "hide", ok: true},
+		{word: "loc", name: "lockmarks", ok: true}, {word: "leg", name: "legacy", ok: true},
+		{word: "lefta", name: "leftabove", ok: true}, {word: "noa", name: "noautocmd", ok: true},
+		{word: "nos", name: "noswapfile", ok: true}, {word: "rightb", name: "rightbelow", ok: true},
+		{word: "san", name: "sandbox", ok: true}, {word: "sil", name: "silent", ok: true},
+		{word: "tab", name: "tab", ok: true}, {word: "to", name: "topleft", ok: true},
+		{word: "uns", name: "unsilent", ok: true}, {word: "vert", name: "vertical", ok: true},
+		{word: "vim9", name: "vim9cmd", ok: true}, {word: "verb", name: "verbose", ok: true},
+		{word: "export", name: "export", ok: true}, {word: "pub", name: "public", ok: true},
+		{word: "abs", name: "abstract", ok: true}, {word: "stat", name: "static", ok: true},
+
+		// Too-short and unknown words do not match a modifier.
+		{word: "", ok: false}, {word: "ab", ok: false}, {word: "be", ok: false},
+		{word: "br", ok: false}, {word: "con", ok: false}, {word: "f", ok: false},
+		{word: "ho", ok: false}, {word: "sta", ok: false}, {word: "unknown", ok: false},
+
+		// The historic declaration order resolves these valid shared prefixes.
+		{word: "keep", name: "keepmarks", ok: true}, {word: "left", ok: false},
+		{word: "no", ok: false}, {word: "ver", ok: false},
+	} {
+		name, ok := lookupModifier(test.word)
+		if name != test.name || ok != test.ok {
+			t.Errorf("lookupModifier(%q) = (%q, %t), want (%q, %t)", test.word, name, ok, test.name, test.ok)
+		}
+	}
+	for _, group := range modifierGroups {
+		for _, modifier := range group {
+			name, ok := lookupModifier(modifier.name)
+			if name != modifier.name || !ok {
+				t.Errorf("lookupModifier(%q) = (%q, %t), want (%q, true)", modifier.name, name, ok, modifier.name)
+			}
+		}
+	}
+}
+
 func TestParseRequiresFirstEffectiveVim9ScriptCommand(t *testing.T) {
 	source := "\ufeff\n  \" legacy comment before Vim knows the dialect\nvim9s\nvar name = 'value' # Vim9 comment\n"
 	file := Parse(source)

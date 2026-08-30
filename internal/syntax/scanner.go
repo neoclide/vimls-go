@@ -14,37 +14,22 @@ type modifierInfo struct {
 	min  int
 }
 
-var modifiers = []modifierInfo{
-	{name: "aboveleft", min: 3},
-	{name: "belowright", min: 3},
-	{name: "browse", min: 3},
-	{name: "botright", min: 2},
-	{name: "confirm", min: 4},
-	{name: "keepmarks", min: 3},
-	{name: "keepalt", min: 5},
-	{name: "keeppatterns", min: 5},
-	{name: "keepjumps", min: 5},
-	{name: "filter", min: 4},
-	{name: "horizontal", min: 3},
-	{name: "hide", min: 3},
-	{name: "lockmarks", min: 3},
-	{name: "legacy", min: 3},
-	{name: "leftabove", min: 5},
-	{name: "noautocmd", min: 3},
-	{name: "noswapfile", min: 3},
-	{name: "rightbelow", min: 6},
-	{name: "sandbox", min: 3},
-	{name: "silent", min: 3},
-	{name: "tab", min: 3},
-	{name: "topleft", min: 2},
-	{name: "unsilent", min: 3},
-	{name: "vertical", min: 4},
-	{name: "vim9cmd", min: 4},
-	{name: "verbose", min: 4},
-	{name: "export", min: 6},
-	{name: "public", min: 3},
-	{name: "abstract", min: 3},
-	{name: "static", min: 4},
+var modifierGroups = [26][]modifierInfo{
+	'a' - 'a': {{name: "aboveleft", min: 3}, {name: "abstract", min: 3}},
+	'b' - 'a': {{name: "belowright", min: 3}, {name: "browse", min: 3}, {name: "botright", min: 2}},
+	'c' - 'a': {{name: "confirm", min: 4}},
+	'e' - 'a': {{name: "export", min: 6}},
+	'f' - 'a': {{name: "filter", min: 4}},
+	'h' - 'a': {{name: "horizontal", min: 3}, {name: "hide", min: 3}},
+	'k' - 'a': {{name: "keepmarks", min: 3}, {name: "keepalt", min: 5}, {name: "keeppatterns", min: 5}, {name: "keepjumps", min: 5}},
+	'l' - 'a': {{name: "lockmarks", min: 3}, {name: "legacy", min: 3}, {name: "leftabove", min: 5}},
+	'n' - 'a': {{name: "noautocmd", min: 3}, {name: "noswapfile", min: 3}},
+	'p' - 'a': {{name: "public", min: 3}},
+	'r' - 'a': {{name: "rightbelow", min: 6}},
+	's' - 'a': {{name: "sandbox", min: 3}, {name: "silent", min: 3}, {name: "static", min: 4}},
+	't' - 'a': {{name: "tab", min: 3}, {name: "topleft", min: 2}},
+	'u' - 'a': {{name: "unsilent", min: 3}},
+	'v' - 'a': {{name: "vertical", min: 4}, {name: "vim9cmd", min: 4}, {name: "verbose", min: 4}},
 }
 
 func parseSource(source string, initial Dialect) *File {
@@ -5810,7 +5795,10 @@ func isVim9AlwaysActiveGuard(source string) bool {
 }
 
 func lookupModifier(word string) (string, bool) {
-	for _, modifier := range modifiers {
+	if len(word) == 0 || word[0] < 'a' || word[0] > 'z' {
+		return "", false
+	}
+	for _, modifier := range modifierGroups[word[0]-'a'] {
 		if len(word) >= modifier.min && strings.HasPrefix(modifier.name, word) {
 			return modifier.name, true
 		}

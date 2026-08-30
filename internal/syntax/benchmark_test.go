@@ -14,6 +14,27 @@ var benchmarkConsumed int
 var benchmarkContinuationState vim9ContinuationScan
 var benchmarkOpaqueEnd int
 var benchmarkLongestOperator string
+var benchmarkModifier string
+var benchmarkModifierOK bool
+
+func BenchmarkLookupModifier(b *testing.B) {
+	for _, test := range []struct {
+		name string
+		word string
+	}{
+		{name: "hit", word: "silent"},
+		{name: "ambiguous-prefix", word: "keep"},
+		{name: "miss", word: "unknown"},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				benchmarkModifier, benchmarkModifierOK = lookupModifier(test.word)
+			}
+		})
+	}
+}
 
 func BenchmarkLongestOperator(b *testing.B) {
 	inputs := []struct {
