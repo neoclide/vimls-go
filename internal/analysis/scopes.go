@@ -6204,6 +6204,10 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 		if vim9 {
 			code, required = "vim/E1210", "Number"
 		}
+	case "arg_chan_or_job":
+		if vim9 {
+			code, required = "vim/E1217", "Channel or Job"
+		}
 	case "arg_item_of_prev":
 		if vim9 && index > 0 && index <= len(actual)-1 && actual[index-1].Name == "blob" {
 			code, required = "vim/E1210", "Number"

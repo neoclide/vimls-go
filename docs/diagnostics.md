@@ -1888,6 +1888,26 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   every non-null inner List before delegating content validation.
 - `src/errors.h:3123-3124` defines the exact E1216 message.
 
+## Channel or Job required for builtin argument: E1217
+
+Analysis reports E1217 at Vim9 script level when an `arg_chan_or_job`
+builtin argument has a known incompatible type. The diagnostic selects the
+complete normalized argument and uses its one-based position, including a
+method receiver or a later optional argument.
+
+Channel, Job, and dynamically typed values are accepted. A mismatch in a
+compiled `def` or block lambda retains E1013, Legacy calls are not diagnosed,
+and the stricter Job-only checker remains separate from this rule.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:558-725` distinguishes compiled E1013
+  from script-level E1217 across first and later channel-handle arguments.
+- `src/evalfunc.c:991-1001` accepts Channel, Job, and unknown types for the
+  `arg_chan_or_job` checker.
+- `runtime/doc/vim9.txt:2756-2767` documents the method-call diagnostic.
+- `src/errors.h:3127-3129` defines the exact E1217 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
