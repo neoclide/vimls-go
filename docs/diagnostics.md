@@ -2334,6 +2334,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   check and its method example.
 - `src/errors.h:3179-3180` defines the exact E1238 message.
 
+## Line-address arithmetic overflow: E1247
+
+Syntax analysis reports E1247 when an accepted Ex range contains statically
+provable 64-bit line-address overflow. This includes a relative decimal whose
+magnitude reaches `LONG_MAX`, regardless of sign, and a positive explicit or
+implicit offset that makes a known nonnegative base reach `LONG_MAX`. The
+current-line address `.` has a guaranteed minimum of one, covering Vim's
+`.9223372036854775806` regression shape. The diagnostic selects the offending
+decimal token.
+
+The check is deliberately conservative and independent of the Go host word
+size. A huge standalone absolute address is not diagnosed solely from its
+spelling, because Vim's checked E1247 paths occur during subsequent relative
+address parsing. Digits inside search patterns, command arguments, Vim9
+expressions without an explicit range colon, and non-overflowing negative
+offsets remain untouched. The full range token and following command or bar
+recovery are preserved.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_excmd.vim:721-734` covers long dot-relative addresses,
+  the `LONG_MAX - 1` addition boundary, command recovery, and unchanged buffer
+  contents after failure.
+- `src/ex_docmd.c:4758-4805` emits E1247 when a parsed relative magnitude is
+  `MAXLNUM` or positive addition reaches `LONG_MAX`.
+- `src/charset.c:2254-2270` defines the decimal parsing used by that path, and
+  `src/vim.h:1898-1919` defines `linenr_T` and the non-MVS `MAXLNUM` bound.
+- `runtime/doc/cmdline.txt:781-790` documents absolute line-number addresses
+  and E1247.
+- `src/errors.h:3206-3207` defines the exact E1247 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

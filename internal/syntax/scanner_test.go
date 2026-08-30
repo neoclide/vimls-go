@@ -2,6 +2,7 @@ package syntax
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -225,6 +226,68 @@ func TestOfficialVim9CompatibilityGuardTriggersVim9(t *testing.T) {
 	patch := Parse("if !has(\"patch-9.1.1232\")\n  echoerr 'upgrade Vim'\n  finish\nendif\nvim9script\nvar pair = (1, 2)\n")
 	if patch.Dialect != Vim9 || len(patch.Diagnostics) != 0 || patch.Commands[len(patch.Commands)-1].Declaration == nil {
 		t.Fatalf("patch guard = %#v", patch)
+	}
+}
+
+func TestRangeLineNumberOverflowDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, digits string }{
+		{"official bar relative", "echo 1 | .44444444444444444444444\n", "44444444444444444444444"},
+		{"official dot maximum", ".9223372036854775806delete\n", "9223372036854775806"},
+		{"official dot delete", ".44444444444444444444444d\n", "44444444444444444444444"},
+		{"known absolute base", "1+9223372036854775806delete\n", "9223372036854775806"},
+		{"negative magnitude overflow", ".-9223372036854775807delete\n", "9223372036854775807"},
+		{"modifier range", "silent 1+9223372036854775806delete\n", "9223372036854775806"},
+		{"bar recovery", ".44444444444444444444444d | delete\n", "44444444444444444444444"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1247" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Line number out of range" || file.Text(got[0].Span) != test.digits {
+				t.Fatalf("E1247 diagnostics = %#v", got)
+			}
+			foundRange := false
+			for _, token := range file.Tokens {
+				foundRange = foundRange || token.Kind == TokenRange && strings.Contains(file.Text(token.Span), test.digits)
+			}
+			if !foundRange {
+				t.Fatalf("range tokens = %#v", file.Tokens)
+			}
+			if test.name == "bar recovery" {
+				deletes := 0
+				for _, command := range file.Commands {
+					if command.Canonical == "delete" {
+						deletes++
+					}
+				}
+				if deletes != 2 {
+					t.Fatalf("bar recovery commands = %#v", file.Commands)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"large absolute", "9223372036854775808delete\n"},
+		{"large absolute sentinel offset", "9223372036854775808+1delete\n"},
+		{"dot below addition bound", ".9223372036854775805delete\n"},
+		{"negative offset", ".-9223372036854775806delete\n"},
+		{"search pattern digits", "/9223372036854775807/delete\n"},
+		{"command digits", "delete 9223372036854775807\n"},
+		{"Vim9 expression without colon", "vim9script\n.9223372036854775806->string()\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1247" {
+					t.Fatalf("guard unexpectedly received E1247: %#v", file.Diagnostics)
+				}
+			}
+		})
 	}
 }
 

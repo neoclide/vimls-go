@@ -1008,6 +1008,11 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if start > rangeStart {
 			commandRange = Span{Start: rangeStart, End: start}
 			file.Tokens = append(file.Tokens, Token{Kind: TokenRange, Span: commandRange})
+			if !invalidVim9Range {
+				if overflow, ok := rangeLineNumberOverflow(file.Source, commandRange); ok {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1247", Message: "Line number out of range", Span: overflow})
+				}
+			}
 			start = skipSpaceToken(file, start, end)
 		}
 
@@ -1123,6 +1128,11 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 						Code: "vim/E1050", Message: "colon required before a range", Span: Span{Start: rangeStart, End: end},
 					})
 					invalidModifierRange = true
+				}
+				if !invalidModifierRange {
+					if overflow, ok := rangeLineNumberOverflow(file.Source, commandRange); ok {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1247", Message: "Line number out of range", Span: overflow})
+					}
 				}
 				start = skipSpaceToken(file, start, end)
 			}
@@ -6403,6 +6413,137 @@ func scanRange(source string, start, end int) int {
 		}
 	}
 	return index
+}
+
+const maxLineNumber = "9223372036854775807"
+
+// rangeLineNumberOverflow recognizes only arithmetic that is provably outside
+// Vim's 64-bit line-address bound.  The scanner has already isolated the Ex
+// range, so search-pattern bytes can be skipped without affecting recovery.
+func rangeLineNumberOverflow(source string, span Span) (Span, bool) {
+	haveBase := false
+	baseMinimum := int64(0)
+	applyOffset := func(offset int64, positive bool, target Span) (Span, bool) {
+		if !haveBase {
+			haveBase = true
+			baseMinimum = 0
+		}
+		if positive {
+			if baseMinimum >= 0 && offset >= int64(1<<63-1)-baseMinimum {
+				return target, true
+			}
+			baseMinimum += offset
+		} else if baseMinimum < int64(-1<<63)+offset {
+			baseMinimum = int64(-1 << 63)
+		} else {
+			baseMinimum -= offset
+		}
+		return Span{}, false
+	}
+	for index := span.Start; index < span.End; {
+		character := source[index]
+		switch {
+		case character >= '0' && character <= '9':
+			start := index
+			for index < span.End && source[index] >= '0' && source[index] <= '9' {
+				index++
+			}
+			digits := Span{Start: start, End: index}
+			if haveBase {
+				if decimalAtLeast(source[digits.Start:digits.End], maxLineNumber) {
+					return digits, true
+				}
+				if overflow, ok := applyOffset(decimalValue(source, digits), true, digits); ok {
+					return overflow, true
+				}
+				continue
+			}
+			// A bare decimal is an absolute Ex address.  Vim's checked overflow
+			// path is not reached until it participates in a later positive offset.
+			haveBase = true
+			if decimalAtLeast(source[digits.Start:digits.End], maxLineNumber) {
+				// getdigits() returns MAXLNUM, which the relative-address loop
+				// treats as an unset base rather than a huge known address.
+				baseMinimum = 0
+			} else {
+				baseMinimum = decimalValue(source, digits)
+			}
+		case character == '.':
+			haveBase, baseMinimum = true, 1
+			index++
+		case character == '$':
+			haveBase, baseMinimum = true, 1
+			index++
+		case character == '\'':
+			// An unset mark fails before address arithmetic, so only zero is a
+			// safe lower bound without editor state.
+			haveBase, baseMinimum = true, 0
+			if index+1 < span.End {
+				index += 2
+			} else {
+				index++
+			}
+		case character == '/' || character == '?':
+			delimiter := character
+			index++
+			for index < span.End {
+				if source[index] == '\\' {
+					index += 2
+				} else if source[index] == delimiter {
+					index++
+					break
+				} else {
+					index++
+				}
+			}
+			// A failed search stops before arithmetic; keep the state-unknown
+			// lower bound conservative.
+			haveBase, baseMinimum = true, 0
+		case character == '+' || character == '-':
+			positive := character == '+'
+			operator := Span{Start: index, End: index + 1}
+			index++
+			start := index
+			for index < span.End && source[index] >= '0' && source[index] <= '9' {
+				index++
+			}
+			if start == index {
+				if overflow, ok := applyOffset(1, positive, operator); ok {
+					return overflow, true
+				}
+				continue
+			}
+			digits := Span{Start: start, End: index}
+			if decimalAtLeast(source[digits.Start:digits.End], maxLineNumber) {
+				return digits, true
+			}
+			if overflow, ok := applyOffset(decimalValue(source, digits), positive, digits); ok {
+				return overflow, true
+			}
+		case character == ',' || character == ';':
+			haveBase, baseMinimum = false, 0
+			index++
+		default:
+			index++
+		}
+	}
+	return Span{}, false
+}
+
+func decimalAtLeast(value, limit string) bool {
+	value = strings.TrimLeft(value, "0")
+	if value == "" {
+		return false
+	}
+	return len(value) > len(limit) || len(value) == len(limit) && value >= limit
+}
+
+func decimalValue(source string, span Span) int64 {
+	var value int64
+	for index := span.Start; index < span.End; index++ {
+		value = value*10 + int64(source[index]-'0')
+	}
+	return value
 }
 
 func vim9ModifierRangeRequiresColon(source string, start, rangeEnd, end int) bool {
