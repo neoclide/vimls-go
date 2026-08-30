@@ -118,6 +118,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks)
 	collectDuplicateEnumValueDiagnostics(result)
 	collectArgumentRedeclarationDiagnostics(result)
+	collectArgumentShadowDiagnostics(result)
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
@@ -159,6 +160,34 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectArgumentShadowDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	for _, declaration := range result.Declarations {
+		if declaration == nil || !declaration.Parameter || declaration.Name == "_" || declaration.Scope == nil {
+			continue
+		}
+		scope := declaration.Scope
+		compiled := scope.Kind == syntax.BlockDef || scope.Lambda != nil && result.File.Text(scope.Lambda.Operator) == "=>"
+		if !compiled || syntaxDiagnosticTouchesCall(result.File.Diagnostics, declaration.Span) {
+			continue
+		}
+		for parent := scope.Parent; parent != nil && parent != result.Root; parent = parent.Parent {
+			if parent.Kind == syntax.BlockClass || parent.Kind == syntax.BlockInterface || parent.Kind == syntax.BlockEnum {
+				continue
+			}
+			for _, outer := range parent.Declarations {
+				if outer.Name == declaration.Name && outer.Span.Start < declaration.Span.Start && (outer.Kind == SymbolKindVariable || outer.Kind == SymbolKindConstant || outer.Parameter) {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1167", Message: "Argument name shadows existing variable: " + declaration.Name, Span: declaration.Span})
+					goto next
+				}
+			}
+		}
+	next:
+	}
 }
 
 func collectDuplicateTypeAliasDiagnostics(result *FileAnalysis) {

@@ -2045,6 +2045,69 @@ func TestAnalyzeE1166DictionaryRangeUnletDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1167ArgumentShadowDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		recovery           bool
+	}{
+		{"lambda shadows def local", "vim9script\ndef F()\n  var value = 1\n  var Callback = (value) => value\n  var after = 1\nenddef\n", "value", true},
+		{"nested def shadows local", "vim9script\ndef F()\n  var value = 1\n  def Inner(value: number)\n  enddef\nenddef\n", "value", false},
+		{"nested def shadows argument", "vim9script\ndef F(value: number)\n  def Inner(value: number)\n  enddef\nenddef\n", "value", false},
+		{"Legacy-root def lambda", "def F()\n  var value = 1\n  var Callback = (value) => value\nenddef\n", "value", false},
+		{"lambda shadows def argument", "vim9script\ndef F(value: number)\n  var Callback = (value) => value\nenddef\n", "value", false},
+		{"nested lambda shadows lambda argument", "vim9script\ndef F()\n  var Callback = (value) => (value) => value\nenddef\n", "value", false},
+		{"lambda shadows enclosing block local", "vim9script\ndef F()\n  if true\n    var value = 1\n    var Callback = (value) => value\n  endif\nenddef\n", "value", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			count := 0
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1167" {
+					count++
+					if diagnostic.Message != "Argument name shadows existing variable: value" || file.Text(diagnostic.Span) != test.span {
+						t.Fatalf("diagnostic = %#v", diagnostic)
+					}
+				}
+			}
+			if count != 1 {
+				t.Fatalf("want one E1167, got %d", count)
+			}
+			if test.recovery {
+				found := false
+				for index := range file.Commands {
+					declaration := file.Commands[index].Declaration
+					if declaration != nil && file.Text(declaration.Name) == "after" {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("following declaration not retained: %#v", file.Commands)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"script variable reserved for E1168", "vim9script\nvar value = 1\nvar Callback = (value) => value\n"},
+		{"def argument conflicts with script variable", "vim9script\nvar value = 1\ndef F(value: number)\nenddef\n"},
+		{"underscore parameter", "vim9script\ndef F(_: any)\n  var Callback = (_) => 0\nenddef\n"},
+		{"outer local declared later", "vim9script\ndef F()\n  var Callback = (value) => value\n  var value = 1\nenddef\n"},
+		{"sibling block local", "vim9script\ndef F()\n  if true\n    var value = 1\n  endif\n  if true\n    var Callback = (value) => value\n  endif\nenddef\n"},
+		{"Legacy lambda and function", "let value = 1\nlet Callback = {value -> value}\nfunction Legacy(value)\nendfunction\n"},
+		{"same-scope duplicate arguments", "vim9script\ndef F(value: number, value: number)\nenddef\n"},
+		{"class member reserved for E1340", "vim9script\nclass Item\n  var value: number\n  def Method(value: number)\n  enddef\nendclass\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			for _, diagnostic := range CombinedDiagnostics(file, Analyze(file)) {
+				if diagnostic.Code == "vim/E1167" {
+					t.Fatalf("unexpected E1167: %#v", diagnostic)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1024NumberAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

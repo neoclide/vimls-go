@@ -1437,6 +1437,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   them with E1166.
 - `src/errors.h:2993-2994` defines the exact E1166 message.
 
+## Compiled argument shadowing: E1167
+
+Analysis reports E1167 when a Vim9 `def` or lambda argument shadows a
+previously declared local variable, constant, or argument in an enclosing
+compiled lexical scope. The diagnostic uses Vim's exact `Argument name shadows
+existing variable: {name}` form and selects the new argument name.
+
+This includes nested functions, nested lambdas, control-block locals, and
+`def` under a Legacy root. The special `_` argument is exempt. Later and
+sibling-scope declarations do not count, and Legacy functions and lambdas are
+unchanged. Root script items and aggregate members retain their more specific
+E1168 and E1340 ownership instead of cascading to E1167. An overlapping parser
+diagnostic also retains precedence.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/vim9compile.c:440-495` gives script and class conflicts priority, exempts
+  `_`, and emits E1167 for an existing compiled local or argument.
+- `src/vim9compile.c:3881-3908` checks nested compiled-function arguments
+  against their enclosing compilation context.
+- `src/userfunc.c:55-109` applies the same defined-name check while parsing
+  Vim9 lambda arguments.
+- `src/testdir/test_vim9_func.vim:1613-1619,1638-1653` expects E1167 for the
+  three supported local/argument shadowing shapes.
+- `runtime/doc/vim9.txt:527-532` documents the no-shadowing rule.
+- `src/errors.h:2995-2996` defines the exact E1167 message template.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a
