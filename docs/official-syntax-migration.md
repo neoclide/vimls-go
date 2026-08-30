@@ -1147,7 +1147,9 @@ ordinary Vim9 call argument now reports E1069 and retains an explicit missing
 argument node; the valid generic type list and enclosing member-call AST remain
 unchanged. Commit `e228d76` keeps the different comma in
 `function(Fn<number,)` owned by the incomplete generic list, preventing the
-outer call from reporting the same E1069 twice.
+outer call from reporting the same E1069 twice. Commit `8cd4ac2` likewise
+deduplicates the missing-space and missing-type paths for a doubled generic
+comma while retaining the missing type node.
 
 Commit `f6d3c44` migrated
 `T:{83:2341,90:2522,111:3055,118:3270}/script`. Type-alias parsing now follows
