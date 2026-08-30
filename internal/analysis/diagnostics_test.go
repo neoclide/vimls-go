@@ -5003,6 +5003,57 @@ func TestAnalyzeE1253ReduceReverseContainerDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1301RepeatArgumentDiagnostics(t *testing.T) {
+	const message = "String, Number, List, Tuple or Blob required for argument 1"
+	for _, test := range []struct{ name, source, span string }{
+		{"official float", "vim9script\nrepeat(1.1, 2)\n", "1.1"},
+		{"official dictionary", "vim9script\nrepeat({a: 10}, 2)\n", "{a: 10}"},
+		{"Bool method receiver", "vim9script\ntrue->repeat(2)\n", "true"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1301" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1301 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1301 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"compiled def", "vim9script\ndef Func()\n  repeat(1.1, 2)\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  repeat({a: 10}, 2)\n}\n", "vim/E1013"},
+		{"valid values", "vim9script\nrepeat('x', 2)\nrepeat(1, 2)\nrepeat([1], 2)\nrepeat((1, 2), 2)\nrepeat(0z12, 2)\n", ""},
+		{"unknown", "vim9script\nrepeat(Unknown, 2)\n", ""},
+		{"Legacy", "let value = repeat(1.1, 2)\n", ""},
+		{"arity ownership", "vim9script\nrepeat()\n", "vim/E119"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1301" {
+					t.Fatalf("guard unexpectedly received E1301: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1256BuiltinCallbackArgumentDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"sort zero script", "vim9script\nsort(['a', 'b'], 0)\n", "0"},

@@ -3069,3 +3069,27 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/eval.c:4417-4448` implements the same check for evaluated expressions.
 - `runtime/doc/eval.txt:1422-1432` documents bitshift operands and amounts.
 - `src/errors.h:3297-3298` defines the exact message.
+
+## Non-repeatable builtin argument: E1301
+
+E1301 means `String, Number, List, Tuple or Blob required for argument 1`.
+Analysis reports it for a Vim9 script-level `repeat()` call when the first
+argument has a statically known type outside those five repeatable kinds. The
+diagnostic selects that argument, including a method-call receiver.
+
+A compiled `def` or expression lambda retains Vim's E1013 static signature
+error for the same mismatch. Unknown and `any` values remain unresolved, valid
+repeatable values stay quiet, and Legacy calls retain their conversion
+behavior. Ordinary arity diagnostics continue to own malformed calls.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:3713-3721` distinguishes compiled E1013
+  from script-level E1301 and exercises the supported repeatable values.
+- `src/evalfunc.c:1160-1176` defines the compiled first-argument checker and
+  permits String, Number, Blob, List, Tuple, `any`, and unknown types.
+- `src/evalfunc.c:10633-10654` applies the runtime Vim9 checks before selecting
+  the repeat implementation.
+- `src/typval.c:937-953` emits E1301 for a non-repeatable runtime value.
+- `runtime/doc/builtin.txt:9336-9350` documents `repeat()` and method use.
+- `src/errors.h:3348-3352` defines the exact message.
