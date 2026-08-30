@@ -366,6 +366,8 @@ func officialParserExpectedFailures() map[string]string {
 		"src/testdir/test_tuple.vim:159:4498/legacy":               "vim/E15",
 		"src/testdir/test_tuple.vim:159:4498/def":                  "vim/E1015",
 		"src/testdir/test_tuple.vim:159:4498/vim9-script":          "vim/E15",
+		"src/testdir/test_tuple.vim:167:4773/def":                  "vim/E1010",
+		"src/testdir/test_tuple.vim:167:4773/vim9-script":          "vim/E1010",
 		"src/testdir/test_vim9_assign.vim:515:12614/def":           "vim/E1097",
 		"src/testdir/test_vim9_assign.vim:73:1858/script":          "vim/E1124",
 		"src/testdir/test_vim9_assign.vim:2239:56425/script":       "vim/E1125",

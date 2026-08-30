@@ -137,6 +137,11 @@ func (p *typeParser) parseType() *Type {
 	}
 	if p.offset < len(p.source) && p.source[p.offset] == '<' {
 		node.Kind = TypeGeneric
+		// Vim only has generic container types in this grammar.  An unknown
+		// name followed by an angle-bracket argument is still retained as a
+		// generic node for recovery and later tooling, but Vim reports E1010
+		// for the complete type (for example, "tupel<number>").
+		unknownGeneric := !containerType
 		p.offset++
 		if name == "tuple" && p.offset < len(p.source) && isExpressionSpace(p.source[p.offset]) {
 			p.diagnostics = append(p.diagnostics, Diagnostic{
@@ -223,6 +228,11 @@ func (p *typeParser) parseType() *Type {
 			p.consumeTypeClosing('>')
 		}
 		node.Span.End = p.base + p.offset
+		if unknownGeneric {
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E1010", Message: "type not recognized", Span: node.Span,
+			})
+		}
 	}
 	if name == "func" {
 		node.Kind = TypeFunction
