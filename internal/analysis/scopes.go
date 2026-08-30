@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3965,12 +3966,7 @@ func expressionTreeContainsLambda(expression *syntax.Expression) bool {
 	if expression.Kind == syntax.ExpressionLambda {
 		return true
 	}
-	for _, child := range expression.Children {
-		if expressionTreeContainsLambda(child) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(expression.Children, expressionTreeContainsLambda)
 }
 
 func walkCompiledStringExpression(result *FileAnalysis, scope *Scope, expression *syntax.Expression, base, visibilityOffset int, preferFunction bool) {
@@ -4210,12 +4206,7 @@ func expressionContainsMissing(expression *syntax.Expression) bool {
 	if expression.Kind == syntax.ExpressionMissing {
 		return true
 	}
-	for _, child := range expression.Children {
-		if expressionContainsMissing(child) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(expression.Children, expressionContainsMissing)
 }
 
 // Syntax diagnostics use point spans for some missing delimiters. Treating a

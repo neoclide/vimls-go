@@ -192,10 +192,10 @@ E1408 E1409 E1410 E1411 E1415
 
 func officialCompileCodeStatuses() map[string]bool {
 	statuses := make(map[string]bool)
-	for _, code := range strings.Fields(officialCompileCompletedCodes) {
+	for code := range strings.FieldsSeq(officialCompileCompletedCodes) {
 		statuses["vim/"+code] = true
 	}
-	for _, code := range strings.Fields(officialCompilePendingCodes) {
+	for code := range strings.FieldsSeq(officialCompilePendingCodes) {
 		statuses["vim/"+code] = false
 	}
 	return statuses
@@ -464,7 +464,7 @@ func evenlySampleOfficialCompileCases(candidates []officialCompileCase, limit in
 		return candidates[:1]
 	}
 	selected := make([]officialCompileCase, 0, limit)
-	for index := 0; index < limit; index++ {
+	for index := range limit {
 		candidate := index * (len(candidates) - 1) / (limit - 1)
 		selected = append(selected, candidates[candidate])
 	}
@@ -493,7 +493,7 @@ func officialCompileCaseSelected(testCase officialCompileCase) bool {
 	if filter == "all" {
 		return true
 	}
-	for _, part := range strings.Split(filter, ",") {
+	for part := range strings.SplitSeq(filter, ",") {
 		part = strings.TrimSpace(part)
 		if part != "" && officialCompileFilterMatches(part, testCase.ID, testCase.Code) {
 			return true
