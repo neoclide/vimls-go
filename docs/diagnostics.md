@@ -743,3 +743,28 @@ Representative source evidence:
   concatenation, while `src/typval.c:1269-1296` defines the left-side value
   conversions and their precedence.
 - `src/errors.h:2370-2371` defines the exact message template.
+
+## Using a Blob as a Number: E974
+
+E974 means `Using a Blob as a Number`. Vim uses it when a Blob reaches a
+runtime operation that requires numeric conversion.
+
+Analysis reports E974 for a statically known Blob operand of numeric binary
+operators outside a compiled Vim9 context. Blob-plus-Blob remains valid
+concatenation, and right-side E974 is reported only after a statically numeric
+left operand so that an earlier List, String, or unsupported value keeps its
+own error. Unary `+` or `-` and a Blob ternary condition use E974 in Legacy,
+top-level Vim9, and a compiled `def`. Compiled binary arithmetic instead keeps
+E1051, E1035, or E1036 according to the operator.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:193-196` uses E974 for a Blob ternary
+  condition in both compiled and script contexts.
+- `src/testdir/test_vim9_expr.vim:1881-1889`, `2041-2046`, and `2271-2273`
+  distinguish compiled binary operator errors from script-level E974 and
+  establish left-to-right operand precedence.
+- `src/testdir/test_vim9_expr.vim:4152-4160` uses E974 for unary minus in both
+  compiled and script contexts.
+- `src/typval.c:250-273` maps Blob numeric conversion to E974, and
+  `src/errors.h:2561-2562` defines the exact message.

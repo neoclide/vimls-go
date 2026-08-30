@@ -1019,6 +1019,73 @@ func TestAnalyzeInvalidStringValueDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBlobAsNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script left binary operand",
+			source: "vim9script\nvar value = 0z1234 - 44\n",
+			span:   "0z1234",
+		},
+		{
+			name:   "vim9 script right binary operand",
+			source: "vim9script\nvar value = 33 + 0z1122\n",
+			span:   "0z1122",
+		},
+		{
+			name:   "legacy binary operand",
+			source: "let value = 0z12 * 3\n",
+			span:   "0z12",
+		},
+		{
+			name:   "vim9 script ternary condition",
+			source: "vim9script\nvar value = 0z12 ? 'one' : 'two'\n",
+			span:   "0z12",
+		},
+		{
+			name:   "compiled def ternary condition",
+			source: "vim9script\ndef F()\n  var value = 0z12 ? 'one' : 'two'\nenddef\n",
+			span:   "0z12",
+		},
+		{
+			name:   "compiled def unary operand",
+			source: "vim9script\ndef F()\n  var value = -0z12\nenddef\n",
+			span:   "0z12",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E974" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Blob as a Number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E974 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value = 0z01 + 0z02\n",
+		"vim9script\nvar value = [3] + 0z1122\n",
+		"vim9script\nvar value = 'text' + 0z1122\n",
+		"vim9script\ndef F()\n  var value = 0z12 - 3\nenddef\n",
+		"vim9script\nvar value = 'text' .. 0z12\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E974" {
+				t.Fatalf("source %q unexpectedly received E974: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

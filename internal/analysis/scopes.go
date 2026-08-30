@@ -628,6 +628,8 @@ func numericConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagno
 		return syntax.Diagnostic{Code: "vim/E728", Message: "Using a Dictionary as a Number", Span: span}, true
 	case "list":
 		return syntax.Diagnostic{Code: "vim/E745", Message: "Using a List as a Number", Span: span}, true
+	case "blob":
+		return syntax.Diagnostic{Code: "vim/E974", Message: "Using a Blob as a Number", Span: span}, true
 	default:
 		return syntax.Diagnostic{}, false
 	}
@@ -773,9 +775,9 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						if !containerConcat {
 							diagnostic, ok = numericConversionDiagnostic(left, leftOperand.Span)
 						}
-						if !ok {
+						if !ok && !containerConcat {
 							leftNumeric := left.Name == "number" || left.Name == "float"
-							if right.Name != "list" || leftNumeric {
+							if (right.Name != "list" && right.Name != "blob") || leftNumeric {
 								diagnostic, ok = numericConversionDiagnostic(right, rightOperand.Span)
 							}
 						}
@@ -831,11 +833,24 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 			}
+			if expression.Kind == syntax.ExpressionUnary && (expression.Value == "+" || expression.Value == "-") && len(expression.Children) == 1 && !expressionContainsMissing(expression) {
+				operand := expression.Children[0]
+				if result.TypeOf(operand).Name == "blob" {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E974", Message: "Using a Blob as a Number", Span: operand.Span,
+					})
+				}
+			}
 			if expression.Kind == syntax.ExpressionTernary && len(expression.Children) == 3 && !expressionContainsMissing(expression) {
 				condition := expression.Children[0]
-				if result.TypeOf(condition).Name == "float" {
+				switch result.TypeOf(condition).Name {
+				case "float":
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code: "vim/E805", Message: "Using a Float as a Number", Span: condition.Span,
+					})
+				case "blob":
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E974", Message: "Using a Blob as a Number", Span: condition.Span,
 					})
 				}
 			}
