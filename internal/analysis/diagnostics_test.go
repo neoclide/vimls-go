@@ -4961,6 +4961,60 @@ func TestAnalyzeE1226ListOrBlobBuiltinArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1228ListDictionaryOrBlobBuiltinArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"extend", "vim9script\nextend('bad', [])\n", "'bad'"},
+		{"remove", "vim9script\nremove('bad', 1)\n", "'bad'"},
+		{"method receiver", "vim9script\n'bad'->extend([])\n", "'bad'"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1228" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1228 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "List, Dictionary or Blob required for argument 1" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1228 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"compiled def", "vim9script\ndef Func()\n  extend('bad', [])\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  extend('bad', [])\n}\n", "vim/E1013"},
+		{"list", "vim9script\nextend([], [])\n", ""},
+		{"dictionary", "vim9script\nextend({}, {})\n", ""},
+		{"blob", "vim9script\nextend(0z12, 0z34)\n", ""},
+		{"unknown", "vim9script\nextend(Unknown, [])\n", ""},
+		{"Legacy", "let value = extend('bad', [])\n", ""},
+		{"string union", "vim9script\nfilter('text', (_, _) => true)\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1228" {
+					t.Fatalf("guard unexpectedly received E1228: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1213ImportedItemRedefinitionDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"var", "vim9script\nimport './item.vim' as Item\nvar Item = 1\n", "Item"},
