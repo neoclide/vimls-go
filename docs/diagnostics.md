@@ -2393,6 +2393,32 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   and an E1251 `filter()` example.
 - `src/errors.h:3217-3218` defines the exact E1251 message.
 
+## Sequence builtin argument: E1253
+
+Analysis reports E1253 at top-level Vim9 script when the first argument to
+`reduce()` or `reverse()` has a statically known type other than String, List,
+Tuple, or Blob. The diagnostic selects that argument and includes its
+one-based index.
+
+Both builtins use a generic compile-time checker, so compiled `def` and
+block-lambda calls retain E1013. Valid sequence values, unknown values, Legacy
+calls, later `reduce()` argument diagnostics, and ordinary arity diagnostics
+keep their existing behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:3514,3736` distinguishes compiled E1013
+  from top-level E1253 for `reduce()` and `reverse()`.
+- `src/evalfunc.c:951-980` defines the two generic compile-time checkers and
+  routes their rejected types through the ordinary argument mismatch.
+- `src/typval.c:860-880` defines the runtime String, List, Tuple, or Blob
+  union check and emits E1253.
+- `src/list.c:3338-3342,3467-3473` applies that check in `reverse()` and
+  `reduce()`.
+- `runtime/doc/vim9.txt:2758-2780` documents the builtin argument checks and
+  an E1253 `reverse()` example.
+- `src/errors.h:3221-3222` defines the exact E1253 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

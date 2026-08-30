@@ -4580,6 +4580,56 @@ func TestAnalyzeE1251BuiltinContainerArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1253ReduceReverseContainerDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"official reduce", "vim9script\nreduce({a: 10}, '1')\n", "{a: 10}"},
+		{"official reverse", "vim9script\nreverse(10)\n", "10"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1253" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1253 source retained E1013: %#v", result.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "String, List, Tuple or Blob required for argument 1" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1253 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"compiled def", "vim9script\ndef Func()\n  reverse(10)\nenddef\n", "vim/E1013"},
+		{"compiled lambda", "vim9script\nvar Callback = () => {\n  reduce({a: 10}, '1')\n}\n", "vim/E1013"},
+		{"valid containers", "vim9script\nreverse('text')\nreverse([1])\nreverse((1, 2))\nreverse(0z12)\n", ""},
+		{"unknown", "vim9script\nreverse(Unknown)\n", ""},
+		{"reduce callback ownership", "vim9script\nreduce([], 'not callback')\n", ""},
+		{"arity ownership", "vim9script\nreverse()\n", "vim/E119"},
+		{"Legacy", "let value = reverse(10)\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1253" {
+					t.Fatalf("guard unexpectedly received E1253: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1216DigraphSetlistDiagnostics(t *testing.T) {
 	const message = "digraph_setlist() argument must be a list of lists with two items"
 	for _, test := range []struct{ name, source, span string }{
