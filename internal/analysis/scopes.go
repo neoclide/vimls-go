@@ -156,10 +156,108 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
 	collectAssignmentDiagnostics(result, file.Commands, root)
+	collectNameOnlyExpressionDiagnostics(result, file.Commands, root)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	if result == nil || result.File == nil {
+		return
+	}
+	seen := make(map[syntax.Span]bool)
+	var walkCommands func([]syntax.Command, *Scope)
+	var walkExpression func(*syntax.Expression, *Scope)
+	appendDiagnostic := func(expression *syntax.Expression) {
+		if expression == nil || expressionContainsMissing(expression) || syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) || seen[expression.Span] {
+			return
+		}
+		seen[expression.Span] = true
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1207", Message: "Expression without an effect: " + result.File.Text(expression.Span), Span: expression.Span})
+	}
+	nameOnly := func(expression *syntax.Expression, scope *Scope, eval bool) bool {
+		if expression == nil || expressionContainsMissing(expression) {
+			return false
+		}
+		if eval && expression.Kind == syntax.ExpressionString {
+			return true
+		}
+		if expression.Kind != syntax.ExpressionIdentifier {
+			return false
+		}
+		name := expression.Value
+		if strings.HasPrefix(name, "@") || strings.HasPrefix(name, "$") {
+			return true
+		}
+		if strings.HasPrefix(name, "&") {
+			optionName := name
+			if strings.HasPrefix(optionName, "&l:") || strings.HasPrefix(optionName, "&g:") {
+				optionName = "&" + optionName[3:]
+			}
+			_, ok := vimdata.LookupOption(optionName)
+			return ok
+		}
+		if isLiteralIdentifier(name) {
+			return true
+		}
+		if strings.HasPrefix(name, "v:") {
+			_, ok := vimdata.LookupVariable(name)
+			return ok
+		}
+		declaration := resolve(scope, name, expression.Span.Start, false, nil)
+		return declaration != nil && (declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant || declaration.Parameter)
+	}
+	walkExpression = func(expression *syntax.Expression, scope *Scope) {
+		if expression == nil {
+			return
+		}
+		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
+			lambdaScope := result.lambdaScopes[expression]
+			if lambdaScope == nil {
+				lambdaScope = scope
+			}
+			walkCommands(expression.LambdaBody.Commands, lambdaScope)
+		}
+		for _, child := range expression.Children {
+			walkExpression(child, scope)
+		}
+	}
+	walkCommands = func(commands []syntax.Command, inherited *Scope) {
+		for index := range commands {
+			command := &commands[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = inherited
+			}
+			if command.Dialect == syntax.Vim9 {
+				if command.Kind == syntax.CommandExpression || command.Canonical == "eval" {
+					for _, expression := range command.Expressions {
+						if expression != nil && expression.Span == command.Argument && nameOnly(expression, scope, command.Canonical == "eval") {
+							appendDiagnostic(expression)
+						}
+					}
+				}
+				if command.Argument.Start == command.Argument.End && command.Range.Start == command.Range.End && command.Bang.Start == command.Bang.End && command.Kind == syntax.CommandBuiltin {
+					name := result.File.Text(command.Name)
+					if declaration := resolve(scope, name, command.Name.Start, false, nil); declaration != nil && (declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant || declaration.Parameter) {
+						appendDiagnostic(&syntax.Expression{Kind: syntax.ExpressionIdentifier, Span: command.Name, Value: name})
+					}
+				}
+			}
+			for _, expression := range command.Expressions {
+				walkExpression(expression, scope)
+			}
+			if command.Declaration != nil {
+				walkExpression(command.Declaration.Initializer, scope)
+			}
+			if command.Embedded != nil {
+				walkCommands(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	walkCommands(commands, parent)
 }
 
 func collectArgumentShadowDiagnostics(result *FileAnalysis) {

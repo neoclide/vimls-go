@@ -1717,6 +1717,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   when invoking a compiled Vim9 callable and emits the pluralized error.
 - `src/errors.h:3052-3053` defines the exact E1190 messages.
 
+## Expression without an effect: E1207
+
+Analysis reports E1207 for a Vim9 expression command whose complete value is
+only a register, environment variable, known option, known literal, predefined
+variable, or lexically visible variable, constant, or parameter. It also
+reports the code for a string literal passed directly to `:eval`. The
+diagnostic selects that complete expression and preserves its source text in
+Vim's `Expression without an effect: {expression}` message.
+
+The rule applies in a Vim9 script, a compiled `def` from either root dialect,
+a compiled block lambda, and an explicit `:vim9cmd`. An effective `:legacy`
+command remains exempt. Calls, assignments, method and index expressions,
+parenthesized and compound values, unresolved names and options, forward
+declarations, incomplete atoms, and expressions with trailing text remain on
+their existing paths. A bare Ex command is covered only when an earlier
+visible variable-like declaration shadows that spelling, as in `var undo = 1`
+followed by `undo`.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_cmd.vim:744-821` covers registers, local and global
+  options, an environment variable, and single- and double-quoted `:eval`
+  arguments in both a compiled `def` and Vim9 script evaluation.
+- `src/testdir/test_vim9_script.vim:1847-1860` distinguishes assignment to a
+  variable named `undo` from evaluating the same name without an effect.
+- `src/ex_eval.c:944-1018` recognizes the narrow name-only shapes and emits
+  E1207 only after successful Vim9 evaluation.
+- `src/vim9cmds.c:1998-2025` performs the corresponding compiled-expression
+  check before dropping an otherwise useful result.
+- `src/errors.h:3101-3102` defines the exact E1207 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

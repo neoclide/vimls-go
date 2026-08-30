@@ -4140,6 +4140,66 @@ func TestAnalyzeE1190Vim9ScriptCallbackDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1207NameOnlyExpressionDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"register recovery", "vim9script\n@a\n# comment\nvar after = 1\n", "@a"},
+		{"search register", "vim9script\n@/\n", "@/"},
+		{"options", "vim9script\n&opfunc\n&l:showbreak\n&g:showbreak\n", "&opfunc"},
+		{"environment", "vim9script\n$SomeEnv\n", "$SomeEnv"},
+		{"eval strings", "vim9script\neval 'text'\neval \"text\"\n", "'text'"},
+		{"literal", "vim9script\ntrue\n", "true"},
+		{"predefined variable", "vim9script\nv:version\n", "v:version"},
+		{"resolved variable", "vim9script\nvar value = 1\nvalue\n", "value"},
+		{"shadowed command", "vim9script\nvar undo = 1\nundo\n", "undo"},
+		{"compiled def", "vim9script\ndef Func()\n  @a\nenddef\n", "@a"},
+		{"Legacy-root def", "def Func()\n  @a\nenddef\n", "@a"},
+		{"vim9cmd", "vim9cmd @a\n", "@a"},
+		{"modifier", "vim9script\nsilent @a\n", "@a"},
+		{"lambda", "vim9script\nvar Callback = () => {\n  @a\n}\n", "@a"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1207" {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.name == "options" {
+				if len(got) != 3 {
+					t.Fatalf("E1207 diagnostics = %#v", got)
+				}
+				return
+			}
+			if test.name == "eval strings" {
+				if len(got) != 2 || file.Text(got[0].Span) != "'text'" || file.Text(got[1].Span) != "\"text\"" {
+					t.Fatalf("E1207 diagnostics = %#v", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Message != "Expression without an effect: "+test.span || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1207 diagnostics = %#v", got)
+			}
+			if test.name == "register recovery" && (file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after") {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\nlen([])\nvalue = 1\nvalue.method()\nvalue[0]\n(value)\n1\n[]\n{}\n", "vim9script\nUnknown\n&unknown_option\nundo\n@\n@<\n$\n@a tail\n",
+		"vim9script\nlegacy eval 'text'\n", "let value = 1\neval 'text'\n", "vim9script\nvalue\nvar value = 1\n",
+		"vim9script\ndef Func()\nenddef\nFunc\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1207" {
+				t.Fatalf("guard unexpectedly received E1207: %#v", result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeCompiledIndexReceiverDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string
