@@ -424,6 +424,25 @@ func nestedNamedFunctionSource(prefix, header, end string, depth int) string {
 	return source.String()
 }
 
+func TestVim9ClassPublicMethodDiagnostic(t *testing.T) {
+	for _, declaration := range []string{
+		"public def Foo()",
+		"public static def Foo()",
+		"public def _Foo()",
+		"public static def _Foo()",
+	} {
+		source := "vim9script\nclass A\n  " + declaration + "\n  enddef\nendclass\nvar after = 1\n"
+		file := Parse(source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1388" || file.Diagnostics[0].Message != "public keyword not supported for a method" || file.Text(file.Diagnostics[0].Span) != "public" {
+			t.Fatalf("declaration=%q diagnostics=%#v", declaration, file.Diagnostics)
+		}
+		if len(file.Commands) != 6 || file.Commands[5].Declaration == nil {
+			t.Fatalf("declaration=%q commands=%#v", declaration, file.Commands)
+		}
+		assertFileSpans(t, file)
+	}
+}
+
 func TestVim9UnmatchedScopeEndRecovers(t *testing.T) {
 	file := (Vim9Parser{}).Parse("}\nvar after = 1\n")
 	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1025" || len(file.Commands) != 2 || file.Commands[1].Declaration == nil {

@@ -4430,6 +4430,9 @@ func diagnoseClassMemberModifierOrder(file *File, command *Command) {
 		next = command.Modifiers[1].Name
 	}
 	if modifier.Name == "public" {
+		if command.Canonical == "def" {
+			return
+		}
 		valid := next == "var" || next == "static" || next == "final" || next == "const"
 		if !valid {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{

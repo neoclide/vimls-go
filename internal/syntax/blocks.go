@@ -66,6 +66,18 @@ func buildBlocks(file *File) {
 		if len(stack) > 0 {
 			blockIndex := stack[len(stack)-1]
 			if file.Blocks[blockIndex].Kind == BlockClass && command.Dialect == Vim9 {
+				publicMethod := false
+				if command.Canonical == "def" {
+					for _, modifier := range command.Modifiers {
+						if modifier.Name == "public" {
+							publicMethod = true
+							file.Diagnostics = append(file.Diagnostics, Diagnostic{
+								Code: "vim/E1388", Message: "public keyword not supported for a method", Span: modifier.Span,
+							})
+							break
+						}
+					}
+				}
 				classMethod := classMethods[blockIndex]
 				if classMethod == classMethodRecovery {
 					command.Block = blockIndex
@@ -95,7 +107,9 @@ func buildBlocks(file *File) {
 						classMethods = make(map[int]uint8)
 					}
 					classMethods[blockIndex] = classMethodRecovery
-					classBodyCommandDiagnostic(file, command)
+					if !publicMethod {
+						classBodyCommandDiagnostic(file, command)
+					}
 					continue
 				}
 				if command.Canonical == "final" || command.Canonical == "const" {
