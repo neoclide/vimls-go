@@ -53,6 +53,29 @@ Implementation work consumes stable rule-group IDs from this ledger. It may
 combine groups that touch the same parser path, but it must not start a new
 source-research pass for cases already classified here.
 
+## Compile error-code continuation
+
+The descending compile-error pass is tracked by
+`internal/analysis/official_compile_cases_test.go`; its completed and pending
+sets are authoritative. This branch has completed E1366 and E1365. Resume at
+E1363, the highest remaining pending code, and continue with one local commit
+per code whose subject starts with that code. Every completed code must update
+the inventory file above.
+
+E1365 is a syntax diagnostic on a class constructor return annotation. A
+constructor is a class member method whose name starts with `new` or `_new`.
+Non-void annotations report E1365 over the return type; an omitted annotation
+and explicit `: void` are valid. E1359, E1370, and E1372 take priority for an
+abstract-class, static, or abstract constructor respectively. Focused coverage
+is in `internal/syntax/declarations_test.go`.
+
+At this checkpoint, gopls diagnostics and the focused analysis, syntax, and
+official-case tests pass. `go test ./...` has three unrelated reproducible
+baseline failures: the E476/E1267 cascade in
+`TestOfficialVimParserFailures`, top-level `def new` receiving E1267 in
+`TestVim9ConstructorParameterTarget`, and the watcher registration assertion
+in `TestLSPSubprocess`.
+
 After changing the expected map, run the migration report instead of counting
 keys or source groups by hand:
 

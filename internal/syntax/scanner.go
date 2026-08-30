@@ -441,6 +441,7 @@ func parseSource(source string, initial Dialect) *File {
 	diagnoseConcreteClassAbstractMembers(file)
 	suppressClassBodyCommandDiagnostics(file)
 	buildAggregateMembers(file)
+	suppressAbstractClassConstructorReturnDiagnostics(file)
 	diagnoseStaticConstructors(file)
 	suppressInvalidBlockMissingEnds(file)
 	suppressInvalidInterfaceInitializers(file)
@@ -2809,7 +2810,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if command.Canonical == "function" && command.Dialect == Vim9 && command.Bang.Start < command.Bang.End && command.Function != nil && !strings.HasPrefix(file.Text(command.Function.Name), "g:") {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "no ! allowed", Span: command.Bang})
 		}
-		if command.Function != nil && command.Function.ReturnType != nil && command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockClass) && !staticMethod {
+		abstractMethod := slices.ContainsFunc(command.Modifiers, func(modifier Modifier) bool { return modifier.Name == "abstract" })
+		if command.Function != nil && constructorHasNonVoidReturnType(command.Function) && command.Dialect == Vim9 &&
+			commandInsideBlock(command, file.Blocks, BlockClass) && !abstractMethod && !staticMethod {
 			name := file.Text(command.Function.Name)
 			if strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new") {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1365", Message: `Cannot use a return type with the "new" method`, Span: command.Function.ReturnTypeSpan})
@@ -3191,6 +3194,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			file.Diagnostics = append(file.Diagnostics, diagnostics...)
 		}
 	}
+}
+
+func constructorHasNonVoidReturnType(function *Function) bool {
+	if function == nil || function.ReturnType == nil || function.ReturnType.Kind == TypeMissing {
+		return false
+	}
+	return function.ReturnType.Kind != TypeNamed || function.ReturnType.Name != "void"
 }
 
 // diagnoseVim9MatchArgument validates the small, command-specific grammar of
@@ -4503,6 +4513,39 @@ func diagnoseConcreteClassAbstractMembers(file *File) {
 				Code: "vim/E1372", Message: `Abstract method "` + file.Text(span) + `" cannot be defined in a concrete class`, Span: span,
 			})
 			break
+		}
+	}
+}
+
+func suppressAbstractClassConstructorReturnDiagnostics(file *File) {
+	if file == nil {
+		return
+	}
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Aggregate == nil || class.Aggregate.Kind != BlockClass ||
+			!slices.ContainsFunc(class.Modifiers, func(modifier Modifier) bool { return modifier.Name == "abstract" }) {
+			continue
+		}
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Function == nil {
+				continue
+			}
+			name := file.Text(member.Function.Name)
+			if !strings.HasPrefix(name, "new") && !strings.HasPrefix(name, "_new") {
+				continue
+			}
+			kept := file.Diagnostics[:0]
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code != "vim/E1365" || diagnostic.Span != member.Function.ReturnTypeSpan {
+					kept = append(kept, diagnostic)
+				}
+			}
+			file.Diagnostics = kept
 		}
 	}
 }

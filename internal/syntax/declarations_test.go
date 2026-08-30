@@ -1470,6 +1470,58 @@ func TestVim9StaticConstructorReportsE1370(t *testing.T) {
 	}
 }
 
+func TestVim9ConstructorReturnTypeReportsE1365(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		method     string
+		returnType string
+	}{
+		{name: "official any", method: "new", returnType: "any"},
+		{name: "official dictionary", method: "new", returnType: "dict<any>"},
+		{name: "named constructor", method: "newValues", returnType: "number"},
+		{name: "protected constructor", method: "_newPrivate", returnType: "string"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\nclass A\n  def " + test.method + "(): " + test.returnType + "\n  enddef\nendclass\nvar after = 1\n"
+			file := Parse(source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1365" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Cannot use a return type with the "new" method` || file.Text(got[0].Span) != test.returnType {
+				t.Fatalf("diagnostics=%#v", file.Diagnostics)
+			}
+			constructor := &file.Commands[file.Commands[1].Aggregate.Members[0]]
+			if constructor.Function == nil || constructor.Function.ReturnType == nil {
+				t.Fatalf("constructor signature not retained: %#v", constructor)
+			}
+			last := file.Commands[len(file.Commands)-1]
+			if last.Declaration == nil || file.Text(last.Declaration.Name) != "after" {
+				t.Fatalf("following declaration not retained: %#v", last)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  def new()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  def new(): void\n  enddef\n  def newValues(): void\n  enddef\n  def _newPrivate(): void\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  def Build(): number\n    return 1\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static def new(): number\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  abstract def new(): number\nendclass\n",
+		"vim9script\nabstract class A\n  def new(): number\n  enddef\nendclass\n",
+	} {
+		file := Parse(source)
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1365" {
+				t.Fatalf("guard source reported E1365: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	source := "vim9script\n" +
 		"var $ENV = 1\n" +
