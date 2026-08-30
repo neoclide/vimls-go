@@ -97,6 +97,96 @@ func TestVim9FunctionNameCapitalDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9DictionaryFunctionDiagnostic(t *testing.T) {
+	tests := []struct {
+		name, source string
+		wantNames    []string
+	}{
+		{
+			name:      "top-level function",
+			source:    "vim9script\nfunction Object.Method()\nendfunction\nvar after = 1\n",
+			wantNames: []string{"Object.Method"},
+		},
+		{
+			name:      "top-level def",
+			source:    "vim9script\ndef Object.Method()\nenddef\n",
+			wantNames: []string{"Object.Method"},
+		},
+		{
+			name:      "legacy-root def",
+			source:    "def Object.Method()\nenddef\n",
+			wantNames: []string{"Object.Method"},
+		},
+		{
+			name:      "global receiver",
+			source:    "vim9script\nfunction g:Object.Method()\nendfunction\n",
+			wantNames: []string{"g:Object.Method"},
+		},
+		{
+			name:      "vim9cmd function",
+			source:    "vim9cmd function Object.Method()\nendfunction\n",
+			wantNames: []string{"Object.Method"},
+		},
+		{
+			name:      "legacy-root def body",
+			source:    "def Define()\n  function s:Object.Method()\n  endfunction\n  def Object.Method()\n  enddef\nenddef\n",
+			wantNames: []string{"s:Object.Method", "Object.Method"},
+		},
+		{
+			name:      "lowercase receiver takes precedence",
+			source:    "vim9script\nfunction object.Method()\nendfunction\n",
+			wantNames: []string{"object.Method"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1182" {
+					got = append(got, diagnostic)
+				}
+				if test.name == "lowercase receiver takes precedence" && diagnostic.Code == "vim/E1267" {
+					t.Fatalf("unexpected E1267: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != len(test.wantNames) {
+				t.Fatalf("E1182 diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Diagnostics) != len(got) {
+				t.Fatalf("E1182 retained competing diagnostics: %#v", file.Diagnostics)
+			}
+			for index, name := range test.wantNames {
+				if got[index].Message != "Cannot define a dict function in Vim9 script: "+name || file.Text(got[index].Span) != name {
+					t.Fatalf("E1182 diagnostic = %#v on %q", got[index], file.Text(got[index].Span))
+				}
+				foundFunction := false
+				for _, command := range file.Commands {
+					foundFunction = foundFunction || command.Function != nil && file.Text(command.Function.Name) == name
+				}
+				if !foundFunction {
+					t.Fatalf("function AST for %q was not retained: %#v", name, file.Commands)
+				}
+			}
+			if test.name == "top-level function" && (file.Commands[len(file.Commands)-1].Declaration == nil || file.Text(file.Commands[len(file.Commands)-1].Declaration.Name) != "after") {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Object.Method()\nendfunction\n",
+		"vim9script\nlegacy function Object.Method()\nendfunction\n",
+		"vim9script\ndef Func()\nenddef\n",
+		"vim9script\nclass Thing\n  def Method()\n  enddef\nendclass\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1182") {
+			t.Fatalf("unexpected E1182: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9MissingArgumentTypeDiagnostic(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_func.vim:2484.
 	file := (Vim9Parser{}).Parse("def Func5(items)\n  echo items\nenddef\nvar after = 1\n")

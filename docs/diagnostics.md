@@ -1581,6 +1581,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   Vim9 script assignment.
 - `src/errors.h:3027-3028` defines the exact E1181 message.
 
+## Dictionary function in Vim9 script: E1182
+
+Syntax analysis reports E1182 when a `def` or `function` header in Vim9
+context uses a Dictionary-member name such as `Object.Method`. The diagnostic
+uses Vim's `Cannot define a dict function in Vim9 script: {name}` message and
+selects the complete function name.
+
+The Vim9 rule applies at script level, inside a compiled `def`, to a `def`
+retained under a Legacy root, and after an explicit `vim9cmd`. It owns the
+invalid dotted header before capital-name or nested-namespace checks. A
+top-level Legacy Dictionary function and an explicit `legacy function` retain
+Legacy behavior, while ordinary class, interface, and enum methods are not
+Dictionary functions.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:111-168` expects E1182 for `function` and
+  `def` Dictionary-member headers at Vim9 script level and inside a compiled
+  `def`, including script-local and global receivers.
+- `src/userfunc.c:5122-5134` rejects a dotted `:function` name in Vim9 script
+  context before the Legacy Dictionary-function name is resolved.
+- `src/vim9compile.c:1063-1072` applies the same rule while compiling a nested
+  function definition.
+- `runtime/doc/vim9.txt:272-286` states that `:def` cannot define a Dictionary
+  function and recommends a Vim9 class or an explicit Dictionary parameter.
+- `src/errors.h:3029-3030` defines the exact E1182 message.
+
 ## Name expected: E1015
 
 Syntax analysis reports E1015 when a compiled `def` tuple starts with a

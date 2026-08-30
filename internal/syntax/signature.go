@@ -38,7 +38,7 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
-	if vim9Context && command.Block >= 0 && command.Block < len(file.Blocks) {
+	if vim9Context && !strings.Contains(source[nameStart:offset], ".") && command.Block >= 0 && command.Block < len(file.Blocks) {
 		block := file.Blocks[command.Block]
 		if block.Kind == BlockDef && block.Parent >= 0 && block.Parent < len(file.Blocks) && file.Blocks[block.Parent].Kind == BlockDef {
 			for _, namespace := range []string{"s:", "b:"} {
@@ -67,10 +67,17 @@ func parseFunctionSignature(file *File, command *Command) {
 			directAggregateMethod = parent == BlockClass || parent == BlockInterface || parent == BlockEnum
 		}
 	}
+	name := source[nameStart:offset]
+	dictFunction := vim9Context && strings.Contains(name, ".")
+	if dictFunction {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1182", Message: "Cannot define a dict function in Vim9 script: " + name,
+			Span: function.Name,
+		})
+	}
 	// Vim9 script function names begin with an ASCII capital. Direct object-type
 	// methods use different grammar, including private underscore names.
-	if command.Dialect == Vim9 && !directAggregateMethod {
-		name := source[nameStart:offset]
+	if command.Dialect == Vim9 && !directAggregateMethod && !dictFunction {
 		capital := name[0]
 		checkCapital := !strings.Contains(name, ":")
 		if strings.HasPrefix(name, "g:") && len(name) > 2 {
