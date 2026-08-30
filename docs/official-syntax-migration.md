@@ -457,6 +457,9 @@ Commit `e1179fe` migrated the postfix optional-type variant. The authoritative
 syntax split is therefore 994 migrated, zero ready, and 28 pending-fix.
 Commit `ad45d88` migrated both legacy tuple-gap variants. The authoritative
 syntax split is therefore 996 migrated, zero ready, and 26 pending-fix.
+Commit `ef1f2ca` migrated all three missing function-terminator variants. The
+authoritative syntax split is therefore 999 migrated, zero ready, and 23
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -1532,7 +1535,7 @@ unknowns are `C:2148:44597/script` and
 
 ### Group D inventory: tuple, function, legacy expression, blob, list/dict, enum
 
-Group D contains 173 syntax variants: 147 migrated and 26 pending-fix. In the
+Group D contains 173 syntax variants: 150 migrated and 23 pending-fix. In the
 exact inventory below, `M` and `P` mean those two statuses.
 `test_blob.vim` has no syntax failure variants.
 
@@ -1686,7 +1689,7 @@ E1007 M ready: 2078:45879/def
 E1008 M ready: 2462:55226/script,2464:55349/script,2481:55796/script
 E1010 M recovery: 2077:45815/def
 E1055 M ready: 2482:55906/script
-E1057 P mapping: 408:8674/script,2466:55472/script
+E1057 M mapping: 408:8674/script,2466:55472/script
 E1059 M ready: 2448:54929/script,2455:55077/script
 E1065 M ready: 398:8465/script
 E1068 M ready: 426:8986/script,434:9120/script,441:9237/script,2495:56457/script,2885:66191/def
@@ -1703,7 +1706,7 @@ E1170 M ready: 73:1788/def
 E1172 P missing: 1626:35394/{def|vim9-script}
 E1173 M missing: 392:8331/script,1145:24549/script,2361:52851/script,2378:53272/script,2388:53495/script
 E125 M ready: 948:20577/script,955:20687/script
-E126 P mapping: 416:8808/script
+E126 M mapping: 416:8808/script
 E1267 P missing: 99:2271/script,107:2406/script,1049:22663/script,1061:22873/script,1069:23011/script,1077:23147/script
 E129 P mapping: 3734:85678/script
 E15 M mapping: 828:17920/def
@@ -1764,6 +1767,12 @@ Commit `e1179fe` migrates `2077:45815/def`. A postfix `?` is invalid Vim9 type
 grammar, so the type parser retains `string?` as the argument span, reports one
 E1010, consumes the real function-type `)`, and resumes at the next command.
 The valid prefix optional form `?string` is unchanged.
+
+Commit `ef1f2ca` migrates `408:8674/script`, `416:8808/script`, and
+`2466:55472/script`. An unclosed `def` reports E1057 and an unclosed legacy
+`function` reports E126 on the retained header while their blocks, bodies, and
+invalid near-miss terminator commands remain in the syntax tree. Other block
+kinds keep the generic editor-recovery diagnostic.
 
 Group D unknowns are `test_tuple.vim:1913:53484/{legacy,def,vim9-script}`
 and `test_vim9_func.vim:{2407:53889/script,2413:54060/script}`; their helpers
