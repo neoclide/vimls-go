@@ -51,6 +51,64 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeBuiltinNativeArgumentDiagnostics(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		code     string
+		message  string
+		argument string
+	}{
+		{
+			name:     "string argument",
+			source:   "vim9script\nsubstitute('Hallo', 'a', 'e', true)\n",
+			code:     "vim/E1174",
+			message:  "String required for argument 4",
+			argument: "true",
+		},
+		{
+			name:     "dictionary method receiver",
+			source:   "vim9script\n[8, 9]->keys()\n",
+			code:     "vim/E1206",
+			message:  "Dictionary required for argument 1",
+			argument: "[8, 9]",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var native []syntax.Diagnostic
+			var e1013 int
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == test.code {
+					native = append(native, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.argument {
+					e1013++
+				}
+			}
+			if len(native) != 1 {
+				t.Fatalf("native diagnostics = %#v, want one %s; all diagnostics = %#v", native, test.code, result.Diagnostics)
+			}
+			diagnostic := native[0]
+			if diagnostic.Message != test.message || file.Text(diagnostic.Span) != test.argument {
+				t.Fatalf("diagnostic = %#v (span text %q), want %s %q on %q", diagnostic, file.Text(diagnostic.Span), test.code, test.message, test.argument)
+			}
+			if e1013 != 0 {
+				t.Fatalf("E1013 diagnostics for remapped argument = %d, want none; all diagnostics = %#v", e1013, result.Diagnostics)
+			}
+		})
+	}
+
+	positive := syntax.Parse("vim9script\nsubstitute('Hallo', 'a', 'e', '')\n{'a': 1}->keys()\n")
+	for _, diagnostic := range Analyze(positive).Diagnostics {
+		if diagnostic.Code == "vim/E1174" || diagnostic.Code == "vim/E1206" {
+			t.Fatalf("valid builtin argument diagnostic = %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeFunctionArgumentTypeDiagnostics(t *testing.T) {
 	source := "vim9script\ndef Filter(x: string, Cond: func(string): bool): bool\n  return Cond(x)\nenddef\ndef Defaults(one: string, two = 'foo', ...rest: list<string>)\nenddef\ndef Varargs(...args: list<string>)\nenddef\ndef F()\n  var Ref = (x: number, y: number) => x + y\n  Ref(1, 'lambda')\n  Ref(1, 2)\n  Filter('foo', (v) => v .. '^b')\n  Defaults('one', 22)\n  Defaults('one', 'two', 123)\n  Varargs(1)\n  Varargs('one', 2)\nenddef\n"
 	var diagnostics []syntax.Diagnostic

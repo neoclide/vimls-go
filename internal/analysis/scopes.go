@@ -1460,6 +1460,12 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						expected.functionReturn = nil
 					}
 					if builtinArgumentMismatch(actual[index], expected) {
+						if !scopeUsesDefTypeRules(scope) {
+							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, argument.Span); ok {
+								result.Diagnostics = append(result.Diagnostics, diagnostic)
+								continue
+							}
+						}
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
 					}
 				}
@@ -1504,6 +1510,26 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		}
 	}
 	walkCommands(commands, parent)
+}
+
+// builtinArgumentDiagnostic mirrors the concrete Vim compile-time checker
+// errors for the simple argument checkers whose native diagnostic is useful to
+// callers. E1013 remains the general static type mismatch for checkers without
+// a specialized native diagnostic.
+func builtinArgumentDiagnostic(checker string, index int, span syntax.Span) (syntax.Diagnostic, bool) {
+	checker = strings.TrimSuffix(checker, "_mod")
+	var code, required string
+	switch checker {
+	case "arg_string":
+		code, required = "vim/E1174", "String"
+	case "arg_dict_any":
+		code, required = "vim/E1206", "Dictionary"
+	default:
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{
+		Code: code, Message: required + " required for argument " + strconv.Itoa(index+1), Span: span,
+	}, true
 }
 
 func collectMapCallbackReturnTypeDiagnostic(result *FileAnalysis, scope *Scope, builtin vimdata.BuiltinFunction, arguments []*syntax.Expression, actual []ValueType) {
