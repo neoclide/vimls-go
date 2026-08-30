@@ -390,6 +390,11 @@ pending-fix.
 Commit `e76ef03` migrated the two Vim9 substitute replacement-expression tail
 variants. The authoritative parser split is therefore 955 migrated, zero
 ready, and 80 pending-fix.
+A command/name-resolution audit then removed the three one-letter
+`a`/`c`/`i` assignment cases: Vim reports E488 only when `item_exists()` fails
+and the text is reinterpreted as `append`, `change`, or `insert`. The
+authoritative parser split is therefore 955 migrated, zero ready, and 77
+pending-fix.
 
 For editor recovery, `eece91f` intentionally keeps an invalid first
 `:vim9script` command in Vim9 dialect after reporting E475 or E983. Vim itself
@@ -982,13 +987,13 @@ Aliases are `S=test_vim9_script.vim`, `G=test_vim9_generics.vim`,
 | --- | ---: | ---: | ---: | ---: |
 | `C-BLOCK` | 51 | 51 | 0 | 0 |
 | `C-DECL` | 3 | 3 | 0 | 0 |
-| `C-EXCMD` | 109 | 96 | 0 | 13 |
+| `C-EXCMD` | 106 | 96 | 0 | 10 |
 | `C-EXPR` | 15 | 15 | 0 | 0 |
 | `C-GENERIC` | 90 | 90 | 0 | 0 |
 | `C-IMPORT` | 11 | 11 | 0 | 0 |
 | `C-MODIFIER` | 56 | 56 | 0 | 0 |
 | `C-REDIR` | 1 | 1 | 0 | 0 |
-| **Total** | **336** | **323** | **0** | **13** |
+| **Total** | **333** | **323** | **0** | **10** |
 
 ```text
 C-EXPR
@@ -1046,7 +1051,7 @@ C-EXCMD
   E475 I:2972:73136/script,2984:73418/script; S:3732:79394/script,3778:80424/script,3805:81070/script,3813:81312/script,3848:82155/script
   E477 S:4135:88194/script
   E481 S:72:1434/{def|vim9-script},78:1542/{def|vim9-script},83:1641/{def|vim9-script},88:1738/{def|vim9-script},4851:108739/{def|vim9-script}
-  E488 C:472:10765/{def|vim9-script},1903:39368/def,1904:39418/def; S:2042:42704/script,2044:42817/script,2046:42930/script,2088:44163/def,2096:44294/def,2382:49493/def,2437:50783/def,2459:51306/def,3476:74196/def,3557:75701/script,3561:75787/script,3564:75852/script,3570:75953/def,3573:76014/def,3579:76110/def,3599:76552/def,3635:77305/def,3654:77678/def,3715:79011/script,3926:83957/script,3937:84202/script,3942:84304/script,3946:84394/script,3967:84795/script,4077:87087/script,4091:87356/script,4098:87482/script,4112:87742/script,4126:88011/script; T:125:3484/script
+  E488 C:472:10765/{def|vim9-script},1903:39368/def,1904:39418/def; S:2088:44163/def,2096:44294/def,2382:49493/def,2437:50783/def,2459:51306/def,3476:74196/def,3557:75701/script,3561:75787/script,3564:75852/script,3570:75953/def,3573:76014/def,3579:76110/def,3599:76552/def,3635:77305/def,3654:77678/def,3715:79011/script,3926:83957/script,3937:84202/script,3942:84304/script,3946:84394/script,3967:84795/script,4077:87087/script,4091:87356/script,4098:87482/script,4112:87742/script,4126:88011/script; T:125:3484/script
   E1170 S:3541:75427/script
 
 C-GENERIC
@@ -1096,7 +1101,7 @@ Authority is distributed across `src/eval.c`, `src/vim9expr.c`,
 `src/vim9cmds.c`, `src/vim9compile.c`, `src/vim9generics.c`,
 `src/vim9class.c`, `src/ex_docmd.c`, `src/userfunc.c`, and `src/usercmd.c`.
 
-The Group C parser inventory excludes fifty failures whose outcome requires
+The Group C parser inventory excludes fifty-three failures whose outcome requires
 state beyond the token stream or would violate opaque unknown-command recovery.
 `S:57:1170/{def|vim9-script}` checks the current
 buffer range, `G:854:19046/script` asks whether a resolved funcref is generic,
@@ -1125,6 +1130,12 @@ variants at `C:{22:487,2076:42938}`, `G:{296:6532,312:6869,346:7617}`, and
 only after Vim resolves a command name and context. The syntax parser keeps
 unknown, user-defined, and future commands opaque instead of inventing those
 state-dependent errors.
+
+The E488 cases at `S:{2042:42704,2044:42817,2046:42930}/script` also depend on
+name resolution. Vim first asks `item_exists()` whether the one-letter name is
+an assignable variable; only a failed lookup falls back to the legacy
+`append`, `change`, or `insert` command and diagnoses the `= 1` tail. The syntax
+parser retains the assignment AST and leaves that distinction to analysis.
 
 `S:2021:42097/script` remains in the pinned corpus as a parser-stability input
 but is excluded from exact negative conformance. Vim's test verifies that an
