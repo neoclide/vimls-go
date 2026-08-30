@@ -448,3 +448,31 @@ Representative source evidence:
 - `src/eval.c:1405-1410` reports a missing read, while `src/eval.c:2487-2492`
   distinguishes missing compound-assignment keys from keys created by plain
   assignment. `src/errors.h:1833-1834` defines the exact message.
+
+## Duplicate Dictionary key: E721
+
+E721 means `Duplicate key in Dictionary: "{key}"`. Legacy Vim script and Vim9
+script use it when two statically evaluable entries in the same Dictionary
+literal produce the same case-sensitive key. Analysis selects the later key as
+the diagnostic span.
+
+Vim9 bare keys and quoted keys are literal strings. A bracketed String or
+Number key is evaluated before comparison, so `{[001]: 1, '1': 2}` contains a
+duplicate. An unbracketed Vim9 Number retains its source spelling, so
+`{001: 1, '1': 2}` does not. Legacy quoted and Number keys are also compared,
+but a Legacy bare identifier is an expression whose value may change at
+runtime and therefore remains unknown.
+
+Dynamic computed keys remain unknown. Malformed entries retain their structural
+Dictionary diagnostic instead of receiving a cascading E721, and keys in
+nested Dictionary literals are compared only within their own literal.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:3134-3144` covers a direct duplicate and a
+  runtime duplicate produced by a computed key.
+- `src/testdir/test_listdict.vim:320-334` covers Legacy duplicate keys.
+- `src/vim9expr.c:1943-1992` checks Vim9 literal and constant computed keys;
+  `src/dict.c:1068-1076` checks evaluated Legacy keys; and
+  `src/vim9execute.c:293-309` defers dynamic compiled keys to execution.
+- `src/errors.h:1843-1844` defines the exact message.

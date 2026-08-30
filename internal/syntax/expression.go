@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -2249,9 +2250,13 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 	// already parsed before the error.
 	malformed := false
 	spacingDiagnostic := false
+	knownKeys := make(map[string]struct{})
+	duplicateKeyReported := false
 	for p.current().kind != expressionEOF && p.current().text != "}" {
+		entryDiagnosticsStart := len(p.diagnostics)
 		key := p.parseDictionaryKey()
 		children = append(children, key)
+		keyValue, keyKnown := StaticDictionaryKey(key, p.dialect)
 		if key.Span.End > last {
 			last = key.Span.End
 		}
@@ -2306,6 +2311,15 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 			}
 			break
 		}
+		if keyKnown && len(p.diagnostics) == entryDiagnosticsStart {
+			if _, duplicate := knownKeys[keyValue]; duplicate && !duplicateKeyReported {
+				p.diagnostics = append(p.diagnostics, Diagnostic{
+					Code: "vim/E721", Message: "Duplicate key in Dictionary: \"" + keyValue + "\"", Span: key.Span,
+				})
+				duplicateKeyReported = true
+			}
+			knownKeys[keyValue] = struct{}{}
+		}
 		if p.current().text == "," {
 			comma := p.current()
 			commaOffset := comma.span.Start - p.base
@@ -2343,6 +2357,80 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 		p.diagnostics = append(p.diagnostics, Diagnostic{Code: code, Message: message, Span: p.current().span})
 	}
 	return &Expression{Kind: ExpressionDictionary, Span: Span{Start: open.span.Start, End: end}, Children: children}
+}
+
+// StaticDictionaryKey returns a Dictionary literal key only when evaluating
+// it cannot consult mutable Vim state. Bare names are literal only in Vim9;
+// bracketed keys must contain a simple literal value.
+func StaticDictionaryKey(expression *Expression, dialect Dialect) (string, bool) {
+	if expression == nil {
+		return "", false
+	}
+	if expression.Kind == ExpressionIdentifier {
+		if dialect == Vim9 {
+			return expression.Value, expression.Value != ""
+		}
+		return staticDictionaryNumberKey(expression.Value)
+	}
+	if expression.Kind == ExpressionList && len(expression.Children) == 1 {
+		return StaticDictionaryIndexKey(expression.Children[0])
+	}
+	if expression.Kind == ExpressionNumber && dialect == Vim9 {
+		return expression.Value, expression.Value != ""
+	}
+	return StaticDictionaryIndexKey(expression)
+}
+
+// StaticDictionaryIndexKey returns a literal Dictionary index without
+// treating an identifier as its spelling, since an index identifier is a
+// runtime variable rather than a literal key.
+func StaticDictionaryIndexKey(expression *Expression) (string, bool) {
+	if expression == nil {
+		return "", false
+	}
+	if expression.Kind == ExpressionNumber {
+		return staticDictionaryNumberKey(expression.Value)
+	}
+	if expression.Kind != ExpressionString {
+		return "", false
+	}
+	literal := expression.Value
+	if len(literal) < 2 || literal[len(literal)-1] != literal[0] || literal[0] != '\'' && literal[0] != '"' {
+		return "", false
+	}
+	value := literal[1 : len(literal)-1]
+	if literal[0] == '\'' && strings.Contains(value, "''") || literal[0] == '"' && strings.Contains(value, "\\") {
+		return "", false
+	}
+	return value, true
+}
+
+func staticDictionaryNumberKey(value string) (string, bool) {
+	value = strings.ReplaceAll(value, "'", "")
+	if value == "" {
+		return "", false
+	}
+	base := 10
+	digits := value
+	lower := strings.ToLower(value)
+	if len(value) > 2 {
+		switch lower[:2] {
+		case "0x":
+			base, digits = 16, value[2:]
+		case "0b":
+			base, digits = 2, value[2:]
+		case "0o":
+			base, digits = 8, value[2:]
+		}
+	}
+	if base == 10 && strings.ContainsAny(value, ".eE") {
+		return "", false
+	}
+	number, err := strconv.ParseInt(digits, base, 64)
+	if err != nil {
+		return "", false
+	}
+	return strconv.FormatInt(number, 10), true
 }
 
 // consumeDictionaryRemainder makes a malformed dictionary opaque through the

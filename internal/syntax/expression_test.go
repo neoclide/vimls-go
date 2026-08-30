@@ -1034,6 +1034,114 @@ func TestOfficialVim9DictionaryExpressionKeys(t *testing.T) {
 	}
 }
 
+func TestDictionaryDuplicateKeyDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, message, span string
+		parse                       func(string) (*Expression, []Diagnostic)
+	}{
+		{
+			name: "vim9 bare key", source: "{a: 1, a: 2}",
+			message: `Duplicate key in Dictionary: "a"`, span: "a",
+			parse: func(source string) (*Expression, []Diagnostic) {
+				return (Vim9ExpressionParser{}).Parse(source)
+			},
+		},
+		{
+			name: "legacy string key", source: "{'k' : 10, 'k' : 20}",
+			message: `Duplicate key in Dictionary: "k"`, span: "'k'",
+			parse: func(source string) (*Expression, []Diagnostic) {
+				return (LegacyExpressionParser{}).Parse(source)
+			},
+		},
+		{
+			name: "mixed literal spelling", source: "{a: 1, 'a': 2}",
+			message: `Duplicate key in Dictionary: "a"`, span: "'a'",
+			parse: func(source string) (*Expression, []Diagnostic) {
+				return (Vim9ExpressionParser{}).Parse(source)
+			},
+		},
+		{
+			name: "computed constant key", source: "{['a']: 1, ['a']: 2}",
+			message: `Duplicate key in Dictionary: "a"`, span: "['a']",
+			parse: func(source string) (*Expression, []Diagnostic) {
+				return (Vim9ExpressionParser{}).Parse(source)
+			},
+		},
+		{
+			name: "vim9 computed number", source: "{[001]: 1, '1': 2}",
+			message: `Duplicate key in Dictionary: "1"`, span: "'1'",
+			parse: func(source string) (*Expression, []Diagnostic) {
+				return (Vim9ExpressionParser{}).Parse(source)
+			},
+		},
+		{
+			name: "vim9 computed hexadecimal number", source: "{[0xA]: 1, '10': 2}",
+			message: `Duplicate key in Dictionary: "10"`, span: "'10'",
+			parse: func(source string) (*Expression, []Diagnostic) {
+				return (Vim9ExpressionParser{}).Parse(source)
+			},
+		},
+		{
+			name: "legacy number", source: "{04 : 1, '4' : 2}",
+			message: `Duplicate key in Dictionary: "4"`, span: "'4'",
+			parse: func(source string) (*Expression, []Diagnostic) {
+				return (LegacyExpressionParser{}).Parse(source)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			expression, diagnostics := test.parse(test.source)
+			if expression == nil || expression.Kind != ExpressionDictionary {
+				t.Fatalf("expression = %#v", expression)
+			}
+			var got []Diagnostic
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "vim/E721" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || test.source[got[0].Span.Start:got[0].Span.End] != test.span {
+				t.Fatalf("diagnostics = %#v, want one E721 %q on %q; all diagnostics = %#v", got, test.message, test.span, diagnostics)
+			}
+		})
+	}
+
+	valid := []struct {
+		name, source string
+		parse        func(string) (*Expression, []Diagnostic)
+	}{
+		{name: "dynamic computed key", source: "{[key]: 1, [key]: 2}", parse: func(source string) (*Expression, []Diagnostic) {
+			return (Vim9ExpressionParser{}).Parse(source)
+		}},
+		{name: "nested literals", source: "{a: {a: 1}, b: {a: 2}}", parse: func(source string) (*Expression, []Diagnostic) {
+			return (Vim9ExpressionParser{}).Parse(source)
+		}},
+		{name: "case sensitive", source: "{a: 1, A: 2}", parse: func(source string) (*Expression, []Diagnostic) {
+			return (Vim9ExpressionParser{}).Parse(source)
+		}},
+		{name: "vim9 direct number spelling", source: "{001: 1, '1': 2}", parse: func(source string) (*Expression, []Diagnostic) {
+			return (Vim9ExpressionParser{}).Parse(source)
+		}},
+		{name: "legacy evaluated bare names", source: "{a : 1, a : 2}", parse: func(source string) (*Expression, []Diagnostic) {
+			return (LegacyExpressionParser{}).Parse(source)
+		}},
+		{name: "malformed duplicate entry", source: "{a: 1, a}", parse: func(source string) (*Expression, []Diagnostic) {
+			return (Vim9ExpressionParser{}).Parse(source)
+		}},
+	}
+	for _, test := range valid {
+		t.Run(test.name, func(t *testing.T) {
+			_, diagnostics := test.parse(test.source)
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "vim/E721" {
+					t.Fatalf("valid dictionary diagnostic = %#v; all diagnostics = %#v", diagnostic, diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestOfficialVim9SliceColonSpacing(t *testing.T) {
 	// v9.2.1015 runtime/doc/vim9.txt and
 	// src/testdir/test_vim9_assign.vim Test_unlet_list_slice.

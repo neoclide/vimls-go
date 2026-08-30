@@ -182,45 +182,13 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 			declarations[declaration.Span] = declaration
 		}
 	}
-	staticLiteralKey := func(expression *syntax.Expression) (string, bool) {
-		if expression == nil {
-			return "", false
-		}
-		switch expression.Kind {
-		case syntax.ExpressionNumber:
-			return expression.Value, expression.Value != ""
-		case syntax.ExpressionString:
-			literal := expression.Value
-			if len(literal) < 2 || literal[len(literal)-1] != literal[0] || literal[0] != '\'' && literal[0] != '"' {
-				return "", false
-			}
-			value := literal[1 : len(literal)-1]
-			if literal[0] == '\'' && strings.Contains(value, "''") || literal[0] == '"' && strings.Contains(value, "\\") {
-				return "", false
-			}
-			return value, true
-		}
-		return "", false
-	}
-	staticDictionaryKey := func(expression *syntax.Expression) (string, bool) {
-		if expression == nil {
-			return "", false
-		}
-		if expression.Kind == syntax.ExpressionIdentifier {
-			return expression.Value, expression.Value != ""
-		}
-		if expression.Kind == syntax.ExpressionList && len(expression.Children) == 1 {
-			return staticLiteralKey(expression.Children[0])
-		}
-		return staticLiteralKey(expression)
-	}
-	staticDictionaryKeys := func(expression *syntax.Expression) (map[string]struct{}, bool) {
+	staticDictionaryKeys := func(expression *syntax.Expression, dialect syntax.Dialect) (map[string]struct{}, bool) {
 		if expression == nil || expression.Kind != syntax.ExpressionDictionary || len(expression.Children)%2 != 0 {
 			return nil, false
 		}
 		keys := make(map[string]struct{}, len(expression.Children)/2)
 		for index := 0; index < len(expression.Children); index += 2 {
-			key, ok := staticDictionaryKey(expression.Children[index])
+			key, ok := syntax.StaticDictionaryKey(expression.Children[index], dialect)
 			if !ok {
 				return nil, false
 			}
@@ -229,8 +197,8 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 		return keys, true
 	}
 	shapes := make(map[*Declaration]dictionaryShape)
-	shapeForReceiver := func(scope *Scope, receiver *syntax.Expression, generation int) (map[string]struct{}, bool) {
-		if keys, ok := staticDictionaryKeys(receiver); ok {
+	shapeForReceiver := func(scope *Scope, receiver *syntax.Expression, dialect syntax.Dialect, generation int) (map[string]struct{}, bool) {
+		if keys, ok := staticDictionaryKeys(receiver, dialect); ok {
 			return keys, true
 		}
 		if receiver == nil || receiver.Kind != syntax.ExpressionIdentifier {
@@ -246,7 +214,7 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 		}
 		return shape.keys, true
 	}
-	appendMissingKey := func(scope *Scope, expression *syntax.Expression, generation int) {
+	appendMissingKey := func(scope *Scope, expression *syntax.Expression, dialect syntax.Dialect, generation int) {
 		if expression == nil || len(expression.Children) == 0 {
 			return
 		}
@@ -271,14 +239,14 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 			if len(expression.Children) < 2 {
 				return
 			}
-			key, ok = staticLiteralKey(expression.Children[1])
+			key, ok = syntax.StaticDictionaryIndexKey(expression.Children[1])
 		default:
 			return
 		}
 		if !ok {
 			return
 		}
-		keys, known := shapeForReceiver(scope, expression.Children[0], generation)
+		keys, known := shapeForReceiver(scope, expression.Children[0], dialect, generation)
 		if !known {
 			return
 		}
@@ -292,8 +260,8 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 
 	generation := 0
 	var walkCommands func([]syntax.Command, *Scope)
-	var walkExpression func(*syntax.Expression, *Scope, bool, int)
-	walkExpression = func(expression *syntax.Expression, scope *Scope, read bool, currentGeneration int) {
+	var walkExpression func(*syntax.Expression, *Scope, syntax.Dialect, bool, int)
+	walkExpression = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect, read bool, currentGeneration int) {
 		if expression == nil || scope == nil {
 			return
 		}
@@ -307,25 +275,25 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 			}
 			for index, child := range expression.Children {
 				if index >= len(expression.Parameters) {
-					walkExpression(child, lambdaScope, true, currentGeneration)
+					walkExpression(child, lambdaScope, dialect, true, currentGeneration)
 				}
 			}
 			return
 		}
 		if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 {
-			walkExpression(expression.Children[1], scope, true, currentGeneration)
+			walkExpression(expression.Children[1], scope, dialect, true, currentGeneration)
 			plainAssignment := expression.Value == "=" && result.File.Text(expression.Operator) == "="
-			walkExpression(expression.Children[0], scope, !plainAssignment, currentGeneration)
+			walkExpression(expression.Children[0], scope, dialect, !plainAssignment, currentGeneration)
 			for _, child := range expression.Children[2:] {
-				walkExpression(child, scope, true, currentGeneration)
+				walkExpression(child, scope, dialect, true, currentGeneration)
 			}
 			return
 		}
 		if read && (expression.Kind == syntax.ExpressionMember || expression.Kind == syntax.ExpressionIndex) {
-			appendMissingKey(scope, expression, currentGeneration)
+			appendMissingKey(scope, expression, dialect, currentGeneration)
 		}
 		for _, child := range expression.Children {
-			walkExpression(child, scope, true, currentGeneration)
+			walkExpression(child, scope, dialect, true, currentGeneration)
 		}
 	}
 	walkCommands = func(items []syntax.Command, inherited *Scope) {
@@ -338,11 +306,11 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 				scope = inherited
 			}
 			if command.Declaration != nil {
-				walkExpression(command.Declaration.Initializer, scope, true, currentGeneration)
+				walkExpression(command.Declaration.Initializer, scope, command.Dialect, true, currentGeneration)
 				if len(command.Declaration.Bindings) == 1 {
 					binding := command.Declaration.Bindings[0]
 					declaration := declarations[binding.Name]
-					keys, known := staticDictionaryKeys(command.Declaration.Initializer)
+					keys, known := staticDictionaryKeys(command.Declaration.Initializer, command.Dialect)
 					if !known && command.Dialect == syntax.Vim9 && command.Declaration.Initializer == nil && convertSyntaxType(binding.ParsedType).Name == "dict" {
 						keys, known = map[string]struct{}{}, true
 					}
@@ -352,15 +320,15 @@ func collectMissingDictionaryKeyDiagnostics(result *FileAnalysis, commands []syn
 				}
 			} else {
 				for _, expression := range command.Expressions {
-					walkExpression(expression, scope, true, currentGeneration)
+					walkExpression(expression, scope, command.Dialect, true, currentGeneration)
 				}
 			}
 			for _, target := range command.Targets {
-				walkExpression(target, scope, true, currentGeneration)
+				walkExpression(target, scope, command.Dialect, true, currentGeneration)
 			}
 			if command.Function != nil {
 				for _, parameter := range command.Function.Parameters {
-					walkExpression(parameter.Default, scope, true, currentGeneration)
+					walkExpression(parameter.Default, scope, command.Dialect, true, currentGeneration)
 				}
 			}
 			if command.Embedded != nil {
