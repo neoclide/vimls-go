@@ -272,6 +272,58 @@ func TestAnalyzeFuncrefAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDictionaryAsNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{
+			name:   "vim9 script left operand",
+			source: "vim9script\nvar value = {one: 1} * {two: 2}\n",
+			span:   "{one: 1}",
+		},
+		{
+			name:   "vim9 script right operand",
+			source: "vim9script\nvar value = 22 % {two: 2}\n",
+			span:   "{two: 2}",
+		},
+		{
+			name:   "legacy operand",
+			source: "let value = {} - 22\n",
+			span:   "{}",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E728" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a Dictionary as a Number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one E728 on %q; all diagnostics = %#v", got, test.span, result.Diagnostics)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef F()\n  var value = {} - 22\nenddef\n")
+	result := Analyze(file)
+	var mismatch []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E728" {
+			t.Fatalf("compiled def retained E728: %#v", result.Diagnostics)
+		}
+		if diagnostic.Code == "vim/E1036" {
+			mismatch = append(mismatch, diagnostic)
+		}
+	}
+	if len(mismatch) != 1 || file.Text(mismatch[0].Span) != "-" {
+		t.Fatalf("compiled def diagnostics = %#v, want one E1036 on operator", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, wantName string

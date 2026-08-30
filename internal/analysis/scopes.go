@@ -681,6 +681,8 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 							code, message = "vim/E611", "Using a Special as a Number"
 						case "func":
 							code, message = "vim/E703", "Using a Funcref as a Number"
+						case "dict":
+							code, message = "vim/E728", "Using a Dictionary as a Number"
 						}
 						if code == "" {
 							operand = expression.Children[1]
@@ -689,6 +691,8 @@ func collectArithmeticDiagnostics(result *FileAnalysis, commands []syntax.Comman
 								code, message = "vim/E611", "Using a Special as a Number"
 							case "func":
 								code, message = "vim/E703", "Using a Funcref as a Number"
+							case "dict":
+								code, message = "vim/E728", "Using a Dictionary as a Number"
 							}
 						}
 						if code != "" {

@@ -476,3 +476,24 @@ Representative source evidence:
   `src/dict.c:1068-1076` checks evaluated Legacy keys; and
   `src/vim9execute.c:293-309` defers dynamic compiled keys to execution.
 - `src/errors.h:1843-1844` defines the exact message.
+
+## Using a Dictionary as a Number: E728
+
+E728 means `Using a Dictionary as a Number`. Legacy Vim script and the Vim9
+script evaluator use this historical conversion error when a Dictionary is an
+operand of numeric arithmetic.
+
+Analysis reports E728 for a statically known Dictionary operand of binary
+`+`, `-`, `*`, `/`, or `%` outside a compiled `def`. The diagnostic selects the
+Dictionary operand, checking the left operand before the right. Unknown values
+remain unknown. A compiled Vim9 `def` keeps the operator-specific type error:
+E1036 for `-`, `*`, or `/`, E1035 for `%`, and E1051 for `+`.
+
+Representative source evidence:
+
+- `src/testdir/test_vim9_expr.vim:1875-1879` distinguishes E1036 in a
+  compiled `def` from E728 at Vim9 script level for subtraction.
+- `src/testdir/test_vim9_expr.vim:2277-2281` covers Dictionary multiplication,
+  division, and remainder and their E1036/E1035 compiled counterparts.
+- `src/typval.c:225-249` selects E728 when numeric conversion receives a
+  Dictionary, and `src/errors.h:1857-1858` defines the exact message.
