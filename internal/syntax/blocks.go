@@ -535,6 +535,18 @@ func buildBlocks(file *File) {
 			})
 			continue
 		}
+		if block.Kind == BlockDef {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1057", Message: "Missing :enddef", Span: file.Commands[block.Header].Name,
+			})
+			continue
+		}
+		if block.Kind == BlockFunction {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E126", Message: "Missing :endfunction", Span: file.Commands[block.Header].Name,
+			})
+			continue
+		}
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vimls/missing-end", Message: "block is missing its end command", Span: file.Commands[block.Header].Name,
 		})
@@ -712,7 +724,7 @@ func suppressInvalidBlockMissingEnds(file *File) {
 	for _, diagnostic := range file.Diagnostics {
 		if invalid[diagnostic.Span] {
 			switch diagnostic.Code {
-			case "vimls/missing-end", "vim/E170", "vim/E171", "vim/E600", "vim/E1420":
+			case "vimls/missing-end", "vim/E126", "vim/E170", "vim/E171", "vim/E600", "vim/E1057", "vim/E1420":
 				continue
 			}
 		}
