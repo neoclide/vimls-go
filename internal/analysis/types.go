@@ -733,7 +733,7 @@ func convertSyntaxType(typeNode *syntax.Type) ValueType {
 		}
 		return convertSyntaxType(typeNode.Arguments[0])
 	}
-	typ := ValueType{Name: typeNode.Name, ArgumentCountKnown: typeNode.Kind == syntax.TypeFunction}
+	typ := ValueType{Name: typeNode.Name, ArgumentCountKnown: typeNode.Kind == syntax.TypeFunction && typeNode.ArgumentCountKnown}
 	for _, argument := range typeNode.Arguments {
 		typ.Arguments = append(typ.Arguments, convertSyntaxType(argument))
 	}
@@ -742,6 +742,8 @@ func convertSyntaxType(typeNode *syntax.Type) ValueType {
 	}
 	if typeNode.ReturnType != nil {
 		typ.Return = valueTypePointer(convertSyntaxType(typeNode.ReturnType))
+	} else if typeNode.Kind == syntax.TypeFunction && typeNode.ArgumentCountKnown {
+		typ.Return = valueTypePointer(ValueType{Name: "void"})
 	}
 	return typ
 }

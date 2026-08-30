@@ -81,6 +81,9 @@ var after = forward
 	for _, declaration := range result.Root.Declarations {
 		declarations[declaration.Name] = declaration
 	}
+	if declarations["Any"] == nil || declarations["AnyReturn"] == nil || declarations["VoidReturn"] == nil {
+		t.Fatalf("function declarations = %#v", declarations)
+	}
 	for _, name := range []string{"n", "propagated", "arithmetic"} {
 		if declarations[name].Type.Name != "number" {
 			t.Fatalf("%s type = %#v", name, declarations[name].Type)
@@ -205,5 +208,22 @@ func TestAnalyzeLambdaExplicitReturnTypeRejectsIncompatibleInference(t *testing.
 	result := Analyze(syntax.Parse("vim9script\nvar f = (value: number): string => value\n"))
 	if len(result.Root.Declarations) != 1 || result.Root.Declarations[0].Type.Name != "func" || result.Root.Declarations[0].Type.Return == nil || result.Root.Declarations[0].Type.Return.Name != "any" {
 		t.Fatalf("incompatible lambda type = %+v return=%+v", *result.Root.Declarations[0], *result.Root.Declarations[0].Type.Return)
+	}
+}
+
+func TestAnalyzeFunctionTypeImplicitVoidReturn(t *testing.T) {
+	result := Analyze(syntax.Parse("vim9script\nvar Any: func\nvar AnyReturn: func: string\nvar VoidReturn: func(number)\n"))
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Root.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	if declarations["Any"].Type.ArgumentCountKnown || declarations["Any"].Type.Return != nil {
+		t.Fatalf("bare func type = %+v", declarations["Any"].Type)
+	}
+	if declarations["AnyReturn"].Type.ArgumentCountKnown || declarations["AnyReturn"].Type.Return == nil || declarations["AnyReturn"].Type.Return.Name != "string" {
+		t.Fatalf("func return-only type = %+v", declarations["AnyReturn"].Type)
+	}
+	if !declarations["VoidReturn"].Type.ArgumentCountKnown || declarations["VoidReturn"].Type.Return == nil || declarations["VoidReturn"].Type.Return.Name != "void" {
+		t.Fatalf("parenthesized func type = %+v", declarations["VoidReturn"].Type)
 	}
 }
