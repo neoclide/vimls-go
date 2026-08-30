@@ -558,6 +558,14 @@ func commandHasModifier(command *syntax.Command, name string) bool {
 	return false
 }
 
+func commandIsClassMethod(file *syntax.File, command *syntax.Command) bool {
+	if file == nil || command == nil || command.Function == nil {
+		return false
+	}
+	name := file.Text(command.Function.Name)
+	return commandHasModifier(command, "static") || strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new")
+}
+
 func aggregateEndSpan(file *syntax.File, command *syntax.Command) syntax.Span {
 	if file != nil && command != nil && command.Block >= 0 && command.Block < len(file.Blocks) {
 		end := file.Blocks[command.Block].End
@@ -3273,6 +3281,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		}
 	case syntax.ExpressionCall:
 		collectBuiltinCallArityDiagnostic(result, file, expression)
+		appendUnqualifiedClassMethodDiagnostic(result, file, expression, scope, dialect)
 		appendAbstractSuperMethodDiagnostic(result, file, expression, scope, dialect)
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
 		appendTooManyGenericTypeArgumentsDiagnostic(result, expression, scope, skipped)
@@ -3435,12 +3444,50 @@ func appendClassMethodThroughObjectDiagnostic(result *FileAnalysis, scope *Scope
 		if method.Function == nil || file.Text(method.Function.Name) != member.Value {
 			continue
 		}
-		if commandHasModifier(method, "static") || strings.HasPrefix(member.Value, "new") {
+		if commandIsClassMethod(file, method) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1385", Message: `Class method "` + member.Value + `" accessible only using class "` + className + `"`, Span: memberNameSpan(file, member),
 			})
 		}
 		return
+	}
+}
+
+func appendUnqualifiedClassMethodDiagnostic(result *FileAnalysis, file *syntax.File, call *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
+	if result == nil || file == nil || call == nil || scope == nil || dialect != syntax.Vim9 || call.Kind != syntax.ExpressionCall ||
+		len(call.Children) == 0 || call.Children[0] == nil || call.Children[0].Kind != syntax.ExpressionIdentifier {
+		return
+	}
+	callee := call.Children[0]
+	if callee.Value == "" || strings.HasPrefix(callee.Value, "_") || resolve(scope, callee.Value, callee.Span.Start, true, nil) != nil {
+		return
+	}
+	current := enclosingClassCommand(file, scope)
+	if current == nil || current.Aggregate == nil {
+		return
+	}
+	seen := make(map[*syntax.Command]bool)
+	for class := current; class != nil; class = extendedClass(file, result.classes, class) {
+		if seen[class] {
+			return
+		}
+		seen[class] = true
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			method := &file.Commands[memberIndex]
+			if method.Function == nil || file.Text(method.Function.Name) != callee.Value || !commandIsClassMethod(file, method) {
+				continue
+			}
+			if class != current {
+				owner := file.Text(class.Aggregate.Name)
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1384", Message: `Class method "` + callee.Value + `" accessible only inside class "` + owner + `"`, Span: callee.Span,
+				})
+			}
+			return
+		}
 	}
 }
 
