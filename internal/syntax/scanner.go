@@ -2778,6 +2778,15 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
+		if command.Dialect == Vim9 && !commandInsideBlock(command, file.Blocks, BlockDef) &&
+			len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-expression" &&
+			expression != nil && expression.Kind == ExpressionIdentifier &&
+			(strings.HasPrefix(expression.Value, "g:") || strings.HasPrefix(expression.Value, "s:")) {
+			colon := diagnostics[0].Span.Start
+			if colon >= command.Argument.Start && colon+1 < command.Argument.End && file.Source[colon] == ':' && !isSpace(file.Source[colon+1]) {
+				diagnostics[0] = Diagnostic{Code: "vim/E1069", Message: "white space required after ':'", Span: Span{Start: colon, End: colon + 1}}
+			}
+		}
 		genericCallMissingEnd := !commandInsideBlock(command, file.Blocks, BlockDef) && expression != nil && expression.Kind == ExpressionCall && len(expression.TypeArguments) > 0 &&
 			len(diagnostics) == 1 && diagnostics[0].Code == "vimls/missing-delimiter" && diagnostics[0].Message == "expected )"
 		if len(diagnostics) == 1 && (diagnostics[0].Code == "vimls/missing-expression" || diagnostics[0].Code == "vimls/invalid-atom" || diagnostics[0].Code == "vimls/missing-list-end" || diagnostics[0].Code == "vimls/missing-member" || diagnostics[0].Code == "vimls/invalid-member-tail" || diagnostics[0].Code == "vim/E722" || diagnostics[0].Code == "vim/E260") || genericCallMissingEnd {
