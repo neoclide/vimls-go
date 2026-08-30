@@ -1215,10 +1215,33 @@ func TestVim9InterfaceProtectedMethodReportsE1380(t *testing.T) {
 	for _, source := range []string{
 		"vim9script\ninterface A\n  def Foo()\nendinterface\n",
 		"vim9script\ninterface A\n  static def _Foo()\nendinterface\n",
+		"vim9script\ninterface A\n  public def _Foo()\nendinterface\n",
 		"vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\n",
 	} {
 		if hasDiagnostic(Parse(source), "vim/E1380") {
 			t.Fatalf("guard source reported E1380: %s", source)
+		}
+	}
+}
+
+func TestVim9InterfaceProtectedVariableReportsE1379(t *testing.T) {
+	file := Parse("vim9script\ninterface A\n  var _Foo: list<string> = []\nendinterface\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1379" || file.Diagnostics[0].Message != "Protected variable not supported in an interface" || file.Text(file.Diagnostics[0].Span) != "_Foo" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 5 || file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "_Foo" || file.Commands[4].Declaration == nil {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	for _, source := range []string{
+		"vim9script\ninterface A\n  var Foo: list<string>\nendinterface\n",
+		"vim9script\ninterface A\n  static var _Foo: list<string>\nendinterface\n",
+		"vim9script\ninterface A\n  public var _Foo: list<string>\nendinterface\n",
+		"vim9script\nclass A\n  var _Foo: list<string>\nendclass\n",
+	} {
+		if hasDiagnostic(Parse(source), "vim/E1379") {
+			t.Fatalf("guard source reported E1379: %s", source)
 		}
 	}
 }

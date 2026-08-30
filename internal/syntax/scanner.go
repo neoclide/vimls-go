@@ -4462,7 +4462,23 @@ func diagnoseClassMemberModifierOrder(file *File, command *Command) {
 }
 
 func diagnoseInvalidInterfaceDeclaration(file *File, command *Command, declaration *Declaration) {
-	if command == nil || command.Dialect != Vim9 || command.Canonical != "var" || declaration == nil || declaration.Assignment.Start >= declaration.Assignment.End || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockInterface {
+	if command == nil || command.Dialect != Vim9 || command.Canonical != "var" || declaration == nil || command.Block < 0 || command.Block >= len(file.Blocks) || file.Blocks[command.Block].Kind != BlockInterface {
+		return
+	}
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == "static" || modifier.Name == "public" {
+			return
+		}
+	}
+	for _, binding := range declaration.Bindings {
+		if strings.HasPrefix(file.Text(binding.Name), "_") {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E1379", Message: "Protected variable not supported in an interface", Span: binding.Name,
+			})
+			return
+		}
+	}
+	if declaration.Assignment.Start >= declaration.Assignment.End {
 		return
 	}
 	file.Diagnostics = append(file.Diagnostics, Diagnostic{
