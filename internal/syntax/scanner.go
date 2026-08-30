@@ -2797,9 +2797,19 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 					typedDeclaration = parseDeclarationHead(file, leftSource, command.Argument.Start, command.Dialect)
 					left, leftDiagnostics = parseExpressionWithVersion(file.Text(typedDeclaration.Name), typedDeclaration.Name.Start, command.Dialect, command.ScriptVersion)
 					tailStart := skipSpace(file.Source, typedDeclaration.Name.End, typeSpan.Start)
-					leftDiagnostics = append(leftDiagnostics, Diagnostic{
-						Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tailStart, End: command.Argument.End},
-					})
+					if commandInsideBlock(command, file.Blocks, BlockDef) {
+						if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, typedDeclaration.Name); ok {
+							leftDiagnostics = append(leftDiagnostics, diagnostic)
+						} else {
+							leftDiagnostics = append(leftDiagnostics, Diagnostic{
+								Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tailStart, End: command.Argument.End},
+							})
+						}
+					} else {
+						leftDiagnostics = append(leftDiagnostics, Diagnostic{
+							Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tailStart, End: command.Argument.End},
+						})
+					}
 				} else {
 					left, leftDiagnostics = parseExpressionWithVersion(leftSource, command.Argument.Start, command.Dialect, command.ScriptVersion)
 				}
@@ -2859,6 +2869,17 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			expression, diagnostics = parseExpressionWithVersion(source, command.Argument.Start, command.Dialect, command.ScriptVersion)
 		}
 		command.Expressions = append(command.Expressions, expression)
+		if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) && expression != nil && expression.Kind == ExpressionIdentifier && len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-expression" {
+			nameEnd := expression.Span.End
+			if nameEnd >= command.Argument.Start && nameEnd < command.Argument.End {
+				tail := skipSpace(file.Source, nameEnd, command.Argument.End)
+				if tail < command.Argument.End && file.Source[tail] == ':' && tail+1 < command.Argument.End && !isSpace(file.Source[tail+1]) {
+					if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, expression.Span); ok {
+						diagnostics[0] = diagnostic
+					}
+				}
+			}
+		}
 		if command.Dialect == Vim9 && !commandInsideBlock(command, file.Blocks, BlockDef) &&
 			len(diagnostics) == 1 && diagnostics[0].Code == "vimls/trailing-expression" &&
 			expression != nil && expression.Kind == ExpressionIdentifier &&
@@ -2893,6 +2914,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		if command.Dialect == Vim9 && command.Canonical == "let" {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1126", Message: "Cannot use :let in Vim9 script", Span: command.Name})
 		}
+		assignment := findAssignment(source)
 		if command.Dialect == Vim9 && command.Canonical != "let" {
 			start := skipSpace(source, 0, len(source))
 			if start < len(source) && source[start] >= '0' && source[start] <= '9' {
@@ -2901,16 +2923,19 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 					Span: Span{Start: command.Argument.Start + start, End: command.Argument.Start + start + 1},
 				})
 			}
-			if command.Block < 0 && start < len(source) && source[start] == '$' {
+			// Keep Vim's additional E475 for an unassigned top-level
+			// environment declaration.  Once there is an initializer, the
+			// compile-time scope diagnostic below is the primary error.
+			if command.Block < 0 && assignment.Start < 0 && start < len(source) && source[start] == '$' {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{
 					Code: "vim/E475", Message: "Invalid argument: " + file.Text(command.Argument), Span: command.Argument,
 				})
 			}
 		}
-		assignment := findAssignment(source)
 		if assignment.Start < 0 {
 			diagnosticsStart := len(file.Diagnostics)
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
+			diagnoseVim9ScopeDeclaration(file, command, declaration, false)
 			diagnoseVim9IllegalDeclarationName(file, command, declaration)
 			diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 			diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
@@ -2929,6 +2954,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		left := file.Source[command.Argument.Start:assignment.Start]
 		diagnosticsStart := len(file.Diagnostics)
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
+		diagnoseVim9ScopeDeclaration(file, command, declaration, true)
 		diagnoseVim9IllegalDeclarationName(file, command, declaration)
 		diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
 		diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
@@ -4650,6 +4676,54 @@ func diagnoseVim9IllegalDeclarationName(file *File, command *Command, declaratio
 	file.Diagnostics = append(file.Diagnostics, Diagnostic{
 		Code: "vim/E461", Message: "Illegal variable name: " + file.Text(declaration.Name), Span: declaration.Name,
 	})
+}
+
+// vim9ScopeDeclarationDiagnostic mirrors vim9_declare_error() for the
+// declaration forms which can be recognized without evaluating the script.
+// Keep the option and register sigils out of this helper: they have their own
+// diagnostics and target handling.
+func vim9ScopeDeclarationDiagnostic(file *File, name Span) (Diagnostic, bool) {
+	if file == nil || name.Start < 0 || name.End <= name.Start || name.End > len(file.Source) {
+		return Diagnostic{}, false
+	}
+	value := file.Text(name)
+	if strings.HasPrefix(value, "$") {
+		return Diagnostic{
+			Code: "vim/E1016", Message: "Cannot declare an environment variable: " + value, Span: name,
+		}, true
+	}
+	scope := ""
+	switch {
+	case strings.HasPrefix(value, "g:"):
+		scope = "global"
+	case strings.HasPrefix(value, "b:"):
+		scope = "buffer"
+	case strings.HasPrefix(value, "w:"):
+		scope = "window"
+	case strings.HasPrefix(value, "t:"):
+		scope = "tab"
+	case strings.HasPrefix(value, "v:"):
+		scope = "v:"
+	default:
+		return Diagnostic{}, false
+	}
+	return Diagnostic{
+		Code: "vim/E1016", Message: "Cannot declare a " + scope + " variable: " + value, Span: name,
+	}, true
+}
+
+func diagnoseVim9ScopeDeclaration(file *File, command *Command, declaration *Declaration, hasAssignment bool) {
+	if command == nil || declaration == nil || command.Dialect != Vim9 || command.Canonical != "var" {
+		return
+	}
+	// At script root Vim rejects an uninitialized environment declaration as
+	// an invalid :var argument before reaching vim9_declare_error().
+	if !hasAssignment && command.Block < 0 && strings.HasPrefix(file.Text(declaration.Name), "$") {
+		return
+	}
+	if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, declaration.Name); ok {
+		file.Diagnostics = append(file.Diagnostics, diagnostic)
+	}
 }
 
 func vim9ForHeaderIsComment(file *File, command *Command) bool {

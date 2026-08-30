@@ -721,3 +721,123 @@ func TestVim9EnumEndTrailingCharacters(t *testing.T) {
 		assertFileSpans(t, stray)
 	})
 }
+
+func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
+	source := "vim9script\n" +
+		"var $ENV = 1\n" +
+		"var g:global = 2\n" +
+		"var w:window = 3\n" +
+		"var b:buffer = 4\n" +
+		"var t:tab = 5\n" +
+		"var v:version = 6\n" +
+		"var after = 7\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 6 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	want := []struct {
+		name, message string
+	}{
+		{"$ENV", "Cannot declare an environment variable: $ENV"},
+		{"g:global", "Cannot declare a global variable: g:global"},
+		{"w:window", "Cannot declare a window variable: w:window"},
+		{"b:buffer", "Cannot declare a buffer variable: b:buffer"},
+		{"t:tab", "Cannot declare a tab variable: t:tab"},
+		{"v:version", "Cannot declare a v: variable: v:version"},
+	}
+	for index, test := range want {
+		diagnostic := file.Diagnostics[index]
+		if diagnostic.Code != "vim/E1016" || diagnostic.Message != test.message || file.Text(diagnostic.Span) != test.name {
+			t.Fatalf("diagnostic %d = %#v, want E1016 %q on %q", index, diagnostic, test.message, test.name)
+		}
+		command := file.Commands[index+1]
+		if command.Declaration == nil || file.Text(command.Declaration.Name) != test.name || command.Declaration.Target == nil || command.Declaration.Initializer == nil {
+			t.Fatalf("declaration %d = %#v", index, command.Declaration)
+		}
+	}
+	if file.Commands[7].Canonical != "var" || file.Commands[7].Declaration == nil || file.Text(file.Commands[7].Declaration.Name) != "after" {
+		t.Fatalf("following command = %#v", file.Commands[7])
+	}
+	assertFileSpans(t, file)
+}
+
+func TestVim9E1016TypedScopedRecovery(t *testing.T) {
+	source := "def Build()\n" +
+		"  w:width: number = 10\n" +
+		"  t:tab: bool = true\n" +
+		"  b:name: string = 'x'\n" +
+		"  g:count: number = 1\n" +
+		"  var after = 2\n" +
+		"enddef\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 4 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	for index, test := range []struct {
+		name, message string
+	}{
+		{"w:width", "Cannot declare a window variable: w:width"},
+		{"t:tab", "Cannot declare a tab variable: t:tab"},
+		{"b:name", "Cannot declare a buffer variable: b:name"},
+		{"g:count", "Cannot declare a global variable: g:count"},
+	} {
+		diagnostic := file.Diagnostics[index]
+		if diagnostic.Code != "vim/E1016" || diagnostic.Message != test.message || file.Text(diagnostic.Span) != test.name {
+			t.Fatalf("diagnostic %d = %#v, want E1016 %q on %q", index, diagnostic, test.message, test.name)
+		}
+		command := file.Commands[index+1]
+		if command.Declaration == nil || file.Text(command.Declaration.Name) != test.name || command.Declaration.ParsedType == nil || command.Declaration.Target == nil || command.Declaration.Initializer == nil {
+			t.Fatalf("typed declaration %d = %#v", index, command.Declaration)
+		}
+	}
+	if file.Commands[5].Canonical != "var" || file.Commands[5].Declaration == nil || file.Text(file.Commands[5].Declaration.Name) != "after" {
+		t.Fatalf("following command = %#v", file.Commands[5])
+	}
+	assertFileSpans(t, file)
+}
+
+func TestVim9E1016ScopedExpressionRecovery(t *testing.T) {
+	source := "def Build()\n" +
+		"  g:notexist:cmd\n" +
+		"  var after = 2\n" +
+		"enddef\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1016" || file.Diagnostics[0].Message != "Cannot declare a global variable: g:notexist" || file.Text(file.Diagnostics[0].Span) != "g:notexist" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 4 || len(file.Commands[1].Expressions) != 1 || file.Commands[1].Expressions[0].Kind != ExpressionIdentifier || file.Commands[1].Expressions[0].Value != "g:notexist" {
+		t.Fatalf("expression recovery = %#v", file.Commands)
+	}
+	if file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "after" {
+		t.Fatalf("following command = %#v", file.Commands[2])
+	}
+	assertFileSpans(t, file)
+}
+
+func TestVim9E1016ScopeGuards(t *testing.T) {
+	valid := Parse("vim9script\ng:foo = 1\nvar after = 2\n")
+	if len(valid.Diagnostics) != 0 || len(valid.Commands) != 3 || len(valid.Commands[2].Expressions) != 1 {
+		t.Fatalf("valid scoped assignment = %#v", valid)
+	}
+	scriptTyped := Parse("vim9script\nw:foo: number = 1\nvar after = 2\n")
+	if hasDiagnostic(scriptTyped, "vim/E1016") || len(scriptTyped.Commands) != 3 || scriptTyped.Commands[1].Declaration == nil || scriptTyped.Commands[2].Declaration == nil {
+		t.Fatalf("script typed scope = %#v", scriptTyped)
+	}
+	legacy := (LegacyParser{}).Parse("var g:foo = 1\nvar after = 2\n")
+	if hasDiagnostic(legacy, "vim/E1016") || len(legacy.Commands) != 2 || legacy.Commands[1].Declaration == nil {
+		t.Fatalf("legacy scoped declaration = %#v", legacy)
+	}
+	rootEnvironment := Parse("vim9script\nvar $ENV: number\nvar after = 2\n")
+	if hasDiagnostic(rootEnvironment, "vim/E1016") || !hasDiagnostic(rootEnvironment, "vim/E475") || rootEnvironment.Commands[1].Declaration == nil || rootEnvironment.Commands[2].Declaration == nil {
+		t.Fatalf("root environment declaration = %#v", rootEnvironment)
+	}
+	constants := Parse("vim9script\nconst g:GLOBAL = 1\nfinal w:WINDOW = 2\n")
+	if hasDiagnostic(constants, "vim/E1016") {
+		t.Fatalf("scoped constants = %#v", constants.Diagnostics)
+	}
+	assertFileSpans(t, valid)
+	assertFileSpans(t, scriptTyped)
+	assertFileSpans(t, legacy)
+	assertFileSpans(t, rootEnvironment)
+	assertFileSpans(t, constants)
+}

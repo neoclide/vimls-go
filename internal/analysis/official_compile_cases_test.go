@@ -302,6 +302,7 @@ func officialCompileSupportedCodes() map[string]bool {
 		"vim/E1010": true,
 		"vim/E1012": true,
 		"vim/E1013": true,
+		"vim/E1016": true,
 		"vim/E1018": true,
 		"vim/E1021": true,
 		"vim/E1022": true,
