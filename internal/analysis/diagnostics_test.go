@@ -3112,6 +3112,50 @@ func TestAnalyzeE1560RejectsTypeArgumentsForNonGenericFunction(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1559RequiresGenericTypeArguments(t *testing.T) {
+	tests := []struct {
+		name string
+		use  string
+		span string
+	}{
+		{name: "direct call", use: "Fn()", span: "Fn"},
+		{name: "function reference", use: "var Fx = function(Fn)", span: "Fn"},
+		{name: "quoted function reference", use: "var Fx = function('Fn')", span: "'Fn'"},
+		{name: "call identifier", use: "call(Fn, [])", span: "Fn"},
+		{name: "call quoted", use: "call('Fn', [])", span: "'Fn'"},
+		{name: "value reference", use: "var Fx = Fn", span: "Fn"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\ndef Fn<T>()\nenddef\n" + test.use + "\n"
+			file := syntax.Parse(source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1559" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Type arguments missing for generic function 'Fn'" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1559 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Fn<T>()\nenddef\nFn<number>()\n",
+		"vim9script\ndef Fn()\nenddef\nFn()\n",
+		"vim9script\nUnknown()\n",
+		"vim9script\ndef Fn<T>()\nenddef\nfunction(dynamicName)\n",
+		"vim9script\ndef Fn<T>()\nenddef\nfunction('F\\n')\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1559" {
+				t.Fatalf("guard source reported E1559: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1093DestructuringCardinality(t *testing.T) {
 	tests := []struct {
 		name      string

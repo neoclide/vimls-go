@@ -2500,6 +2500,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				Name: expression.Value, Span: expression.Span,
 				Declaration: declaration, scope: scope, dialect: dialect,
 			})
+			if !preferFunction && declaration != nil && functionSymbolKind(declaration.Kind) && declaration.Generic {
+				appendMissingGenericTypeArgumentsDiagnostic(result, expression.Value, expression.Span)
+			}
 			unscoped := !strings.Contains(expression.Value, ":") && !strings.HasPrefix(expression.Value, "&") && !strings.HasPrefix(expression.Value, "$") && !strings.HasPrefix(expression.Value, "@")
 			unknownVimVariable := isUnknownVimVariable(expression.Value)
 			unsupportedNamespace := vim9UnsupportedNamespace(expression.Value)
@@ -2528,6 +2531,8 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 	case syntax.ExpressionCall:
 		collectBuiltinCallArityDiagnostic(result, file, expression)
 		appendNonGenericFunctionDiagnostic(result, expression, scope, skipped)
+		appendGenericFunctionCallWithoutTypesDiagnostic(result, expression, scope, skipped)
+		appendQuotedGenericFunctionDiagnostic(result, expression, scope, skipped)
 		for index, child := range expression.Children {
 			walkExpression(result, file, child, scope, skipped, index == 0, dialect)
 		}
@@ -2583,6 +2588,55 @@ func appendNonGenericFunctionDiagnostic(result *FileAnalysis, expression *syntax
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1560", Message: "Not a generic function: " + callee.Value, Span: callee.Span,
+	})
+}
+
+func appendGenericFunctionCallWithoutTypesDiagnostic(result *FileAnalysis, expression *syntax.Expression, scope *Scope, hidden map[syntax.Span]bool) {
+	if result == nil || expression == nil || len(expression.TypeArguments) > 0 || len(expression.Children) == 0 {
+		return
+	}
+	callee := expression.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionIdentifier {
+		return
+	}
+	declaration := resolve(scope, callee.Value, callee.Span.Start, true, hidden)
+	if declaration != nil && functionSymbolKind(declaration.Kind) && declaration.Generic {
+		appendMissingGenericTypeArgumentsDiagnostic(result, callee.Value, callee.Span)
+	}
+}
+
+func appendQuotedGenericFunctionDiagnostic(result *FileAnalysis, expression *syntax.Expression, scope *Scope, hidden map[syntax.Span]bool) {
+	if result == nil || expression == nil || len(expression.Children) < 2 {
+		return
+	}
+	callee, argument := expression.Children[0], expression.Children[1]
+	if callee == nil || callee.Kind != syntax.ExpressionIdentifier || callee.Value != "function" && callee.Value != "funcref" && callee.Value != "call" || argument == nil || argument.Kind != syntax.ExpressionString {
+		return
+	}
+	name := simpleVimStringLiteral(argument.Value)
+	if name == "" {
+		return
+	}
+	declaration := resolve(scope, name, argument.Span.Start, true, hidden)
+	if declaration != nil && functionSymbolKind(declaration.Kind) && declaration.Generic {
+		appendMissingGenericTypeArgumentsDiagnostic(result, name, argument.Span)
+	}
+}
+
+func simpleVimStringLiteral(value string) string {
+	if len(value) < 2 || value[0] != value[len(value)-1] || value[0] != '\'' && value[0] != '"' {
+		return ""
+	}
+	value = value[1 : len(value)-1]
+	if strings.ContainsAny(value, "\\\"'") {
+		return ""
+	}
+	return value
+}
+
+func appendMissingGenericTypeArgumentsDiagnostic(result *FileAnalysis, name string, span syntax.Span) {
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1559", Message: "Type arguments missing for generic function '" + name + "'", Span: span,
 	})
 }
 
