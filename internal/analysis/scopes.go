@@ -122,6 +122,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectDuplicateTypeAliasDiagnostics(result)
+	collectMethodAccessLevelDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
 	collectMethodTypeMismatchDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
@@ -519,6 +520,57 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 					})
 				}
 				break
+			}
+		}
+	}
+}
+
+func collectMethodAccessLevelDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+			continue
+		}
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Function == nil || commandHasModifier(member, "static") || commandHasModifier(member, "public") {
+				continue
+			}
+			name := file.Text(member.Function.Name)
+			base := strings.TrimPrefix(name, "_")
+			protected := strings.HasPrefix(name, "_")
+			visited := make(map[*syntax.Command]bool)
+			reported := false
+			for parent := extendedClass(file, result.classes, class); parent != nil && !visited[parent]; parent = extendedClass(file, result.classes, parent) {
+				visited[parent] = true
+				for _, parentMemberIndex := range parent.Aggregate.Members {
+					if parentMemberIndex < 0 || parentMemberIndex >= len(file.Commands) {
+						continue
+					}
+					parentMember := &file.Commands[parentMemberIndex]
+					if parentMember.Function == nil || commandHasModifier(parentMember, "static") || commandHasModifier(parentMember, "public") {
+						continue
+					}
+					parentName := file.Text(parentMember.Function.Name)
+					if strings.TrimPrefix(parentName, "_") == base && strings.HasPrefix(parentName, "_") != protected {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1377", Message: `Access level of method "` + name + `" is different in class "` + file.Text(parent.Aggregate.Name) + `"`,
+							Span: aggregateEndSpan(file, class),
+						})
+						reported = true
+						break
+					}
+				}
+				if reported {
+					break
+				}
 			}
 		}
 	}

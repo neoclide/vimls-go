@@ -3156,6 +3156,46 @@ endclass
 	}
 }
 
+func TestAnalyzeE1377MethodAccessLevelMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		parentName string
+		childName  string
+	}{
+		{name: "public to protected", parentName: "Foo", childName: "_Foo"},
+		{name: "protected to public", parentName: "_Foo", childName: "Foo"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\nclass A\n  def " + test.parentName + "()\n  enddef\nendclass\nclass B extends A\nendclass\nclass C extends B\n  def " + test.childName + "()\n  enddef\nendclass\nvar after = 1\n"
+			file := syntax.Parse(source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1377" {
+					got = append(got, diagnostic)
+				}
+			}
+			wantMessage := `Access level of method "` + test.childName + `" is different in class "A"`
+			if len(got) != 1 || got[0].Message != wantMessage || file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("E1377 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nclass B extends A\n  def Foo()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  def _Foo()\n  enddef\nendclass\nclass B extends A\n  def _Foo()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\nclass B extends A\n  static def _Foo()\n  enddef\nendclass\n",
+		"vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nclass B extends A\n  public def _Foo()\n  enddef\nendclass\n",
+		"vim9script\nclass A extends B\n  def Foo()\n  enddef\nendclass\nclass B extends A\n  def Foo()\n  enddef\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1377" {
+				t.Fatalf("guard source reported E1377: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeClassAsValueDiagnostic(t *testing.T) {
 	source := `vim9script
 class C
