@@ -479,6 +479,80 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 	open := p.current().span.Start - p.base
 	close := findGenericTypeEnd(p.source, open)
 	if close < 0 {
+		// A delimiter belonging to the enclosing call can also terminate an
+		// incomplete type list (Fn<, []) without a closing '>'.  Keep that
+		// delimiter for the caller; treating the whole line as E1554 loses the
+		// useful outer call and, for a partial first type, its AST node.
+		scanLineEnd := strings.IndexByte(p.source[open:], '\n')
+		if scanLineEnd < 0 {
+			scanLineEnd = len(p.source) - open
+		}
+		scanLineEnd += open
+		delimiter := -1
+		roundDepth, squareDepth, braceDepth, angleDepth := 0, 0, 0, 0
+		for index := open + 1; index < scanLineEnd; index++ {
+			switch p.source[index] {
+			case '<':
+				angleDepth++
+			case '>':
+				if angleDepth > 0 {
+					angleDepth--
+				}
+			case '(':
+				roundDepth++
+			case ')':
+				if roundDepth > 0 {
+					roundDepth--
+				} else if squareDepth == 0 && braceDepth == 0 && angleDepth == 0 && skipExpressionSpace(p.source, open+1) == index {
+					delimiter = index
+				}
+			case '[':
+				squareDepth++
+			case ']':
+				if squareDepth > 0 {
+					squareDepth--
+				}
+			case '{':
+				braceDepth++
+			case '}':
+				if braceDepth > 0 {
+					braceDepth--
+				}
+			case ',':
+				// A comma followed by another type is part of the generic
+				// list; only recognize the enclosing call's comma when its
+				// next argument starts with a list (the official incomplete
+				// form) or another delimiter.
+				if roundDepth == 0 && squareDepth == 0 && braceDepth == 0 && angleDepth == 0 {
+					next := index + 1
+					for next < scanLineEnd && (p.source[next] == ' ' || p.source[next] == '\t') {
+						next++
+					}
+					if next == scanLineEnd || p.source[next] == '[' || p.source[next] == ')' {
+						delimiter = index
+					}
+				}
+			}
+			if delimiter >= 0 {
+				break
+			}
+		}
+		if delimiter >= 0 {
+			cursor := p.lexer
+			for cursor.current.kind != expressionEOF && cursor.current.span.Start < p.base+delimiter {
+				cursor.advance()
+			}
+			if cursor.current.span.Start == p.base+delimiter {
+				p.lexer = cursor
+				types := p.parseGenericTypeArguments(open, delimiter, false)
+				if len(types) == 0 || types[len(types)-1].Kind != TypeMissing {
+					span := Span{Start: p.base + delimiter, End: p.base + delimiter}
+					types = append(types, &Type{Kind: TypeMissing, Span: span})
+					p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1008", Message: "Missing <type> after generic function", Span: span})
+				}
+				return &Expression{Kind: ExpressionGenericReference, Span: Span{Start: left.Span.Start, End: p.base + delimiter}, Operator: Span{Start: p.base + open, End: p.base + delimiter}, Children: []*Expression{left}, TypeArguments: types}, true
+			}
+		}
 		// Recover an unterminated generic list only when its call argument
 		// opener is on this physical line.  Do not let a missing '>' consume
 		// later lines (or turn a comparison into a generic call).
