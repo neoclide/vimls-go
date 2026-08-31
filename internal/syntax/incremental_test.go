@@ -288,6 +288,40 @@ var incrementalCommandBoundaryScenarios = func() []incrementalCommandBoundarySce
 	}
 }()
 
+func incrementalTextEditAtOffset(source string, start int, oldText, replacement string) incrementalTextEdit {
+	if start < 0 || start+len(oldText) > len(source) || source[start:start+len(oldText)] != oldText {
+		panic(fmt.Sprintf("incremental edit offset %d does not contain %q", start, oldText))
+	}
+	return incrementalTextEdit{start: start, oldEnd: start + len(oldText), replacement: replacement}
+}
+
+var incrementalHeredocOwnerScenarios = func() []incrementalCommandBoundaryScenario {
+	complete := "let text =<< END\nbody A01\nEND\nlet afterHeredoc = 1\n"
+	incomplete := "let text =<< END\nbody A01\nlet afterHeredoc = 1\n"
+	headerEnd := strings.Index(complete, "<< END") + len("<< ")
+	markerEnd := strings.LastIndex(complete, "END\n")
+	return []incrementalCommandBoundaryScenario{
+		{
+			name: "complete heredoc", tags: []string{"complete heredoc", "heredoc header marker", "heredoc body", "heredoc end marker"}, source: complete,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("complete heredoc", "header marker", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAtOffset(complete, headerEnd, "END", "FIN")}),
+				newIncrementalMatrixCase("complete heredoc", "body insert", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(complete, "A01", "X")}),
+				newIncrementalMatrixCase("complete heredoc", "body delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(complete, "A01", "")}),
+				newIncrementalMatrixCase("complete heredoc", "body replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(complete, "A01", "B02")}),
+				newIncrementalMatrixCase("complete heredoc", "body length replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(complete, "A01", "A010")}),
+				newIncrementalMatrixCase("complete heredoc", "end marker", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAtOffset(complete, markerEnd, "END", "FIN")}),
+				newIncrementalMatrixCase("complete heredoc", "marker rename sequence", incrementalSequence, []incrementalTextEdit{incrementalTextEditAtOffset(complete, headerEnd, "END", "FIN"), incrementalTextEditAtOffset(complete, markerEnd, "END", "FIN")}),
+			},
+		},
+		{
+			name: "incomplete heredoc", tags: []string{"incomplete heredoc", "heredoc body to EOF"}, source: incomplete,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("incomplete heredoc", "body replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(incomplete, "A01", "B02")}),
+			},
+		},
+	}
+}()
+
 var incrementalEditCases = []incrementalEditCase{
 	{name: "legacy tail", old: "let first = 1\nlet last = 2\n", new: "let first = 1\nlet last = 20\n"},
 	{name: "vim9 middle", old: "vim9script\nvar first = 1\nvar last = 2\n", new: "vim9script\nvar first = 10\nvar last = 2\n"},
@@ -734,6 +768,148 @@ func TestCommandBoundaryMatrixASTRecovery(t *testing.T) {
 	}
 }
 
+func TestIncrementalEditMatrixHeredocOwner(t *testing.T) {
+	seenTags, seenKinds, seenNames := map[string]bool{}, map[incrementalEditKind]bool{}, map[string]bool{}
+	for _, scenario := range incrementalHeredocOwnerScenarios {
+		for _, tag := range scenario.tags {
+			seenTags[tag] = true
+		}
+		for _, test := range scenario.cases {
+			if seenNames[test.name] {
+				t.Fatalf("duplicate heredoc matrix case %q", test.name)
+			}
+			seenNames[test.name], seenKinds[test.kind] = true, true
+			results := incrementalTextEditResults(scenario.source, test.edits)
+			if len(results) == 0 || test.kind == incrementalSequence && len(results) != 2 {
+				t.Fatalf("%s has invalid edit count %d", test.name, len(results))
+			}
+			for step, result := range results {
+				if result.old == result.new || result.edit.start < 0 || result.edit.start > result.edit.oldEnd || result.edit.oldEnd > len(result.old) {
+					t.Fatalf("%s step %d is invalid: %#v", test.name, step, result)
+				}
+				valid := incrementalTextEditKindValid(test.kind, result.edit)
+				if test.kind == incrementalSequence {
+					valid = incrementalSequenceStepValid(result.edit)
+				}
+				if !valid {
+					t.Fatalf("%s step %d does not match kind %d: %#v", test.name, step, test.kind, result.edit)
+				}
+				if strings.Contains(test.name, "header marker") || test.name == "complete heredoc: marker rename sequence" && step == 0 {
+					want := strings.Index(result.old, "<< END") + len("<< ")
+					if result.edit.start != want {
+						t.Fatalf("%s header edit at %d, want %d", test.name, result.edit.start, want)
+					}
+				}
+				if strings.Contains(test.name, "end marker") || test.name == "complete heredoc: marker rename sequence" && step == 1 {
+					want := strings.LastIndex(result.old, "END\n")
+					if result.edit.start != want {
+						t.Fatalf("%s end edit at %d, want %d", test.name, result.edit.start, want)
+					}
+				}
+				if strings.Contains(test.name, "body") && result.edit.start < strings.Index(result.old, "body ") {
+					t.Fatalf("%s edit does not hit body: %#v", test.name, result.edit)
+				}
+			}
+		}
+	}
+	for _, tag := range []string{"complete heredoc", "incomplete heredoc", "heredoc header marker", "heredoc body", "heredoc end marker", "heredoc body to EOF"} {
+		if !seenTags[tag] {
+			t.Fatalf("missing heredoc scenario %q", tag)
+		}
+	}
+	if len(seenKinds) != 5 {
+		t.Fatalf("heredoc matrix has %d edit kinds, want 5", len(seenKinds))
+	}
+}
+
+func TestReparseHeredocOwnerMatrix(t *testing.T) {
+	for _, scenario := range incrementalHeredocOwnerScenarios {
+		for _, test := range scenario.cases {
+			t.Run(test.name, func(t *testing.T) {
+				runIncrementalMatrix(t, scenario.source, test)
+			})
+		}
+	}
+}
+
+func TestHeredocOwnerMatrixASTRecovery(t *testing.T) {
+	for _, scenario := range incrementalHeredocOwnerScenarios {
+		for _, test := range scenario.cases {
+			sequence := strings.Contains(test.name, "marker rename sequence")
+			var got *File
+			if sequence {
+				got = runIncrementalMatrixSteps(t, scenario.source, test, func(step int, file *File) {
+					command := file.Commands[0]
+					if command.Heredoc == nil {
+						t.Fatalf("%s step %d has no heredoc", test.name, step)
+					}
+					heredoc := command.Heredoc
+					switch step {
+					case 0:
+						if heredoc.Marker != "FIN" || !heredoc.Incomplete || heredoc.EndMarker != (Span{}) || file.Text(heredoc.Body) != "body A01\nEND\nlet afterHeredoc = 1" || len(file.Commands) != 1 {
+							t.Fatalf("%s step 0 heredoc = %#v body=%q commands=%d", test.name, heredoc, file.Text(heredoc.Body), len(file.Commands))
+						}
+					case 1:
+						if heredoc.Marker != "FIN" || heredoc.Incomplete || file.Text(heredoc.Body) != "body A01" || file.Text(heredoc.EndMarker) != "FIN" {
+							t.Fatalf("%s step 1 heredoc = %#v body=%q end=%q", test.name, heredoc, file.Text(heredoc.Body), file.Text(heredoc.EndMarker))
+						}
+						incrementalDeclaration(t, file, "afterHeredoc")
+					}
+				})
+			} else {
+				got = runIncrementalMatrix(t, scenario.source, test)
+			}
+			command := got.Commands[0]
+			if command.Canonical != "let" || command.Heredoc == nil {
+				t.Fatalf("%s command = %#v", test.name, command)
+			}
+			heredoc := command.Heredoc
+			if scenario.name == "complete heredoc" {
+				headerRename := strings.Contains(test.name, "header marker")
+				endRename := strings.Contains(test.name, "end marker")
+				sequence := strings.Contains(test.name, "marker rename sequence")
+				if headerRename || endRename {
+					marker := "END"
+					body := "body A01\nFIN\nlet afterHeredoc = 1"
+					if headerRename {
+						marker, body = "FIN", "body A01\nEND\nlet afterHeredoc = 1"
+					}
+					if !heredoc.Incomplete || heredoc.Marker != marker || heredoc.EndMarker != (Span{}) || got.Text(heredoc.Body) != body || len(got.Commands) != 1 {
+						t.Fatalf("%s incomplete marker rename = %#v body=%q", test.name, heredoc, got.Text(heredoc.Body))
+					}
+					continue
+				}
+				wantMarker, wantEnd := "END", "END"
+				if sequence {
+					wantMarker, wantEnd = "FIN", "FIN"
+				}
+				wantBody := "body A01"
+				switch strings.TrimPrefix(test.name, "complete heredoc: ") {
+				case "body insert":
+					wantBody = "body XA01"
+				case "body delete":
+					wantBody = "body "
+				case "body replace":
+					wantBody = "body B02"
+				case "body length replace":
+					wantBody = "body A010"
+				}
+				if heredoc.Incomplete || heredoc.Marker != wantMarker || got.Text(heredoc.Body) != wantBody || got.Text(heredoc.EndMarker) != wantEnd {
+					t.Fatalf("%s heredoc = %#v body=%q end=%q", test.name, heredoc, got.Text(heredoc.Body), got.Text(heredoc.EndMarker))
+				}
+				incrementalDeclaration(t, got, "afterHeredoc")
+			} else {
+				if !heredoc.Incomplete || heredoc.EndMarker != (Span{}) || got.Text(heredoc.Body) != "body B02\nlet afterHeredoc = 1" {
+					t.Fatalf("incomplete heredoc = %#v body=%q", heredoc, got.Text(heredoc.Body))
+				}
+				if len(got.Commands) != 1 {
+					t.Fatalf("incomplete heredoc commands = %#v", got.Commands)
+				}
+			}
+		}
+	}
+}
+
 func incrementalDeclaration(t *testing.T, file *File, name string) *Command {
 	for index := range file.Commands {
 		command := &file.Commands[index]
@@ -746,6 +922,10 @@ func incrementalDeclaration(t *testing.T, file *File, name string) *Command {
 }
 
 func runIncrementalMatrix(t *testing.T, source string, test incrementalMatrixCase) *File {
+	return runIncrementalMatrixSteps(t, source, test, nil)
+}
+
+func runIncrementalMatrixSteps(t *testing.T, source string, test incrementalMatrixCase, check func(int, *File)) *File {
 	t.Helper()
 	previous := Parse(source)
 	for step, result := range incrementalTextEditResults(source, test.edits) {
@@ -753,6 +933,9 @@ func runIncrementalMatrix(t *testing.T, source string, test incrementalMatrixCas
 			t.Fatalf("step %d starts from %q, previous source is %q", step, result.old, previous.Source)
 		}
 		previous = checkIncrementalParserFromPrevious(t, Reparse, previous, fmt.Sprintf("%s step %d", test.name, step), result.new)
+		if check != nil {
+			check(step, previous)
+		}
 	}
 	return previous
 }
