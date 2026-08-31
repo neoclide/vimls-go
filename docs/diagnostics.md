@@ -3169,3 +3169,32 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:1965-1993` checks the Vim9-script gate, then ASCII uppercase,
   then whitespace after the name in that order.
 - `src/errors.h:3385-3388` defines E1314 and the following E1315 message.
+
+## Missing whitespace after a type name: E1315
+
+E1315 means `White space required after name: {remainder}`. Vim9 aggregate and
+type-alias declarations require whitespace after each declared or referenced
+type name before punctuation, an assignment, or another grammar element.
+Analysis reports E1315 on the complete offending remainder while retaining the
+partially parsed declaration for recovery.
+
+The rule covers class, interface, and enum names; names after `extends` and
+`implements`; comma-separated interface lists; and type-alias names before `=`
+or another separator. A lowercase first byte is rejected earlier by the
+aggregate-specific uppercase diagnostic. Once E1315 is selected, later
+trailing-text, missing-assignment, and assignment-spacing diagnostics are
+suppressed. Legacy aggregate declarations retain their Vim9-script gate.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:21-27,2477-2485` covers punctuation in a
+  class name and after an extended class name.
+- `src/testdir/test_vim9_interface.vim:300-361,525-535,1088-1098` covers
+  extended and implemented names plus comma separation.
+- `src/testdir/test_vim9_enum.vim:22-36` distinguishes uppercase-name and
+  missing-whitespace failures for enums.
+- `src/testdir/test_vim9_typealias.vim:78-118` distinguishes whitespace around
+  an alias name and assignment from the neighboring E1069 and E1394 rules.
+- `src/vim9class.c:1978-1993,2907-2917` applies uppercase checks before the
+  shared whitespace-after-name error for aggregates and type aliases.
+- `src/errors.h:3387-3388` defines the exact message.

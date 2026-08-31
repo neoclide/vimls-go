@@ -1270,6 +1270,83 @@ func TestVim9ClassNameReportsE1314(t *testing.T) {
 	}
 }
 
+func TestVim9DeclarationWhitespaceReportsE1315(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, remainder string
+		aggregate                     bool
+	}{
+		{"class name", "vim9script\nclass Not@working\nendclass\nvar after = 1\n", "Not@working", "Not@working", true},
+		{"enum name", "vim9script\nenum Foo@bar\nendenum\nvar after = 1\n", "Foo@bar", "Foo@bar", true},
+		{"class extends", "vim9script\nclass B extends A\"\nendclass\nvar after = 1\n", "A\"", "A\"", true},
+		{"class implements", "vim9script\nclass B implements A;\nendclass\nvar after = 1\n", "A;", "A;", true},
+		{"class implements comma", "vim9script\nclass C implements A,B\nendclass\nvar after = 1\n", "A,B", "A,B", true},
+		{"interface extends comma", "vim9script\ninterface C extends A, B\nendinterface\nvar after = 1\n", "A, B", "A, B", true},
+		{"type assignment", "vim9script\ntype MyType=number\nvar after = 1\n", "MyType=number", "MyType=number", false},
+		{"type colon", "vim9script\ntype Index:number\nvar after = 1\n", "Index:number", "Index:number", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1315" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E488" || diagnostic.Code == "vim/E398" || diagnostic.Code == "vim/E1069" {
+					t.Fatalf("E1315 source retained secondary diagnostic: %#v", file.Diagnostics)
+				}
+			}
+			message := "White space required after name: " + test.remainder
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1315 diagnostics = %#v", file.Diagnostics)
+			}
+			found, after := false, false
+			for _, command := range file.Commands {
+				if test.aggregate && command.Aggregate != nil {
+					found = true
+				}
+				if !test.aggregate && command.TypeAlias != nil {
+					found = true
+				}
+				if command.Declaration != nil {
+					after = true
+				}
+			}
+			if !found || !after {
+				t.Fatalf("declaration recovery = %#v", file.Commands)
+			}
+			if test.aggregate && len(file.Blocks) != 1 || test.aggregate && file.Blocks[0].End < 0 {
+				t.Fatalf("aggregate blocks = %#v", file.Blocks)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	for _, test := range []struct{ source, code string }{
+		{"vim9script\nclass lower@bad\nendclass\n", "vim/E1314"},
+		{"vim9script\ninterface lower@bad\nendinterface\n", "vim/E1343"},
+		{"vim9script\nenum lower@bad\nendenum\n", "vim/E1415"},
+		{"vim9script\ntype lower=number\n", "vim/E1394"},
+	} {
+		file := Parse(test.source)
+		if !hasDiagnostic(file, test.code) || hasDiagnostic(file, "vim/E1315") {
+			t.Fatalf("name-priority diagnostics = %#v", file.Diagnostics)
+		}
+	}
+	for _, source := range []string{
+		"vim9script\nclass B extends A\nendclass\n",
+		"vim9script\nenum Foo\nendenum\n",
+		"vim9script\ntype MyType = number\n",
+	} {
+		if file := Parse(source); hasDiagnostic(file, "vim/E1315") {
+			t.Fatalf("valid whitespace diagnostics = %#v", file.Diagnostics)
+		}
+	}
+	legacy := Parse("class B@bad\nendclass\n")
+	if !hasDiagnostic(legacy, "vim/E1316") || hasDiagnostic(legacy, "vim/E1315") {
+		t.Fatalf("Legacy aggregate diagnostics = %#v", legacy.Diagnostics)
+	}
+}
+
 func TestVim9LowercaseEnumNameReportsE1415(t *testing.T) {
 	file := Parse("vim9script\nenum foo\nendenum\n")
 	var got []Diagnostic
