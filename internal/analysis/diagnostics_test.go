@@ -3132,6 +3132,41 @@ func TestAnalyzeE1175NonEmptyStringArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1148CannotIndexRuntimeDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"compiled nested string", "vim9script\ndef F()\n  var dict = {value: 'text'}\n  dict.value[0] = 1\nenddef\n", "dict.value"},
+		{"script string assignment", "vim9script\nvar text = 'text'\ntext[0] = 'T'\n", "text"},
+		{"compiled string unlet", "vim9script\ndef F()\n  var text = 'text'\n  unlet text[0]\nenddef\n", "text"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1148" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot index a string" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1148 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let text = 'text'\nlet text[0] = 'T'\n",
+		"vim9script\nvar text = 'text'\necho text[0]\n",
+		"vim9script\nvar values = [1]\nvalues[0] = 2\n",
+		"vim9script\ndef F(value: any)\n  value.key = 1\nenddef\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1148" {
+				t.Fatalf("guard unexpectedly received E1148: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1181IgnoredUnderscoreDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

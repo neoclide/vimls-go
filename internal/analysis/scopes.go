@@ -6281,6 +6281,13 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				break
 			}
 		}
+		if command.Canonical == "unlet" && command.Dialect == syntax.Vim9 {
+			for _, target := range command.Targets {
+				if appendCannotIndexRuntimeDiagnostic(result, scope, target) {
+					break
+				}
+			}
+		}
 		if (command.Canonical == "lockvar" || command.Canonical == "unlockvar") && command.Dialect == syntax.Vim9 {
 			for _, target := range command.Targets {
 				before := len(result.Diagnostics)
@@ -6535,7 +6542,7 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 			}
 		}
 		if target != nil && (target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) && len(target.Children) > 0 &&
-			!(dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope)) && resolvedExpressionType(result, scope, target.Children[0]).Name == "string" {
+			dialect == syntax.Legacy && resolvedExpressionType(result, scope, target.Children[0]).Name == "string" {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E689", Message: "Index not allowed after a string: " + result.File.Text(expression.Span), Span: target.Span,
 			})
@@ -6546,13 +6553,25 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 			})
 			return
 		}
-		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && !sliceAssignmentNeedsE1165(result, scope, expression) {
+		cannotIndex := dialect == syntax.Vim9 && appendCannotIndexRuntimeDiagnostic(result, scope, target)
+		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && !cannotIndex && !sliceAssignmentNeedsE1165(result, scope, expression) {
 			appendIndexableAssignmentDiagnostic(result, scope, target)
 		}
 	}
 	for _, child := range expression.Children {
 		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
+}
+
+func appendCannotIndexRuntimeDiagnostic(result *FileAnalysis, scope *Scope, target *syntax.Expression) bool {
+	receiver := invalidAssignmentReceiver(result, scope, target)
+	if receiver == nil || resolvedExpressionType(result, scope, receiver).Name != "string" {
+		return false
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1148", Message: "Cannot index a string", Span: receiver.Span,
+	})
+	return true
 }
 
 func appendDotNotAllowedAfterNumberDiagnostic(result *FileAnalysis, scope *Scope, assignment, target *syntax.Expression) {
