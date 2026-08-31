@@ -241,10 +241,27 @@ func parseFunctionSignature(file *File, command *Command) {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-parameter-end", Message: "expected ) after function parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
 		close = len(source)
 	}
+	seenDefault := false
+	parameterOrderInvalid := false
+	variadicSeen := false
 	for _, part := range splitTopLevel(source, offset+1, close, ',') {
+		diagnosticsStart := len(file.Diagnostics)
 		parameter := parseParameter(file, command, source, part)
 		if parameter != nil {
 			function.Parameters = append(function.Parameters, *parameter)
+			if len(file.Diagnostics) == diagnosticsStart && !parameterOrderInvalid && !variadicSeen {
+				switch {
+				case parameter.Variadic:
+					variadicSeen = true
+				case parameter.Default != nil:
+					seenDefault = true
+				case seenDefault && parameter.Name.Start < parameter.Name.End:
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E989", Message: "Non-default argument follows default argument", Span: parameter.Name,
+					})
+					parameterOrderInvalid = true
+				}
+			}
 		}
 		if command.Canonical == "def" && part.End < close {
 			beforeComma := trimSyntaxSpaceEnd(source, part.Start, part.End)

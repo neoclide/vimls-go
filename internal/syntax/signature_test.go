@@ -143,6 +143,68 @@ func TestFunctionIllegalArgumentDiagnostic(t *testing.T) {
 	}
 }
 
+func TestFunctionArgumentOrderDiagnostic(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+		parameterCount     int
+	}{
+		{
+			name:           "legacy non-default after default",
+			source:         "function Bad(a, b = 1, c)\nendfunction\n",
+			span:           "c",
+			parameterCount: 3,
+		},
+		{
+			name:           "vim9 def non-default after default",
+			source:         "vim9script\ndef Bad(a: number = 1, b: number)\nenddef\n",
+			span:           "b",
+			parameterCount: 2,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			var function *Function
+			foundEnd := false
+			for _, command := range file.Commands {
+				if command.Function != nil {
+					function = command.Function
+				}
+				if command.Canonical == "endfunction" || command.Canonical == "enddef" {
+					foundEnd = true
+				}
+			}
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E989" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Non-default argument follows default argument" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E989 diagnostics = %#v", got)
+			}
+			if function == nil || len(function.Parameters) != test.parameterCount {
+				t.Fatalf("function parameters = %#v, want %d", file.Commands, test.parameterCount)
+			}
+			if !foundEnd {
+				t.Fatalf("end command not recovered: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Good(a, b = 1)\nendfunction\n",
+		"function Good(a = 1, b = 2)\nendfunction\n",
+		"function Good(a = 1, ...)\nendfunction\n",
+		"function Bad(a =, b)\nendfunction\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E989") {
+			t.Fatalf("guard unexpectedly received E989: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestLegacyFunctionNameCapitalDiagnostic(t *testing.T) {
 	for _, test := range []struct {
 		name, source, function string
