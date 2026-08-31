@@ -95,6 +95,19 @@ func parseFunctionSignature(file *File, command *Command) {
 			})
 		}
 	}
+	if command.Canonical == "function" && command.Dialect == Legacy && !strings.Contains(name, ".") && !strings.Contains(name, "#") {
+		globalName := name
+		if strings.HasPrefix(globalName, "g:") {
+			globalName = globalName[2:]
+		} else if strings.Contains(globalName, ":") {
+			globalName = ""
+		}
+		if len(globalName) > 0 && globalName[0] >= 'a' && globalName[0] <= 'z' {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E128", Message: `Function name must start with a capital or "s:": ` + name, Span: function.Name,
+			})
+		}
+	}
 	// Vim9 script function names begin with an ASCII capital. Direct object-type
 	// methods use different grammar, including private underscore names.
 	if command.Dialect == Vim9 && !vim9ScriptNamespace && !directAggregateMethod && !dictFunction && !strings.Contains(name, "#") {

@@ -137,6 +137,60 @@ func TestFunctionIllegalArgumentDiagnostic(t *testing.T) {
 	}
 }
 
+func TestLegacyFunctionNameCapitalDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source, function string
+	}{
+		{
+			name:     "plain lowercase",
+			source:   "function xfunc()\nendfunction\nlet after = 1\n",
+			function: "xfunc",
+		},
+		{
+			name:     "explicit global",
+			source:   "function! g:test()\nendfunction\nlet after = 1\n",
+			function: "g:test",
+		},
+		{
+			name:     "lowercase before comment",
+			source:   "function! test2() \"#\nendfunction\nlet after = 1\n",
+			function: "test2",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E128" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := `Function name must start with a capital or "s:": ` + test.function
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.function {
+				t.Fatalf("E128 diagnostics = %#v", file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Capital()\nendfunction\n",
+		"function s:local()\nendfunction\n",
+		"function lower#autoload()\nendfunction\n",
+		"function object.method()\nendfunction\n",
+		"function b:local()\nendfunction\n",
+		"vim9script\nfunction lower()\nendfunction\n",
+		"def lower()\nenddef\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E128") {
+			t.Fatalf("guard source unexpectedly received E128: %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestVim9VariadicDefaultDiagnostic(t *testing.T) {
 	tests := []struct {
 		name, source, span, defaultText string

@@ -4068,3 +4068,25 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/userfunc.c:1054-1061` selects E126 when the open function is not a
   `:def` and no valid terminator is found.
 - `src/errors.h:304-305` defines the exact E126 message.
+
+## Lowercase Legacy function name: E128
+
+E128 means `Function name must start with a capital or "s:": {name}`. Syntax
+analysis reports it for a Legacy `:function` whose global name starts with an
+ASCII lowercase letter, including an explicit lowercase `g:` name. The
+diagnostic selects the retained function name.
+
+Script-local `s:` functions, autoload names containing `#`, Dictionary
+functions, other scoped names, and capitalized globals remain outside E128.
+Vim9 `:def` and `:function` headers use their separate E1267 rule. The bang on
+`:function!` does not change the naming rule, and following commands remain
+available after the invalid definition.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_user_func.vim:461-465` expects E128 for `func xfunc()`.
+- `src/testdir/test_vimscript.vim:7428-7461` covers lowercase plain and
+  explicit-global Legacy definitions, including `:function!`.
+- `src/userfunc.c:4670-4713` distinguishes script-local names, lowercase
+  builtin-shaped global names, class methods, and Vim9's E1267 wording.
+- `src/errors.h:308-309` defines the exact E128 message.
