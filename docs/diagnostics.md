@@ -3387,3 +3387,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:57-82` performs the public/underscore check immediately
   after finding the member name and before parsing its type or initializer.
 - `src/errors.h:3418-3419` defines the exact message.
+
+## Protected variable access: E1333
+
+E1333 means `Cannot access protected variable "{variable}" in class
+"{class}"`. A Vim9 aggregate variable whose name starts with an underscore is
+protected unless it is explicitly public (which is itself invalid under
+E1332). Analysis reports the member-name span for a complete read, write, or
+function-typed member call whose receiver resolves to a same-file class or
+enum.
+
+An object variable is accessible inside its defining class and descendant
+classes. An inherited variable therefore names the class that defined it in
+the diagnostic. A static variable is accessible only inside its exact defining
+class, not from a descendant. The same object rule applies to enum members.
+
+Unknown values, imported aggregates, and incomplete member expressions remain
+conservative. Public underscore declarations remain owned by E1332, protected
+methods by E1366, and access through the wrong receiver kind by the applicable
+class/object diagnostic.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:1270-1277` covers external protected object
+  reads and writes, while lines 1502-1536 show that a child cannot access a
+  protected static variable declared by its parent.
+- `src/testdir/test_vim9_class.vim:1940-2052` covers inherited protected object
+  variables and uses the defining class in the diagnostic.
+- `src/testdir/test_vim9_class.vim:780-815` reaches the rule through runtime
+  `any` values; analysis deliberately leaves those flows unknown.
+- `src/vim9expr.c:530-620` applies the distinct object and static access rules
+  to reads, method references, and calls.
+- `src/vim9compile.c:1635-1665,2070-2105` applies the same rules to assignment
+  targets, and `src/vim9class.c:3626-3637` defines descendant object access.
+- `src/errors.h:3420-3421` defines the exact message.

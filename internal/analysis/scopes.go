@@ -1358,28 +1358,46 @@ func classObjectVariableBinding(result *FileAnalysis, class *syntax.Command, nam
 	if result == nil || result.File == nil {
 		return nil, 0, false
 	}
-	seen := make(map[*syntax.Command]bool)
-	for current := class; current != nil; current = extendedClass(result.File, result.classes, current) {
-		if seen[current] {
-			return nil, 0, false
+	_, member, bindingIndex, found := classObjectVariableOwner(result, class, name)
+	return member, bindingIndex, found
+}
+
+func aggregateVariableBinding(file *syntax.File, aggregate *syntax.Command, name string, static bool) (*syntax.Command, int, bool) {
+	if file == nil || aggregate == nil || aggregate.Aggregate == nil {
+		return nil, 0, false
+	}
+	for _, memberIndex := range aggregate.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
 		}
-		seen[current] = true
-		for _, memberIndex := range current.Aggregate.Members {
-			if memberIndex < 0 || memberIndex >= len(result.File.Commands) {
-				continue
-			}
-			member := &result.File.Commands[memberIndex]
-			if member.Declaration == nil || commandHasModifier(member, "static") {
-				continue
-			}
-			for bindingIndex, binding := range member.Declaration.Bindings {
-				if result.File.Text(binding.Name) == name {
-					return member, bindingIndex, true
-				}
+		member := &file.Commands[memberIndex]
+		if member.Declaration == nil || commandHasModifier(member, "static") != static {
+			continue
+		}
+		for bindingIndex, binding := range member.Declaration.Bindings {
+			if file.Text(binding.Name) == name {
+				return member, bindingIndex, true
 			}
 		}
 	}
 	return nil, 0, false
+}
+
+func classObjectVariableOwner(result *FileAnalysis, class *syntax.Command, name string) (*syntax.Command, *syntax.Command, int, bool) {
+	if result == nil || result.File == nil {
+		return nil, nil, 0, false
+	}
+	seen := make(map[*syntax.Command]bool)
+	for current := class; current != nil; current = extendedClass(result.File, result.classes, current) {
+		if seen[current] {
+			return nil, nil, 0, false
+		}
+		seen[current] = true
+		if member, bindingIndex, found := aggregateVariableBinding(result.File, current, name, false); found {
+			return current, member, bindingIndex, true
+		}
+	}
+	return nil, nil, 0, false
 }
 
 func memberTypesCompatible(result *FileAnalysis, expected, actual ValueType) bool {
@@ -3528,6 +3546,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			}
 			if command.Dialect == syntax.Vim9 && expression.Kind == syntax.ExpressionMember {
 				appendProtectedMethodAccessDiagnostic(result, expressionScope, expression)
+				appendProtectedVariableAccessDiagnostic(result, expressionScope, expression)
 				appendObjectVariableThroughClassDiagnostic(result, expressionScope, expression)
 				appendClassVariableThroughObjectDiagnostic(result, expressionScope, expression)
 				appendClassMethodThroughObjectDiagnostic(result, expressionScope, expression)
@@ -5921,6 +5940,90 @@ func appendProtectedMethodAccessDiagnostic(result *FileAnalysis, scope *Scope, m
 			Code: "vim/E1366", Message: "Cannot access protected method: " + member.Value, Span: memberNameSpan(file, member),
 		})
 	}
+}
+
+func appendProtectedVariableAccessDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || result.File.Text(member.Operator) != "." || member.Value == "" ||
+		!strings.HasPrefix(member.Value, "_") || expressionContainsMissing(member) || syntaxDiagnosticOverlaps(result.File.Diagnostics, member.Span) {
+		return
+	}
+	file := result.File
+	owner := (*syntax.Command)(nil)
+	objectVariable := false
+	if receiver := member.Children[0]; receiver.Kind == syntax.ExpressionIdentifier {
+		if declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil); declaration != nil {
+			className := ""
+			switch declaration.Kind {
+			case SymbolKindClass, SymbolKindEnum:
+				className = declaration.Name
+			case SymbolKindTypeAlias:
+				className = result.classAliases[declaration.Name]
+			}
+			if className != "" {
+				aggregate := result.classes[className]
+				if aggregate == nil {
+					aggregate = localEnum(file, className)
+				}
+				if variable, _, found := aggregateVariableBinding(file, aggregate, member.Value, true); found && !commandHasModifier(variable, "public") {
+					owner = aggregate
+				}
+			}
+		}
+	}
+	if owner == nil {
+		_, aggregate, _, found := objectAggregateReceiver(result, scope, member.Children[0], make(map[*syntax.Expression]bool))
+		if !found || aggregate == nil || aggregate.Aggregate == nil {
+			return
+		}
+		if aggregate.Aggregate.Kind == syntax.BlockClass {
+			candidate, variable, _, exists := classObjectVariableOwner(result, aggregate, member.Value)
+			if exists && !commandHasModifier(variable, "public") {
+				owner = candidate
+				objectVariable = true
+			}
+		} else if aggregate.Aggregate.Kind == syntax.BlockEnum {
+			if variable, _, exists := aggregateVariableBinding(file, aggregate, member.Value, false); exists && !commandHasModifier(variable, "public") {
+				owner = aggregate
+				objectVariable = true
+			}
+		}
+	}
+	if owner == nil || owner.Aggregate == nil {
+		return
+	}
+	current := enclosingAggregateCommand(file, scope)
+	allowed := current == owner
+	if objectVariable && !allowed && owner.Aggregate.Kind == syntax.BlockClass && current != nil && current.Aggregate != nil && current.Aggregate.Kind == syntax.BlockClass {
+		for seen := make(map[*syntax.Command]bool); current != nil && !seen[current]; current = extendedClass(file, result.classes, current) {
+			seen[current] = true
+			allowed = current == owner
+			if allowed {
+				break
+			}
+		}
+	}
+	if !allowed {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1333", Message: `Cannot access protected variable "` + member.Value + `" in class "` + file.Text(owner.Aggregate.Name) + `"`, Span: memberNameSpan(file, member),
+		})
+	}
+}
+
+func enclosingAggregateCommand(file *syntax.File, scope *Scope) *syntax.Command {
+	for current := scope; file != nil && current != nil; current = current.Parent {
+		if current.CommandList != nil || current.Block < 0 || current.Block >= len(file.Blocks) {
+			continue
+		}
+		switch current.Kind {
+		case syntax.BlockClass, syntax.BlockInterface, syntax.BlockEnum:
+			header := file.Blocks[current.Block].Header
+			if header >= 0 && header < len(file.Commands) {
+				return &file.Commands[header]
+			}
+		}
+	}
+	return nil
 }
 
 func appendObjectVariableThroughClassDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {

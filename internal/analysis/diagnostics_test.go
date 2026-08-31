@@ -7075,6 +7075,55 @@ func TestAnalyzeE1332PublicUnderscoreVariableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1333ProtectedVariableAccessDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, member, owner string }{
+		{"inherited object read", "vim9script\nclass Base\n  var _value = 1\nendclass\nclass Child extends Base\nendclass\nvar child = Child.new()\nvar value = child._value\n", "_value", "Base"},
+		{"object assignment", "vim9script\nclass Base\n  var _value = 1\nendclass\nvar value = Base.new()\nvalue._value = 2\n", "_value", "Base"},
+		{"typed parameter", "vim9script\nclass Base\n  var _value = 1\nendclass\ndef Check(value: Base)\n  var copy = value._value\nenddef\n", "_value", "Base"},
+		{"unrelated class", "vim9script\nclass Base\n  var _value = 1\nendclass\nclass Other\n  def Check(value: Base)\n    var copy = value._value\n  enddef\nendclass\n", "_value", "Base"},
+		{"protected static read", "vim9script\nclass Base\n  static var _value = 1\nendclass\nvar value = Base._value\n", "_value", "Base"},
+		{"protected static write", "vim9script\nclass Base\n  static var _value = 1\nendclass\nBase._value = 2\n", "_value", "Base"},
+		{"child class accesses base static", "vim9script\nclass Base\n  static var _value = 1\nendclass\nclass Child extends Base\n  static def Check()\n    var value = Base._value\n  enddef\nendclass\n", "_value", "Base"},
+		{"func member call", "vim9script\nclass Base\n  var _callback: func\nendclass\nvar value = Base.new()\nvalue._callback()\n", "_callback", "Base"},
+		{"enum object", "vim9script\nenum Fruit\n  Apple\n  var _code: number\nendenum\nvar fruit: Fruit = Fruit.Apple\nvar value = fruit._code\n", "_code", "Fruit"},
+		{"enum static", "vim9script\nenum Fruit\n  Apple\n  static var _count: number\nendenum\nvar value = Fruit._count\n", "_count", "Fruit"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1333" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := `Cannot access protected variable "` + test.member + `" in class "` + test.owner + `"`
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.member {
+				t.Fatalf("E1333 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"owner this", "vim9script\nclass Base\n  var _value = 1\n  def Check()\n    var value = this._value\n  enddef\nendclass\n"},
+		{"descendant this super and object", "vim9script\nclass Base\n  var _value = 1\nendclass\nclass Child extends Base\n  def Check()\n    var one = this._value\n    var two = super._value\n    var child = Child.new()\n    var three = child._value\n  enddef\nendclass\n"},
+		{"owner static", "vim9script\nclass Base\n  static var _value = 1\n  static def Check()\n    var value = Base._value\n  enddef\nendclass\n"},
+		{"public variable", "vim9script\nclass Base\n  public var _value = 1\nendclass\nvar value = Base.new()\nvar copy = value._value\n"},
+		{"protected method", "vim9script\nclass Base\n  def _Check()\n  enddef\nendclass\nvar value = Base.new()\nvalue._Check()\n"},
+		{"static through object", "vim9script\nclass Base\n  static var _value = 1\nendclass\nvar value = Base.new()\nvar copy = value._value\n"},
+		{"unknown", "vim9script\nvar value: any\nvar copy = value._value\n"},
+		{"incomplete", "vim9script\nclass Base\n  var _value = 1\nendclass\nvar value = Base.new()\nvar copy = value.\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1333" {
+					t.Fatalf("guard unexpectedly received E1333: %#v\n%s", diagnostic, test.source)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string
