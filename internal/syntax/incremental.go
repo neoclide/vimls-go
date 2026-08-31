@@ -174,6 +174,7 @@ func appendParsedUnits(result *File, source string, dialect Dialect, start, end 
 		if !parsedRangeIndependent(parsed, start, next) {
 			return false
 		}
+		clearFinishedCommandTemps(parsed.Commands)
 		parsed.Source = source
 		result.Commands = append(result.Commands, parsed.Commands...)
 		result.Tokens = append(result.Tokens, parsed.Tokens...)

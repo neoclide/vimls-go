@@ -2056,6 +2056,59 @@ func TestReparseMatchesFullParse(t *testing.T) {
 	}
 }
 
+func TestParseAndReparseClearTemporaryCommandState(t *testing.T) {
+	file := Parse(`vim9script
+var logical = 1 +
+  2
+autocmd BufEnter * echo embedded
+var callback = (value: number): number => {
+  var lambdaLogical = value +
+    1
+  return lambdaLogical
+}
+`)
+	if file.incremental == nil {
+		t.Fatal("full parse missing incremental metadata")
+	}
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.logical != nil || command.boundaryExpression != nil {
+			t.Fatalf("top-level command %d retained parser temp: %#v", index, command)
+		}
+	}
+	if len(file.Commands) < 4 || file.Commands[2].Embedded == nil || len(file.Commands[2].Embedded.Commands) != 1 {
+		t.Fatalf("embedded command = %#v", file.Commands)
+	}
+	embedded := &file.Commands[2].Embedded.Commands[0]
+	if embedded.logical != nil || embedded.boundaryExpression != nil {
+		t.Fatalf("embedded command retained parser temp: %#v", embedded)
+	}
+	if file.Commands[3].Declaration == nil {
+		t.Fatalf("lambda declaration = %#v", file.Commands[3])
+	}
+	lambda := file.Commands[3].Declaration.Initializer
+	if lambda == nil || lambda.LambdaBody == nil || len(lambda.LambdaBody.Commands) == 0 {
+		t.Fatalf("lambda body = %#v", file.Commands[3].Declaration)
+	}
+	lambdaCommand := &lambda.LambdaBody.Commands[0]
+	if lambdaCommand.logical != nil || lambdaCommand.boundaryExpression != nil {
+		t.Fatalf("lambda command retained parser temp: %#v", lambdaCommand)
+	}
+
+	old := "vim9script\nvar first = 1\nvar changing = 2\nvar stable = 3\n"
+	new := "vim9script\nvar first = 1\nvar changing = 4\nvar stable = 3\n"
+	got := checkIncrementalParser(t, Reparse, incrementalEditCase{name: "temporary command state", old: old, new: new})
+	if got.incremental == nil || got.incremental.parsed == 0 {
+		t.Fatalf("expected incremental reparse, metadata = %#v", got.incremental)
+	}
+	for index := range got.Commands {
+		command := &got.Commands[index]
+		if command.logical != nil || command.boundaryExpression != nil {
+			t.Fatalf("reparsed command %d retained parser temp: %#v", index, command)
+		}
+	}
+}
+
 func TestReparseBoundaryEdits(t *testing.T) {
 	for _, test := range incrementalBoundaryEditCases {
 		t.Run(test.name, func(t *testing.T) {

@@ -513,6 +513,21 @@ func (p *sourceParser) finish() {
 	})
 	if p.start == 0 {
 		file.incremental = buildIncrementalMetadata(file)
+		clearFinishedCommandTemps(file.Commands)
+	}
+}
+
+// clearFinishedCommandTemps drops parser-only state after all consumers that
+// need the logical source view have finished. Embedded command lists share the
+// returned command tree, so clear them with their owning commands.
+func clearFinishedCommandTemps(commands []Command) {
+	for index := range commands {
+		command := &commands[index]
+		command.logical = nil
+		command.boundaryExpression = nil
+		if command.Embedded != nil {
+			clearFinishedCommandTemps(command.Embedded.Commands)
+		}
 	}
 }
 
