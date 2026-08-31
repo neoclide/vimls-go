@@ -352,7 +352,9 @@ func TestOversizedWorkspaceSaveEvictsPriorAST(t *testing.T) {
 	instance.analysisWorkers = 1
 	instance.analysisMu.Unlock()
 	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+	instance.mu.Lock()
 	instance.client = client
+	instance.mu.Unlock()
 	documentURI := uri.File(path)
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: documentURI, Version: 1, Text: "let g:openValue = 1\n",
