@@ -3042,6 +3042,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	if command.Kind == CommandExpression {
 		if assignment := findAssignment(source); assignment.Start >= 0 {
+			diagnoseUnsupportedDotEqual(file, command, Span{Start: command.Argument.Start + assignment.Start, End: command.Argument.Start + assignment.End})
 			leftEnd := trimSpaceEnd(source, 0, assignment.Start)
 			rightStart := skipSpace(source, assignment.End, len(source))
 			leftSource := source[:leftEnd]
@@ -3251,6 +3252,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		}
 		assignment.Start += command.Argument.Start
 		assignment.End += command.Argument.Start
+		diagnoseUnsupportedDotEqual(file, command, assignment)
 		left := file.Source[command.Argument.Start:assignment.Start]
 		diagnosticsStart := len(file.Diagnostics)
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
@@ -5416,6 +5418,17 @@ func findAssignment(source string) Span {
 		}
 	}
 	return Span{Start: -1, End: -1}
+}
+
+func diagnoseUnsupportedDotEqual(file *File, command *Command, assignment Span) {
+	if file == nil || command == nil || command.Dialect == Vim9 && command.Canonical == "let" ||
+		assignment.Start < 0 || assignment.End > len(file.Source) || file.Text(assignment) != ".=" ||
+		command.Dialect != Vim9 && command.ScriptVersion < 2 {
+		return
+	}
+	file.Diagnostics = append(file.Diagnostics, Diagnostic{
+		Code: "vim/E985", Message: ".= is not supported with script version >= 2", Span: assignment,
+	})
 }
 
 func declarationSpans(source string, base int, dialect Dialect) (Span, Span) {

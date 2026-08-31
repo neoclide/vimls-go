@@ -922,6 +922,65 @@ func TestScriptVersionDialectRules(t *testing.T) {
 	}
 }
 
+func TestDotEqualsScriptVersionDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source string
+	}{
+		{
+			name:   "legacy scriptversion 2",
+			source: "scriptversion 2\nlet value = 'a'\nlet value .= 'b'\n",
+		},
+		{
+			name:   "vim9script",
+			source: "vim9script\nvar value = 'a'\nvalue .= 'b'\n",
+		},
+		{
+			name:   "vim9def member",
+			source: "vim9script\ndef Func()\n  var d: dict<string>\n  d.k .= ''\nenddef\n",
+		},
+		{
+			name:   "legacy root def",
+			source: "def Func()\n  var value = 'a'\n  value .= 'b'\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E985" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != ".= is not supported with script version >= 2" || file.Text(got[0].Span) != ".=" {
+				t.Fatalf("E985 diagnostics = %#v", got)
+			}
+			found := false
+			for _, command := range file.Commands {
+				for _, expression := range command.Expressions {
+					if expression.Value == ".=" {
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("operator . assignment not retained = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let value = 'a'\nlet value .= 'b'\n",
+		"vim9script\nvar value = 'a'\nlegacy let value .= 'b'\n",
+		"vim9script\nvar value = 'a'\nvalue ..= 'b'\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E985") {
+			t.Fatalf("guard unexpectedly received E985: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9ExportDiagnostics(t *testing.T) {
 	tests := []struct {
 		name    string
