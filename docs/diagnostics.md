@@ -3900,3 +3900,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9compile.c:39-62` handles object methods and constructors as class
   contexts before parent validation.
 - `src/errors.h:3468-3471` defines the exact E1357 and E1358 messages.
+
+## Super outside a child class: E1358
+
+E1358 means `Using "super" not in a child class`. An object method,
+constructor, or a Lambda nested in one of them may use `super.member` only
+when its class has an `extends` clause. Enum object methods have no parent and
+therefore have the same error.
+
+Static methods retain their separate member-lookup behavior. A valid child
+class proceeds to normal parent-member checks. An unresolved or invalid parent
+remains owned by E1353 or E1354, and incomplete aggregates do not gain a
+cascade. Outside a method remains E1357, while a missing immediate dot remains
+E1356.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:11093-11104` covers an object method in a
+  class without a parent and the exact E1358 message.
+- `src/testdir/test_vim9_class.vim:11015-11037` confirms that object-method
+  context is retained through a nested Lambda.
+- `src/vim9compile.c:39-62` checks the immediate dot before requiring a parent
+  for object methods and constructors.
+- `runtime/doc/vim9class.txt:667-678` defines `super.` as access to an object
+  method of the base class and distinguishes static method calls.
+- `src/errors.h:3470-3473` defines the exact E1358 and E1359 messages.

@@ -8361,6 +8361,98 @@ func TestAnalyzeE1357SuperOutsideClassMethodDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1358SuperNotInChildClassDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "object method",
+			source: "vim9script\nclass A\n  def Foo()\n    super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "constructor",
+			source: "vim9script\nclass A\n  def new()\n    super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "lambda in object method",
+			source: "vim9script\nclass A\n  def Foo()\n    var Fn = () => super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "enum object method",
+			source: "vim9script\nenum A\n  Value\n  def Foo()\n    super.Foo()\n  enddef\nendenum\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1358" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Using "super" not in a child class` || file.Text(got[0].Span) != "super" {
+				t.Fatalf("E1358 diagnostics = %#v; syntax = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "child class",
+			source: "vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nclass B extends A\n  def Foo()\n    super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "unresolved parent belongs to e1353",
+			source: "vim9script\nclass B extends Missing\n  def Foo()\n    super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "invalid parent belongs to e1354",
+			source: "vim9script\nvar Parent = 1\nclass B extends Parent\n  def Foo()\n    super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "static method uses member lookup rules",
+			source: "vim9script\nclass A\n  static def Foo()\n    super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "outside method belongs to e1357",
+			source: "vim9script\ndef Foo()\n  super.Foo()\nenddef\n",
+		},
+		{
+			name:   "bare super belongs to e1356",
+			source: "vim9script\nclass A\n  def Foo()\n    echo super\n  enddef\nendclass\n",
+		},
+		{
+			name:   "incomplete aggregate",
+			source: "vim9script\nclass A\n  def Foo()\n    super.Foo()\n  enddef\n",
+		},
+		{
+			name:   "legacy expression",
+			source: "function Foo()\n  echo super.Foo()\nendfunction\n",
+		},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1358" {
+					t.Fatalf("unexpected E1358: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\nclass A\n  def Foo()\n    super .Foo()\n  enddef\nendclass\n")
+	if !hasDiagnostic(file, "vim/E1356") {
+		t.Fatalf("spaced super syntax diagnostics = %#v", file.Diagnostics)
+	}
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E1358" {
+			t.Fatalf("syntax E1356 gained E1358 cascade: %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

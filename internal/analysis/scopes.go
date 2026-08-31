@@ -3388,6 +3388,29 @@ func appendSuperOutsideClassMethodDiagnostic(result *FileAnalysis, file *syntax.
 	})
 }
 
+func appendSuperNotInChildClassDiagnostic(result *FileAnalysis, file *syntax.File, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
+	if result == nil || file == nil || scope == nil || expression == nil || dialect != syntax.Vim9 || expression.Kind != syntax.ExpressionMember ||
+		len(expression.Children) == 0 || expression.Children[0] == nil || expression.Children[0].Kind != syntax.ExpressionIdentifier ||
+		expression.Children[0].Value != "super" || file.Text(expression.Operator) != "." || syntaxDiagnosticOverlaps(file.Diagnostics, expression.Span) {
+		return
+	}
+	aggregate, method := enclosingSuperMethod(file, scope)
+	if aggregate == nil || aggregate.Aggregate == nil || method == nil || method.Function == nil ||
+		aggregate.Block < 0 || aggregate.Block >= len(file.Blocks) || file.Blocks[aggregate.Block].End < 0 {
+		return
+	}
+	name := file.Text(method.Function.Name)
+	if commandHasModifier(method, "static") && !strings.HasPrefix(name, "new") && !strings.HasPrefix(name, "_new") {
+		return
+	}
+	if aggregate.Aggregate.Kind == syntax.BlockClass && len(aggregate.Aggregate.Extends) > 0 {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1358", Message: `Using "super" not in a child class`, Span: expression.Children[0].Span,
+	})
+}
+
 func syntaxDiagnosticOverlaps(diagnostics []syntax.Diagnostic, span syntax.Span) bool {
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Span.Start <= span.End && diagnostic.Span.End >= span.Start {
@@ -6632,6 +6655,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		// receiver expression participates in same-file resolution.
 		if dialect == syntax.Vim9 {
 			appendSuperOutsideClassMethodDiagnostic(result, file, scope, expression, dialect)
+			appendSuperNotInChildClassDiagnostic(result, file, scope, expression, dialect)
 			appendMissingEnumValueDiagnostic(result, scope, expression)
 			appendObjectMethodThroughClassDiagnostic(result, scope, expression)
 		}
