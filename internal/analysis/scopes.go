@@ -1097,6 +1097,18 @@ func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []synta
 				scope = inherited
 			}
 			if command.Dialect == syntax.Vim9 {
+				if command.Canonical == "defcompile" && scope == result.Root {
+					raw := result.File.Text(command.Argument)
+					name := strings.TrimSpace(raw)
+					if name != "" && !strings.ContainsAny(name, " \t\r\n") {
+						start := command.Argument.Start + len(raw) - len(strings.TrimLeft(raw, " \t\r\n"))
+						span := syntax.Span{Start: start, End: start + len(name)}
+						declaration := resolve(scope, name, span.Start, false, nil)
+						if declaration != nil && declaration.Scope == result.Root && (declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant) {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1061", Message: "Cannot find function " + name, Span: span})
+						}
+					}
+				}
 				if command.Kind == syntax.CommandExpression || command.Canonical == "eval" {
 					for _, expression := range command.Expressions {
 						if expression != nil && expression.Span == command.Argument && nameOnly(expression, scope, command.Canonical == "eval") {

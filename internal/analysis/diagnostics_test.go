@@ -3296,6 +3296,34 @@ func TestAnalyzeE1118ImmediateConstListGrowthDiagnostic(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1061KnownNonFunctionDefcompileDiagnostic(t *testing.T) {
+	file := syntax.Parse("vim9script\nvar Target: list<number> = []\ndefcompile Target\n")
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1061" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Cannot find function Target" || file.Text(got[0].Span) != "Target" {
+		t.Fatalf("E1061 diagnostics = %#v", result.Diagnostics)
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Target()\nenddef\ndefcompile Target\n",
+		"vim9script\nclass Target\nendclass\ndefcompile Target\n",
+		"vim9script\ndefcompile Missing\n",
+		"vim9script\nvar Target = []\ndefcompile debug Target\n",
+		"vim9script\ndef F()\n  var Target = []\n  defcompile Target\nenddef\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1061" {
+				t.Fatalf("guard unexpectedly received E1061: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)
