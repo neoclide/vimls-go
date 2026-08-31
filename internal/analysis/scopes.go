@@ -6582,7 +6582,7 @@ func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous,
 			return syntax.Diagnostic{}, false
 		}
 		var ok bool
-		key, ok = syntax.StaticDictionaryKey(assigned.Children[1], current.Dialect)
+		key, ok = syntax.StaticDictionaryIndexKey(assigned.Children[1])
 		if !ok {
 			return syntax.Diagnostic{}, false
 		}
