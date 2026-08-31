@@ -326,6 +326,12 @@ func TestReparseReturnsPreviousForIdenticalSource(t *testing.T) {
 	}
 }
 
+func TestReparsePreservesEmptySliceSemantics(t *testing.T) {
+	checkIncrementalParser(t, Reparse, incrementalEditCase{
+		name: "commands removed", old: "let value = 1\n", new: "# comment\n",
+	})
+}
+
 func TestReparseReusesIndependentUnits(t *testing.T) {
 	oldSource := "let one = 1\nlet two = 2\nlet three = 3\nlet four = 4\n"
 	newSource := "let one = 1\nlet two = 20\nlet three = 3\nlet four = 4\n"

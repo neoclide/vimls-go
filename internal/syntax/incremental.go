@@ -66,7 +66,18 @@ func Reparse(previous *File, source string) *File {
 	}
 
 	result := &File{Dialect: previous.Dialect, Source: source, lambdaBody: previous.lambdaBody}
-	cloner := newASTCloner(len(previous.Commands))
+	// Keep empty slices nil while giving the common unchanged-document case
+	// enough room for the cloned command/token arrays.
+	if len(previous.Commands) > 0 {
+		result.Commands = make([]Command, 0, len(previous.Commands))
+	}
+	if len(previous.Tokens) > 0 {
+		result.Tokens = make([]Token, 0, len(previous.Tokens))
+	}
+	if len(previous.Diagnostics) > 0 {
+		result.Diagnostics = make([]Diagnostic, 0, len(previous.Diagnostics))
+	}
+	cloner := newASTCloner()
 	for index := 0; index < restart; index++ {
 		appendClonedUnit(result, previous, metadata.units[index], 0, cloner)
 	}
@@ -80,6 +91,15 @@ func Reparse(previous *File, source string) *File {
 	}
 	for index := suffix; index < len(metadata.units); index++ {
 		appendClonedUnit(result, previous, metadata.units[index], delta, cloner)
+	}
+	if len(result.Commands) == 0 {
+		result.Commands = nil
+	}
+	if len(result.Tokens) == 0 {
+		result.Tokens = nil
+	}
+	if len(result.Diagnostics) == 0 {
+		result.Diagnostics = nil
 	}
 	result.incremental = buildIncrementalMetadata(result)
 	if result.incremental == nil || !result.incremental.eligible {
@@ -212,7 +232,9 @@ func parsedRangeIndependent(file *File, start, end int) bool {
 func appendClonedUnit(result, previous *File, unit parseUnit, delta int, cloner *astCloner) {
 	for index := unit.firstCommand; index < unit.firstCommand+unit.commandCount; index++ {
 		command := cloner.command(previous.Commands[index])
-		rebaseCommand(&command, result.Source, delta)
+		if delta != 0 {
+			rebaseCommand(&command, result.Source, delta)
+		}
 		result.Commands = append(result.Commands, command)
 	}
 	for _, token := range previous.Tokens[unit.firstToken : unit.firstToken+unit.tokenCount] {
@@ -444,13 +466,8 @@ type astCloner struct {
 	lists       map[*CommandList]*CommandList
 }
 
-func newASTCloner(commandCount int) *astCloner {
-	return &astCloner{
-		expressions: make(map[*Expression]*Expression, commandCount*3),
-		types:       make(map[*Type]*Type, commandCount),
-		files:       make(map[*File]*File),
-		lists:       make(map[*CommandList]*CommandList),
-	}
+func newASTCloner() *astCloner {
+	return &astCloner{}
 }
 
 func (cloner *astCloner) file(file *File) *File {
@@ -459,6 +476,9 @@ func (cloner *astCloner) file(file *File) *File {
 	}
 	if cloned := cloner.files[file]; cloned != nil {
 		return cloned
+	}
+	if cloner.files == nil {
+		cloner.files = make(map[*File]*File)
 	}
 	cloned := *file
 	cloner.files[file] = &cloned
@@ -580,6 +600,9 @@ func (cloner *astCloner) commandList(list *CommandList) *CommandList {
 	if cloned := cloner.lists[list]; cloned != nil {
 		return cloned
 	}
+	if cloner.lists == nil {
+		cloner.lists = make(map[*CommandList]*CommandList)
+	}
 	cloned := *list
 	cloner.lists[list] = &cloned
 	if list.Commands != nil {
@@ -606,6 +629,9 @@ func (cloner *astCloner) expression(expression *Expression) *Expression {
 	}
 	if cloned := cloner.expressions[expression]; cloned != nil {
 		return cloned
+	}
+	if cloner.expressions == nil {
+		cloner.expressions = make(map[*Expression]*Expression)
 	}
 	cloned := *expression
 	cloner.expressions[expression] = &cloned
@@ -640,6 +666,9 @@ func (cloner *astCloner) typeNode(node *Type) *Type {
 	}
 	if cloned := cloner.types[node]; cloned != nil {
 		return cloned
+	}
+	if cloner.types == nil {
+		cloner.types = make(map[*Type]*Type)
 	}
 	cloned := *node
 	cloner.types[node] = &cloned
