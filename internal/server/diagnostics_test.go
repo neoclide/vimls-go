@@ -28,6 +28,9 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 			t.Errorf("%s configured severity = %v, want hint", code, got)
 		}
 	}
+	if got := protocolDiagnosticSeverity("vim/E122", syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
+		t.Errorf("vim/E122 severity = %v, want warning", got)
+	}
 }
 
 func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {

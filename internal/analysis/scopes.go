@@ -118,6 +118,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	// permits, without making variables forward-visible.
 	collectEmbeddedDeclarations(result, root, file.Commands)
 	collectLambdaDeclarations(result, file.Commands)
+	collectLegacyFunctionOverwriteRiskDiagnostics(result, file.Commands)
 	collectVim9LegacyScriptVariableDiagnostics(result)
 
 	// A malformed or partially parsed enum value may remain an opaque command.
@@ -186,6 +187,27 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.File == nil {
+		return
+	}
+	for index := range commands {
+		command := &commands[index]
+		if command.Canonical == "function" && command.Function != nil && emptySyntaxSpan(command.Bang) &&
+			!emptySyntaxSpan(command.Function.Name) {
+			name := result.File.Text(command.Function.Name)
+			if command.Dialect == syntax.Legacy || strings.HasPrefix(name, "g:") {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E122", Message: "Function " + name + " may already exist when this script is sourced again; add ! to replace it", Span: command.Function.Name,
+				})
+			}
+		}
+		if command.Embedded != nil {
+			collectLegacyFunctionOverwriteRiskDiagnostics(result, command.Embedded.Commands)
+		}
+	}
 }
 
 func collectDeferDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {

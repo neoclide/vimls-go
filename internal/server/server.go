@@ -979,6 +979,8 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 
 func protocolDiagnosticSeverity(code string, unresolvedSeverity syntax.DiagnosticSeverity) protocol.DiagnosticSeverity {
 	switch code {
+	case "vim/E122":
+		return protocol.DiagnosticSeverityWarning
 	case "vim/E117", "vim/E121", "vim/E1001", "vim/E1089":
 		return protocolSeverity(unresolvedSeverity)
 	}

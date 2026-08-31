@@ -10462,6 +10462,41 @@ func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE122LegacyFunctionOverwriteRiskWarning(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+		want               int
+	}{
+		{"legacy function", "function Legacy()\nendfunction\n", "Legacy", 1},
+		{"legacy abbreviation", "func ScriptLocal()\nendfunc\n", "ScriptLocal", 1},
+		{"Vim9 global function", "vim9script\nfunction g:Global()\nendfunction\n", "g:Global", 1},
+		{"forced legacy function", "function! Legacy()\nendfunction\n", "", 0},
+		{"function query", "function Legacy\n", "", 0},
+		{"Vim9 local cannot use bang", "vim9script\nfunction Local()\nendfunction\n", "", 0},
+		{"Vim9 def", "vim9script\ndef Modern()\nenddef\n", "", 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E122" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E122 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if test.want == 1 {
+				message := "Function " + test.span + " may already exist when this script is sourced again; add ! to replace it"
+				if got[0].Message != message || file.Text(got[0].Span) != test.span {
+					t.Fatalf("E122 diagnostic = %#v on %q", got[0], file.Text(got[0].Span))
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1041ScriptItemRedefinition(t *testing.T) {
 	tests := []struct {
 		name, source, text, forbidden string
