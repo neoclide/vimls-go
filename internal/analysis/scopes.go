@@ -7060,7 +7060,13 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 			})
 			return
 		}
-		cannotIndex := dialect == syntax.Vim9 && appendCannotIndexRuntimeDiagnostic(result, scope, target)
+		cannotIndex := false
+		if dialect == syntax.Vim9 {
+			receiver := invalidAssignmentReceiver(result, scope, target)
+			if !scopeUsesDefTypeRules(scope) || receiver == nil || receiver.Kind != syntax.ExpressionIdentifier {
+				cannotIndex = appendCannotIndexRuntimeDiagnostic(result, scope, target)
+			}
+		}
 		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && !cannotIndex && !sliceAssignmentNeedsE1165(result, scope, expression) {
 			appendIndexableAssignmentDiagnostic(result, scope, target)
 		}
