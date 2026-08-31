@@ -338,6 +338,29 @@ var incrementalTextBodyOwnerScenarios = func() []incrementalCommandBoundaryScena
 	}
 }()
 
+var incrementalEmbeddedOwnerScenarios = func() []incrementalCommandBoundaryScenario {
+	vim9Command := "vim9script\ncommand Foo {\n  echo 'hello'\n}\nvar afterCommand = 1\n"
+	autocmdBlock := "autocmd BufEnter * {\n  var value = 1\n}\nlet afterAutocmd = 1\n"
+	global := "g/foo/ echo one | v/bar/ echo two | s/x/y/\nlet afterGlobal = 1\n"
+	listDo := "ldo echo one\nlet afterListDo = 1\n"
+	legacyBlock := "windo if cond\n  echo value\nendif\nlet afterLegacyBlock = 1\n"
+	nestedNear := "windo " + strings.Repeat("windo ", maxEmbeddedCommandDepth-1) + "edit file.txt\nlet afterNestedNear = 1\n"
+	nestedOver := "windo " + strings.Repeat("windo ", maxEmbeddedCommandDepth) + "edit file.txt\nlet afterNestedOver = 1\n"
+	directFinish := "let before = 1\nfinish | echo 'dead'\nHELP TEXT *tag*\n"
+	conditionalFinish := "if !has('vim9script')\n  finish\nendif\nvim9script\nvar value = 1\n"
+	return []incrementalCommandBoundaryScenario{
+		{name: "Vim9 command block", tags: []string{"Vim9 command block"}, source: vim9Command, cases: []incrementalMatrixCase{newIncrementalMatrixCase("Vim9 command block", "payload insert", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(vim9Command, "hello", "hi ")})}},
+		{name: "autocmd block", tags: []string{"autocmd block"}, source: autocmdBlock, cases: []incrementalMatrixCase{newIncrementalMatrixCase("autocmd block", "payload delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(autocmdBlock, "value", "")})}},
+		{name: "global/vglobal", tags: []string{"global/vglobal"}, source: global, cases: []incrementalMatrixCase{newIncrementalMatrixCase("global/vglobal", "payload replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(global, "one", "two")})}},
+		{name: "list-do", tags: []string{"list-do"}, source: listDo, cases: []incrementalMatrixCase{newIncrementalMatrixCase("list-do", "payload length replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(listDo, "one", "three")})}},
+		{name: "Legacy embedded block", tags: []string{"Legacy embedded block"}, source: legacyBlock, cases: []incrementalMatrixCase{newIncrementalMatrixCase("Legacy embedded block", "payload sequence", incrementalSequence, incrementalFixedWidthSequence(legacyBlock, strings.Index(legacyBlock, "value"), len("value"), []string{"other", "value"}))}},
+		{name: "nested embedded depth near", tags: []string{"nested embedded depth near"}, source: nestedNear, cases: []incrementalMatrixCase{newIncrementalMatrixCase("nested embedded depth near", "payload replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(nestedNear, "file.txt", "file.log")})}},
+		{name: "nested embedded depth over", tags: []string{"nested embedded depth over"}, source: nestedOver, cases: []incrementalMatrixCase{newIncrementalMatrixCase("nested embedded depth over", "payload replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(nestedOver, "file.txt", "file.log")})}},
+		{name: "direct finish", tags: []string{"direct finish", "OpaqueTail"}, source: directFinish, cases: []incrementalMatrixCase{newIncrementalMatrixCase("direct finish", "opaque tail replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(directFinish, "dead", "live")})}},
+		{name: "conditional finish", tags: []string{"conditional finish"}, source: conditionalFinish, cases: []incrementalMatrixCase{newIncrementalMatrixCase("conditional finish", "following declaration length replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(conditionalFinish, "value", "values")})}},
+	}
+}()
+
 var incrementalEditCases = []incrementalEditCase{
 	{name: "legacy tail", old: "let first = 1\nlet last = 2\n", new: "let first = 1\nlet last = 20\n"},
 	{name: "vim9 middle", old: "vim9script\nvar first = 1\nvar last = 2\n", new: "vim9script\nvar first = 10\nvar last = 2\n"},
@@ -1031,6 +1054,121 @@ func TestTextBodyOwnerMatrixASTRecovery(t *testing.T) {
 			}
 			after := map[string]string{"append text body": "afterAppend", "change text body": "afterChange", "insert text body": "afterInsert"}[scenario.name]
 			incrementalDeclaration(t, got, after)
+		}
+	}
+}
+
+func TestIncrementalEditMatrixEmbeddedOwner(t *testing.T) {
+	seenTags, seenKinds, seenNames := map[string]bool{}, map[incrementalEditKind]bool{}, map[string]bool{}
+	for _, scenario := range incrementalEmbeddedOwnerScenarios {
+		for _, tag := range scenario.tags {
+			seenTags[tag] = true
+		}
+		for _, test := range scenario.cases {
+			if seenNames[test.name] {
+				t.Fatalf("duplicate embedded-owner matrix case %q", test.name)
+			}
+			seenNames[test.name], seenKinds[test.kind] = true, true
+			results := incrementalTextEditResults(scenario.source, test.edits)
+			if len(results) == 0 || test.kind == incrementalSequence && len(results) < 2 {
+				t.Fatalf("%s has invalid edit count %d", test.name, len(results))
+			}
+			for step, result := range results {
+				if result.old == result.new || result.edit.start < 0 || result.edit.start > result.edit.oldEnd || result.edit.oldEnd > len(result.old) {
+					t.Fatalf("%s step %d is invalid: %#v", test.name, step, result)
+				}
+				valid := incrementalTextEditKindValid(test.kind, result.edit)
+				if test.kind == incrementalSequence {
+					valid = incrementalSequenceStepValid(result.edit)
+				}
+				if !valid {
+					t.Fatalf("%s step %d does not match kind %d: %#v", test.name, step, test.kind, result.edit)
+				}
+			}
+		}
+	}
+	for _, tag := range []string{"Vim9 command block", "autocmd block", "global/vglobal", "list-do", "Legacy embedded block", "nested embedded depth near", "nested embedded depth over", "direct finish", "OpaqueTail", "conditional finish"} {
+		if !seenTags[tag] {
+			t.Fatalf("missing embedded-owner scenario %q", tag)
+		}
+	}
+	if len(seenKinds) != 5 {
+		t.Fatalf("embedded-owner matrix has %d edit kinds, want 5", len(seenKinds))
+	}
+}
+
+func TestReparseEmbeddedOwnerMatrix(t *testing.T) {
+	for _, scenario := range incrementalEmbeddedOwnerScenarios {
+		for _, test := range scenario.cases {
+			t.Run(test.name, func(t *testing.T) {
+				runIncrementalMatrix(t, scenario.source, test)
+			})
+		}
+	}
+}
+
+func TestEmbeddedOwnerMatrixBoundaries(t *testing.T) {
+	for _, scenario := range incrementalEmbeddedOwnerScenarios {
+		for _, test := range scenario.cases {
+			got := runIncrementalMatrix(t, scenario.source, test)
+			switch scenario.name {
+			case "direct finish":
+				if len(got.Commands) != 2 || got.Commands[1].Canonical != "finish" || got.OpaqueTail.Start != strings.Index(got.Source, "|") || got.OpaqueTail.End != len(got.Source) || got.Text(got.OpaqueTail) != "| echo 'live'\nHELP TEXT *tag*\n" {
+					t.Fatalf("direct finish = %#v tail=%q", got.Commands, got.Text(got.OpaqueTail))
+				}
+			case "conditional finish":
+				if got.OpaqueTail != (Span{}) {
+					t.Fatalf("conditional opaque tail = %#v", got.OpaqueTail)
+				}
+				incrementalDeclaration(t, got, "values")
+			case "nested embedded depth near":
+				if got.Commands[0].Embedded == nil || hasDiagnostic(got, "vimls/embedded-command-depth") {
+					t.Fatalf("nested near depth = %#v diagnostics=%#v", got.Commands[0].Embedded, got.Diagnostics)
+				}
+				owner := &got.Commands[0]
+				for depth := 0; depth < maxEmbeddedCommandDepth; depth++ {
+					if owner.Embedded == nil || len(owner.Embedded.Commands) != 1 {
+						t.Fatalf("nested near owner depth %d = %#v", depth, owner)
+					}
+					owner = &owner.Embedded.Commands[0]
+				}
+				if owner.Canonical != "edit" {
+					t.Fatalf("nested near leaf = %#v", owner)
+				}
+				incrementalDeclaration(t, got, "afterNestedNear")
+			case "nested embedded depth over":
+				if got.Commands[0].Embedded == nil || !hasDiagnostic(got, "vimls/embedded-command-depth") {
+					t.Fatalf("nested over depth = %#v diagnostics=%#v", got.Commands[0].Embedded, got.Diagnostics)
+				}
+				incrementalDeclaration(t, got, "afterNestedOver")
+			case "Vim9 command block":
+				if len(got.Commands) < 2 || got.Commands[1].Block < 0 || got.Blocks[got.Commands[1].Block].Kind != BlockCommand {
+					t.Fatalf("Vim9 command block owner = %#v blocks=%#v", got.Commands, got.Blocks)
+				}
+				incrementalDeclaration(t, got, "afterCommand")
+			case "global/vglobal":
+				outer := got.Commands[0]
+				if outer.Canonical != "global" || outer.Embedded == nil || len(outer.Embedded.Commands) < 2 || outer.Embedded.Commands[1].Canonical != "vglobal" || outer.Embedded.Commands[1].Embedded == nil {
+					t.Fatalf("global/vglobal owner = %#v", outer)
+				}
+				incrementalDeclaration(t, got, "afterGlobal")
+			case "Legacy embedded block":
+				outer := got.Commands[0]
+				if outer.Canonical != "windo" || outer.Embedded == nil || len(outer.Embedded.Commands) != 3 || outer.Embedded.Commands[0].Canonical != "if" || outer.Embedded.Commands[1].Canonical != "echo" || outer.Embedded.Commands[2].Canonical != "endif" || len(outer.Embedded.Blocks) != 1 || outer.Embedded.Blocks[0].Kind != BlockIf || outer.Embedded.Blocks[0].End < 0 {
+					t.Fatalf("legacy embedded block owner = %#v", outer)
+				}
+				if len(got.Commands) != 2 || got.Commands[1].Declaration == nil {
+					t.Fatalf("legacy embedded leaked commands = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterLegacyBlock")
+			default:
+				ownerIndex := 0
+				if got.Commands[ownerIndex].Embedded == nil {
+					t.Fatalf("%s has no embedded owner: %#v", scenario.name, got.Commands[ownerIndex])
+				}
+				after := map[string]string{"autocmd block": "afterAutocmd", "list-do": "afterListDo"}[scenario.name]
+				incrementalDeclaration(t, got, after)
+			}
 		}
 	}
 }
