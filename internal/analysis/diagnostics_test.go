@@ -7378,6 +7378,57 @@ func TestAnalyzeE1341AggregateLocalRedeclarationDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1346MissingImplementedInterfaceDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message string }{
+		{"missing", "vim9script\nclass A implements Missing\nendclass\n", "Interface name not found: Missing"},
+		{"first unresolved", "vim9script\ninterface Present\nendinterface\nclass A implements Present, Missing, Later\nendclass\n", "Interface name not found: Missing"},
+		{"forward declaration", "vim9script\nclass A implements Later\nendclass\ninterface Later\nendinterface\n", "Interface name not found: Later"},
+		{"body diagnostic does not suppress", "vim9script\nclass A implements Missing\n  aaa\nendclass\n", "Interface name not found: Missing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1346" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("E1346 diagnostics = %#v; syntax = %#v", result.Diagnostics, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"valid interface", "vim9script\ninterface Face\nendinterface\nclass A implements Face\nendclass\n"},
+		{"resolved class", "vim9script\nclass Base\nendclass\nclass A implements Base\nendclass\n"},
+		{"resolved class stops later missing", "vim9script\nclass Base\nendclass\nclass A implements Base, Missing\nendclass\n"},
+		{"resolved variable", "vim9script\nvar Face = 1\nclass A implements Face\nendclass\n"},
+		{"import namespace", "vim9script\nimport './face.vim' as Imported\nclass A implements Imported.Face\nendclass\n"},
+		{"import namespace stops later missing", "vim9script\nimport './face.vim' as Imported\nclass A implements Imported.Face, Missing\nendclass\n"},
+		{"Legacy", "class A implements Missing\nendclass\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1346" {
+					t.Fatalf("guard unexpectedly received E1346: %#v\n%s", diagnostic, test.source)
+				}
+			}
+		})
+	}
+
+	malformed := syntax.Parse("vim9script\nclass A implements Missing,\nendclass\n")
+	if len(malformed.Diagnostics) == 0 {
+		t.Fatalf("malformed header retained no syntax diagnostic: %#v", malformed)
+	}
+	for _, diagnostic := range Analyze(malformed).Diagnostics {
+		if diagnostic.Code == "vim/E1346" {
+			t.Fatalf("header diagnostic unexpectedly retained E1346: %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

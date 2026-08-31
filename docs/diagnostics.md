@@ -3574,3 +3574,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:1965-1993` checks the Vim9-script gate, ASCII-uppercase
   requirement, and whitespace after the name in that order.
 - `src/errors.h:3440-3442` defines the exact message.
+
+## Interface name not found: E1346
+
+E1346 means `Interface name not found: {name}`. For a Vim9 class with an
+`implements` clause, analysis reports the closing `endclass` when the first
+interface name cannot be resolved at the point of the class declaration.
+Names declared later in the script are therefore not visible.
+
+A resolved same-file interface is valid. A resolved class, variable, or other
+script item is not E1346 and remains available for the more specific E1347
+check. A qualified name whose prefix resolves to an imported script remains
+conservative because same-file analysis cannot prove whether that script
+exports the requested interface.
+
+Class-header syntax errors take priority and prevent interface validation, as
+they do in Vim. Legacy declarations and interface or enum aggregates are not
+covered by this rule. A diagnostic elsewhere in the class body does not hide
+an independently provable missing interface name.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_interface.vim:324-344` distinguishes a missing
+  interface name from a resolved regular class and places the failure on the
+  closing `endclass`.
+- `src/vim9class.c:835-864` resolves `implements` entries in source order,
+  emits E1346 only when name lookup fails, and selects E1347 for a resolved
+  value that is not an interface.
+- `src/errors.h:3446-3449` defines the exact E1346 and E1347 messages.

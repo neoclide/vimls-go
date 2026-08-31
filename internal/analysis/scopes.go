@@ -129,6 +129,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectAggregateLocalRedeclarationDiagnostics(result)
 	collectDuplicateTypeAliasDiagnostics(result)
+	collectMissingImplementedInterfaceDiagnostics(result)
 	collectUnimplementedAbstractMethodDiagnostics(result)
 	collectMethodAccessLevelDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
@@ -172,6 +173,52 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectMissingImplementedInterfaceDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Implements) == 0 ||
+			class.Block < 0 || class.Block >= len(file.Blocks) || file.Blocks[class.Block].End < 0 {
+			continue
+		}
+		header := syntax.Span{Start: class.Name.Start, End: class.Argument.End}
+		headerInvalid := slices.ContainsFunc(file.Diagnostics, func(diagnostic syntax.Diagnostic) bool {
+			if diagnostic.Span.Start == diagnostic.Span.End {
+				return diagnostic.Span.Start >= header.Start && diagnostic.Span.Start <= header.End
+			}
+			return diagnostic.Span.Start < header.End && diagnostic.Span.End > header.Start
+		})
+		if headerInvalid {
+			continue
+		}
+		scope := result.commandScopes[class]
+		if scope == nil {
+			scope = result.Root
+		}
+		for _, implemented := range class.Aggregate.Implements {
+			name := file.Text(implemented)
+			if declaration := resolve(scope, name, implemented.Start, false, nil); declaration != nil {
+				if declaration.Kind == SymbolKindInterface {
+					continue
+				}
+				break
+			}
+			if dot := strings.IndexByte(name, '.'); dot > 0 {
+				if prefix := resolve(scope, name[:dot], implemented.Start, false, nil); prefix != nil && prefix.Kind == SymbolKindImport {
+					break
+				}
+			}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1346", Message: "Interface name not found: " + name, Span: aggregateEndSpan(file, class),
+			})
+			break
+		}
+	}
 }
 
 func collectConstructorDefaultValueDiagnostics(result *FileAnalysis) {
