@@ -498,26 +498,32 @@ go test -mod=readonly ./internal/server \
 - `internal/server/workspace_test.go`
 - `internal/server/navigation_test.go`
 - `internal/server/rename_test.go`
+- `internal/server/server.go`（仅 nil-by-default、锁外调用的测试同步点）
+- `internal/server/workspace.go`（仅 nil-by-default、锁外调用的测试同步点）
 - `incremental-parsing-plan.md`
 - 已实现事实对应的 `docs/architecture.md`、`docs/testing.md`、`docs/roadmap.md`
 
 **Forbidden paths**
 
-- 未经对应阶段重新打开的 production code
+- 除上述确定性 race 测试同步点外的 production code
 - `internal/syntax` AST 增量实现
 - dependencies、generated files、`go.mod`、`go.sum`
 
 **Required behavior**
 
 - 新增 text edit fuzz/property：每步增量 edits 的最终全文与直接 replacement 相同。
-- deterministic 100-step edit sequence 覆盖多编码、CRLF、BOM、combining 和 astral。
+- deterministic 5-step edit sequence 覆盖多编码、CRLF、BOM、combining 和 astral；
+  每一步验证不同的不变量，不用重复次数代替覆盖率。
 - race test 覆盖同 snapshot 并发读、change during parse、close/reopen 和 workspace rebuild。
+- server race test 通过锁外、nil-by-default 的同步点各强制一次目标交错，不通过压力循环
+  碰运气。
 - readonly QA 审查 parser tree immutability、lock order、stale barriers 和 cache/source 对应。
-- 性能只比较：content-ID 构造、same-content open-document cache hit、
-  changed-file full Parse，并记录一次 workspace full rebuild/`ParseSources` 基线，
-  作为第 10.1 节是否立项的证据。
+- 性能只比较 `BenchmarkContentID`、`BenchmarkParseCacheHit`、
+  `BenchmarkParseCacheChangedFile` 和 `BenchmarkWorkspaceRebuild`；最后一项同步执行
+  workspace full rebuild，并包含其 `ParseSources` 路径，作为第 10.1 节是否立项的基线。
 - 小编辑后的 full parse 不要求比 `syntax.Parse` 更快；它本来就是同一完整解析路径。
-- benchmark 构造必须在计时区外，记录五次 `ns/op`、`B/op`、`allocs/op`。
+- benchmark 构造必须在计时区外；每项固定执行 100 次操作并记录 `ns/op`、`B/op`、
+  `allocs/op`。
 
 **Validation**
 
@@ -528,9 +534,10 @@ go test -mod=readonly -race ./internal/text ./internal/workspace ./internal/serv
 go test -mod=readonly ./internal/text -run '^$' \
   -fuzz '^FuzzApplyChanges$' -fuzztime=30s
 go test -mod=readonly ./internal/text -run '^$' \
-  -bench 'BenchmarkContentID' -benchmem -count=5
+  -bench '^BenchmarkContentID$' -benchmem -benchtime=100x -count=1
 go test -mod=readonly ./internal/server -run '^$' \
-  -bench 'Benchmark(ParseCache|WorkspaceRebuild)' -benchmem -count=5
+  -bench '^(BenchmarkParseCache(Hit|ChangedFile)|BenchmarkWorkspaceRebuild)$' \
+  -benchmem -benchtime=100x -count=1
 ```
 
 ## 9. 必测矩阵
