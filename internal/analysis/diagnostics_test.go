@@ -3466,6 +3466,40 @@ func TestAnalyzeE909SpecialVariableIndexDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE891SortFloatFuncrefDiagnostics(t *testing.T) {
+	for _, test := range []struct{ source, span string }{
+		{"echo sort([function('min'), 1], 'f')\n", "function('min')"},
+		{"vim9script\necho sort([(left, right) => left - right, 1], 'f')\n", "(left, right) => left - right"},
+		{"echo ([1, function('min')])->sort('f')\n", "function('min')"},
+	} {
+		file := syntax.Parse(test.source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E891" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != "Using a Funcref as a Float" || file.Text(got[0].Span) != test.span {
+			t.Fatalf("E891 diagnostics = %#v", got)
+		}
+	}
+
+	for _, source := range []string{
+		"let values = [function('min'), 1]\necho sort(values, 'f')\n",
+		"let Fn = function('min')\necho sort([Fn, 1], 'f')\n",
+		"echo sort([function('min'), 1], 'n')\n",
+		"echo sort([1, 2], 'f')\n",
+		"echo sort(DynamicValues(), 'f')\n",
+		"echo uniq([function('min'), 1], 'f')\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E891" {
+				t.Fatalf("guard unexpectedly received E891: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

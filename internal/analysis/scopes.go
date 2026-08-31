@@ -8992,8 +8992,47 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 					emptyRequiredString = true
 				}
 			}
+			sortFloatFuncref := false
+			if builtinCall && builtin.Name == "sort" && len(arguments) >= 2 {
+				list, how := arguments[0], arguments[1]
+				for list != nil && list.Kind == syntax.ExpressionParenthesized && len(list.Children) == 1 {
+					list = list.Children[0]
+				}
+				for how != nil && how.Kind == syntax.ExpressionParenthesized && len(how.Children) == 1 {
+					how = how.Children[0]
+				}
+				if list != nil && list.Kind == syntax.ExpressionList && how != nil && how.Kind == syntax.ExpressionString && simpleVimStringLiteral(how.Value) == "f" {
+					for _, item := range list.Children {
+						candidate := item
+						for candidate != nil && candidate.Kind == syntax.ExpressionParenthesized && len(candidate.Children) == 1 {
+							candidate = candidate.Children[0]
+						}
+						directFuncref := candidate != nil && candidate.Kind == syntax.ExpressionLambda
+						if candidate != nil && candidate.Kind == syntax.ExpressionCall && len(candidate.Children) > 1 {
+							callee, nameExpression := candidate.Children[0], candidate.Children[1]
+							if callee != nil && callee.Kind == syntax.ExpressionIdentifier && (callee.Value == "function" || callee.Value == "funcref") &&
+								nameExpression != nil && nameExpression.Kind == syntax.ExpressionString {
+								name := simpleVimStringLiteral(nameExpression.Value)
+								_, builtin := vimdata.LookupFunction(name)
+								declaration := resolve(scope, name, nameExpression.Span.Start, true, nil)
+								directFuncref = name != "" && (builtin || declaration != nil && functionSymbolKind(declaration.Kind))
+							}
+						}
+						actual := result.TypeOf(item)
+						if directFuncref && (actual.Name == "func" || actual.Name == "partial") {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E891", Message: "Using a Funcref as a Float", Span: item.Span,
+							})
+							sortFloatFuncref = true
+							break
+						}
+					}
+				}
+			}
 			if emptyRequiredString {
 				// The value error owns the call before ordinary type checks.
+			} else if sortFloatFuncref {
+				// The item conversion error owns the call.
 			} else if builtinCall && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && builtin.Name == "exists_compiled" {
 				explicit := arguments
 				switch {
