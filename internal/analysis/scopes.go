@@ -6224,7 +6224,7 @@ func immediateLockedAssignment(file *syntax.File, previous, current *syntax.Comm
 	return assigned
 }
 
-func immediateLockedDictionaryItemDiagnostic(result *FileAnalysis, scope *Scope, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
+func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
 	if result == nil || result.File == nil || scope == nil || previous == nil || current == nil {
 		return syntax.Diagnostic{}, false
 	}
@@ -6233,15 +6233,31 @@ func immediateLockedDictionaryItemDiagnostic(result *FileAnalysis, scope *Scope,
 	if assigned == nil || assigned.Kind != syntax.ExpressionMember && assigned.Kind != syntax.ExpressionIndex {
 		return syntax.Diagnostic{}, false
 	}
-	if previous.Canonical == "lockvar" && previous.Count.Start == previous.Count.End && len(previous.Targets) == 1 && len(assigned.Children) > 0 &&
-		resolvedExpressionType(result, scope, assigned.Children[0]).Name == "dict" &&
-		file.Text(previous.Targets[0].Span) == file.Text(assigned.Span) {
-		return syntax.Diagnostic{Code: "vim/E1121", Message: "Cannot change dict item", Span: assigned.Span}, true
+	if scopeUsesDefTypeRules(scope) && previous.Canonical == "lockvar" && previous.Count.Start == previous.Count.End && len(previous.Targets) == 1 &&
+		len(assigned.Children) > 0 && file.Text(previous.Targets[0].Span) == file.Text(assigned.Span) {
+		switch resolvedExpressionType(result, scope, assigned.Children[0]).Name {
+		case "dict":
+			return syntax.Diagnostic{Code: "vim/E1121", Message: "Cannot change dict item", Span: assigned.Span}, true
+		case "list":
+			if assigned.Kind == syntax.ExpressionIndex {
+				return syntax.Diagnostic{Code: "vim/E1119", Message: "Cannot change locked list item", Span: assigned.Span}, true
+			}
+		}
 	}
 	if !scopeUsesDefTypeRules(scope) || previous.Canonical != "const" || previous.Declaration == nil || previous.Declaration.Target == nil ||
-		previous.Declaration.Target.Kind != syntax.ExpressionIdentifier || previous.Declaration.Initializer == nil || previous.Declaration.Initializer.Kind != syntax.ExpressionDictionary ||
+		previous.Declaration.Target.Kind != syntax.ExpressionIdentifier || previous.Declaration.Initializer == nil ||
 		len(assigned.Children) == 0 || assigned.Children[0] == nil || assigned.Children[0].Kind != syntax.ExpressionIdentifier ||
 		assigned.Children[0].Value != previous.Declaration.Target.Value {
+		return syntax.Diagnostic{}, false
+	}
+	if previous.Declaration.Initializer.Kind == syntax.ExpressionList && assigned.Kind == syntax.ExpressionIndex && len(assigned.Children) > 1 {
+		index, ok := staticTupleIndex(assigned.Children[1])
+		if ok && index >= 0 && index < len(previous.Declaration.Initializer.Children) {
+			return syntax.Diagnostic{Code: "vim/E1119", Message: "Cannot change locked list item", Span: assigned.Span}, true
+		}
+		return syntax.Diagnostic{}, false
+	}
+	if previous.Declaration.Initializer.Kind != syntax.ExpressionDictionary {
 		return syntax.Diagnostic{}, false
 	}
 	key := assigned.Value
@@ -6325,7 +6341,7 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 					Code: "vim/E1122", Message: "Variable is locked: " + assigned.Value, Span: assigned.Span,
 				})
 			}
-			if diagnostic, ok := immediateLockedDictionaryItemDiagnostic(result, scope, previous, command); ok &&
+			if diagnostic, ok := immediateLockedItemDiagnostic(result, scope, previous, command); ok &&
 				!syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
 				result.Diagnostics = append(result.Diagnostics, diagnostic)
 			}
