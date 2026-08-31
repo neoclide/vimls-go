@@ -3226,3 +3226,44 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:2473-2502,2578-2586` distinguishes a missing method name and
   the aggregate-specific fallback for invalid body commands.
 - `src/errors.h:3393-3394` defines the exact message.
+
+## Method not found on a class: E1325
+
+E1325 means `Method "{method}" not found in class "{class}"`. For a complete
+Vim9 dot call whose receiver resolves to a same-file class or enum, analysis
+selects the method name after proving that neither the applicable method table
+nor a function-typed member contains it. Unknown values and cross-file import
+namespaces remain conservative.
+
+Class receivers use only class methods declared on that aggregate; class
+methods are not inherited. Object receivers use object methods and object
+members through the class hierarchy. Calling a method through the wrong kind
+of receiver remains owned by E1385 or E1386, and protected access remains owned
+by E1366. `super` searches inherited object methods but reports the current
+class name when none exists. A local class type alias resolves to its underlying
+class for this message.
+
+A concrete class without an explicit `new` or `_new` has Vim's generated
+`new()` constructor. Abstract classes do not receive that default, an exact
+`_new` suppresses the public default, and enum constructor methods whose names
+start with `new` or `_new` are removed after the enum is created. Ordinary
+function-typed class and object members remain callable.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:2818-2834` shows that `super` does not expose
+  a parent class method, and lines 2938-2948 reject the missing constructor of
+  an abstract class.
+- `src/testdir/test_vim9_class.vim:4980-4998,10958-10968` covers non-inherited
+  protected class methods and `_new` suppressing the default `new`.
+- `src/testdir/test_vim9_enum.vim:1332-1375` rejects default and named enum
+  constructors at script and compiled-function level.
+- `src/testdir/test_vim9_generics.vim:1365-1377` applies E1325 to a missing
+  generic object method.
+- `src/vim9expr.c:420-475` chooses the class or object method table, handles
+  `super`, and accepts a function-typed member before reporting a missing
+  method.
+- `src/vim9class.c:1467-1520,1529-1608,2709-2749` defines the default
+  constructor, inherits only object methods, and removes enum constructors.
+- `src/vim9class.c:4080-4106` selects E1325 after ruling out a wrong receiver
+  kind; `src/errors.h:3404-3405` defines the exact message.

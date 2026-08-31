@@ -5240,6 +5240,67 @@ func TestAnalyzeE1307ConstBuiltinMutationDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1325MissingAggregateMethodDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, method, class string }{
+		{"class receiver", "vim9script\nclass A\nendclass\nA.Missing()\n", "Missing", "A"},
+		{"abstract constructor", "vim9script\nabstract class A\nendclass\nA.new()\n", "new", "A"},
+		{"protected constructor hides default", "vim9script\nclass A\n  def _new()\n  enddef\nendclass\nA.new()\n", "new", "A"},
+		{"enum default constructor", "vim9script\nenum Fruit\n  Apple\nendenum\nFruit.new()\n", "new", "Fruit"},
+		{"enum constructor", "vim9script\nenum Fruit\n  Apple\nendenum\nFruit.newFruit()\n", "newFruit", "Fruit"},
+		{"enum missing regular method", "vim9script\nenum Fruit\n  Apple\nendenum\nFruit.Missing()\n", "Missing", "Fruit"},
+		{"object receiver", "vim9script\nclass A\nendclass\nvar a = A.new()\na.Missing()\n", "Missing", "A"},
+		{"typed parameter", "vim9script\nclass A\nendclass\ndef Func(a: A)\n  a.Missing()\nenddef\n", "Missing", "A"},
+		{"generic object call", "vim9script\nclass A\nendclass\ndef Func(a: A)\n  a.Bar<number, string>()\nenddef\n", "Bar", "A"},
+		{"this object method", "vim9script\nclass A\n  def Check()\n    this.Missing()\n  enddef\nendclass\n", "Missing", "A"},
+		{"super ignores static parent method", "vim9script\nclass A\n  static def ParentOnly()\n  enddef\nendclass\nclass B extends A\n  def Check()\n    super.ParentOnly()\n  enddef\nendclass\n", "ParentOnly", "B"},
+		{"class methods do not inherit", "vim9script\nclass A\n  static def ParentOnly()\n  enddef\nendclass\nclass B extends A\nendclass\nB.ParentOnly()\n", "ParentOnly", "B"},
+		{"protected static does not inherit through class", "vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\nclass C extends A\nendclass\nC._Foo()\n", "_Foo", "C"},
+		{"protected static does not inherit through object", "vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\nclass C extends A\nendclass\nvar c = C.new()\nc._Foo()\n", "_Foo", "C"},
+		{"class alias", "vim9script\nclass A\nendclass\ntype Alias = A\nAlias.Missing()\n", "Missing", "A"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1325" {
+					got = append(got, diagnostic)
+				}
+				if strings.Contains(test.name, "protected static") && diagnostic.Code == "vim/E1366" {
+					t.Fatalf("non-inherited protected class method reported E1366: %#v", result.Diagnostics)
+				}
+			}
+			message := `Method "` + test.method + `" not found in class "` + test.class + `"`
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.method {
+				t.Fatalf("E1325 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass A\nendclass\nA.new()\n",
+		"vim9script\nclass A\n  def new()\n  enddef\nendclass\nA.new()\n",
+		"vim9script\nclass A\n  static var Fn: func\nendclass\nA.Fn()\n",
+		"vim9script\nclass A\n  var Fn: func\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nb.Fn()\n",
+		"vim9script\nenum Fruit\n  Apple\n  static def Values()\n  enddef\nendenum\nFruit.Values()\n",
+		"vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\nA.Foo()\n",
+		"vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nb.Foo()\n",
+		"vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nA.Foo()\n",
+		"vim9script\nclass A\n  static def Foo()\n  enddef\nendclass\nvar a = A.new()\na.Foo()\n",
+		"vim9script\nclass A\n  static def _Foo()\n  enddef\nendclass\nA._Foo()\n",
+		"vim9script\nvar value: any\nvalue.Missing()\n",
+		"function Legacy()\n  var a = 1\n  a.Missing()\nendfunction\n",
+		"vim9script\nclass A\nendclass\nvar a = A.new()\nvar value = a.Missing\n",
+		"vim9script\nclass A\nendclass\nvar a = A.new()\na.Missing(\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1325" {
+				t.Fatalf("guard unexpectedly received E1325: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1256BuiltinCallbackArgumentDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"sort zero script", "vim9script\nsort(['a', 'b'], 0)\n", "0"},

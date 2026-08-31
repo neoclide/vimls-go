@@ -158,6 +158,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
 	collectOperatorDiagnostics(result, file.Commands, root)
+	collectMissingAggregateMethodDiagnostics(result)
 	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
@@ -1905,6 +1906,238 @@ func collectLoopNestingDiagnostics(result *FileAnalysis) {
 			})
 		}
 	}
+}
+
+func collectMissingAggregateMethodDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	seen := make(map[*syntax.Expression]bool)
+	var walkCommands func([]syntax.Command, *Scope)
+	var walkExpression func(*syntax.Expression, *Scope, syntax.Dialect)
+	walkExpression = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
+		if expression == nil || seen[expression] {
+			return
+		}
+		seen[expression] = true
+		if dialect == syntax.Vim9 {
+			appendMissingAggregateMethodDiagnostic(result, scope, expression)
+		}
+		expressionScope := scope
+		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
+			if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
+				expressionScope = lambdaScope
+			}
+			walkCommands(expression.LambdaBody.Commands, expressionScope)
+		}
+		for _, child := range expression.Children {
+			walkExpression(child, expressionScope, dialect)
+		}
+	}
+	walkCommands = func(items []syntax.Command, fallback *Scope) {
+		for index := range items {
+			command := &items[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = fallback
+			}
+			for _, expression := range command.Expressions {
+				walkExpression(expression, scope, command.Dialect)
+			}
+			for _, expression := range command.Targets {
+				walkExpression(expression, scope, command.Dialect)
+			}
+			if command.Declaration != nil {
+				walkExpression(command.Declaration.Initializer, scope, command.Dialect)
+			}
+			if command.For != nil {
+				walkExpression(command.For.Iterable, scope, command.Dialect)
+			}
+			if command.Import != nil {
+				walkExpression(command.Import.Path, scope, command.Dialect)
+			}
+			if command.Function != nil {
+				for _, parameter := range command.Function.Parameters {
+					walkExpression(parameter.Default, scope, command.Dialect)
+				}
+			}
+			if command.Embedded != nil {
+				walkCommands(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	walkCommands(result.File.Commands, result.Root)
+}
+
+func appendMissingAggregateMethodDiagnostic(result *FileAnalysis, scope *Scope, call *syntax.Expression) {
+	if result == nil || result.File == nil || call == nil || call.Kind != syntax.ExpressionCall || call.Value != "" || len(call.Children) == 0 ||
+		expressionContainsMissing(call) || syntaxDiagnosticOverlaps(result.File.Diagnostics, call.Span) {
+		return
+	}
+	file := result.File
+	callee := call.Children[0]
+	if callee != nil && callee.Kind == syntax.ExpressionGenericReference && len(callee.Children) == 1 {
+		callee = callee.Children[0]
+	}
+	if callee == nil || callee.Kind != syntax.ExpressionMember || file.Text(callee.Operator) != "." || callee.Value == "" || len(callee.Children) != 1 || callee.Children[0] == nil {
+		return
+	}
+	memberSpan := memberNameSpan(file, callee)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Span == memberSpan && (diagnostic.Code == "vim/E1366" || diagnostic.Code == "vim/E1385" || diagnostic.Code == "vim/E1386") {
+			return
+		}
+	}
+
+	receiver := callee.Children[0]
+	className := ""
+	classReceiver := false
+	super := false
+	var aggregate *syntax.Command
+	if receiver.Kind == syntax.ExpressionIdentifier {
+		switch receiver.Value {
+		case "super":
+			aggregate = enclosingClassCommand(file, scope)
+			if aggregate == nil || aggregate.Aggregate == nil || len(aggregate.Aggregate.Extends) == 0 {
+				return
+			}
+			className = file.Text(aggregate.Aggregate.Name)
+			super = true
+		case "this":
+			aggregate = enclosingClassCommand(file, scope)
+			if aggregate == nil || aggregate.Aggregate == nil {
+				return
+			}
+			objectMethod := false
+			for current := scope; current != nil; current = current.Parent {
+				if current.Kind != syntax.BlockDef {
+					continue
+				}
+				if current.CommandList == nil && current.Block >= 0 && current.Block < len(file.Blocks) {
+					header := file.Blocks[current.Block].Header
+					if header >= 0 && header < len(file.Commands) {
+						for _, member := range aggregate.Aggregate.Members {
+							if member == header && !commandIsClassMethod(file, &file.Commands[header]) {
+								objectMethod = true
+								break
+							}
+						}
+					}
+				}
+				break
+			}
+			if !objectMethod {
+				return
+			}
+			className = file.Text(aggregate.Aggregate.Name)
+		default:
+			declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+			if declaration != nil {
+				switch declaration.Kind {
+				case SymbolKindClass:
+					className, classReceiver = declaration.Name, true
+				case SymbolKindEnum:
+					className, classReceiver = declaration.Name, true
+				case SymbolKindTypeAlias:
+					className = result.classAliases[declaration.Name]
+					classReceiver = className != ""
+				}
+			}
+		}
+	}
+	if className == "" && !super {
+		className = resolvedExpressionType(result, scope, receiver).Name
+		if target := result.classAliases[className]; target != "" {
+			className = target
+		}
+	}
+	if aggregate == nil {
+		aggregate = result.classes[className]
+		if aggregate == nil {
+			aggregate = localEnum(file, className)
+		}
+	}
+	if aggregate == nil || aggregate.Aggregate == nil {
+		return
+	}
+
+	methodName := callee.Value
+	if super {
+		seenClasses := make(map[*syntax.Command]bool)
+		for current := extendedClass(file, result.classes, aggregate); current != nil && !seenClasses[current]; current = extendedClass(file, result.classes, current) {
+			seenClasses[current] = true
+			if aggregateMethod(file, current, methodName) != nil {
+				return
+			}
+		}
+	} else if classReceiver {
+		enumConstructor := aggregate.Aggregate.Kind == syntax.BlockEnum && (strings.HasPrefix(methodName, "new") || strings.HasPrefix(methodName, "_new"))
+		for _, index := range aggregate.Aggregate.Members {
+			if index < 0 || index >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[index]
+			if !enumConstructor && member.Function != nil && commandIsClassMethod(file, member) && file.Text(member.Function.Name) == methodName {
+				return
+			}
+			if member.Declaration != nil && commandHasModifier(member, "static") {
+				for bindingIndex, binding := range member.Declaration.Bindings {
+					if file.Text(binding.Name) == methodName && aggregateBindingType(result, member, bindingIndex).Name == "func" {
+						return
+					}
+				}
+			}
+		}
+		if aggregate.Aggregate.Kind == syntax.BlockClass && methodName == "new" && !commandHasModifier(aggregate, "abstract") {
+			hasConstructor := false
+			for _, index := range aggregate.Aggregate.Members {
+				if index < 0 || index >= len(file.Commands) {
+					continue
+				}
+				member := &file.Commands[index]
+				if member.Function != nil && (file.Text(member.Function.Name) == "new" || file.Text(member.Function.Name) == "_new") {
+					hasConstructor = true
+					break
+				}
+			}
+			if !hasConstructor {
+				return
+			}
+		}
+		if aggregateMethod(file, aggregate, methodName) != nil || aggregate.Aggregate.Kind == syntax.BlockClass && objectMethodInClassHierarchy(file, result.classes, aggregate, methodName) != nil {
+			return
+		}
+	} else {
+		if aggregate.Aggregate.Kind == syntax.BlockClass {
+			if objectMethodInClassHierarchy(file, result.classes, aggregate, methodName) != nil {
+				return
+			}
+			if typ, found := classObjectVariableType(result, aggregate, methodName); found && typ.Name == "func" {
+				return
+			}
+		} else {
+			if aggregateMethod(file, aggregate, methodName) != nil {
+				return
+			}
+			if typ, found := aggregateObjectVariableType(result, aggregate, methodName); found && typ.Name == "func" {
+				return
+			}
+		}
+		enumConstructor := aggregate.Aggregate.Kind == syntax.BlockEnum && (strings.HasPrefix(methodName, "new") || strings.HasPrefix(methodName, "_new"))
+		for _, index := range aggregate.Aggregate.Members {
+			if index < 0 || index >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[index]
+			if !enumConstructor && member.Function != nil && commandIsClassMethod(file, member) && file.Text(member.Function.Name) == methodName {
+				return
+			}
+		}
+	}
+
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1325", Message: `Method "` + methodName + `" not found in class "` + className + `"`, Span: memberSpan,
+	})
 }
 
 func syntaxDiagnosticOverlaps(diagnostics []syntax.Diagnostic, span syntax.Span) bool {
@@ -5237,7 +5470,7 @@ func appendProtectedMethodAccessDiagnostic(result *FileAnalysis, scope *Scope, m
 			}
 			classMethod = commandIsClassMethod(file, method)
 			if current != class && classMethod {
-				return
+				continue
 			}
 			owner = current
 			break
