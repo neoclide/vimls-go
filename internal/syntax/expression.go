@@ -1441,6 +1441,8 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 	parts := splitTopLevel(p.source, openOffset+1, closeOffset, ',')
 	commaDiagnostic := false
 	defaultDiagnostic := false
+	seenParameters := make(map[string]struct{})
+	duplicateParameter := false
 	for index, part := range parts {
 		if index+1 < len(parts) && !commaDiagnostic {
 			comma := part.End
@@ -1466,6 +1468,12 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 		nameEnd := scanWord(p.source, start, end)
 		parameter.Name = Span{Start: p.base + start, End: p.base + nameEnd}
 		lambda.Children = append(lambda.Children, &Expression{Kind: ExpressionIdentifier, Span: parameter.Name, Value: p.source[start:nameEnd]})
+		if !duplicateParameter {
+			if diagnostic, duplicate := duplicateParameterNameDiagnostic(seenParameters, p.source[start:nameEnd], parameter.Name, true); duplicate {
+				p.diagnostics = append(p.diagnostics, diagnostic)
+				duplicateParameter = true
+			}
+		}
 		equals := -1
 		if assignment := findAssignment(p.source[nameEnd:end]); assignment.Start >= 0 && assignment.End == assignment.Start+1 {
 			equals = nameEnd + assignment.Start
@@ -2489,6 +2497,8 @@ func (p *expressionParser) parseDictionaryKey() *Expression {
 func (p *expressionParser) parseLegacyLambda(open expressionToken, arrowOffset int) *Expression {
 	openOffset := open.span.Start - p.base
 	lambda := &Expression{Kind: ExpressionLambda, Operator: Span{Start: p.base + arrowOffset, End: p.base + arrowOffset + 2}}
+	seenParameters := make(map[string]struct{})
+	duplicateParameter := false
 	for _, part := range splitTopLevel(p.source, openOffset+1, arrowOffset, ',') {
 		start := skipExpressionSpace(p.source, part.Start)
 		end := trimExpressionSpaceEnd(p.source, start, part.End)
@@ -2499,6 +2509,12 @@ func (p *expressionParser) parseLegacyLambda(open expressionToken, arrowOffset i
 		parameter := Parameter{Name: Span{Start: p.base + start, End: p.base + nameEnd}}
 		lambda.Parameters = append(lambda.Parameters, parameter)
 		lambda.Children = append(lambda.Children, &Expression{Kind: ExpressionIdentifier, Span: parameter.Name, Value: p.source[start:nameEnd]})
+		if !duplicateParameter {
+			if diagnostic, duplicate := duplicateParameterNameDiagnostic(seenParameters, p.source[start:nameEnd], parameter.Name, false); duplicate {
+				p.diagnostics = append(p.diagnostics, diagnostic)
+				duplicateParameter = true
+			}
+		}
 	}
 	arrowEnd := p.base + arrowOffset + 2
 	for p.current().kind != expressionEOF && p.current().span.End <= arrowEnd {

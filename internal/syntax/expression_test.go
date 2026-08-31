@@ -677,6 +677,89 @@ func TestVim9TypedLambda(t *testing.T) {
 	}
 }
 
+func TestDuplicateLambdaArgumentNameDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "legacy lambda duplicate argument",
+			source: "let value = {a, a -> a}\nlet after = 1\n",
+		},
+		{
+			name:   "vim9 lambda typed duplicate argument",
+			source: "vim9script\nvar value = (a: number, a: number) => a\nvar after = 1\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E853" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+			if got[0].Message != "Duplicate argument name: a" || file.Text(got[0].Span) != "a" {
+				t.Fatalf("E853 diagnostic = %#v", got)
+			}
+			var lambda *Expression
+			for index := range file.Commands {
+				declaration := file.Commands[index].Declaration
+				if declaration != nil && declaration.Initializer != nil && declaration.Initializer.Kind == ExpressionLambda {
+					lambda = declaration.Initializer
+					break
+				}
+			}
+			if lambda == nil || len(lambda.Parameters) != 2 || file.Text(lambda.Parameters[1].Name) != "a" {
+				t.Fatalf("lambda commands = %#v", file.Commands)
+			}
+		})
+	}
+
+	expression, diagnostics := (Vim9ExpressionParser{}).Parse("(_, _) => 1")
+	if len(diagnostics) != 0 || expression.Kind != ExpressionLambda {
+		t.Fatalf("expression = %#v, diagnostics = %#v", expression, diagnostics)
+	}
+	if expression.Parameters == nil || len(expression.Parameters) != 2 {
+		t.Fatalf("lambda parameters = %#v", expression.Parameters)
+	}
+
+	file := Parse("vim9script\nfunction F(a, a)\nendfunction\nvar x = (a, a) => a\n")
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E853" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("cross scope diagnostics = %#v", file.Diagnostics)
+	}
+	wantStarts := make(map[int]bool)
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Function != nil && len(command.Function.Parameters) == 2 {
+			wantStarts[command.Function.Parameters[1].Name.Start] = true
+		}
+		if command.Declaration != nil && command.Declaration.Initializer != nil && len(command.Declaration.Initializer.Parameters) == 2 {
+			wantStarts[command.Declaration.Initializer.Parameters[1].Name.Start] = true
+		}
+	}
+	for _, diagnostic := range got {
+		if diagnostic.Message != "Duplicate argument name: a" || file.Text(diagnostic.Span) != "a" {
+			t.Fatalf("cross scope diagnostic = %#v", got)
+		}
+		if !wantStarts[diagnostic.Span.Start] {
+			t.Fatalf("cross scope diagnostic spans = %#v, want starts %#v", got, wantStarts)
+		}
+		delete(wantStarts, diagnostic.Span.Start)
+	}
+	if len(wantStarts) != 0 {
+		t.Fatalf("missing cross scope diagnostic starts: %#v", wantStarts)
+	}
+}
+
 func TestVim9LambdaMissingReturnType(t *testing.T) {
 	source := "(): => 123"
 	expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)

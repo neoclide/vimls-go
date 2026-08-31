@@ -244,11 +244,20 @@ func parseFunctionSignature(file *File, command *Command) {
 	seenDefault := false
 	parameterOrderInvalid := false
 	variadicSeen := false
+	seenParameters := make(map[string]struct{})
+	duplicateParameter := false
 	for _, part := range splitTopLevel(source, offset+1, close, ',') {
 		diagnosticsStart := len(file.Diagnostics)
 		parameter := parseParameter(file, command, source, part)
 		if parameter != nil {
 			function.Parameters = append(function.Parameters, *parameter)
+			if !duplicateParameter && parameter.Target == nil && len(file.Diagnostics) == diagnosticsStart {
+				name := file.Text(parameter.Name)
+				if diagnostic, duplicate := duplicateParameterNameDiagnostic(seenParameters, name, parameter.Name, defSignature); duplicate {
+					file.Diagnostics = append(file.Diagnostics, diagnostic)
+					duplicateParameter = true
+				}
+			}
 			if len(file.Diagnostics) == diagnosticsStart && !parameterOrderInvalid && !variadicSeen {
 				switch {
 				case parameter.Variadic:
@@ -389,6 +398,25 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 	}
 	command.Function = function
+}
+
+func duplicateParameterNameDiagnostic(seen map[string]struct{}, name string, span Span, allowPlaceholder bool) (Diagnostic, bool) {
+	if name == "" || allowPlaceholder && name == "_" {
+		return Diagnostic{}, false
+	}
+	if !isASCIIIdentifierStart(name[0]) {
+		return Diagnostic{}, false
+	}
+	for index := 1; index < len(name); index++ {
+		if !isASCIIIdentifierContinue(name[index]) {
+			return Diagnostic{}, false
+		}
+	}
+	if _, exists := seen[name]; exists {
+		return Diagnostic{Code: "vim/E853", Message: "Duplicate argument name: " + name, Span: span}, true
+	}
+	seen[name] = struct{}{}
+	return Diagnostic{}, false
 }
 
 // nestedGenericTypeParameterDiagnostic reports the Vim rule that a nested

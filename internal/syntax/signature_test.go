@@ -205,6 +205,93 @@ func TestFunctionArgumentOrderDiagnostic(t *testing.T) {
 	}
 }
 
+func TestDuplicateFunctionArgumentNameDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+		argCount                    int
+	}{
+		{
+			name:     "legacy duplicate argument",
+			source:   "function Bad(a, a)\nendfunction\n",
+			message:  "Duplicate argument name: a",
+			span:     "a",
+			argCount: 2,
+		},
+		{
+			name:     "vim9 duplicate argument",
+			source:   "vim9script\ndef Bad(a: number, a: number)\nenddef\n",
+			message:  "Duplicate argument name: a",
+			span:     "a",
+			argCount: 2,
+		},
+		{
+			name:     "legacy duplicate underscore arguments",
+			source:   "function Bad(_, _)\nendfunction\n",
+			message:  "Duplicate argument name: _",
+			span:     "_",
+			argCount: 2,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			var function *Function
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E853" {
+					got = append(got, diagnostic)
+				}
+			}
+			for _, command := range file.Commands {
+				if command.Function != nil {
+					function = command.Function
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E853 diagnostics = %#v", got)
+			}
+			if function == nil || len(function.Parameters) != test.argCount || file.Text(function.Parameters[1].Name) != test.span {
+				t.Fatalf("function AST = %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Bad(a, a, a)\nendfunction\n",
+		"vim9script\ndef Good(_, _)\nenddef\n",
+	} {
+		file := Parse(source)
+		if source == "function Bad(a, a, a)\nendfunction\n" {
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E853" || file.Text(file.Diagnostics[0].Span) != "a" {
+				t.Fatalf("legacy triple duplicate diagnostics = %#v", file.Diagnostics)
+			}
+			continue
+		}
+		if hasDiagnostic(file, "vim/E853") {
+			t.Fatalf("guard unexpectedly received E853: %#v", file.Diagnostics)
+		}
+	}
+
+	file := Parse("function Outer(a)\n  function Inner(a, a)\n  endfunction\nendfunction\n")
+	var got []Diagnostic
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E853" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("nested function diagnostics = %#v", file.Diagnostics)
+	}
+	var innerFunction *Function
+	for _, command := range file.Commands {
+		if command.Function != nil && file.Text(command.Function.Name) == "Inner" {
+			innerFunction = command.Function
+		}
+	}
+	if innerFunction == nil || len(innerFunction.Parameters) != 2 || file.Text(got[0].Span) != file.Text(innerFunction.Parameters[1].Name) || got[0].Span.Start != innerFunction.Parameters[1].Name.Start {
+		t.Fatalf("inner duplicate diagnostic/span = %#v, function = %#v", got, innerFunction)
+	}
+}
+
 func TestFunctionClosureDisallowedAtTopLevelDiagnostic(t *testing.T) {
 	for _, test := range []struct {
 		name, source, message, span string
