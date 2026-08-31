@@ -5883,7 +5883,7 @@ func needsVim9CommandContinuation(file *File, commandIndex int, state vim9Contin
 }
 
 func usesVim9Continuation(command Command) bool {
-	return command.Dialect == Vim9 || command.Canonical == "def"
+	return command.logical != nil && (command.Dialect == Vim9 || command.Canonical == "def")
 }
 
 func completeVim9TypedDeclaration(command Command, source string) bool {

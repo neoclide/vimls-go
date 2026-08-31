@@ -1,0 +1,5 @@
+go test fuzz v1
+string("def000000\n0000000")
+uint64(95)
+uint64(27)
+string("%")

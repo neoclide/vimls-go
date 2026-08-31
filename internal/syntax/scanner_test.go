@@ -240,6 +240,16 @@ func TestUnknownUserCommandsAndLegacyContinuationRecover(t *testing.T) {
 	}
 }
 
+func TestMalformedDefDoesNotBlockFollowingLine(t *testing.T) {
+	file := Parse("def00%\n0000000")
+	if len(file.Commands) < 2 {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	if got := file.Text(file.Commands[len(file.Commands)-1].Span); got != "0000000" {
+		t.Fatalf("following command span = %q, commands = %#v", got, file.Commands)
+	}
+}
+
 func TestOfficialVim9CompatibilityGuardTriggersVim9(t *testing.T) {
 	// v9.2.1015 runtime/doc/vim9.txt *vim9-mix* and
 	// src/testdir/test_vim9_script.vim Test_vim9script_feature.
