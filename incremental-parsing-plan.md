@@ -1,6 +1,6 @@
 # 基于 gopls 模型的增量编辑实施计划
 
-> 状态：I0-I5 实现完成，待最终验证与性能证据。
+> 状态：I0-I5 已完成；2026-09-01 的最终验证与性能证据见第 8 节。
 >
 > 本计划以仓库根目录的 `gopls-incremental-parsing.md` 为设计依据。
 > 2026-08-31 已通过提交 `038c4a0` 撤销旧的局部 AST `Reparse` 方案。
@@ -544,6 +544,39 @@ go test -mod=readonly ./internal/server -run '^$' \
   -benchmem -benchtime=100x -count=1
 ```
 
+### I5 最终证据（2026-09-01）
+
+环境：`go1.26.5 darwin/amd64`，Intel Core i7-9750H，代码提交 `2620c99`。
+
+- `go test -count=1 -mod=readonly ./internal/text ./internal/workspace ./internal/server`
+  通过。
+- `go test -count=1 -mod=readonly -race ./internal/text ./internal/workspace ./internal/server`
+  通过。
+- `go vet ./internal/text ./internal/workspace ./internal/server` 通过。
+- `FuzzApplyChanges` 按上面的命令运行 30 秒，通过 2,877,740 次执行；没有 panic、hang
+  或失败输入。
+- Terra high readonly QA 已审查 immutable parser tree、锁顺序、stale publication barriers、
+  cache/source 对应和 deterministic lifecycle interleavings；发现的测试夹具锁与五步编辑断言
+  缺口均已在最终性能测试前修复并重新验证。
+
+四项 benchmark 都使用 `-benchmem -benchtime=100x -count=1`，即每项恰好 100 次操作，
+构造和 preflight 位于计时区外：
+
+| Benchmark | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `BenchmarkContentID` | 212,461 | 65,590 | 1 |
+| `BenchmarkParseCacheHit` | 38.36 | 0 | 0 |
+| `BenchmarkParseCacheChangedFile` | 5,421,663 | 4,316,601 | 20,639 |
+| `BenchmarkWorkspaceRebuild` | 58,246,528 | 29,297,375 | 119,160 |
+
+这些数据只说明每次操作的分配压力。cache hit 路径没有分配；64 KiB content identity
+构造分配约一个 source 大小；变化文件的完整解析和 32 文件 workspace full rebuild 有明显
+分配成本。`BenchmarkParseCacheChangedFile` 是 changed immutable source 的完整、不可安装解析，
+不是端到端 `didChange`；`BenchmarkWorkspaceRebuild` 是同步 full rebuild，不包含 watcher 调度。
+因此 `B/op` 不能证明 retained heap、峰值 RSS 或内存泄漏。当前基线也没有隔离出 parser 是
+真实 workspace 的主要成本，第 10.1 节继续保持后置，需 profile 和代表性 workspace 复现后
+再立项。
+
 ## 9. 必测矩阵
 
 ### 文本合成
@@ -647,6 +680,6 @@ gopls 使用 package key 和 typerefs 阻止无关反向依赖继续失效。vim
 - [x] stale document lifetime/snapshot/source 结果不能覆盖当前 URI parser cache。
 - [x] stale document/config/workspace 结果不能替换 facts 或发布 diagnostics；纯 parser
       cache 不因 config/index/graph 变化而失效。
-- [ ] text、workspace 和 server 的 focused correctness/race/fuzz gates 通过。
-- [ ] 全部代码完成后才记录 content identity、cache hit 和 full parse 性能。
+- [x] text、workspace 和 server 的 focused correctness/race/fuzz gates 通过。
+- [x] 全部代码完成后才记录 content identity、cache hit 和 full parse 性能。
 - [x] 文档只描述已经实现的事实。
