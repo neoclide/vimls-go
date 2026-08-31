@@ -19,10 +19,18 @@ func parseFunctionSignature(file *File, command *Command) {
 	}
 	offset := skipSyntaxSpace(source, 0, len(source))
 	nameStart := offset
-	if vim9Context && strings.HasPrefix(source[nameStart:], "<SID>:") {
-		function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameStart + len("<SID>:")}}
+	if strings.HasPrefix(source[nameStart:], "<SID>:") {
+		nameEnd := nameStart + len("<SID>:")
+		for nameEnd < len(source) {
+			r, size := utf8.DecodeRuneInString(source[nameEnd:])
+			if r == '(' || unicode.IsSpace(r) {
+				break
+			}
+			nameEnd += size
+		}
+		function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + nameEnd}}
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
-			Code: "vim/E884", Message: "function name cannot contain a colon", Span: function.Name,
+			Code: "vim/E884", Message: "Function name cannot contain a colon: " + file.Text(function.Name), Span: function.Name,
 		})
 		command.Function = function
 		return
@@ -75,6 +83,17 @@ func parseFunctionSignature(file *File, command *Command) {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1268", Message: "Cannot use s: in Vim9 script: " + name, Span: function.Name,
 		})
+	}
+	unqualifiedName := name
+	if strings.HasPrefix(unqualifiedName, "s:") || strings.HasPrefix(unqualifiedName, "g:") {
+		unqualifiedName = unqualifiedName[2:]
+	}
+	if !nestedDefNamespace && !vim9ScriptNamespace && strings.Contains(unqualifiedName, ":") {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E884", Message: "Function name cannot contain a colon: " + name, Span: function.Name,
+		})
+		command.Function = function
+		return
 	}
 	dictFunction := vim9Context && strings.Contains(name, ".")
 	if dictFunction && !vim9ScriptNamespace {

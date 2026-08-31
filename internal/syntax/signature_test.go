@@ -395,6 +395,38 @@ func TestLegacyFunctionNameCapitalDiagnostic(t *testing.T) {
 	}
 }
 
+func TestFunctionNameColonDiagnostic(t *testing.T) {
+	for _, test := range []struct{ source, name string }{
+		{"function b:test()\nendfunction\n", "b:test"},
+		{"function s:Good:bad()\nendfunction\n", "s:Good:bad"},
+		{"vim9script\ndef <SID>: list<string>\n", "<SID>:"},
+		{"vim9script\ndef <SID>:Name()\nenddef\n", "<SID>:Name"},
+		{"vim9script\ndef b:Name()\nenddef\n", "b:Name"},
+	} {
+		file := Parse(test.source)
+		var got []Diagnostic
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E884" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != "Function name cannot contain a colon: "+test.name || file.Text(got[0].Span) != test.name {
+			t.Fatalf("E884 diagnostics = %#v\n%s", file.Diagnostics, test.source)
+		}
+	}
+
+	for _, source := range []string{
+		"function s:local()\nendfunction\n",
+		"function! g:Global()\nendfunction\n",
+		"vim9script\ndef s:Name()\nenddef\n",
+		"vim9script\ndef Outer()\n  def b:Nested()\n  enddef\nenddef\n",
+	} {
+		if file := Parse(source); hasDiagnostic(file, "vim/E884") {
+			t.Fatalf("guard unexpectedly received E884: %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestVim9VariadicDefaultDiagnostic(t *testing.T) {
 	tests := []struct {
 		name, source, span, defaultText string
