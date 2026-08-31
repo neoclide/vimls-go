@@ -3098,9 +3098,9 @@ func TestAnalyzeE1175NonEmptyStringArgumentDiagnostics(t *testing.T) {
 		{"exists", "vim9script\nexists('')\n", "''", 1},
 		{"mkdir method", "vim9script\n''->mkdir()\n", "''", 1},
 		{"readfile", "vim9script\nreadfile('')\n", "''", 1},
-		{"gettext legacy", "gettext('')\n", "''", 1},
-		{"bindtextdomain second", "bindtextdomain('package', '')\n", "''", 2},
-		{"ngettext second", "ngettext('one', '', 2)\n", "''", 2},
+		{"gettext legacy", "call gettext('')\n", "''", 1},
+		{"bindtextdomain second", "call bindtextdomain('package', '')\n", "''", 2},
+		{"ngettext second", "call ngettext('one', '', 2)\n", "''", 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(test.source)
