@@ -66,6 +66,8 @@ type sourceParser struct {
 	vim9ContinuationState vim9ContinuationScan
 	lambdaCloseCommand    int
 	lambdaCloseOffset     int
+
+	scannerDiagnostics int
 }
 
 // parseSourceRange parses source starting at a physical source boundary. The
@@ -181,6 +183,14 @@ func (p *sourceParser) applyCommandState(before int) (int, int) {
 }
 
 func (p *sourceParser) parse() *File {
+	p.scan()
+	p.structure()
+	p.details()
+	p.finish()
+	return p.file
+}
+
+func (p *sourceParser) scan() {
 	file, source := p.file, p.source
 	if p.start == 0 && strings.HasPrefix(source, "\ufeff") {
 		p.offset = len("\ufeff")
@@ -437,13 +447,21 @@ func (p *sourceParser) parse() *File {
 	}
 	coalesceLegacyEmbeddedBlocks(file)
 	coalesceCollectedCommandBlocks(file, len(file.Source))
-	scannerDiagnostics := len(file.Diagnostics)
+	p.scannerDiagnostics = len(file.Diagnostics)
+}
+
+func (p *sourceParser) structure() {
+	file := p.file
 	buildBlocks(file)
-	if truncateAfterDirectFinish(file, scannerDiagnostics) {
+	if truncateAfterDirectFinish(file, p.scannerDiagnostics) {
 		buildBlocks(file)
 	}
 	diagnoseCollectedBlockBarSeparators(file, true)
 	normalizeVim9CallDiagnostics(file)
+}
+
+func (p *sourceParser) details() {
+	file := p.file
 	for index := range file.Commands {
 		if index+1 < len(file.Commands) {
 			_, closing := closingBlock(&file.Commands[index+1])
@@ -476,6 +494,10 @@ func (p *sourceParser) parse() *File {
 			}
 		}
 	}
+}
+
+func (p *sourceParser) finish() {
+	file := p.file
 	diagnoseConcreteClassAbstractMembers(file)
 	suppressClassBodyCommandDiagnostics(file)
 	buildAggregateMembers(file)
@@ -492,7 +514,6 @@ func (p *sourceParser) parse() *File {
 	if p.start == 0 {
 		file.incremental = buildIncrementalMetadata(file)
 	}
-	return file
 }
 
 func diagnoseVim9ScriptNamespaces(file *File) {
