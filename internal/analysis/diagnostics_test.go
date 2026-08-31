@@ -3566,6 +3566,41 @@ func TestAnalyzeE741ImmediateLockedValueDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE719DictionarySliceDiagnostics(t *testing.T) {
+	for _, test := range []struct{ source, span string }{
+		{"echo {'one': 1}[0 : 1]\n", "{'one': 1}[0 : 1]"},
+		{"echo v:event[0 : 1]\n", "v:event[0 : 1]"},
+		{"vim9script\nvar dictionary = {one: 1}\necho dictionary[0 : 1]\n", "dictionary[0 : 1]"},
+		{"vim9script\ndef F(dictionary: dict<any>)\n  echo dictionary[0 : 1]\nenddef\n", "dictionary[0 : 1]"},
+	} {
+		file := syntax.Parse(test.source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E719" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != "Cannot slice a Dictionary" || file.Text(got[0].Span) != test.span {
+			t.Fatalf("E719 diagnostics = %#v", got)
+		}
+	}
+
+	for _, source := range []string{
+		"let dictionary = {'one': 1}\nlet dictionary = []\necho dictionary[0 : 1]\n",
+		"echo DynamicValue()[0 : 1]\n",
+		"echo [1, 2][0 : 1]\n",
+		"vim9script\ndef F()\n  var dictionary = {one: 1}\n  dictionary[0 : 1] = {}\nenddef\n",
+		"vim9script\ndef F()\n  var dictionary = {one: 1}\n  unlet dictionary[0 : 1]\nenddef\n",
+		"echo {'one': 1}[0 :\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E719" {
+				t.Fatalf("guard unexpectedly received E719: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

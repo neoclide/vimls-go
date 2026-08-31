@@ -5397,6 +5397,33 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					})
 				}
 			}
+			if expression.Kind == syntax.ExpressionSlice && len(expression.Children) > 0 && !syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
+				writeTarget := false
+				for _, root := range command.Expressions {
+					if root != nil && root.Kind == syntax.ExpressionAssignment && len(root.Children) > 0 && root.Children[0] == expression {
+						writeTarget = true
+						break
+					}
+				}
+				receiver := expression.Children[0]
+				for receiver != nil && receiver.Kind == syntax.ExpressionParenthesized && len(receiver.Children) == 1 {
+					receiver = receiver.Children[0]
+				}
+				dictionary := receiver != nil && receiver.Kind == syntax.ExpressionDictionary
+				if receiver != nil && receiver.Kind == syntax.ExpressionIdentifier {
+					if command.Dialect == syntax.Vim9 && resolvedExpressionType(result, expressionScope, receiver).Name == "dict" {
+						dictionary = true
+					} else if variable, ok := vimdata.LookupVariable(receiver.Value); ok && builtinVariableValueType(variable).Name == "dict" {
+						dictionary = true
+					}
+				}
+				vim9Unlet := command.Canonical == "unlet" && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)
+				if dictionary && !writeTarget && !vim9Unlet {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E719", Message: "Cannot slice a Dictionary", Span: expression.Span,
+					})
+				}
+			}
 			if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 &&
 				command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) && !expressionContainsMissing(expression) {
 				receiver := expression.Children[0]
