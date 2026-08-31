@@ -26,16 +26,47 @@
 10/100/1024 KiB 的基础 benchmark 入口。
 
 - [x] 让 AST 反射覆盖检查遍历 map；新增 pointer/slice/map 字段遗漏 clone 时测试必须失败。
-- [ ] 把计划第 13 节的文本、方言、command boundary、多行 owner、structure、恢复和
-  生命周期编辑矩阵固化成后续 I3-I7 共用的数据表。
+- [x] 把计划第 13 节的文本、方言、command boundary、多行 owner、structure 和恢复
+  编辑矩阵固化成后续 I3-I7 共用的数据表。
+- [x] 登记生命周期/并发场景、已有测试证据和 I6 缺口；I0 不修改被禁止的
+  `internal/server/`，也不把登记表冒充成可执行 server 矩阵。
 - [x] 在固定 runner 上记录 Legacy/Vim9、10/100/1024 KiB full Parse 的五次原始样本和
   median：`ns/op`、`B/op`、`allocs/op`。
 - [x] 记录 Go 版本、OS/CPU、`GOMAXPROCS` 和 corpus 生成方式。
-- [ ] 确认 I1 完成后 full Parse 的 time 回退不超过 15%，allocation 回退不超过 20%。
 
-完成证据：I0 测试文件、五次 benchmark 原始输出和基线摘要。
+I1 改动后的 full Parse 回归门槛属于 I1b 验收，继续保留在 I1b，不作为 I0 基线任务的
+前置条件。
 
-### I0 full Parse 基线（`e1e642a`）
+完成证据：I0 测试文件、五次 benchmark 原始输出、基线摘要和下面的生命周期证据映射。
+
+### I0 共享矩阵证据
+
+| 分组 | 共用数据表 | 提交 |
+| --- | --- | --- |
+| 文本和位置 | `incrementalTextPositionGroups` | `e9a8f37` |
+| 方言和 scanner state | `incrementalDialectStateScenarios` | `f21a82c` |
+| command boundary 和 lookahead | `incrementalCommandBoundaryScenarios` | `58b4d81` |
+| 多行 owner | `incrementalHeredocOwnerScenarios`、`incrementalTextBodyOwnerScenarios`、`incrementalEmbeddedOwnerScenarios` | `f5431f2`、`b95a323`、`8a288ad` |
+| structure state | `incrementalStructureStateScenarios` | `4d42bc8` |
+| 错误恢复 | `incrementalRecoveryScenarios` | `f3d6c92` |
+
+这些表已经由对应的 `TestIncrementalEditMatrix*`、`TestReparse*Matrix` 和边界/恢复测试
+消费。当前保守 `Reparse` 会执行差分检查或安全回退；I0 的完成不表示 I3-I5 的复用与
+收敛门槛已经完成。
+
+生命周期行跨 syntax/server package，I0 只登记共用场景和已有证据；缺少的端到端 cache、
+revision 和 publish 断言仍由 I6 完成。
+
+| 生命周期场景 | 已有证据 | 后续留项 |
+| --- | --- | --- |
+| analysis 期间 didChange | `TestServerDocumentHandlersCancelStaleAnalysis` | I6 增加后台 analysis 端到端回归 |
+| 多个中间 revision | `TestAnalysisQueueCoalescesRapidDocumentChanges` | I6 明确证明每个旧 revision 不 cache、不 publish |
+| didSave whole content | `TestServerDocumentSynchronization` | I6 补 parser cache/revision 回归 |
+| close/reopen、重复 didOpen | `TestServerDocumentParserCacheDoesNotCrossCloseReopen`、`TestServerStaleAnalysisCannotRestoreClosedParserCache`、`TestServerRepeatedDocumentOpenReplacesParserCache` | 已有生命周期 cache 隔离证据 |
+| target/config/graph revision | `TestTargetVersionCompatibilityDiagnosticsReanalyze`、`TestGraphRevisionRejectsStaleDiagnostics`、`TestWorkspaceImportGraphTracksOpenDocumentChanges` | I6 补齐组合后的 cache/publish barrier 端到端证据 |
+| 同一旧 `File` 并发 Reparse | `TestReparseConcurrentReaders` | I5/I7 执行最终 race gate |
+
+### I0 full Parse 基线（`7ac3ac4`）
 
 Runner：Go `go1.26.5 darwin/amd64`；Darwin `25.5.0`；Intel Core i7-9750H
 2.60 GHz；`GOMAXPROCS` 未显式设置，运行时使用 12 个逻辑 CPU。benchmark 在计时区外
@@ -163,6 +194,8 @@ identity-aware clone/rebase 与 alias tests 已存在；structure state 当前�
 纯 parser cache、配置诊断局部副本、close/reopen、重复 DidOpen、超大文件和主要同步
 请求路径已实现。
 
+- [ ] 把 I0 登记的生命周期行落成可执行的 cache/revision/publish 矩阵；已有单项测试
+  可以复用，但不能只引用测试名称代替组合状态断言。
 - [ ] 增加 didSave whole-content replacement 的 cache/revision 回归。
 - [ ] parser 在 server 锁外运行；只在锁下取得旧 cache pointer 和发布结果。
 - [ ] canceled、stale、config-old、graph-old 结果可以完成，但不能 cache 或 publish。
