@@ -760,6 +760,58 @@ func TestDuplicateLambdaArgumentNameDiagnostic(t *testing.T) {
 	}
 }
 
+func TestTooManyFunctionArgumentsDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "legacy call",
+			source: "let value = min(" + strings.TrimSuffix(strings.Repeat("1,", 21), ",") + ")\nlet after = 1\n",
+		},
+		{
+			name:   "Vim9 call",
+			source: "vim9script\nvar value = min(" + strings.TrimSuffix(strings.Repeat("1, ", 21), ", ") + ")\nvar after = 1\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			var call *Expression
+			declarations := 0
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E740" {
+					got = append(got, diagnostic)
+				}
+			}
+			for index := range file.Commands {
+				declaration := file.Commands[index].Declaration
+				if declaration != nil {
+					declarations++
+					if declaration.Initializer != nil && declaration.Initializer.Kind == ExpressionCall {
+						call = declaration.Initializer
+					}
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Too many arguments for function min" || file.Text(got[0].Span) != "min" {
+				t.Fatalf("E740 diagnostics = %#v", file.Diagnostics)
+			}
+			if call == nil || len(call.Children) != 22 || declarations != 2 {
+				t.Fatalf("call or following declaration not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	valid := Parse("let value = min(" + strings.TrimSuffix(strings.Repeat("1,", 20), ",") + ")\n")
+	if hasDiagnostic(valid, "vim/E740") {
+		t.Fatalf("20-argument call unexpectedly received E740: %#v", valid.Diagnostics)
+	}
+
+	malformed := Parse("vim9script\nvar value = min(" + strings.Repeat("1, ", 21) + ")\n")
+	if hasDiagnostic(malformed, "vim/E740") {
+		t.Fatalf("malformed call unexpectedly received E740: %#v", malformed.Diagnostics)
+	}
+}
+
 func TestVim9LambdaMissingReturnType(t *testing.T) {
 	source := "(): => 123"
 	expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)

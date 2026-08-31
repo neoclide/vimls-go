@@ -1080,6 +1080,7 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 	token := p.current()
 	switch token.text {
 	case "(":
+		diagnosticsStart := len(p.diagnostics)
 		p.advance()
 		if p.dialect == Vim9 && p.lambdaBody && p.current().text == "]" {
 			// A call opener in a lambda body can be the malformed endpoint of an
@@ -1154,7 +1155,14 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 			fallback = children[len(children)-1].Span.End
 		}
 		end := p.consumeClosing(")", fallback)
-		return &Expression{Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: end}, Children: children}
+		call := &Expression{Kind: ExpressionCall, Span: Span{Start: left.Span.Start, End: end}, Children: children}
+		if len(children) > 21 && len(p.diagnostics) == diagnosticsStart && left.Kind == ExpressionIdentifier {
+			name := p.source[left.Span.Start-p.base : left.Span.End-p.base]
+			p.diagnostics = append(p.diagnostics, Diagnostic{
+				Code: "vim/E740", Message: "Too many arguments for function " + name, Span: left.Span,
+			})
+		}
+		return call
 	case "[":
 		p.advance()
 		children := []*Expression{left}
