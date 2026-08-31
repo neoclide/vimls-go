@@ -5397,6 +5397,16 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					})
 				}
 			}
+			if expression.Kind == syntax.ExpressionIndex && len(expression.Children) >= 2 &&
+				!expressionContainsMissing(expression) && !syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
+				receiver := expression.Children[0]
+				receiverType := resolvedExpressionType(result, expressionScope, receiver)
+				if receiverType.Name == "func" || receiverType.Name == "partial" {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E695", Message: "Cannot index a Funcref", Span: receiver.Span,
+					})
+				}
+			}
 			if expression.Kind == syntax.ExpressionSlice && len(expression.Children) > 0 && !syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
 				writeTarget := false
 				for _, root := range command.Expressions {

@@ -7315,6 +7315,43 @@ func TestAnalyzeCompiledIndexReceiverDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE695CannotIndexFuncref(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+	}{
+		{"legacy direct function", "echo function('min')[0]\n", "function('min')"},
+		{"Vim9 direct function", "vim9script\necho function('min')[0]\n", "function('min')"},
+		{"typed function", "vim9script\nvar Callback: func\necho Callback[0]\n", "Callback"},
+		{"typed partial", "vim9script\nvar Callback: func(...any): any\nvar Bound = function(Callback, [1])\necho Bound[0]\n", "Bound"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E695" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot index a Funcref" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E695 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar value: any\necho value[0]\n",
+		"echo Unknown()[0]\n",
+		"vim9script\necho function('min')[0 : 1]\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E695" {
+				t.Fatalf("uncertain receiver reported E695: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
