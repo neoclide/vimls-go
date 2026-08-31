@@ -179,7 +179,7 @@ func (s *Server) importMemberCompletions(documentURI string, file *syntax.File, 
 	if open {
 		targetFile := parsed.file
 		if targetFile == nil || parsed.revision != snapshot.Revision() {
-			targetFile = syntax.Parse(snapshot.Text())
+			targetFile = s.parseSnapshot(snapshot)
 		}
 		facts = workspace.CollectSymbolFacts(targetPath, targetFile)
 	} else {

@@ -390,6 +390,12 @@ func TestServerPublishesVersionedSemanticDiagnosticsAndClearsThem(t *testing.T) 
 		diagnostic.Range != (protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 5}}) {
 		t.Fatalf("semantic diagnostic = %#v", diagnostic)
 	}
+	instance.publishMu.Lock()
+	cached := instance.parsed[documentURI.String()].file
+	instance.publishMu.Unlock()
+	if cached == nil || len(cached.Diagnostics) != 0 {
+		t.Fatalf("parser cache contains analysis diagnostics: %#v", cached)
+	}
 
 	_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
@@ -743,10 +749,22 @@ func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {
 	if len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vimls/target-version") {
 		t.Fatalf("default-target diagnostics = %#v", first)
 	}
+	instance.publishMu.Lock()
+	cached := instance.parsed[documentURI.String()].file
+	instance.publishMu.Unlock()
+	if cached == nil || len(cached.Diagnostics) != 0 {
+		t.Fatalf("parser cache contains compatibility diagnostics: %#v", cached)
+	}
 	_ = instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: []byte(`{"targetVersion":"9.2.1015"}`)})
 	cleared := waitForDiagnostics(t, client.published)
 	if len(cleared.Diagnostics) != 0 {
 		t.Fatalf("updated-target diagnostics = %#v", cleared)
+	}
+	instance.publishMu.Lock()
+	reused := instance.parsed[documentURI.String()].file
+	instance.publishMu.Unlock()
+	if reused != cached {
+		t.Fatal("configuration-only analysis replaced the syntax pointer")
 	}
 }
 

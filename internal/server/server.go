@@ -471,6 +471,7 @@ func (s *Server) Shutdown(context.Context) error {
 func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocumentParams) error {
 	document := params.TextDocument
 	s.publishMu.Lock()
+	delete(s.parsed, document.URI.String())
 	snapshot := s.documents.Open(document.URI.String(), document.Version, document.Text)
 	s.removeWorkspaceURI(snapshot.URI())
 	s.publishMu.Unlock()
@@ -614,7 +615,7 @@ func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSy
 	}
 	file := parsed.file
 	if file == nil || parsed.revision != snapshot.Revision() {
-		file = syntax.Parse(snapshot.Text())
+		file = s.parseSnapshot(snapshot)
 	}
 	s.mu.Lock()
 	encoding := s.encoding
@@ -848,6 +849,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		target, _ = ParseTargetVersion(MaximumTargetVersion)
 	}
 	var file *syntax.File
+	var parserFile *syntax.File
 	var fileAnalysis *analysis.FileAnalysis
 	if work.Snapshot.ByteLen() > maxFileBytes {
 		file = &syntax.File{
@@ -857,8 +859,11 @@ func (s *Server) analyzeDocument(documentURI string) {
 			}},
 		}
 	} else {
-		file = syntax.Parse(work.Snapshot.Text())
-		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
+		parserFile = s.parseSnapshot(work.Snapshot)
+		analysisFile := *parserFile
+		analysisFile.Diagnostics = append([]syntax.Diagnostic(nil), parserFile.Diagnostics...)
+		analysisFile.Diagnostics = append(analysisFile.Diagnostics, syntax.CompatibilityDiagnostics(parserFile, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
+		file = &analysisFile
 		fileAnalysis = analysis.Analyze(file)
 		versionedAnalysis := *fileAnalysis
 		versionedAnalysis.Diagnostics = analysisDiagnosticsForTarget(file, fileAnalysis.Diagnostics, target)
@@ -871,8 +876,10 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if work.Context.Err() != nil {
 		return
 	}
-	if !s.prepareSyntax(work, file) {
-		return
+	if work.Snapshot.ByteLen() <= maxFileBytes {
+		if !s.prepareSyntax(work, parserFile) {
+			return
+		}
 	}
 	graphRevision, graphReady, importDiagnostics := s.workspaceImportDiagnostics(work.Snapshot.URI(), file, fileAnalysis)
 	if !graphReady || work.Context.Err() != nil {
@@ -894,6 +901,25 @@ func (s *Server) analyzeDocument(documentURI string) {
 		})
 	}
 	s.publishSyntax(work, file, graphRevision)
+}
+
+// parseSnapshot returns the cached parser tree for the exact snapshot or
+// reparses from the latest older tree. It never caches analysis diagnostics.
+func (s *Server) parseSnapshot(snapshot *text.Snapshot) *syntax.File {
+	if snapshot == nil {
+		return syntax.Parse("")
+	}
+	s.publishMu.Lock()
+	current, open := s.documents.Snapshot(snapshot.URI())
+	parsed := s.parsed[snapshot.URI()]
+	s.publishMu.Unlock()
+	if !open || current != snapshot || parsed.file == nil || parsed.revision > snapshot.Revision() {
+		return syntax.Parse(snapshot.Text())
+	}
+	if parsed.revision == snapshot.Revision() {
+		return parsed.file
+	}
+	return syntax.Reparse(parsed.file, snapshot.Text())
 }
 
 func (s *Server) userCommandAbbreviationDiagnostics(file *syntax.File) []syntax.Diagnostic {
@@ -1010,9 +1036,7 @@ func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) b
 		return false
 	}
 	documentURI := analysis.Snapshot.URI()
-	parsedFile := *file
-	parsedFile.Diagnostics = append([]syntax.Diagnostic(nil), file.Diagnostics...)
-	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: &parsedFile}
+	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: file}
 	dependents := s.replaceWorkspaceFile(documentURI, file)
 	s.startWorkspaceDependents(dependents)
 	return true

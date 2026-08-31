@@ -179,9 +179,9 @@ func TestServerSkipsAnalysisForOversizedDocument(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", result)
 	}
 	instance.publishMu.Lock()
-	parsed := instance.parsed[documentURI.String()].file
+	_, parsed := instance.parsed[documentURI.String()]
 	instance.publishMu.Unlock()
-	if parsed == nil || len(parsed.Commands) != 0 || len(parsed.Source) != maxFileBytes+1 {
+	if parsed {
 		t.Fatalf("parsed = %#v", parsed)
 	}
 }

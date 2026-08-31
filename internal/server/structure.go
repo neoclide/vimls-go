@@ -29,7 +29,7 @@ func (s *Server) structureDocument(ctx context.Context, documentURI string) (*te
 	}
 	file := parsed.file
 	if file == nil || parsed.revision != snapshot.Revision() {
-		file = syntax.Parse(snapshot.Text())
+		file = s.parseSnapshot(snapshot)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, encoding, protocol.ErrRequestCancelled
