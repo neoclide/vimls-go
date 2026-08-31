@@ -1270,6 +1270,55 @@ func TestVim9ClassNameReportsE1314(t *testing.T) {
 	}
 }
 
+func TestVim9InterfaceNameReportsE1343(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, message string
+	}{
+		{"lowercase recovery", "vim9script\ninterface notWorking\nendinterface\nvar after = 1\n", "notWorking", "Interface name must start with an uppercase letter: notWorking"},
+		{"digit", "vim9script\ninterface 1Thing\nendinterface\n", "1Thing", "Interface name must start with an uppercase letter: 1Thing"},
+		{"underscore", "vim9script\ninterface _Thing\nendinterface\n", "_Thing", "Interface name must start with an uppercase letter: _Thing"},
+		{"non-ASCII", "vim9script\ninterface ÄThing\nendinterface\n", "ÄThing", "Interface name must start with an uppercase letter: ÄThing"},
+		{"before whitespace diagnostic", "vim9script\ninterface lower@bad\nendinterface\n", "lower", "Interface name must start with an uppercase letter: lower@bad"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1343" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1315" {
+					t.Fatalf("E1343 source retained E1315: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1343 diagnostics = %#v", file.Diagnostics)
+			}
+			if file.Commands[1].Aggregate == nil || file.Text(file.Commands[1].Aggregate.Name) != test.span || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockInterface || file.Blocks[0].End < 0 {
+				t.Fatalf("interface recovery = %#v, blocks = %#v", file.Commands, file.Blocks)
+			}
+			if test.name == "lowercase recovery" && (len(file.Commands) != 4 || file.Commands[3].Declaration == nil) {
+				t.Fatalf("following declaration recovery = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	valid := Parse("vim9script\ninterface Working\nendinterface\n")
+	if hasDiagnostic(valid, "vim/E1343") {
+		t.Fatalf("valid interface diagnostics = %#v", valid.Diagnostics)
+	}
+	for _, source := range []string{
+		"interface lower\nendinterface\n",
+		"vim9script\nlegacy interface lower\nendinterface\n",
+	} {
+		file := Parse(source)
+		if !hasDiagnostic(file, "vim/E1342") || hasDiagnostic(file, "vim/E1343") {
+			t.Fatalf("Legacy interface diagnostics = %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9DeclarationWhitespaceReportsE1315(t *testing.T) {
 	for _, test := range []struct {
 		name, source, span, remainder string

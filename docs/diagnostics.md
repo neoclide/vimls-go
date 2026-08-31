@@ -3552,3 +3552,25 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9compile.c:1085-1100` applies the same check to a nested `def` name in
   the outer method compilation context.
 - `src/errors.h:3437-3439` defines the exact message.
+
+## Lowercase interface name: E1343
+
+E1343 means `Interface name must start with an uppercase letter: {argument}`.
+In a Vim9 interface declaration, the first name byte must be an ASCII uppercase
+letter. Analysis selects the parsed interface name while retaining Vim's full
+trimmed declaration argument in the message.
+
+The Vim9-script gate runs first, so Legacy and one-shot `legacy` declarations
+remain E1342. The uppercase check then runs before malformed-name E1315. A
+lowercase, numeric, underscore, or non-ASCII first byte therefore owns the
+diagnostic even when invalid punctuation follows. The recovering interface
+aggregate and block remain available, and parsing continues after
+`endinterface`.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_interface.vim:5-55` distinguishes the Vim9-only
+  interface rule, lowercase-name E1343, and following declarations.
+- `src/vim9class.c:1965-1993` checks the Vim9-script gate, ASCII-uppercase
+  requirement, and whitespace after the name in that order.
+- `src/errors.h:3440-3442` defines the exact message.
