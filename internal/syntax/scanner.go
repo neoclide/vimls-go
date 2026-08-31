@@ -3987,6 +3987,8 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 	nargsUnderscore := false
 	completeoptEscape := Span{}
 	start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+	hasAttributes := start < command.Argument.End && file.Source[start] == '-'
+	attributesAllowNameDiagnostic := true
 	for start < command.Argument.End && file.Source[start] == '-' {
 		end := start
 		for end < command.Argument.End && !isSpace(file.Source[end]) {
@@ -4010,14 +4012,34 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 			}
 		} else if strings.HasPrefix(attribute, "-complete=") && len(attribute) > len("-complete=") {
 			complete = Span{Start: start, End: end}
+			value := attribute[len("-complete="):]
+			attributesAllowNameDiagnostic = attributesAllowNameDiagnostic && (value == "file" || value == "command" ||
+				strings.HasPrefix(value, "custom,") && len(value) > len("custom,") ||
+				strings.HasPrefix(value, "customlist,") && len(value) > len("customlist,"))
 		} else if attribute == "-completeopt=escape" {
 			completeoptEscape = Span{Start: start, End: end}
+		} else if attribute != "-bang" && attribute != "-bar" && attribute != "-buffer" && attribute != "-keepscript" && attribute != "-register" {
+			attributesAllowNameDiagnostic = false
 		}
 		start = skipSpace(file.Source, end, command.Argument.End)
 	}
 	if nargsUnderscore && completeoptEscape.Start < completeoptEscape.End {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E1579", Message: "-completeopt=escape cannot be used with -nargs=_", Span: completeoptEscape,
+		})
+		return true
+	}
+	nameEnd := scanWord(file.Source, start, command.Argument.End)
+	validBoundary := nameEnd == command.Argument.End || nameEnd < command.Argument.End && isSpace(file.Source[nameEnd])
+	validName := nameEnd > start
+	for index := start; validName && index < nameEnd; index++ {
+		validName = file.Source[index] >= 'A' && file.Source[index] <= 'Z' || file.Source[index] >= 'a' && file.Source[index] <= 'z' || file.Source[index] >= '0' && file.Source[index] <= '9'
+	}
+	bodyStart := skipSpace(file.Source, nameEnd, command.Argument.End)
+	definition := bodyStart < command.Argument.End || hasAttributes
+	if attributesAllowNameDiagnostic && validBoundary && validName && definition && file.Source[start] >= 'a' && file.Source[start] <= 'z' {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E183", Message: "User defined commands must start with an uppercase letter", Span: Span{Start: start, End: nameEnd},
 		})
 		return true
 	}
@@ -4029,7 +4051,6 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 			Code: "vim/E1208", Message: "-complete used without allowing arguments", Span: complete,
 		})
 	}
-	nameEnd := scanWord(file.Source, start, command.Argument.End)
 	if nameEnd > start && nameEnd < command.Argument.End && file.Source[nameEnd] == '#' {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E182", Message: "Invalid command name", Span: Span{Start: nameEnd, End: nameEnd + 1},

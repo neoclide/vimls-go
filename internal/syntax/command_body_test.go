@@ -126,6 +126,47 @@ func TestUserCommandListingAndQueryHaveNoBody(t *testing.T) {
 	}
 }
 
+func TestUserCommandLowercaseNameDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		wantFollowing      bool
+	}{
+		{name: "legacy definition", source: "command! docmd :\nlet after = 1\n", span: "docmd", wantFollowing: true},
+		{name: "Vim9 definition", source: "vim9script\ncommand docmd echo 'value'\nvar after = 1\n", span: "docmd", wantFollowing: true},
+		{name: "valid completion attribute", source: "command! -complete=custom,CustomComplete docmd :\nlet after = 1\n", span: "docmd", wantFollowing: true},
+		{name: "inside function", source: "function Check()\n  command! apple echo 'value'\nendfunction\n", span: "apple"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E183" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "User defined commands must start with an uppercase letter" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E183 diagnostics = %#v", file.Diagnostics)
+			}
+			if test.wantFollowing && file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"command docmd\n",
+		"command! DoCmd :\n",
+		"command! _ :\n",
+		"command! doc_md :\n",
+		"command! -xxx docmd :\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E183") {
+			t.Fatalf("guard unexpectedly received E183: %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestUserCommandReplacementRecognizesVimBangVariants(t *testing.T) {
 	for _, replacement := range []string{"<q-bang>", "<Q-BANG>", "<f-bang>"} {
 		source := "command! -bang Clean call s:clean(" + replacement + " == \"!\")\n"
