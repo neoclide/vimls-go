@@ -18,113 +18,134 @@ import (
 const maxCompletionItems = 2000
 
 func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) ([]protocol.DocumentLink, error) {
-	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
-	if err != nil {
-		return nil, err
-	}
-	if snapshot == nil || file == nil {
-		return []protocol.DocumentLink{}, nil
-	}
-	path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
-	resolver, _, _ := s.workspaceNavigationState()
-	if !ok || resolver == nil {
-		return []protocol.DocumentLink{}, s.structureCurrent(ctx, snapshot)
-	}
-	links := make([]protocol.DocumentLink, 0)
-	walkCommands(file.Commands, func(command *syntax.Command) {
-		var span syntax.Span
-		var target string
-		switch {
-		case command.Import != nil:
-			resolution := resolver.ResolveImport(path, file, command.Import)
-			if resolution.Dynamic || resolution.Path == "" {
-				return
-			}
-			span, target = command.Import.PathSpan, resolution.Path
-		case command.Canonical == "source":
-			resolution := resolver.ResolveSource(path, file.Text(command.Argument))
-			if resolution.Dynamic || resolution.Path == "" {
-				return
-			}
-			span, target = command.Argument, resolution.Path
-		default:
-			return
+	for attempt := range 2 {
+		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+		if err != nil {
+			return nil, err
 		}
-		rangeValue, valid := protocolRange(snapshot, encoding, span)
-		if !valid {
-			return
+		if snapshot == nil || file == nil {
+			return []protocol.DocumentLink{}, nil
 		}
-		targetURI := uri.File(target)
-		links = append(links, protocol.DocumentLink{Range: rangeValue, Target: &targetURI})
-	})
-	if err := s.structureCurrent(ctx, snapshot); err != nil {
-		return nil, err
+		state := s.captureWorkspaceNavigationState()
+		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
+		links := make([]protocol.DocumentLink, 0)
+		if ok && state.resolver != nil {
+			walkCommands(file.Commands, func(command *syntax.Command) {
+				var span syntax.Span
+				var target string
+				switch {
+				case command.Import != nil:
+					resolution := state.resolver.ResolveImport(path, file, command.Import)
+					if resolution.Dynamic || resolution.Path == "" {
+						return
+					}
+					span, target = command.Import.PathSpan, resolution.Path
+				case command.Canonical == "source":
+					resolution := state.resolver.ResolveSource(path, file.Text(command.Argument))
+					if resolution.Dynamic || resolution.Path == "" {
+						return
+					}
+					span, target = command.Argument, resolution.Path
+				default:
+					return
+				}
+				rangeValue, valid := protocolRange(snapshot, encoding, span)
+				if !valid {
+					return
+				}
+				targetURI := uri.File(target)
+				links = append(links, protocol.DocumentLink{Range: rangeValue, Target: &targetURI})
+			})
+		}
+		document := navigationDocument{server: s, snapshot: snapshot}
+		current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{})
+		if err != nil {
+			return nil, err
+		}
+		if current {
+			return links, nil
+		}
+		if attempt == 1 {
+			return nil, protocol.ErrContentModified
+		}
 	}
-	return links, nil
+	return nil, protocol.ErrContentModified
 }
 
 func (s *Server) Completion(ctx context.Context, params *protocol.CompletionParams) (protocol.CompletionResult, error) {
-	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
-	if err != nil {
-		return nil, err
-	}
-	if snapshot == nil || file == nil {
-		return protocol.CompletionItemSlice{}, nil
-	}
-	offset, err := snapshot.Offset(fromProtocolPosition(params.Position), encoding)
-	if err != nil {
-		return protocol.CompletionItemSlice{}, s.structureCurrent(ctx, snapshot)
-	}
-	fileAnalysis := analysis.Analyze(file)
-	if alias, member := importMemberContext(snapshot.Text(), offset); member {
-		items := s.importMemberCompletions(snapshot.URI(), file, alias)
+	for attempt := range 2 {
+		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+		if err != nil {
+			return nil, err
+		}
+		if snapshot == nil || file == nil {
+			return protocol.CompletionItemSlice{}, nil
+		}
+		offset, err := snapshot.Offset(fromProtocolPosition(params.Position), encoding)
+		if err != nil {
+			return protocol.CompletionItemSlice{}, s.structureCurrent(ctx, snapshot)
+		}
+		if alias, member := importMemberContext(snapshot.Text(), offset); member {
+			state := s.captureWorkspaceNavigationState()
+			items, target := s.importMemberCompletionsInState(snapshot.URI(), file, alias, state)
+			document := navigationDocument{server: s, snapshot: snapshot}
+			current, err := document.workspaceNavigationCurrent(ctx, state, target)
+			if err != nil {
+				return nil, err
+			}
+			if current {
+				return items, nil
+			}
+			if attempt == 1 {
+				return nil, protocol.ErrContentModified
+			}
+			continue
+		}
+		fileAnalysis := analysis.Analyze(file)
+		contextKind := completionContextAt(file, offset)
+		if contextKind == completionContextNone {
+			return protocol.CompletionItemSlice{}, s.structureCurrent(ctx, snapshot)
+		}
+		items := make(map[string]protocol.CompletionItem)
+		add := func(item protocol.CompletionItem) {
+			if item.Label == "" || len(items) >= maxCompletionItems {
+				return
+			}
+			if _, exists := items[item.Label]; !exists {
+				items[item.Label] = item
+			}
+		}
+		if contextKind == completionContextExpression {
+			for _, declaration := range visibleDeclarations(fileAnalysis, offset) {
+				item := protocol.CompletionItem{Label: declaration.Name, Kind: completionSymbolKind(declaration.Kind)}
+				if declaration.Deprecated {
+					item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
+				}
+				item.Detail = protocol.NewOptional(string(declaration.Kind))
+				if declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
+					item.Detail = protocol.NewOptional(string(declaration.Kind) + ": " + formatValueType(declaration.Type))
+				}
+				add(item)
+			}
+			for _, function := range vimdata.BuiltinFunctions() {
+				add(protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction})
+			}
+		} else {
+			for _, command := range vimdata.Commands() {
+				add(protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword})
+			}
+		}
+		result := make(protocol.CompletionItemSlice, 0, len(items))
+		for _, item := range items {
+			result = append(result, item)
+		}
+		sort.Slice(result, func(i, j int) bool { return result[i].Label < result[j].Label })
 		if err := s.structureCurrent(ctx, snapshot); err != nil {
 			return nil, err
 		}
-		return items, nil
+		return result, nil
 	}
-	contextKind := completionContextAt(file, offset)
-	if contextKind == completionContextNone {
-		return protocol.CompletionItemSlice{}, s.structureCurrent(ctx, snapshot)
-	}
-	items := make(map[string]protocol.CompletionItem)
-	add := func(item protocol.CompletionItem) {
-		if item.Label == "" || len(items) >= maxCompletionItems {
-			return
-		}
-		if _, exists := items[item.Label]; !exists {
-			items[item.Label] = item
-		}
-	}
-	if contextKind == completionContextExpression {
-		for _, declaration := range visibleDeclarations(fileAnalysis, offset) {
-			item := protocol.CompletionItem{Label: declaration.Name, Kind: completionSymbolKind(declaration.Kind)}
-			if declaration.Deprecated {
-				item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
-			}
-			item.Detail = protocol.NewOptional(string(declaration.Kind))
-			if declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
-				item.Detail = protocol.NewOptional(string(declaration.Kind) + ": " + formatValueType(declaration.Type))
-			}
-			add(item)
-		}
-		for _, function := range vimdata.BuiltinFunctions() {
-			add(protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction})
-		}
-	} else {
-		for _, command := range vimdata.Commands() {
-			add(protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword})
-		}
-	}
-	result := make(protocol.CompletionItemSlice, 0, len(items))
-	for _, item := range items {
-		result = append(result, item)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Label < result[j].Label })
-	if err := s.structureCurrent(ctx, snapshot); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return nil, protocol.ErrContentModified
 }
 
 func importMemberContext(source string, offset int) (string, bool) {
@@ -154,36 +175,42 @@ func isCompletionIdentifierByte(value byte) bool {
 }
 
 func (s *Server) importMemberCompletions(documentURI string, file *syntax.File, alias string) protocol.CompletionItemSlice {
+	items, _ := s.importMemberCompletionsInState(documentURI, file, alias, s.captureWorkspaceNavigationState())
+	return items
+}
+
+func (s *Server) importMemberCompletionsInState(documentURI string, file *syntax.File, alias string, state workspaceNavigationSnapshot) (protocol.CompletionItemSlice, workspaceNavigationTarget) {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
-	resolver, index, _ := s.workspaceNavigationState()
-	if !ok || resolver == nil || index == nil {
-		return protocol.CompletionItemSlice{}
+	if !ok || state.resolver == nil || state.index == nil {
+		return protocol.CompletionItemSlice{}, workspaceNavigationTarget{}
 	}
 	var targetPath string
 	walkCommands(file.Commands, func(command *syntax.Command) {
 		if targetPath != "" || command.Import == nil || file.Text(command.Import.Alias) != alias {
 			return
 		}
-		resolution := resolver.ResolveImport(path, file, command.Import)
+		resolution := state.resolver.ResolveImport(path, file, command.Import)
 		if !resolution.Dynamic {
 			targetPath = resolution.Path
 		}
 	})
 	if targetPath == "" {
-		return protocol.CompletionItemSlice{}
+		return protocol.CompletionItemSlice{}, workspaceNavigationTarget{}
 	}
 	var facts []workspace.SymbolFact
+	var target workspaceNavigationTarget
 	s.publishMu.Lock()
 	snapshot, _, open := s.openWorkspaceSnapshotLocked(targetPath)
 	s.publishMu.Unlock()
 	if open {
 		targetFile := s.parseSnapshot(snapshot)
 		if targetFile == nil {
-			return protocol.CompletionItemSlice{}
+			return protocol.CompletionItemSlice{}, workspaceNavigationTarget{openSnapshot: snapshot}
 		}
+		target.openSnapshot = snapshot
 		facts = workspace.CollectSymbolFacts(targetPath, targetFile)
 	} else {
-		matches := index.FileSymbols(targetPath)
+		matches := state.index.FileSymbols(targetPath)
 		facts = make([]workspace.SymbolFact, 0, len(matches))
 		for _, match := range matches {
 			facts = append(facts, match.Fact)
@@ -203,7 +230,7 @@ func (s *Server) importMemberCompletions(documentURI string, file *syntax.File, 
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Label < items[j].Label })
-	return items
+	return items, target
 }
 
 type completionContext uint8

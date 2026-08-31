@@ -945,6 +945,43 @@ func TestWorkspaceSymbolsHonorCancellation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSymbolIdentityRetry(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "symbols.vim", "vim9script\nexport def CurrentSymbol()\nenddef\n")
+	instance := initializeWorkspaceServer(t, root)
+
+	t.Run("retries current result", func(t *testing.T) {
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			if checks == 1 {
+				instance.workspaceMu.Lock()
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			}
+		}
+		result, err := instance.Symbols(context.Background(), &protocol.WorkspaceSymbolParams{Query: "CurrentSymbol"})
+		symbols, ok := result.(protocol.WorkspaceSymbolSlice)
+		if err != nil || !ok || len(symbols) != 1 || checks != 2 {
+			t.Fatalf("symbols=%#v checks=%d error=%v", result, checks, err)
+		}
+	})
+
+	t.Run("drops second stale empty result", func(t *testing.T) {
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			instance.workspaceMu.Lock()
+			instance.workspaceRevision++
+			instance.workspaceMu.Unlock()
+		}
+		result, err := instance.Symbols(context.Background(), &protocol.WorkspaceSymbolParams{Query: "missing"})
+		if !errors.Is(err, protocol.ErrContentModified) || result != nil || checks != 2 {
+			t.Fatalf("symbols=%#v checks=%d error=%v", result, checks, err)
+		}
+	})
+}
+
 func TestWorkspaceResolverIsReusedUntilRootsChange(t *testing.T) {
 	root := t.TempDir()
 	instance := initializeWorkspaceServer(t, root)

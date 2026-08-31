@@ -1036,40 +1036,55 @@ func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolPa
 	if err := ctx.Err(); err != nil {
 		return nil, protocol.ErrRequestCancelled
 	}
-	s.workspaceMu.Lock()
-	index := s.workspaceIndex
-	s.workspaceMu.Unlock()
 	s.mu.Lock()
 	encoding := s.encoding
 	s.mu.Unlock()
-	matches := index.Search(params.Query, maxWorkspaceSymbols)
-	result := make(protocol.WorkspaceSymbolSlice, 0, len(matches))
-	snapshots := make(map[string]*text.Snapshot)
-	for position, match := range matches {
-		if position%32 == 0 && ctx.Err() != nil {
+	for attempt := range 2 {
+		state := s.captureWorkspaceNavigationState()
+		var matches []workspace.SymbolMatch
+		if state.index != nil {
+			matches = state.index.Search(params.Query, maxWorkspaceSymbols)
+		}
+		result := make(protocol.WorkspaceSymbolSlice, 0, len(matches))
+		snapshots := make(map[string]*text.Snapshot)
+		for position, match := range matches {
+			if position%32 == 0 && ctx.Err() != nil {
+				return nil, protocol.ErrRequestCancelled
+			}
+			documentURI := uri.File(match.Fact.Path)
+			snapshot := snapshots[match.Fact.Path]
+			if snapshot == nil || snapshot.Text() != match.Source {
+				snapshot = text.NewSnapshot(documentURI.String(), 0, nil, match.Source)
+				snapshots[match.Fact.Path] = snapshot
+			}
+			rangeValue, ok := protocolRange(snapshot, encoding, match.Fact.SelectionRange)
+			if !ok {
+				continue
+			}
+			information := protocol.BaseSymbolInformation{Name: match.Fact.Name, Kind: protocolSymbolKind(match.Fact.Kind)}
+			if match.Fact.Deprecated {
+				information.Tags = []protocol.SymbolTag{protocol.SymbolTagDeprecated}
+			}
+			result = append(result, protocol.WorkspaceSymbol{
+				BaseSymbolInformation: information,
+				Location:              &protocol.Location{URI: documentURI, Range: rangeValue},
+			})
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
-		documentURI := uri.File(match.Fact.Path)
-		snapshot := snapshots[match.Fact.Path]
-		if snapshot == nil || snapshot.Text() != match.Source {
-			snapshot = text.NewSnapshot(documentURI.String(), 0, nil, match.Source)
-			snapshots[match.Fact.Path] = snapshot
+		if hook := s.beforeWorkspaceIdentityCheck; hook != nil {
+			hook()
 		}
-		rangeValue, ok := protocolRange(snapshot, encoding, match.Fact.SelectionRange)
-		if !ok {
-			continue
+		s.workspaceMu.Lock()
+		current := s.workspaceIdentityCurrentLocked(state.identity)
+		s.workspaceMu.Unlock()
+		if current {
+			return result, nil
 		}
-		information := protocol.BaseSymbolInformation{Name: match.Fact.Name, Kind: protocolSymbolKind(match.Fact.Kind)}
-		if match.Fact.Deprecated {
-			information.Tags = []protocol.SymbolTag{protocol.SymbolTagDeprecated}
+		if attempt == 1 {
+			return nil, protocol.ErrContentModified
 		}
-		result = append(result, protocol.WorkspaceSymbol{
-			BaseSymbolInformation: information,
-			Location:              &protocol.Location{URI: documentURI, Range: rangeValue},
-		})
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, protocol.ErrRequestCancelled
-	}
-	return result, nil
+	return nil, protocol.ErrContentModified
 }

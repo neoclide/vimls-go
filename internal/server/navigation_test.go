@@ -11,6 +11,7 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -807,6 +808,104 @@ func TestWorkspaceIdentityNavigationValidatesMiss(t *testing.T) {
 	}
 }
 
+func TestWorkspaceIdentityDocumentLinkRetry(t *testing.T) {
+	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		if checks == 1 {
+			instance.workspaceMu.Lock()
+			instance.workspaceRevision++
+			instance.workspaceMu.Unlock()
+		}
+	}
+	links, err := instance.DocumentLink(context.Background(), &protocol.DocumentLinkParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil || len(links) != 1 || checks != 2 {
+		t.Fatalf("links=%#v checks=%d error=%v", links, checks, err)
+	}
+}
+
+func TestWorkspaceIdentityDocumentLinkDropsSecondStaleMiss(t *testing.T) {
+	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		instance.workspaceMu.Lock()
+		instance.workspaceRevision++
+		instance.workspaceMu.Unlock()
+	}
+	links, err := instance.DocumentLink(context.Background(), &protocol.DocumentLinkParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if !errors.Is(err, protocol.ErrContentModified) || links != nil || checks != 2 {
+		t.Fatalf("links=%#v checks=%d error=%v", links, checks, err)
+	}
+}
+
+func TestWorkspaceIdentityCompletionRetry(t *testing.T) {
+	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.\n")
+	params := &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 9},
+	}}
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		if checks == 1 {
+			instance.workspaceMu.Lock()
+			instance.workspaceRevision++
+			instance.workspaceMu.Unlock()
+		}
+	}
+	result, err := instance.Completion(context.Background(), params)
+	items, ok := result.(protocol.CompletionItemSlice)
+	if err != nil || !ok || !hasCompletionLabel(items, "Run") || checks != 2 {
+		t.Fatalf("completion=%#v checks=%d error=%v", result, checks, err)
+	}
+}
+
+func TestWorkspaceIdentityCompletionDropsSecondStaleMiss(t *testing.T) {
+	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		instance.workspaceMu.Lock()
+		instance.workspaceRevision++
+		instance.workspaceMu.Unlock()
+	}
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 9},
+	}})
+	if !errors.Is(err, protocol.ErrContentModified) || result != nil || checks != 2 {
+		t.Fatalf("completion=%#v checks=%d error=%v", result, checks, err)
+	}
+}
+
+func TestImportCompletionOpenTargetStaleIsImmediate(t *testing.T) {
+	instance, documentURI, targetURI := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.\n")
+	instance.documents.Open(targetURI.String(), 1, "vim9script\nexport def Run()\nenddef\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		instance.documents.Open(targetURI.String(), 2, "vim9script\nexport def Changed()\nenddef\n")
+	}
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 9},
+	}})
+	if !errors.Is(err, protocol.ErrContentModified) || result != nil || checks != 1 {
+		t.Fatalf("completion=%#v checks=%d error=%v", result, checks, err)
+	}
+}
+
+func TestCompletionStaysPureLocalWithoutWorkspaceIdentityCheck(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 10},
+	}})
+	if err != nil || result == nil || checks != 0 {
+		t.Fatalf("completion=%#v checks=%d error=%v", result, checks, err)
+	}
+}
+
 func openWorkspaceNavigationRetryDocument(t *testing.T, source string) (*Server, uri.URI, protocol.TextDocumentPositionParams) {
 	t.Helper()
 	root := t.TempDir()
@@ -818,10 +917,38 @@ func openWorkspaceNavigationRetryDocument(t *testing.T, source string) (*Server,
 		t.Fatal(err)
 	}
 	waitForWorkspaceSymbols(t, instance, "Run", 1)
+	canonicalMain, ok := workspaceURIPath(documentURI)
+	if !ok {
+		t.Fatalf("workspace path for %s", documentURI)
+	}
+	waitForImportGraph(t, instance, func(graph workspace.ImportGraphSnapshot) bool {
+		return graph.Ready() && graph.Has(canonicalMain)
+	})
 	return instance, documentURI, protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
 		Position:     protocol.Position{Line: uint32(strings.Count(source[:strings.Index(source, "Run")], "\n")), Character: 9},
 	}
+}
+
+func openWorkspaceFeatureRetryDocument(t *testing.T, source string) (*Server, uri.URI, uri.URI) {
+	t.Helper()
+	root := t.TempDir()
+	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\n")
+	mainPath := writeWorkspaceFile(t, root, "main.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForWorkspaceSymbols(t, instance, "Run", 1)
+	mainPath, ok := workspaceURIPath(documentURI)
+	if !ok {
+		t.Fatalf("workspace path for %s", documentURI)
+	}
+	waitForImportGraph(t, instance, func(graph workspace.ImportGraphSnapshot) bool {
+		return graph.Ready() && graph.Has(mainPath)
+	})
+	return instance, documentURI, uri.File(libPath)
 }
 
 func openNavigationDocument(t *testing.T, encoding text.Encoding, source string) (*Server, uri.URI) {
