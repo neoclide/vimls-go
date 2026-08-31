@@ -7049,10 +7049,14 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 			}
 		}
 		if target != nil && (target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) && len(target.Children) > 0 &&
-			dialect == syntax.Legacy && resolvedExpressionType(result, scope, target.Children[0]).Name == "string" {
+			(dialect == syntax.Legacy || dialect == syntax.Vim9 && !scopeUsesDefTypeRules(scope) && expression.Value != "=") &&
+			resolvedExpressionType(result, scope, target.Children[0]).Name == "string" {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E689", Message: "Index not allowed after a string: " + result.File.Text(expression.Span), Span: target.Span,
 			})
+			if dialect == syntax.Vim9 {
+				return
+			}
 		}
 		if dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && expression.Value != "=" && target != nil && target.Kind == syntax.ExpressionSlice && !expressionContainsMissing(expression) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
