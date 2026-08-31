@@ -204,7 +204,7 @@ func parseFunctionSignature(file *File, command *Command) {
 			end += open + 1
 		}
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
-			Code: "vim/E125", Message: "illegal argument",
+			Code: "vim/E125", Message: "Illegal argument: " + strings.TrimSpace(rawSource[open+1:end]),
 			Span: Span{Start: command.Argument.Start + open + 1, End: command.Argument.Start + end},
 		})
 		command.Function = function
@@ -212,6 +212,13 @@ func parseFunctionSignature(file *File, command *Command) {
 	}
 	close := findMatching(source, offset, '(', ')')
 	if close < 0 {
+		argumentStart := skipSyntaxSpace(source, offset+1, len(source))
+		if command.Canonical == "function" && argumentStart >= len(source) {
+			span := Span{Start: command.Argument.End, End: command.Argument.End}
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E125", Message: "Illegal argument: ", Span: span})
+			command.Function = function
+			return
+		}
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-parameter-end", Message: "expected ) after function parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
 		close = len(source)
 	}
@@ -485,14 +492,28 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		})
 	}
 	parameter.Name = Span{Start: command.Argument.Start + start, End: command.Argument.Start + nameEnd}
+	if defSignature && !parameter.Variadic {
+		parameter.Target = parseConstructorParameterTarget(source, start, nameEnd, command.Argument.Start)
+	}
+	if nameEnd > start && parameter.Target == nil {
+		name := source[start:nameEnd]
+		valid := isASCIIIdentifierStart(name[0])
+		for index := 1; valid && index < len(name); index++ {
+			valid = isASCIIIdentifierContinue(name[index])
+		}
+		reservedLegacyName := !defSignature && (name == "firstline" || name == "lastline")
+		if !valid || reservedLegacyName {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E125", Message: "Illegal argument: " + strings.TrimSpace(source[start:]), Span: parameter.Name,
+			})
+			return parameter
+		}
+	}
 	if typed && !defSignature {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
 			Code: "vim/E475", Message: "invalid argument",
 			Span: Span{Start: command.Argument.Start + colon, End: command.Argument.Start + end},
 		})
-	}
-	if defSignature && !parameter.Variadic {
-		parameter.Target = parseConstructorParameterTarget(source, start, nameEnd, command.Argument.Start)
 	}
 	if defSignature && !typed && equals < 0 && nameEnd > start && source[start:nameEnd] != "_" && parameter.Target == nil {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
@@ -526,11 +547,17 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		parameter.DefaultSpan = Span{Start: command.Argument.Start + defaultStart, End: command.Argument.Start + end}
 		if defaultStart >= end {
 			parameter.Default = &Expression{Kind: ExpressionMissing, Span: parameter.DefaultSpan}
-			code, message := "vim/E125", "illegal argument"
+			code, message := "vim/E125", "Illegal argument: "+strings.TrimSpace(source[start:end])
+			span := parameter.DefaultSpan
 			if defSignature && command.Dialect == Vim9 {
-				code, message = "vim/E15", "invalid expression"
+				if part.End < len(source) && source[part.End] == ')' && strings.Contains(source[equals+1:part.End], "\n") {
+					message = "Illegal argument: )"
+					span = Span{Start: command.Argument.Start + part.End, End: command.Argument.Start + part.End + 1}
+				} else {
+					code, message = "vim/E15", "invalid expression"
+				}
 			}
-			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: parameter.DefaultSpan})
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
 		} else {
 			dialect := Legacy
 			if defSignature {

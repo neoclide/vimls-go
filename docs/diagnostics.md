@@ -4024,3 +4024,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/userfunc.c:5213-5224` emits E124 when the byte after the parsed function
   name is not an opening parenthesis.
 - `src/errors.h:300-303` defines the exact E124 and E125 messages.
+
+## Illegal function argument: E125
+
+E125 means `Illegal argument: {text}`. Syntax analysis reports it for an
+argument whose name is not an ASCII identifier, the reserved Legacy argument
+names `firstline` and `lastline`, an immediately attached Vim9 `#` comment at
+the start of an argument list, and the official multiline form where a default
+expression is still missing when the closing `)` is reached.
+
+The Legacy `:function Name(` form with no argument text also receives E125 at
+the missing-argument position. A nonempty unclosed parameter remains an editor
+recovery diagnostic, and a same-line Vim9 default such as `arg: number = )`
+keeps E15. Valid typed, ignored `_`, variadic, and constructor arguments are
+retained without E125. Complete invalid headers still preserve their function
+and following-command syntax data.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:940-955` expects E125 for an attached comment
+  and for a multiline missing default expression.
+- `src/testdir/test_user_func.vim:461-465` expects E125 for an empty unclosed
+  Legacy argument list.
+- `src/userfunc.c:77-100` validates argument identifiers and reserved Legacy
+  names, and `src/userfunc.c:245-545` handles multiline argument recovery.
+- `src/errors.h:302-303` defines the exact E125 message.

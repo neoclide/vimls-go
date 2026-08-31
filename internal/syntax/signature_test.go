@@ -61,6 +61,82 @@ func TestFunctionMissingOpeningParenthesisDiagnostic(t *testing.T) {
 	}
 }
 
+func TestFunctionIllegalArgumentDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "comment starts Vim9 arguments",
+			source:  "vim9script\ndef Func(# comment\n  arg: string)\nenddef\nvar after = 1\n",
+			message: "Illegal argument: # comment",
+			span:    "# comment",
+		},
+		{
+			name:    "multiline missing default",
+			source:  "vim9script\ndef Func(f=\n)\nenddef\nvar after = 1\n",
+			message: "Illegal argument: )",
+			span:    ")",
+		},
+		{
+			name:    "legacy unclosed empty arguments",
+			source:  "function Xfunc(\n",
+			message: "Illegal argument: ",
+			span:    "",
+		},
+		{
+			name:    "digit starts argument",
+			source:  "function Foo(1arg)\nendfunction\nlet after = 1\n",
+			message: "Illegal argument: 1arg)",
+			span:    "1arg",
+		},
+		{
+			name:    "invalid argument character",
+			source:  "vim9script\ndef Func(foo-bar: number)\nenddef\nvar after = 1\n",
+			message: "Illegal argument: foo-bar: number)",
+			span:    "foo-bar",
+		},
+		{
+			name:    "legacy reserved argument",
+			source:  "function Foo(firstline)\nendfunction\nlet after = 1\n",
+			message: "Illegal argument: firstline)",
+			span:    "firstline",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E125" {
+					got = append(got, diagnostic)
+				}
+				if test.name == "multiline missing default" && diagnostic.Code == "vim/E15" {
+					t.Fatalf("multiline missing default retained E15: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E125 diagnostics = %#v", file.Diagnostics)
+			}
+			if test.name != "legacy unclosed empty arguments" && file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef Func(arg: number = )\nenddef\n",
+		"vim9script\ndef Func(arg: number)\nenddef\n",
+		"vim9script\ndef Func(_)\nenddef\n",
+		"function Foo(...)\nendfunction\n",
+		"function Foo(arg\n",
+		"vim9script\ndef Func(\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E125") {
+			t.Fatalf("guard source unexpectedly received E125: %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestVim9VariadicDefaultDiagnostic(t *testing.T) {
 	tests := []struct {
 		name, source, span, defaultText string
