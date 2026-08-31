@@ -6347,11 +6347,15 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 	dynamicVariableCreation := commandsUseExecute(result.File.Commands)
 	var previous *syntax.Command
 	var previousScope *Scope
+	recentGlobalAssignments := make(map[string]*syntax.Expression)
 	for index := range commands {
 		command := &commands[index]
 		scope := result.commandScopes[command]
 		if scope == nil {
 			scope = parent
+		}
+		if previousScope != nil && previousScope != scope {
+			clear(recentGlobalAssignments)
 		}
 		if previousScope == scope {
 			if assigned := immediateLockedAssignment(result.File, previous, command); assigned != nil && !syntaxDiagnosticOverlaps(result.File.Diagnostics, assigned.Span) {
@@ -6396,6 +6400,42 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 		}
 		if command.Canonical == "unlet" && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
 			for _, target := range command.Targets {
+				invalidIndex := false
+				if target != nil && (target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) && len(target.Children) > 1 && !expressionContainsMissing(target) {
+					receiverExpression := target.Children[0]
+					if receiverExpression != nil && receiverExpression.Kind == syntax.ExpressionIdentifier {
+						if initializer := recentGlobalAssignments[receiverExpression.Value]; initializer != nil {
+							receiver := result.TypeOf(initializer)
+							for _, index := range target.Children[1:] {
+								actual := resolvedExpressionType(result, scope, index)
+								if index != nil && index.Kind == syntax.ExpressionIdentifier {
+									if initializer := recentGlobalAssignments[index.Value]; initializer != nil {
+										actual = result.TypeOf(initializer)
+									}
+								}
+								if isUnknownType(actual) {
+									continue
+								}
+								expected := ""
+								if receiver.Name == "list" && actual.Name != "number" {
+									expected = "number"
+								} else if receiver.Name == "dict" && (actual.Name == "blob" || actual.Name == "list" || actual.Name == "dict") {
+									expected = "string"
+								}
+								if expected != "" {
+									result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+										Code: "vim/E1029", Message: "Expected " + expected + " but got " + actual.Name, Span: index.Span,
+									})
+									invalidIndex = true
+									break
+								}
+							}
+						}
+					}
+				}
+				if invalidIndex {
+					continue
+				}
 				if target == nil || target.Kind != syntax.ExpressionSlice || expressionContainsMissing(target) || len(target.Children) == 0 || target.Children[0] == nil {
 					continue
 				}
@@ -6480,6 +6520,26 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			for _, expression := range command.Expressions {
 				collectAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect)
 			}
+		}
+		recordedGlobalAssignment := false
+		for _, expression := range command.Expressions {
+			if expression == nil || expression.Kind != syntax.ExpressionAssignment || expression.Value != "=" || len(expression.Children) < 2 ||
+				expressionContainsMissing(expression) || expression.Children[0] == nil || expression.Children[0].Kind != syntax.ExpressionIdentifier ||
+				!strings.HasPrefix(expression.Children[0].Value, "g:") || isUnknownType(result.TypeOf(expression.Children[1])) {
+				continue
+			}
+			initializer := expression.Children[1]
+			switch initializer.Kind {
+			case syntax.ExpressionBlob, syntax.ExpressionDictionary, syntax.ExpressionList, syntax.ExpressionNumber, syntax.ExpressionString:
+			default:
+				continue
+			}
+			recentGlobalAssignments[expression.Children[0].Value] = initializer
+			recordedGlobalAssignment = true
+			break
+		}
+		if !recordedGlobalAssignment {
+			clear(recentGlobalAssignments)
 		}
 		if command.Embedded != nil {
 			collectAssignmentDiagnostics(result, command.Embedded.Commands, scope)

@@ -3324,6 +3324,44 @@ func TestAnalyzeE1061KnownNonFunctionDefcompileDiagnostic(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1029UnletIndexTypeDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message, span string }{
+		{"list index", "vim9script\ndef F()\n  g:list = [1]\n  g:index = 'x'\n  unlet g:list[g:index]\nenddef\n", "Expected number but got string", "g:index"},
+		{"list slice start", "vim9script\ndef F()\n  g:list = [1]\n  g:index = 'x'\n  unlet g:list[g:index : 0]\nenddef\n", "Expected number but got string", "g:index"},
+		{"list slice end", "vim9script\ndef F()\n  g:list = [1]\n  g:index = 'x'\n  unlet g:list[0 : g:index]\nenddef\n", "Expected number but got string", "g:index"},
+		{"dict blob key", "vim9script\ndef F()\n  g:dict = {one: 1}\n  unlet g:dict[0z11]\nenddef\n", "Expected string but got blob", "0z11"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1029" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1029 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  var list = [1]\n  unlet list['x']\nenddef\n",
+		"vim9script\ndef F()\n  g:list = [1]\n  g:index = 0\n  unlet g:list[g:index]\nenddef\n",
+		"vim9script\ndef F()\n  g:list = [1]\n  g:index = 'x'\n  echo 1\n  unlet g:list[g:index]\nenddef\n",
+		"vim9script\ndef F()\n  g:list = [1]\n  g:index = 'x'\n  add(g:list, 2)\n  unlet g:list[g:index]\nenddef\n",
+		"vim9script\ndef F()\n  unlet g:list[g:index]\nenddef\n",
+		"vim9script\ng:list = [1]\ng:index = 'x'\nunlet g:list[g:index]\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1029" {
+				t.Fatalf("guard unexpectedly received E1029: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)
