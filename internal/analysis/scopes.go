@@ -6189,6 +6189,36 @@ func knownAssignmentType(name string) bool {
 	}
 }
 
+func immediateLockedAssignment(file *syntax.File, previous, current *syntax.Command) *syntax.Expression {
+	if file == nil || previous == nil || current == nil {
+		return nil
+	}
+	locked := (*syntax.Expression)(nil)
+	if previous.Canonical == "lockvar" && file.Text(previous.Count) == "0" && len(previous.Targets) == 1 {
+		locked = previous.Targets[0]
+	} else if previous.Canonical == "final" && previous.Declaration != nil {
+		locked = previous.Declaration.Target
+		if locked == nil || !strings.Contains(locked.Value, ":") {
+			return nil
+		}
+	}
+	assigned := (*syntax.Expression)(nil)
+	if current.Declaration != nil && current.Declaration.Target != nil && current.Declaration.Initializer != nil {
+		assigned = current.Declaration.Target
+	} else {
+		for _, expression := range current.Expressions {
+			if expression != nil && expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) > 0 {
+				assigned = expression.Children[0]
+				break
+			}
+		}
+	}
+	if locked == nil || assigned == nil || locked.Kind != syntax.ExpressionIdentifier || assigned.Kind != syntax.ExpressionIdentifier || locked.Value != assigned.Value {
+		return nil
+	}
+	return assigned
+}
+
 // collectAssignmentDiagnostics reports statically provable assignment-target
 // errors. Dynamic targets deliberately remain opaque here.
 func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
@@ -6233,12 +6263,22 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 		return false
 	}
 	dynamicVariableCreation := commandsUseExecute(result.File.Commands)
+	var previous *syntax.Command
+	var previousScope *Scope
 	for index := range commands {
 		command := &commands[index]
 		scope := result.commandScopes[command]
 		if scope == nil {
 			scope = parent
 		}
+		if previousScope == scope {
+			if assigned := immediateLockedAssignment(result.File, previous, command); assigned != nil && !syntaxDiagnosticOverlaps(result.File.Diagnostics, assigned.Span) {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1122", Message: "Variable is locked: " + assigned.Value, Span: assigned.Span,
+				})
+			}
+		}
+		previous, previousScope = command, scope
 		if command.Canonical == "redir" && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
 			for _, target := range command.Targets {
 				appendIndexableAssignmentDiagnostic(result, scope, target)

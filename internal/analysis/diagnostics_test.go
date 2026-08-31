@@ -3167,6 +3167,41 @@ func TestAnalyzeE1148CannotIndexRuntimeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1122ImmediateLockedAssignmentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"legacy local", "function F()\n  let value = [1]\n  lockvar 0 value\n  let value = [2]\nendfunction\n", "value"},
+		{"Vim9 scoped final", "vim9script\nfinal w:finalvar = [9]\nw:finalvar = [8]\n", "w:finalvar"},
+		{"Vim9 global tuple", "vim9script\nlockvar 0 g:tuple\ng:tuple = ()\n", "g:tuple"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1122" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Variable is locked: "+test.span || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1122 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let value = [1]\nlockvar value\nlet value = [2]\n",
+		"let value = [1]\nlockvar 0 value\nunlockvar value\nlet value = [2]\n",
+		"vim9script\nfinal value = [1]\nvalue = [2]\n",
+		"vim9script\nvar value = [1]\nif true\n  lockvar 0 value\nendif\nvalue = [2]\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1122" {
+				t.Fatalf("guard unexpectedly received E1122: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1181IgnoredUnderscoreDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
