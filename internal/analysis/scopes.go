@@ -4716,6 +4716,10 @@ func appendLegacyListCardinalityDiagnostic(result *FileAnalysis, target, rhs *sy
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vim/E688", Message: "More targets than List items", Span: rhs.Span,
 		})
+	} else if !strings.Contains(result.File.Text(target.Span), ";") && len(rhs.Children) > fixed {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E687", Message: "Less targets than List items", Span: rhs.Span,
+		})
 	}
 }
 
@@ -4752,6 +4756,12 @@ func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bo
 	if !defRules && rhs.Kind == syntax.ExpressionList && got < expected {
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vim/E688", Message: "More targets than List items", Span: rhs.Span,
+		})
+		return
+	}
+	if !defRules && rhs.Kind == syntax.ExpressionList && !rest && got > expected {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E687", Message: "Less targets than List items", Span: rhs.Span,
 		})
 		return
 	}

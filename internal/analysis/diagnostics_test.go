@@ -10850,6 +10850,44 @@ func TestAnalyzeE688MoreTargetsThanListItems(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE687LessTargetsThanListItems(t *testing.T) {
+	tests := []struct {
+		name, source string
+	}{
+		{"legacy declaration", "let [left, right] = [1, 2, 3]\n"},
+		{"Vim9 script assignment", "vim9script\nvar left = 0\nvar right = 0\n[left, right] = [1, 2, 3]\n"},
+		{"Vim9 script declaration", "vim9script\nvar [left, right] = [1, 2, 3]\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E687" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Less targets than List items" || file.Text(got[0].Span) != "[1, 2, 3]" {
+				t.Fatalf("E687 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let values = [1, 2, 3]\nlet [left, right] = values\n",
+		"vim9script\nvar values = [1, 2, 3]\nvar [left, right] = values\n",
+		"vim9script\ndef F()\n  var [left, right] = [1, 2, 3]\nenddef\n",
+		"let [left, right] = [1, 2]\n",
+		"let [left; rest] = [1, 2, 3]\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E687" {
+				t.Fatalf("mutable or valid List reported E687: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1003MissingReturnValue(t *testing.T) {
 	for _, test := range []struct {
 		name   string
