@@ -13,8 +13,8 @@ func TestFunctionMissingOpeningParenthesisDiagnostic(t *testing.T) {
 			span:    "abc ()",
 		},
 		{
-			name:    "Vim9 def",
-			source:  "vim9script\ndef Foo abc ()\nenddef\nvar after = 1\n",
+			name:    "Vim9-root function",
+			source:  "vim9script\nfunction Foo abc ()\nendfunction\nvar after = 1\n",
 			message: "Missing '(': Foo abc ()",
 			span:    "abc ()",
 		},
@@ -39,7 +39,13 @@ func TestFunctionMissingOpeningParenthesisDiagnostic(t *testing.T) {
 			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
 				t.Fatalf("E124 diagnostics = %#v", file.Diagnostics)
 			}
-			if len(file.Commands) < 3 || file.Commands[0].Function == nil || file.Commands[len(file.Commands)-1].Declaration == nil {
+			foundFunction := false
+			foundDeclaration := false
+			for index := range file.Commands {
+				foundFunction = foundFunction || file.Commands[index].Function != nil
+				foundDeclaration = foundDeclaration || file.Commands[index].Declaration != nil
+			}
+			if !foundFunction || !foundDeclaration {
 				t.Fatalf("function or next declaration was not retained: %#v", file.Commands)
 			}
 		})
@@ -922,7 +928,7 @@ func TestVim9ConstructorParameterTarget(t *testing.T) {
 	}
 
 	legacy := (LegacyParser{}).Parse("function s:new(this.name)\nendfunction\n")
-	if len(legacy.Diagnostics) != 0 || len(legacy.Commands) == 0 || legacy.Commands[0].Function == nil || legacy.Commands[0].Function.Parameters[0].Target != nil {
+	if len(legacy.Diagnostics) != 1 || legacy.Diagnostics[0].Code != "vim/E475" || legacy.Diagnostics[0].Message != "Invalid argument: this.name)" || legacy.Text(legacy.Diagnostics[0].Span) != "this.name" || len(legacy.Commands) == 0 || legacy.Commands[0].Function == nil || legacy.Commands[0].Function.Parameters[0].Target != nil {
 		t.Fatalf("legacy constructor parameter = %#v", legacy)
 	}
 }

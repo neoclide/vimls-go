@@ -39,6 +39,7 @@ func (analysis *FileAnalysis) TypeOf(expression *syntax.Expression) ValueType {
 type typeState struct {
 	result        *FileAnalysis
 	declarations  map[syntax.Span]*Declaration
+	explicitTypes map[syntax.Span]bool
 	references    map[syntax.Span]*Reference
 	commandScopes map[*syntax.Command]*Scope
 }
@@ -51,6 +52,7 @@ func inferTypes(result *FileAnalysis) {
 	state := &typeState{
 		result:        result,
 		declarations:  make(map[syntax.Span]*Declaration),
+		explicitTypes: make(map[syntax.Span]bool),
 		references:    make(map[syntax.Span]*Reference),
 		commandScopes: result.commandScopes,
 	}
@@ -67,7 +69,10 @@ func inferTypes(result *FileAnalysis) {
 
 	// A small fixed number of source-order passes lets a function return fact
 	// propagate through a forward call without creating a recursive solver.
-	for range 2 {
+	for pass := range 2 {
+		if pass > 0 {
+			result.expressionTypes = make(map[*syntax.Expression]ValueType)
+		}
 		state.walkCommands()
 		state.inferFunctionReturns()
 	}
@@ -120,6 +125,9 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 					continue
 				}
 				typ := convertSyntaxType(binding.ParsedType)
+				if binding.ParsedType != nil || len(command.Declaration.Bindings) == 1 && command.Declaration.ParsedType != nil {
+					state.explicitTypes[binding.Name] = true
+				}
 				if !isUnknownType(typ) {
 					declaration.Type = typ
 				}
@@ -195,7 +203,8 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 		if command.Declaration != nil && command.Declaration.Initializer != nil {
 			for bindingIndex, binding := range command.Declaration.Bindings {
 				declaration := state.declarations[binding.Name]
-				if declaration == nil || !isUnknownType(declaration.Type) {
+				explicitType := binding.ParsedType != nil || len(command.Declaration.Bindings) == 1 && command.Declaration.ParsedType != nil
+				if declaration == nil || explicitType || !isUnknownType(declaration.Type) {
 					continue
 				}
 				expression := initializerElement(command.Declaration.Initializer, bindingIndex, len(command.Declaration.Bindings))
@@ -283,9 +292,10 @@ func (state *typeState) inferFunctionReturns() {
 func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) {
 	for index := range commands {
 		command := &commands[index]
-		if command.Function != nil && command.Function.ReturnType == nil {
+		if command.Function != nil && (command.Function.ReturnType == nil || command.Function.ReturnType.Kind == syntax.TypeMissing) {
 			declaration := state.declarations[command.Function.Name]
-			if declaration != nil && declaration.Type.Return != nil && isUnknownType(*declaration.Type.Return) {
+			if declaration != nil && declaration.Type.Return != nil && isUnknownType(*declaration.Type.Return) &&
+				(command.Function.ReturnType == nil || !syntaxDiagnosticOverlaps(state.result.File.Diagnostics, command.Function.ReturnType.Span)) {
 				inferred := UnknownValueType
 				hasValueReturn := false
 				for bodyIndex := index + 1; bodyIndex < len(commands); bodyIndex++ {
@@ -392,7 +402,9 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	case syntax.ExpressionDictionary:
 		values := make([]*syntax.Expression, 0, len(expression.Children)/2)
 		for index, child := range expression.Children {
-			if index%2 == 1 {
+			if index%2 == 0 && child != nil && child.Kind != syntax.ExpressionIdentifier {
+				state.infer(child, scope)
+			} else if index%2 == 1 {
 				values = append(values, child)
 			}
 		}
@@ -755,7 +767,7 @@ func (state *typeState) assign(expression *syntax.Expression, typ ValueType) {
 	if expression == nil || isUnknownType(typ) {
 		return
 	}
-	if declaration := state.declarations[expression.Span]; declaration != nil && isUnknownType(declaration.Type) {
+	if declaration := state.declarations[expression.Span]; declaration != nil && !state.explicitTypes[expression.Span] && isUnknownType(declaration.Type) {
 		declaration.Type = typ
 	}
 }

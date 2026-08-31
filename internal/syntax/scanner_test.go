@@ -237,7 +237,7 @@ func TestRangeLineNumberOverflowDiagnostics(t *testing.T) {
 		{"known absolute base", "1+9223372036854775806delete\n", "9223372036854775806"},
 		{"negative magnitude overflow", ".-9223372036854775807delete\n", "9223372036854775807"},
 		{"modifier range", "silent 1+9223372036854775806delete\n", "9223372036854775806"},
-		{"bar recovery", ".44444444444444444444444d | delete\n", "44444444444444444444444"},
+		{"bar stops after range error", ".44444444444444444444444d | delete\n", "44444444444444444444444"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := Parse(test.source)
@@ -257,15 +257,15 @@ func TestRangeLineNumberOverflowDiagnostics(t *testing.T) {
 			if !foundRange {
 				t.Fatalf("range tokens = %#v", file.Tokens)
 			}
-			if test.name == "bar recovery" {
+			if test.name == "bar stops after range error" {
 				deletes := 0
 				for _, command := range file.Commands {
 					if command.Canonical == "delete" {
 						deletes++
 					}
 				}
-				if deletes != 2 {
-					t.Fatalf("bar recovery commands = %#v", file.Commands)
+				if deletes != 1 {
+					t.Fatalf("commands after range error = %#v", file.Commands)
 				}
 			}
 		})

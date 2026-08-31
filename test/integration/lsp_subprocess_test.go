@@ -81,7 +81,7 @@ func TestLSPSubprocess(t *testing.T) {
 	}
 	assertVimWatchRegistration(t, registration["params"], []string{workspaceRoot, runtimeRoot})
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, registration["id"]))
-	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nvar value: number = 1\nclass Widget\n  def new()\n    if true\n      echo value\n    endif\n  enddef\nendclass\ndef Add(left: number, right: number)\nenddef\necho Add(1, 2)\n"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nvar value: number = 1\nclass Widget\n  def new()\n    if true\n      echo value\n    endif\n  enddef\nendclass\ndef Add(left: number, right: number): number\n  return left + right\nenddef\necho Add(1, 2)\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
 	symbols := readJSON(t, reader)
 	if string(symbols["id"]) != "2" || !strings.Contains(string(symbols["result"]), `"name":"value"`) || !strings.Contains(string(symbols["result"]), `"name":"Widget"`) || !strings.Contains(string(symbols["result"]), `"name":"new"`) {
@@ -123,7 +123,7 @@ func TestLSPSubprocess(t *testing.T) {
 	if string(selection["id"]) != "9" || !strings.Contains(string(selection["result"]), `"start":{"line":5,"character":11}`) {
 		t.Fatalf("selection ranges = %s", selection)
 	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":90,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":11,"character":5}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":90,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":12,"character":5}}}`)
 	completion := readJSON(t, reader)
 	if string(completion["id"]) != "90" || !strings.Contains(string(completion["result"]), `"label":"Add"`) || !strings.Contains(string(completion["result"]), `"label":"abs"`) {
 		t.Fatalf("completion = %s", completion)
@@ -133,7 +133,7 @@ func TestLSPSubprocess(t *testing.T) {
 	if string(completionResolve["id"]) != "91" || !strings.Contains(string(completionResolve["result"]), `builtin function`) {
 		t.Fatalf("completion resolve = %s", completionResolve)
 	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":92,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":11,"character":12}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":92,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":12,"character":12}}}`)
 	signature := readJSON(t, reader)
 	if string(signature["id"]) != "92" || !strings.Contains(string(signature["result"]), `Add(left: number, right: number)`) || !strings.Contains(string(signature["result"]), `"activeParameter":1`) {
 		t.Fatalf("signature help = %s", signature)
@@ -153,7 +153,7 @@ func TestLSPSubprocess(t *testing.T) {
 	if string(semanticTokens["id"]) != "95" || !strings.Contains(string(semanticTokens["result"]), `"data":[`) {
 		t.Fatalf("semantic tokens = %s", semanticTokens)
 	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":96,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///symbols.vim"},"range":{"start":{"line":0,"character":0},"end":{"line":12,"character":0}}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":96,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///symbols.vim"},"range":{"start":{"line":0,"character":0},"end":{"line":13,"character":0}}}}`)
 	inlayHints := readJSON(t, reader)
 	if string(inlayHints["id"]) != "96" || !strings.Contains(string(inlayHints["result"]), `": number"`) {
 		t.Fatalf("inlay hints = %s", inlayHints)

@@ -969,7 +969,8 @@ func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []synta
 						}
 					}
 				}
-				if command.Argument.Start == command.Argument.End && command.Range.Start == command.Range.End && command.Bang.Start == command.Bang.End && command.Kind == syntax.CommandBuiltin {
+				if command.Argument.Start == command.Argument.End && command.Range.Start == command.Range.End && command.Bang.Start == command.Bang.End &&
+					(command.Kind == syntax.CommandBuiltin || command.Kind == syntax.CommandUnknown) {
 					name := result.File.Text(command.Name)
 					if declaration := resolve(scope, name, command.Name.Start, false, nil); declaration != nil && (declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant || declaration.Parameter) {
 						appendDiagnostic(&syntax.Expression{Kind: syntax.ExpressionIdentifier, Span: command.Name, Value: name})
@@ -1658,7 +1659,7 @@ func completedAggregateMethodSpan(file *syntax.File, aggregate, method *syntax.C
 	if file == nil || aggregate == nil || aggregate.Aggregate == nil || method == nil || method.Function == nil {
 		return syntax.Span{}, false
 	}
-	if method.Block >= 0 && method.Block < len(file.Blocks) && file.Blocks[method.Block].End >= 0 {
+	if method.Block >= 0 && method.Block < len(file.Blocks) && file.Blocks[method.Block].Kind == syntax.BlockDef && file.Blocks[method.Block].End >= 0 {
 		if syntaxDiagnosticOverlaps(file.Diagnostics, file.Blocks[method.Block].Span) {
 			return syntax.Span{}, false
 		}
@@ -2776,7 +2777,7 @@ func collectImportNamespaceDiagnostics(result *FileAnalysis) {
 				dot++
 			}
 		}
-		if dot < len(source) && source[dot] == '.' {
+		if dot < len(source) && source[dot] == '.' && (dot+1 >= len(source) || source[dot+1] != '.') {
 			if diagnostic, ok := importMemberWhitespaceSyntaxDiagnostic(result.File, dot); ok {
 				result.suppressedSyntaxDiagnostics[diagnostic] = true
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -4121,6 +4122,18 @@ func collectVim9ScriptItemRedefinitionDiagnostics(result *FileAnalysis, commands
 	seenKind := make(map[string]SymbolKind)
 	declarations := append([]*Declaration(nil), result.Declarations...)
 	sort.SliceStable(declarations, func(i, j int) bool { return declarations[i].Span.Start < declarations[j].Span.Start })
+	importRedefinitions := make(map[string]bool)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code != "vim/E1213" {
+			continue
+		}
+		for _, declaration := range declarations {
+			if declaration != nil && declaration.Span == diagnostic.Span {
+				importRedefinitions[declaration.Name] = true
+				break
+			}
+		}
+	}
 	for _, declaration := range declarations {
 		if declaration == nil || !eligible[declaration.Span] || declaration.Scope == nil {
 			continue
@@ -4133,6 +4146,11 @@ func collectVim9ScriptItemRedefinitionDiagnostics(result *FileAnalysis, commands
 		isFunction := functionSymbolKind(declaration.Kind)
 		if seen[declaration.Name] && !(isFunction && functionSymbolKind(previousKind)) &&
 			!(declaration.Kind == SymbolKindTypeAlias && previousKind == SymbolKindTypeAlias) {
+			if importRedefinitions[declaration.Name] {
+				seen[declaration.Name] = true
+				seenKind[declaration.Name] = declaration.Kind
+				continue
+			}
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1041", Message: `Redefining script item: "` + declaration.Name + `"`, Span: declaration.Span})
 		}
 		seen[declaration.Name] = true
@@ -5239,8 +5257,14 @@ func collectVoidValueDiagnostics(result *FileAnalysis, commands []syntax.Command
 	}
 	seenE1186 := make(map[syntax.Span]bool)
 	appendE1186 := func(expression *syntax.Expression) {
-		if expression == nil || expression.Span.End <= expression.Span.Start || expressionContainsMissing(expression) || seenE1186[expression.Span] || result.TypeOf(expression).Name != "void" {
+		if expression == nil || expression.Span.End <= expression.Span.Start || expressionContainsMissing(expression) ||
+			syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) || seenE1186[expression.Span] || result.TypeOf(expression).Name != "void" {
 			return
+		}
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1186" && diagnostic.Span == expression.Span {
+				return
+			}
 		}
 		seenE1186[expression.Span] = true
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -6024,11 +6048,16 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1335", Message: `Variable "` + memberName + `" in class "` + className + `" is not writable`, Span: memberNameSpan(result.File, target),
 			})
-		} else if enumName, memberName, ok := enumAssignmentTarget(result, scope, target); !protectedVariableAccess && ok &&
-			(target.Children[0].Kind != syntax.ExpressionMember || scopeContainsDef(scope) && !scopeWithinVim9Enum(result.File, scope, enumName)) {
-			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-				Code: "vim/E1423", Message: "Enum value \"" + enumName + "." + memberName + "\" cannot be modified", Span: target.Span,
-			})
+		} else if enumName, memberName, ok := enumAssignmentTarget(result, scope, target); !protectedVariableAccess && ok {
+			if target.Children[0].Kind == syntax.ExpressionMember && !scopeContainsDef(scope) {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1335", Message: `Variable "` + memberName + `" in class "` + enumName + `" is not writable`, Span: memberNameSpan(result.File, target),
+				})
+			} else if target.Children[0].Kind != syntax.ExpressionMember || !scopeWithinVim9Enum(result.File, scope, enumName) {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1423", Message: "Enum value \"" + enumName + "." + memberName + "\" cannot be modified", Span: target.Span,
+				})
+			}
 		} else if className, memberName, ok := readOnlyClassMemberAssignment(result, scope, target); !protectedVariableAccess && ok {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1409", Message: "Cannot change read-only variable \"" + memberName + "\" in class \"" + className + "\"", Span: memberNameSpan(result.File, target),
@@ -8226,7 +8255,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 				}
 				constMutation := false
 				extendMismatch := -1
-				if !scopeUsesDefTypeRules(scope) && (builtin.Name == "extend" || builtin.Name == "extendnew") {
+				if builtin.Name == "extend" || builtin.Name == "extendnew" {
 					extendMismatch = extendArgumentMismatchIndex(actual)
 				}
 				for index, argument := range arguments {
@@ -8291,7 +8320,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 								continue
 							}
 						}
-						if extendMismatch >= 0 {
+						if extendMismatch >= 0 && (!scopeUsesDefTypeRules(scope) || index != extendMismatch) {
 							continue
 						}
 						// At script level sign_undefine() converts each list item
@@ -8369,6 +8398,12 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						}
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
 						continue
+					}
+					if dialect == syntax.Vim9 && !scopeUsesDefTypeRules(scope) && strings.TrimSuffix(checker, "_mod") == "arg_bool_or_nr" && actual[index].Name == "number" {
+						if diagnostic, ok := numberAsBoolDiagnostic(argument); ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
+							continue
+						}
 					}
 					if scopeUsesDefTypeRules(scope) && index == 0 && !isUnknownType(actual[index]) && (strings.HasSuffix(checker, "_mod") || checker == "arg_reverse") {
 						candidate := argument

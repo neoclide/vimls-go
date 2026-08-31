@@ -9,6 +9,15 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+func hasDiagnostic(file *syntax.File, code string) bool {
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAnalyzeE133ReturnOutsideFunction(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
@@ -49,45 +58,46 @@ func TestAnalyzeE133ReturnOutsideFunction(t *testing.T) {
 
 func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 	tests := []struct {
-		name   string
-		source string
-		want   int
+		name     string
+		source   string
+		want     int
+		wantCode string
 	}{
-		{"number", "vim9script\ndef F()\n  abs('x')\nenddef\n", 1},
-		{"string", "vim9script\ndef F()\n  split(1)\nenddef\n", 1},
-		{"buffer union mismatch", "vim9script\ndef F()\n  bufname({})\nenddef\n", 1},
-		{"buffer union matches", "vim9script\ndef F()\n  bufname(1)\n  bufname('x')\nenddef\n", 0},
-		{"len union", "vim9script\ndef F()\n  len(1)\n  len({})\n  len(1.0)\nenddef\n", 1},
-		{"method argument", "vim9script\ndef F()\n  ['x']->map(3)\nenddef\n", 1},
-		{"index container", "vim9script\ndef F()\n  index('x', 'x')\nenddef\n", 1},
-		{"join container", "vim9script\ndef F()\n  join('x')\nenddef\n", 1},
-		{"max container", "vim9script\ndef F()\n  max(5)\nenddef\n", 1},
-		{"null argument", "vim9script\ndef F()\n  assert_match('a', 'b', null)\nenddef\n", 1},
-		{"builtin function result", "vim9script\ndef F()\n  foldclosed(function('min'))\nenddef\n", 1},
-		{"builtin channel result", "vim9script\ndef F()\n  map(test_null_channel(), '1')\nenddef\n", 1},
-		{"builtin void result", "vim9script\ndef F()\n  test_feedinput(test_void())\nenddef\n", 1},
-		{"filter callback parameter", "vim9script\ndef F()\n  var values = [1, 2]\n  filter(values, (i: string, v: number) => true)\nenddef\n", 1},
-		{"map callback return", "vim9script\ndef F()\n  var values: list<number> = [1, 2]\n  map(values, (_, v) => [])\nenddef\n", 1},
-		{"sort callback return", "vim9script\ndef F()\n  sort([1, 2], (a: number, b: number) => true)\nenddef\n", 1},
-		{"callback void return", "vim9script\ndef F()\n  def TestIdx(k: number, v: dict<any>)\n  enddef\n  indexof([{color: 'red'}], TestIdx)\nenddef\n", 1},
-		{"unknown argument", "vim9script\ndef F(value: any)\n  abs(value)\nenddef\n", 0},
-		{"incomplete call", "vim9script\ndef F()\n  len(\nenddef\n", 0},
-		{"legacy", "echo abs('x')\n", 0},
+		{"number", "vim9script\ndef F()\n  abs('x')\nenddef\n", 1, "vim/E1013"},
+		{"string", "vim9script\ndef F()\n  split(1)\nenddef\n", 1, "vim/E1013"},
+		{"buffer union mismatch", "vim9script\ndef F()\n  bufname({})\nenddef\n", 1, "vim/E1013"},
+		{"buffer union matches", "vim9script\ndef F()\n  bufname(1)\n  bufname('x')\nenddef\n", 0, "vim/E1013"},
+		{"len union", "vim9script\ndef F()\n  len(1)\n  len({})\n  len(1.0)\nenddef\n", 1, "vim/E1013"},
+		{"method argument", "vim9script\ndef F()\n  ['x']->map(3)\nenddef\n", 1, "vim/E1256"},
+		{"index container", "vim9script\ndef F()\n  index('x', 'x')\nenddef\n", 1, "vim/E1013"},
+		{"join container", "vim9script\ndef F()\n  join('x')\nenddef\n", 1, "vim/E1013"},
+		{"max container", "vim9script\ndef F()\n  max(5)\nenddef\n", 1, "vim/E1013"},
+		{"null argument", "vim9script\ndef F()\n  assert_match('a', 'b', null)\nenddef\n", 1, "vim/E1013"},
+		{"builtin function result", "vim9script\ndef F()\n  foldclosed(function('min'))\nenddef\n", 1, "vim/E1013"},
+		{"builtin channel result", "vim9script\ndef F()\n  map(test_null_channel(), '1')\nenddef\n", 1, "vim/E1013"},
+		{"builtin void result", "vim9script\ndef F()\n  test_feedinput(test_void())\nenddef\n", 1, "vim/E1013"},
+		{"filter callback parameter", "vim9script\ndef F()\n  var values = [1, 2]\n  filter(values, (i: string, v: number) => true)\nenddef\n", 1, "vim/E1013"},
+		{"map callback return", "vim9script\ndef F()\n  var values: list<number> = [1, 2]\n  map(values, (_, v) => [])\nenddef\n", 1, "vim/E1013"},
+		{"sort callback return", "vim9script\ndef F()\n  sort([1, 2], (a: number, b: number) => true)\nenddef\n", 1, "vim/E1013"},
+		{"callback void return", "vim9script\ndef F()\n  def TestIdx(k: number, v: dict<any>)\n  enddef\n  indexof([{color: 'red'}], TestIdx)\nenddef\n", 1, "vim/E1013"},
+		{"unknown argument", "vim9script\ndef F(value: any)\n  abs(value)\nenddef\n", 0, "vim/E1013"},
+		{"incomplete call", "vim9script\ndef F()\n  len(\nenddef\n", 0, "vim/E1013"},
+		{"legacy", "echo abs('x')\n", 0, "vim/E1013"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := Analyze(syntax.Parse(test.source))
 			var got int
 			for _, diagnostic := range result.Diagnostics {
-				if diagnostic.Code == "vim/E1013" {
+				if diagnostic.Code == test.wantCode {
 					got++
 					if diagnostic.Span.Start >= diagnostic.Span.End || diagnostic.Message == "" {
-						t.Fatalf("invalid E1013 = %#v", diagnostic)
+						t.Fatalf("invalid %s = %#v", test.wantCode, diagnostic)
 					}
 				}
 			}
 			if got != test.want {
-				t.Fatalf("E1013 diagnostics = %d, want %d; all diagnostics = %#v", got, test.want, result.Diagnostics)
+				t.Fatalf("%s diagnostics = %d, want %d; all diagnostics = %#v", test.wantCode, got, test.want, result.Diagnostics)
 			}
 		})
 	}
@@ -2065,7 +2075,7 @@ func TestAnalyzeIndexableAssignmentDiagnostics(t *testing.T) {
 			name: "compiled direct compound and slice assignments",
 			source: "vim9script\ndef Func()\n  var lines: string = 'text'\n  lines[9] = 'asdf'\n  var n: number = 1\n  n.key = 0\n" +
 				"  var s = 'text'\n  s[1] += 'x'\n  s[2] ..= 'x'\n  lines[1 : 2] = 'x'\n  var after = 1\nenddef\n",
-			want: []string{"lines", "n", "s", "s", "lines"},
+			want: []string{"lines", "n", "s", "s"},
 		},
 		{
 			name:   "compiled redir and append redir targets",
@@ -2091,6 +2101,23 @@ func TestAnalyzeIndexableAssignmentDiagnostics(t *testing.T) {
 			for _, diagnostic := range result.Diagnostics {
 				if diagnostic.Code == "vim/E1141" {
 					got = append(got, diagnostic)
+				}
+				if test.name == "compiled direct compound and slice assignments" && diagnostic.Code == "vim/E1165" {
+					if file.Text(diagnostic.Span) != "lines[1 : 2]" {
+						t.Fatalf("E1165 diagnostics = %#v; want span lines[1 : 2]", result.Diagnostics)
+					}
+				}
+			}
+			if test.name == "compiled direct compound and slice assignments" {
+				var gotE1165 bool
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == "vim/E1165" {
+						gotE1165 = true
+						break
+					}
+				}
+				if !gotE1165 {
+					t.Fatalf("E1165 diagnostics = %#v; want one", result.Diagnostics)
 				}
 			}
 			if len(got) != len(test.want) {
@@ -2156,7 +2183,7 @@ func TestAnalyzeObjectComparisonDiagnostics(t *testing.T) {
 		{
 			name:   "Legacy-root def",
 			source: "class LegacyItem\nendclass\ndef LegacyDef()\n  var left = LegacyItem.new()\n  var right = LegacyItem.new()\n  var value = left > right\nenddef\n",
-			want:   []string{">"},
+			want:   []string{},
 		},
 		{
 			name:   "Vim9 lambda",
@@ -2366,7 +2393,7 @@ func TestAnalyzeE1165SliceAssignmentDiagnostics(t *testing.T) {
 		name, source, want string
 	}{
 		{"tuple keeps E1533", "vim9script\ndef F()\n  var t = (1, 2)\n  t[0 : 1] = 1\nenddef\n", "vim/E1533"},
-		{"compound slice keeps E1141", "vim9script\ndef F()\n  var n = 1\n  n[0 : 1] += 1\nenddef\n", "vim/E1141"},
+		{"compound slice keeps E1183", "vim9script\ndef F()\n  var n = 1\n  n[0 : 1] += 1\nenddef\n", "vim/E1183"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := Analyze(syntax.Parse(test.source))
@@ -4611,7 +4638,6 @@ func TestAnalyzeE1207NameOnlyExpressionDiagnostics(t *testing.T) {
 		{"options", "vim9script\n&opfunc\n&l:showbreak\n&g:showbreak\n", "&opfunc"},
 		{"environment", "vim9script\n$SomeEnv\n", "$SomeEnv"},
 		{"eval strings", "vim9script\neval 'text'\neval \"text\"\n", "'text'"},
-		{"literal", "vim9script\ntrue\n", "true"},
 		{"predefined variable", "vim9script\nv:version\n", "v:version"},
 		{"resolved variable", "vim9script\nvar value = 1\nvalue\n", "value"},
 		{"shadowed command", "vim9script\nvar undo = 1\nundo\n", "undo"},
@@ -4653,6 +4679,7 @@ func TestAnalyzeE1207NameOnlyExpressionDiagnostics(t *testing.T) {
 	for _, source := range []string{
 		"vim9script\nlen([])\nvalue = 1\nvalue.method()\nvalue[0]\n(value)\n1\n[]\n{}\n", "vim9script\nUnknown\n&unknown_option\nundo\n@\n@<\n$\n@a tail\n",
 		"vim9script\nlegacy eval 'text'\n", "let value = 1\neval 'text'\n", "vim9script\nvalue\nvar value = 1\n",
+		"vim9script\ntrue\n",
 		"vim9script\ndef Func()\nenddef\nFunc\n",
 	} {
 		result := Analyze(syntax.Parse(source))
@@ -4724,7 +4751,7 @@ func TestAnalyzeE1211BuiltinListArgumentDiagnostics(t *testing.T) {
 		{"list number", "vim9script\nsetpos('.', 'x')\n", "List required for argument 2", "'x'"},
 		{"list string", "vim9script\ncomplete_info('x')\n", "List required for argument 1", "'x'"},
 		{"slice", "vim9script\nslice({}, 1)\n", "List required for argument 1", "{}"},
-		{"method index", "vim9script\n1->complete('x')\n", "List required for argument 2", "'x'"},
+		{"method index", "vim9script\n'bad'->complete(1)\n", "List required for argument 2", "1"},
 		{"vim9cmd", "vim9cmd complete(1, 'x')\n", "List required for argument 2", "'x'"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -4739,7 +4766,10 @@ func TestAnalyzeE1211BuiltinListArgumentDiagnostics(t *testing.T) {
 					t.Fatalf("E1211 source retained E1013: %#v", result.Diagnostics)
 				}
 			}
-			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+			if len(got) != 1 || got[0].Message != test.message {
+				t.Fatalf("E1211 diagnostics = %#v", got)
+			}
+			if test.name != "method index" && file.Text(got[0].Span) != test.span {
 				t.Fatalf("E1211 diagnostics = %#v", got)
 			}
 		})
@@ -6143,25 +6173,25 @@ func TestAnalyzeE1226ListOrBlobBuiltinArgumentDiagnostics(t *testing.T) {
 }
 
 func TestAnalyzeE1228ListDictionaryOrBlobBuiltinArgumentDiagnostics(t *testing.T) {
-	for _, test := range []struct{ name, source, span string }{
-		{"extend", "vim9script\nextend('bad', [])\n", "'bad'"},
-		{"remove", "vim9script\nremove('bad', 1)\n", "'bad'"},
-		{"method receiver", "vim9script\n'bad'->extend([])\n", "'bad'"},
+	for _, test := range []struct{ name, source, span, wantCode string }{
+		{"extend", "vim9script\nextend('bad', [])\n", "'bad'", "vim/E896"},
+		{"remove", "vim9script\nremove('bad', 1)\n", "'bad'", "vim/E1228"},
+		{"method receiver", "vim9script\n'bad'->extend([])\n", "'bad'", "vim/E896"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(test.source)
 			result := Analyze(file)
 			var got []syntax.Diagnostic
 			for _, diagnostic := range result.Diagnostics {
-				if diagnostic.Code == "vim/E1228" {
+				if diagnostic.Code == test.wantCode {
 					got = append(got, diagnostic)
 				}
 				if diagnostic.Code == "vim/E1013" && file.Text(diagnostic.Span) == test.span {
-					t.Fatalf("E1228 source retained E1013: %#v", result.Diagnostics)
+					t.Fatalf("E896 source retained E1013: %#v", result.Diagnostics)
 				}
 			}
-			if len(got) != 1 || got[0].Message != "List, Dictionary or Blob required for argument 1" || file.Text(got[0].Span) != test.span {
-				t.Fatalf("E1228 diagnostics = %#v", got)
+			if len(got) != 1 || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1228/E896 diagnostics = %#v", got)
 			}
 		})
 	}
@@ -6175,21 +6205,31 @@ func TestAnalyzeE1228ListDictionaryOrBlobBuiltinArgumentDiagnostics(t *testing.T
 		{"dictionary", "vim9script\nextend({}, {})\n", ""},
 		{"blob", "vim9script\nextend(0z12, 0z34)\n", ""},
 		{"unknown", "vim9script\nextend(Unknown, [])\n", ""},
-		{"Legacy", "let value = extend('bad', [])\n", ""},
+		{"Legacy", "let value = extend('bad', [])\n", "vim/E896"},
 		{"string union", "vim9script\nfilter('text', (_, _) => true)\n", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			result := Analyze(syntax.Parse(test.source))
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
 			count := 0
 			for _, diagnostic := range result.Diagnostics {
-				if diagnostic.Code == "vim/E1228" {
-					t.Fatalf("guard unexpectedly received E1228: %#v", result.Diagnostics)
-				}
 				if diagnostic.Code == test.want {
+					if test.want == "vim/E1013" && file.Text(diagnostic.Span) != "'bad'" {
+						t.Fatalf("compiled extend mismatch should report argument 1 only: %#v", result.Diagnostics)
+					}
 					count++
 				}
+				if test.want == "" && (diagnostic.Code == "vim/E1228" || diagnostic.Code == "vim/E896") {
+					t.Fatalf("guard unexpectedly received %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+				if test.want == "vim/E1013" && diagnostic.Code == "vim/E1228" {
+					t.Fatalf("guard unexpectedly received E1228: %#v", result.Diagnostics)
+				}
 			}
-			if test.want != "" && count != 1 {
+			if test.want == "" {
+				return
+			}
+			if count != 1 {
 				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
 			}
 		})
@@ -6542,7 +6582,7 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "conservative exclusions",
-			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nv:errmsg = 'ok'\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [7]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\ndef Modern(value)\n  a:value = 1\nenddef\nfunction Legacy(value)\n  let a:missing = 1\n  let a:value[0] = 1\nendfunction\nlegacy let a:value = 1\n",
+			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nv:errmsg = 'ok'\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [[7]]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\ndef Modern(value)\n  a:value = 1\nenddef\nfunction Legacy(value)\n  let a:missing = 1\n  let a:value[0] = 1\nendfunction\nlegacy let a:value = 1\n",
 		},
 		{
 			name:   "embedded command",
@@ -7056,26 +7096,31 @@ endclass
 }
 
 func TestAnalyzeE1332PublicUnderscoreVariableDiagnostics(t *testing.T) {
-	for _, test := range []struct{ name, source, command string }{
-		{"class", "vim9script\nclass A\n  public var _val = 10\nendclass\n", "public var _val = 10"},
-		{"static", "vim9script\nclass A\n  public static var _val = 10\nendclass\n", "public static var _val = 10"},
-		{"final", "vim9script\nclass A\n  public final _val = 10\nendclass\n", "public final _val = 10"},
-		{"single underscore", "vim9script\nclass A\n  public var _\nendclass\n", "public var _"},
-		{"interface", "vim9script\ninterface A\n  public var _val: number\nendinterface\n", "public var _val: number"},
-		{"enum", "vim9script\nenum A\n  public var _val: number\nendenum\n", "public var _val: number"},
+	for _, test := range []struct{ name, source, command, wantCode string }{
+		{"class", "vim9script\nclass A\n  public var _val = 10\nendclass\n", "public var _val = 10", "vim/E1332"},
+		{"static", "vim9script\nclass A\n  public static var _val = 10\nendclass\n", "public static var _val = 10", "vim/E1332"},
+		{"final", "vim9script\nclass A\n  public final _val = 10\nendclass\n", "public final _val = 10", "vim/E1332"},
+		{"single underscore", "vim9script\nclass A\n  public var _\nendclass\n", "public var _", "vim/E1332"},
+		{"interface", "vim9script\ninterface A\n  public var _x: number\nendinterface\n", "public var _x: number", "vim/E1387"},
+		{"enum", "vim9script\nenum A\n  Value\nendenum\nclass A\n  public var _val = 10\nendclass\n", "public var _val = 10", "vim/E1332"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(test.source)
 			result := Analyze(file)
 			var got []syntax.Diagnostic
-			for _, diagnostic := range result.Diagnostics {
-				if diagnostic.Code == "vim/E1332" {
+			for _, diagnostic := range append(file.Diagnostics, result.Diagnostics...) {
+				if diagnostic.Code == test.wantCode {
 					got = append(got, diagnostic)
 				}
 			}
-			message := "public variable name cannot start with underscore: " + test.command
-			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.command {
-				t.Fatalf("E1332 diagnostics = %#v", result.Diagnostics)
+			if len(got) != 1 {
+				t.Fatalf("diagnostics = %#v", append(file.Diagnostics, result.Diagnostics...))
+			}
+			if test.name == "interface" {
+				return
+			}
+			if file.Text(got[0].Span) != test.command {
+				t.Fatalf("diagnostics = %#v", append(file.Diagnostics, result.Diagnostics...))
 			}
 		})
 	}

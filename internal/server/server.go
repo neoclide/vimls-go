@@ -911,7 +911,9 @@ func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) b
 		return false
 	}
 	documentURI := analysis.Snapshot.URI()
-	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: file}
+	parsedFile := *file
+	parsedFile.Diagnostics = append([]syntax.Diagnostic(nil), file.Diagnostics...)
+	s.parsed[documentURI] = parsedDocument{revision: analysis.Snapshot.Revision(), file: &parsedFile}
 	dependents := s.replaceWorkspaceFile(documentURI, file)
 	s.startWorkspaceDependents(dependents)
 	return true

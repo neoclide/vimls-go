@@ -409,6 +409,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 	if truncateAfterDirectFinish(file, scannerDiagnostics) {
 		buildBlocks(file)
 	}
+	diagnoseCollectedBlockBarSeparators(file, true)
 	normalizeVim9CallDiagnostics(file)
 	for index := range file.Commands {
 		if index+1 < len(file.Commands) {
@@ -463,6 +464,11 @@ func diagnoseVim9ScriptNamespaces(file *File) {
 		return
 	}
 	reported := make(map[Span]bool)
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Code == "vim/E1268" {
+			reported[diagnostic.Span] = true
+		}
+	}
 	expressions := make(map[*Expression]bool)
 	commands := make(map[*Command]bool)
 	var walkExpression func(*Expression)
@@ -470,6 +476,11 @@ func diagnoseVim9ScriptNamespaces(file *File) {
 	report := func(name string, span Span) {
 		if !strings.HasPrefix(name, "s:") || len(name) == len("s:") || reported[span] {
 			return
+		}
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1069" && diagnostic.Span.Start == span.End {
+				return
+			}
 		}
 		reported[span] = true
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
@@ -1463,8 +1474,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if selfSplittingVariableCommand(canonical) {
 			scanMetadata.Flags |= vimdata.AllowBar
 		}
-		if canonical == "import" || canonical == "delfunction" ||
-			(canonical == "def" || canonical == "function") && unambiguousFunctionDefinitionHead(file.Source, argumentStart, end) {
+		if canonical == "import" || canonical == "delfunction" {
 			scanMetadata.Flags |= vimdata.AllowBar
 		}
 		// These commands evaluate their argument and consume a trailing bar
@@ -1729,17 +1739,6 @@ func scanWincmdArgument(source string, start, end int, dialect Dialect) (int, Sp
 	}
 	argumentEnd, separator, comment := scanVim9OpaqueArgument(source, after, end, metadata)
 	return argumentEnd, separator, comment
-}
-
-func unambiguousFunctionDefinitionHead(source string, start, end int) bool {
-	if start >= end {
-		return false
-	}
-	if bar := strings.IndexByte(source[start:end], '|'); bar >= 0 {
-		end = start + bar
-	}
-	argument := source[start:end]
-	return isFunctionDefinition(argument) && strings.Contains(argument, ")")
 }
 
 func substituteCommand(name string) bool {
@@ -2799,6 +2798,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	source := file.Text(command.Argument)
+	if command.Dialect == Vim9 && command.Kind == CommandUnknown && file.Text(command.Name) == "super" &&
+		command.Name.End < command.Argument.Start && len(source) > 0 && source[0] == '.' {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1356", Message: `"super" must be followed by a dot`, Span: Span{Start: command.Name.End, End: command.Argument.Start},
+		})
+		return
+	}
 	diagnoseClassMemberModifierOrder(file, command)
 	if isEmbeddedCommand(command.Canonical) {
 		if listDoCommand(command.Canonical) && command.baseDialect == Legacy && strings.Contains(source, "\n") {
@@ -4333,14 +4339,14 @@ func parseVim9AutocmdBlockCommandList(file *File, span Span, depth int) *Command
 	// file after parsing.
 	embedded := parseSource(file.Source[span.Start:span.End], Vim9)
 	rebaseLambdaFile(embedded, file.Source, span.Start)
-	diagnoseCollectedBlockBarSeparators(embedded)
+	diagnoseCollectedBlockBarSeparators(embedded, false)
 	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	list.Commands = embedded.Commands
 	list.Blocks = embedded.Blocks
 	return list
 }
 
-func diagnoseCollectedBlockBarSeparators(file *File) {
+func diagnoseCollectedBlockBarSeparators(file *File, commandBlockOnly bool) {
 	if file == nil {
 		return
 	}
@@ -4351,6 +4357,9 @@ func diagnoseCollectedBlockBarSeparators(file *File) {
 			continue
 		}
 		command := &file.Commands[index]
+		if commandBlockOnly && !commandInsideBlock(command, file.Blocks, BlockCommand) {
+			continue
+		}
 		next := &file.Commands[index+1]
 		lineEnd, _ := physicalLineEnd(file.Source, command.Span.Start)
 		if reported[lineEnd] || next.Span.Start >= lineEnd || !collectedBlockBarConflict(file.Source, command) {

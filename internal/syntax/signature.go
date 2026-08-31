@@ -200,8 +200,14 @@ func parseFunctionSignature(file *File, command *Command) {
 	if offset >= len(source) || source[offset] != '(' {
 		if offset < len(source) && source[offset] != '"' {
 			end := trimSyntaxSpaceEnd(source, offset, len(source))
+			code := "vim/E124"
+			message := "Missing '(': " + strings.TrimSpace(rawSource)
+			if defSignature {
+				code = "vim/E488"
+				message = "trailing characters"
+			}
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E124", Message: "Missing '(': " + strings.TrimSpace(rawSource),
+				Code: code, Message: message,
 				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + end},
 			})
 		}
@@ -516,6 +522,12 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 		}
 		reservedLegacyName := !defSignature && (name == "firstline" || name == "lastline")
 		if !valid || reservedLegacyName {
+			if !defSignature && isASCIIIdentifierStart(name[0]) && !reservedLegacyName {
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{
+					Code: "vim/E475", Message: "Invalid argument: " + strings.TrimSpace(source[start:]), Span: parameter.Name,
+				})
+				return parameter
+			}
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E125", Message: "Illegal argument: " + strings.TrimSpace(source[start:]), Span: parameter.Name,
 			})

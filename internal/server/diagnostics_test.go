@@ -371,7 +371,7 @@ func TestServerPublishesE1262ForResolvedDuplicateImport(t *testing.T) {
 	writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
 	instance, published := initializeWorkspaceDiagnosticServer(t, root)
 	importerURI := uri.File(filepath.Join(root, "duplicate-import.vim"))
-	source := "vim9script\nimport './lib.vim' as First\nimport 'lib.vim' as Second\n"
+	source := "vim9script\nimport './lib.vim' as First\nimport './lib.vim' as Second\n"
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: importerURI, Version: 1, Text: source,
 	}}); err != nil {
@@ -384,7 +384,7 @@ func TestServerPublishesE1262ForResolvedDuplicateImport(t *testing.T) {
 			duplicates = append(duplicates, diagnostic)
 		}
 	}
-	if len(duplicates) != 1 || duplicates[0].Message != protocol.String("Cannot import the same script twice: lib.vim") || duplicates[0].Range.Start.Line != 2 {
+	if len(duplicates) != 1 || duplicates[0].Message != protocol.String("Cannot import the same script twice: ./lib.vim") || duplicates[0].Range.Start.Line != 2 {
 		t.Fatalf("E1262 diagnostics = %#v; all=%#v", duplicates, params.Diagnostics)
 	}
 }

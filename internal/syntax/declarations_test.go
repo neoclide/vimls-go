@@ -468,7 +468,7 @@ func TestOfficialVimParserDuplicateExtends(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 
-	file = Parse("vim9script\nclass C extends Base \"\nendclass\n")
+	file = Parse("vim9script\nclass C extends Base\"\nendclass\n")
 	if !hasDiagnostic(file, "vim/E1315") || hasDiagnostic(file, "vim/E1352") {
 		t.Fatalf("malformed extends diagnostics = %#v", file.Diagnostics)
 	}
