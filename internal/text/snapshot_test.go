@@ -3,6 +3,7 @@ package text
 import (
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -65,6 +66,78 @@ func TestSnapshotContentID(t *testing.T) {
 	}
 	if first.ContentID() == ContentIDOf(content+"!") {
 		t.Fatal("changed content has the same ID")
+	}
+}
+
+func TestSnapshotConcurrentReaders(t *testing.T) {
+	const content = "\ufeffa\u0301𐐀\xff\r\nlast"
+	version := int32(7)
+	snapshot := NewSnapshot("file:///concurrent.vim", 11, &version, content)
+	firstLineEnd := len("\ufeffa\u0301𐐀\xff")
+	secondLineStart := firstLineEnd + len("\r\n")
+	expectedID := ContentIDOf(content)
+	tests := []struct {
+		encoding Encoding
+		position Position
+	}{
+		{UTF8, Position{Character: 11}},
+		{UTF16, Position{Character: 6}},
+		{UTF32, Position{Character: 5}},
+	}
+
+	ready := make(chan struct{}, len(tests))
+	start := make(chan struct{})
+	errs := make(chan error, len(tests))
+	for _, test := range tests {
+		go func() {
+			ready <- struct{}{}
+			<-start
+			if snapshot.URI() != "file:///concurrent.vim" || snapshot.Revision() != 11 || snapshot.Text() != content || snapshot.ByteLen() != len(content) || snapshot.LineCount() != 2 {
+				errs <- fmt.Errorf("%s metadata changed", test.encoding)
+				return
+			}
+			if got, ok := snapshot.Version(); !ok || got != version {
+				errs <- fmt.Errorf("%s version = %d, %v", test.encoding, got, ok)
+				return
+			}
+			if snapshot.ContentID() != expectedID {
+				errs <- fmt.Errorf("%s content ID changed", test.encoding)
+				return
+			}
+			position, err := snapshot.Position(firstLineEnd, test.encoding)
+			if err != nil || position != test.position {
+				errs <- fmt.Errorf("%s position = %#v, %v", test.encoding, position, err)
+				return
+			}
+			offset, err := snapshot.Offset(position, test.encoding)
+			if err != nil || offset != firstLineEnd {
+				errs <- fmt.Errorf("%s offset = %d, %v", test.encoding, offset, err)
+				return
+			}
+			position, err = snapshot.Position(secondLineStart, test.encoding)
+			if err != nil || position != (Position{Line: 1}) {
+				errs <- fmt.Errorf("%s second line = %#v, %v", test.encoding, position, err)
+				return
+			}
+			offset, err = snapshot.Offset(position, test.encoding)
+			if err != nil || offset != secondLineStart {
+				errs <- fmt.Errorf("%s second line offset = %d, %v", test.encoding, offset, err)
+				return
+			}
+			errs <- nil
+		}()
+	}
+	for range tests {
+		<-ready
+	}
+	close(start)
+	for range tests {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	if snapshot.Text() != content || snapshot.ContentID() != expectedID {
+		t.Fatal("snapshot changed during concurrent reads")
 	}
 }
 
