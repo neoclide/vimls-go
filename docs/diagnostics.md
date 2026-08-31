@@ -4113,3 +4113,23 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   a Vim9 `:function` query.
 - `src/userfunc.c:4476-4482` rejects an empty name and a Vim9 autoload name that
   ends at `#`; `src/errors.h:310-311` defines the exact E129 message.
+
+## Return outside a function: E133
+
+E133 means `:return not inside a function`. Analysis reports a direct `:return`
+whose lexical command-block ancestry contains neither a Legacy `:function` nor
+a Vim9 `:def`. This includes returns nested in script-level conditionals,
+loops, try blocks, and augroups. The diagnostic selects the command name.
+
+Returns in function and inline-function bodies remain valid. Commands stored as
+autocommand bodies or user-command replacements are not diagnosed because
+their eventual invocation context is dynamic. Aggregate bodies keep their
+more specific invalid-command diagnostics instead of adding E133.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_user_func.vim:551-554` sources a script containing a
+  top-level `return 10` and expects E133.
+- `src/userfunc.c:6428-6442` checks for a current function call before parsing
+  the return expression.
+- `src/errors.h:317-318` defines the exact E133 message.

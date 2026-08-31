@@ -143,6 +143,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectConstructorDefaultValueDiagnostics(result)
 	collectTypeDiagnostics(result)
 	collectInterfaceVariableAccessDiagnostics(result)
+	collectReturnOutsideFunctionDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 	collectUnreachableCodeDiagnostics(result)
 	collectLoopNestingDiagnostics(result)
@@ -180,6 +181,35 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectReturnOutsideFunctionDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Canonical != "return" {
+			continue
+		}
+		valid := false
+		ownedByContainer := false
+		for blockIndex := command.Block; blockIndex >= 0 && blockIndex < len(file.Blocks); blockIndex = file.Blocks[blockIndex].Parent {
+			switch file.Blocks[blockIndex].Kind {
+			case syntax.BlockFunction, syntax.BlockDef:
+				valid = true
+			case syntax.BlockClass, syntax.BlockInterface, syntax.BlockEnum, syntax.BlockCommand:
+				ownedByContainer = true
+			}
+		}
+		if valid || ownedByContainer {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E133", Message: ":return not inside a function", Span: command.Name,
+		})
+	}
 }
 
 func collectExtendedAggregateDiagnostics(result *FileAnalysis) {

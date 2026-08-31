@@ -9,6 +9,44 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+func TestAnalyzeE133ReturnOutsideFunction(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{name: "legacy script", source: "return 10\nlet g:after = 1\n"},
+		{name: "Vim9 control block", source: "vim9script\nif true\n  return\nendif\nvar after = 1\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E133" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != ":return not inside a function" || file.Text(got[0].Span) != "return" {
+				t.Fatalf("E133 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Func()\n  return 1\nendfunction\n",
+		"vim9script\ndef Func(): number\n  return 1\nenddef\n",
+		"vim9script\nvar Func = (): number => {\n  return 1\n}\n",
+		"vim9script\ninterface Result\n  def Value(): number\n    return 1\n  enddef\nendinterface\n",
+		"autocmd User * return 1\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E133" {
+				t.Fatalf("source %q unexpectedly received E133: %#v", source, result.Diagnostics)
+			}
+		}
+	}
+}
+
 func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
