@@ -171,6 +171,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectImplementedInterfaceMembersDiagnostics(result)
 	collectVariableTypeMismatchDiagnostics(result)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
+	collectLegacyListCardinalityDiagnostics(result, file.Commands)
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
 	collectDeferDiagnostics(result, file.Commands, root)
@@ -4665,6 +4666,59 @@ func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax
 	}
 }
 
+func collectLegacyListCardinalityDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	for index := range commands {
+		command := &commands[index]
+		if command.Dialect == syntax.Legacy {
+			if command.Declaration != nil && command.Declaration.Target != nil && command.Declaration.Initializer != nil &&
+				command.Declaration.Target.Kind == syntax.ExpressionList {
+				appendLegacyListCardinalityDiagnostic(result, command.Declaration.Target, command.Declaration.Initializer)
+			}
+			var check func(*syntax.Expression)
+			check = func(expression *syntax.Expression) {
+				if expression == nil {
+					return
+				}
+				if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 {
+					target, rhs := expression.Children[0], expression.Children[1]
+					if target.Kind == syntax.ExpressionList {
+						appendLegacyListCardinalityDiagnostic(result, target, rhs)
+					}
+				}
+				for _, child := range expression.Children {
+					check(child)
+				}
+			}
+			for _, expression := range command.Expressions {
+				if command.Declaration != nil && expression != nil && expression.Kind == syntax.ExpressionAssignment &&
+					len(expression.Children) > 0 && expression.Children[0] == command.Declaration.Target {
+					continue
+				}
+				check(expression)
+			}
+		}
+		if command.Embedded != nil {
+			collectLegacyListCardinalityDiagnostics(result, command.Embedded.Commands)
+		}
+	}
+}
+
+func appendLegacyListCardinalityDiagnostic(result *FileAnalysis, target, rhs *syntax.Expression) {
+	if result == nil || result.File == nil || target == nil || rhs == nil || rhs.Kind != syntax.ExpressionList ||
+		expressionContainsMissing(target) || expressionContainsMissing(rhs) {
+		return
+	}
+	fixed := len(target.Children)
+	if strings.Contains(result.File.Text(target.Span), ";") {
+		fixed--
+	}
+	if len(rhs.Children) < fixed {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E688", Message: "More targets than List items", Span: rhs.Span,
+		})
+	}
+}
+
 func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bool, rhs *syntax.Expression, defRules bool) {
 	if rhs == nil || expressionContainsMissing(rhs) {
 		return
@@ -4692,6 +4746,12 @@ func appendVim9CardinalityDiagnostic(result *FileAnalysis, expected int, rest bo
 	if !defRules && rhs.Kind == syntax.ExpressionTuple && got < expected {
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vim/E1538", Message: "More targets than Tuple items", Span: rhs.Span,
+		})
+		return
+	}
+	if !defRules && rhs.Kind == syntax.ExpressionList && got < expected {
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E688", Message: "More targets than List items", Span: rhs.Span,
 		})
 		return
 	}
