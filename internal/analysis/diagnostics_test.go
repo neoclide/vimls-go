@@ -4719,6 +4719,58 @@ func TestAnalyzeE1207NameOnlyExpressionDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1203DotNotAllowedAfterNumberDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "legacy number member assignment",
+			source:  "let n = 0\nlet n.key = 3\n",
+			message: "Dot not allowed after a number: n.key = 3",
+			span:    "n.key",
+		},
+		{
+			name:    "vim9 number member assignment",
+			source:  "vim9script\nvar n = 0\nn.key = 3\n",
+			message: "Dot not allowed after a number: n.key = 3",
+			span:    "n.key",
+		},
+		{
+			name:    "vim9 number member assignment on any",
+			source:  "vim9script\nvar n: any\nn.key = 5\n",
+			message: "Dot not allowed after a number: n.key = 5",
+			span:    "n.key",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1203" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1203 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let d = {}\nlet d.key = 3\n",
+		"vim9script\nvar d = {}\nd.key = 3\n",
+		"def Func()\n  var n = 0\n  n.key = 3\nendfunc\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1203" {
+				t.Fatalf("guard unexpectedly received E1203: %#v", diagnostic)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1210BuiltinNumberArgumentDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, message, span string }{
 		{"arg_number first", "vim9script\nand([], 1)\n", "Number required for argument 1", "[]"},

@@ -6168,6 +6168,7 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 		if dialect == syntax.Vim9 && target != nil && target.Kind == syntax.ExpressionIdentifier && target.Value == "_" {
 			return
 		}
+		appendDotNotAllowedAfterNumberDiagnostic(result, scope, expression, target)
 		if dialect == syntax.Vim9 {
 			appendProtectedVariableAccessDiagnostic(result, scope, target)
 		}
@@ -6266,6 +6267,44 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 	for _, child := range expression.Children {
 		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
 	}
+}
+
+func appendDotNotAllowedAfterNumberDiagnostic(result *FileAnalysis, scope *Scope, assignment, target *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || assignment == nil || target == nil || scopeUsesDefTypeRules(scope) ||
+		target.Kind != syntax.ExpressionMember || len(target.Children) != 1 || target.Children[0] == nil || result.File.Text(target.Operator) != "." ||
+		target.Value == "" || expressionContainsMissing(target) || syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) ||
+		syntaxDiagnosticOverlaps(result.Diagnostics, target.Span) {
+		return
+	}
+	receiver := target.Children[0]
+	if resolvedExpressionType(result, scope, receiver).Name != "number" && !uninitializedAnyVariable(result, scope, receiver) {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1203", Message: "Dot not allowed after a number: " + result.File.Text(assignment.Span), Span: target.Span,
+	})
+}
+
+func uninitializedAnyVariable(result *FileAnalysis, scope *Scope, expression *syntax.Expression) bool {
+	if result == nil || result.File == nil || scope == nil || expression == nil || expression.Kind != syntax.ExpressionIdentifier {
+		return false
+	}
+	declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil)
+	if declaration == nil {
+		return false
+	}
+	for index := range result.File.Commands {
+		command := &result.File.Commands[index]
+		if command.Dialect != syntax.Vim9 || command.Canonical != "var" || command.Declaration == nil || command.Declaration.Initializer != nil {
+			continue
+		}
+		for _, binding := range command.Declaration.Bindings {
+			if binding.Name == declaration.Span && binding.ParsedType != nil && convertSyntaxType(binding.ParsedType).Name == ValueTypeAny {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sliceAssignmentNeedsE1165(result *FileAnalysis, scope *Scope, expression *syntax.Expression) bool {
