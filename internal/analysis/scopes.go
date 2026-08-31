@@ -5766,8 +5766,11 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 		destructuring := targetStart < loop.Iterable.Span.Start && result.File.Source[targetStart] == '['
 		if destructuring {
 			fixed := 0
+			rest := false
 			for _, binding := range loop.Bindings {
-				if !binding.Rest {
+				if binding.Rest {
+					rest = true
+				} else {
 					fixed++
 				}
 			}
@@ -5775,6 +5778,12 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 				if item != nil && item.Kind == syntax.ExpressionList && len(item.Children) < fixed {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code: "vim/E711", Message: "List value does not have enough items", Span: item.Span,
+					})
+					return
+				}
+				if item != nil && item.Kind == syntax.ExpressionList && !rest && len(item.Children) > fixed {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E710", Message: "List value has more items than targets", Span: item.Span,
 					})
 					return
 				}
