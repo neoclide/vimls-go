@@ -614,13 +614,12 @@ commands:
 					recoveryBlocks[parent] = true
 				}
 			}
-			if closeKind == BlockFunction && command.Dialect == Legacy && command.Bang.Start < command.Bang.End {
-				// A legacy function definition is collected before its body is
-				// executed.  Vim recognizes `endfunction!` as the terminator there;
-				// the trailing ! is only W22 when 'verbose' is non-zero.  Keep the
-				// bang span, but do not turn that context-dependent warning into a
-				// syntax error.  A top-level endfunction! never reaches this matched
-				// block path and still reports E477 recovery.
+			if (closeKind == BlockFunction || closeKind == BlockDef) && command.Bang.Start < command.Bang.End {
+				// A function definition is collected before its body is executed.
+				// Vim recognizes a matched endfunction! or enddef! as the terminator;
+				// Legacy endfunction! only becomes W22 when 'verbose' is non-zero.
+				// Keep the bang span without turning it into E477.  A top-level bang
+				// closer never reaches this matched block path and retains E477.
 				kept := file.Diagnostics[:0]
 				for _, diagnostic := range file.Diagnostics {
 					if diagnostic.Code == "vim/E477" && diagnostic.Span == command.Bang {
