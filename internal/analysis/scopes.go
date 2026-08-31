@@ -6257,11 +6257,14 @@ func immediateLockedDictionaryItemDiagnostic(result *FileAnalysis, scope *Scope,
 	}
 	for index := 0; index+1 < len(previous.Declaration.Initializer.Children); index += 2 {
 		candidate, ok := syntax.StaticDictionaryKey(previous.Declaration.Initializer.Children[index], previous.Dialect)
-		if ok && candidate == key {
+		if !ok {
+			return syntax.Diagnostic{}, false
+		}
+		if candidate == key {
 			return syntax.Diagnostic{Code: "vim/E1121", Message: "Cannot change dict item", Span: assigned.Span}, true
 		}
 	}
-	return syntax.Diagnostic{}, false
+	return syntax.Diagnostic{Code: "vim/E1120", Message: "Cannot change dict", Span: assigned.Span}, true
 }
 
 // collectAssignmentDiagnostics reports statically provable assignment-target

@@ -3236,6 +3236,32 @@ func TestAnalyzeE1121ImmediateLockedDictionaryItemDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
+	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1120" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Cannot change dict" || file.Text(got[0].Span) != "dict['two']" {
+		t.Fatalf("E1120 diagnostics = %#v", result.Diagnostics)
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  const dict = {one: 1}\n  dict['one'] = 2\nenddef\n",
+		"vim9script\nconst dict = {one: 1}\ndict['two'] = 2\n",
+		"vim9script\ndef F(key: string)\n  const dict = {one: 1}\n  dict[key] = 2\nenddef\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1120" {
+				t.Fatalf("guard unexpectedly received E1120: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1181IgnoredUnderscoreDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
