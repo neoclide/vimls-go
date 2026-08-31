@@ -5388,9 +5388,9 @@ func collectTypeMismatchDiagnostics(result *FileAnalysis, commands []syntax.Comm
 		if scope == nil {
 			scope = parent
 		}
+		collectForTypeMismatchDiagnostic(result, scope, command)
 		if command.Dialect == syntax.Vim9 {
 			collectDeclarationTypeMismatchDiagnostic(result, command)
-			collectForTypeMismatchDiagnostic(result, scope, command)
 			collectConditionTypeMismatchDiagnostic(result, scope, command)
 			if command.Declaration != nil {
 				collectAssignmentTypeMismatchDiagnostics(result, scope, command.Declaration.Initializer)
@@ -5450,6 +5450,14 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 		return
 	}
 	iterable := result.TypeOf(loop.Iterable)
+	if command.Dialect != syntax.Vim9 {
+		if !isUnknownType(iterable) && iterable.Name != "list" && iterable.Name != "tuple" && iterable.Name != "string" && iterable.Name != "blob" {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1523", Message: "String, List, Tuple or Blob required", Span: loop.Iterable.Span,
+			})
+		}
+		return
+	}
 	if !isUnknownType(iterable) && iterable.Name != "list" && iterable.Name != "tuple" && iterable.Name != "string" && iterable.Name != "blob" {
 		name := iterable.Name
 		if result.classes[name] != nil || result.classAliases[name] != "" || name == "enum" {

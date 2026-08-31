@@ -2769,6 +2769,44 @@ func TestAnalyzeE1168ScriptArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1523LegacyForIterableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"number", "for item in 99\nendfor\nlet after = 1\n", "99"},
+		{"dictionary", "for item in {'a': 9}\nendfor\nlet after = 1\n", "{'a': 9}"},
+		{"function", "for item in function('winnr')\nendfor\nlet after = 1\n", "function('winnr')"},
+		{"explicit Legacy", "vim9script\nlegacy for item in 99\nendfor\nvar after = 1\n", "99"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1523" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "String, List, Tuple or Blob required" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1523 diagnostics = %#v", result.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"for item in [1]\nendfor\nfor item in 'text'\nendfor\nfor item in 0z12\nendfor\n",
+		"for item in unknown\nendfor\n",
+		"vim9script\nfor item in 99\nendfor\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1523" {
+				t.Fatalf("guard unexpectedly received E1523: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1177UnsupportedForIterableDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, message, span string }{
 		{"script dict", "vim9script\nfor i in {a: 1}\nendfor\n", "For loop on dict not supported", "{a: 1}"},
