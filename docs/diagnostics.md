@@ -3725,3 +3725,26 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9class.txt:695-699` states that `implements` can appear only
   once and distinguishes duplicate entries in one list.
 - `src/errors.h:3454-3457` defines the exact E1350 and E1351 messages.
+
+## Duplicate interface in implements list: E1351
+
+E1351 means `Duplicate interface after "implements": {name}`. Within one
+comma-separated `implements` list, a Vim9 class or enum may name each interface
+only once. The parser reports the second exact name and retains its full
+qualified spelling in the message.
+
+The duplicate is not appended to the recovering aggregate; earlier distinct
+names remain in source order, and parsing continues after the aggregate block.
+Name comparison is case-sensitive. A second `implements` clause is E1350,
+while missing required whitespace is E1315 and takes priority before duplicate
+comparison. Legacy declarations retain their dialect diagnostics.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_interface.vim:226-237` covers the exact duplicate name
+  and reports it on the class header.
+- `src/vim9class.c:2054-2084` compares each parsed name with earlier entries
+  before appending it to the interface list.
+- `runtime/doc/vim9class.txt:695-699` requires each interface name to appear
+  only once.
+- `src/errors.h:3454-3459` defines the exact E1350, E1351, and E1352 messages.

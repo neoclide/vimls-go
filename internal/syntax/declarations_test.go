@@ -418,7 +418,7 @@ func TestOfficialVimParserDuplicateImplements(t *testing.T) {
 		name, source, owner string
 	}{
 		{"single clause", "vim9script\nclass C implements I\nendclass\n", ""},
-		{"duplicate list entry", "vim9script\nclass C implements I, I\nendclass\n", "vim/E1351"},
+		{"duplicate list entry", "vim9script\nclass C implements I, I\nendclass\n", ""},
 		{"interface owns implements", "vim9script\ninterface C implements I\nendinterface\n", "vim/E1381"},
 		{"Legacy root", "class C implements I implements I\nendclass\n", "vim/E1316"},
 		{"one-shot Legacy", "vim9script\nlegacy class C implements I implements I\nendclass\n", "vim/E1316"},
@@ -436,6 +436,137 @@ func TestOfficialVimParserDuplicateImplements(t *testing.T) {
 }
 
 func TestOfficialVimParserDuplicateImplementsWithEnum(t *testing.T) {
+	file := Parse("vim9script\ninterface I\nendinterface\nenum C implements I, I\n  Apple\nendenum\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1351" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if file.Diagnostics[0].Message != `Duplicate interface after "implements": I` || file.Text(file.Diagnostics[0].Span) != "I" {
+		t.Fatalf("diagnostic = %#v", file.Diagnostics[0])
+	}
+	var aggregate *Aggregate
+	for index := range file.Commands {
+		if file.Commands[index].Aggregate != nil && file.Text(file.Commands[index].Aggregate.Name) == "C" {
+			aggregate = file.Commands[index].Aggregate
+			break
+		}
+	}
+	if aggregate == nil || aggregate.Kind != BlockEnum || len(aggregate.Implements) != 1 || file.Text(aggregate.Implements[0]) != "I" {
+		t.Fatalf("aggregate = %#v", aggregate)
+	}
+	var enumBlock *Block
+	for index := range file.Blocks {
+		if file.Blocks[index].Kind == BlockEnum && file.Blocks[index].End >= 0 {
+			enumBlock = &file.Blocks[index]
+			break
+		}
+	}
+	if enumBlock == nil || enumBlock.Kind != BlockEnum || enumBlock.End < 0 {
+		t.Fatalf("enum block = %#v", file.Blocks)
+	}
+	var following *Command
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+			following = command
+			break
+		}
+	}
+	if following == nil || following.Canonical != "var" || file.Text(following.Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}
+
+func TestOfficialVimParserDuplicateImplementsName(t *testing.T) {
+	source := "vim9script\ninterface I\nendinterface\ninterface J\nendinterface\nclass C implements I, J, I\nendclass\nvar after = 1\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	diagnostic := file.Diagnostics[0]
+	if diagnostic.Code != "vim/E1351" || diagnostic.Message != `Duplicate interface after "implements": I` || file.Text(diagnostic.Span) != "I" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	var class *Aggregate
+	for index := range file.Commands {
+		if file.Commands[index].Aggregate != nil && file.Text(file.Commands[index].Aggregate.Name) == "C" {
+			class = file.Commands[index].Aggregate
+			break
+		}
+	}
+	if class == nil || class.Kind != BlockClass || len(class.Implements) != 2 || file.Text(class.Implements[0]) != "I" || file.Text(class.Implements[1]) != "J" {
+		t.Fatalf("class = %#v", file.Commands)
+	}
+	var following *Command
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+			following = command
+			break
+		}
+	}
+	if following == nil || following.Canonical != "var" || file.Text(following.Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	for _, test := range []struct {
+		name, source, owner string
+	}{
+		{"second clause", "vim9script\nclass C implements I implements I\nendclass\n", "vim/E1350"},
+		{"missing comma whitespace", "vim9script\nclass C implements I,I\nendclass\n", "vim/E1315"},
+		{"interface owns implements", "vim9script\ninterface C implements I\nendinterface\n", "vim/E1381"},
+		{"Legacy root", "class C implements I, I\nendclass\n", "vim/E1316"},
+		{"one-shot Legacy", "vim9script\nlegacy class C implements I, I\nendclass\n", "vim/E1316"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parsed := Parse(test.source)
+			if hasDiagnostic(parsed, "vim/E1351") || !hasDiagnostic(parsed, test.owner) {
+				t.Fatalf("guard diagnostics = %#v, want %s without E1351", parsed.Diagnostics, test.owner)
+			}
+		})
+	}
+}
+
+func TestOfficialVimParserDuplicateImplementsQualifiedName(t *testing.T) {
+	file := Parse("vim9script\nclass C implements M.Face, M.Face\nendclass\n")
+	if len(file.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	diagnostic := file.Diagnostics[0]
+	if diagnostic.Code != "vim/E1351" || diagnostic.Message != `Duplicate interface after "implements": M.Face` || file.Text(diagnostic.Span) != "M.Face" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	var class *Aggregate
+	for index := range file.Commands {
+		if file.Commands[index].Aggregate != nil && file.Text(file.Commands[index].Aggregate.Name) == "C" {
+			class = file.Commands[index].Aggregate
+			break
+		}
+	}
+	if class == nil || class.Kind != BlockClass || len(class.Implements) != 1 || file.Text(class.Implements[0]) != "M.Face" {
+		t.Fatalf("class = %#v", file.Commands)
+	}
+}
+
+func TestOfficialVimParserDuplicateImplementsDistinctNamesAreAllowed(t *testing.T) {
+	file := Parse("vim9script\nclass C implements I, i\nendclass\n")
+	if hasDiagnostic(file, "vim/E1351") {
+		t.Fatalf("unexpected duplicate diagnostic: %#v", file.Diagnostics)
+	}
+	var class *Aggregate
+	for index := range file.Commands {
+		if file.Commands[index].Aggregate != nil && file.Text(file.Commands[index].Aggregate.Name) == "C" {
+			class = file.Commands[index].Aggregate
+			break
+		}
+	}
+	if class == nil || len(class.Implements) != 2 || file.Text(class.Implements[0]) != "I" || file.Text(class.Implements[1]) != "i" {
+		t.Fatalf("class implements = %#v", class)
+	}
+}
+
+func TestOfficialVimParserDuplicateImplementsWithEnumClause(t *testing.T) {
 	file := Parse("vim9script\ninterface I\nendinterface\nenum C implements I implements\n  Apple\nendenum\nvar after = 1\n")
 	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1350" || file.Diagnostics[0].Message != `Duplicate "implements"` || file.Text(file.Diagnostics[0].Span) != "implements" {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
