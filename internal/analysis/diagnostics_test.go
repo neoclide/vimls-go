@@ -8668,6 +8668,67 @@ func TestAnalyzeE1360NullObjectDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1363IncompleteTypeDiagnostics(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\nvar value = null_class.member\n",
+		"vim9script\nnull_class.member = 1\n",
+		"vim9script\nnull_class.Build()\n",
+	} {
+		file := syntax.Parse(source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E1363" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != "Incomplete type" || file.Text(got[0].Span) != "null_class" {
+			t.Fatalf("source %q E1363 diagnostics = %#v; syntax = %#v", source, got, file.Diagnostics)
+		}
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "compiled def uses runtime null-class rule",
+			source: "vim9script\ndef Use()\n  echo null_class.member\nenddef\n",
+		},
+		{
+			name:   "block lambda uses runtime null-class rule",
+			source: "vim9script\nvar Callback = () => {\n  echo null_class.member\n}\n",
+		},
+		{
+			name:   "null class as value",
+			source: "vim9script\necho string(null_class)\n",
+		},
+		{
+			name:   "null object member",
+			source: "vim9script\nvar value = null_object.member\n",
+		},
+		{
+			name:   "complete class",
+			source: "vim9script\nclass C\n  static var member = 1\nendclass\nvar value = C.member\n",
+		},
+		{
+			name:   "incomplete member",
+			source: "vim9script\nvar value = null_class.\n",
+		},
+		{
+			name:   "legacy expression",
+			source: "let value = null_class.member\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1363" {
+					t.Fatalf("unexpected E1363: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

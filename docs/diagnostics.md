@@ -3983,3 +3983,24 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9class.txt:798-803` documents the default null value of an
   uninitialized object variable and the E1360 behavior.
 - `src/errors.h:3474-3475` defines the exact E1360 message.
+
+## Incomplete null-class type: E1363
+
+E1363 means `Incomplete type`. Analysis reports it when Vim9 script-level code
+uses `null_class` as the receiver of a complete member read, write, or call.
+The receiver has no class identity, so the member type cannot be resolved.
+
+Compiled `def` and Lambda bodies deliberately do not receive E1363: Vim checks
+that form at runtime and reports E1395 instead. A standalone `null_class`, a
+real class receiver, legacy expressions, and incomplete member syntax are also
+left unchanged. The diagnostic selects the `null_class` receiver.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:551-555` expects E1363 in script context but
+  E1395 for the same expression in a compiled function.
+- `src/vim9expr.c:373-405` emits E1363 when compile-time member lookup has no
+  class identity and checks the missing-name case separately.
+- `runtime/doc/vim9.txt:2357-2368` documents the script-level E1363 and
+  compiled E1395 distinction.
+- `src/errors.h:3482-3483` defines the exact E1363 message.

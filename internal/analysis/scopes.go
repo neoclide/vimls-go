@@ -161,7 +161,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
-	collectNullObjectDiagnostics(result)
+	collectNullReceiverDiagnostics(result)
 	collectExtendedAggregateDiagnostics(result)
 	collectImplementedInterfaceNameDiagnostics(result)
 	collectImplementedInterfaceMembersDiagnostics(result)
@@ -1394,7 +1394,7 @@ func collectAbstractConstructorDiagnostics(result *FileAnalysis) {
 	}
 }
 
-func collectNullObjectDiagnostics(result *FileAnalysis) {
+func collectNullReceiverDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
@@ -1439,12 +1439,13 @@ func collectNullObjectDiagnostics(result *FileAnalysis) {
 		}
 		return false
 	}
-	isNullObject := func(expression *syntax.Expression) bool {
+	isNullLiteral := func(expression *syntax.Expression, name string) bool {
 		for expression != nil && (expression.Kind == syntax.ExpressionParenthesized || expression.Kind == syntax.ExpressionCast) && len(expression.Children) == 1 {
 			expression = expression.Children[0]
 		}
-		return expression != nil && expression.Kind == syntax.ExpressionIdentifier && strings.EqualFold(expression.Value, "null_object")
+		return expression != nil && expression.Kind == syntax.ExpressionIdentifier && strings.EqualFold(expression.Value, name)
 	}
+	isNullObject := func(expression *syntax.Expression) bool { return isNullLiteral(expression, "null_object") }
 
 	type scopedExpression struct {
 		expression *syntax.Expression
@@ -1590,14 +1591,20 @@ func collectNullObjectDiagnostics(result *FileAnalysis) {
 			expression.Children[0] != nil && file.Text(expression.Operator) == "." && expression.Value != "" &&
 			!expressionContainsMissing(expression) && !syntaxDiagnosticOverlaps(file.Diagnostics, expression.Span) {
 			receiver := expression.Children[0]
-			null := isNullObject(receiver)
-			if !null && receiver.Kind == syntax.ExpressionIdentifier {
-				null = candidates[resolve(scope, receiver.Value, receiver.Span.Start, false, nil)]
-			}
-			if null {
+			if isNullLiteral(receiver, "null_class") && !scopeUsesDefTypeRules(scope) {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E1360", Message: "Using a null object", Span: receiver.Span,
+					Code: "vim/E1363", Message: "Incomplete type", Span: receiver.Span,
 				})
+			} else {
+				null := isNullObject(receiver)
+				if !null && receiver.Kind == syntax.ExpressionIdentifier {
+					null = candidates[resolve(scope, receiver.Value, receiver.Span.Start, false, nil)]
+				}
+				if null {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1360", Message: "Using a null object", Span: receiver.Span,
+					})
+				}
 			}
 		}
 		expressionScope := scope
