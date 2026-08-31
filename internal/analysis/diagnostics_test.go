@@ -10497,6 +10497,42 @@ func TestAnalyzeE122LegacyFunctionOverwriteRiskWarning(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE174UserCommandOverwriteRiskWarning(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+		want               int
+	}{
+		{"legacy definition", "command Build echo 'value'\n", "Build", 1},
+		{"Vim9 definition", "vim9script\ncommand Build echo 'value'\n", "Build", 1},
+		{"legacy block definition", "command Build {\n  var value = 1\n}\n", "Build", 1},
+		{"nested definition", "command Define command Nested echo 'value'\n", "Define", 2},
+		{"forced definition", "command! Build echo 'value'\n", "", 0},
+		{"list commands", "command\n", "", 0},
+		{"query command", "command Build\n", "", 0},
+		{"filtered list", "command -nargs=* Build\n", "", 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E174" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != test.want {
+				t.Fatalf("E174 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if test.want > 0 {
+				message := "Command " + test.span + " may already exist when this script is sourced again; add ! to replace it"
+				if got[0].Message != message || file.Text(got[0].Span) != test.span {
+					t.Fatalf("E174 diagnostic = %#v on %q", got[0], file.Text(got[0].Span))
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1041ScriptItemRedefinition(t *testing.T) {
 	tests := []struct {
 		name, source, text, forbidden string

@@ -119,6 +119,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectEmbeddedDeclarations(result, root, file.Commands)
 	collectLambdaDeclarations(result, file.Commands)
 	collectLegacyFunctionOverwriteRiskDiagnostics(result, file.Commands)
+	collectUserCommandOverwriteRiskDiagnostics(result, file.Commands)
 	collectVim9LegacyScriptVariableDiagnostics(result)
 
 	// A malformed or partially parsed enum value may remain an opaque command.
@@ -208,6 +209,55 @@ func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, command
 			collectLegacyFunctionOverwriteRiskDiagnostics(result, command.Embedded.Commands)
 		}
 	}
+}
+
+func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.File == nil {
+		return
+	}
+	for index := range commands {
+		command := &commands[index]
+		if command.Canonical == "command" && emptySyntaxSpan(command.Bang) {
+			if name, span, definition := userCommandDefinitionName(result.File, command); definition {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
+				})
+			}
+		}
+		if command.Embedded != nil {
+			collectUserCommandOverwriteRiskDiagnostics(result, command.Embedded.Commands)
+		}
+	}
+}
+
+func userCommandDefinitionName(file *syntax.File, command *syntax.Command) (string, syntax.Span, bool) {
+	if file == nil || command == nil || command.Argument.Start >= command.Argument.End {
+		return "", syntax.Span{}, false
+	}
+	start, end := command.Argument.Start, command.Argument.End
+	for start < end && (file.Source[start] == ' ' || file.Source[start] == '\t') {
+		start++
+	}
+	for start < end && file.Source[start] == '-' {
+		for start < end && file.Source[start] != ' ' && file.Source[start] != '\t' {
+			start++
+		}
+		for start < end && (file.Source[start] == ' ' || file.Source[start] == '\t') {
+			start++
+		}
+	}
+	nameStart := start
+	for start < end && file.Source[start] != ' ' && file.Source[start] != '\t' {
+		start++
+	}
+	if start == nameStart {
+		return "", syntax.Span{}, false
+	}
+	span := syntax.Span{Start: nameStart, End: start}
+	for start < end && (file.Source[start] == ' ' || file.Source[start] == '\t') {
+		start++
+	}
+	return file.Text(span), span, start < end || command.Embedded != nil
 }
 
 func collectDeferDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
