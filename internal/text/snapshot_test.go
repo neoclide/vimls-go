@@ -48,6 +48,23 @@ func TestSnapshotPositions(t *testing.T) {
 	}
 }
 
+func TestSnapshotContentID(t *testing.T) {
+	content := "\ufeffa𐐀e\u0301\r\n"
+	version := int32(7)
+	first := NewSnapshot("file:///first.vim", 1, &version, content)
+	second := NewSnapshot("file:///second.vim", 2, nil, content)
+
+	if got, want := first.ContentID(), ContentIDOf(content); got != want {
+		t.Fatalf("first content ID = %x, want %x", got, want)
+	}
+	if first.ContentID() != second.ContentID() {
+		t.Fatalf("equal content IDs differ: %x != %x", first.ContentID(), second.ContentID())
+	}
+	if first.ContentID() == ContentIDOf(content+"!") {
+		t.Fatal("changed content has the same ID")
+	}
+}
+
 func TestSnapshotRejectsInvalidPositions(t *testing.T) {
 	snapshot := NewSnapshot("u", 1, nil, "a𐐀\r\n")
 	tests := []struct {
@@ -100,10 +117,22 @@ func TestApplyChangesInOrder(t *testing.T) {
 	if snapshot.Text() != "one 𐐀\r\ntwo" {
 		t.Fatal("original snapshot was mutated")
 	}
+	if snapshot.LineCount() != 2 {
+		t.Fatalf("original line count = %d, want 2", snapshot.LineCount())
+	}
+	if position, err := snapshot.Position(len("one 𐐀\r\n"), UTF16); err != nil || position != (Position{Line: 1}) {
+		t.Fatalf("original line index = %#v, %v", position, err)
+	}
+	if got := snapshot.ContentID(); got != ContentIDOf("one 𐐀\r\ntwo") {
+		t.Fatalf("original content ID = %x", got)
+	}
 
 	replaced, err := ApplyChanges(updated, 3, &newVersion, UTF16, []Change{{Text: "all"}, {Range: &Range{Start: Position{Character: 3}, End: Position{Character: 3}}, Text: "!"}})
 	if err != nil || replaced.Text() != "all!" {
 		t.Fatalf("full replacement = %q, %v", replaced.Text(), err)
+	}
+	if got, want := replaced.ContentID(), ContentIDOf("all!"); got != want {
+		t.Fatalf("replacement content ID = %x, want %x", got, want)
 	}
 	empty, err := ApplyChanges(replaced, 4, nil, UTF16, nil)
 	if err != nil || empty.Text() != "all!" || empty.Revision() != 4 {
@@ -155,6 +184,9 @@ func TestIncrementalChangesMatchFullReplacement(t *testing.T) {
 			}
 			if incremental.Text() != full.Text() {
 				t.Fatalf("incremental = %q, full = %q", incremental.Text(), full.Text())
+			}
+			if incremental.ContentID() != full.ContentID() {
+				t.Fatalf("incremental content ID = %x, full = %x", incremental.ContentID(), full.ContentID())
 			}
 		})
 	}

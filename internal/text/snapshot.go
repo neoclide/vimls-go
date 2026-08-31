@@ -1,6 +1,7 @@
 package text
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sort"
@@ -37,6 +38,13 @@ type Change struct {
 	Text  string
 }
 
+// ContentID is the stable SHA-256 identity of complete source text.
+type ContentID [sha256.Size]byte
+
+func ContentIDOf(source string) ContentID {
+	return sha256.Sum256([]byte(source))
+}
+
 type line struct {
 	start int
 	end   int
@@ -50,14 +58,16 @@ type Snapshot struct {
 	hasVersion bool
 	text       string
 	lines      []line
+	contentID  ContentID
 }
 
 func NewSnapshot(uri string, revision uint64, version *int32, content string) *Snapshot {
 	snapshot := &Snapshot{
-		uri:      uri,
-		revision: revision,
-		text:     content,
-		lines:    indexLines(content),
+		uri:       uri,
+		revision:  revision,
+		text:      content,
+		lines:     indexLines(content),
+		contentID: ContentIDOf(content),
 	}
 	if version != nil {
 		snapshot.version = *version
@@ -69,6 +79,7 @@ func NewSnapshot(uri string, revision uint64, version *int32, content string) *S
 func (s *Snapshot) URI() string            { return s.uri }
 func (s *Snapshot) Revision() uint64       { return s.revision }
 func (s *Snapshot) Text() string           { return s.text }
+func (s *Snapshot) ContentID() ContentID   { return s.contentID }
 func (s *Snapshot) LineCount() int         { return len(s.lines) }
 func (s *Snapshot) ByteLen() int           { return len(s.text) }
 func (s *Snapshot) Version() (int32, bool) { return s.version, s.hasVersion }
