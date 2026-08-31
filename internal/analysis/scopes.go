@@ -6001,6 +6001,9 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 					})
 					break
 				}
+				if appendObjectVariableLockDiagnostic(result, scope, target) {
+					break
+				}
 				if len(result.Diagnostics) != before {
 					break
 				}
@@ -6027,6 +6030,27 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			collectAssignmentDiagnostics(result, command.Embedded.Commands, scope)
 		}
 	}
+}
+
+func appendObjectVariableLockDiagnostic(result *FileAnalysis, scope *Scope, target *syntax.Expression) bool {
+	if result == nil || result.File == nil || scope == nil || target == nil || target.Kind != syntax.ExpressionMember ||
+		len(target.Children) != 1 || target.Children[0] == nil || result.File.Text(target.Operator) != "." || target.Value == "" ||
+		expressionContainsMissing(target) || syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, target.Span) {
+		return false
+	}
+	_, class, _, found := objectAggregateReceiver(result, scope, target.Children[0], make(map[*syntax.Expression]bool))
+	if !found || class == nil || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+		return false
+	}
+	owner, _, _, found := classObjectVariableOwner(result, class, target.Value)
+	if !found || owner == nil || owner.Aggregate == nil {
+		return false
+	}
+	file := result.File
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1391", Message: `Cannot (un)lock variable "` + file.Text(target.Span) + `" in class "` + file.Text(owner.Aggregate.Name) + `"`, Span: target.Span,
+	})
+	return true
 }
 
 func appendClassVariableLockDiagnostic(result *FileAnalysis, scope *Scope, target *syntax.Expression) bool {
