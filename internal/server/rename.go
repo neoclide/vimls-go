@@ -307,6 +307,11 @@ func (s *Server) openWorkspaceReferenceLocations(ctx context.Context, target wor
 }
 
 func normalizeRenameLocations(locations []protocol.Location) []protocol.Location {
+	for index := range locations {
+		if path, ok := workspaceURIPath(locations[index].URI); ok {
+			locations[index].URI = uri.File(path)
+		}
+	}
 	sort.Slice(locations, func(i, j int) bool {
 		if locations[i].URI != locations[j].URI {
 			return locations[i].URI < locations[j].URI

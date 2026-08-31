@@ -212,6 +212,11 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 			}
 		}
 	}
+	for index := range locations {
+		if path, ok := workspaceURIPath(locations[index].URI); ok {
+			locations[index].URI = uri.File(path)
+		}
+	}
 	sort.SliceStable(locations, func(left, right int) bool {
 		if locations[left].URI != locations[right].URI {
 			return locations[left].URI < locations[right].URI
