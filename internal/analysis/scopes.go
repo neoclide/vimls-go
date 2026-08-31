@@ -137,7 +137,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectPublicUnderscoreVariableDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectConstructorDefaultValueDiagnostics(result)
-	collectInvalidVoidTypeDiagnostics(result)
+	collectTypeDiagnostics(result)
 	collectInterfaceVariableAccessDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 	collectUnreachableCodeDiagnostics(result)
@@ -157,6 +157,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
+	collectExtendedAggregateNameDiagnostics(result)
 	collectImplementedInterfaceNameDiagnostics(result)
 	collectImplementedInterfaceMembersDiagnostics(result)
 	collectVariableTypeMismatchDiagnostics(result)
@@ -174,6 +175,42 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectExtendedAggregateNameDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		aggregate := &file.Commands[index]
+		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil || aggregate.Aggregate.Kind != syntax.BlockInterface && aggregate.Aggregate.Kind != syntax.BlockClass ||
+			len(aggregate.Aggregate.Extends) == 0 || aggregate.Block < 0 || aggregate.Block >= len(file.Blocks) || file.Blocks[aggregate.Block].End < 0 ||
+			commandHasModifier(aggregate, "legacy") {
+			continue
+		}
+		if aggregateHeaderHasSyntaxDiagnostic(file, aggregate) {
+			continue
+		}
+		extendsName := file.Text(aggregate.Aggregate.Extends[0])
+		scope := result.commandScopes[aggregate]
+		if scope == nil {
+			scope = result.Root
+		}
+		if declaration := resolve(scope, extendsName, aggregate.Aggregate.Extends[0].Start, false, nil); declaration != nil {
+			continue
+		}
+		if dot := strings.IndexByte(extendsName, '.'); dot > 0 {
+			if prefix := resolve(scope, extendsName[:dot], aggregate.Aggregate.Extends[0].Start, false, nil); prefix != nil && prefix.Kind == SymbolKindImport {
+				continue
+			}
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code:    "vim/E1353",
+			Message: "Class name not found: " + extendsName,
+			Span:    aggregateEndSpan(file, aggregate),
+		})
+	}
 }
 
 func collectImplementedInterfaceNameDiagnostics(result *FileAnalysis) {
@@ -460,7 +497,7 @@ func collectConstructorDefaultValueDiagnostics(result *FileAnalysis) {
 	}
 }
 
-func collectInvalidVoidTypeDiagnostics(result *FileAnalysis) {
+func collectTypeDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
@@ -480,7 +517,11 @@ func collectInvalidVoidTypeDiagnostics(result *FileAnalysis) {
 	}
 	collectAliases(file.Commands)
 	appendTypeDiagnostic := func(typeNode *syntax.Type, scope *Scope, allowVoid bool) {
-		if invalid := invalidVoidValueType(result, scope, typeNode, allowVoid, aliases, make(map[syntax.Span]bool)); invalid != nil {
+		if invalid := invalidObjectValueType(result, scope, typeNode, aliases, make(map[syntax.Span]bool)); invalid != (syntax.Span{}) {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1353", Message: "Class name not found: " + file.Text(invalid), Span: invalid,
+			})
+		} else if invalid := invalidVoidValueType(result, scope, typeNode, allowVoid, aliases, make(map[syntax.Span]bool)); invalid != nil {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1330", Message: "Invalid type used in variable declaration: void", Span: invalid.Span,
 			})
@@ -499,6 +540,9 @@ func collectInvalidVoidTypeDiagnostics(result *FileAnalysis) {
 		}
 		for _, typeNode := range expression.TypeArguments {
 			appendTypeDiagnostic(typeNode, scope, false)
+		}
+		if expression.Kind == syntax.ExpressionCast {
+			appendTypeDiagnostic(expression.CastType, scope, false)
 		}
 		expressionScope := scope
 		if expression.Kind == syntax.ExpressionLambda {
@@ -617,6 +661,131 @@ func invalidVoidValueType(result *FileAnalysis, scope *Scope, typeNode *syntax.T
 		return invalid
 	}
 	return nil
+}
+
+func invalidObjectValueType(result *FileAnalysis, scope *Scope, typeNode *syntax.Type, aliases map[syntax.Span]*syntax.Type, seen map[syntax.Span]bool) syntax.Span {
+	if result == nil || result.File == nil || scope == nil || typeNode == nil || typeNode.Kind == syntax.TypeMissing {
+		return syntax.Span{}
+	}
+	file := result.File
+	if syntaxDiagnosticOverlaps(file.Diagnostics, typeNode.Span) {
+		return syntax.Span{}
+	}
+	for _, argument := range typeNode.Arguments {
+		if invalid := invalidObjectValueType(result, scope, argument, aliases, seen); invalid != (syntax.Span{}) {
+			return invalid
+		}
+	}
+	if invalid := invalidObjectValueType(result, scope, typeNode.ReturnType, aliases, seen); invalid != (syntax.Span{}) {
+		return invalid
+	}
+	if typeNode.Kind != syntax.TypeGeneric || typeNode.Name != "object" {
+		return syntax.Span{}
+	}
+	if len(typeNode.Arguments) != 1 || typeNode.Arguments[0] == nil {
+		return syntax.Span{}
+	}
+	inner := typeNode.Arguments[0]
+	switch inner.Kind {
+	case syntax.TypeGeneric, syntax.TypeFunction, syntax.TypeVariadic, syntax.TypeOptional, syntax.TypeNamed:
+	default:
+		return syntax.Span{}
+	}
+	switch objectTypeArgumentValidity(result, scope, inner, aliases, seen) {
+	case objectTypeValid, objectTypeUnknown:
+		return syntax.Span{}
+	}
+	return objectTypeSuffixSpan(file, typeNode)
+}
+
+type objectTypeValidity uint8
+
+const (
+	objectTypeUnknown objectTypeValidity = iota
+	objectTypeInvalid
+	objectTypeValid
+)
+
+func objectTypeArgumentValidity(result *FileAnalysis, scope *Scope, typeNode *syntax.Type, aliases map[syntax.Span]*syntax.Type, seen map[syntax.Span]bool) objectTypeValidity {
+	if result == nil || result.File == nil || scope == nil || typeNode == nil || typeNode.Kind == syntax.TypeMissing {
+		return objectTypeUnknown
+	}
+	if syntaxDiagnosticOverlaps(result.File.Diagnostics, typeNode.Span) {
+		return objectTypeUnknown
+	}
+	if typeNode.Kind == syntax.TypeNamed {
+		name := typeNode.Name
+		if name == "any" {
+			return objectTypeValid
+		}
+		switch name {
+		case "bool", "number", "float", "string", "special", "dict", "list", "tuple", "blob", "func", "partial", "job", "channel", "void":
+			return objectTypeInvalid
+		}
+		declaration := resolve(scope, name, typeNode.Span.Start, false, nil)
+		if declaration == nil {
+			if dot := strings.IndexByte(name, '.'); dot > 0 {
+				if prefix := resolve(scope, name[:dot], typeNode.Span.Start, false, nil); prefix != nil && prefix.Kind == SymbolKindImport {
+					return objectTypeUnknown
+				}
+			}
+			return objectTypeUnknown
+		}
+		switch declaration.Kind {
+		case SymbolKindClass, SymbolKindInterface, SymbolKindEnum:
+			return objectTypeValid
+		case SymbolKindTypeAlias:
+			alias := aliases[declaration.Span]
+			if alias == nil || seen[declaration.Span] {
+				return objectTypeUnknown
+			}
+			seen[declaration.Span] = true
+			valid := objectTypeArgumentValidity(result, scope, alias, aliases, seen)
+			delete(seen, declaration.Span)
+			return valid
+		default:
+			return objectTypeUnknown
+		}
+	}
+	if typeNode.Kind == syntax.TypeOptional || typeNode.Kind == syntax.TypeVariadic {
+		if len(typeNode.Arguments) == 0 {
+			return objectTypeUnknown
+		}
+		return objectTypeArgumentValidity(result, scope, typeNode.Arguments[0], aliases, seen)
+	}
+	if typeNode.Kind == syntax.TypeGeneric {
+		if typeNode.Name == "object" && len(typeNode.Arguments) == 1 {
+			return objectTypeArgumentValidity(result, scope, typeNode.Arguments[0], aliases, seen)
+		}
+		return objectTypeInvalid
+	}
+	return objectTypeInvalid
+}
+
+func objectTypeSuffixSpan(file *syntax.File, typeNode *syntax.Type) syntax.Span {
+	if file == nil || typeNode == nil || len(typeNode.Arguments) == 0 {
+		return typeNode.Span
+	}
+	start := typeNode.Span.Start
+	if start < 0 || typeNode.Span.End <= start || typeNode.Span.End > len(file.Source) {
+		return typeNode.Span
+	}
+	depth := 0
+	for index := typeNode.Span.Start; index < typeNode.Span.End; index++ {
+		switch file.Source[index] {
+		case '<':
+			if depth == 0 {
+				start = index
+			}
+			depth++
+		case '>':
+			depth--
+			if depth == 0 {
+				return syntax.Span{Start: start, End: index + 1}
+			}
+		}
+	}
+	return typeNode.Arguments[0].Span
 }
 
 func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {

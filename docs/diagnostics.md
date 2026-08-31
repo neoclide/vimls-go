@@ -3768,3 +3768,30 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   its following parent name.
 - `runtime/doc/vim9class.txt:656-664` states that a class can extend one class.
 - `src/errors.h:3458-3463` defines the exact E1352, E1353, and E1354 messages.
+
+## Class name not found: E1353
+
+E1353 means `Class name not found: {name}`. A complete Vim9 class or interface
+reports it when its `extends` name cannot be resolved at that source position.
+The diagnostic belongs to the aggregate terminator, matching Vim's deferred
+validation. Imported qualified names remain unknown until workspace import
+analysis can prove their members.
+
+E1353 also owns a well-formed `object<T>` type when `T` is proven not to be an
+object type. Its message and span retain the angle-bracket suffix, for example
+`<number>`. `any`, prior local classes, interfaces, enums, and aliases ending
+in those types are accepted. Unresolved names and malformed types remain with
+their existing conservative or syntax diagnostics instead of gaining a
+cascade.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:2388-2394` covers an unresolved base class
+  and reports E1353 on `endclass`.
+- `src/testdir/test_vim9_class.vim:11744-11749` covers the exact
+  `object<number>` message in script and compiled-function contexts.
+- `src/vim9class.c:315-348` distinguishes an unresolved `extends` name from a
+  resolved value that cannot be extended.
+- `src/vim9type.c:1920-1977` accepts `object<any>` and object-valued inner
+  types, and reports E1353 for a parsed non-object inner type.
+- `src/errors.h:3460-3463` defines the exact E1353 and E1354 messages.

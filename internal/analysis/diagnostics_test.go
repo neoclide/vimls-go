@@ -7729,6 +7729,238 @@ func TestAnalyzeE1352DuplicateExtendsSuppressesExtendsValidation(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1353ClassNameNotFoundDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		source  string
+		message string
+		span    string
+	}{
+		{
+			name:    "class missing parent",
+			source:  "vim9script\nclass Child extends Missing\nendclass\n",
+			message: "Class name not found: Missing",
+			span:    "endclass",
+		},
+		{
+			name:    "interface missing parent",
+			source:  "vim9script\ninterface Face extends Missing\nendinterface\n",
+			message: "Class name not found: Missing",
+			span:    "endinterface",
+		},
+		{
+			name:    "object number",
+			source:  "vim9script\nclass A\n  var value: object<number>\nendclass\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "legacy root def parameter object number",
+			source:  "def Fn(value: object<number>)\nenddef\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "def return object number",
+			source:  "vim9script\ndef Fn(): object<number>\nenddef\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "lambda parameter object number",
+			source:  "vim9script\nvar Fn = (value: object<number>): any => value\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "cast object number",
+			source:  "vim9script\nvar value: any\nvar cast = <object<number>>value\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "generic type argument object number",
+			source:  "vim9script\ndef Fn<T>()\nenddef\nFn<object<number>>()\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "type alias object number",
+			source:  "vim9script\ntype Invalid = object<number>\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "nested object alias type",
+			source:  "vim9script\nclass A\n  var value: list<object<number>>\nendclass\n",
+			message: "Class name not found: <number>",
+			span:    "<number>",
+		},
+		{
+			name:    "object alias number",
+			source:  "vim9script\ntype Alias = number\nclass A\n  var value: object<Alias>\nendclass\n",
+			message: "Class name not found: <Alias>",
+			span:    "<Alias>",
+		},
+		{
+			name:    "object void owns e1330",
+			source:  "vim9script\nvar value: object<void>\n",
+			message: "Class name not found: <void>",
+			span:    "<void>",
+		},
+		{
+			name:    "future parent is not visible",
+			source:  "vim9script\nclass Child extends Base\nendclass\nclass Base\nendclass\n",
+			message: "Class name not found: Base",
+			span:    "endclass",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1353" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1353 diagnostics = %#v; syntax = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name    string
+		source  string
+		noCodes []string
+	}{
+		{
+			name:    "no e1353 for valid extends",
+			source:  "vim9script\nclass Base\nendclass\nclass Child extends Base\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "no e1353 for prior interface",
+			source:  "vim9script\ninterface Face\nendinterface\ninterface Derive extends Face\nendinterface\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "resolved variable is reserved for e1354",
+			source:  "vim9script\nvar Parent = 1\nclass Child extends Parent\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "self extension is reserved for e1354",
+			source:  "vim9script\nclass Child extends Child\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "wrong aggregate category is reserved for e1354",
+			source:  "vim9script\ninterface Parent\nendinterface\nclass Child extends Parent\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "import namespace suppresses e1353",
+			source:  "vim9script\nimport './face.vim' as Imported\nclass A extends Imported.Face\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "legacy suppresses e1353",
+			source:  "vim9script\nlegacy class A extends Missing\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "missing header suppresses e1353",
+			source:  "vim9script\nclass A extends Missing extends\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "incomplete aggregate suppresses e1353",
+			source:  "vim9script\nclass A extends Missing\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object any",
+			source:  "vim9script\nclass A\n  var value: object<any>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object class",
+			source:  "vim9script\nclass Klass\nendclass\nclass A\n  var value: object<Klass>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object interface",
+			source:  "vim9script\ninterface Face\nendinterface\nclass A\n  var value: object<Face>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object enum",
+			source:  "vim9script\nenum Face\n  One\nendenum\nclass A\n  var value: object<Face>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object alias class",
+			source:  "vim9script\nclass Klass\nendclass\ntype Alias = Klass\nclass A\n  var value: object<Alias>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object alias chain class",
+			source:  "vim9script\nclass Klass\nendclass\ntype Alias = Klass\ntype Alias2 = Alias\nclass A\n  var value: object<Alias2>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object unknown name",
+			source:  "vim9script\nclass A\n  var value: object<Unknown>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object qualified import",
+			source:  "vim9script\nimport './face.vim' as Imported\nclass A\n  var value: object<Imported.Face>\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "object generic parameter",
+			source:  "vim9script\ndef Fn[T](value: object<T>)\nenddef\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "malformed object type suppressed",
+			source:  "vim9script\nclass A\n  var value: object<number\nendclass\n",
+			noCodes: []string{"vim/E1353"},
+		},
+		{
+			name:    "legacy object spelling is not a vim9 type",
+			source:  "let value: object<number>\n",
+			noCodes: []string{"vim/E1353"},
+		},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, code := range test.noCodes {
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == code {
+						t.Fatalf("unexpected %s in %s: %#v", code, test.name, result.Diagnostics)
+					}
+				}
+			}
+			if strings.Contains(test.source, "extends Missing extends") {
+				if len(result.File.Diagnostics) == 0 {
+					t.Fatalf("expected syntax diagnostic for malformed extends: %#v", result.Diagnostics)
+				}
+				return
+			}
+		})
+	}
+
+	result := Analyze(syntax.Parse("vim9script\nvar value: object<void>\n"))
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1330" {
+			t.Fatalf("object<void> retained E1330 cascade: %#v", result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string
