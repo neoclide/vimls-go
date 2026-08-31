@@ -266,7 +266,9 @@ func TestOversizedWorkspaceDocumentIsNotIndexedAndEvictsPriorAST(t *testing.T) {
 		t.Fatalf("small overlay imports = %#v", graph.Imports(path))
 	}
 	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+	instance.mu.Lock()
 	instance.client = client
+	instance.mu.Unlock()
 	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
 		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
 		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: strings.Repeat("x", maxFileBytes+1)}},
