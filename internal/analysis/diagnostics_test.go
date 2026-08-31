@@ -3432,6 +3432,40 @@ func TestAnalyzeE963VimVariableTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE909SpecialVariableIndexDiagnostics(t *testing.T) {
+	for _, source := range []string{
+		"echo v:true[0]\n",
+		"echo v:false[0]\n",
+		"echo v:null[0]\n",
+		"echo v:none[:] \n",
+		"vim9script\necho (v:true)[0]\n",
+	} {
+		file := syntax.Parse(source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E909" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != "Cannot index a special variable" {
+			t.Fatalf("E909 diagnostics = %#v\n%s", got, source)
+		}
+	}
+
+	for _, source := range []string{
+		"echo v:true[\n",
+		"echo v:errors[0]\n",
+		"let value = v:null\necho value[0]\n",
+		"echo test_unknown()[0]\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E909" {
+				t.Fatalf("guard unexpectedly received E909: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

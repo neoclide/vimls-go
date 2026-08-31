@@ -5384,6 +5384,19 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					})
 				}
 			}
+			if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) > 0 &&
+				!syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
+				receiver := expression.Children[0]
+				for receiver != nil && receiver.Kind == syntax.ExpressionParenthesized && len(receiver.Children) == 1 {
+					receiver = receiver.Children[0]
+				}
+				if receiver != nil && receiver.Kind == syntax.ExpressionIdentifier &&
+					(receiver.Value == "v:true" || receiver.Value == "v:false" || receiver.Value == "v:null" || receiver.Value == "v:none") {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E909", Message: "Cannot index a special variable", Span: expression.Children[0].Span,
+					})
+				}
+			}
 			if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 &&
 				command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) && !expressionContainsMissing(expression) {
 				receiver := expression.Children[0]
