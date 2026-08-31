@@ -4683,14 +4683,18 @@ func collectVim9DestructuringDiagnostics(result *FileAnalysis, commands []syntax
 				(command.Declaration.Target.Kind == syntax.ExpressionList || command.Declaration.Target.Kind == syntax.ExpressionTuple) {
 				fixed := 0
 				rest := false
+				cardinalityDefRules := defRules
 				for _, binding := range bindings {
 					if binding.Rest {
 						rest = true
 					} else {
 						fixed++
 					}
+					if binding.ParsedType != nil {
+						cardinalityDefRules = true
+					}
 				}
-				appendVim9CardinalityDiagnostic(result, fixed, rest, command.Declaration.Initializer, defRules)
+				appendVim9CardinalityDiagnostic(result, fixed, rest, command.Declaration.Initializer, cardinalityDefRules)
 			}
 		}
 		if command.Dialect == syntax.Vim9 {
