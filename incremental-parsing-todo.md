@@ -25,7 +25,7 @@
 已具备 JSON、alias topology、span、旧树不可变和 downstream analysis 比较器，以及
 10/100/1024 KiB 的基础 benchmark 入口。
 
-- [ ] 让 AST 反射覆盖检查遍历 map；新增 pointer/slice/map 字段遗漏 clone 时测试必须失败。
+- [x] 让 AST 反射覆盖检查遍历 map；新增 pointer/slice/map 字段遗漏 clone 时测试必须失败。
 - [ ] 把计划第 13 节的文本、方言、command boundary、多行 owner、structure、恢复和
   生命周期编辑矩阵固化成后续 I3-I7 共用的数据表。
 - [ ] 在固定 runner 上记录 Legacy/Vim9、10/100/1024 KiB full Parse 的五次原始样本和

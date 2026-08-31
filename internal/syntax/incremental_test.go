@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -85,50 +86,19 @@ var (
 )
 
 func syntaxAliases(file *File) []string {
+	return syntaxAliasesValue(reflect.ValueOf(file))
+}
+
+func syntaxAliasesValue(root reflect.Value) []string {
 	aliases := make(map[uintptr][]string)
-	seen := make(map[uintptr]bool)
-	var walk func(reflect.Value, string)
-	walk = func(value reflect.Value, path string) {
-		if !value.IsValid() {
-			return
+	pointerSeen := make(map[uintptr]bool)
+	active := make(map[syntaxReflectionIdentity]bool)
+	walkSyntaxReflection(root, "File", pointerSeen, active, true, func(value reflect.Value, path string) bool {
+		if value.Kind() == reflect.Pointer && trackedAliasType(value.Type()) {
+			aliases[value.Pointer()] = append(aliases[value.Pointer()], path)
 		}
-		if value.Kind() == reflect.Interface {
-			if !value.IsNil() {
-				walk(value.Elem(), path)
-			}
-			return
-		}
-		if value.Kind() == reflect.Pointer {
-			if value.IsNil() {
-				return
-			}
-			pointer := value.Pointer()
-			if trackedAliasType(value.Type()) {
-				aliases[pointer] = append(aliases[pointer], path)
-			}
-			if seen[pointer] {
-				return
-			}
-			seen[pointer] = true
-			walk(value.Elem(), path)
-			return
-		}
-		switch value.Kind() {
-		case reflect.Struct:
-			valueType := value.Type()
-			for index := 0; index < value.NumField(); index++ {
-				field := valueType.Field(index)
-				if field.PkgPath == "" {
-					walk(value.Field(index), path+"."+field.Name)
-				}
-			}
-		case reflect.Slice, reflect.Array:
-			for index := 0; index < value.Len(); index++ {
-				walk(value.Index(index), fmt.Sprintf("%s[%d]", path, index))
-			}
-		}
-	}
-	walk(reflect.ValueOf(file), "File")
+		return true
+	})
 	result := make([]string, 0, len(aliases))
 	for _, paths := range aliases {
 		if len(paths) > 1 {
@@ -145,101 +115,275 @@ func trackedAliasType(value reflect.Type) bool {
 }
 
 func checkSyntaxSpans(t *testing.T, file *File) {
+	checkSyntaxSpansValue(t, reflect.ValueOf(file), file.Source, file.Text)
+}
+
+func checkSyntaxSpansValue(t *testing.T, root reflect.Value, source string, textForSpan func(Span) string) {
 	t.Helper()
-	seen := make(map[uintptr]bool)
-	var walk func(reflect.Value, string)
-	walk = func(value reflect.Value, path string) {
-		if !value.IsValid() {
-			return
-		}
-		if value.Kind() == reflect.Interface {
-			if !value.IsNil() {
-				walk(value.Elem(), path)
-			}
-			return
-		}
-		if value.Kind() == reflect.Pointer {
-			if value.IsNil() || seen[value.Pointer()] {
-				return
-			}
-			seen[value.Pointer()] = true
-			walk(value.Elem(), path)
-			return
-		}
+	pointerSeen := make(map[uintptr]bool)
+	active := make(map[syntaxReflectionIdentity]bool)
+	walkSyntaxReflection(root, "File", pointerSeen, active, false, func(value reflect.Value, path string) bool {
 		if value.Type() == spanReflectionType {
 			span := value.Interface().(Span)
-			if span.Start < 0 || span.End < span.Start || span.End > len(file.Source) {
-				t.Errorf("%s: span %#v outside source of %d bytes", path, span, len(file.Source))
-				return
+			if span.Start < 0 || span.End < span.Start || span.End > len(source) {
+				t.Errorf("%s: span %#v outside source of %d bytes", path, span, len(source))
+				return false
 			}
-			if text := file.Text(span); len(text) != span.End-span.Start {
+			if text := textForSpan(span); len(text) != span.End-span.Start {
 				t.Errorf("%s: Text(%#v) has %d bytes", path, span, len(text))
 			}
-			return
+			return false
 		}
-		switch value.Kind() {
-		case reflect.Struct:
-			valueType := value.Type()
-			for index := 0; index < value.NumField(); index++ {
-				field := valueType.Field(index)
-				if field.PkgPath == "" {
-					walk(value.Field(index), path+"."+field.Name)
-				}
-			}
-		case reflect.Slice, reflect.Array:
-			for index := 0; index < value.Len(); index++ {
-				walk(value.Index(index), fmt.Sprintf("%s[%d]", path, index))
-			}
-		}
-	}
-	walk(reflect.ValueOf(file), "File")
+		return true
+	})
 }
 
 func syntaxSpansValid(file *File) bool {
+	return syntaxSpansValidValue(reflect.ValueOf(file), len(file.Source))
+}
+
+func syntaxSpansValidValue(root reflect.Value, sourceLength int) bool {
 	valid := true
-	seen := make(map[uintptr]bool)
-	var walk func(reflect.Value)
-	walk = func(value reflect.Value) {
-		if !value.IsValid() {
-			return
-		}
-		if value.Kind() == reflect.Interface {
-			if !value.IsNil() {
-				walk(value.Elem())
-			}
-			return
-		}
-		if value.Kind() == reflect.Pointer {
-			if value.IsNil() || seen[value.Pointer()] {
-				return
-			}
-			seen[value.Pointer()] = true
-			walk(value.Elem())
-			return
-		}
+	pointerSeen := make(map[uintptr]bool)
+	active := make(map[syntaxReflectionIdentity]bool)
+	walkSyntaxReflection(root, "File", pointerSeen, active, false, func(value reflect.Value, _ string) bool {
 		if value.Type() == spanReflectionType {
 			span := value.Interface().(Span)
-			if span.Start < 0 || span.End < span.Start || span.End > len(file.Source) {
+			if span.Start < 0 || span.End < span.Start || span.End > sourceLength {
 				valid = false
+			}
+			return false
+		}
+		return true
+	})
+	return valid
+}
+
+type syntaxReflectionIdentity struct {
+	kind     reflect.Kind
+	typ      reflect.Type
+	pointer  uintptr
+	length   int
+	capacity int
+}
+
+func walkSyntaxReflection(value reflect.Value, path string, pointerSeen map[uintptr]bool, active map[syntaxReflectionIdentity]bool, visitRepeatedPointers bool, visit func(reflect.Value, string) bool) {
+	if !value.IsValid() {
+		return
+	}
+	if value.Kind() == reflect.Interface {
+		if !value.IsNil() {
+			walkSyntaxReflection(value.Elem(), path, pointerSeen, active, visitRepeatedPointers, visit)
+		}
+		return
+	}
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return
+		}
+		identity := syntaxReflectionIdentity{kind: value.Kind(), pointer: value.Pointer()}
+		if pointerSeen[identity.pointer] {
+			if visitRepeatedPointers {
+				visit(value, path)
 			}
 			return
 		}
-		switch value.Kind() {
-		case reflect.Struct:
-			valueType := value.Type()
-			for index := 0; index < value.NumField(); index++ {
-				if valueType.Field(index).PkgPath == "" {
-					walk(value.Field(index))
-				}
-			}
-		case reflect.Slice, reflect.Array:
-			for index := 0; index < value.Len(); index++ {
-				walk(value.Index(index))
+		pointerSeen[identity.pointer] = true
+		if !visit(value, path) {
+			return
+		}
+		walkSyntaxReflection(value.Elem(), path, pointerSeen, active, visitRepeatedPointers, visit)
+		return
+	}
+	if value.Kind() == reflect.Map || value.Kind() == reflect.Slice {
+		if value.IsNil() {
+			return
+		}
+		identity := syntaxReflectionIdentity{kind: value.Kind(), typ: value.Type(), pointer: value.Pointer(), length: value.Len()}
+		if value.Kind() == reflect.Slice {
+			identity.capacity = value.Cap()
+		}
+		if active[identity] {
+			return
+		}
+		active[identity] = true
+		defer delete(active, identity)
+	}
+	if !visit(value, path) {
+		return
+	}
+	switch value.Kind() {
+	case reflect.Struct:
+		valueType := value.Type()
+		for index := 0; index < value.NumField(); index++ {
+			field := valueType.Field(index)
+			if field.PkgPath == "" {
+				walkSyntaxReflection(value.Field(index), path+"."+field.Name, pointerSeen, active, visitRepeatedPointers, visit)
 			}
 		}
+	case reflect.Slice, reflect.Array:
+		for index := 0; index < value.Len(); index++ {
+			walkSyntaxReflection(value.Index(index), fmt.Sprintf("%s[%d]", path, index), pointerSeen, active, visitRepeatedPointers, visit)
+		}
+	case reflect.Map:
+		type mapEntry struct {
+			key   reflect.Value
+			label string
+		}
+		keys := value.MapKeys()
+		entries := make([]mapEntry, len(keys))
+		for index, key := range keys {
+			entries[index] = mapEntry{key: key, label: syntaxMapKey(key)}
+		}
+		slices.SortStableFunc(entries, func(left, right mapEntry) int {
+			return strings.Compare(left.label, right.label)
+		})
+		labels := make(map[string]int, len(entries))
+		for _, entry := range entries {
+			index := labels[entry.label]
+			labels[entry.label] = index + 1
+			label := entry.label
+			if index > 0 {
+				label += "#" + strconv.Itoa(index)
+			}
+			walkSyntaxReflection(entry.key, path+"["+label+"]{key}", pointerSeen, active, visitRepeatedPointers, visit)
+			walkSyntaxReflection(value.MapIndex(entry.key), path+"["+label+"]{value}", pointerSeen, active, visitRepeatedPointers, visit)
+		}
 	}
-	walk(reflect.ValueOf(file))
-	return valid
+}
+
+func syntaxMapKey(value reflect.Value) string {
+	if !value.IsValid() {
+		panic("invalid syntax reflection map key")
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return "nil"
+		}
+		return syntaxMapKey(value.Elem())
+	case reflect.String:
+		return value.Type().String() + ":" + strconv.Quote(value.String())
+	case reflect.Bool:
+		return value.Type().String() + ":" + strconv.FormatBool(value.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return value.Type().String() + ":" + strconv.FormatInt(value.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return value.Type().String() + ":" + strconv.FormatUint(value.Uint(), 10)
+	case reflect.Struct:
+		if value.Type() == spanReflectionType {
+			span := value.Interface().(Span)
+			return fmt.Sprintf("Span:{%d,%d}", span.Start, span.End)
+		}
+		panic(fmt.Sprintf("unsupported syntax reflection map key type %s", value.Type()))
+	default:
+		panic(fmt.Sprintf("unsupported syntax reflection map key type %s", value.Type()))
+	}
+}
+
+type syntaxReflectionMapFixture struct {
+	AliasesByValue map[string]*Expression
+	Spans          map[Span]Span
+	Cycle          map[string]any
+	hidden         Span
+}
+
+func TestSyntaxReflectionMapTraversal(t *testing.T) {
+	source := "0123456789"
+	expression := &Expression{Kind: ExpressionNumber, Span: Span{Start: 1, End: 3}}
+	fixture := syntaxReflectionMapFixture{
+		AliasesByValue: map[string]*Expression{
+			"a": expression,
+			"b": expression,
+		},
+		Spans: map[Span]Span{
+			{Start: 3, End: 5}: {Start: 5, End: 7},
+			{Start: 7, End: 9}: {Start: 8, End: 9},
+		},
+		hidden: Span{Start: 100, End: 101},
+	}
+	fixture.Cycle = make(map[string]any)
+	fixture.Cycle["self"] = fixture.Cycle
+
+	aliases := syntaxAliasesValue(reflect.ValueOf(fixture))
+	if len(aliases) != 1 || !strings.Contains(aliases[0], ".AliasesByValue[") {
+		t.Fatalf("map pointer aliases = %v", aliases)
+	}
+	for index := 0; index < 10; index++ {
+		if got := syntaxAliasesValue(reflect.ValueOf(fixture)); !slices.Equal(got, aliases) {
+			t.Fatalf("map traversal is nondeterministic: first=%v, got=%v", aliases, got)
+		}
+	}
+
+	if !syntaxSpansValidValue(reflect.ValueOf(fixture), len(source)) {
+		t.Fatal("valid map key/value spans were not accepted")
+	}
+	checkSyntaxSpansValue(t, reflect.ValueOf(fixture), source, func(span Span) string {
+		return source[span.Start:span.End]
+	})
+
+	invalid := fixture
+	invalid.Spans = map[Span]Span{
+		{Start: len(source) + 1, End: len(source) + 2}: {Start: 0, End: 1},
+	}
+	if syntaxSpansValidValue(reflect.ValueOf(invalid), len(source)) {
+		t.Fatal("invalid map key span was not visited")
+	}
+	invalidValue := fixture
+	invalidValue.Spans = map[Span]Span{
+		{Start: 3, End: 5}: {Start: len(source) + 1, End: len(source) + 2},
+	}
+	if syntaxSpansValidValue(reflect.ValueOf(invalidValue), len(source)) {
+		t.Fatal("invalid map value span was not visited")
+	}
+}
+
+func TestSyntaxReflectionMapPointerKeysAreRejected(t *testing.T) {
+	expressionA := &Expression{Kind: ExpressionNumber, Span: Span{Start: 1, End: 2}}
+	expressionB := &Expression{Kind: ExpressionNumber, Span: Span{Start: 1, End: 2}}
+	fixture := struct {
+		Values map[*Expression]Span
+	}{Values: map[*Expression]Span{
+		expressionA: {Start: 2, End: 3},
+		expressionB: {Start: 3, End: 4},
+	}}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("pointer map key was not rejected")
+		}
+	}()
+	_ = syntaxAliasesValue(reflect.ValueOf(fixture))
+}
+
+func TestSyntaxReflectionSliceCycle(t *testing.T) {
+	cycle := make([]any, 1)
+	cycle[0] = cycle
+	fixture := struct {
+		Cycle []any
+	}{Cycle: cycle}
+	root := reflect.ValueOf(fixture)
+	if !syntaxSpansValidValue(root, 0) {
+		t.Fatal("slice cycle changed span validity")
+	}
+	if aliases := syntaxAliasesValue(root); len(aliases) != 0 {
+		t.Fatalf("slice cycle aliases = %v", aliases)
+	}
+	checkSyntaxSpansValue(t, root, "", func(Span) string { return "" })
+
+	expression := &Expression{Kind: ExpressionNumber, Span: Span{Start: 0, End: 0}}
+	sharedSlice := []any{expression}
+	sharedMap := map[string]any{"expression": expression}
+	shared := struct {
+		SliceA []any
+		SliceB []any
+		MapA   map[string]any
+		MapB   map[string]any
+	}{SliceA: sharedSlice, SliceB: sharedSlice, MapA: sharedMap, MapB: sharedMap}
+	aliases := syntaxAliasesValue(reflect.ValueOf(shared))
+	if len(aliases) != 1 || !strings.Contains(aliases[0], ".SliceA[0]") || !strings.Contains(aliases[0], ".SliceB[0]") ||
+		!strings.Contains(aliases[0], ".MapA[") || !strings.Contains(aliases[0], ".MapB[") {
+		t.Fatalf("shared container aliases = %v", aliases)
+	}
 }
 
 func TestIncrementalComparisonHelpers(t *testing.T) {
