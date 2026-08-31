@@ -3748,3 +3748,23 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9class.txt:695-699` requires each interface name to appear
   only once.
 - `src/errors.h:3454-3459` defines the exact E1350, E1351, and E1352 messages.
+
+## Duplicate extends clause: E1352
+
+E1352 means `Duplicate "extends"`. A Vim9 class or interface declaration may
+contain only one `extends` clause. The parser reports the second keyword before
+attempting to parse another parent name, including when that name is missing.
+
+The first parent remains the sole entry in the recovering aggregate, and the
+block plus following declarations remain available. An enum's first `extends`
+clause is instead E1416. Malformed whitespace after the first parent remains
+E1315, while Legacy declarations retain their dialect diagnostics.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:2377-2386` covers the exact duplicate clause
+  and reports it on the class header.
+- `src/vim9class.c:2012-2021` rejects a second `extends` keyword before scanning
+  its following parent name.
+- `runtime/doc/vim9class.txt:656-664` states that a class can extend one class.
+- `src/errors.h:3458-3463` defines the exact E1352, E1353, and E1354 messages.

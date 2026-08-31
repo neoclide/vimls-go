@@ -435,6 +435,87 @@ func TestOfficialVimParserDuplicateImplements(t *testing.T) {
 	}
 }
 
+func TestOfficialVimParserDuplicateExtends(t *testing.T) {
+	file := Parse("vim9script\nclass C extends Base extends Base\nendclass\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1352" || file.Diagnostics[0].Message != `Duplicate "extends"` || file.Text(file.Diagnostics[0].Span) != "extends" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	var class *Aggregate
+	for index := range file.Commands {
+		if file.Commands[index].Aggregate != nil && file.Text(file.Commands[index].Aggregate.Name) == "C" {
+			class = file.Commands[index].Aggregate
+			break
+		}
+	}
+	if class == nil || class.Kind != BlockClass || len(class.Extends) != 1 || file.Text(class.Extends[0]) != "Base" {
+		t.Fatalf("class = %#v", file.Commands)
+	}
+	var following *Command
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+			following = command
+			break
+		}
+	}
+	if following == nil || following.Canonical != "var" || file.Text(following.Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	file = Parse("vim9script\nclass C extends Base extends\nendclass\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1352" || file.Text(file.Diagnostics[0].Span) != "extends" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+
+	file = Parse("vim9script\nclass C extends Base \"\nendclass\n")
+	if !hasDiagnostic(file, "vim/E1315") || hasDiagnostic(file, "vim/E1352") {
+		t.Fatalf("malformed extends diagnostics = %#v", file.Diagnostics)
+	}
+
+	for _, test := range []struct {
+		name, source, owner, message, span string
+	}{
+		{"single extends", "vim9script\nclass C extends Base\nendclass\n", "", "", ""},
+		{"second implements", "vim9script\nclass C extends Base implements I implements J\nendclass\n", "vim/E1350", "", ""},
+		{"legacy root", "class C extends Base extends Base\nendclass\n", "vim/E1316", "", ""},
+		{"one-shot legacy", "vim9script\nlegacy class C extends Base extends Base\nendclass\n", "vim/E1316", "", ""},
+		{"interface duplicate extends", "vim9script\ninterface I extends A extends A\nendinterface\n", "vim/E1352", `Duplicate "extends"`, "extends"},
+		{"enum first extends", "vim9script\nenum C extends A\n  Value\nendenum\n", "vim/E1416", `Enum cannot extend a class or enum`, "extends"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parsed := Parse(test.source)
+			if test.owner == "" {
+				if hasDiagnostic(parsed, "vim/E1352") {
+					t.Fatalf("guard unexpectedly received E1352: %#v", parsed.Diagnostics)
+				}
+				return
+			}
+			if !hasDiagnostic(parsed, test.owner) {
+				t.Fatalf("guard diagnostics = %#v, want %s", parsed.Diagnostics, test.owner)
+			}
+			if test.message != "" {
+				diagnostic := parsed.Diagnostics[0]
+				if diagnostic.Code != test.owner || diagnostic.Message != test.message || parsed.Text(diagnostic.Span) != test.span {
+					t.Fatalf("guard diagnostics = %#v", parsed.Diagnostics)
+				}
+			}
+			if test.name == "interface duplicate extends" {
+				var interfaceAggregate *Aggregate
+				for index := range parsed.Commands {
+					if parsed.Commands[index].Aggregate != nil && parsed.Text(parsed.Commands[index].Aggregate.Name) == "I" {
+						interfaceAggregate = parsed.Commands[index].Aggregate
+						break
+					}
+				}
+				if interfaceAggregate == nil || interfaceAggregate.Kind != BlockInterface || len(interfaceAggregate.Extends) != 1 || parsed.Text(interfaceAggregate.Extends[0]) != "A" {
+					t.Fatalf("interface aggregate = %#v", parsed.Commands)
+				}
+			}
+		})
+	}
+}
+
 func TestOfficialVimParserDuplicateImplementsWithEnum(t *testing.T) {
 	file := Parse("vim9script\ninterface I\nendinterface\nenum C implements I, I\n  Apple\nendenum\nvar after = 1\n")
 	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1351" {

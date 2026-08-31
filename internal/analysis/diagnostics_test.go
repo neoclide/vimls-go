@@ -7716,6 +7716,19 @@ func TestAnalyzeE1351DuplicateImplementsNameSuppressesInterfaceValidation(t *tes
 	}
 }
 
+func TestAnalyzeE1352DuplicateExtendsSuppressesExtendsValidation(t *testing.T) {
+	file := syntax.Parse("vim9script\nclass C extends Missing extends\nendclass\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1352" {
+		t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+	}
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		switch diagnostic.Code {
+		case "vim/E1353", "vim/E1354":
+			t.Fatalf("E1352 header retained semantic cascade: %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string
