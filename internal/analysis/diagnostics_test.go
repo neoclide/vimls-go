@@ -3215,6 +3215,47 @@ func TestAnalyzeE705E707NameConflictWarnings(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1084CannotDeleteVim9ScriptFunction(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{"legacy function at script level", "vim9script\nfunction DeleteMe()\nendfunction\ndelfunction DeleteMe\n"},
+		{"legacy function inside def", "vim9script\nfunction DeleteMe()\nendfunction\ndef Remove()\n  delfunction DeleteMe\nenddef\nRemove()\n"},
+		{"def at script level", "vim9script\ndef DeleteMe()\nenddef\ndelfunction DeleteMe\n"},
+		{"def inside def", "vim9script\ndef DeleteMe()\nenddef\ndef Remove()\n  delfunction DeleteMe\nenddef\nRemove()\n"},
+		{"bang does not allow deletion", "vim9script\ndef DeleteMe()\nenddef\ndelfunction! DeleteMe\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1084" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot delete Vim9 script function DeleteMe" || file.Text(got[0].Span) != "DeleteMe" {
+				t.Fatalf("E1084 diagnostics = %#v", got)
+			}
+		})
+	}
+}
+
+func TestAnalyzeE1084ConservativeGuards(t *testing.T) {
+	for _, source := range []string{
+		"function DeleteMe()\nendfunction\ndelfunction DeleteMe\n",
+		"vim9script\ndef g:DeleteMe()\nenddef\ndelfunction g:DeleteMe\n",
+		"vim9script\ndelfunction DeleteMe\ndef DeleteMe()\nenddef\n",
+		"vim9script\ndelfunction! Missing\n",
+		"vim9script\ndef Auto#DeleteMe()\nenddef\ndelfunction Auto#DeleteMe\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1084" {
+				t.Fatalf("guard unexpectedly received E1084: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1148CannotIndexRuntimeDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"compiled nested string", "vim9script\ndef F()\n  var dict = {value: 'text'}\n  dict.value[0] = 1\nenddef\n", "dict.value"},

@@ -146,6 +146,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectLegacyFunctionOverwriteRiskDiagnostics(result, file.Commands)
 	collectUserCommandOverwriteRiskDiagnostics(result, file.Commands)
 	collectNameDeclarationConflictDiagnostics(result)
+	collectVim9ScriptFunctionDeletionDiagnostics(result, file.Commands, root)
 	collectVim9LegacyScriptVariableDiagnostics(result)
 
 	// A malformed or partially parsed enum value may remain an opaque command.
@@ -342,6 +343,53 @@ func collectNameDeclarationConflictDiagnostics(result *FileAnalysis) {
 		}
 		tables[key][event.Kind] = true
 	}
+}
+
+func collectVim9ScriptFunctionDeletionDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	if result == nil || result.File == nil || result.File.Dialect != syntax.Vim9 {
+		return
+	}
+	file := result.File
+	var walk func([]syntax.Command, *Scope)
+	walk = func(commands []syntax.Command, parent *Scope) {
+		for index := range commands {
+			command := &commands[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = parent
+			}
+			if command.Canonical == "delfunction" && len(command.Targets) == 1 {
+				target := command.Targets[0]
+				if target != nil && target.Kind == syntax.ExpressionIdentifier {
+					declaration := resolve(scope, target.Value, target.Span.Start, true, nil)
+					if vim9ScriptFunctionDeclaration(result, declaration, target.Span.Start) {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1084", Message: "Cannot delete Vim9 script function " + target.Value, Span: target.Span,
+						})
+					}
+				}
+			}
+			if command.Embedded != nil {
+				walk(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	walk(commands, parent)
+}
+
+func vim9ScriptFunctionDeclaration(result *FileAnalysis, declaration *Declaration, before int) bool {
+	if declaration == nil || declaration.Kind != SymbolKindFunction || declaration.Scope != result.Root || declaration.Span.Start >= before {
+		return false
+	}
+	for index := range result.File.Commands {
+		command := &result.File.Commands[index]
+		if command.Function == nil || command.Function.Name != declaration.Span || command.Dialect != syntax.Vim9 {
+			continue
+		}
+		name := result.File.Text(command.Function.Name)
+		return validScopeVariableName(name) && !strings.Contains(name, "#")
+	}
+	return false
 }
 
 func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {
