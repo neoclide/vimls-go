@@ -7440,7 +7440,7 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "legacy function arguments",
-			source: "function Test(value, ...)\n  let a:value = 1\n  let a:000 += [1]\n  let a:0 = 1\n  let a:firstline = 2\n  let a:lastline = 3\nendfunction\n",
+			source: "function! Test(value, ...)\n  let a:value = 1\n  let a:000 += [1]\n  let a:0 = 1\n  let a:firstline = 2\n  let a:lastline = 3\nendfunction\n",
 			want: []syntax.Diagnostic{
 				{Code: "vim/E46", Message: `Cannot change read-only variable "a:value"`},
 				{Code: "vim/E46", Message: `Cannot change read-only variable "a:000"`},
