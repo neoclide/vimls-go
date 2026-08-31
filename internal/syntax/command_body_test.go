@@ -126,6 +126,19 @@ func TestUserCommandListingAndQueryHaveNoBody(t *testing.T) {
 	}
 }
 
+func TestDefinedUserCommand(t *testing.T) {
+	file := Parse("command! Build echo 'value'\ncommand -buffer LocalBuild echo 'local'\ncommand Build\n")
+	if name, span, bufferLocal, ok := DefinedUserCommand(file, &file.Commands[0]); !ok || name != "Build" || file.Text(span) != "Build" || bufferLocal {
+		t.Fatalf("global definition = %q, %#v, %v, %v", name, span, bufferLocal, ok)
+	}
+	if name, span, bufferLocal, ok := DefinedUserCommand(file, &file.Commands[1]); !ok || name != "LocalBuild" || file.Text(span) != "LocalBuild" || !bufferLocal {
+		t.Fatalf("buffer definition = %q, %#v, %v, %v", name, span, bufferLocal, ok)
+	}
+	if _, _, _, ok := DefinedUserCommand(file, &file.Commands[2]); ok {
+		t.Fatal("query form was treated as a definition")
+	}
+}
+
 func TestUserCommandLowercaseNameDiagnostic(t *testing.T) {
 	for _, test := range []struct {
 		name, source, span string

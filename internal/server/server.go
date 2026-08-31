@@ -875,6 +875,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		return
 	}
 	file.Diagnostics = append(file.Diagnostics, importDiagnostics...)
+	file.Diagnostics = append(file.Diagnostics, s.userCommandAbbreviationDiagnostics(file)...)
 	sort.SliceStable(file.Diagnostics, func(left, right int) bool {
 		if file.Diagnostics[left].Span.Start != file.Diagnostics[right].Span.Start {
 			return file.Diagnostics[left].Span.Start < file.Diagnostics[right].Span.Start
@@ -888,6 +889,17 @@ func (s *Server) analyzeDocument(documentURI string) {
 		})
 	}
 	s.publishSyntax(work, file, graphRevision)
+}
+
+func (s *Server) userCommandAbbreviationDiagnostics(file *syntax.File) []syntax.Diagnostic {
+	s.workspaceMu.Lock()
+	index := s.workspaceIndex
+	ready := s.workspaceBuilt && len(s.workspacePending) == 0
+	s.workspaceMu.Unlock()
+	if !ready || index == nil || !index.Complete() {
+		return nil
+	}
+	return analysis.UserCommandAbbreviationDiagnostics(file, index.UserCommandNames())
 }
 
 func analysisDiagnosticsForTarget(file *syntax.File, diagnostics []syntax.Diagnostic, target TargetVersion) []syntax.Diagnostic {
@@ -979,7 +991,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 
 func protocolDiagnosticSeverity(code string, unresolvedSeverity syntax.DiagnosticSeverity) protocol.DiagnosticSeverity {
 	switch code {
-	case "vim/E122", "vim/E174":
+	case "vim/E122", "vim/E174", "vim/E464":
 		return protocol.DiagnosticSeverityWarning
 	case "vim/E117", "vim/E121", "vim/E1001", "vim/E1089":
 		return protocolSeverity(unresolvedSeverity)

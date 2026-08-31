@@ -3981,6 +3981,34 @@ func userCommandBodySpan(source string, argument Span) (Span, bool) {
 	return Span{Start: bodyStart, End: argument.End}, true
 }
 
+// DefinedUserCommand returns the full name of a :command definition. Listing
+// and query forms do not define a command and therefore return ok=false.
+func DefinedUserCommand(file *File, command *Command) (name string, span Span, bufferLocal bool, ok bool) {
+	if file == nil || command == nil || command.Canonical != "command" || command.Argument.Start >= command.Argument.End {
+		return "", Span{}, false, false
+	}
+	if _, body := userCommandBodySpan(file.Source, command.Argument); !body {
+		return "", Span{}, false, false
+	}
+	start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+	for start < command.Argument.End && file.Source[start] == '-' {
+		end := start
+		for end < command.Argument.End && !isSpace(file.Source[end]) {
+			end++
+		}
+		if file.Source[start:end] == "-buffer" {
+			bufferLocal = true
+		}
+		start = skipSpace(file.Source, end, command.Argument.End)
+	}
+	nameEnd := scanWord(file.Source, start, command.Argument.End)
+	if nameEnd == start {
+		return "", Span{}, false, false
+	}
+	span = Span{Start: start, End: nameEnd}
+	return file.Text(span), span, bufferLocal, true
+}
+
 func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 	allowArguments := false
 	complete := Span{}

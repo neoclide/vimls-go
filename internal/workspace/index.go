@@ -62,11 +62,22 @@ type ExternalReferenceMatch struct {
 	Source string
 }
 
+// UserCommandFact is a statically parsed :command definition retained by the
+// workspace index. Runtimepath order and script execution are deliberately not
+// inferred here; diagnostics use only the complete set of defined names.
+type UserCommandFact struct {
+	Path        string
+	Name        string
+	Span        syntax.Span
+	BufferLocal bool
+}
+
 type indexedFile struct {
 	bytes      int
 	source     string
 	facts      []SymbolFact
 	references []ExternalReferenceFact
+	commands   []UserCommandFact
 }
 
 // Index stores symbols from a bounded set of syntax files. All methods are
@@ -80,6 +91,8 @@ type Index struct {
 	files          map[string]indexedFile
 	byName         map[string][]SymbolFact
 	byExternalName map[string][]ExternalReferenceFact
+	byUserCommand  map[string][]UserCommandFact
+	complete       bool
 }
 
 // NewIndex creates a workspace symbol index with file-count and source-byte
@@ -92,6 +105,7 @@ func NewIndex(maxFiles, maxBytes int) *Index {
 		files:          make(map[string]indexedFile),
 		byName:         make(map[string][]SymbolFact),
 		byExternalName: make(map[string][]ExternalReferenceFact),
+		byUserCommand:  make(map[string][]UserCommandFact),
 	}
 }
 
@@ -108,7 +122,8 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	facts := CollectSymbolFacts(normalized, file)
 	sortFacts(facts)
 	references := CollectExternalReferences(normalized, file)
-	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references}
+	commands := CollectUserCommandFacts(normalized, file)
+	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references, commands: commands}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -128,6 +143,7 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	if exists {
 		i.removeFactsLocked(old.facts)
 		i.removeExternalReferencesLocked(old.references)
+		i.removeUserCommandsLocked(old.commands)
 	}
 	i.files[normalized] = indexed
 	i.bytes = indexedBytes
@@ -142,6 +158,9 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	}
 	for _, name := range referenceNamesIn(references) {
 		sortExternalReferences(i.byExternalName[name])
+	}
+	for _, command := range commands {
+		i.byUserCommand[command.Name] = append(i.byUserCommand[command.Name], command)
 	}
 	i.revision++
 	return nil
@@ -161,6 +180,7 @@ func (i *Index) Remove(path string) {
 	}
 	i.removeFactsLocked(old.facts)
 	i.removeExternalReferencesLocked(old.references)
+	i.removeUserCommandsLocked(old.commands)
 	delete(i.files, normalized)
 	i.bytes -= old.bytes
 	i.revision++
@@ -242,6 +262,34 @@ func (i *Index) ExternalReferences(name string) []ExternalReferenceMatch {
 	}
 	i.mu.RUnlock()
 	return result
+}
+
+// UserCommandNames returns every distinct parsed user-command definition in
+// bytewise name order. The returned slice is independent of the index.
+func (i *Index) UserCommandNames() []string {
+	i.mu.RLock()
+	names := make([]string, 0, len(i.byUserCommand))
+	for name := range i.byUserCommand {
+		names = append(names, name)
+	}
+	i.mu.RUnlock()
+	sort.Strings(names)
+	return names
+}
+
+// SetComplete records whether every discovered source fitted in the index.
+// Cross-file diagnostics that require a closed world must remain silent when
+// this value is false.
+func (i *Index) SetComplete(complete bool) {
+	i.mu.Lock()
+	i.complete = complete
+	i.mu.Unlock()
+}
+
+func (i *Index) Complete() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.complete
 }
 
 // Lookup returns exact-name matches sorted by path and source span. The
@@ -344,6 +392,32 @@ func normalizeIndexPath(path string) (string, error) {
 		return "", err
 	}
 	return CanonicalPath(filepath.Clean(abs))
+}
+
+// CollectUserCommandFacts returns every explicit :command definition in file,
+// including definitions in deferred command lists. Dynamic :execute forms are
+// intentionally absent because their full command name is not statically
+// known.
+func CollectUserCommandFacts(path string, file *syntax.File) []UserCommandFact {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil {
+		return nil
+	}
+	facts := make([]UserCommandFact, 0)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if name, span, bufferLocal, ok := syntax.DefinedUserCommand(file, command); ok && len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+				facts = append(facts, UserCommandFact{Path: normalized, Name: strings.Clone(name), Span: span, BufferLocal: bufferLocal})
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	return facts
 }
 
 // CollectSymbolFacts returns immutable symbol facts for file. Exported is set
@@ -826,6 +900,21 @@ func (i *Index) removeExternalReferencesLocked(facts []ExternalReferenceFact) {
 				i.byExternalName[fact.Name] = append(matches[:index], matches[index+1:]...)
 				if len(i.byExternalName[fact.Name]) == 0 {
 					delete(i.byExternalName, fact.Name)
+				}
+				break
+			}
+		}
+	}
+}
+
+func (i *Index) removeUserCommandsLocked(facts []UserCommandFact) {
+	for _, fact := range facts {
+		matches := i.byUserCommand[fact.Name]
+		for index, candidate := range matches {
+			if candidate == fact {
+				i.byUserCommand[fact.Name] = append(matches[:index], matches[index+1:]...)
+				if len(i.byUserCommand[fact.Name]) == 0 {
+					delete(i.byUserCommand, fact.Name)
 				}
 				break
 			}

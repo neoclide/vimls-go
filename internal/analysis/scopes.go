@@ -218,7 +218,7 @@ func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands [
 	for index := range commands {
 		command := &commands[index]
 		if command.Canonical == "command" && emptySyntaxSpan(command.Bang) {
-			if name, span, definition := userCommandDefinitionName(result.File, command); definition {
+			if name, span, _, definition := syntax.DefinedUserCommand(result.File, command); definition {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
 				})
@@ -230,34 +230,57 @@ func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands [
 	}
 }
 
-func userCommandDefinitionName(file *syntax.File, command *syntax.Command) (string, syntax.Span, bool) {
-	if file == nil || command == nil || command.Argument.Start >= command.Argument.End {
-		return "", syntax.Span{}, false
+// UserCommandAbbreviationDiagnostics warns when a parsed user-command call is
+// a proper prefix of a full name from the complete runtimepath command index.
+// Exact matches always win, matching Vim's user-command lookup rule.
+func UserCommandAbbreviationDiagnostics(file *syntax.File, indexedNames []string) []syntax.Diagnostic {
+	if file == nil {
+		return nil
 	}
-	start, end := command.Argument.Start, command.Argument.End
-	for start < end && (file.Source[start] == ' ' || file.Source[start] == '\t') {
-		start++
-	}
-	for start < end && file.Source[start] == '-' {
-		for start < end && file.Source[start] != ' ' && file.Source[start] != '\t' {
-			start++
-		}
-		for start < end && (file.Source[start] == ' ' || file.Source[start] == '\t') {
-			start++
+	names := make(map[string]bool, len(indexedNames))
+	for _, name := range indexedNames {
+		if len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+			names[name] = true
 		}
 	}
-	nameStart := start
-	for start < end && file.Source[start] != ' ' && file.Source[start] != '\t' {
-		start++
+	var collectDefinitions func([]syntax.Command)
+	collectDefinitions = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if name, _, _, ok := syntax.DefinedUserCommand(file, command); ok && len(name) > 0 && name[0] >= 'A' && name[0] <= 'Z' {
+				names[name] = true
+			}
+			if command.Embedded != nil {
+				collectDefinitions(command.Embedded.Commands)
+			}
+		}
 	}
-	if start == nameStart {
-		return "", syntax.Span{}, false
+	collectDefinitions(file.Commands)
+	if len(names) == 0 {
+		return nil
 	}
-	span := syntax.Span{Start: nameStart, End: start}
-	for start < end && (file.Source[start] == ' ' || file.Source[start] == '\t') {
-		start++
+	diagnostics := make([]syntax.Diagnostic, 0)
+	var diagnose func([]syntax.Command)
+	diagnose = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.Kind == syntax.CommandUser && !names[command.TypedName] {
+				for name := range names {
+					if len(command.TypedName) < len(name) && strings.HasPrefix(name, command.TypedName) {
+						diagnostics = append(diagnostics, syntax.Diagnostic{
+							Code: "vim/E464", Message: "User-defined command " + command.TypedName + " is abbreviated; use the full command name to avoid ambiguity", Span: command.Name,
+						})
+						break
+					}
+				}
+			}
+			if command.Embedded != nil {
+				diagnose(command.Embedded.Commands)
+			}
+		}
 	}
-	return file.Text(span), span, start < end || command.Embedded != nil
+	diagnose(file.Commands)
+	return diagnostics
 }
 
 func collectDeferDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {

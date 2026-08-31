@@ -254,9 +254,11 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 	graph := workspace.NewImportGraph()
 	diskFiles := make(map[string]struct{})
 	if len(roots) == 0 || ctx.Err() != nil {
+		index.SetComplete(ctx.Err() == nil)
 		graph.SetReady(ctx.Err() == nil)
 		return index, graph, diskFiles, nil
 	}
+	complete := true
 
 	paths := make([]string, 0)
 	seen := make(map[string]struct{})
@@ -265,17 +267,20 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 	for _, root := range roots {
 		remaining := maxWorkspaceFiles - len(paths)
 		if remaining <= 0 {
+			complete = false
 			warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
 			break
 		}
 		files, truncated, err := workspace.DiscoverFiles(root, remaining)
 		if err != nil {
+			complete = false
 			warnings = appendWarning(warnings, fmt.Sprintf("vimls: workspace discovery failed for %s: %v", root, err))
 			continue
 		}
 		for _, path := range files {
 			canonical, err := workspace.CanonicalPath(path)
 			if err != nil {
+				complete = false
 				continue
 			}
 			if _, ok := seen[canonical]; ok {
@@ -285,6 +290,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 			paths = append(paths, canonical)
 		}
 		if truncated {
+			complete = false
 			warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
 			break
 		}
@@ -329,9 +335,11 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 		}
 		source, diskFile, ok := readSource(path)
 		if !ok {
+			complete = false
 			continue
 		}
 		if len(source) > maxIndexBytes-indexedBytes {
+			complete = false
 			warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 			break
 		}
@@ -379,14 +387,17 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
 			}
 			if len(indexedPaths)+len(newPaths) >= maxWorkspaceFiles {
+				complete = false
 				warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
 				break
 			}
 			source, diskFile, ok := readSource(path)
 			if !ok {
+				complete = false
 				continue
 			}
 			if len(source) > maxIndexBytes-indexedBytes {
+				complete = false
 				warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 				break
 			}
@@ -413,6 +424,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 		}
 		path := indexedPaths[position]
 		if err := index.Replace(path, file); err != nil {
+			complete = false
 			warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 			break
 		}
@@ -434,11 +446,13 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 			return ok
 		})
 		if err := graph.Replace(path, facts); err != nil {
+			complete = false
 			index.Remove(path)
 			delete(indexed, path)
 			delete(diskFiles, path)
 		}
 	}
+	index.SetComplete(complete)
 	graph.SetReady(true)
 	return index, graph, diskFiles, warnings
 }
@@ -555,6 +569,7 @@ func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []s
 		return nil
 	}
 	if err := s.workspaceIndex.Replace(path, file); err != nil {
+		s.workspaceIndex.SetComplete(false)
 		s.workspaceIndex.Remove(path)
 		s.logf("vimls: workspace index limit reached for %s: %v", path, err)
 	}
@@ -632,6 +647,7 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 		s.workspaceGraph.Remove(path)
 	} else {
 		if err := s.workspaceIndex.Replace(path, file); err != nil {
+			s.workspaceIndex.SetComplete(false)
 			s.workspaceIndex.Remove(path)
 		}
 		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath), func(target string) bool {

@@ -34,6 +34,38 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 	if got := protocolDiagnosticSeverity("vim/E174", syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
 		t.Errorf("vim/E174 severity = %v, want warning", got)
 	}
+	if got := protocolDiagnosticSeverity("vim/E464", syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
+		t.Errorf("vim/E464 severity = %v, want warning", got)
+	}
+}
+
+func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	writeWorkspaceFile(t, runtimeRoot, "plugin/build.vim", "command! BuildProject echo 'build'\n")
+	writeWorkspaceFile(t, runtimeRoot, "after/plugin/local.vim", "command! LocalCommand echo 'local'\n")
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{runtimeRoot}, workspacePathResolver(nil, []string{runtimeRoot}), nil)
+	if len(warnings) != 0 || !index.Complete() || index.FileCount() != 2 {
+		t.Fatalf("runtimepath index: files=%d complete=%v warnings=%#v", index.FileCount(), index.Complete(), warnings)
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceIndex = index
+	instance.workspaceGraph = graph
+	instance.workspaceGraphView = graph.Snapshot()
+	instance.workspaceFiles = files
+	instance.workspaceBuilt = true
+	instance.workspaceMu.Unlock()
+
+	file := syntax.Parse("BuildP\nLocalC\nBuildProject\n")
+	diagnostics := instance.userCommandAbbreviationDiagnostics(file)
+	if len(diagnostics) != 2 || file.Text(diagnostics[0].Span) != "BuildP" || file.Text(diagnostics[1].Span) != "LocalC" {
+		t.Fatalf("E464 diagnostics = %#v", diagnostics)
+	}
+	index.SetComplete(false)
+	if diagnostics := instance.userCommandAbbreviationDiagnostics(file); len(diagnostics) != 0 {
+		t.Fatalf("incomplete runtimepath index produced E464: %#v", diagnostics)
+	}
 }
 
 func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {

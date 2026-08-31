@@ -10533,6 +10533,38 @@ func TestAnalyzeE174UserCommandOverwriteRiskWarning(t *testing.T) {
 	}
 }
 
+func TestE464UserCommandAbbreviationDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, span string
+		indexed            []string
+		want               int
+	}{
+		{"runtimepath abbreviation", "BuildP\n", "BuildP", []string{"BuildProject"}, 1},
+		{"local abbreviation", "command! BuildProject echo 'value'\nBuildP\n", "BuildP", nil, 1},
+		{"Vim9 abbreviation", "vim9script\nBuildP\n", "BuildP", []string{"BuildProject"}, 1},
+		{"nested invocation", "function F()\n  BuildP\nendfunction\n", "BuildP", []string{"BuildProject"}, 1},
+		{"ambiguous prefix warns once", "Ren\n", "Ren", []string{"Rename", "Renumber"}, 1},
+		{"exact full name wins", "Build\n", "", []string{"Build", "BuildMore"}, 0},
+		{"unknown external command", "External\n", "", []string{"BuildProject"}, 0},
+		{"builtin command", "Print\n", "", []string{"PrintMore"}, 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			got := UserCommandAbbreviationDiagnostics(file, test.indexed)
+			if len(got) != test.want {
+				t.Fatalf("E464 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			if test.want == 1 {
+				message := "User-defined command " + test.span + " is abbreviated; use the full command name to avoid ambiguity"
+				if got[0].Code != "vim/E464" || got[0].Message != message || file.Text(got[0].Span) != test.span {
+					t.Fatalf("E464 diagnostic = %#v on %q", got[0], file.Text(got[0].Span))
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1041ScriptItemRedefinition(t *testing.T) {
 	tests := []struct {
 		name, source, text, forbidden string

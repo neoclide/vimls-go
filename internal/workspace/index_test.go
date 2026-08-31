@@ -58,6 +58,36 @@ func TestIndexLookupOrdersSameNamesAndReplaceRemovesOldSymbols(t *testing.T) {
 	}
 }
 
+func TestIndexUserCommandNamesTrackReplaceAndRemove(t *testing.T) {
+	index := NewIndex(10, 10000)
+	root := t.TempDir()
+	first := filepath.Join(root, "first.vim")
+	second := filepath.Join(root, "second.vim")
+	if err := index.Replace(first, syntax.Parse("command! BuildProject echo 'value'\ncommand Build\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Replace(second, syntax.Parse("command -buffer LocalBuild echo 'value'\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.UserCommandNames(); len(got) != 2 || got[0] != "BuildProject" || got[1] != "LocalBuild" {
+		t.Fatalf("user command names = %#v", got)
+	}
+	if err := index.Replace(first, syntax.Parse("command! TestProject echo 'value'\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.UserCommandNames(); len(got) != 2 || got[0] != "LocalBuild" || got[1] != "TestProject" {
+		t.Fatalf("replaced user command names = %#v", got)
+	}
+	index.Remove(second)
+	if got := index.UserCommandNames(); len(got) != 1 || got[0] != "TestProject" {
+		t.Fatalf("removed user command names = %#v", got)
+	}
+	index.SetComplete(true)
+	if !index.Complete() {
+		t.Fatal("complete index was not recorded")
+	}
+}
+
 func TestIndexSearchRanksSubsequencesAndLimitsResults(t *testing.T) {
 	index := NewIndex(10, 10000)
 	root := t.TempDir()
