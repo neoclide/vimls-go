@@ -6680,7 +6680,15 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 		}
 		if previousScope == scope {
 			if command.Dialect == syntax.Legacy {
-				if diagnostic, ok := immediateLockedValueDiagnostic(result.File, previous, command); ok && !syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
+				assigned := (*syntax.Expression)(nil)
+				if previous.Canonical == "lockvar" {
+					assigned = immediateLockedAssignment(result.File, previous, command)
+				}
+				if assigned != nil && !syntaxDiagnosticOverlaps(result.File.Diagnostics, assigned.Span) {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1122", Message: "Variable is locked: " + assigned.Value, Span: assigned.Span,
+					})
+				} else if diagnostic, ok := immediateLockedValueDiagnostic(result.File, previous, command); ok && !syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
 					result.Diagnostics = append(result.Diagnostics, diagnostic)
 				}
 			}
