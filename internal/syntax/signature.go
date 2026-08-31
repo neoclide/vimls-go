@@ -283,7 +283,8 @@ func parseFunctionSignature(file *File, command *Command) {
 					variadicSeen = true
 				case parameter.Default != nil:
 					seenDefault = true
-				case seenDefault && parameter.Name.Start < parameter.Name.End:
+				case seenDefault && parameter.Name.Start < parameter.Name.End &&
+					(parameter.Target == nil || parameter.Target.Kind != ExpressionMember || parameter.Target.Value != ""):
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
 						Code: "vim/E989", Message: "Non-default argument follows default argument", Span: parameter.Name,
 					})
