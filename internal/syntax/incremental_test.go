@@ -19,6 +19,151 @@ type incrementalEditCase struct {
 	expectReuse bool
 }
 
+type incrementalEditPosition uint8
+
+const (
+	incrementalEditHead incrementalEditPosition = iota
+	incrementalEditMiddle
+	incrementalEditEOF
+)
+
+type incrementalEditKind uint8
+
+const (
+	incrementalInsert incrementalEditKind = iota
+	incrementalDelete
+	incrementalEqualReplace
+	incrementalLengthReplace
+	incrementalSequence
+)
+
+type incrementalTextEdit struct {
+	start       int
+	oldEnd      int
+	replacement string
+}
+
+type incrementalTextEditResult struct {
+	edit incrementalTextEdit
+	old  string
+	new  string
+}
+
+type incrementalTextPositionCase struct {
+	name  string
+	kind  incrementalEditKind
+	edits []incrementalTextEdit
+	whole bool
+}
+
+type incrementalTextPositionGroup struct {
+	name     string
+	position incrementalEditPosition
+	source   string
+	cases    []incrementalTextPositionCase
+}
+
+func applyIncrementalTextEdit(source string, edit incrementalTextEdit) string {
+	if edit.start < 0 || edit.start > edit.oldEnd || edit.oldEnd > len(source) {
+		panic(fmt.Sprintf("invalid incremental edit %#v for %d-byte source", edit, len(source)))
+	}
+	return source[:edit.start] + edit.replacement + source[edit.oldEnd:]
+}
+
+func incrementalTextEditResults(source string, edits []incrementalTextEdit) []incrementalTextEditResult {
+	results := make([]incrementalTextEditResult, 0, len(edits))
+	for _, edit := range edits {
+		next := applyIncrementalTextEdit(source, edit)
+		results = append(results, incrementalTextEditResult{edit: edit, old: source, new: next})
+		source = next
+	}
+	return results
+}
+
+func incrementalTextEditAt(source, oldText, replacement string) incrementalTextEdit {
+	start := strings.Index(source, oldText)
+	if start < 0 {
+		panic(fmt.Sprintf("incremental edit text %q not found", oldText))
+	}
+	return incrementalTextEdit{start: start, oldEnd: start + len(oldText), replacement: replacement}
+}
+
+func incrementalFixedWidthSequence(source string, start, width int, replacements []string) []incrementalTextEdit {
+	if start < 0 || start+width > len(source) {
+		panic(fmt.Sprintf("invalid fixed-width sequence range %d:%d", start, start+width))
+	}
+	edits := make([]incrementalTextEdit, 0, len(replacements))
+	for _, replacement := range replacements {
+		if len(replacement) != width {
+			panic(fmt.Sprintf("fixed-width sequence replacement %q has %d bytes, want %d", replacement, len(replacement), width))
+		}
+		edit := incrementalTextEdit{start: start, oldEnd: start + width, replacement: replacement}
+		if source[start:edit.oldEnd] == replacement {
+			panic(fmt.Sprintf("fixed-width sequence step does not change source at %d", start))
+		}
+		edits = append(edits, edit)
+		source = applyIncrementalTextEdit(source, edit)
+	}
+	return edits
+}
+
+func newIncrementalTextPositionCase(groupName, name string, kind incrementalEditKind, edits []incrementalTextEdit) incrementalTextPositionCase {
+	return incrementalTextPositionCase{name: groupName + ": " + name, kind: kind, edits: edits}
+}
+
+var incrementalTextPositionGroups = func() []incrementalTextPositionGroup {
+	head := "\ufefflet head = \"中😀e\u0301\"\t\nlet stable = 2\nlet tail = 3\n"
+	middle := "let head = \"中😀e\u0301\"\t\r\nlet middle = 2\r\nlet tail = 3\r\n"
+	eof := "let head = \"中😀e\u0301\"\t\nlet middle = 2\nlet tail = 3"
+	byteSequence := make([]string, 100)
+	for index := range byteSequence {
+		byteSequence[index] = string('0' + byte(index%10))
+	}
+	utf8Sequence := make([]string, 100)
+	for index := range utf8Sequence {
+		utf8Sequence[index] = []string{"🚀", "😺", "🦄", "😀"}[index%4]
+	}
+	return []incrementalTextPositionGroup{
+		{
+			name:     "head",
+			position: incrementalEditHead,
+			source:   head,
+			cases: []incrementalTextPositionCase{
+				newIncrementalTextPositionCase("head", "insert", incrementalInsert, []incrementalTextEdit{{start: strings.Index(head, "中"), oldEnd: strings.Index(head, "中"), replacement: "文"}}),
+				newIncrementalTextPositionCase("head", "delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(head, "\u0301", "")}),
+				newIncrementalTextPositionCase("head", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(head, "😀", "🚀")}),
+				newIncrementalTextPositionCase("head", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(head, "e\u0301", "e")}),
+				newIncrementalTextPositionCase("head", "sequence", incrementalSequence, incrementalFixedWidthSequence(head, strings.Index(head, "😀"), len("😀"), utf8Sequence)),
+				{name: "head: whole replacement", kind: incrementalLengthReplace, edits: []incrementalTextEdit{{start: 0, oldEnd: len(head), replacement: "\ufefflet whole = \"新😀e\u0301\"\t\n"}}, whole: true},
+			},
+		},
+		{
+			name:     "middle",
+			position: incrementalEditMiddle,
+			source:   middle,
+			cases: []incrementalTextPositionCase{
+				newIncrementalTextPositionCase("middle", "insert", incrementalInsert, []incrementalTextEdit{{start: strings.Index(middle, "\t") + len("\t"), oldEnd: strings.Index(middle, "\t") + len("\t"), replacement: "x"}}),
+				newIncrementalTextPositionCase("middle", "delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "")}),
+				newIncrementalTextPositionCase("middle", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "center")}),
+				newIncrementalTextPositionCase("middle", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "the-middle")}),
+				newIncrementalTextPositionCase("middle", "sequence", incrementalSequence, incrementalFixedWidthSequence(middle, strings.Index(middle, "2"), len("2"), byteSequence)),
+			},
+		},
+		{
+			name:     "EOF",
+			position: incrementalEditEOF,
+			source:   eof,
+			cases: []incrementalTextPositionCase{
+				newIncrementalTextPositionCase("EOF", "insert", incrementalInsert, []incrementalTextEdit{{start: len(eof), oldEnd: len(eof), replacement: "\n"}}),
+				newIncrementalTextPositionCase("EOF", "delete", incrementalDelete, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: ""}}),
+				newIncrementalTextPositionCase("EOF", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: "4"}}),
+				newIncrementalTextPositionCase("EOF", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: "42"}}),
+				newIncrementalTextPositionCase("EOF", "sequence", incrementalSequence, incrementalFixedWidthSequence(eof, len(eof)-1, len("3"), byteSequence)),
+			},
+		},
+	}
+}()
+
 var incrementalEditCases = []incrementalEditCase{
 	{name: "legacy tail", old: "let first = 1\nlet last = 2\n", new: "let first = 1\nlet last = 20\n"},
 	{name: "vim9 middle", old: "vim9script\nvar first = 1\nvar last = 2\n", new: "vim9script\nvar first = 10\nvar last = 2\n"},
@@ -42,28 +187,163 @@ var incrementalBoundaryEditCases = []incrementalEditCase{
 	{name: "EOF without trailing newline", old: "let one = 1\nlet two = 2", new: "let one = 1\nlet two = 20"},
 }
 
+func TestIncrementalEditMatrixTextPosition(t *testing.T) {
+	seenNames := make(map[string]bool)
+	seenKinds := make(map[incrementalEditPosition]map[incrementalEditKind]bool)
+	contexts := map[string]bool{"LF": false, "CRLF": false, "BOM": false, "no trailing newline": false, "UTF-8": false, "astral": false, "combining": false, "tab": false}
+	for _, group := range incrementalTextPositionGroups {
+		seenKinds[group.position] = make(map[incrementalEditKind]bool)
+		contexts["LF"] = contexts["LF"] || strings.Contains(group.source, "\n")
+		contexts["CRLF"] = contexts["CRLF"] || strings.Contains(group.source, "\r\n")
+		contexts["BOM"] = contexts["BOM"] || strings.HasPrefix(group.source, "\ufeff")
+		contexts["no trailing newline"] = contexts["no trailing newline"] || !strings.HasSuffix(group.source, "\n")
+		if !strings.Contains(group.source, "中") || !strings.Contains(group.source, "😀") || !strings.Contains(group.source, "e\u0301") || !strings.Contains(group.source, "\t") {
+			t.Fatalf("%s source does not cover required text boundaries: %q", group.name, group.source)
+		}
+		for _, test := range group.cases {
+			if seenNames[test.name] {
+				t.Fatalf("duplicate matrix case name %q", test.name)
+			}
+			seenNames[test.name] = true
+			seenKinds[group.position][test.kind] = true
+			if len(test.edits) == 0 {
+				t.Fatalf("%s has no executable edits", test.name)
+			}
+			results := incrementalTextEditResults(group.source, test.edits)
+			if test.whole {
+				if len(results) != 1 || results[0].edit.start != 0 || results[0].edit.oldEnd != len(group.source) {
+					t.Fatalf("%s is not a whole-document replacement: %#v", test.name, test.edits)
+				}
+				continue
+			}
+			if test.kind == incrementalSequence && len(results) != 100 {
+				t.Fatalf("%s has %d sequence steps, want 100", test.name, len(results))
+			}
+			for _, result := range results {
+				if result.old == result.new {
+					t.Fatalf("%s has an unchanged edit: %#v", test.name, result.edit)
+				}
+				edit := result.edit
+				old := result.old
+				if !incrementalTextEditInPosition(group.position, old, edit) {
+					t.Fatalf("%s edit is outside its position group: %#v", test.name, edit)
+				}
+				for _, boundary := range []struct {
+					name string
+					text string
+				}{
+					{"UTF-8", "中"}, {"astral", "😀"}, {"combining", "\u0301"},
+				} {
+					if editTouchesIncrementalText(old, edit, boundary.text) {
+						contexts[boundary.name] = true
+					}
+				}
+				if tab := strings.Index(old, "\t"); tab >= 0 && edit.start == tab+len("\t") {
+					contexts["tab"] = true
+				}
+				if !incrementalTextEditKindValid(test.kind, edit) {
+					t.Fatalf("%s does not match edit kind %d: %#v", test.name, test.kind, edit)
+				}
+			}
+		}
+	}
+	for name, present := range contexts {
+		if !present {
+			t.Fatalf("matrix context %q is not represented by a source or edit range", name)
+		}
+	}
+	if len(seenNames) != 16 {
+		t.Fatalf("matrix has %d unique cases, want 16", len(seenNames))
+	}
+	for _, position := range []incrementalEditPosition{incrementalEditHead, incrementalEditMiddle, incrementalEditEOF} {
+		if len(seenKinds[position]) != 5 {
+			t.Fatalf("position %d expresses %d edit kinds, want 5", position, len(seenKinds[position]))
+		}
+	}
+}
+
+func incrementalTextEditInPosition(position incrementalEditPosition, source string, edit incrementalTextEdit) bool {
+	if edit.start < 0 || edit.start > edit.oldEnd || edit.oldEnd > len(source) {
+		return false
+	}
+	switch position {
+	case incrementalEditHead:
+		return edit.start <= len(source)/2
+	case incrementalEditMiddle:
+		return edit.start > len(source)/4 && edit.start < len(source)*3/4
+	case incrementalEditEOF:
+		return edit.start >= len(source)-1
+	default:
+		return false
+	}
+}
+
+func incrementalTextEditKindValid(kind incrementalEditKind, edit incrementalTextEdit) bool {
+	oldLength := edit.oldEnd - edit.start
+	switch kind {
+	case incrementalInsert:
+		return oldLength == 0 && edit.replacement != ""
+	case incrementalDelete:
+		return oldLength > 0 && edit.replacement == ""
+	case incrementalEqualReplace:
+		return oldLength > 0 && oldLength == len(edit.replacement)
+	case incrementalLengthReplace:
+		return oldLength > 0 && oldLength != len(edit.replacement)
+	case incrementalSequence:
+		return oldLength > 0 && oldLength == len(edit.replacement)
+	default:
+		return false
+	}
+}
+
+func editTouchesIncrementalText(source string, edit incrementalTextEdit, text string) bool {
+	start := strings.Index(source, text)
+	return start >= 0 && edit.start <= start && edit.oldEnd >= start
+}
+
+func TestReparseTextPositionMatrix(t *testing.T) {
+	for _, group := range incrementalTextPositionGroups {
+		for _, test := range group.cases {
+			t.Run(test.name, func(t *testing.T) {
+				previous := Parse(group.source)
+				for step, result := range incrementalTextEditResults(group.source, test.edits) {
+					if previous.Source != result.old {
+						t.Fatalf("step %d starts from %q, previous source is %q", step, result.old, previous.Source)
+					}
+					previous = checkIncrementalParserFromPrevious(t, Reparse, previous, fmt.Sprintf("%s step %d", test.name, step), result.new)
+				}
+			})
+		}
+	}
+}
+
 func checkIncrementalParser(t *testing.T, parse func(*File, string) *File, test incrementalEditCase) *File {
 	t.Helper()
 	previous := Parse(test.old)
+	return checkIncrementalParserFromPrevious(t, parse, previous, test.name, test.new)
+}
+
+func checkIncrementalParserFromPrevious(t *testing.T, parse func(*File, string) *File, previous *File, name, source string) *File {
+	t.Helper()
 	beforeJSON := marshalSyntax(t, previous)
 	beforeAliases := syntaxAliases(previous)
 
-	got := parse(previous, test.new)
-	want := Parse(test.new)
+	got := parse(previous, source)
+	want := Parse(source)
 	if string(marshalSyntax(t, got)) != string(marshalSyntax(t, want)) {
-		t.Fatalf("%s: incremental syntax differs from full parse\ngot:  %s\nwant: %s", test.name, marshalSyntax(t, got), marshalSyntax(t, want))
+		t.Fatalf("%s: incremental syntax differs from full parse\ngot:  %s\nwant: %s", name, marshalSyntax(t, got), marshalSyntax(t, want))
 	}
 	if gotAliases, wantAliases := syntaxAliases(got), syntaxAliases(want); !slices.Equal(gotAliases, wantAliases) {
-		t.Fatalf("%s: alias topology differs\ngot:  %v\nwant: %v", test.name, gotAliases, wantAliases)
+		t.Fatalf("%s: alias topology differs\ngot:  %v\nwant: %v", name, gotAliases, wantAliases)
 	}
 	if syntaxSpansValid(want) {
 		checkSyntaxSpans(t, got)
 	}
 	if afterJSON := marshalSyntax(t, previous); string(afterJSON) != string(beforeJSON) {
-		t.Fatalf("%s: previous syntax changed\nbefore: %s\nafter:  %s", test.name, beforeJSON, afterJSON)
+		t.Fatalf("%s: previous syntax changed\nbefore: %s\nafter:  %s", name, beforeJSON, afterJSON)
 	}
 	if afterAliases := syntaxAliases(previous); !slices.Equal(afterAliases, beforeAliases) {
-		t.Fatalf("%s: previous alias topology changed\nbefore: %v\nafter:  %v", test.name, beforeAliases, afterAliases)
+		t.Fatalf("%s: previous alias topology changed\nbefore: %v\nafter:  %v", name, beforeAliases, afterAliases)
 	}
 	return got
 }
