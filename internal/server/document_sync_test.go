@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -170,6 +171,193 @@ func TestServerDocumentHandlersCancelStaleAnalysis(t *testing.T) {
 	}
 }
 
+func TestServerDocumentParserCache(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	documentURI := uri.MustParse("file:///parser-cache.vim")
+	firstSnapshot := instance.documents.Open(documentURI.String(), 1, "vim9script\nvar value = 1\n")
+	first := instance.parseSnapshot(firstSnapshot)
+	if first == nil {
+		t.Fatal("first parse is nil")
+	}
+
+	secondSnapshot, changed, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: firstSnapshot.Text()}})
+	if err != nil || changed {
+		t.Fatalf("same-source change = %#v, %v", changed, err)
+	}
+	if got := instance.parseSnapshot(secondSnapshot); got != first {
+		t.Fatalf("same-source parse = %p, want cached %p", got, first)
+	}
+
+	thirdSnapshot, changed, err := instance.documents.Change(documentURI.String(), 3, text.UTF16, []text.Change{{Text: "vim9script\nvar changed = 1\n"}})
+	if err != nil || !changed {
+		t.Fatalf("changed-source change = %#v, %v", changed, err)
+	}
+	if got := instance.parseSnapshot(thirdSnapshot); got == first || got == nil || got.Source != thirdSnapshot.Text() {
+		t.Fatalf("changed-source parse = %#v, first = %#v", got, first)
+	}
+}
+
+func TestServerAnalysisDoesNotMutateParserCache(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	documentURI := uri.MustParse("file:///pure-parser-cache.vim")
+	snapshot := instance.documents.Open(documentURI.String(), 1, "vim9script\nenum Color\n  Red\nendenum\n")
+	raw := instance.parseSnapshot(snapshot)
+	if raw == nil || len(raw.Diagnostics) != 0 {
+		t.Fatalf("raw parser diagnostics = %#v", raw)
+	}
+
+	instance.analyzeDocument(documentURI.String())
+	instance.publishMu.Lock()
+	cached := instance.parsed[documentURI.String()].file
+	instance.publishMu.Unlock()
+	if cached != raw || len(cached.Diagnostics) != 0 {
+		t.Fatalf("parser cache after analysis = %#v", cached)
+	}
+}
+
+func TestServerRepeatedDocumentOpenClearsParserCache(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	instance.stopAnalysis()
+	documentURI := uri.MustParse("file:///reopen-parser-cache.vim")
+	params := &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\nvar value = 1\n",
+	}}
+	if err := instance.DidOpen(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	firstSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok {
+		t.Fatal("first snapshot is missing")
+	}
+	first := instance.parseSnapshot(firstSnapshot)
+
+	params.TextDocument.Version = 2
+	if err := instance.DidOpen(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	instance.publishMu.Lock()
+	_, cached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if cached {
+		t.Fatal("repeated didOpen retained parser cache")
+	}
+	secondSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok || secondSnapshot == firstSnapshot {
+		t.Fatalf("second snapshot = %#v", secondSnapshot)
+	}
+	if got := instance.parseSnapshot(secondSnapshot); got == first {
+		t.Fatal("repeated didOpen reused prior lifetime parser tree")
+	}
+}
+
+func TestServerOldSnapshotParserCacheCannotRestoreCurrentLifetime(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	instance.stopAnalysis()
+	documentURI := uri.MustParse("file:///old-snapshot-parser-cache.vim")
+	oldSource := "vim9script\nvar old = 1\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: oldSource,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	oldSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok {
+		t.Fatal("old snapshot is missing")
+	}
+	oldFile := instance.parseSnapshot(oldSnapshot)
+
+	currentSource := "vim9script\nvar current = 1\n"
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{Text: currentSource},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	currentSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok {
+		t.Fatal("current snapshot is missing")
+	}
+	currentFile := instance.parseSnapshot(currentSnapshot)
+	if stale := instance.parseSnapshot(oldSnapshot); stale == nil || stale.Source != oldSource {
+		t.Fatalf("old snapshot parse after change = %#v", stale)
+	}
+	instance.publishMu.Lock()
+	cachedAfterChange := instance.parsed[documentURI.String()].file
+	instance.publishMu.Unlock()
+	if cachedAfterChange != currentFile {
+		t.Fatalf("old snapshot replaced current cache: got %p, want %p", cachedAfterChange, currentFile)
+	}
+
+	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	if stale := instance.parseSnapshot(oldSnapshot); stale == nil || stale.Source != oldSource {
+		t.Fatalf("old snapshot parse after close = %#v", stale)
+	}
+	instance.publishMu.Lock()
+	_, cachedAfterClose := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if cachedAfterClose {
+		t.Fatal("closed document retained or restored parser cache")
+	}
+
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 3, Text: oldSource,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok || reopened == oldSnapshot {
+		t.Fatalf("reopened snapshot = %#v", reopened)
+	}
+	reopenedFile := instance.parseSnapshot(reopened)
+	if reopenedFile == oldFile {
+		t.Fatal("reopened lifetime reused old parser tree")
+	}
+	if stale := instance.parseSnapshot(oldSnapshot); stale == nil || stale.Source != oldSource {
+		t.Fatalf("old snapshot parse after reopen = %#v", stale)
+	}
+	instance.publishMu.Lock()
+	cachedAfterReopen := instance.parsed[documentURI.String()].file
+	instance.publishMu.Unlock()
+	if cachedAfterReopen != reopenedFile {
+		t.Fatalf("old snapshot replaced reopened cache: got %p, want %p", cachedAfterReopen, reopenedFile)
+	}
+}
+
+func TestServerParseImportTargetRequiresExactOpenSource(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	documentURI := uri.File(filepath.Join(t.TempDir(), "import-target.vim"))
+	path, ok := workspaceURIPath(documentURI)
+	if !ok {
+		t.Fatal("import target path is invalid")
+	}
+	capturedSource := "vim9script\nexport var Value = 1\n"
+	snapshot := instance.documents.Open(documentURI.String(), 1, capturedSource)
+	cached := instance.parseSnapshot(snapshot)
+	if got := instance.parseImportTarget(path, capturedSource); got != cached {
+		t.Fatalf("exact open import parse = %p, want cached %p", got, cached)
+	}
+
+	overlaySource := "vim9script\nexport var Changed = 1\n"
+	overlay, changed, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: overlaySource}})
+	if err != nil || !changed {
+		t.Fatalf("overlay change = %#v, %v", changed, err)
+	}
+	overlayFile := instance.parseSnapshot(overlay)
+	if got := instance.parseImportTarget(path, capturedSource); got == nil || got.Source != capturedSource || got == overlayFile {
+		t.Fatalf("stale captured import parse = %#v, overlay = %#v", got, overlayFile)
+	}
+	instance.publishMu.Lock()
+	current := instance.parsed[documentURI.String()].file
+	instance.publishMu.Unlock()
+	if current != overlayFile {
+		t.Fatalf("stale captured import parse replaced overlay cache: got %p, want %p", current, overlayFile)
+	}
+}
+
 func TestServerUnchangedSavePreservesAnalysisAndWorkspace(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	defer instance.stopAnalysis()
@@ -296,10 +484,10 @@ func TestServerSkipsAnalysisForOversizedDocument(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", result)
 	}
 	instance.publishMu.Lock()
-	parsed := instance.parsed[documentURI.String()].file
+	_, cached := instance.parsed[documentURI.String()]
 	instance.publishMu.Unlock()
-	if parsed == nil || len(parsed.Commands) != 0 || len(parsed.Source) != maxFileBytes+1 {
-		t.Fatalf("parsed = %#v", parsed)
+	if cached {
+		t.Fatal("oversized document entered parser cache")
 	}
 }
 

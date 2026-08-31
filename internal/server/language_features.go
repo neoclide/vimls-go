@@ -174,12 +174,12 @@ func (s *Server) importMemberCompletions(documentURI string, file *syntax.File, 
 	}
 	var facts []workspace.SymbolFact
 	s.publishMu.Lock()
-	snapshot, parsed, open := s.openWorkspaceSnapshotLocked(targetPath)
+	snapshot, _, open := s.openWorkspaceSnapshotLocked(targetPath)
 	s.publishMu.Unlock()
 	if open {
-		targetFile := parsed.file
-		if targetFile == nil || parsed.revision != snapshot.Revision() {
-			targetFile = syntax.Parse(snapshot.Text())
+		targetFile := s.parseSnapshot(snapshot)
+		if targetFile == nil {
+			return protocol.CompletionItemSlice{}
 		}
 		facts = workspace.CollectSymbolFacts(targetPath, targetFile)
 	} else {

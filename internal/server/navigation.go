@@ -27,7 +27,6 @@ type navigationDocument struct {
 func (s *Server) navigationAt(ctx context.Context, documentURI string, position protocol.Position) (*navigationDocument, error) {
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)
-	parsed := s.parsed[documentURI]
 	s.publishMu.Unlock()
 	if !ok || snapshot.ByteLen() > maxFileBytes {
 		return nil, nil
@@ -43,9 +42,9 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 	if err != nil {
 		return nil, nil
 	}
-	file := parsed.file
-	if file == nil || parsed.revision != snapshot.Revision() {
-		file = syntax.Parse(snapshot.Text())
+	file := s.parseSnapshot(snapshot)
+	if file == nil {
+		return nil, nil
 	}
 	result := analysis.Analyze(file)
 	if err := ctx.Err(); err != nil {
@@ -246,7 +245,7 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 			return nil, document.checkCurrent(ctx)
 		}
 		lines := []string{"name: " + target.match.Fact.Name, "kind: " + string(target.match.Fact.Kind)}
-		_, declaration := analyzeWorkspaceTarget(target)
+		_, declaration := s.analyzeWorkspaceTarget(target)
 		if declaration != nil && declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
 			lines = append(lines, "type: "+formatValueType(declaration.Type))
 		}

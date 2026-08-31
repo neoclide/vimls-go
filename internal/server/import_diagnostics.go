@@ -62,7 +62,7 @@ func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.Fil
 	}
 	s.workspaceMu.Unlock()
 	for path, target := range targets {
-		parsed := syntax.Parse(target.source)
+		parsed := s.parseImportTarget(path, target.source)
 		target.known = target.source != "" && parsed.Dialect == syntax.Vim9 && len(parsed.Diagnostics) == 0
 		targets[path] = target
 	}
@@ -114,6 +114,18 @@ func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.Fil
 		members = append(members, member)
 	}
 	return revision, true, analysis.AnalyzeImports(loads, members)
+}
+
+func (s *Server) parseImportTarget(path, source string) *syntax.File {
+	s.publishMu.Lock()
+	snapshot, _, open := s.openWorkspaceSnapshotLocked(path)
+	s.publishMu.Unlock()
+	if open && snapshot.Text() == source {
+		if parsed := s.parseSnapshot(snapshot); parsed != nil {
+			return parsed
+		}
+	}
+	return syntax.Parse(source)
 }
 
 func importReferenceInDeferredScope(result *analysis.FileAnalysis, span syntax.Span) bool {

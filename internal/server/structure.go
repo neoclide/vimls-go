@@ -19,7 +19,6 @@ func (s *Server) structureDocument(ctx context.Context, documentURI string) (*te
 	}
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)
-	parsed := s.parsed[documentURI]
 	s.publishMu.Unlock()
 	s.mu.Lock()
 	encoding := s.encoding
@@ -27,10 +26,7 @@ func (s *Server) structureDocument(ctx context.Context, documentURI string) (*te
 	if !ok || snapshot.ByteLen() > maxFileBytes {
 		return nil, nil, encoding, nil
 	}
-	file := parsed.file
-	if file == nil || parsed.revision != snapshot.Revision() {
-		file = syntax.Parse(snapshot.Text())
-	}
+	file := s.parseSnapshot(snapshot)
 	if err := ctx.Err(); err != nil {
 		return nil, nil, encoding, protocol.ErrRequestCancelled
 	}

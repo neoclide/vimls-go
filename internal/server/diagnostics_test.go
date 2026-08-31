@@ -5,11 +5,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -723,6 +726,75 @@ func TestServerPublishesDiagnosticsForNonFileURIWithWorkspaceGraph(t *testing.T)
 	if len(params.Diagnostics) != 1 || params.Diagnostics[0].Code != protocol.String("vimls/missing-end") {
 		t.Fatalf("non-file diagnostics = %#v", params.Diagnostics)
 	}
+}
+
+func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
+	root := t.TempDir()
+	targetPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\nif true\n")
+	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './lib.vim' as Lib\necho Lib.Value\nif true\n")
+	instance, _ := initializeWorkspaceDiagnosticServer(t, root)
+	instance.stopAnalysis()
+
+	open := func(path, source string) (*text.Snapshot, *syntax.File, []syntax.Diagnostic) {
+		t.Helper()
+		snapshot := instance.documents.Open(uri.File(path).String(), 1, source)
+		file := instance.parseSnapshot(snapshot)
+		if file == nil || len(file.Diagnostics) == 0 {
+			t.Fatalf("raw parser file for %s = %#v", path, file)
+		}
+		return snapshot, file, append([]syntax.Diagnostic(nil), file.Diagnostics...)
+	}
+	assertCached := func(label string, snapshot *text.Snapshot, want *syntax.File, diagnostics []syntax.Diagnostic) {
+		t.Helper()
+		instance.publishMu.Lock()
+		cached := instance.parsed[snapshot.URI()].file
+		instance.publishMu.Unlock()
+		if cached != want || !reflect.DeepEqual(cached.Diagnostics, diagnostics) {
+			t.Fatalf("%s parser cache = %#v, want pointer %p diagnostics %#v", label, cached, want, diagnostics)
+		}
+	}
+
+	targetSource := "vim9script\nexport var Value = 1\nif true\n"
+	mainSource := "vim9script\nimport './lib.vim' as Lib\necho Lib.Value\nif true\n"
+	targetSnapshot, targetFile, targetDiagnostics := open(targetPath, targetSource)
+	mainSnapshot, mainFile, mainDiagnostics := open(mainPath, mainSource)
+	navigationPath := filepath.Join(root, "navigation.vim")
+	navigationSnapshot, navigationFile, navigationDiagnostics := open(navigationPath, "vim9script\nvar Current = 1\nif true\n")
+
+	if _, err := instance.navigationAt(context.Background(), navigationSnapshot.URI(), protocol.Position{Line: 1, Character: 5}); err != nil {
+		t.Fatal(err)
+	}
+	assertCached("navigation", navigationSnapshot, navigationFile, navigationDiagnostics)
+
+	var targetFact workspace.SymbolFact
+	for _, fact := range workspace.CollectSymbolFacts(targetPath, targetFile) {
+		if fact.Name == "Value" && fact.Exported {
+			targetFact = fact
+			break
+		}
+	}
+	if targetFact.Name == "" {
+		t.Fatalf("target facts = %#v", workspace.CollectSymbolFacts(targetPath, targetFile))
+	}
+	target := workspaceNavigationTarget{
+		match:        workspace.SymbolMatch{Fact: targetFact, Source: targetSource},
+		openSnapshot: targetSnapshot,
+	}
+	if _, err := instance.openWorkspaceReferenceLocations(context.Background(), target, text.UTF16); err != nil {
+		t.Fatal(err)
+	}
+	assertCached("rename open references", mainSnapshot, mainFile, mainDiagnostics)
+
+	items := instance.importMemberCompletions(mainSnapshot.URI(), mainFile, "Lib")
+	if len(items) != 1 || items[0].Label != "Value" {
+		t.Fatalf("open import completion = %#v", items)
+	}
+	assertCached("completion open import target", targetSnapshot, targetFile, targetDiagnostics)
+
+	if _, ready, _ := instance.workspaceImportDiagnostics(mainSnapshot.URI(), mainFile, analysis.Analyze(mainFile)); !ready {
+		t.Fatal("workspace import diagnostics were not ready")
+	}
+	assertCached("import diagnostics open target", targetSnapshot, targetFile, targetDiagnostics)
 }
 
 func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {

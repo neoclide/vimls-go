@@ -259,7 +259,7 @@ func TestNavigationReusesCurrentParsedDocument(t *testing.T) {
 		t.Fatal("document snapshot is missing")
 	}
 	cached := syntax.Parse(source)
-	instance.parsed[documentURI.String()] = parsedDocument{revision: snapshot.Revision(), file: cached}
+	instance.parsed[documentURI.String()] = parsedDocument{contentID: snapshot.ContentID(), file: cached}
 
 	document, err := instance.navigationAt(context.Background(), documentURI.String(), protocol.Position{Line: 2, Character: 6})
 	if err != nil || document == nil || document.analysis.File != cached {
@@ -267,7 +267,7 @@ func TestNavigationReusesCurrentParsedDocument(t *testing.T) {
 	}
 
 	stale := syntax.Parse("vim9script\necho missing\n")
-	instance.parsed[documentURI.String()] = parsedDocument{revision: snapshot.Revision() + 1, file: stale}
+	instance.parsed[documentURI.String()] = parsedDocument{contentID: snapshot.ContentID(), file: stale}
 	document, err = instance.navigationAt(context.Background(), documentURI.String(), protocol.Position{Line: 2, Character: 6})
 	if err != nil || document == nil || document.analysis.File == stale || document.declaration == nil {
 		t.Fatalf("stale navigation analysis = %#v, error = %v", document, err)

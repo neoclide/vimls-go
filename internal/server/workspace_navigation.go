@@ -92,16 +92,16 @@ func (s *Server) resolveWorkspaceReference(resolver *workspace.PathResolver, ind
 
 func (s *Server) lookupWorkspaceTarget(index *workspace.Index, path string, accept func(workspace.SymbolFact) bool) (workspaceNavigationTarget, bool) {
 	s.publishMu.Lock()
-	snapshot, parsed, open := s.openWorkspaceSnapshotLocked(path)
+	snapshot, _, open := s.openWorkspaceSnapshotLocked(path)
 	s.publishMu.Unlock()
 	var candidates []workspace.SymbolMatch
 	if open {
 		if snapshot.ByteLen() > maxFileBytes {
 			return workspaceNavigationTarget{}, false
 		}
-		file := parsed.file
-		if file == nil || parsed.revision != snapshot.Revision() {
-			file = syntax.Parse(snapshot.Text())
+		file := s.parseSnapshot(snapshot)
+		if file == nil {
+			return workspaceNavigationTarget{}, false
 		}
 		for _, fact := range workspace.CollectSymbolFacts(path, file) {
 			if accept(fact) {
@@ -151,7 +151,7 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 		return []protocol.Location{}, document.checkCurrent(ctx)
 	}
 	locations := make([]protocol.Location, 0)
-	targetAnalysis, targetDeclaration := analyzeWorkspaceTarget(target)
+	targetAnalysis, targetDeclaration := document.server.analyzeWorkspaceTarget(target)
 	if includeDeclaration {
 		if location, ok := document.server.workspaceTargetLocation(target, document.encoding); ok {
 			locations = append(locations, location)
@@ -236,8 +236,15 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 	return locations, nil
 }
 
-func analyzeWorkspaceTarget(target workspaceNavigationTarget) (*analysis.FileAnalysis, *analysis.Declaration) {
-	result := analysis.Analyze(syntax.Parse(target.match.Source))
+func (s *Server) analyzeWorkspaceTarget(target workspaceNavigationTarget) (*analysis.FileAnalysis, *analysis.Declaration) {
+	var file *syntax.File
+	if target.openSnapshot != nil && target.openSnapshot.Text() == target.match.Source {
+		file = s.parseSnapshot(target.openSnapshot)
+	}
+	if file == nil {
+		file = syntax.Parse(target.match.Source)
+	}
+	result := analysis.Analyze(file)
 	for _, declaration := range result.Declarations {
 		if declaration.Span == target.match.Fact.SelectionRange && declaration.Name == target.match.Fact.Name {
 			return result, declaration
