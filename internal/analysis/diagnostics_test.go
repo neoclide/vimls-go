@@ -7017,6 +7017,64 @@ endclass
 	}
 }
 
+func TestAnalyzeE1332PublicUnderscoreVariableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, command string }{
+		{"class", "vim9script\nclass A\n  public var _val = 10\nendclass\n", "public var _val = 10"},
+		{"static", "vim9script\nclass A\n  public static var _val = 10\nendclass\n", "public static var _val = 10"},
+		{"final", "vim9script\nclass A\n  public final _val = 10\nendclass\n", "public final _val = 10"},
+		{"single underscore", "vim9script\nclass A\n  public var _\nendclass\n", "public var _"},
+		{"interface", "vim9script\ninterface A\n  public var _val: number\nendinterface\n", "public var _val: number"},
+		{"enum", "vim9script\nenum A\n  public var _val: number\nendenum\n", "public var _val: number"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1332" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := "public variable name cannot start with underscore: " + test.command
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.command {
+				t.Fatalf("E1332 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"implicit protected", "vim9script\nclass A\n  var _val = 10\nendclass\n"},
+		{"public regular", "vim9script\nclass A\n  public var value = 10\nendclass\n"},
+		{"public method", "vim9script\nclass A\n  public def _Value()\n  enddef\nendclass\n"},
+		{"top-level", "vim9script\npublic var _val = 10\n"},
+		{"Legacy", "class A\n  public var _val = 10\nendclass\n"},
+		{"incomplete", "vim9script\nclass A\n  public var\nendclass\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1332" {
+					t.Fatalf("guard unexpectedly received E1332: %#v\n%s", diagnostic, test.source)
+				}
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\nclass A\n  var value = 1\n  public var _value = 2\nendclass\n")
+	result := Analyze(file)
+	var e1332, e1406 int
+	for _, diagnostic := range result.Diagnostics {
+		switch diagnostic.Code {
+		case "vim/E1332":
+			e1332++
+		case "vim/E1406":
+			e1406++
+		}
+	}
+	if e1332 != 1 || e1406 != 0 {
+		t.Fatalf("E1332 precedence diagnostics = %#v", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

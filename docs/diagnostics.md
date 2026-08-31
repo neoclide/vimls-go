@@ -3362,3 +3362,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   `src/vim9generics.c:296-311` apply it to parameters, aggregate members, and
   generic arguments.
 - `src/errors.h:3414-3415` defines the exact message.
+
+## Public variable beginning with underscore: E1332
+
+E1332 means `public variable name cannot start with underscore: {command}`.
+Vim9 aggregate variables use a leading underscore to request protected access,
+so an explicit `public` modifier on the same name is contradictory. Analysis
+reports the complete direct member command, preserving its original modifiers,
+type, initializer, and spacing in both the message and span.
+
+The check applies to variable-like `var`, `final`, and `const` members,
+including static members, but not to methods, aggregate-external declarations,
+or an implicit protected variable without `public`. It runs as soon as the
+member name is available, before type and initializer validation. The invalid
+member does not participate in the later public/protected name-pair E1406
+check.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:1284-1292` reports the exact complete command
+  for `public var _val = 10`.
+- `runtime/doc/vim9class.txt:145-170` defines underscore-prefixed variables as
+  protected and associates E1332 with that rule.
+- `src/vim9class.c:57-82` performs the public/underscore check immediately
+  after finding the member name and before parsing its type or initializer.
+- `src/errors.h:3418-3419` defines the exact message.

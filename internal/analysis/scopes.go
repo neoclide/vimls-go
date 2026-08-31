@@ -133,6 +133,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectGenericMethodOverrideDiagnostics(result)
 	collectMethodTypeMismatchDiagnostics(result)
 	collectDuplicateClassVariableDiagnostics(result)
+	collectPublicUnderscoreVariableDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectConstructorDefaultValueDiagnostics(result)
 	collectInvalidVoidTypeDiagnostics(result)
@@ -609,6 +610,9 @@ func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {
 			if !ok {
 				continue
 			}
+			if member.protected && commandHasModifier(&file.Commands[memberIndex], "public") {
+				continue
+			}
 			conflict := false
 			for _, previous := range seen {
 				if member.base == previous.base && member.protected != previous.protected {
@@ -636,6 +640,33 @@ func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {
 					break
 				}
 			}
+		}
+	}
+}
+
+func collectPublicUnderscoreVariableDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		aggregate := &file.Commands[index]
+		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil ||
+			(aggregate.Aggregate.Kind != syntax.BlockClass && aggregate.Aggregate.Kind != syntax.BlockInterface && aggregate.Aggregate.Kind != syntax.BlockEnum) {
+			continue
+		}
+		for _, memberIndex := range aggregate.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			command := &file.Commands[memberIndex]
+			if command.Declaration == nil || command.Canonical != "var" && command.Canonical != "final" && command.Canonical != "const" ||
+				!commandHasModifier(command, "public") || !strings.HasPrefix(file.Text(command.Declaration.Name), "_") {
+				continue
+			}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1332", Message: "public variable name cannot start with underscore: " + file.Text(command.Span), Span: command.Span,
+			})
 		}
 	}
 }
