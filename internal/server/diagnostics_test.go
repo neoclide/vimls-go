@@ -110,6 +110,58 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	}
 }
 
+func TestAutoloadExportedFunctionVariableConflictUsesE707(t *testing.T) {
+	root := t.TempDir()
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.setWorkspaceRoots([]string{root})
+	source := "vim9script\n\nvar Clash = 'value'\n\nexport def Clash()\nenddef\n"
+
+	for _, test := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{"autoload script", filepath.Join(root, "autoload", "clash.vim"), "vim/E707"},
+		{"ordinary script", filepath.Join(root, "plugin", "clash.vim"), "vim/E1041"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(source)
+			result := analysis.Analyze(file)
+			diagnostics := instance.autoloadExportedFunctionDiagnostics(uri.File(test.path).String(), file, result, result.Diagnostics)
+			if len(diagnostics) != 1 || diagnostics[0].Code != test.want || file.Text(diagnostics[0].Span) != "Clash" {
+				t.Fatalf("diagnostics = %#v, want one %s for Clash", diagnostics, test.want)
+			}
+		})
+	}
+}
+
+func TestAutoloadE707RequiresVariableBeforeExportedDef(t *testing.T) {
+	root := t.TempDir()
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.setRuntimePaths([]string{root})
+	documentURI := uri.File(filepath.Join(root, "autoload", "clash.vim")).String()
+
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{"non-exported def", "vim9script\nvar Clash = 'value'\ndef Clash()\nenddef\n"},
+		{"function before variable", "vim9script\nexport def Clash()\nenddef\nvar Clash = 'value'\n"},
+		{"exported variable before def", "vim9script\nexport var Clash = 'value'\ndef Clash()\nenddef\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := analysis.Analyze(file)
+			diagnostics := instance.autoloadExportedFunctionDiagnostics(documentURI, file, result, result.Diagnostics)
+			if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1041" {
+				t.Fatalf("diagnostics = %#v, want one vim/E1041", diagnostics)
+			}
+		})
+	}
+}
+
 func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)

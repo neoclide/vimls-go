@@ -859,6 +859,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		fileAnalysis = analysis.Analyze(file)
 		versionedAnalysis := *fileAnalysis
 		versionedAnalysis.Diagnostics = analysisDiagnosticsForTarget(file, fileAnalysis.Diagnostics, target)
+		versionedAnalysis.Diagnostics = s.autoloadExportedFunctionDiagnostics(work.Snapshot.URI(), file, fileAnalysis, versionedAnalysis.Diagnostics)
 		file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
 		if work.Context.Err() != nil {
 			return
@@ -916,6 +917,73 @@ func (s *Server) globalNameConflictDiagnostics(documentURI string, file *syntax.
 		return nil
 	}
 	return index.GlobalNameConflictDiagnostics(path, file)
+}
+
+func (s *Server) autoloadExportedFunctionDiagnostics(documentURI string, file *syntax.File, result *analysis.FileAnalysis, diagnostics []syntax.Diagnostic) []syntax.Diagnostic {
+	path, ok := workspaceURIPath(uri.URI(documentURI))
+	if !ok || file == nil || result == nil || result.Root == nil {
+		return diagnostics
+	}
+	s.workspaceMu.Lock()
+	roots := workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)
+	s.workspaceMu.Unlock()
+	autoload := false
+	for _, root := range roots {
+		if _, ok := workspaceAutoloadPath(path, root); ok {
+			autoload = true
+			break
+		}
+	}
+	if !autoload {
+		return diagnostics
+	}
+	versioned := diagnostics
+	copied := false
+	for index := range diagnostics {
+		diagnostic := diagnostics[index]
+		if diagnostic.Code != "vim/E1041" || !autoloadExportedDefVariableConflict(file, result, diagnostic.Span) {
+			continue
+		}
+		if !copied {
+			versioned = append([]syntax.Diagnostic(nil), diagnostics...)
+			copied = true
+		}
+		name := file.Text(diagnostic.Span)
+		versioned[index].Code = "vim/E707"
+		versioned[index].Message = "Function name conflicts with variable: " + name
+	}
+	return versioned
+}
+
+func autoloadExportedDefVariableConflict(file *syntax.File, result *analysis.FileAnalysis, span syntax.Span) bool {
+	var function *syntax.Command
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Canonical == "def" && command.Function != nil && command.Function.Name == span && serverCommandHasModifier(command, "export") {
+			function = command
+			break
+		}
+	}
+	if function == nil {
+		return false
+	}
+	name := file.Text(span)
+	for _, declaration := range result.Root.Declarations {
+		if declaration != nil && declaration.Span.Start < span.Start && declaration.Name == name &&
+			(declaration.Kind == analysis.SymbolKindVariable || declaration.Kind == analysis.SymbolKindConstant) {
+			return true
+		}
+	}
+	return false
+}
+
+func serverCommandHasModifier(command *syntax.Command, name string) bool {
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func analysisDiagnosticsForTarget(file *syntax.File, diagnostics []syntax.Diagnostic, target TargetVersion) []syntax.Diagnostic {

@@ -266,9 +266,8 @@ func workspaceReferenceMatchesTarget(resolver *workspace.PathResolver, reference
 
 func workspaceAutoloadName(path, name string, roots []string) (string, bool) {
 	for _, root := range roots {
-		autoloadRoot := filepath.Join(root, "autoload")
-		relative, err := filepath.Rel(autoloadRoot, path)
-		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.Ext(relative) != ".vim" {
+		relative, ok := workspaceAutoloadPath(path, root)
+		if !ok {
 			continue
 		}
 		prefix := strings.TrimSuffix(relative, ".vim")
@@ -276,6 +275,14 @@ func workspaceAutoloadName(path, name string, roots []string) (string, bool) {
 		return prefix + "#" + strings.TrimPrefix(name, "g:"), true
 	}
 	return "", false
+}
+
+func workspaceAutoloadPath(path, root string) (string, bool) {
+	relative, err := filepath.Rel(filepath.Join(root, "autoload"), path)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.Ext(relative) != ".vim" {
+		return "", false
+	}
+	return relative, true
 }
 
 func sameWorkspacePath(left, right string) bool {
