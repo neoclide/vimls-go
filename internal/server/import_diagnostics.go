@@ -62,15 +62,7 @@ func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.Fil
 	}
 	s.workspaceMu.Unlock()
 	for path, target := range targets {
-		s.publishMu.Lock()
-		snapshot, _, open := s.openWorkspaceSnapshotLocked(path)
-		s.publishMu.Unlock()
-		var parsed *syntax.File
-		if open && snapshot.Text() == target.source {
-			parsed = s.parseSnapshot(snapshot)
-		} else {
-			parsed = syntax.Parse(target.source)
-		}
+		parsed := syntax.Parse(target.source)
 		target.known = target.source != "" && parsed.Dialect == syntax.Vim9 && len(parsed.Diagnostics) == 0
 		targets[path] = target
 	}

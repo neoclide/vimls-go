@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neoclide/vimls-go/internal/syntax"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -119,170 +118,6 @@ func TestServerDocumentHandlersCancelStaleAnalysis(t *testing.T) {
 	}
 }
 
-func TestServerDocumentParserCacheDoesNotCrossCloseReopen(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
-	instance.mu.Lock()
-	instance.client = client
-	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	documentURI := uri.MustParse("file:///lifetime.vim")
-	oldSource := "if true\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: oldSource},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitForDiagnostics(t, client.published)
-	instance.publishMu.Lock()
-	oldCached, ok := instance.parsed[documentURI.String()]
-	instance.publishMu.Unlock()
-	if !ok || oldCached.file == nil || oldCached.file.Source != oldSource {
-		t.Fatalf("old parser cache = %#v", oldCached)
-	}
-
-	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitForDiagnostics(t, client.published)
-	instance.publishMu.Lock()
-	_, cacheAfterClose := instance.parsed[documentURI.String()]
-	instance.publishMu.Unlock()
-	if cacheAfterClose {
-		t.Fatal("parser cache survived document close")
-	}
-	if _, open := instance.documents.Snapshot(documentURI.String()); open {
-		t.Fatal("document survived close")
-	}
-
-	newSource := "while true\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: newSource},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitForDiagnostics(t, client.published)
-	instance.publishMu.Lock()
-	newCached, ok := instance.parsed[documentURI.String()]
-	instance.publishMu.Unlock()
-	if !ok || newCached.file == nil || newCached.file.Source != newSource {
-		t.Fatalf("new parser cache = %#v", newCached)
-	}
-	if newCached.file == oldCached.file || newCached.revision <= oldCached.revision {
-		t.Fatalf("parser cache crossed document lifetimes: old=%#v new=%#v", oldCached, newCached)
-	}
-}
-
-func TestServerRepeatedDocumentOpenReplacesParserCache(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	// Stop scheduling before opening so the cache deletion assertion is not
-	// racing a background analysis that could repopulate it.
-	instance.stopAnalysis()
-	documentURI := uri.MustParse("file:///repeated-open.vim")
-	oldSource := "if true\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: oldSource},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	snapshot, ok := instance.documents.Snapshot(documentURI.String())
-	if !ok {
-		t.Fatal("first document snapshot was not retained")
-	}
-	// Seed a real parser result to model the cache owned by the first lifetime.
-	instance.publishMu.Lock()
-	instance.parsed[documentURI.String()] = parsedDocument{
-		revision: snapshot.Revision(),
-		file:     syntax.Parse(oldSource),
-	}
-	instance.publishMu.Unlock()
-
-	newSource := "while true\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 2, Text: newSource},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	instance.publishMu.Lock()
-	_, cacheAfterReopen := instance.parsed[documentURI.String()]
-	instance.publishMu.Unlock()
-	if cacheAfterReopen {
-		t.Fatal("repeated DidOpen retained the previous parser cache")
-	}
-	newSnapshot, ok := instance.documents.Snapshot(documentURI.String())
-	if !ok || newSnapshot.Text() != newSource || newSnapshot.Revision() <= snapshot.Revision() {
-		t.Fatalf("reopened snapshot = %#v", newSnapshot)
-	}
-}
-
-func TestServerStaleAnalysisCannotRestoreClosedParserCache(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
-	instance.mu.Lock()
-	instance.client = client
-	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	documentURI := uri.MustParse("file:///stale-lifetime.vim")
-	oldSource := "if true\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: oldSource},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitForDiagnostics(t, client.published)
-	instance.publishMu.Lock()
-	oldFile := instance.parsed[documentURI.String()].file
-	instance.publishMu.Unlock()
-	if oldFile == nil || oldFile.Source != oldSource {
-		t.Fatalf("old parser cache = %#v", oldFile)
-	}
-	oldAnalysis, ok := instance.documents.BeginAnalysis(context.Background(), documentURI.String())
-	if !ok {
-		t.Fatal("old analysis did not start")
-	}
-
-	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if oldAnalysis.Context.Err() == nil {
-		t.Fatal("closing document did not cancel the old analysis")
-	}
-	waitForDiagnostics(t, client.published)
-	newSource := "while true\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: newSource},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitForDiagnostics(t, client.published)
-	instance.publishMu.Lock()
-	newCached := instance.parsed[documentURI.String()]
-	instance.publishMu.Unlock()
-	if newCached.file == nil || newCached.file.Source != newSource {
-		t.Fatalf("new parser cache = %#v", newCached)
-	}
-
-	if instance.prepareSyntax(oldAnalysis, oldFile) {
-		t.Fatal("stale analysis restored parser cache after reopen")
-	}
-	instance.publishMu.Lock()
-	current := instance.parsed[documentURI.String()]
-	instance.publishMu.Unlock()
-	if current.file != newCached.file || current.revision != newCached.revision {
-		t.Fatalf("stale analysis replaced new parser cache: got=%#v want=%#v", current, newCached)
-	}
-}
-
 func TestAnalysisQueueCoalescesRapidDocumentChanges(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	defer instance.stopAnalysis()
@@ -344,9 +179,9 @@ func TestServerSkipsAnalysisForOversizedDocument(t *testing.T) {
 		t.Fatalf("diagnostics = %#v", result)
 	}
 	instance.publishMu.Lock()
-	_, parsed := instance.parsed[documentURI.String()]
+	parsed := instance.parsed[documentURI.String()].file
 	instance.publishMu.Unlock()
-	if parsed {
+	if parsed == nil || len(parsed.Commands) != 0 || len(parsed.Source) != maxFileBytes+1 {
 		t.Fatalf("parsed = %#v", parsed)
 	}
 }

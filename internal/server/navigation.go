@@ -45,7 +45,7 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 	}
 	file := parsed.file
 	if file == nil || parsed.revision != snapshot.Revision() {
-		file = s.parseSnapshot(snapshot)
+		file = syntax.Parse(snapshot.Text())
 	}
 	result := analysis.Analyze(file)
 	if err := ctx.Err(); err != nil {
@@ -246,7 +246,7 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 			return nil, document.checkCurrent(ctx)
 		}
 		lines := []string{"name: " + target.match.Fact.Name, "kind: " + string(target.match.Fact.Kind)}
-		_, declaration := document.server.analyzeWorkspaceTarget(target)
+		_, declaration := analyzeWorkspaceTarget(target)
 		if declaration != nil && declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
 			lines = append(lines, "type: "+formatValueType(declaration.Type))
 		}

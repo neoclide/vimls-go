@@ -38,169 +38,126 @@ func parseSource(source string, initial Dialect) *File {
 }
 
 func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
-	return parseSourceRange(source, initial, lambdaBody, 0)
-}
-
-type sourceParser struct {
-	file   *File
-	source string
-	start  int
-	offset int
-
-	initial       Dialect
-	active        Dialect
-	scriptVersion uint8
-	vim9Prologue  bool
-
-	dialectStack   []Dialect
-	aggregateStack []BlockKind
-
-	heredocCommand            int
-	heredocRecoveryCommand    string
-	heredocRecoveryOffset     int
-	heredocRecoveryBody       Span
-	heredocRecoverySpanEnd    int
-	heredocRecoveryTokenCount int
-
-	vim9Continuation      int
-	vim9ContinuationState vim9ContinuationScan
-	lambdaCloseCommand    int
-	lambdaCloseOffset     int
-
-	scannerDiagnostics int
-}
-
-// parseSourceRange parses source starting at a physical source boundary. The
-// caller supplies source truncated at the desired end, so every produced span
-// remains an absolute byte span in that source. Full parsing always starts at
-// zero; incremental parsing uses this only after proving the range is an
-// independent syntax unit.
-func parseSourceRange(source string, initial Dialect, lambdaBody bool, start int) *File {
-	p := &sourceParser{
-		file: &File{Dialect: initial, Source: source, lambdaBody: lambdaBody}, source: source, start: start, offset: start,
-		initial: initial, scriptVersion: 1, vim9Prologue: start == 0 && initial == Vim9 && startsWithVim9Script(source),
-		heredocCommand: -1, heredocRecoveryOffset: -1,
-		vim9Continuation: -1, lambdaCloseCommand: -1, lambdaCloseOffset: -1,
+	file := &File{Dialect: initial, Source: source, lambdaBody: lambdaBody}
+	active := initial
+	scriptVersion := uint8(1)
+	vim9Prologue := initial == Vim9 && startsWithVim9Script(source)
+	if vim9Prologue {
+		active = Legacy
 	}
-	p.active = initial
-	if p.vim9Prologue {
-		p.active = Legacy
+	var dialectStack []Dialect
+	var aggregateStack []BlockKind
+	heredocCommand := -1
+	heredocRecoveryCommand := ""
+	heredocRecoveryOffset := -1
+	var heredocRecoveryBody Span
+	heredocRecoverySpanEnd := 0
+	heredocRecoveryTokenCount := 0
+	vim9Continuation := -1
+	var vim9ContinuationState vim9ContinuationScan
+	lambdaCloseCommand := -1
+	lambdaCloseOffset := -1
+	offset := 0
+	if strings.HasPrefix(source, "\ufeff") {
+		offset = len("\ufeff")
+		file.Tokens = append(file.Tokens, Token{Kind: TokenBOM, Span: Span{End: offset}})
 	}
-	return p.parse()
-}
-
-func (p *sourceParser) applyCommandState(before int) (int, int) {
-	file := p.file
-	loadKeymapCommand := -1
-	textBodyCommand := -1
-	for index := before; index < len(file.Commands); index++ {
-		command := &file.Commands[index]
-		command.ScriptVersion = p.scriptVersion
-		if command.logical != nil {
-			command.logical.command.ScriptVersion = p.scriptVersion
-		}
-		switch command.Canonical {
-		case "vim9script":
-			if p.vim9Prologue {
-				if code, message, span, valid := vim9ScriptArgumentDiagnostic(file.Source, command.Argument); !valid {
-					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
+	applyCommandState := func(before int) (int, int) {
+		loadKeymapCommand := -1
+		textBodyCommand := -1
+		for index := before; index < len(file.Commands); index++ {
+			command := &file.Commands[index]
+			command.ScriptVersion = scriptVersion
+			if command.logical != nil {
+				command.logical.command.ScriptVersion = scriptVersion
+			}
+			switch command.Canonical {
+			case "vim9script":
+				if vim9Prologue {
+					if code, message, span, valid := vim9ScriptArgumentDiagnostic(file.Source, command.Argument); !valid {
+						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
+					}
+					active = Vim9
+					vim9Prologue = false
+				} else if len(dialectStack) > 0 {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1038", Message: "vim9script can only be used in a script", Span: command.Name,
+					})
+				} else if initial == Legacy {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1039", Message: `"vim9script" must be the first command in a script`, Span: command.Name,
+					})
+					if len(dialectStack) == 0 {
+						active = Vim9
+					}
 				}
-				p.active = Vim9
-				p.vim9Prologue = false
-			} else if len(p.dialectStack) > 0 {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{
-					Code: "vim/E1038", Message: "vim9script can only be used in a script", Span: command.Name,
-				})
-			} else if p.initial == Legacy {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{
-					Code: "vim/E1039", Message: `"vim9script" must be the first command in a script`, Span: command.Name,
-				})
-				if len(p.dialectStack) == 0 {
-					p.active = Vim9
+			case "def":
+				dialectStack = append(dialectStack, active)
+				active = Vim9
+			case "function":
+				if isFunctionDefinition(file.Text(command.Argument)) {
+					dialectStack = append(dialectStack, active)
+					active = Legacy
 				}
-			}
-		case "def":
-			p.dialectStack = append(p.dialectStack, p.active)
-			p.active = Vim9
-		case "function":
-			if isFunctionDefinition(file.Text(command.Argument)) {
-				p.dialectStack = append(p.dialectStack, p.active)
-				p.active = Legacy
-			}
-		case "enddef", "endfunction":
-			if len(p.dialectStack) > 0 {
-				p.active = p.dialectStack[len(p.dialectStack)-1]
-				p.dialectStack = p.dialectStack[:len(p.dialectStack)-1]
-			}
-		case "class", "interface", "enum":
-			if command.Dialect == Vim9 {
+			case "enddef", "endfunction":
+				if len(dialectStack) > 0 {
+					active = dialectStack[len(dialectStack)-1]
+					dialectStack = dialectStack[:len(dialectStack)-1]
+				}
+			case "class", "interface", "enum":
+				if command.Dialect == Vim9 {
+					kind := BlockClass
+					if command.Canonical == "interface" {
+						kind = BlockInterface
+					}
+					if command.Canonical == "enum" {
+						kind = BlockEnum
+					}
+					aggregateStack = append(aggregateStack, kind)
+				}
+			case "endclass", "endinterface", "endenum":
 				kind := BlockClass
-				if command.Canonical == "interface" {
+				if command.Canonical == "endinterface" {
 					kind = BlockInterface
 				}
-				if command.Canonical == "enum" {
+				if command.Canonical == "endenum" {
 					kind = BlockEnum
 				}
-				p.aggregateStack = append(p.aggregateStack, kind)
-			}
-		case "endclass", "endinterface", "endenum":
-			kind := BlockClass
-			if command.Canonical == "endinterface" {
-				kind = BlockInterface
-			}
-			if command.Canonical == "endenum" {
-				kind = BlockEnum
-			}
-			if command.Dialect == Vim9 && len(p.aggregateStack) > 0 && p.aggregateStack[len(p.aggregateStack)-1] == kind {
-				p.aggregateStack = p.aggregateStack[:len(p.aggregateStack)-1]
-			}
-		case "scriptversion":
-			if command.Dialect == Legacy {
-				if version, ok := parseScriptVersion(logicalArgumentText(file, command)); ok {
-					p.scriptVersion = version
+				if command.Dialect == Vim9 && len(aggregateStack) > 0 && aggregateStack[len(aggregateStack)-1] == kind {
+					aggregateStack = aggregateStack[:len(aggregateStack)-1]
 				}
-			} else {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{
-					Code: "vim/E1040", Message: "Cannot use :scriptversion after :vim9script", Span: command.Name,
-				})
+			case "scriptversion":
+				if command.Dialect == Legacy {
+					if version, ok := parseScriptVersion(logicalArgumentText(file, command)); ok {
+						scriptVersion = version
+					}
+				} else {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E1040", Message: "Cannot use :scriptversion after :vim9script", Span: command.Name,
+					})
+				}
+			case "loadkeymap":
+				// :loadkeymap consumes every following physical line as
+				// keymap data. It is not an Ex heredoc.
+				if command.Argument.Start == command.Argument.End && len(dialectStack) == 0 {
+					loadKeymapCommand = index
+				}
 			}
-		case "loadkeymap":
-			// :loadkeymap consumes every following physical line as
-			// keymap data. It is not an Ex heredoc.
-			if command.Argument.Start == command.Argument.End && len(p.dialectStack) == 0 {
-				loadKeymapCommand = index
+			if command.Dialect == Legacy && legacyTextCommand(command.Canonical) && legacyTextCommandHeaderValid(file, command) {
+				if len(dialectStack) > 0 && len(command.Modifiers) > 0 {
+					parseLegacyInlineTextBody(file, command)
+				} else {
+					textBodyCommand = index
+				}
 			}
 		}
-		if command.Dialect == Legacy && legacyTextCommand(command.Canonical) && legacyTextCommandHeaderValid(file, command) {
-			if len(p.dialectStack) > 0 && len(command.Modifiers) > 0 {
-				parseLegacyInlineTextBody(file, command)
-			} else {
-				textBodyCommand = index
-			}
-		}
+		return loadKeymapCommand, textBodyCommand
 	}
-	return loadKeymapCommand, textBodyCommand
-}
-
-func (p *sourceParser) parse() *File {
-	p.scan()
-	p.structure()
-	p.details()
-	p.finish()
-	return p.file
-}
-
-func (p *sourceParser) scan() {
-	file, source := p.file, p.source
-	if p.start == 0 && strings.HasPrefix(source, "\ufeff") {
-		p.offset = len("\ufeff")
-		file.Tokens = append(file.Tokens, Token{Kind: TokenBOM, Span: Span{End: p.offset}})
-	}
-	for p.offset < len(source) {
-		contentEnd, nextOffset := physicalLineEnd(source, p.offset)
-		if p.heredocCommand >= 0 {
-			command := &file.Commands[p.heredocCommand]
-			if commandBlockEndLine(source[p.offset:contentEnd]) && insideVim9CommandBlock(file, p.heredocCommand) {
+	for offset < len(source) {
+		contentEnd, nextOffset := physicalLineEnd(source, offset)
+		if heredocCommand >= 0 {
+			command := &file.Commands[heredocCommand]
+			if commandBlockEndLine(source[offset:contentEnd]) && insideVim9CommandBlock(file, heredocCommand) {
 				// may_get_cmd_block() collects a :command { ... } definition
 				// before it is executed and explicitly does not understand
 				// heredocs. Its first line-leading } closes the definition even
@@ -211,66 +168,66 @@ func (p *sourceParser) scan() {
 				command.Heredoc.Body.End = contentEnd
 				command.Span.End = contentEnd
 				command.Heredoc.Incomplete = true
-				p.heredocCommand = -1
-				p.heredocRecoveryCommand = ""
-				p.heredocRecoveryOffset = -1
-			} else if heredocEndMarkerMatches(source, command, p.offset, contentEnd) {
+				heredocCommand = -1
+				heredocRecoveryCommand = ""
+				heredocRecoveryOffset = -1
+			} else if heredocEndMarkerMatches(source, command, offset, contentEnd) {
 				scanEvalHeredoc(file, command)
-				command.Heredoc.EndMarker = Span{Start: p.offset, End: contentEnd}
+				command.Heredoc.EndMarker = Span{Start: offset, End: contentEnd}
 				command.Span.End = contentEnd
 				file.Tokens = append(file.Tokens, Token{Kind: TokenHeredoc, Span: command.Heredoc.EndMarker})
 				if contentEnd < nextOffset {
 					file.Tokens = append(file.Tokens, Token{Kind: TokenNewline, Span: Span{Start: contentEnd, End: nextOffset}})
 				}
-				p.heredocCommand = -1
-				p.heredocRecoveryCommand = ""
-				p.heredocRecoveryOffset = -1
-				p.offset = nextOffset
+				heredocCommand = -1
+				heredocRecoveryCommand = ""
+				heredocRecoveryOffset = -1
+				offset = nextOffset
 				continue
 			} else {
-				if p.heredocRecoveryOffset < 0 && p.heredocRecoveryCommand != "" && isPayloadRecoveryLine(source, p.offset, contentEnd, p.heredocRecoveryCommand) {
-					p.heredocRecoveryOffset = p.offset
-					p.heredocRecoveryBody = command.Heredoc.Body
-					p.heredocRecoverySpanEnd = command.Span.End
-					p.heredocRecoveryTokenCount = len(file.Tokens)
+				if heredocRecoveryOffset < 0 && heredocRecoveryCommand != "" && isPayloadRecoveryLine(source, offset, contentEnd, heredocRecoveryCommand) {
+					heredocRecoveryOffset = offset
+					heredocRecoveryBody = command.Heredoc.Body
+					heredocRecoverySpanEnd = command.Span.End
+					heredocRecoveryTokenCount = len(file.Tokens)
 				}
 				if command.Heredoc.Body.Start == 0 && command.Heredoc.Body.End == 0 {
-					command.Heredoc.Body.Start = p.offset
+					command.Heredoc.Body.Start = offset
 				}
 				command.Heredoc.Body.End = contentEnd
 				command.Span.End = contentEnd
-				file.Tokens = append(file.Tokens, Token{Kind: TokenHeredoc, Span: Span{Start: p.offset, End: contentEnd}})
+				file.Tokens = append(file.Tokens, Token{Kind: TokenHeredoc, Span: Span{Start: offset, End: contentEnd}})
 				if contentEnd < nextOffset {
 					file.Tokens = append(file.Tokens, Token{Kind: TokenNewline, Span: Span{Start: contentEnd, End: nextOffset}})
 				}
-				if nextOffset >= len(source) && p.heredocRecoveryOffset >= 0 {
-					command.Heredoc.Body = p.heredocRecoveryBody
+				if nextOffset >= len(source) && heredocRecoveryOffset >= 0 {
+					command.Heredoc.Body = heredocRecoveryBody
 					command.Heredoc.Incomplete = true
-					command.Span.End = p.heredocRecoverySpanEnd
-					file.Tokens = file.Tokens[:p.heredocRecoveryTokenCount]
+					command.Span.End = heredocRecoverySpanEnd
+					file.Tokens = file.Tokens[:heredocRecoveryTokenCount]
 					scanEvalHeredoc(file, command)
-					p.heredocCommand = -1
-					p.heredocRecoveryCommand = ""
-					p.offset = p.heredocRecoveryOffset
-					p.heredocRecoveryOffset = -1
+					heredocCommand = -1
+					heredocRecoveryCommand = ""
+					offset = heredocRecoveryOffset
+					heredocRecoveryOffset = -1
 					continue
 				}
-				p.offset = nextOffset
+				offset = nextOffset
 				continue
 			}
 		}
 
-		first := skipSpace(source, p.offset, contentEnd)
+		first := skipSpace(source, offset, contentEnd)
 		if first < contentEnd && source[first] == '}' && hasOpenVim9CommandBlock(file) {
 			// may_get_cmd_block() stops at any physical line whose first
 			// non-white byte is }, regardless of trailing replacement text.
-			if p.offset < first {
-				file.Tokens = append(file.Tokens, Token{Kind: TokenWhitespace, Span: Span{Start: p.offset, End: first}})
+			if offset < first {
+				file.Tokens = append(file.Tokens, Token{Kind: TokenWhitespace, Span: Span{Start: offset, End: first}})
 			}
 			name := Span{Start: first, End: first + 1}
 			file.Tokens = append(file.Tokens, Token{Kind: TokenCommand, Span: name})
 			file.Commands = append(file.Commands, Command{
-				Kind: CommandBlockEnd, Dialect: Vim9, ScriptVersion: p.scriptVersion,
+				Kind: CommandBlockEnd, Dialect: Vim9, ScriptVersion: scriptVersion,
 				Span: name, Name: name, TypedName: "}", Canonical: "}", Block: -1,
 			})
 			if first+1 < contentEnd {
@@ -279,36 +236,36 @@ func (p *sourceParser) scan() {
 			if contentEnd < nextOffset {
 				file.Tokens = append(file.Tokens, Token{Kind: TokenNewline, Span: Span{Start: contentEnd, End: nextOffset}})
 			}
-			p.vim9Continuation = -1
-			p.vim9ContinuationState = vim9ContinuationScan{}
-			p.offset = nextOffset
+			vim9Continuation = -1
+			vim9ContinuationState = vim9ContinuationScan{}
+			offset = nextOffset
 			continue
 		}
-		if p.vim9Continuation >= 0 && first < contentEnd && source[first:scanWord(source, first, contentEnd)] == "endenum" && hasOpenEnum(file) {
+		if vim9Continuation >= 0 && first < contentEnd && source[first:scanWord(source, first, contentEnd)] == "endenum" && hasOpenEnum(file) {
 			// A trailing comma is valid after the final enum value.  It does not
 			// make the following endenum part of the value expression.
-			p.vim9Continuation = -1
+			vim9Continuation = -1
 		}
-		lambdaRecoveryBoundary := len(p.vim9ContinuationState.lambdaDepth) > 0 && p.vim9ContinuationState.lambdaBodyStarted
-		if lambdaRecoveryBoundary && (p.lambdaCloseCommand != p.vim9Continuation || p.lambdaCloseOffset >= 0 && first > p.lambdaCloseOffset) {
-			p.lambdaCloseCommand = p.vim9Continuation
-			p.lambdaCloseOffset = findVim9LambdaRecoveryClose(source, nextOffset)
+		lambdaRecoveryBoundary := len(vim9ContinuationState.lambdaDepth) > 0 && vim9ContinuationState.lambdaBodyStarted
+		if lambdaRecoveryBoundary && (lambdaCloseCommand != vim9Continuation || lambdaCloseOffset >= 0 && first > lambdaCloseOffset) {
+			lambdaCloseCommand = vim9Continuation
+			lambdaCloseOffset = findVim9LambdaRecoveryClose(source, nextOffset)
 		}
-		lambdaBodyCommand := lambdaRecoveryBoundary && p.lambdaCloseOffset >= 0
-		forTypeContinuation := p.vim9Continuation >= 0 && first < contentEnd && source[first] == ':' &&
-			file.Commands[p.vim9Continuation].Canonical == "for"
-		if p.vim9Continuation >= 0 && (len(p.vim9ContinuationState.lambdaDepth) == 0 || lambdaRecoveryBoundary) && first < contentEnd &&
-			!(source[first] == '}' && p.vim9ContinuationState.depth > 0) && startsVim9RecoveryCommand(source, first, contentEnd) &&
+		lambdaBodyCommand := lambdaRecoveryBoundary && lambdaCloseOffset >= 0
+		forTypeContinuation := vim9Continuation >= 0 && first < contentEnd && source[first] == ':' &&
+			file.Commands[vim9Continuation].Canonical == "for"
+		if vim9Continuation >= 0 && (len(vim9ContinuationState.lambdaDepth) == 0 || lambdaRecoveryBoundary) && first < contentEnd &&
+			!(source[first] == '}' && vim9ContinuationState.depth > 0) && startsVim9RecoveryCommand(source, first, contentEnd) &&
 			!lambdaBodyCommand &&
 			!forTypeContinuation &&
-			!(p.vim9ContinuationState.depth > 0 && looksLikeVim9NamedItem(source, first, contentEnd)) &&
-			!continuesVim9FunctionSignature(file, p.vim9Continuation, p.vim9ContinuationState, source, first, contentEnd) &&
-			!(source[first] == ':' && (len(p.vim9ContinuationState.ternaryDepth) > 0 || p.vim9ContinuationState.bracketDepth > 0)) {
+			!(vim9ContinuationState.depth > 0 && looksLikeVim9NamedItem(source, first, contentEnd)) &&
+			!continuesVim9FunctionSignature(file, vim9Continuation, vim9ContinuationState, source, first, contentEnd) &&
+			!(source[first] == ':' && (len(vim9ContinuationState.ternaryDepth) > 0 || vim9ContinuationState.bracketDepth > 0)) {
 			// Static analysis must recover after an incomplete expression.  A
 			// clear statement boundary belongs to the following command even if
 			// the previous line left a delimiter or operator open.
-			p.vim9Continuation = -1
-			p.vim9ContinuationState = vim9ContinuationScan{}
+			vim9Continuation = -1
+			vim9ContinuationState = vim9ContinuationScan{}
 		}
 		automaticLeadingContinuation := false
 		if len(file.Commands) > 0 {
@@ -321,8 +278,8 @@ func (p *sourceParser) scan() {
 				automaticLeadingContinuation = allowsVim9AutomaticContinuation(file, last)
 			}
 		}
-		if first < contentEnd && len(file.Commands) > 0 && (p.vim9Continuation >= 0 || automaticLeadingContinuation) {
-			commandIndex := p.vim9Continuation
+		if first < contentEnd && len(file.Commands) > 0 && (vim9Continuation >= 0 || automaticLeadingContinuation) {
+			commandIndex := vim9Continuation
 			if commandIndex < 0 {
 				commandIndex = len(file.Commands) - 1
 			}
@@ -355,113 +312,105 @@ func (p *sourceParser) scan() {
 			} else if comment.Start < comment.End {
 				file.Tokens = append(file.Tokens, Token{Kind: TokenComment, Span: logical.view.mapSpan(comment)})
 			}
-			loadKeymapCommand, textBodyCommand := p.applyCommandState(newCommands)
+			loadKeymapCommand, textBodyCommand := applyCommandState(newCommands)
 			if loadKeymapCommand >= 0 {
-				p.offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], nextOffset, hasOpenVim9CommandBlock(file))
+				offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], nextOffset, hasOpenVim9CommandBlock(file))
 				continue
 			}
 			if textBodyCommand >= 0 {
 				if contentEnd < nextOffset {
 					file.Tokens = append(file.Tokens, Token{Kind: TokenNewline, Span: Span{Start: contentEnd, End: nextOffset}})
 				}
-				p.offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], nextOffset, textBodyRecoveryCommand(p.active, p.dialectStack), hasOpenVim9CommandBlock(file))
+				offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], nextOffset, textBodyRecoveryCommand(active, dialectStack), hasOpenVim9CommandBlock(file))
 				continue
 			}
 
-			p.vim9Continuation = -1
+			vim9Continuation = -1
 			last := len(file.Commands) - 1
 			if last >= commandIndex && file.Commands[last].Heredoc != nil {
-				if len(p.dialectStack) > 0 && len(file.Commands[last].Modifiers) > 0 {
+				if len(dialectStack) > 0 && len(file.Commands[last].Modifiers) > 0 {
 					file.Commands[last].Heredoc.Deferred = true
 				} else {
-					p.heredocCommand = last
+					heredocCommand = last
 					if file.Commands[last].Heredoc.Body == (Span{}) {
 						file.Commands[last].Heredoc.Body = Span{Start: nextOffset, End: nextOffset}
 					}
-					p.heredocRecoveryCommand = enclosingFunctionEnd(p.active, p.dialectStack)
-					p.heredocRecoveryOffset = -1
+					heredocRecoveryCommand = enclosingFunctionEnd(active, dialectStack)
+					heredocRecoveryOffset = -1
 				}
 			} else if last >= commandIndex && usesVim9Continuation(file.Commands[last]) {
-				p.vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
-				if needsVim9CommandContinuation(file, last, p.vim9ContinuationState) {
-					p.vim9Continuation = last
+				vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
+				if needsVim9CommandContinuation(file, last, vim9ContinuationState) {
+					vim9Continuation = last
 				}
 			}
 			if contentEnd < nextOffset {
 				file.Tokens = append(file.Tokens, Token{Kind: TokenNewline, Span: Span{Start: contentEnd, End: nextOffset}})
 			}
-			p.offset = nextOffset
+			offset = nextOffset
 			continue
 		}
 
 		var view logicalView
-		if p.active == Legacy {
-			view = readLegacyLogicalView(source, p.offset)
+		if active == Legacy {
+			view = readLegacyLogicalView(source, offset)
 		} else {
-			view = readVim9LogicalView(source, p.offset)
+			view = readVim9LogicalView(source, offset)
 		}
 		var directAggregateKind BlockKind
-		if len(p.aggregateStack) > 0 && len(p.dialectStack) == 0 {
-			directAggregateKind = p.aggregateStack[len(p.aggregateStack)-1]
+		if len(aggregateStack) > 0 && len(dialectStack) == 0 {
+			directAggregateKind = aggregateStack[len(aggregateStack)-1]
 		}
-		before := scanLogicalCommandsWithContext(file, &view, p.active, directAggregateKind, len(p.dialectStack) > 1, p.scriptVersion)
-		loadKeymapCommand, textBodyCommand := p.applyCommandState(before)
+		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateKind, len(dialectStack) > 1, scriptVersion)
+		loadKeymapCommand, textBodyCommand := applyCommandState(before)
 		if loadKeymapCommand >= 0 {
-			p.offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, hasOpenVim9CommandBlock(file))
+			offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, hasOpenVim9CommandBlock(file))
 			continue
 		}
 		if textBodyCommand >= 0 {
-			p.offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], view.Next, textBodyRecoveryCommand(p.active, p.dialectStack), hasOpenVim9CommandBlock(file))
+			offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], view.Next, textBodyRecoveryCommand(active, dialectStack), hasOpenVim9CommandBlock(file))
 			continue
 		}
 		if len(file.Commands) > before && file.Commands[len(file.Commands)-1].Heredoc != nil {
 			last := len(file.Commands) - 1
-			if len(p.dialectStack) > 0 && len(file.Commands[last].Modifiers) > 0 {
+			if len(dialectStack) > 0 && len(file.Commands[last].Modifiers) > 0 {
 				file.Commands[last].Heredoc.Deferred = true
 			} else {
-				p.heredocCommand = last
-				if file.Commands[p.heredocCommand].Heredoc.Body == (Span{}) {
-					file.Commands[p.heredocCommand].Heredoc.Body = Span{Start: view.Next, End: view.Next}
+				heredocCommand = last
+				if file.Commands[heredocCommand].Heredoc.Body == (Span{}) {
+					file.Commands[heredocCommand].Heredoc.Body = Span{Start: view.Next, End: view.Next}
 				}
-				p.heredocRecoveryCommand = enclosingFunctionEnd(p.active, p.dialectStack)
-				p.heredocRecoveryOffset = -1
+				heredocRecoveryCommand = enclosingFunctionEnd(active, dialectStack)
+				heredocRecoveryOffset = -1
 			}
 		} else if len(file.Commands) > before {
 			last := len(file.Commands) - 1
 			if usesVim9Continuation(file.Commands[last]) {
-				p.vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
-				p.vim9Continuation = -1
-				if needsVim9CommandContinuation(file, last, p.vim9ContinuationState) {
-					p.vim9Continuation = last
+				vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
+				vim9Continuation = -1
+				if needsVim9CommandContinuation(file, last, vim9ContinuationState) {
+					vim9Continuation = last
 				}
 			} else {
-				p.vim9Continuation = -1
+				vim9Continuation = -1
 			}
 		}
-		p.offset = view.Next
+		offset = view.Next
 	}
-	if p.heredocCommand >= 0 {
-		command := &file.Commands[p.heredocCommand]
+	if heredocCommand >= 0 {
+		command := &file.Commands[heredocCommand]
 		command.Heredoc.Incomplete = true
 		scanEvalHeredoc(file, command)
 	}
 	coalesceLegacyEmbeddedBlocks(file)
 	coalesceCollectedCommandBlocks(file, len(file.Source))
-	p.scannerDiagnostics = len(file.Diagnostics)
-}
-
-func (p *sourceParser) structure() {
-	file := p.file
+	scannerDiagnostics := len(file.Diagnostics)
 	buildBlocks(file)
-	if truncateAfterDirectFinish(file, p.scannerDiagnostics) {
+	if truncateAfterDirectFinish(file, scannerDiagnostics) {
 		buildBlocks(file)
 	}
 	diagnoseCollectedBlockBarSeparators(file, true)
 	normalizeVim9CallDiagnostics(file)
-}
-
-func (p *sourceParser) details() {
-	file := p.file
 	for index := range file.Commands {
 		if index+1 < len(file.Commands) {
 			_, closing := closingBlock(&file.Commands[index+1])
@@ -494,10 +443,6 @@ func (p *sourceParser) details() {
 			}
 		}
 	}
-}
-
-func (p *sourceParser) finish() {
-	file := p.file
 	diagnoseConcreteClassAbstractMembers(file)
 	suppressClassBodyCommandDiagnostics(file)
 	buildAggregateMembers(file)
@@ -511,24 +456,7 @@ func (p *sourceParser) finish() {
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
 		return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start
 	})
-	if p.start == 0 {
-		file.incremental = buildIncrementalMetadata(file)
-		clearFinishedCommandTemps(file.Commands)
-	}
-}
-
-// clearFinishedCommandTemps drops parser-only state after all consumers that
-// need the logical source view have finished. Embedded command lists share the
-// returned command tree, so clear them with their owning commands.
-func clearFinishedCommandTemps(commands []Command) {
-	for index := range commands {
-		command := &commands[index]
-		command.logical = nil
-		command.boundaryExpression = nil
-		if command.Embedded != nil {
-			clearFinishedCommandTemps(command.Embedded.Commands)
-		}
-	}
+	return file
 }
 
 func diagnoseVim9ScriptNamespaces(file *File) {

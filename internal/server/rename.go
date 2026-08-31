@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
@@ -291,7 +292,7 @@ func (s *Server) openWorkspaceReferenceLocations(ctx context.Context, target wor
 		s.publishMu.Unlock()
 		file := parsed.file
 		if file == nil || parsed.revision != snapshot.Revision() {
-			file = s.parseSnapshot(snapshot)
+			file = syntax.Parse(snapshot.Text())
 		}
 		fileAnalysis := analysis.Analyze(file)
 		for _, reference := range workspace.CollectExternalReferencesFromAnalysis(path, file, fileAnalysis) {

@@ -101,7 +101,7 @@ func (s *Server) lookupWorkspaceTarget(index *workspace.Index, path string, acce
 		}
 		file := parsed.file
 		if file == nil || parsed.revision != snapshot.Revision() {
-			file = s.parseSnapshot(snapshot)
+			file = syntax.Parse(snapshot.Text())
 		}
 		for _, fact := range workspace.CollectSymbolFacts(path, file) {
 			if accept(fact) {
@@ -151,7 +151,7 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 		return []protocol.Location{}, document.checkCurrent(ctx)
 	}
 	locations := make([]protocol.Location, 0)
-	targetAnalysis, targetDeclaration := document.server.analyzeWorkspaceTarget(target)
+	targetAnalysis, targetDeclaration := analyzeWorkspaceTarget(target)
 	if includeDeclaration {
 		if location, ok := document.server.workspaceTargetLocation(target, document.encoding); ok {
 			locations = append(locations, location)
@@ -236,15 +236,8 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 	return locations, nil
 }
 
-func (s *Server) analyzeWorkspaceTarget(target workspaceNavigationTarget) (*analysis.FileAnalysis, *analysis.Declaration) {
-	var file *syntax.File
-	if target.openSnapshot != nil {
-		file = s.parseSnapshot(target.openSnapshot)
-	}
-	if file == nil {
-		file = syntax.Parse(target.match.Source)
-	}
-	result := analysis.Analyze(file)
+func analyzeWorkspaceTarget(target workspaceNavigationTarget) (*analysis.FileAnalysis, *analysis.Declaration) {
+	result := analysis.Analyze(syntax.Parse(target.match.Source))
 	for _, declaration := range result.Declarations {
 		if declaration.Span == target.match.Fact.SelectionRange && declaration.Name == target.match.Fact.Name {
 			return result, declaration

@@ -88,8 +88,6 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 type logicalSpanMapper struct {
 	view        *logicalView
 	source      string
-	delta       int
-	direct      bool
 	expressions map[*Expression]bool
 	types       map[*Type]bool
 	files       map[*File]bool
@@ -276,14 +274,6 @@ func (mapper *logicalSpanMapper) command(command *Command) {
 		command.Heredoc.Body = mapper.optional(command.Heredoc.Body)
 		command.Heredoc.EndMarker = mapper.optional(command.Heredoc.EndMarker)
 	}
-	if command.TextBody != nil {
-		command.TextBody.Separator = mapper.optional(command.TextBody.Separator)
-		command.TextBody.Body = mapper.optional(command.TextBody.Body)
-		command.TextBody.EndMarker = mapper.optional(command.TextBody.EndMarker)
-		for index := range command.TextBody.Lines {
-			command.TextBody.Lines[index] = mapper.span(command.TextBody.Lines[index])
-		}
-	}
 	if command.Keymap != nil {
 		command.Keymap.Body = mapper.span(command.Keymap.Body)
 		for index := range command.Keymap.Entries {
@@ -384,15 +374,9 @@ func (mapper *logicalSpanMapper) file(file *File) {
 }
 
 func (mapper *logicalSpanMapper) span(span Span) Span {
-	if mapper.direct {
-		return shiftedSpan(span, mapper.delta)
-	}
 	return mapper.view.mapSpan(span)
 }
 
 func (mapper *logicalSpanMapper) optional(span Span) Span {
-	if mapper.direct {
-		return shiftedSpan(span, mapper.delta)
-	}
 	return mapOptionalLogicalSpan(mapper.view, span)
 }

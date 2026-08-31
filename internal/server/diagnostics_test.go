@@ -10,7 +10,6 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
-	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -391,12 +390,6 @@ func TestServerPublishesVersionedSemanticDiagnosticsAndClearsThem(t *testing.T) 
 		diagnostic.Range != (protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 5}}) {
 		t.Fatalf("semantic diagnostic = %#v", diagnostic)
 	}
-	instance.publishMu.Lock()
-	cached := instance.parsed[documentURI.String()].file
-	instance.publishMu.Unlock()
-	if cached == nil || len(cached.Diagnostics) != 0 {
-		t.Fatalf("parser cache contains analysis diagnostics: %#v", cached)
-	}
 
 	_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
@@ -638,69 +631,6 @@ enddef
 	}
 }
 
-func TestWorkspaceImportDiagnosticsUsesMatchingOpenSnapshot(t *testing.T) {
-	root := t.TempDir()
-	targetPath := filepath.Join(root, "lib.vim")
-	importerPath := filepath.Join(root, "main.vim")
-	targetSource := "vim9script\nexport var Public = 1\n"
-	importerSource := "vim9script\nimport './lib.vim' as Lib\necho Lib.Missing\n"
-
-	index := workspace.NewIndex(0, 0)
-	if err := index.Replace(targetPath, syntax.Parse(targetSource)); err != nil {
-		t.Fatal(err)
-	}
-	index.SetComplete(true)
-	graph := workspace.NewImportGraph()
-	if err := graph.Replace(importerPath, []workspace.ImportFact{{
-		Target: targetPath, ImportPath: "'./lib.vim'", PathSpan: syntax.Span{Start: 11, End: 30},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	graph.SetReady(true)
-
-	instance := New(nil, nil, io.Discard)
-	t.Cleanup(instance.stopAnalysis)
-	instance.workspaceMu.Lock()
-	instance.workspaceRoots = []string{root}
-	instance.workspaceIndex = index
-	instance.workspaceGraph = graph
-	instance.workspaceGraphView = graph.Snapshot()
-	instance.workspaceMu.Unlock()
-
-	importer := syntax.Parse(importerSource)
-	analysisResult := analysis.Analyze(importer)
-	targetURI := uri.File(targetPath)
-	snapshot := instance.documents.Open(targetURI.String(), 1, targetSource)
-	// Deliberately violate the cache/source invariant: this sentinel proves
-	// the exact-revision open-snapshot path uses parseSnapshot's cached result.
-	cacheRouteSentinel := syntax.Parse("let g:legacy = 1\n")
-	instance.publishMu.Lock()
-	instance.parsed[targetURI.String()] = parsedDocument{revision: snapshot.Revision(), file: cacheRouteSentinel}
-	instance.publishMu.Unlock()
-
-	_, ready, diagnostics := instance.workspaceImportDiagnostics(uri.File(importerPath).String(), importer, analysisResult)
-	if !ready {
-		t.Fatal("import graph is not ready")
-	}
-	if len(diagnostics) != 0 {
-		t.Fatalf("matching open target did not use cached parser result: %#v", diagnostics)
-	}
-
-	// Restore a valid cached parser result before testing the source-mismatch
-	// fallback, so that assertion does not depend on the sentinel above.
-	instance.publishMu.Lock()
-	instance.parsed[targetURI.String()] = parsedDocument{revision: snapshot.Revision(), file: syntax.Parse(targetSource)}
-	instance.publishMu.Unlock()
-	instance.documents.Open(targetURI.String(), 2, "vim9script\nexport var Other = 1\n")
-	_, ready, diagnostics = instance.workspaceImportDiagnostics(uri.File(importerPath).String(), importer, analysisResult)
-	if !ready {
-		t.Fatal("import graph is not ready after target change")
-	}
-	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1048" {
-		t.Fatalf("source-mismatched open target did not use captured index source: %#v", diagnostics)
-	}
-}
-
 func TestImportTargetChangeReanalyzesReverseDependent(t *testing.T) {
 	root := t.TempDir()
 	targetPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nvar Value = 1\n")
@@ -813,22 +743,10 @@ func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {
 	if len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vimls/target-version") {
 		t.Fatalf("default-target diagnostics = %#v", first)
 	}
-	instance.publishMu.Lock()
-	cached := instance.parsed[documentURI.String()].file
-	instance.publishMu.Unlock()
-	if cached == nil || len(cached.Diagnostics) != 0 {
-		t.Fatalf("parser cache contains compatibility diagnostics: %#v", cached)
-	}
 	_ = instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: []byte(`{"targetVersion":"9.2.1015"}`)})
 	cleared := waitForDiagnostics(t, client.published)
 	if len(cleared.Diagnostics) != 0 {
 		t.Fatalf("updated-target diagnostics = %#v", cleared)
-	}
-	instance.publishMu.Lock()
-	reused := instance.parsed[documentURI.String()].file
-	instance.publishMu.Unlock()
-	if reused != cached {
-		t.Fatal("configuration-only analysis replaced the syntax pointer")
 	}
 }
 
