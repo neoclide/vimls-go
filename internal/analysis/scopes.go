@@ -6790,7 +6790,18 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				if len(result.Diagnostics) != before {
 					break
 				}
-				if target == nil || target.Kind != syntax.ExpressionIdentifier || target.Value == "this" || syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, target.Span) {
+				if target == nil || target.Kind != syntax.ExpressionIdentifier || target.Value == "this" || syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) {
+					continue
+				}
+				blocked := false
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Span.Start <= target.Span.End && diagnostic.Span.End >= target.Span.Start &&
+						diagnostic.Code != "vim/E121" && diagnostic.Code != "vim/E1001" {
+						blocked = true
+						break
+					}
+				}
+				if blocked {
 					continue
 				}
 				declaration := resolve(scope, target.Value, target.Span.Start, false, nil)
@@ -6806,6 +6817,14 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 					}
 				}
 				if !dynamicVariableCreation && !declared && !strings.Contains(target.Value, ":") && !isLiteralIdentifier(target.Value) {
+					filtered := result.Diagnostics[:0]
+					for _, diagnostic := range result.Diagnostics {
+						if diagnostic.Span == target.Span && (diagnostic.Code == "vim/E121" || diagnostic.Code == "vim/E1001") {
+							continue
+						}
+						filtered = append(filtered, diagnostic)
+					}
+					result.Diagnostics = filtered
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code: "vim/E1246", Message: "Cannot find variable to (un)lock: " + target.Value, Span: target.Span,
 					})
