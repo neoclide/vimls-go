@@ -3362,6 +3362,43 @@ func TestAnalyzeE1029UnletIndexTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE995LegacyConstExistingVariableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"let then const", "function F()\n  let value = []\n  const value = []\nendfunction\n", "value"},
+		{"const then const", "function F()\n  const value = 1\n  const value = 2\nendfunction\n", "value"},
+		{"compound const", "function F()\n  let value = 1\n  const value += 2\nendfunction\n", "value"},
+		{"destructuring", "function F()\n  let [left, right] = [1, 2]\n  const [left, other] = [3, 4]\nendfunction\n", "left"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E995" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot modify existing variable" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E995 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function F()\n  let value = []\n  unlet value\n  const value = []\nendfunction\n",
+		"function F()\n  let value = []\n  add(value, 1)\n  const value = []\nendfunction\n",
+		"function F()\n  let value = []\n  if 1\n    const value = []\n  endif\nendfunction\n",
+		"let value = []\nconst value = []\n",
+		"vim9script\ndef F()\n  var value = []\n  const value = []\nenddef\n",
+		"function F()\n  let name = 'value'\n  let value = []\n  const {name} = []\nendfunction\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E995" {
+				t.Fatalf("guard unexpectedly received E995: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

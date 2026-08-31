@@ -126,6 +126,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectDuplicateEnumValueDiagnostics(result)
 	collectArgumentRedeclarationDiagnostics(result)
 	collectArgumentShadowDiagnostics(result)
+	collectLegacyConstExistingVariableDiagnostics(result, file.Commands)
 	collectVim9RedeclarationDiagnostics(result)
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectImportedItemRedefinitionDiagnostics(result, file.Commands)
@@ -1398,6 +1399,42 @@ func collectDuplicateTypeAliasDiagnostics(result *FileAnalysis) {
 		typeNode := command.TypeAlias.Type
 		if typeNode != nil && typeNode.Kind == syntax.TypeNamed && (classes[typeNode.Name] != nil || classAliases[typeNode.Name]) {
 			classAliases[name] = true
+		}
+	}
+}
+
+// collectLegacyConstExistingVariableDiagnostics reports E995 only while a
+// straight-line sequence of legacy declarations proves that a function-local
+// variable still exists. Any other command discards the fact.
+func collectLegacyConstExistingVariableDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	if result == nil || result.File == nil {
+		return
+	}
+	seen := make(map[string]bool)
+	var previousScope *Scope
+	for index := range commands {
+		command := &commands[index]
+		scope := result.commandScopes[command]
+		if scope != previousScope {
+			clear(seen)
+		}
+		previousScope = scope
+		if command.Dialect != syntax.Legacy || scope == nil || scope.Kind != syntax.BlockFunction || command.Declaration == nil ||
+			(command.Canonical != "let" && command.Canonical != "const") {
+			clear(seen)
+			continue
+		}
+		for _, binding := range command.Declaration.Bindings {
+			name := result.File.Text(binding.Name)
+			if strings.Contains(name, "{") || !assignmentTargetNeedsDeclaration(name) {
+				continue
+			}
+			if command.Canonical == "const" && seen[name] {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E995", Message: "Cannot modify existing variable", Span: binding.Name,
+				})
+			}
+			seen[name] = true
 		}
 	}
 }
