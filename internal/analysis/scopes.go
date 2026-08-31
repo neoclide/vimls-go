@@ -158,7 +158,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
 	collectOperatorDiagnostics(result, file.Commands, root)
-	collectMissingAggregateMethodDiagnostics(result)
+	collectAggregateAccessDiagnostics(result)
 	collectVoidValueDiagnostics(result, file.Commands)
 	collectTypeMismatchDiagnostics(result, file.Commands, root)
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
@@ -1908,11 +1908,12 @@ func collectLoopNestingDiagnostics(result *FileAnalysis) {
 	}
 }
 
-func collectMissingAggregateMethodDiagnostics(result *FileAnalysis) {
+func collectAggregateAccessDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
 	seen := make(map[*syntax.Expression]bool)
+	methodCallees := make(map[*syntax.Expression]bool)
 	var walkCommands func([]syntax.Command, *Scope)
 	var walkExpression func(*syntax.Expression, *Scope, syntax.Dialect)
 	walkExpression = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
@@ -1921,7 +1922,19 @@ func collectMissingAggregateMethodDiagnostics(result *FileAnalysis) {
 		}
 		seen[expression] = true
 		if dialect == syntax.Vim9 {
+			if expression.Kind == syntax.ExpressionCall && len(expression.Children) > 0 {
+				callee := expression.Children[0]
+				if callee != nil && callee.Kind == syntax.ExpressionGenericReference && len(callee.Children) == 1 {
+					callee = callee.Children[0]
+				}
+				if callee != nil && callee.Kind == syntax.ExpressionMember {
+					methodCallees[callee] = true
+				}
+			}
 			appendMissingAggregateMethodDiagnostic(result, scope, expression)
+			if !methodCallees[expression] {
+				appendMissingObjectVariableDiagnostic(result, scope, expression)
+			}
 		}
 		expressionScope := scope
 		if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
@@ -2004,29 +2017,8 @@ func appendMissingAggregateMethodDiagnostic(result *FileAnalysis, scope *Scope, 
 			className = file.Text(aggregate.Aggregate.Name)
 			super = true
 		case "this":
-			aggregate = enclosingClassCommand(file, scope)
+			aggregate = enclosingObjectMethodClass(file, scope)
 			if aggregate == nil || aggregate.Aggregate == nil {
-				return
-			}
-			objectMethod := false
-			for current := scope; current != nil; current = current.Parent {
-				if current.Kind != syntax.BlockDef {
-					continue
-				}
-				if current.CommandList == nil && current.Block >= 0 && current.Block < len(file.Blocks) {
-					header := file.Blocks[current.Block].Header
-					if header >= 0 && header < len(file.Commands) {
-						for _, member := range aggregate.Aggregate.Members {
-							if member == header && !commandIsClassMethod(file, &file.Commands[header]) {
-								objectMethod = true
-								break
-							}
-						}
-					}
-				}
-				break
-			}
-			if !objectMethod {
 				return
 			}
 			className = file.Text(aggregate.Aggregate.Name)
@@ -2138,6 +2130,201 @@ func appendMissingAggregateMethodDiagnostic(result *FileAnalysis, scope *Scope, 
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1325", Message: `Method "` + methodName + `" not found in class "` + className + `"`, Span: memberSpan,
 	})
+}
+
+func appendMissingObjectVariableDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || result.File.Text(member.Operator) != "." || member.Value == "" ||
+		expressionContainsMissing(member) || syntaxDiagnosticOverlaps(result.File.Diagnostics, member.Span) {
+		return
+	}
+	file := result.File
+	className, aggregate, super, found := objectAggregateReceiver(result, scope, member.Children[0], make(map[*syntax.Expression]bool))
+	if !found || aggregate == nil || aggregate.Aggregate == nil {
+		return
+	}
+	name := member.Value
+	if aggregate.Aggregate.Kind == syntax.BlockClass {
+		if _, _, found := classObjectVariableBinding(result, aggregate, name); found || objectMethodInClassHierarchy(file, result.classes, aggregate, name) != nil {
+			return
+		}
+		if !super && aggregateHasClassMember(file, aggregate, name) {
+			return
+		}
+	} else if aggregate.Aggregate.Kind == syntax.BlockEnum {
+		if enumObjectAccessExists(file, aggregate, name) || !super && aggregateHasClassMember(file, aggregate, name) {
+			return
+		}
+	} else {
+		return
+	}
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Span == memberNameSpan(file, member) && (diagnostic.Code == "vim/E1333" || diagnostic.Code == "vim/E1335" || diagnostic.Code == "vim/E1375" || diagnostic.Code == "vim/E1385" || diagnostic.Code == "vim/E1386" || diagnostic.Code == "vim/E1409") {
+			return
+		}
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1326", Message: `Variable "` + name + `" not found in object "` + className + `"`, Span: memberNameSpan(file, member),
+	})
+}
+
+func objectAggregateReceiver(result *FileAnalysis, scope *Scope, receiver *syntax.Expression, seen map[*syntax.Expression]bool) (string, *syntax.Command, bool, bool) {
+	if result == nil || result.File == nil || scope == nil || receiver == nil || seen[receiver] {
+		return "", nil, false, false
+	}
+	seen[receiver] = true
+	file := result.File
+	for receiver.Kind == syntax.ExpressionParenthesized && len(receiver.Children) == 1 && receiver.Children[0] != nil {
+		receiver = receiver.Children[0]
+		if seen[receiver] {
+			return "", nil, false, false
+		}
+		seen[receiver] = true
+	}
+	if receiver.Kind == syntax.ExpressionIdentifier {
+		switch receiver.Value {
+		case "this":
+			if aggregate := enclosingObjectMethodClass(file, scope); aggregate != nil && aggregate.Aggregate != nil {
+				return file.Text(aggregate.Aggregate.Name), aggregate, false, true
+			}
+			return "", nil, false, false
+		case "super":
+			current := enclosingObjectMethodClass(file, scope)
+			if current == nil || current.Aggregate == nil {
+				return "", nil, false, false
+			}
+			parent := extendedClass(file, result.classes, current)
+			if parent == nil {
+				return "", nil, false, false
+			}
+			return file.Text(current.Aggregate.Name), parent, true, true
+		default:
+			if declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil); declaration != nil {
+				switch declaration.Kind {
+				case SymbolKindClass, SymbolKindEnum, SymbolKindTypeAlias:
+					return "", nil, false, false
+				}
+			}
+		}
+	}
+	if receiver.Kind == syntax.ExpressionMember && len(receiver.Children) == 1 && receiver.Children[0] != nil {
+		_, aggregate, _, found := objectAggregateReceiver(result, scope, receiver.Children[0], seen)
+		if found && aggregate != nil {
+			var typ ValueType
+			var hasType bool
+			if aggregate.Aggregate != nil && aggregate.Aggregate.Kind == syntax.BlockClass {
+				typ, hasType = classObjectVariableType(result, aggregate, receiver.Value)
+			} else {
+				typ, hasType = aggregateObjectVariableType(result, aggregate, receiver.Value)
+			}
+			if hasType {
+				if target := result.classAliases[typ.Name]; target != "" {
+					typ.Name = target
+				}
+				if class := result.classes[typ.Name]; class != nil {
+					return typ.Name, class, false, true
+				}
+				if enum := localEnum(file, typ.Name); enum != nil {
+					return typ.Name, enum, false, true
+				}
+			}
+		}
+	}
+	typ := resolvedExpressionType(result, scope, receiver)
+	if target := result.classAliases[typ.Name]; target != "" {
+		typ.Name = target
+	}
+	if class := result.classes[typ.Name]; class != nil {
+		return typ.Name, class, false, true
+	}
+	if enum := localEnum(file, typ.Name); enum != nil {
+		return typ.Name, enum, false, true
+	}
+	return "", nil, false, false
+}
+
+func aggregateHasClassMember(file *syntax.File, aggregate *syntax.Command, name string) bool {
+	if file == nil || aggregate == nil || aggregate.Aggregate == nil {
+		return false
+	}
+	for _, index := range aggregate.Aggregate.Members {
+		if index < 0 || index >= len(file.Commands) {
+			continue
+		}
+		member := &file.Commands[index]
+		if member.Function != nil && commandIsClassMethod(file, member) && file.Text(member.Function.Name) == name {
+			return true
+		}
+		if member.Declaration != nil && commandHasModifier(member, "static") {
+			for _, binding := range member.Declaration.Bindings {
+				if file.Text(binding.Name) == name {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func enumObjectAccessExists(file *syntax.File, enum *syntax.Command, name string) bool {
+	if file == nil || enum == nil || enum.Aggregate == nil {
+		return false
+	}
+	if name == "name" || name == "ordinal" {
+		return true
+	}
+	for _, index := range enum.Aggregate.Members {
+		if index < 0 || index >= len(file.Commands) {
+			continue
+		}
+		member := &file.Commands[index]
+		if member.Declaration != nil && !commandHasModifier(member, "static") {
+			for _, binding := range member.Declaration.Bindings {
+				if file.Text(binding.Name) == name {
+					return true
+				}
+			}
+		}
+		if member.Function != nil && !commandIsClassMethod(file, member) && file.Text(member.Function.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func enclosingObjectMethodClass(file *syntax.File, scope *Scope) *syntax.Command {
+	aggregate := enclosingClassCommand(file, scope)
+	if aggregate == nil || aggregate.Aggregate == nil {
+		return nil
+	}
+	for current := scope; current != nil; current = current.Parent {
+		if current.Kind != syntax.BlockDef {
+			continue
+		}
+		if current.CommandList != nil || current.Block < 0 || current.Block >= len(file.Blocks) {
+			return nil
+		}
+		header := file.Blocks[current.Block].Header
+		if header < 0 || header >= len(file.Commands) {
+			return nil
+		}
+		for _, member := range aggregate.Aggregate.Members {
+			if member != header {
+				continue
+			}
+			method := &file.Commands[header]
+			if method.Function == nil {
+				return nil
+			}
+			name := file.Text(method.Function.Name)
+			if !commandHasModifier(method, "static") || strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new") {
+				return aggregate
+			}
+			return nil
+		}
+		return nil
+	}
+	return nil
 }
 
 func syntaxDiagnosticOverlaps(diagnostics []syntax.Diagnostic, span syntax.Span) bool {

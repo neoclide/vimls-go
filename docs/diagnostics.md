@@ -3267,3 +3267,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   constructor, inherits only object methods, and removes enum constructors.
 - `src/vim9class.c:4080-4106` selects E1325 after ruling out a wrong receiver
   kind; `src/errors.h:3404-3405` defines the exact message.
+
+## Variable not found on an object: E1326
+
+E1326 means `Variable "{variable}" not found in object "{class}"`. Analysis
+reports it for a complete Vim9 member read, write, or method reference whose
+receiver has a known same-file class or enum type and whose object-variable and
+object-method tables contain no matching name. Ordinary calls remain owned by
+E1325, while unknown values and cross-file import namespaces remain
+conservative.
+
+Class object variables and object methods are inherited. Class variables and
+class methods are not: accessing an inherited static name through a child
+object is E1326, while accessing a static name declared directly on that
+object's class remains owned by E1375 or E1385. Protected and non-writable
+object variables remain reserved for E1333 and E1335 instead of being
+downgraded to E1326. `this` is resolved in object methods and constructors, and
+`super` searches the parent object table but names the current class in the
+diagnostic. Enum objects expose `name`, `ordinal`, declared object variables,
+and object methods.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:242-252,1275-1280,1931-1939` covers a
+  missing `this` field, assignment target, and object read.
+- `src/testdir/test_vim9_class.vim:11140-11163` distinguishes a valid inherited
+  object variable through `super` from a non-inherited static variable and
+  reports the current class name.
+- `src/testdir/test_vim9_class.vim:826-836,10201-10245` reaches E1326 through
+  runtime `any` values; analysis deliberately leaves those flows unknown.
+- `src/vim9class.c:4113-4126` gives a directly declared class variable the
+  higher-priority wrong-receiver diagnostic before selecting E1326.
+- `src/vim9execute.c:3360-3410` accepts variables and bound method references
+  before choosing E1326 for a missing object member; `src/errors.h:3406-3407`
+  defines the exact message.

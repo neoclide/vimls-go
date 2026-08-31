@@ -5301,6 +5301,57 @@ func TestAnalyzeE1325MissingAggregateMethodDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1326MissingObjectVariableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, member, class string }{
+		{"constructor this", "vim9script\nclass A\n  def new()\n    var value = this.state\n  enddef\nendclass\n", "state", "A"},
+		{"script read", "vim9script\nclass A\nendclass\nvar a = A.new()\nvar value = a.bar\n", "bar", "A"},
+		{"assignment", "vim9script\nclass A\nendclass\nvar a = A.new()\na.four = 4\n", "four", "A"},
+		{"typed parameter", "vim9script\nclass A\nendclass\ndef Func(a: A)\n  a.missing = 1\nenddef\n", "missing", "A"},
+		{"inherited object", "vim9script\nclass A\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nvar value = b.missing\n", "missing", "B"},
+		{"inherited static variable", "vim9script\nclass A\n  static var token: number\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nvar value = b.token\n", "token", "B"},
+		{"inherited static method reference", "vim9script\nclass A\n  static def Build()\n  enddef\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nvar Callback = b.Build\n", "Build", "B"},
+		{"super skips parent static", "vim9script\nclass A\n  static var foo: number\nendclass\nclass B extends A\n  def Check()\n    var value = super.foo\n  enddef\nendclass\n", "foo", "B"},
+		{"nested typed member", "vim9script\nclass Inner\nendclass\nclass Outer\n  var inner: Inner\nendclass\nvar outer = Outer.new()\nvar value = outer.inner.missing\n", "missing", "Inner"},
+		{"enum object", "vim9script\nenum Fruit\n  Apple\nendenum\nvar fruit: Fruit = Fruit.Apple\nvar value = fruit.missing\n", "missing", "Fruit"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1326" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := `Variable "` + test.member + `" not found in object "` + test.class + `"`
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.member {
+				t.Fatalf("E1326 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"direct and inherited object variables", "vim9script\nclass A\n  var one: number\nendclass\nclass B extends A\nendclass\nvar b = B.new()\nvar value = b.one\n"},
+		{"super object variable", "vim9script\nclass A\n  var one: number\nendclass\nclass B extends A\n  def Check()\n    var value = super.one\n  enddef\nendclass\n"},
+		{"direct static members", "vim9script\nclass A\n  static var count: number\n  static def Build()\n  enddef\nendclass\nvar a = A.new()\nvar count = a.count\nvar Callback = a.Build\n"},
+		{"protected and readonly object variables", "vim9script\nclass A\n  var _hidden: number\n  final fixed: number\nendclass\nvar a = A.new()\nvar hidden = a._hidden\na.fixed = 1\n"},
+		{"enum object fields", "vim9script\nenum Fruit\n  Apple\n  var color: string\nendenum\nvar fruit = Fruit.Apple\nvar value = fruit.name .. fruit.ordinal .. fruit.color\n"},
+		{"object method reference", "vim9script\nclass A\n  def Check()\n  enddef\nendclass\nvar a = A.new()\nvar Callback = a.Check\n"},
+		{"method calls own E1325", "vim9script\nclass A\nendclass\nvar a = A.new()\na.Missing()\n"},
+		{"class receiver", "vim9script\nclass A\nendclass\nvar value = A.Missing\n"},
+		{"unknown and Legacy", "vim9script\nvar value: any\nvar result = value.missing\nlegacy var legacy = value.missing\n"},
+		{"incomplete", "vim9script\nclass A\nendclass\nvar a = A.new()\nvar value = a.\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1326" {
+					t.Fatalf("guard unexpectedly received E1326: %#v\n%s", diagnostic, test.source)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1256BuiltinCallbackArgumentDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"sort zero script", "vim9script\nsort(['a', 'b'], 0)\n", "0"},
