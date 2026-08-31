@@ -4090,3 +4090,26 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/userfunc.c:4670-4713` distinguishes script-local names, lowercase
   builtin-shaped global names, class methods, and Vim9's E1267 wording.
 - `src/errors.h:308-309` defines the exact E128 message.
+
+## Missing Vim9 function name: E129
+
+E129 means `Function name required`. Syntax analysis reports it when a Vim9
+function header contains only the `g:` namespace, when a Vim9-style function
+name ends in `#` immediately before its argument list, or when a Vim9
+`:function` query starts with a Legacy double-quote comment. The diagnostic
+selects the incomplete name or query argument and retains following commands.
+
+A complete `g:Name` and an autoload name with a non-empty final component remain
+outside E129. A hash comment after a Vim9 `:function` query is valid, while a
+Legacy `:function` definition ending in `#` retains Legacy behavior.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:3734-3743` distinguishes an empty `g:` name
+  (E129) from the `<SID>:` (E884) and missing-parenthesis (E488) cases.
+- `src/testdir/test_vim9_import.vim:2788-2799` expects E129 for a Vim9 autoload
+  definition whose name has no component after its final `#`.
+- `src/testdir/test_vim9_script.vim:3898-3910` distinguishes `#` from `"` after
+  a Vim9 `:function` query.
+- `src/userfunc.c:4476-4482` rejects an empty name and a Vim9 autoload name that
+  ends at `#`; `src/errors.h:310-311` defines the exact E129 message.

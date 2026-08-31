@@ -298,6 +298,59 @@ func TestVim9ScriptNamespaceFunctionDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9FunctionNameRequiredDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{
+			name:   "empty global name",
+			source: "vim9script\ndef g: list<string>\nvar after = 1\n",
+			span:   "g:",
+		},
+		{
+			name:   "empty autoload part",
+			source: "vim9script\ndef loadme#()\nenddef\nvar after = 1\n",
+			span:   "loadme#",
+		},
+		{
+			name:   "legacy comment in Vim9 query",
+			source: "vim9script\nfunction \" comment\nvar after = 1\n",
+			span:   "\" comment",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E129" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1263" || diagnostic.Code == "vim/E1267" {
+					t.Fatalf("unexpected competing name diagnostic: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Function name required" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E129 diagnostics = %#v", file.Diagnostics)
+			}
+			if file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("following declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef g:Global()\nenddef\n",
+		"vim9script\ndef loadme#Func()\nenddef\n",
+		"vim9script\nfunction # comment\n",
+		"function loadme#()\nendfunction\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E129") {
+			t.Fatalf("unexpected E129: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9FunctionNameCapitalDiagnostic(t *testing.T) {
 	for _, name := range []string{"_Foo", "lower", "g:globalFunc"} {
 		t.Run(name, func(t *testing.T) {

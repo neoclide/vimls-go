@@ -38,24 +38,25 @@ func parseFunctionSignature(file *File, command *Command) {
 		return
 	}
 	function := &Function{Name: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + offset}}
+	name := source[nameStart:offset]
 	nestedDefNamespace := false
-	if vim9Context && !strings.Contains(source[nameStart:offset], ".") && command.Block >= 0 && command.Block < len(file.Blocks) {
+	if vim9Context && !strings.Contains(name, ".") && command.Block >= 0 && command.Block < len(file.Blocks) {
 		block := file.Blocks[command.Block]
 		if block.Kind == BlockDef && block.Parent >= 0 && block.Parent < len(file.Blocks) && file.Blocks[block.Parent].Kind == BlockDef {
 			for _, namespace := range []string{"s:", "b:"} {
-				if strings.HasPrefix(source[nameStart:offset], namespace) {
+				if strings.HasPrefix(name, namespace) {
 					nestedDefNamespace = true
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{
-						Code: "vim/E1075", Message: "Namespace not supported: " + source[nameStart:offset], Span: function.Name,
+						Code: "vim/E1075", Message: "Namespace not supported: " + name, Span: function.Name,
 					})
 					break
 				}
 			}
 		}
 	}
-	if vim9Context && source[nameStart:offset] == "g:" {
+	if vim9Context && (name == "g:" || strings.HasSuffix(name, "#") && offset < len(source) && source[offset] == '(') {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
-			Code: "vim/E129", Message: "function name required", Span: function.Name,
+			Code: "vim/E129", Message: "Function name required", Span: function.Name,
 		})
 		command.Function = function
 		return
@@ -69,7 +70,6 @@ func parseFunctionSignature(file *File, command *Command) {
 			directAggregateMethod = parent == BlockClass || parent == BlockInterface || parent == BlockEnum
 		}
 	}
-	name := source[nameStart:offset]
 	vim9ScriptNamespace := file.Dialect == Vim9 && command.Dialect == Vim9 && !nestedDefNamespace && strings.HasPrefix(name, "s:") && len(name) > len("s:")
 	if vim9ScriptNamespace {
 		file.Diagnostics = append(file.Diagnostics, Diagnostic{
