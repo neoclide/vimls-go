@@ -599,6 +599,62 @@ func TestVim9ClassPublicMethodDiagnostic(t *testing.T) {
 	}
 }
 
+func TestVim9InvalidClassBodyCommandReportsE1318(t *testing.T) {
+	for _, test := range []struct{ name, command string }{
+		{"this member type", "this.count: number"},
+		{"this member assignment", "this.count = 42"},
+		{"other member", "that.count"},
+		{"variable command", "variable count: number"},
+		{"unknown command", "aaa"},
+		{"missing def name", "def"},
+		{"missing static def name", "static def"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\nclass Shape\n  " + test.command + "\nendclass\nvar after = 1\n"
+			file := Parse(source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1318" {
+					got = append(got, diagnostic)
+				}
+				switch diagnostic.Code {
+				case "vimls/trailing-characters", "vim/E121", "vim/E488", "vim/E1001", "vimls/missing-delimiter":
+					t.Fatalf("class body %q retained cascade %s: %#v", test.command, diagnostic.Code, file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Not a valid command in a class: "+test.command || file.Text(got[0].Span) != test.command {
+				t.Fatalf("class body %q diagnostics = %#v", test.command, file.Diagnostics)
+			}
+			if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockClass || file.Blocks[0].End < 0 || len(file.Commands) != 5 || file.Commands[4].Declaration == nil {
+				t.Fatalf("class body %q recovery = %#v, blocks = %#v", test.command, file.Commands, file.Blocks)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	abstract := Parse("vim9script\nabstract class Shape\n  abstract def Draw(): string\n    return 'X'\n  enddef\nendclass\nvar after = 1\n")
+	var abstractGot []Diagnostic
+	for _, diagnostic := range abstract.Diagnostics {
+		if diagnostic.Code == "vim/E1318" {
+			abstractGot = append(abstractGot, diagnostic)
+		}
+	}
+	if len(abstractGot) != 1 || abstractGot[0].Message != "Not a valid command in a class: return 'X'" || abstract.Text(abstractGot[0].Span) != "return 'X'" || len(abstract.Blocks) != 1 || abstract.Blocks[0].End < 0 || abstract.Commands[len(abstract.Commands)-1].Declaration == nil {
+		t.Fatalf("abstract class recovery = %#v, blocks = %#v", abstract.Commands, abstract.Blocks)
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass Shape\n  var count: number\n  const label = 'shape'\n  final size = 1\n  def Draw()\n  enddef\nendclass\n",
+		"vim9script\nclass Shape\n  def Draw()\n    aaa\n  enddef\nendclass\n",
+		"vim9script\ninterface Face\n  aaa\nendinterface\nenum Kind\n  aaa\nendenum\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E1318") {
+			t.Fatalf("valid/non-class body diagnostics = %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestVim9UnmatchedScopeEndRecovers(t *testing.T) {
 	file := (Vim9Parser{}).Parse("}\nvar after = 1\n")
 	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1025" || len(file.Commands) != 2 || file.Commands[1].Declaration == nil {

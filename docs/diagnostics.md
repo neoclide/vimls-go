@@ -3198,3 +3198,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:1978-1993,2907-2917` applies uppercase checks before the
   shared whitespace-after-name error for aggregates and type aliases.
 - `src/errors.h:3387-3388` defines the exact message.
+
+## Invalid command in a class body: E1318
+
+E1318 means `Not a valid command in a class: {command}`. A Vim9 class body
+accepts member declarations and method definitions directly; other commands
+are rejected at that level. Analysis selects the complete offending command,
+including any class modifier, and uses the same text in the diagnostic message.
+
+The restriction applies only to the direct class body. Commands inside a valid
+method remain method-body syntax, while interfaces and enums use their own
+aggregate-specific diagnostics. A bare `def` or `static def` is also E1318 and
+enters method recovery so its `enddef` cannot close the class accidentally. An
+abstract method signature cannot acquire a body: its first body command is
+E1318. Diagnostics produced only while parsing an invalid class-body command
+are suppressed, and parsing resumes at the class closer and following top-level
+declarations.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:142-240` covers obsolete `this.` member
+  spellings, `that`, and `variable` as invalid direct class-body commands.
+- `src/testdir/test_vim9_class.vim:491-509` covers bare `def` and `static def`.
+- `src/testdir/test_vim9_class.vim:2124-2134` rejects an arbitrary command after
+  a valid class method, and lines 5671-5681 reject a body command after an
+  abstract method signature.
+- `src/vim9class.c:2473-2502,2578-2586` distinguishes a missing method name and
+  the aggregate-specific fallback for invalid body commands.
+- `src/errors.h:3393-3394` defines the exact message.
