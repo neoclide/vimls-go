@@ -197,6 +197,9 @@ func (s *Server) workspaceIndexWorker() {
 			resolver = workspacePathResolver(workspaceRoots, runtimePaths)
 		}
 		openSnapshots := s.documents.Snapshots()
+		if s.beforeWorkspaceBuildForTest != nil {
+			s.beforeWorkspaceBuildForTest(openSnapshots)
+		}
 
 		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, resolver, openSnapshots)
 		s.workspaceMu.Lock()
@@ -779,6 +782,9 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 	restore, ok := s.captureWorkspaceRestore(documentURI)
 	if !ok {
 		return
+	}
+	if s.beforeWorkspaceRestoreReadForTest != nil {
+		s.beforeWorkspaceRestoreReadForTest(restore)
 	}
 	var file *syntax.File
 	if !restore.knownDiskFile {

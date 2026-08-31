@@ -115,6 +115,12 @@ type Server struct {
 	workspaceRunning    bool
 	workspaceWG         sync.WaitGroup
 
+	// The following hooks are test-only synchronization seams. They are set
+	// before use and are always called outside server locks.
+	beforeParseSnapshotCacheMissForTest func(*text.Snapshot)
+	beforeWorkspaceRestoreReadForTest   func(workspaceRestore)
+	beforeWorkspaceBuildForTest         func([]*text.Snapshot)
+
 	watchMu                  sync.Mutex
 	watchDynamicRegistration bool
 	watchRelativePatterns    bool
@@ -1105,6 +1111,9 @@ func (s *Server) parseSnapshot(snapshot *text.Snapshot) *syntax.File {
 	s.publishMu.Unlock()
 	if parsed.file != nil && parsed.contentID == contentID && parsed.file.Source == source {
 		return parsed.file
+	}
+	if s.beforeParseSnapshotCacheMissForTest != nil {
+		s.beforeParseSnapshotCacheMissForTest(snapshot)
 	}
 
 	file := syntax.Parse(source)

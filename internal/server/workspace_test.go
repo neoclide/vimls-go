@@ -10,10 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -999,6 +1001,143 @@ func TestWorkspaceResolverIsReusedUntilRootsChange(t *testing.T) {
 	refreshed, _, _ := instance.workspaceNavigationState()
 	if refreshed == nil || refreshed == first {
 		t.Fatalf("resolver was not refreshed: before=%p after=%p", first, refreshed)
+	}
+}
+
+func TestServerCloseReopenRejectsPausedRestore(t *testing.T) {
+	root := t.TempDir()
+	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "restore.vim", "vim9script\nvar Disk = 1\n"))
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(path)
+	instance.publishMu.Lock()
+	instance.documents.Open(documentURI.String(), 1, "vim9script\nvar Overlay = 1\n")
+	instance.removeWorkspaceURI(documentURI.String())
+	delete(instance.parsed, documentURI.String())
+	instance.publishMu.Unlock()
+
+	paused := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	var capturedRevision uint64
+	instance.beforeWorkspaceRestoreReadForTest = func(restore workspaceRestore) {
+		if restore.documentURI == documentURI.String() {
+			capturedRevision = restore.revision
+			close(paused)
+			<-release
+		}
+	}
+	closeDone := make(chan struct{})
+	var closeErr error
+	go func() {
+		closeErr = instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+		close(closeDone)
+	}()
+	releaseThenJoin := func() {
+		releaseOnce.Do(func() { close(release) })
+		waitForServerRace(t, closeDone, "workspace restore completion")
+	}
+	t.Cleanup(releaseThenJoin)
+	waitForServerRace(t, paused, "workspace restore capture")
+
+	currentSource := "vim9script\nvar Reopened = 2\n"
+	instance.publishMu.Lock()
+	currentSnapshot := instance.documents.Open(documentURI.String(), 2, currentSource)
+	delete(instance.parsed, documentURI.String())
+	instance.publishMu.Unlock()
+	currentFile := instance.parseSnapshot(currentSnapshot)
+	if currentFile == nil || currentFile.Source != currentSource {
+		t.Fatalf("reopened parse = %#v", currentFile)
+	}
+	instance.publishMu.Lock()
+	instance.replaceWorkspaceFile(documentURI.String(), currentFile)
+	instance.publishMu.Unlock()
+	instance.workspaceMu.Lock()
+	currentRevision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	if currentRevision != capturedRevision {
+		t.Fatalf("reopen changed workspace revision: got %d, want %d", currentRevision, capturedRevision)
+	}
+
+	releaseThenJoin()
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if snapshot, ok := instance.documents.Snapshot(documentURI.String()); !ok || snapshot != currentSnapshot {
+		t.Fatalf("stale restore replaced reopened snapshot: %#v", snapshot)
+	}
+	instance.publishMu.Lock()
+	cached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if cached.file == nil {
+		t.Fatal("stale restore cleared reopened cache")
+	}
+	if cached.file != currentFile || cached.contentID != currentSnapshot.ContentID() {
+		t.Fatalf("stale restore replaced reopened cache: file=%p want=%p contentID=%x want=%x", cached.file, currentFile, cached.contentID, currentSnapshot.ContentID())
+	}
+	instance.workspaceMu.Lock()
+	source, indexed := instance.workspaceIndex.Source(path)
+	graph := instance.workspaceGraphView
+	instance.workspaceMu.Unlock()
+	if !indexed || source != currentSource || !graph.Has(path) {
+		t.Fatalf("stale restore replaced reopened workspace: indexed=%t source=%q graphHas=%t", indexed, source, graph.Has(path))
+	}
+}
+
+func TestServerRebuildRejectsCapturedSnapshotAfterOpenEdit(t *testing.T) {
+	root := t.TempDir()
+	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "rebuild.vim", "vim9script\nvar Disk = 1\n"))
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.setWorkspaceRoots([]string{root})
+	documentURI := uri.File(path)
+	oldSource := "vim9script\nvar Old = 1\n"
+	instance.publishMu.Lock()
+	oldSnapshot := instance.documents.Open(documentURI.String(), 1, oldSource)
+	instance.publishMu.Unlock()
+
+	paused := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	hookCalls := 0
+	instance.beforeWorkspaceBuildForTest = func(snapshots []*text.Snapshot) {
+		hookCalls++
+		if len(snapshots) == 1 && snapshots[0] == oldSnapshot {
+			close(paused)
+			<-release
+		}
+	}
+	instance.scheduleWorkspaceRebuild()
+	workspaceDone := make(chan struct{})
+	go func() {
+		instance.workspaceWG.Wait()
+		close(workspaceDone)
+	}()
+	releaseThenJoin := func() {
+		releaseOnce.Do(func() { close(release) })
+		waitForServerRace(t, workspaceDone, "workspace rebuild completion")
+	}
+	t.Cleanup(releaseThenJoin)
+	waitForServerRace(t, paused, "workspace rebuild snapshot capture")
+
+	currentSource := "vim9script\nvar Current = 2\n"
+	instance.publishMu.Lock()
+	currentSnapshot, changed, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: currentSource}})
+	instance.publishMu.Unlock()
+	if err != nil || !changed {
+		t.Fatalf("direct document change: changed=%t err=%v", changed, err)
+	}
+	releaseThenJoin()
+
+	if snapshot, ok := instance.documents.Snapshot(documentURI.String()); !ok || snapshot != currentSnapshot || snapshot.Text() != currentSource {
+		t.Fatalf("final snapshot = %#v", snapshot)
+	}
+	instance.workspaceMu.Lock()
+	source, indexed := instance.workspaceIndex.Source(path)
+	graph := instance.workspaceGraphView
+	built := instance.workspaceBuilt
+	instance.workspaceMu.Unlock()
+	if hookCalls != 2 || !built || !indexed || source != currentSource || !graph.Has(path) {
+		t.Fatalf("stale rebuild published: hooks=%d built=%t indexed=%t source=%q graphHas=%t", hookCalls, built, indexed, source, graph.Has(path))
 	}
 }
 

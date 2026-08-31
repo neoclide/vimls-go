@@ -8,13 +8,24 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+func waitForServerRace(t *testing.T, event <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-event:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
+}
 
 func TestServerDocumentSynchronization(t *testing.T) {
 	input := encodeFrames(t,
@@ -486,6 +497,62 @@ func TestServerOldSnapshotParserCacheCannotRestoreCurrentLifetime(t *testing.T) 
 	instance.publishMu.Unlock()
 	if cachedAfterReopen != reopenedFile {
 		t.Fatalf("old snapshot replaced reopened cache: got %p, want %p", cachedAfterReopen, reopenedFile)
+	}
+}
+
+func TestServerChangeRejectsPausedParseCacheMiss(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	documentURI := uri.MustParse("file:///paused-parse.vim")
+	oldSource := "vim9script\nvar Old = 1\n"
+	oldSnapshot := instance.documents.Open(documentURI.String(), 1, oldSource)
+	paused := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	instance.beforeParseSnapshotCacheMissForTest = func(snapshot *text.Snapshot) {
+		if snapshot == oldSnapshot {
+			close(paused)
+			<-release
+		}
+	}
+
+	oldDone := make(chan struct{})
+	var oldFile *syntax.File
+	go func() {
+		oldFile = instance.parseSnapshot(oldSnapshot)
+		close(oldDone)
+	}()
+	releaseThenJoin := func() {
+		releaseOnce.Do(func() { close(release) })
+		waitForServerRace(t, oldDone, "old parse completion")
+	}
+	t.Cleanup(releaseThenJoin)
+	waitForServerRace(t, paused, "old parse cache miss")
+
+	currentSource := "vim9script\nvar Current = 2\n"
+	instance.publishMu.Lock()
+	currentSnapshot, changed, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: currentSource}})
+	instance.publishMu.Unlock()
+	if err != nil || !changed {
+		t.Fatalf("direct document change: changed=%t err=%v", changed, err)
+	}
+	currentFile := instance.parseSnapshot(currentSnapshot)
+	if currentFile == nil || currentFile.Source != currentSource {
+		t.Fatalf("current parse = %#v", currentFile)
+	}
+
+	releaseThenJoin()
+	if oldFile == nil || oldFile.Source != oldSource {
+		t.Fatalf("old parse = %#v", oldFile)
+	}
+	instance.publishMu.Lock()
+	cached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if cached.file == nil {
+		t.Fatal("stale parse cleared current cache")
+	}
+	if cached.file != currentFile || cached.contentID != currentSnapshot.ContentID() || cached.file.Source != currentSource {
+		t.Fatalf("stale parse replaced cache: file=%p want=%p contentID=%x want=%x source=%q", cached.file, currentFile, cached.contentID, currentSnapshot.ContentID(), cached.file.Source)
 	}
 }
 
