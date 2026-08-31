@@ -8193,6 +8193,90 @@ func TestAnalyzeE1355DuplicateFunctionDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1356SuperMustBeFollowedByDotDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "object method",
+			source: "vim9script\nclass A\n  def Foo()\n    echo super\n  enddef\nendclass\n",
+		},
+		{
+			name:   "static method",
+			source: "vim9script\nclass A\n  static def Foo()\n    echo super\n  enddef\nendclass\n",
+		},
+		{
+			name:   "constructor",
+			source: "vim9script\nclass A\n  def new()\n    echo super\n  enddef\nendclass\n",
+		},
+		{
+			name:   "lambda in object method",
+			source: "vim9script\nclass A\n  def Foo()\n    var Fn = () => super\n  enddef\nendclass\n",
+		},
+		{
+			name:   "index instead of dot",
+			source: "vim9script\nclass A\n  def Foo()\n    echo super[0]\n  enddef\nendclass\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1356" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `"super" must be followed by a dot` || file.Text(got[0].Span) != "super" {
+				t.Fatalf("E1356 diagnostics = %#v; syntax = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "valid member",
+			source: "vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nclass B extends A\n  def Foo()\n    super.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "outside method member belongs to e1357",
+			source: "vim9script\ndef Foo()\n  super.Foo()\nenddef\n",
+		},
+		{
+			name:   "outside method bare super",
+			source: "vim9script\ndef Foo()\n  echo super\nenddef\n",
+		},
+		{
+			name:   "this keyword",
+			source: "vim9script\nclass A\n  def Foo()\n    echo this\n  enddef\nendclass\n",
+		},
+		{
+			name:   "legacy expression",
+			source: "function Foo()\n  echo super\nendfunction\n",
+		},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1356" {
+					t.Fatalf("unexpected semantic E1356: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\nclass A\n  def Foo()\n    echo super .Foo()\n  enddef\nendclass\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1356" || file.Diagnostics[0].Message != `"super" must be followed by a dot` || file.Text(file.Diagnostics[0].Span) != " " {
+		t.Fatalf("spaced super diagnostics = %#v", file.Diagnostics)
+	}
+	for _, diagnostic := range Analyze(file).Diagnostics {
+		if diagnostic.Code == "vim/E1356" {
+			t.Fatalf("syntax E1356 gained semantic duplicate: %#v", diagnostic)
+		}
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

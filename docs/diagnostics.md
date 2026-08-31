@@ -3849,3 +3849,29 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9class.txt:638-642` forbids method overloading by argument
   type.
 - `src/errors.h:3464-3467` defines the exact E1355 and E1356 messages.
+
+## Super must be followed by a dot: E1356
+
+E1356 means `"super" must be followed by a dot`. In an object method, static
+method, constructor, or a Lambda nested in one of those methods, `super` is a
+special receiver and must be immediately followed by `.`. Bare uses and other
+postfix forms such as `super[0]` report the keyword; whitespace before the dot
+is a syntax error on that whitespace.
+
+A direct `super.member` receiver is accepted here and remains subject to the
+context and parent-class checks owned by E1357 and E1358. Outside a class
+method, a dotted use is likewise reserved for E1357. Legacy expressions and
+the separate `this` keyword do not gain E1356.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:11064-11074` covers whitespace between
+  `super` and `.` with the exact message.
+- `src/testdir/test_vim9_cmd.vim:2144-2150` retains a bare-`super` crash
+  regression that includes E1356.
+- `src/vim9compile.c:39-62` requires `.` after `super` in object methods and
+  constructors and then checks for a parent class.
+- `src/vim9expr.c:851-864` identifies static class-method context while
+  preserving object-method context through nested closures.
+- `src/vim9expr.c:990-1002` requires `.` after `super` in that static context.
+- `src/errors.h:3466-3469` defines the exact E1356 and E1357 messages.

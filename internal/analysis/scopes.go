@@ -33,6 +33,7 @@ type FileAnalysis struct {
 	enumValueExempt             map[syntax.Span]bool
 	typeAliasExempt             map[syntax.Span]bool
 	classValueExempt            map[syntax.Span]bool
+	superMemberExempt           map[syntax.Span]bool
 	classAliases                map[string]string
 	classes                     map[string]*syntax.Command
 }
@@ -106,6 +107,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	result.enumValueExempt = make(map[syntax.Span]bool)
 	result.typeAliasExempt = make(map[syntax.Span]bool)
 	result.classValueExempt = make(map[syntax.Span]bool)
+	result.superMemberExempt = make(map[syntax.Span]bool)
 	result.classAliases = localClassAliases(file)
 	result.classes = localClasses(file)
 	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
@@ -3308,20 +3310,32 @@ func enumObjectAccessExists(file *syntax.File, enum *syntax.Command, name string
 }
 
 func enclosingObjectMethodClass(file *syntax.File, scope *Scope) *syntax.Command {
+	aggregate, method := enclosingClassMethod(file, scope)
+	if aggregate == nil || method == nil || method.Function == nil {
+		return nil
+	}
+	name := file.Text(method.Function.Name)
+	if !commandHasModifier(method, "static") || strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new") {
+		return aggregate
+	}
+	return nil
+}
+
+func enclosingClassMethod(file *syntax.File, scope *Scope) (*syntax.Command, *syntax.Command) {
 	aggregate := enclosingClassCommand(file, scope)
 	if aggregate == nil || aggregate.Aggregate == nil {
-		return nil
+		return nil, nil
 	}
 	for current := scope; current != nil; current = current.Parent {
 		if current.Kind != syntax.BlockDef {
 			continue
 		}
 		if current.CommandList != nil || current.Block < 0 || current.Block >= len(file.Blocks) {
-			return nil
+			return nil, nil
 		}
 		header := file.Blocks[current.Block].Header
 		if header < 0 || header >= len(file.Commands) {
-			return nil
+			return nil, nil
 		}
 		for _, member := range aggregate.Aggregate.Members {
 			if member != header {
@@ -3329,17 +3343,27 @@ func enclosingObjectMethodClass(file *syntax.File, scope *Scope) *syntax.Command
 			}
 			method := &file.Commands[header]
 			if method.Function == nil {
-				return nil
+				return nil, nil
 			}
-			name := file.Text(method.Function.Name)
-			if !commandHasModifier(method, "static") || strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new") {
-				return aggregate
-			}
-			return nil
+			return aggregate, method
 		}
-		return nil
+		return nil, nil
 	}
-	return nil
+	return nil, nil
+}
+
+func appendSuperMustBeFollowedByDotDiagnostic(result *FileAnalysis, file *syntax.File, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
+	if result == nil || file == nil || scope == nil || expression == nil || dialect != syntax.Vim9 ||
+		expression.Kind != syntax.ExpressionIdentifier || expression.Value != "super" || result.superMemberExempt[expression.Span] ||
+		syntaxDiagnosticOverlaps(file.Diagnostics, expression.Span) {
+		return
+	}
+	if aggregate, method := enclosingClassMethod(file, scope); aggregate == nil || method == nil {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1356", Message: `"super" must be followed by a dot`, Span: expression.Span,
+	})
 }
 
 func syntaxDiagnosticOverlaps(diagnostics []syntax.Diagnostic, span syntax.Span) bool {
@@ -6543,6 +6567,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		if appendUnderscoreDiagnostic(result, expression, dialect) {
 			return
 		}
+		appendSuperMustBeFollowedByDotDiagnostic(result, file, scope, expression, dialect)
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
 			if strings.HasPrefix(expression.Value, "&") {
 				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
@@ -6592,6 +6617,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				result.enumValueExempt[expression.Children[0].Span] = true
 				result.typeAliasExempt[expression.Children[0].Span] = true
 				result.classValueExempt[expression.Children[0].Span] = true
+				if expression.Children[0].Value == "super" && file.Text(expression.Operator) == "." {
+					result.superMemberExempt[expression.Children[0].Span] = true
+				}
 			}
 			walkExpression(result, file, expression.Children[0], scope, skipped, false, dialect)
 		}
