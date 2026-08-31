@@ -815,10 +815,19 @@ func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {
 	if len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vimls/target-version") {
 		t.Fatalf("default-target diagnostics = %#v", first)
 	}
+	snapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok {
+		t.Fatal("snapshot is missing")
+	}
+	raw := instance.parseSnapshot(snapshot)
 	_ = instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: []byte(`{"targetVersion":"9.2.1015"}`)})
 	cleared := waitForDiagnostics(t, client.published)
 	if len(cleared.Diagnostics) != 0 {
 		t.Fatalf("updated-target diagnostics = %#v", cleared)
+	}
+	current, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok || current != snapshot || instance.parseSnapshot(current) != raw {
+		t.Fatalf("configuration changed snapshot/cache = %p/%p, want %p/%p", current, instance.parseSnapshot(current), snapshot, raw)
 	}
 }
 

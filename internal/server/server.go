@@ -465,6 +465,11 @@ func (s *Server) Shutdown(context.Context) error {
 	s.mu.Lock()
 	s.state = stateShutdown
 	s.mu.Unlock()
+	s.cancelAnalysis()
+	// Wait only for a publication already holding this lock. Parsing and
+	// workspace I/O remain outside it, and reject their later installations.
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
 	return nil
 }
 
@@ -472,10 +477,16 @@ func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 	document := params.TextDocument
 	s.publishMu.Lock()
 	snapshot := s.documents.Open(document.URI.String(), document.Version, document.Text)
-	s.removeWorkspaceURI(snapshot.URI())
+	var dependents []string
+	if snapshot.ByteLen() > maxFileBytes {
+		dependents = s.replaceWorkspaceFile(snapshot.URI(), nil)
+	} else {
+		s.removeWorkspaceURI(snapshot.URI())
+	}
 	delete(s.parsed, snapshot.URI())
 	s.publishMu.Unlock()
 	s.startAnalysis(document.URI.String())
+	s.startWorkspaceDependents(dependents)
 	return nil
 }
 
@@ -503,14 +514,21 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 	s.mu.Unlock()
 	s.publishMu.Lock()
 	snapshot, changed, err := s.documents.Change(params.TextDocument.URI.String(), params.TextDocument.Version, encoding, changes)
+	var dependents []string
 	if err == nil && changed {
-		s.removeWorkspaceURI(snapshot.URI())
+		if snapshot.ByteLen() > maxFileBytes {
+			dependents = s.replaceWorkspaceFile(snapshot.URI(), nil)
+			delete(s.parsed, snapshot.URI())
+		} else {
+			s.removeWorkspaceURI(snapshot.URI())
+		}
 	}
 	s.publishMu.Unlock()
 	if err != nil {
 		s.logf("vimls: ignored content change for %s: %v", params.TextDocument.URI, err)
 	} else {
 		s.startAnalysis(params.TextDocument.URI.String())
+		s.startWorkspaceDependents(dependents)
 	}
 	return nil
 }
@@ -518,14 +536,21 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 func (s *Server) DidSave(_ context.Context, params *protocol.DidSaveTextDocumentParams) error {
 	s.publishMu.Lock()
 	snapshot, changed, err := s.documents.Save(params.TextDocument.URI.String(), params.Text)
+	var dependents []string
 	if err == nil && changed {
-		s.removeWorkspaceURI(snapshot.URI())
+		if snapshot.ByteLen() > maxFileBytes {
+			dependents = s.replaceWorkspaceFile(snapshot.URI(), nil)
+			delete(s.parsed, snapshot.URI())
+		} else {
+			s.removeWorkspaceURI(snapshot.URI())
+		}
 	}
 	s.publishMu.Unlock()
 	if err != nil {
 		s.logf("vimls: ignored save for %s: %v", params.TextDocument.URI, err)
 	} else if changed {
 		s.startAnalysis(params.TextDocument.URI.String())
+		s.startWorkspaceDependents(dependents)
 	}
 	return nil
 }
@@ -747,6 +772,12 @@ func fromProtocolPosition(position protocol.Position) text.Position {
 }
 
 func (s *Server) startAnalysis(documentURI string) {
+	s.mu.Lock()
+	shutdown := s.state == stateShutdown
+	s.mu.Unlock()
+	if shutdown {
+		return
+	}
 	s.analysisMu.Lock()
 	if s.analysisStopped {
 		s.analysisMu.Unlock()
@@ -850,7 +881,6 @@ func (s *Server) analyzeDocument(documentURI string) {
 	var fileAnalysis *analysis.FileAnalysis
 	if work.Snapshot.ByteLen() > maxFileBytes {
 		file = &syntax.File{
-			Source: work.Snapshot.Text(),
 			Diagnostics: []syntax.Diagnostic{{
 				Code: "vimls/file-too-large", Message: "file exceeds the 4 MiB analysis limit",
 			}},
@@ -877,6 +907,11 @@ func (s *Server) analyzeDocument(documentURI string) {
 		return
 	}
 	if !s.prepareSyntax(work, file) {
+		return
+	}
+	if work.Snapshot.ByteLen() > maxFileBytes {
+		graphRevision, _, _ := s.workspaceImportDiagnostics(work.Snapshot.URI(), nil, nil)
+		s.publishSyntax(work, file, graphRevision)
 		return
 	}
 	graphRevision, graphReady, importDiagnostics := s.workspaceImportDiagnostics(work.Snapshot.URI(), file, fileAnalysis)
@@ -1011,10 +1046,13 @@ func analysisDiagnosticsForTarget(file *syntax.File, diagnostics []syntax.Diagno
 func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) bool {
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
-	if !s.documents.IsCurrent(analysis) {
+	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
 		return false
 	}
 	documentURI := analysis.Snapshot.URI()
+	if analysis.Snapshot.ByteLen() > maxFileBytes {
+		file = nil
+	}
 	dependents := s.replaceWorkspaceFile(documentURI, file)
 	s.startWorkspaceDependents(dependents)
 	return true
@@ -1040,6 +1078,9 @@ func (s *Server) parseSnapshot(snapshot *text.Snapshot) *syntax.File {
 	file := syntax.Parse(source)
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
+	if s.analysisContext.Err() != nil {
+		return file
+	}
 	current, ok := s.documents.Snapshot(documentURI)
 	if !ok || current != snapshot {
 		return file
@@ -1061,7 +1102,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
-	if !s.documents.IsCurrent(analysis) {
+	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
 		return
 	}
 	documentURI := analysis.Snapshot.URI()
@@ -1144,6 +1185,11 @@ func protocolSeverity(severity syntax.DiagnosticSeverity) protocol.DiagnosticSev
 }
 
 func (s *Server) clearDiagnostics(documentURI string) {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if s.analysisContext.Err() != nil {
+		return
+	}
 	s.mu.Lock()
 	client := s.client
 	s.mu.Unlock()
@@ -1154,18 +1200,20 @@ func (s *Server) clearDiagnostics(documentURI string) {
 	}
 }
 
-func (s *Server) stopAnalysis() {
+func (s *Server) cancelAnalysis() {
 	s.workspaceMu.Lock()
 	s.analysisMu.Lock()
-	if s.analysisStopped {
-		s.analysisMu.Unlock()
-		s.workspaceMu.Unlock()
-		return
+	if !s.analysisStopped {
+		s.analysisStopped = true
+		s.analysisCancel()
 	}
-	s.analysisStopped = true
-	s.analysisCancel()
+	clear(s.analysisPending)
 	s.analysisMu.Unlock()
 	s.workspaceMu.Unlock()
+}
+
+func (s *Server) stopAnalysis() {
+	s.cancelAnalysis()
 	s.analysisWG.Wait()
 	// Synchronize with a rebuild that may have checked analysisContext just
 	// before cancellation, so its WaitGroup.Add completes before Wait starts.

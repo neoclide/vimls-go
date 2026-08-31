@@ -270,6 +270,8 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 	paths := make([]string, 0)
 	seen := make(map[string]struct{})
 	openByPath := make(map[string]*text.Snapshot, len(openSnapshots))
+	oversizedOpen := make(map[string]struct{})
+	discoveredRecoverable := make(map[string]struct{})
 	var warnings []string
 	for _, root := range roots {
 		remaining := maxWorkspaceFiles - len(paths)
@@ -295,6 +297,9 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 			}
 			seen[canonical] = struct{}{}
 			paths = append(paths, canonical)
+			if info, err := os.Stat(canonical); err == nil && info.Mode().IsRegular() && info.Size() <= maxFileBytes {
+				discoveredRecoverable[canonical] = struct{}{}
+			}
 		}
 		if truncated {
 			complete = false
@@ -304,7 +309,11 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 	}
 	for _, snapshot := range openSnapshots {
 		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
-		if !ok || !workspacePathInRoots(path, roots) || snapshot.ByteLen() > maxFileBytes {
+		if !ok || !workspacePathInRoots(path, roots) {
+			continue
+		}
+		if snapshot.ByteLen() > maxFileBytes {
+			oversizedOpen[path] = struct{}{}
 			continue
 		}
 		openByPath[path] = snapshot
@@ -313,6 +322,17 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolv
 		}
 		seen[path] = struct{}{}
 		paths = append(paths, path)
+	}
+	if len(oversizedOpen) > 0 {
+		filtered := paths[:0]
+		for _, path := range paths {
+			if _, oversized := oversizedOpen[path]; !oversized {
+				filtered = append(filtered, path)
+			} else if _, recoverable := discoveredRecoverable[path]; recoverable {
+				diskFiles[path] = struct{}{}
+			}
+		}
+		paths = filtered
 	}
 	sort.Strings(paths)
 
@@ -561,7 +581,7 @@ func workspacePathInRoots(path string, roots []string) bool {
 
 func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []string {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
-	if !ok || file == nil {
+	if !ok {
 		return nil
 	}
 	openByPath := make(map[string]*text.Snapshot)
@@ -574,6 +594,27 @@ func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []s
 	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
 		s.workspaceMu.Unlock()
 		return nil
+	}
+	if file == nil {
+		_, indexed := s.workspaceIndex.Source(path)
+		_, pending := s.workspacePending[path]
+		if !indexed && !pending && len(s.workspaceGraphView.Outgoing(path)) == 0 {
+			s.workspaceMu.Unlock()
+			return nil
+		}
+		s.queueWorkspaceDependentsLocked(path)
+		s.workspaceIndex.Remove(path)
+		if err := s.workspaceGraph.Replace(path, nil); err != nil {
+			s.logf("vimls: remove import graph for %s: %v", path, err)
+		}
+		delete(s.workspacePending, path)
+		if s.workspaceBuilt && len(s.workspacePending) == 0 {
+			s.workspaceGraph.SetReady(true)
+		}
+		s.workspaceGraphView = s.workspaceGraph.Snapshot()
+		dependents := s.readyWorkspaceDependentsLocked()
+		s.workspaceMu.Unlock()
+		return dependents
 	}
 	if err := s.workspaceIndex.Replace(path, file); err != nil {
 		s.workspaceIndex.SetComplete(false)

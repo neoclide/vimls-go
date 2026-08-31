@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,6 +237,149 @@ func TestOpenDocumentsOverrideDiskAndClientFileEventsRebuild(t *testing.T) {
 	}
 	if symbols := workspaceSymbols(t, instance, "diskName"); len(symbols) != 0 {
 		t.Fatalf("stale disk symbols after client event = %#v", symbols)
+	}
+}
+
+func TestOversizedWorkspaceDocumentIsNotIndexedAndEvictsPriorAST(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "current.vim", "vim9script\nimport './target.vim' as Target\nvar diskValue = Target.Value\n")
+	writeWorkspaceFile(t, root, "target.vim", "vim9script\nexport var Value = 1\n")
+	path = mustWorkspaceCanonicalPath(t, path)
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\nimport './target.vim' as Target\nvar openValue = Target.Value\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if symbols := waitForWorkspaceSymbols(t, instance, "openValue", 1); len(symbols) != 1 {
+		t.Fatalf("open overlay symbols = %#v", symbols)
+	}
+	snapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok || instance.parseSnapshot(snapshot) == nil {
+		t.Fatal("small overlay was not parsed")
+	}
+	if graph := waitForImportGraph(t, instance, func(graph workspace.ImportGraphSnapshot) bool { return graph.Ready() && len(graph.Imports(path)) == 1 }); len(graph.Imports(path)) != 1 {
+		t.Fatalf("small overlay imports = %#v", graph.Imports(path))
+	}
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+	instance.client = client
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: strings.Repeat("x", maxFileBytes+1)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics *protocol.PublishDiagnosticsParams
+	for diagnostics == nil {
+		candidate := waitForDiagnostics(t, client.published)
+		if version, ok := candidate.Version.Get(); ok && version == 2 {
+			diagnostics = candidate
+		}
+	}
+	if len(diagnostics.Diagnostics) != 1 || diagnostics.Diagnostics[0].Code != protocol.String("vimls/file-too-large") {
+		t.Fatalf("oversized diagnostics = %#v", diagnostics)
+	}
+	instance.publishMu.Lock()
+	_, cached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	instance.workspaceMu.Lock()
+	_, indexed := instance.workspaceIndex.Source(path)
+	graph := instance.workspaceGraphView
+	pending := len(instance.workspacePending)
+	instance.workspaceMu.Unlock()
+	if cached || indexed || len(graph.Imports(path)) != 0 || !graph.Ready() || pending != 0 {
+		t.Fatalf("oversized workspace cache=%t indexed=%t imports=%#v ready=%t pending=%d", cached, indexed, graph.Imports(path), graph.Ready(), pending)
+	}
+	if symbols := workspaceSymbols(t, instance, "openValue"); len(symbols) != 0 {
+		t.Fatalf("oversized overlay remained indexed: %#v", symbols)
+	}
+	graphRevision := graph.Revision()
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 3},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: strings.Repeat("x", maxFileBytes+1)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		candidate := waitForDiagnostics(t, client.published)
+		if version, ok := candidate.Version.Get(); ok && version == 3 {
+			break
+		}
+	}
+	instance.workspaceMu.Lock()
+	graph = instance.workspaceGraphView
+	instance.workspaceMu.Unlock()
+	if graph.Revision() != graphRevision {
+		t.Fatalf("same oversized change advanced graph: got %d, want %d", graph.Revision(), graphRevision)
+	}
+	instance.scheduleWorkspaceRebuild()
+	instance.workspaceWG.Wait()
+	instance.workspaceMu.Lock()
+	_, indexed = instance.workspaceIndex.Source(path)
+	graph = instance.workspaceGraphView
+	_, knownDiskFile := instance.workspaceFiles[path]
+	pending = len(instance.workspacePending)
+	instance.workspaceMu.Unlock()
+	if indexed || len(graph.Imports(path)) != 0 || !graph.Ready() || pending != 0 || !knownDiskFile {
+		t.Fatalf("rebuild oversized workspace indexed=%t imports=%#v ready=%t pending=%d disk=%t", indexed, graph.Imports(path), graph.Ready(), pending, knownDiskFile)
+	}
+	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	source, indexed := instance.workspaceIndex.Source(path)
+	graph = instance.workspaceGraphView
+	instance.workspaceMu.Unlock()
+	if !indexed || source != "vim9script\nimport './target.vim' as Target\nvar diskValue = Target.Value\n" || len(graph.Imports(path)) != 1 {
+		t.Fatalf("close restore source=%q indexed=%t imports=%#v", source, indexed, graph.Imports(path))
+	}
+	if symbols := workspaceSymbols(t, instance, "diskValue"); len(symbols) != 1 {
+		t.Fatalf("close restore symbols = %#v", symbols)
+	}
+}
+
+func TestOversizedWorkspaceSaveEvictsPriorAST(t *testing.T) {
+	root := t.TempDir()
+	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "save.vim", "let g:diskValue = 1\n"))
+	instance := initializeWorkspaceServer(t, root)
+	instance.analysisMu.Lock()
+	instance.analysisWorkers = 1
+	instance.analysisMu.Unlock()
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+	instance.client = client
+	documentURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "let g:openValue = 1\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.analyzeDocument(documentURI.String())
+	snapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok || instance.parseSnapshot(snapshot) == nil {
+		t.Fatal("small save overlay was not parsed")
+	}
+	oversized := strings.Repeat("x", maxFileBytes+1)
+	if err := instance.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Text: &oversized,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	instance.analyzeDocument(documentURI.String())
+	diagnostics := waitForDiagnostics(t, client.published)
+	if len(diagnostics.Diagnostics) != 1 || diagnostics.Diagnostics[0].Code != protocol.String("vimls/file-too-large") {
+		t.Fatalf("oversized save diagnostics = %#v", diagnostics)
+	}
+	instance.publishMu.Lock()
+	_, cached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	instance.workspaceMu.Lock()
+	_, indexed := instance.workspaceIndex.Source(path)
+	graph := instance.workspaceGraphView
+	pending := len(instance.workspacePending)
+	instance.workspaceMu.Unlock()
+	if cached || indexed || len(graph.Imports(path)) != 0 || !graph.Ready() || pending != 0 {
+		t.Fatalf("oversized save cache=%t indexed=%t imports=%#v ready=%t pending=%d", cached, indexed, graph.Imports(path), graph.Ready(), pending)
 	}
 }
 

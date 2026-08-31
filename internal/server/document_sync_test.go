@@ -246,6 +246,119 @@ func TestServerDocumentParserCache(t *testing.T) {
 	}
 }
 
+func TestSameContentDidChangeRepublishesNewVersionWithCachedAST(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+	instance.client = client
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
+		t.Fatal(err)
+	}
+	documentURI := uri.MustParse("file:///same-content.vim")
+	source := "if true\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: source,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	first := waitForDiagnostics(t, client.published)
+	firstSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok {
+		t.Fatal("first snapshot is missing")
+	}
+	firstFile := instance.parseSnapshot(firstSnapshot)
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second := waitForDiagnostics(t, client.published)
+	secondSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok || secondSnapshot == firstSnapshot || instance.parseSnapshot(secondSnapshot) != firstFile {
+		t.Fatalf("same-content snapshot/cache = %p/%p, want new snapshot and cached %p", secondSnapshot, instance.parseSnapshot(secondSnapshot), firstFile)
+	}
+	for label, result := range map[string]*protocol.PublishDiagnosticsParams{"first": first, "second": second} {
+		got, ok := result.Version.Get()
+		if !ok || got != map[string]int32{"first": 1, "second": 2}[label] || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vimls/missing-end") {
+			t.Fatalf("%s diagnostics = %#v", label, result)
+		}
+	}
+}
+
+func TestShutdownCancelsAnalysisBeforeExit(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+	instance.client = client
+	root := t.TempDir()
+	instance.setWorkspaceRoots([]string{root})
+	documentURI := uri.File(filepath.Join(root, "shutdown.vim"))
+	snapshot := instance.documents.Open(documentURI.String(), 1, "if true\n")
+	active, ok := instance.documents.BeginAnalysis(instance.analysisContext, documentURI.String())
+	if !ok {
+		t.Fatal("analysis did not start")
+	}
+	instance.analysisMu.Lock()
+	instance.analysisPending[documentURI.String()] = struct{}{}
+	instance.analysisMu.Unlock()
+	instance.publishMu.Lock()
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- instance.Shutdown(context.Background()) }()
+	<-active.Context.Done()
+	instance.analysisMu.Lock()
+	stopped, pending := instance.analysisStopped, len(instance.analysisPending)
+	instance.analysisMu.Unlock()
+	if !stopped || pending != 0 {
+		instance.publishMu.Unlock()
+		t.Fatalf("shutdown analysis queue: stopped=%t pending=%d", stopped, pending)
+	}
+	select {
+	case err := <-shutdown:
+		instance.publishMu.Unlock()
+		t.Fatalf("shutdown bypassed publish barrier: %v", err)
+	default:
+	}
+	instance.publishMu.Unlock()
+	if err := <-shutdown; err != nil {
+		t.Fatal(err)
+	}
+	instance.clearDiagnostics(documentURI.String())
+	select {
+	case published := <-client.published:
+		t.Fatalf("shutdown allowed late cleared diagnostics: %#v", published)
+	default:
+	}
+	if parsed := instance.parseSnapshot(snapshot); parsed == nil {
+		t.Fatal("shutdown snapshot did not parse for stale-result check")
+	}
+	instance.publishMu.Lock()
+	_, cached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if cached {
+		t.Fatal("shutdown allowed stale parse to install parser cache")
+	}
+	instance.startAnalysis(documentURI.String())
+	instance.analysisMu.Lock()
+	stopped, workers, pending, running := instance.analysisStopped, instance.analysisWorkers, len(instance.analysisPending), len(instance.analysisRunning)
+	instance.analysisMu.Unlock()
+	if !stopped || workers != 0 || pending != 0 || running != 0 {
+		t.Fatalf("shutdown analysis queue: stopped=%t workers=%d pending=%d running=%d", stopped, workers, pending, running)
+	}
+	instance.analyzeDocument(documentURI.String())
+	instance.workspaceMu.Lock()
+	_, indexed := instance.workspaceIndex.Source(filepath.Join(root, "shutdown.vim"))
+	instance.workspaceMu.Unlock()
+	if indexed {
+		t.Fatal("shutdown allowed stale analysis to install workspace facts")
+	}
+	select {
+	case published := <-client.published:
+		t.Fatalf("shutdown allowed stale diagnostics: %#v", published)
+	default:
+	}
+}
+
 func TestServerAnalysisDoesNotMutateParserCache(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	documentURI := uri.MustParse("file:///pure-parser-cache.vim")
