@@ -6557,6 +6557,23 @@ func immediateLockedValueDiagnostic(file *syntax.File, previous, current *syntax
 	return syntax.Diagnostic{Code: "vim/E741", Message: "Value is locked: " + file.Text(assigned.Span), Span: assigned.Span}, true
 }
 
+func immediateLegacyNumberMemberDiagnostic(file *syntax.File, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
+	if file == nil || previous == nil || current == nil || previous.Dialect != syntax.Legacy || current.Dialect != syntax.Legacy ||
+		previous.Declaration == nil || previous.Declaration.Target == nil || previous.Declaration.Initializer == nil ||
+		previous.Declaration.Target.Kind != syntax.ExpressionIdentifier || previous.Declaration.Initializer.Kind != syntax.ExpressionNumber {
+		return syntax.Diagnostic{}, false
+	}
+	target := directAssignmentTarget(current)
+	if target == nil || target.Kind != syntax.ExpressionMember || len(target.Children) != 1 || target.Children[0] == nil ||
+		target.Children[0].Kind != syntax.ExpressionIdentifier || target.Children[0].Value != previous.Declaration.Target.Value ||
+		file.Text(target.Operator) != "." || target.Value == "" || expressionContainsMissing(target) {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{
+		Code: "vim/E1203", Message: "Dot not allowed after a number: " + file.Text(current.Argument), Span: target.Span,
+	}, true
+}
+
 func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
 	if result == nil || result.File == nil || scope == nil || previous == nil || current == nil {
 		return syntax.Diagnostic{}, false
@@ -6679,6 +6696,26 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			clear(recentGlobalAssignments)
 		}
 		if previousScope == scope {
+			if diagnostic, ok := immediateLegacyNumberMemberDiagnostic(result.File, previous, command); ok &&
+				!syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
+				blocked := false
+				for _, existing := range result.Diagnostics {
+					if existing.Span.Start <= diagnostic.Span.End && existing.Span.End >= diagnostic.Span.Start && existing.Code != "vim/E1017" {
+						blocked = true
+						break
+					}
+				}
+				if !blocked {
+					filtered := result.Diagnostics[:0]
+					for _, existing := range result.Diagnostics {
+						if existing.Code == "vim/E1017" && existing.Span.Start >= diagnostic.Span.Start && existing.Span.End <= diagnostic.Span.End {
+							continue
+						}
+						filtered = append(filtered, existing)
+					}
+					result.Diagnostics = append(filtered, diagnostic)
+				}
+			}
 			if command.Dialect == syntax.Legacy {
 				assigned := (*syntax.Expression)(nil)
 				if previous.Canonical == "lockvar" {
