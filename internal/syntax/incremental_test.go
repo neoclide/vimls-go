@@ -322,6 +322,22 @@ var incrementalHeredocOwnerScenarios = func() []incrementalCommandBoundaryScenar
 	}
 }()
 
+var incrementalTextBodyOwnerScenarios = func() []incrementalCommandBoundaryScenario {
+	appendSource := "append\nbody A01\n.\nlet afterAppend = 1\n"
+	changeSource := "change\nbody A01\n.\nlet afterChange = 1\n"
+	insertSource := "insert\nbody A01\n.\nlet afterInsert = 1\n"
+	dotSource := "append\nbody A01\n.\nlet afterDot = 1\n"
+	keymapSource := "loadkeymap\na A01\nb B02\n"
+	dotMarker := strings.Index(dotSource, ".\n")
+	return []incrementalCommandBoundaryScenario{
+		{name: "append text body", tags: []string{"append", "text body"}, source: appendSource, cases: []incrementalMatrixCase{newIncrementalMatrixCase("append text body", "body insert", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(appendSource, "A01", "X")})}},
+		{name: "change text body", tags: []string{"change", "text body"}, source: changeSource, cases: []incrementalMatrixCase{newIncrementalMatrixCase("change text body", "body delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(changeSource, "A01", "")})}},
+		{name: "insert text body", tags: []string{"insert", "text body"}, source: insertSource, cases: []incrementalMatrixCase{newIncrementalMatrixCase("insert text body", "body replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(insertSource, "A01", "B02")})}},
+		{name: "dot terminator", tags: []string{"dot terminator", "dot recovery"}, source: dotSource, cases: []incrementalMatrixCase{newIncrementalMatrixCase("dot terminator", "break and restore", incrementalSequence, []incrementalTextEdit{incrementalTextEditAtOffset(dotSource, dotMarker, ".", "!"), incrementalTextEditAtOffset(dotSource, dotMarker, ".", ".")})}},
+		{name: "loadkeymap body", tags: []string{"loadkeymap", "keymap body to EOF"}, source: keymapSource, cases: []incrementalMatrixCase{newIncrementalMatrixCase("loadkeymap body", "body length replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(keymapSource, "A01", "ASCII")})}},
+	}
+}()
+
 var incrementalEditCases = []incrementalEditCase{
 	{name: "legacy tail", old: "let first = 1\nlet last = 2\n", new: "let first = 1\nlet last = 20\n"},
 	{name: "vim9 middle", old: "vim9script\nvar first = 1\nvar last = 2\n", new: "vim9script\nvar first = 10\nvar last = 2\n"},
@@ -906,6 +922,115 @@ func TestHeredocOwnerMatrixASTRecovery(t *testing.T) {
 					t.Fatalf("incomplete heredoc commands = %#v", got.Commands)
 				}
 			}
+		}
+	}
+}
+
+func TestIncrementalEditMatrixTextBodyOwner(t *testing.T) {
+	seenTags, seenKinds, seenNames := map[string]bool{}, map[incrementalEditKind]bool{}, map[string]bool{}
+	for _, scenario := range incrementalTextBodyOwnerScenarios {
+		for _, tag := range scenario.tags {
+			seenTags[tag] = true
+		}
+		for _, test := range scenario.cases {
+			if seenNames[test.name] {
+				t.Fatalf("duplicate text-body matrix case %q", test.name)
+			}
+			seenNames[test.name], seenKinds[test.kind] = true, true
+			results := incrementalTextEditResults(scenario.source, test.edits)
+			if len(results) == 0 || test.kind == incrementalSequence && len(results) != 2 {
+				t.Fatalf("%s has invalid edit count %d", test.name, len(results))
+			}
+			for step, result := range results {
+				if result.old == result.new || result.edit.start < 0 || result.edit.start > result.edit.oldEnd || result.edit.oldEnd > len(result.old) {
+					t.Fatalf("%s step %d is invalid: %#v", test.name, step, result)
+				}
+				valid := incrementalTextEditKindValid(test.kind, result.edit)
+				if test.kind == incrementalSequence {
+					valid = incrementalSequenceStepValid(result.edit)
+				}
+				if !valid {
+					t.Fatalf("%s step %d does not match kind %d: %#v", test.name, step, test.kind, result.edit)
+				}
+				if strings.Contains(test.name, "body") && result.edit.start < strings.Index(result.old, "body ") {
+					t.Fatalf("%s step %d does not hit body: %#v", test.name, step, result.edit)
+				}
+			}
+		}
+	}
+	for _, tag := range []string{"append", "change", "insert", "text body", "dot terminator", "dot recovery", "loadkeymap", "keymap body to EOF"} {
+		if !seenTags[tag] {
+			t.Fatalf("missing text-body scenario %q", tag)
+		}
+	}
+	if len(seenKinds) != 5 {
+		t.Fatalf("text-body matrix has %d edit kinds, want 5", len(seenKinds))
+	}
+}
+
+func TestReparseTextBodyOwnerMatrix(t *testing.T) {
+	for _, scenario := range incrementalTextBodyOwnerScenarios {
+		for _, test := range scenario.cases {
+			t.Run(test.name, func(t *testing.T) {
+				runIncrementalMatrix(t, scenario.source, test)
+			})
+		}
+	}
+}
+
+func TestTextBodyOwnerMatrixASTRecovery(t *testing.T) {
+	for _, scenario := range incrementalTextBodyOwnerScenarios {
+		for _, test := range scenario.cases {
+			sequence := scenario.name == "dot terminator"
+			var got *File
+			if sequence {
+				got = runIncrementalMatrixSteps(t, scenario.source, test, func(step int, file *File) {
+					command := file.Commands[0]
+					body := file.Commands[0].TextBody
+					if body == nil {
+						t.Fatalf("%s step %d has no text body", test.name, step)
+					}
+					switch step {
+					case 0:
+						if !body.Incomplete || body.EndMarker != (Span{}) || file.Text(body.Body) != "body A01\n!\nlet afterDot = 1" || len(file.Commands) != 1 {
+							t.Fatalf("%s step 0 body = %#v text=%q commands=%d", test.name, body, file.Text(body.Body), len(file.Commands))
+						}
+					case 1:
+						if body.Incomplete || file.Text(body.Body) != "body A01" || file.Text(body.EndMarker) != "." || command.Span.Start != 0 || command.Span.End != body.EndMarker.End {
+							t.Fatalf("%s step 1 body = %#v text=%q end=%q", test.name, body, file.Text(body.Body), file.Text(body.EndMarker))
+						}
+						incrementalDeclaration(t, file, "afterDot")
+					}
+				})
+			} else {
+				got = runIncrementalMatrix(t, scenario.source, test)
+			}
+			command := got.Commands[0]
+			if scenario.name == "dot terminator" {
+				body := command.TextBody
+				if command.Canonical != "append" || body == nil || body.Incomplete || got.Text(body.Body) != "body A01" || got.Text(body.EndMarker) != "." || command.Span.Start != 0 || command.Span.End != body.EndMarker.End {
+					t.Fatalf("%s final body = %#v text=%q end=%q", test.name, body, got.Text(body.Body), got.Text(body.EndMarker))
+				}
+				incrementalDeclaration(t, got, "afterDot")
+				continue
+			}
+			if scenario.name == "loadkeymap body" {
+				if command.Canonical != "loadkeymap" || command.Keymap == nil || command.Span.Start != 0 || command.Span.End != len(got.Source) || command.Keymap.Body.End != len(got.Source) || got.Text(command.Keymap.Body) != "a ASCII\nb B02\n" {
+					t.Fatalf("%s keymap = %#v body=%q", test.name, command.Keymap, got.Text(command.Keymap.Body))
+				}
+				continue
+			}
+			body := command.TextBody
+			wantCommand := map[string]string{"append text body": "append", "change text body": "change", "insert text body": "insert"}[scenario.name]
+			if command.Canonical != wantCommand || body == nil || body.Incomplete || command.Span.Start != 0 || command.Span.End != body.EndMarker.End || got.Text(body.EndMarker) != "." {
+				t.Fatalf("%s command/body = %#v/%#v", test.name, command, body)
+			}
+			wantBody := map[string]string{"append text body: body insert": "body XA01", "change text body: body delete": "body ", "insert text body: body replace": "body B02"}[test.name]
+			if got.Text(body.Body) != wantBody {
+				t.Fatalf("%s body = %q, want %q", test.name, got.Text(body.Body), wantBody)
+			}
+			after := map[string]string{"append text body": "afterAppend", "change text body": "afterChange", "insert text body": "afterInsert"}[scenario.name]
+			incrementalDeclaration(t, got, after)
 		}
 	}
 }
