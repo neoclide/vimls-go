@@ -7602,6 +7602,94 @@ func TestAnalyzeE1348InterfaceMembersDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1349InterfaceMethodsDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message string }{
+		{"official missing method", "vim9script\ninterface I\n  def Methods(): bool\nendinterface\nclass C implements I\nendclass\n", `Method "Methods" of interface "I" is not implemented`},
+		{"first required method ordering", "vim9script\ninterface I\n  def First(): number\n  def Second(): number\nendinterface\nclass C implements I\n  def First(): number\n    return 1\n  enddef\nendclass\n", `Method "Second" of interface "I" is not implemented`},
+		{"static same-name does not satisfy", "vim9script\ninterface I\n  def Value(): number\nendinterface\nclass C implements I\n  static def Value(): number\n  enddef\nendclass\n", `Method "Value" of interface "I" is not implemented`},
+		{"method same-name variable does not satisfy", "vim9script\ninterface I\n  def Value(): number\nendinterface\nclass C implements I\n  var Value = 10\nendclass\n", `Method "Value" of interface "I" is not implemented`},
+		{"inherited class method satisfies", "vim9script\ninterface I\n  def Value(): number\nendinterface\nclass Base\n  def Value(): number\n    return 10\n  enddef\nendclass\nclass C extends Base implements I\nendclass\n", ""},
+		{"inherited interface method", "vim9script\ninterface I\n  def Counter(): number\nendinterface\ninterface J extends I\nendinterface\nclass C implements J\nendclass\n", `Method "Counter" of interface "J" is not implemented`},
+		{"direct interface ordering", "vim9script\ninterface A\n  def Ready(): bool\nendinterface\ninterface B\n  def Methods(): bool\nendinterface\nclass C implements A, B\n  def Ready(): bool\n    return true\n  enddef\nendclass\n", `Method "Methods" of interface "B" is not implemented`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1349" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1346" || diagnostic.Code == "vim/E1347" {
+					t.Fatalf("unexpected interface name diagnostic in %s: %#v\n%s", test.name, diagnostic, test.source)
+				}
+			}
+			if test.message == "" {
+				if len(got) != 0 {
+					t.Fatalf("unexpected E1349 diagnostics=%#v; source=%s", got, test.source)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("E1349 diagnostics=%#v; syntax = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name       string
+		source     string
+		expectCode []string
+	}{
+		{"wrong method signature", "vim9script\ninterface I\n  def IsReady(nr: number): bool\nendinterface\nclass C implements I\n  def IsReady(nr: string): bool\n  enddef\nendclass\n", []string{"vim/E1383"}},
+		{"missing variable blocks later method", "vim9script\ninterface I\n  var value: number\n  def Methods(): bool\nendinterface\nclass C implements I\nendclass\n", []string{"vim/E1348"}},
+		{"method mismatch blocks later interface method", "vim9script\ninterface A\n  def IsReady(nr: number): bool\nendinterface\ninterface B\n  def Methods(): bool\nendinterface\nclass C implements A, B\n  def IsReady(nr: string): bool\n  enddef\nendclass\n", []string{"vim/E1383"}},
+		{"qualified import blocks", "vim9script\nimport './face.vim' as Imported\ninterface I\n  def Value(): bool\nendinterface\nclass A implements Imported.Face, I\nendclass\n", nil},
+		{"resolved non-interface blocks", "vim9script\nclass Base\nendclass\nclass A implements Base\nendclass\n", nil},
+		{"unresolved blocks", "vim9script\nclass A implements Missing\nendclass\n", []string{"vim/E1346"}},
+		{"invalid protected interface method", "vim9script\ninterface I\n  def _Value(): bool\nendinterface\nclass A implements I\nendclass\n", nil},
+		{"invalid static interface method", "vim9script\ninterface I\n  static def Value(): bool\nendinterface\nclass A implements I\nendclass\n", nil},
+		{"valid implementation", "vim9script\ninterface I\n  def Value(): bool\nendinterface\nclass A implements I\n  def Value(): bool\n    return true\n  enddef\nendclass\n", nil},
+		{"legacy blocks", "legacy class A implements Missing\nendclass\n", nil},
+		{"header syntax error", "vim9script\nclass A implements Missing,\nendclass\n", nil},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1349" {
+					t.Fatalf("unexpected E1349 in %s: %#v\n%s", test.name, diagnostic, test.source)
+				}
+				for _, expect := range test.expectCode {
+					if diagnostic.Code == expect {
+						got = append(got, diagnostic)
+					}
+				}
+			}
+			if test.name == "header syntax error" {
+				if len(result.File.Diagnostics) == 0 {
+					t.Fatalf("expected syntax diagnostics for header error: %#v", test.source)
+				}
+				return
+			}
+			if test.name == "legacy blocks" {
+				return
+			}
+			for _, expect := range test.expectCode {
+				found := false
+				for _, gotOne := range got {
+					if gotOne.Code == expect {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("expected %s in guard case %s; got %#v", expect, test.name, result.Diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

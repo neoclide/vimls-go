@@ -390,6 +390,9 @@ func collectImplementedInterfaceMembersDiagnostics(result *FileAnalysis) {
 					}
 					actual := objectMethodInClassHierarchy(file, result.classes, class, name)
 					if actual == nil {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1349", Message: `Method "` + name + `" of interface "` + directInterfaceName + `" is not implemented`, Span: aggregateEndSpan(file, class),
+						})
 						return false
 					}
 					if methodSignaturesMismatch(required.Function, actual.Function) {

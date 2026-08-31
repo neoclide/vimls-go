@@ -3668,3 +3668,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:799-890` checks variables before methods for each interface
   and stops on the first failure.
 - `src/errors.h:3450-3453` defines the exact E1348 and E1349 messages.
+
+## Interface method is not implemented: E1349
+
+E1349 means `Method "{method}" of interface "{interface}" is not
+implemented`. After all required variables of a same-file interface are
+present and compatible, analysis reports the closing `endclass` when the first
+required object method is absent from the class and its extended-class
+hierarchy.
+
+Inherited interface methods are checked before methods declared directly in
+the child interface. Direct `implements` entries retain source order, and the
+diagnostic names that direct interface even when the missing method comes from
+an interface parent. A static method or variable with the same name does not
+implement an interface object method.
+
+An exact method with an incompatible signature remains owned by E1383 and
+stops validation without a secondary E1349. A missing variable remains E1348
+and takes priority over methods in the same interface. Invalid static or
+protected interface methods, unresolved or imported interface names, and
+incomplete headers do not create cascading E1349 diagnostics.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_interface.vim:256-271` covers the exact missing-method
+  message and places it on `endclass`.
+- `src/testdir/test_vim9_interface.vim:1031-1056` shows direct interface order:
+  a missing method in the first interface stops validation before the second,
+  while a valid method permits the second interface's variable check.
+- `src/testdir/test_vim9_interface.vim:1170-1211` covers methods inherited from
+  the class hierarchy and selects the first remaining missing method.
+- `src/vim9class.c:735-825` checks exact object-method names and signatures
+  across the class hierarchy.
+- `src/vim9class.c:878-887` checks variables before methods for each interface.
+- `src/errors.h:3452-3455` defines the exact E1349 and E1350 messages.
