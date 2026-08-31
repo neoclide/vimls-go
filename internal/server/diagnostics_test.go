@@ -119,6 +119,7 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	instance.workspaceGraphView = graph.Snapshot()
 	instance.workspaceFiles = files
 	instance.workspaceBuilt = true
+	instance.workspaceRoots = []string{mustWorkspaceCanonicalPath(t, runtimeRoot)}
 	instance.workspaceMu.Unlock()
 
 	file := syntax.Parse("BuildP\nLocalC\nBuildProject\n")
@@ -166,6 +167,14 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	instance.workspaceMu.Unlock()
 	if got := instance.globalNameConflictDiagnostics(uri.File(variablePath).String(), variableFile); len(got) != 0 {
 		t.Fatalf("unready index produced global conflict warning: %#v", got)
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceIndex.SetComplete(false)
+	snapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, functionPath), functionFile)
+	instance.workspaceMu.Unlock()
+	if snapshot.indexComplete || len(snapshot.globalDiagnostics) != 1 || snapshot.globalDiagnostics[0].Code != "vim/E707" {
+		t.Fatalf("incomplete index global snapshot = %#v", snapshot)
 	}
 }
 
@@ -675,42 +684,234 @@ func TestImportTargetChangeReanalyzesReverseDependent(t *testing.T) {
 }
 
 func TestGraphRevisionRejectsStaleDiagnostics(t *testing.T) {
+	newWork := func(t *testing.T) (*Server, workspace.Analysis, *syntax.File, <-chan *protocol.PublishDiagnosticsParams) {
+		t.Helper()
+		instance := New(nil, nil, io.Discard)
+		t.Cleanup(instance.stopAnalysis)
+		published := make(chan *protocol.PublishDiagnosticsParams, 1)
+		instance.client = &diagnosticClient{published: published}
+		// Keep stale-result requeue visible without a background worker consuming it.
+		instance.analysisMu.Lock()
+		instance.analysisWorkers = 1
+		instance.analysisMu.Unlock()
+		documentURI := uri.MustParse("file:///stale-graph.vim")
+		instance.documents.Open(documentURI.String(), 1, "if true\n")
+		work, ok := instance.documents.BeginAnalysis(context.Background(), documentURI.String())
+		if !ok {
+			t.Fatal("analysis did not start")
+		}
+		file := syntax.Parse(work.Snapshot.Text())
+		if len(file.Diagnostics) == 0 {
+			t.Fatal("test source has no diagnostic")
+		}
+		return instance, work, file, published
+	}
+	assertRequeued := func(t *testing.T, instance *Server, documentURI string) {
+		t.Helper()
+		instance.analysisMu.Lock()
+		_, queued := instance.analysisPending[documentURI]
+		delete(instance.analysisPending, documentURI)
+		instance.analysisMu.Unlock()
+		if !queued {
+			t.Fatal("current document was not requeued after stale workspace identity")
+		}
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*testing.T, *Server)
+	}{
+		{"generation", func(_ *testing.T, instance *Server) {
+			instance.workspaceMu.Lock()
+			instance.workspaceRevision++
+			instance.workspaceMu.Unlock()
+		}},
+		{"index revision", func(_ *testing.T, instance *Server) {
+			instance.workspaceMu.Lock()
+			instance.workspaceIndex.SetComplete(true)
+			instance.workspaceMu.Unlock()
+		}},
+		{"new index same revision", func(_ *testing.T, instance *Server) {
+			instance.workspaceMu.Lock()
+			instance.workspaceIndex = workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes)
+			instance.workspaceMu.Unlock()
+		}},
+		{"graph revision", func(t *testing.T, instance *Server) {
+			instance.workspaceMu.Lock()
+			err := instance.workspaceGraph.Replace(filepath.Join(t.TempDir(), "changed.vim"), nil)
+			instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+			instance.workspaceMu.Unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, work, file, published := newWork(t)
+			instance.workspaceMu.Lock()
+			identity := instance.workspaceIdentityLocked()
+			instance.workspaceMu.Unlock()
+			test.mutate(t, instance)
+			instance.publishSyntax(work, file, identity)
+			select {
+			case params := <-published:
+				t.Fatalf("stale diagnostics were published: %#v", params)
+			default:
+			}
+			assertRequeued(t, instance, work.Snapshot.URI())
+		})
+	}
+	t.Run("document and configuration stale do not requeue", func(t *testing.T) {
+		for _, mutate := range []func(*Server, workspace.Analysis){
+			func(instance *Server, _ workspace.Analysis) {
+				_, _, _ = instance.documents.Change("file:///stale-graph.vim", 2, text.UTF16, []text.Change{{Text: "if true\n"}})
+			},
+			func(instance *Server, _ workspace.Analysis) { instance.documents.ConfigurationChanged() },
+		} {
+			instance, work, file, published := newWork(t)
+			instance.workspaceMu.Lock()
+			identity := instance.workspaceIdentityLocked()
+			instance.workspaceMu.Unlock()
+			mutate(instance, work)
+			instance.publishSyntax(work, file, identity)
+			select {
+			case params := <-published:
+				t.Fatalf("stale document diagnostics were published: %#v", params)
+			default:
+			}
+			instance.analysisMu.Lock()
+			_, queued := instance.analysisPending[work.Snapshot.URI()]
+			instance.analysisMu.Unlock()
+			if queued {
+				t.Fatal("stale document/config result was requeued")
+			}
+		}
+	})
+}
+
+func TestWorkspaceIdentityCapturesCrossFileInputs(t *testing.T) {
+	root := t.TempDir()
+	targetPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "target.vim", "vim9script\nexport var Value = 1\ncommand! BuildProject echo 'build'\nlet g:Shared = 1\n"))
+	conflictPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "conflict.vim", "function Shared()\nendfunction\n"))
+	mainPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './target.vim' as Target\necho Target.Value\nBuildP\nlet g:Shared = 1\nif true\n"))
+	root = mustWorkspaceCanonicalPath(t, root)
 	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
 	published := make(chan *protocol.PublishDiagnosticsParams, 1)
 	instance.client = &diagnosticClient{published: published}
-	instance.analysisMu.Lock()
-	instance.analysisStopped = true
-	instance.analysisMu.Unlock()
-	documentURI := uri.MustParse("file:///stale-graph.vim")
-	instance.documents.Open(documentURI.String(), 1, "if true\n")
+	instance.setWorkspaceRoots([]string{root})
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceResolver = workspacePathResolver([]string{root}, nil)
+	instance.workspaceIndex.SetComplete(true)
+	instance.workspaceGraph.SetReady(true)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	instance.replaceWorkspaceFile(uri.File(targetPath).String(), syntax.Parse("vim9script\nexport var Value = 1\ncommand! BuildProject echo 'build'\nlet g:Shared = 1\n"))
+	instance.replaceWorkspaceFile(uri.File(conflictPath).String(), syntax.Parse("function Shared()\nendfunction\n"))
+	documentURI := uri.File(mainPath)
+	mainSource := "vim9script\nimport './target.vim' as Target\necho Target.Value\nBuildP\nlet g:Shared = 1\nif true\n"
+	instance.documents.Open(documentURI.String(), 1, mainSource)
 	work, ok := instance.documents.BeginAnalysis(context.Background(), documentURI.String())
 	if !ok {
 		t.Fatal("analysis did not start")
 	}
-	file := syntax.Parse(work.Snapshot.Text())
-	if len(file.Diagnostics) == 0 {
-		t.Fatal("test source has no diagnostic")
+	mainFile := syntax.Parse(mainSource)
+	instance.publishMu.Lock()
+	snapshot, _ := instance.replaceWorkspaceFileWithSnapshot(documentURI.String(), mainFile)
+	instance.publishMu.Unlock()
+	if snapshot.targets[targetPath].source == "" || len(snapshot.targets[targetPath].symbols) == 0 || !snapshot.indexComplete || len(snapshot.userCommandNames) != 1 || len(snapshot.globalDiagnostics) != 1 || len(snapshot.roots) != 1 || snapshot.roots[0] != root {
+		t.Fatalf("captured workspace snapshot = %#v", snapshot)
 	}
-	staleRevision := currentImportGraph(instance).Revision()
+	if diagnostics := instance.workspaceImportDiagnostics(snapshot, mainFile, analysis.Analyze(mainFile)); len(diagnostics) != 0 {
+		t.Fatalf("captured import diagnostics = %#v", diagnostics)
+	}
 	instance.workspaceMu.Lock()
-	if err := instance.workspaceGraph.Replace(filepath.Join(t.TempDir(), "changed.vim"), nil); err != nil {
+	if err := instance.workspaceIndex.Replace(targetPath, syntax.Parse("vim9script\nexport var Other = 1\n")); err != nil {
+		instance.workspaceMu.Unlock()
+		t.Fatal(err)
+	}
+	if err := instance.workspaceGraph.Replace(targetPath, nil); err != nil {
 		instance.workspaceMu.Unlock()
 		t.Fatal(err)
 	}
 	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
-	currentRevision := instance.workspaceGraphView.Revision()
+	instance.workspaceRoots = []string{t.TempDir()}
+	instance.workspaceRevision++
 	instance.workspaceMu.Unlock()
-
-	instance.publishSyntax(work, file, staleRevision)
+	if diagnostics := instance.workspaceImportDiagnostics(snapshot, mainFile, analysis.Analyze(mainFile)); len(diagnostics) != 0 {
+		t.Fatalf("later workspace mutation changed captured diagnostics = %#v", diagnostics)
+	}
+	instance.analysisMu.Lock()
+	instance.analysisWorkers = 1
+	instance.analysisMu.Unlock()
+	instance.publishSyntax(work, mainFile, snapshot.identity)
 	select {
 	case params := <-published:
-		t.Fatalf("stale diagnostics were published: %#v", params)
+		t.Fatalf("stale workspace snapshot published diagnostics: %#v", params)
 	default:
 	}
-	instance.publishSyntax(work, file, currentRevision)
-	params := waitForDiagnostics(t, published)
-	if len(params.Diagnostics) == 0 {
-		t.Fatalf("current diagnostics = %#v", params)
+	instance.analysisMu.Lock()
+	_, queued := instance.analysisPending[documentURI.String()]
+	instance.analysisMu.Unlock()
+	if !queued {
+		t.Fatal("stale workspace snapshot did not requeue current document")
+	}
+}
+
+func TestWorkspaceIdentityOversizedTransitionRejectsOldPublish(t *testing.T) {
+	root := t.TempDir()
+	mainPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "if true\n"))
+	dependentPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "dependent.vim", "vim9script\nimport './main.vim' as Main\n"))
+	file := syntax.Parse("if true\n")
+	root = mustWorkspaceCanonicalPath(t, root)
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	published := make(chan *protocol.PublishDiagnosticsParams, 1)
+	instance.client = &diagnosticClient{published: published}
+	instance.setWorkspaceRoots([]string{root})
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceResolver = workspacePathResolver([]string{root}, nil)
+	instance.workspaceGraph.SetReady(true)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	instance.replaceWorkspaceFile(uri.File(mainPath).String(), file)
+	instance.replaceWorkspaceFile(uri.File(dependentPath).String(), syntax.Parse("vim9script\nimport './main.vim' as Main\n"))
+	documentURI := uri.File(mainPath)
+	instance.documents.Open(documentURI.String(), 1, file.Source)
+	work, ok := instance.documents.BeginAnalysis(context.Background(), documentURI.String())
+	if !ok {
+		t.Fatal("analysis did not start")
+	}
+	instance.publishMu.Lock()
+	oldSnapshot, _ := instance.replaceWorkspaceFileWithSnapshot(documentURI.String(), file)
+	_, dependents := instance.replaceWorkspaceFileWithSnapshot(documentURI.String(), nil)
+	instance.publishMu.Unlock()
+	if len(dependents) != 1 || dependents[0] != dependentPath {
+		t.Fatalf("oversized transition dependents = %#v, want %q", dependents, dependentPath)
+	}
+	instance.workspaceMu.Lock()
+	stale := !instance.workspaceIdentityCurrentLocked(oldSnapshot.identity)
+	_, indexed := instance.workspaceIndex.Source(mainPath)
+	graph := instance.workspaceGraphView
+	instance.workspaceMu.Unlock()
+	if !stale || indexed || graph.Has(mainPath) {
+		t.Fatalf("oversized transition stale=%t indexed=%t graph=%t", stale, indexed, graph.Has(mainPath))
+	}
+	instance.analysisMu.Lock()
+	instance.analysisWorkers = 1
+	instance.analysisMu.Unlock()
+	instance.publishSyntax(work, file, oldSnapshot.identity)
+	select {
+	case params := <-published:
+		t.Fatalf("oversized transition published stale diagnostics: %#v", params)
+	default:
+	}
+	instance.analysisMu.Lock()
+	_, queued := instance.analysisPending[documentURI.String()]
+	instance.analysisMu.Unlock()
+	if !queued {
+		t.Fatal("oversized transition did not requeue current document")
 	}
 }
 
@@ -732,8 +933,9 @@ func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
 	root := t.TempDir()
 	targetPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\nif true\n")
 	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './lib.vim' as Lib\necho Lib.Value\nif true\n")
+	targetCanonical := mustWorkspaceCanonicalPath(t, targetPath)
+	mainCanonical := mustWorkspaceCanonicalPath(t, mainPath)
 	instance, _ := initializeWorkspaceDiagnosticServer(t, root)
-	instance.stopAnalysis()
 
 	open := func(path, source string) (*text.Snapshot, *syntax.File, []syntax.Diagnostic) {
 		t.Helper()
@@ -790,8 +992,15 @@ func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
 		t.Fatalf("open import completion = %#v", items)
 	}
 	assertCached("completion open import target", targetSnapshot, targetFile, targetDiagnostics)
+	if parsed := instance.parseImportTarget(targetCanonical, targetSource); parsed != targetFile {
+		t.Fatalf("open target parser cache = %p, want %p", parsed, targetFile)
+	}
 
-	if _, ready, _ := instance.workspaceImportDiagnostics(mainSnapshot.URI(), mainFile, analysis.Analyze(mainFile)); !ready {
+	instance.workspaceMu.Lock()
+	workspaceSnapshot := instance.workspaceAnalysisSnapshotLocked(mainCanonical, mainFile)
+	instance.workspaceMu.Unlock()
+	_ = instance.workspaceImportDiagnostics(workspaceSnapshot, mainFile, analysis.Analyze(mainFile))
+	if !workspaceSnapshot.ready {
 		t.Fatal("workspace import diagnostics were not ready")
 	}
 	assertCached("import diagnostics open target", targetSnapshot, targetFile, targetDiagnostics)

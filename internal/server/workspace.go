@@ -21,6 +21,8 @@ type DidChangeRuntimepathParams struct {
 	Runtimepath []string `json:"runtimepath"`
 }
 
+var workspaceGraphReplaceForTest func(*workspace.ImportGraph, string, []workspace.ImportFact) error
+
 func workspaceRootsFromInitialize(params *protocol.InitializeParams) []string {
 	if params == nil {
 		return nil
@@ -580,10 +582,15 @@ func workspacePathInRoots(path string, roots []string) bool {
 }
 
 func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []string {
+	_, dependents := s.replaceWorkspaceFileWithSnapshot(documentURI, file)
+	return dependents
+}
+
+// replaceWorkspaceFileWithSnapshot installs one open-document state and copies
+// every cross-file input needed by its analysis under publishMu -> workspaceMu.
+// The caller holds publishMu when the document-current check matters.
+func (s *Server) replaceWorkspaceFileWithSnapshot(documentURI string, file *syntax.File) (workspaceAnalysisSnapshot, []string) {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
-	if !ok {
-		return nil
-	}
 	openByPath := make(map[string]*text.Snapshot)
 	for _, snapshot := range s.documents.Snapshots() {
 		if openPath, valid := workspaceURIPath(uri.URI(snapshot.URI())); valid && snapshot.ByteLen() <= maxFileBytes {
@@ -591,37 +598,45 @@ func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []s
 		}
 	}
 	s.workspaceMu.Lock()
-	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
+	if !ok || !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
+		snapshot := s.workspaceAnalysisSnapshotLocked("", nil)
 		s.workspaceMu.Unlock()
-		return nil
+		return snapshot, nil
 	}
 	if file == nil {
 		_, indexed := s.workspaceIndex.Source(path)
 		_, pending := s.workspacePending[path]
-		if !indexed && !pending && len(s.workspaceGraphView.Outgoing(path)) == 0 {
-			s.workspaceMu.Unlock()
-			return nil
+		if indexed || pending || s.workspaceGraphView.Has(path) {
+			s.queueWorkspaceDependentsLocked(path)
+			s.workspaceIndex.Remove(path)
+			s.workspaceGraph.Remove(path)
+			delete(s.workspacePending, path)
 		}
-		s.queueWorkspaceDependentsLocked(path)
-		s.workspaceIndex.Remove(path)
-		if err := s.workspaceGraph.Replace(path, nil); err != nil {
-			s.logf("vimls: remove import graph for %s: %v", path, err)
-		}
-		delete(s.workspacePending, path)
 		if s.workspaceBuilt && len(s.workspacePending) == 0 {
 			s.workspaceGraph.SetReady(true)
 		}
 		s.workspaceGraphView = s.workspaceGraph.Snapshot()
+		snapshot := s.workspaceAnalysisSnapshotLocked(path, nil)
 		dependents := s.readyWorkspaceDependentsLocked()
 		s.workspaceMu.Unlock()
-		return dependents
+		return snapshot, dependents
 	}
+	sameSource, indexed := s.workspaceIndex.Source(path)
+	_, pending := s.workspacePending[path]
+	if !pending && indexed && sameSource == file.Source && s.workspaceGraphView.Has(path) {
+		snapshot := s.workspaceAnalysisSnapshotLocked(path, file)
+		dependents := s.readyWorkspaceDependentsLocked()
+		s.workspaceMu.Unlock()
+		return snapshot, dependents
+	}
+	s.queueWorkspaceDependentsLocked(path)
 	if err := s.workspaceIndex.Replace(path, file); err != nil {
 		s.workspaceIndex.SetComplete(false)
 		s.workspaceIndex.Remove(path)
+		s.workspaceGraph.Remove(path)
+		delete(s.workspacePending, path)
 		s.logf("vimls: workspace index limit reached for %s: %v", path, err)
-	}
-	if _, pending := s.workspacePending[path]; pending {
+	} else {
 		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath), func(target string) bool {
 			if openByPath[target] != nil {
 				return true
@@ -629,18 +644,86 @@ func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []s
 			_, ok := s.workspaceIndex.Source(target)
 			return ok
 		})
-		if err := s.workspaceGraph.Replace(path, facts); err != nil {
-			s.logf("vimls: update import graph for %s: %v", path, err)
+		var graphErr error
+		if workspaceGraphReplaceForTest != nil {
+			graphErr = workspaceGraphReplaceForTest(s.workspaceGraph, path, facts)
+		} else {
+			graphErr = s.workspaceGraph.Replace(path, facts)
 		}
-		delete(s.workspacePending, path)
+		if graphErr != nil {
+			s.logf("vimls: update import graph for %s: %v", path, graphErr)
+			s.workspaceIndex.Remove(path)
+			s.workspaceIndex.SetComplete(false)
+			s.workspaceGraph.Remove(path)
+			delete(s.workspacePending, path)
+		} else {
+			delete(s.workspacePending, path)
+		}
 	}
 	if s.workspaceBuilt && len(s.workspacePending) == 0 {
 		s.workspaceGraph.SetReady(true)
 	}
 	s.workspaceGraphView = s.workspaceGraph.Snapshot()
+	snapshot := s.workspaceAnalysisSnapshotLocked(path, file)
 	dependents := s.readyWorkspaceDependentsLocked()
 	s.workspaceMu.Unlock()
-	return dependents
+	return snapshot, dependents
+}
+
+func (s *Server) workspaceIdentityLocked() workspaceIdentity {
+	identity := workspaceIdentity{generation: s.workspaceRevision, index: s.workspaceIndex, graphRevision: s.workspaceGraphView.Revision()}
+	if identity.index != nil {
+		identity.indexRevision = identity.index.Revision()
+	}
+	return identity
+}
+
+func (s *Server) workspaceIdentityCurrentLocked(identity workspaceIdentity) bool {
+	return identity == s.workspaceIdentityLocked()
+}
+
+func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File) workspaceAnalysisSnapshot {
+	snapshot := workspaceAnalysisSnapshot{
+		identity: s.workspaceIdentityLocked(), path: path, graph: s.workspaceGraphView,
+		roots: workspaceIndexRoots(s.workspaceRoots, s.runtimePaths), ready: true,
+	}
+	if path == "" || !workspacePathInRoots(path, snapshot.roots) {
+		return snapshot
+	}
+	if !snapshot.graph.Ready() {
+		s.workspaceDependents[path] = struct{}{}
+		snapshot.ready = false
+		return snapshot
+	}
+	if s.workspaceBuilt && len(s.workspacePending) == 0 && s.workspaceIndex != nil {
+		snapshot.globalDiagnostics = s.workspaceIndex.GlobalNameConflictDiagnostics(path, file)
+		if s.workspaceIndex.Complete() {
+			snapshot.indexComplete = true
+			snapshot.userCommandNames = s.workspaceIndex.UserCommandNames()
+		}
+	}
+	imports := snapshot.graph.Imports(path)
+	snapshot.targets = make(map[string]importTargetSnapshot)
+	for _, importFact := range imports {
+		if importFact.Target == "" {
+			continue
+		}
+		if _, exists := snapshot.targets[importFact.Target]; exists {
+			continue
+		}
+		source, sourceOK := s.workspaceIndex.Source(importFact.Target)
+		if !sourceOK {
+			snapshot.targets[importFact.Target] = importTargetSnapshot{}
+			continue
+		}
+		matches := s.workspaceIndex.FileSymbols(importFact.Target)
+		symbols := make([]workspace.SymbolFact, 0, len(matches))
+		for _, match := range matches {
+			symbols = append(symbols, match.Fact)
+		}
+		snapshot.targets[importFact.Target] = importTargetSnapshot{source: source, symbols: symbols}
+	}
+	return snapshot
 }
 
 func (s *Server) removeWorkspaceURI(documentURI string) {
@@ -754,16 +837,21 @@ func (s *Server) installWorkspaceRestore(restore workspaceRestore, file *syntax.
 		if err := s.workspaceIndex.Replace(restore.path, file); err != nil {
 			s.workspaceIndex.SetComplete(false)
 			s.workspaceIndex.Remove(restore.path)
-		}
-		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(restore.path, file, s.workspaceResolver, openByPath), func(target string) bool {
-			if openByPath[target] != nil {
-				return true
+			s.workspaceGraph.Remove(restore.path)
+		} else {
+			facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(restore.path, file, s.workspaceResolver, openByPath), func(target string) bool {
+				if openByPath[target] != nil {
+					return true
+				}
+				_, ok := s.workspaceIndex.Source(target)
+				return ok
+			})
+			if err := s.workspaceGraph.Replace(restore.path, facts); err != nil {
+				s.logf("vimls: restore import graph for %s: %v", restore.path, err)
+				s.workspaceIndex.Remove(restore.path)
+				s.workspaceIndex.SetComplete(false)
+				s.workspaceGraph.Remove(restore.path)
 			}
-			_, ok := s.workspaceIndex.Source(target)
-			return ok
-		})
-		if err := s.workspaceGraph.Replace(restore.path, facts); err != nil {
-			s.logf("vimls: restore import graph for %s: %v", restore.path, err)
 		}
 	}
 	delete(s.workspacePending, restore.path)

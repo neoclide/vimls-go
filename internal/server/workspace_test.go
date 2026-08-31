@@ -424,6 +424,39 @@ func TestWorkspaceRestoreInstallsCapturedDiskSourceAndFacts(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRestoreIndexFailureRemovesIndexAndGraphFacts(t *testing.T) {
+	root := t.TempDir()
+	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './target.vim' as Target\n"))
+	writeWorkspaceFile(t, root, "target.vim", "vim9script\nexport var Value = 1\n")
+	instance := initializeWorkspaceServer(t, root)
+	oldSource := "vim9script\nimport './target.vim' as Target\n"
+	instance.workspaceMu.Lock()
+	limited := workspace.NewIndex(0, len(oldSource))
+	if err := limited.Replace(path, syntax.Parse(oldSource)); err != nil {
+		instance.workspaceMu.Unlock()
+		t.Fatal(err)
+	}
+	limited.SetComplete(true)
+	instance.workspaceIndex = limited
+	instance.workspaceMu.Unlock()
+	restore, ok := instance.captureWorkspaceRestore(uri.File(path).String())
+	if !ok {
+		t.Fatal("restore was not captured")
+	}
+	if dependents := instance.installWorkspaceRestore(restore, syntax.Parse(oldSource+"var this_source_exceeds_the_index_limit = 1\n")); len(dependents) != 0 {
+		t.Fatalf("failed restore dependents = %#v", dependents)
+	}
+	instance.workspaceMu.Lock()
+	_, indexed := instance.workspaceIndex.Source(path)
+	graph := instance.workspaceGraphView
+	complete := instance.workspaceIndex.Complete()
+	pending := len(instance.workspacePending)
+	instance.workspaceMu.Unlock()
+	if indexed || graph.Has(path) || complete || pending != 0 || !graph.Ready() {
+		t.Fatalf("failed restore indexed=%t graph=%t complete=%t pending=%d ready=%t", indexed, graph.Has(path), complete, pending, graph.Ready())
+	}
+}
+
 func TestWorkspaceRestoreRejectsReopenedURIAndAliasOverlay(t *testing.T) {
 	root := t.TempDir()
 	path := writeWorkspaceFile(t, root, "restore.vim", "vim9script\nimport './disk.vim' as Disk\n")
@@ -660,6 +693,197 @@ func TestWorkspaceImportGraphTracksOpenDocumentChanges(t *testing.T) {
 	restored := currentImportGraph(instance)
 	if outgoing := restored.Outgoing(mainPath); !restored.Ready() || restored.Revision() <= changed.Revision() || len(outgoing) != 1 || !sameWorkspacePath(outgoing[0].Target, onePath) {
 		t.Fatalf("restored graph: ready=%t revision=%d outgoing=%#v", restored.Ready(), restored.Revision(), outgoing)
+	}
+}
+
+func TestWorkspaceIdentitySameContentSkipsInstalledFacts(t *testing.T) {
+	root := t.TempDir()
+	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "vim9script\nvar Value = 1\n"))
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	instance.setWorkspaceRoots([]string{root})
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceGraph.SetReady(true)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	file := syntax.Parse("vim9script\nvar Value = 1\n")
+	instance.replaceWorkspaceFile(uri.File(path).String(), file)
+
+	state := func() (uint64, uint64, int, int) {
+		instance.workspaceMu.Lock()
+		defer instance.workspaceMu.Unlock()
+		return instance.workspaceIndex.Revision(), instance.workspaceGraphView.Revision(), len(instance.workspacePending), len(instance.workspaceDependents)
+	}
+	indexRevision, graphRevision, pending, dependents := state()
+	instance.replaceWorkspaceFile(uri.File(path).String(), syntax.Parse(file.Source))
+	if gotIndex, gotGraph, gotPending, gotDependents := state(); gotIndex != indexRevision || gotGraph != graphRevision || gotPending != pending || gotDependents != dependents {
+		t.Fatalf("same content changed index=%d/%d graph=%d/%d pending=%d/%d dependents=%d/%d", gotIndex, indexRevision, gotGraph, graphRevision, gotPending, pending, gotDependents, dependents)
+	}
+}
+
+func TestWorkspaceIdentitySameSourceInstallsMissingFacts(t *testing.T) {
+	root := t.TempDir()
+	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "vim9script\nvar Value = 1\n"))
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	instance.setWorkspaceRoots([]string{root})
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceGraph.SetReady(true)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	file := syntax.Parse("vim9script\nvar Value = 1\n")
+	instance.replaceWorkspaceFile(uri.File(path).String(), file)
+
+	assertInstalled := func(label string, beforeIndex, beforeGraph uint64) {
+		t.Helper()
+		instance.workspaceMu.Lock()
+		defer instance.workspaceMu.Unlock()
+		_, indexed := instance.workspaceIndex.Source(path)
+		if !indexed || !instance.workspaceGraphView.Has(path) || instance.workspaceIndex.Revision() <= beforeIndex || instance.workspaceGraphView.Revision() <= beforeGraph || len(instance.workspacePending) != 0 {
+			t.Fatalf("%s indexed=%t graph=%t index=%d/%d graph=%d/%d pending=%d", label, indexed, instance.workspaceGraphView.Has(path), instance.workspaceIndex.Revision(), beforeIndex, instance.workspaceGraphView.Revision(), beforeGraph, len(instance.workspacePending))
+		}
+	}
+	instance.workspaceMu.Lock()
+	beforeIndex, beforeGraph := instance.workspaceIndex.Revision(), instance.workspaceGraphView.Revision()
+	instance.workspacePending[path] = struct{}{}
+	instance.workspaceMu.Unlock()
+	instance.replaceWorkspaceFile(uri.File(path).String(), syntax.Parse(file.Source))
+	assertInstalled("pending", beforeIndex, beforeGraph)
+
+	instance.workspaceMu.Lock()
+	beforeIndex, beforeGraph = instance.workspaceIndex.Revision(), instance.workspaceGraphView.Revision()
+	instance.workspaceGraph.Remove(path)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	instance.replaceWorkspaceFile(uri.File(path).String(), syntax.Parse(file.Source))
+	assertInstalled("missing graph facts", beforeIndex, beforeGraph)
+
+	instance.workspaceMu.Lock()
+	beforeIndex, beforeGraph = instance.workspaceIndex.Revision(), instance.workspaceGraphView.Revision()
+	instance.workspaceIndex.Remove(path)
+	instance.workspaceMu.Unlock()
+	instance.replaceWorkspaceFile(uri.File(path).String(), syntax.Parse(file.Source))
+	assertInstalled("missing index facts", beforeIndex, beforeGraph)
+}
+
+func TestWorkspaceIdentityChangedImportReplacesEdgesAndRequeuesDependents(t *testing.T) {
+	root := t.TempDir()
+	first := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "first.vim", "vim9script\nexport var First = 1\n"))
+	second := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "second.vim", "vim9script\nexport var Second = 1\n"))
+	main := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './first.vim' as Lib\n"))
+	dependent := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "dependent.vim", "vim9script\nimport './main.vim' as Main\n"))
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	instance.setWorkspaceRoots([]string{root})
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceResolver = workspacePathResolver([]string{root}, nil)
+	instance.workspaceGraph.SetReady(true)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	for _, entry := range []struct{ path, source string }{
+		{first, "vim9script\nexport var First = 1\n"}, {second, "vim9script\nexport var Second = 1\n"},
+		{main, "vim9script\nimport './first.vim' as Lib\n"}, {dependent, "vim9script\nimport './main.vim' as Main\n"},
+	} {
+		instance.replaceWorkspaceFile(uri.File(entry.path).String(), syntax.Parse(entry.source))
+	}
+	dependents := instance.replaceWorkspaceFile(uri.File(main).String(), syntax.Parse("vim9script\nimport './second.vim' as Lib\n"))
+	if len(dependents) != 1 || dependents[0] != dependent {
+		t.Fatalf("changed import dependents = %#v, want %q", dependents, dependent)
+	}
+	graph := currentImportGraph(instance)
+	if outgoing := graph.Outgoing(main); len(outgoing) != 1 || !sameWorkspacePath(outgoing[0].Target, second) || sameWorkspacePath(outgoing[0].Target, first) {
+		t.Fatalf("changed import edges = %#v", outgoing)
+	}
+}
+
+func TestWorkspaceIdentityIndexFailureRemovesOldFactsAndRequeuesDependents(t *testing.T) {
+	root := t.TempDir()
+	main := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './first.vim' as First\n"))
+	first := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "first.vim", "vim9script\nexport var First = 1\n"))
+	dependent := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "dependent.vim", "vim9script\nimport './main.vim' as Main\n"))
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	instance.setWorkspaceRoots([]string{root})
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceResolver = workspacePathResolver([]string{root}, nil)
+	instance.workspaceGraph.SetReady(true)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	for _, entry := range []struct{ path, source string }{
+		{first, "vim9script\nexport var First = 1\n"}, {main, "vim9script\nimport './first.vim' as First\n"}, {dependent, "vim9script\nimport './main.vim' as Main\n"},
+	} {
+		instance.replaceWorkspaceFile(uri.File(entry.path).String(), syntax.Parse(entry.source))
+	}
+	oldSource := "vim9script\nimport './first.vim' as First\n"
+	instance.workspaceMu.Lock()
+	limited := workspace.NewIndex(0, len(oldSource))
+	if err := limited.Replace(main, syntax.Parse(oldSource)); err != nil {
+		instance.workspaceMu.Unlock()
+		t.Fatal(err)
+	}
+	limited.SetComplete(true)
+	instance.workspaceIndex = limited
+	before := instance.workspaceIdentityLocked()
+	instance.workspaceMu.Unlock()
+	snapshot, dependents := instance.replaceWorkspaceFileWithSnapshot(uri.File(main).String(), syntax.Parse(oldSource+"var this_source_exceeds_the_index_limit = 1\n"))
+	if len(dependents) != 1 || dependents[0] != dependent {
+		t.Fatalf("index failure dependents = %#v, want %q", dependents, dependent)
+	}
+	instance.workspaceMu.Lock()
+	_, indexed := instance.workspaceIndex.Source(main)
+	graph := instance.workspaceGraphView
+	stillCurrent := instance.workspaceIdentityCurrentLocked(before)
+	instance.workspaceMu.Unlock()
+	if indexed || graph.Has(main) || stillCurrent || snapshot.identity == before {
+		t.Fatalf("index failure indexed=%t graph=%t oldCurrent=%t identity=%#v old=%#v", indexed, graph.Has(main), stillCurrent, snapshot.identity, before)
+	}
+}
+
+func TestWorkspaceIdentityGraphFailureRemovesOldFactsAndRequeuesDependents(t *testing.T) {
+	root := t.TempDir()
+	main := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './first.vim' as First\n"))
+	first := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "first.vim", "vim9script\nexport var First = 1\n"))
+	dependent := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "dependent.vim", "vim9script\nimport './main.vim' as Main\n"))
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	instance.setWorkspaceRoots([]string{root})
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = true
+	instance.workspaceResolver = workspacePathResolver([]string{root}, nil)
+	instance.workspaceGraph.SetReady(true)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	for _, entry := range []struct{ path, source string }{
+		{first, "vim9script\nexport var First = 1\n"}, {main, "vim9script\nimport './first.vim' as First\n"}, {dependent, "vim9script\nimport './main.vim' as Main\n"},
+	} {
+		instance.replaceWorkspaceFile(uri.File(entry.path).String(), syntax.Parse(entry.source))
+	}
+	instance.workspaceMu.Lock()
+	instance.workspacePending[main] = struct{}{}
+	instance.workspaceGraph.SetReady(false)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	previousGraphReplace := workspaceGraphReplaceForTest
+	workspaceGraphReplaceForTest = func(*workspace.ImportGraph, string, []workspace.ImportFact) error {
+		return errors.New("graph replace failed")
+	}
+	t.Cleanup(func() { workspaceGraphReplaceForTest = previousGraphReplace })
+	dependents := instance.replaceWorkspaceFile(uri.File(main).String(), syntax.Parse("vim9script\nimport './first.vim' as First\nvar Changed = 1\n"))
+	if len(dependents) != 1 || dependents[0] != dependent {
+		t.Fatalf("graph failure dependents = %#v, want %q", dependents, dependent)
+	}
+	instance.workspaceMu.Lock()
+	_, indexed := instance.workspaceIndex.Source(main)
+	graph := instance.workspaceGraphView
+	complete := instance.workspaceIndex.Complete()
+	pending := len(instance.workspacePending)
+	instance.workspaceMu.Unlock()
+	if indexed || graph.Has(main) || complete || pending != 0 || !graph.Ready() {
+		t.Fatalf("graph failure indexed=%t graph=%t complete=%t pending=%d ready=%t", indexed, graph.Has(main), complete, pending, graph.Ready())
 	}
 }
 

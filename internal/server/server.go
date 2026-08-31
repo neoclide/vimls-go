@@ -47,6 +47,27 @@ type parsedDocument struct {
 	file      *syntax.File
 }
 
+// workspaceIdentity names the post-install workspace state consumed by one
+// document analysis. It is captured and checked only while workspaceMu is held.
+type workspaceIdentity struct {
+	generation    uint64
+	index         *workspace.Index
+	indexRevision uint64
+	graphRevision uint64
+}
+
+type workspaceAnalysisSnapshot struct {
+	identity          workspaceIdentity
+	path              string
+	graph             workspace.ImportGraphSnapshot
+	targets           map[string]importTargetSnapshot
+	roots             []string
+	indexComplete     bool
+	userCommandNames  []string
+	globalDiagnostics []syntax.Diagnostic
+	ready             bool
+}
+
 type Server struct {
 	protocol.UnimplementedServer
 
@@ -895,10 +916,6 @@ func (s *Server) analyzeDocument(documentURI string) {
 		file = &parsed
 		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
 		fileAnalysis = analysis.Analyze(file)
-		versionedAnalysis := *fileAnalysis
-		versionedAnalysis.Diagnostics = analysisDiagnosticsForTarget(file, fileAnalysis.Diagnostics, target)
-		versionedAnalysis.Diagnostics = s.autoloadExportedFunctionDiagnostics(work.Snapshot.URI(), file, fileAnalysis, versionedAnalysis.Diagnostics)
-		file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
 		if work.Context.Err() != nil {
 			return
 		}
@@ -906,21 +923,27 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if work.Context.Err() != nil {
 		return
 	}
-	if !s.prepareSyntax(work, file) {
+	workspaceSnapshot, ok := s.prepareSyntax(work, file)
+	if !ok {
 		return
 	}
 	if work.Snapshot.ByteLen() > maxFileBytes {
-		graphRevision, _, _ := s.workspaceImportDiagnostics(work.Snapshot.URI(), nil, nil)
-		s.publishSyntax(work, file, graphRevision)
+		s.publishSyntax(work, file, workspaceSnapshot.identity)
 		return
 	}
-	graphRevision, graphReady, importDiagnostics := s.workspaceImportDiagnostics(work.Snapshot.URI(), file, fileAnalysis)
-	if !graphReady || work.Context.Err() != nil {
+	versionedAnalysis := *fileAnalysis
+	versionedAnalysis.Diagnostics = analysisDiagnosticsForTarget(file, fileAnalysis.Diagnostics, target)
+	versionedAnalysis.Diagnostics = autoloadExportedFunctionDiagnostics(workspaceSnapshot.path, workspaceSnapshot.roots, file, fileAnalysis, versionedAnalysis.Diagnostics)
+	file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
+	importDiagnostics := s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)
+	if !workspaceSnapshot.ready || work.Context.Err() != nil {
 		return
 	}
 	file.Diagnostics = append(file.Diagnostics, importDiagnostics...)
-	file.Diagnostics = append(file.Diagnostics, s.userCommandAbbreviationDiagnostics(file)...)
-	file.Diagnostics = append(file.Diagnostics, s.globalNameConflictDiagnostics(work.Snapshot.URI(), file)...)
+	if workspaceSnapshot.indexComplete {
+		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandAbbreviationDiagnostics(file, workspaceSnapshot.userCommandNames)...)
+	}
+	file.Diagnostics = append(file.Diagnostics, workspaceSnapshot.globalDiagnostics...)
 	sort.SliceStable(file.Diagnostics, func(left, right int) bool {
 		if file.Diagnostics[left].Span.Start != file.Diagnostics[right].Span.Start {
 			return file.Diagnostics[left].Span.Start < file.Diagnostics[right].Span.Start
@@ -933,7 +956,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 			Span: syntax.Span{Start: len(file.Source), End: len(file.Source)},
 		})
 	}
-	s.publishSyntax(work, file, graphRevision)
+	s.publishSyntax(work, file, workspaceSnapshot.identity)
 }
 
 func (s *Server) userCommandAbbreviationDiagnostics(file *syntax.File) []syntax.Diagnostic {
@@ -970,6 +993,13 @@ func (s *Server) autoloadExportedFunctionDiagnostics(documentURI string, file *s
 	s.workspaceMu.Lock()
 	roots := workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)
 	s.workspaceMu.Unlock()
+	return autoloadExportedFunctionDiagnostics(path, roots, file, result, diagnostics)
+}
+
+func autoloadExportedFunctionDiagnostics(path string, roots []string, file *syntax.File, result *analysis.FileAnalysis, diagnostics []syntax.Diagnostic) []syntax.Diagnostic {
+	if path == "" || file == nil || result == nil || result.Root == nil {
+		return diagnostics
+	}
 	autoload := false
 	for _, root := range roots {
 		if _, ok := workspaceAutoloadPath(path, root); ok {
@@ -1043,19 +1073,19 @@ func analysisDiagnosticsForTarget(file *syntax.File, diagnostics []syntax.Diagno
 	return versioned
 }
 
-func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) bool {
+func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) (workspaceAnalysisSnapshot, bool) {
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
 	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
-		return false
+		return workspaceAnalysisSnapshot{}, false
 	}
 	documentURI := analysis.Snapshot.URI()
 	if analysis.Snapshot.ByteLen() > maxFileBytes {
 		file = nil
 	}
-	dependents := s.replaceWorkspaceFile(documentURI, file)
+	workspaceSnapshot, dependents := s.replaceWorkspaceFileWithSnapshot(documentURI, file)
 	s.startWorkspaceDependents(dependents)
-	return true
+	return workspaceSnapshot, true
 }
 
 // parseSnapshot returns the immutable syntax tree for an open snapshot. Its
@@ -1093,7 +1123,7 @@ func (s *Server) parseSnapshot(snapshot *text.Snapshot) *syntax.File {
 	return file
 }
 
-func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, graphRevision uint64) {
+func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, identity workspaceIdentity) {
 	s.mu.Lock()
 	encoding := s.encoding
 	client := s.client
@@ -1107,12 +1137,12 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 	}
 	documentURI := analysis.Snapshot.URI()
 	s.workspaceMu.Lock()
-	currentGraphRevision := s.workspaceGraphView.Revision()
-	s.workspaceMu.Unlock()
-	if currentGraphRevision != graphRevision {
+	if !s.workspaceIdentityCurrentLocked(identity) {
+		s.workspaceMu.Unlock()
 		s.startAnalysis(documentURI)
 		return
 	}
+	s.workspaceMu.Unlock()
 	diagnostics := make([]protocol.Diagnostic, 0, len(file.Diagnostics))
 	for _, item := range file.Diagnostics {
 		start, startError := analysis.Snapshot.Position(item.Span.Start, encoding)

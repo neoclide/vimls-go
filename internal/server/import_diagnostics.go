@@ -4,7 +4,6 @@ import (
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/workspace"
-	"go.lsp.dev/uri"
 )
 
 type importTargetSnapshot struct {
@@ -13,54 +12,15 @@ type importTargetSnapshot struct {
 	known   bool
 }
 
-// workspaceImportDiagnostics captures graph metadata and target symbol facts
-// under one workspace lock, then performs the conservative analysis without
-// holding server state. The returned revision must still be current when the
-// diagnostics are published.
-func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.File, result *analysis.FileAnalysis) (uint64, bool, []syntax.Diagnostic) {
-	path, ok := workspaceURIPath(uri.URI(documentURI))
-	if !ok || file == nil {
-		s.workspaceMu.Lock()
-		revision := s.workspaceGraphView.Revision()
-		s.workspaceMu.Unlock()
-		return revision, true, nil
+// workspaceImportDiagnostics consumes the immutable workspace snapshot captured
+// after this document's source and graph facts were installed.
+func (s *Server) workspaceImportDiagnostics(snapshot workspaceAnalysisSnapshot, file *syntax.File, result *analysis.FileAnalysis) []syntax.Diagnostic {
+	if snapshot.path == "" || file == nil || !snapshot.ready {
+		return nil
 	}
-	references := workspace.CollectExternalReferencesFromAnalysis(path, file, result)
-
-	s.workspaceMu.Lock()
-	graph := s.workspaceGraphView
-	revision := graph.Revision()
-	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
-		s.workspaceMu.Unlock()
-		return revision, true, nil
-	}
-	if !graph.Ready() {
-		s.workspaceDependents[path] = struct{}{}
-		s.workspaceMu.Unlock()
-		return revision, false, nil
-	}
-	imports := graph.Imports(path)
-	targets := make(map[string]importTargetSnapshot)
-	for _, importFact := range imports {
-		if importFact.Target == "" {
-			continue
-		}
-		if _, exists := targets[importFact.Target]; exists {
-			continue
-		}
-		source, sourceOK := s.workspaceIndex.Source(importFact.Target)
-		if !sourceOK {
-			targets[importFact.Target] = importTargetSnapshot{}
-			continue
-		}
-		matches := s.workspaceIndex.FileSymbols(importFact.Target)
-		symbols := make([]workspace.SymbolFact, 0, len(matches))
-		for _, match := range matches {
-			symbols = append(symbols, match.Fact)
-		}
-		targets[importFact.Target] = importTargetSnapshot{source: source, symbols: symbols}
-	}
-	s.workspaceMu.Unlock()
+	references := workspace.CollectExternalReferencesFromAnalysis(snapshot.path, file, result)
+	imports := snapshot.graph.Imports(snapshot.path)
+	targets := snapshot.targets
 	for path, target := range targets {
 		parsed := s.parseImportTarget(path, target.source)
 		target.known = target.source != "" && parsed.Dialect == syntax.Vim9 && len(parsed.Diagnostics) == 0
@@ -113,9 +73,11 @@ func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.Fil
 		}
 		members = append(members, member)
 	}
-	return revision, true, analysis.AnalyzeImports(loads, members)
+	return analysis.AnalyzeImports(loads, members)
 }
 
+// parseImportTarget preserves the parser-cache fast path when an unchanged
+// open target exactly matches the immutable source captured by workspace analysis.
 func (s *Server) parseImportTarget(path, source string) *syntax.File {
 	s.publishMu.Lock()
 	snapshot, _, open := s.openWorkspaceSnapshotLocked(path)
