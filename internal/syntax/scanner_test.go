@@ -52,6 +52,29 @@ func TestLookupModifier(t *testing.T) {
 	}
 }
 
+func TestKnownCommandsWithoutBangReportE477(t *testing.T) {
+	for _, source := range []string{"helpclose!\n", ">!\n", "<!\n"} {
+		file := (LegacyParser{}).Parse(source)
+		var got []Diagnostic
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E477" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != "No ! allowed" || file.Text(got[0].Span) != "!" {
+			t.Fatalf("E477 diagnostics = %#v for %q", got, source)
+		}
+	}
+
+	for _, source := range []string{"write!\n", "Unknown!\n"} {
+		for _, diagnostic := range (LegacyParser{}).Parse(source).Diagnostics {
+			if diagnostic.Code == "vim/E477" {
+				t.Fatalf("allowed or unknown command reported E477: %#v for %q", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestParseRequiresFirstEffectiveVim9ScriptCommand(t *testing.T) {
 	source := "\ufeff\n  \" legacy comment before Vim knows the dialect\nvim9s\nvar name = 'value' # Vim9 comment\n"
 	file := Parse(source)

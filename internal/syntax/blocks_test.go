@@ -332,7 +332,7 @@ func TestTopLevelEndfunctionBangRetainsBothRecoveryDiagnostics(t *testing.T) {
 	for _, diagnostic := range file.Diagnostics {
 		codes[diagnostic.Code]++
 	}
-	if codes["vimls/unexpected-bang"] != 1 || codes["vimls/unexpected-end"] != 1 {
+	if codes["vim/E477"] != 1 || codes["vimls/unexpected-end"] != 1 {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 	if len(file.Commands) != 2 || file.Text(file.Commands[0].Bang) != "!" || file.Commands[1].Declaration == nil {

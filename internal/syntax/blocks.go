@@ -620,10 +620,10 @@ commands:
 				// the trailing ! is only W22 when 'verbose' is non-zero.  Keep the
 				// bang span, but do not turn that context-dependent warning into a
 				// syntax error.  A top-level endfunction! never reaches this matched
-				// block path and still reports E477-like unexpected-bang recovery.
+				// block path and still reports E477 recovery.
 				kept := file.Diagnostics[:0]
 				for _, diagnostic := range file.Diagnostics {
-					if diagnostic.Code == "vimls/unexpected-bang" && diagnostic.Span == command.Bang {
+					if diagnostic.Code == "vim/E477" && diagnostic.Span == command.Bang {
 						continue
 					}
 					kept = append(kept, diagnostic)

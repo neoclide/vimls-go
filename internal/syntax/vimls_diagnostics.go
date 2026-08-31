@@ -50,7 +50,6 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/trailing-expression", Message: "unexpected text after expression", Severity: DiagnosticError},
 	{Code: "vimls/trailing-type", Message: "unexpected text after type", Severity: DiagnosticError},
 	{Code: "vimls/type-too-deep", Message: "type nesting exceeds parser limit", Severity: DiagnosticError},
-	{Code: "vimls/unexpected-bang", Message: "command does not accept !", Severity: DiagnosticError},
 	{Code: "vimls/unexpected-branch", Message: "branch command has no matching block", Severity: DiagnosticError},
 	{Code: "vimls/unexpected-end", Message: "end command has no matching block", Severity: DiagnosticError},
 	{Code: "vimls/unexpected-token", Message: "unexpected token in expression", Severity: DiagnosticError},

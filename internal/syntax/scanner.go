@@ -1459,7 +1459,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			file.Tokens = append(file.Tokens, Token{Kind: TokenBang, Span: bang})
 			start++
 			if builtIn && metadata.Flags&vimdata.AllowBang == 0 {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-bang", Message: "command does not accept !", Span: bang})
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "No ! allowed", Span: bang})
 			}
 		}
 		argumentStart := skipSpaceToken(file, start, end)
