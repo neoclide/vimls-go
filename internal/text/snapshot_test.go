@@ -69,6 +69,15 @@ func TestSnapshotContentID(t *testing.T) {
 	}
 }
 
+func BenchmarkContentID(b *testing.B) {
+	source := strings.Repeat("vim9script\n", 64*1024/len("vim9script\n")+1)[:64*1024]
+	b.ReportAllocs()
+	b.SetBytes(int64(len(source)))
+	for b.Loop() {
+		ContentIDOf(source)
+	}
+}
+
 func TestSnapshotConcurrentReaders(t *testing.T) {
 	const content = "\ufeffa\u0301𐐀\xff\r\nlast"
 	version := int32(7)
