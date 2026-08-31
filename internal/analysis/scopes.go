@@ -2186,6 +2186,7 @@ func collectAggregateAccessDiagnostics(result *FileAnalysis) {
 			appendMissingAggregateMethodDiagnostic(result, scope, expression)
 			if !methodCallees[expression] {
 				appendMissingObjectVariableDiagnostic(result, scope, expression)
+				appendMissingClassVariableDiagnostic(result, scope, expression)
 			}
 		}
 		expressionScope := scope
@@ -2417,6 +2418,55 @@ func appendMissingObjectVariableDiagnostic(result *FileAnalysis, scope *Scope, m
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1326", Message: `Variable "` + name + `" not found in object "` + className + `"`, Span: memberNameSpan(file, member),
+	})
+}
+
+func appendMissingClassVariableDiagnostic(result *FileAnalysis, scope *Scope, member *syntax.Expression) {
+	if result == nil || result.File == nil || scope == nil || member == nil || member.Kind != syntax.ExpressionMember ||
+		len(member.Children) != 1 || member.Children[0] == nil || result.File.Text(member.Operator) != "." || member.Value == "" ||
+		expressionContainsMissing(member) || syntaxDiagnosticOverlaps(result.File.Diagnostics, member.Span) {
+		return
+	}
+	file := result.File
+	receiver := member.Children[0]
+	if receiver.Kind != syntax.ExpressionIdentifier {
+		return
+	}
+	declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+	if declaration == nil {
+		return
+	}
+	className := ""
+	switch declaration.Kind {
+	case SymbolKindClass:
+		className = declaration.Name
+	case SymbolKindTypeAlias:
+		className = result.classAliases[declaration.Name]
+	case SymbolKindEnum:
+		return
+	}
+	class := result.classes[className]
+	if class == nil || class.Aggregate == nil {
+		return
+	}
+	if aggregateHasClassMember(file, class, member.Value) {
+		return
+	}
+	if _, _, found := classObjectVariableBinding(result, class, member.Value); found || objectMethodInClassHierarchy(file, result.classes, class, member.Value) != nil {
+		return
+	}
+	memberSpan := memberNameSpan(file, member)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Span != memberSpan {
+			continue
+		}
+		switch diagnostic.Code {
+		case "vim/E1333", "vim/E1335", "vim/E1366", "vim/E1375", "vim/E1376", "vim/E1385", "vim/E1386", "vim/E1409", "vim/E1422", "vim/E1423":
+			return
+		}
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1337", Message: `Class variable "` + member.Value + `" not found in class "` + className + `"`, Span: memberSpan,
 	})
 }
 

@@ -3459,3 +3459,31 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9compile.c:1627-1663,2051-2105` checks object and static write access
   before read-only flags and aggregate-specific mutation rules.
 - `src/errors.h:3423-3424` defines the exact message.
+
+## Class variable not found: E1337
+
+E1337 means `Class variable "{variable}" not found in class "{class}"`.
+For a complete Vim9 member read, write, or non-call reference whose receiver
+resolves to a same-file class, analysis reports the member-name span after
+proving that the class has no applicable static variable or class method.
+
+Static variables and class methods are not inherited. An access through a
+child class therefore searches only that child and uses the child name in the
+diagnostic. Local class type aliases resolve to the underlying class. A dot
+call remains owned by E1325, while an existing object variable or object method
+used through a class remains owned by E1376, E1386, or protected-access
+diagnostics. Enum receivers use E1422 or E1423 instead.
+
+Unknown and imported receivers, incomplete member syntax, and Legacy commands
+remain conservative. Existing static members retain the more specific E1333,
+E1335, and E1409 write/access rules.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:1688-1720` covers both reading and assigning
+  a missing static member.
+- `src/vim9expr.c:605-628` accepts class variables and class method references
+  before selecting the missing-member path.
+- `src/vim9class.c:4113-4141` selects E1376 for an object variable and E1422
+  for an enum receiver before falling back to E1337 for a class receiver.
+- `src/errors.h:3429-3430` defines the exact message.

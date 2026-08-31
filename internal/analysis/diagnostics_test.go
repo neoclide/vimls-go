@@ -7186,6 +7186,65 @@ func TestAnalyzeE1335NonWritableAggregateVariableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1337MissingClassVariableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, member, class string }{
+		{"read", "vim9script\nclass TextPos\nendclass\nvar value = TextPos.noSuchMember\n", "noSuchMember", "TextPos"},
+		{"assignment", "vim9script\nclass TextPos\nendclass\nTextPos.noSuchMember = 1\n", "noSuchMember", "TextPos"},
+		{"compound assignment", "vim9script\nclass TextPos\nendclass\nTextPos.noSuchMember += 1\n", "noSuchMember", "TextPos"},
+		{"indexed chain", "vim9script\nclass TextPos\nendclass\nvar value = TextPos.noSuchMember[0]\n", "noSuchMember", "TextPos"},
+		{"type alias", "vim9script\nclass TextPos\nendclass\ntype Alias = TextPos\nvar value = Alias.noSuchMember\n", "noSuchMember", "TextPos"},
+		{"child does not inherit static", "vim9script\nclass Base\n  static var parentValue = 1\nendclass\nclass Child extends Base\nendclass\nvar value = Child.parentValue\n", "parentValue", "Child"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1337" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := `Class variable "` + test.member + `" not found in class "` + test.class + `"`
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.member {
+				t.Fatalf("E1337 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"call callee keeps E1325", "vim9script\nclass TextPos\nendclass\nTextPos.noSuchMember()\n", "vim/E1325"},
+		{"static variable", "vim9script\nclass TextPos\n  static var value = 1\nendclass\nvar copy = TextPos.value\n", ""},
+		{"class method reference", "vim9script\nclass TextPos\n  static def Value()\n  enddef\nendclass\nvar callback = TextPos.Value\n", ""},
+		{"func static variable", "vim9script\nclass TextPos\n  static var Callback: func\nendclass\nvar callback = TextPos.Callback\n", ""},
+		{"object variable keeps E1376", "vim9script\nclass TextPos\n  var value = 1\nendclass\nvar copy = TextPos.value\n", "vim/E1376"},
+		{"object method keeps E1386", "vim9script\nclass TextPos\n  def Value()\n  enddef\nendclass\nTextPos.Value\n", "vim/E1386"},
+		{"protected static keeps E1333", "vim9script\nclass TextPos\n  static var _value = 1\nendclass\nvar copy = TextPos._value\n", "vim/E1333"},
+		{"non-writable static keeps E1335", "vim9script\nclass TextPos\n  static var value = 1\nendclass\nTextPos.value = 2\n", "vim/E1335"},
+		{"read-only static keeps E1409", "vim9script\nclass TextPos\n  public static final value = 1\nendclass\nTextPos.value = 2\n", "vim/E1409"},
+		{"enum keeps E1422", "vim9script\nenum Fruit\n  Apple\nendenum\nvar copy = Fruit.Missing\n", "vim/E1422"},
+		{"unknown", "vim9script\nvar value: any\nvar copy = value.Missing\n", ""},
+		{"imported", "vim9script\nimport './types.vim' as types\nvar copy = types.TextPos.Missing\n", ""},
+		{"legacy command", "vim9script\nclass TextPos\nendclass\nlegacy let old = TextPos.Missing\n", ""},
+		{"incomplete", "vim9script\nclass TextPos\nendclass\nvar copy = TextPos.\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1337" {
+					t.Fatalf("guard unexpectedly received E1337: %#v\n%s", diagnostic, test.source)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string
