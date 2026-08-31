@@ -5470,6 +5470,18 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			if expression.Kind == syntax.ExpressionIndex && len(expression.Children) >= 2 &&
 				!expressionContainsMissing(expression) && !syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
 				receiver := expression.Children[0]
+				literal := receiver
+				for literal.Kind == syntax.ExpressionParenthesized && len(literal.Children) == 1 {
+					literal = literal.Children[0]
+				}
+				if literal.Kind == syntax.ExpressionList {
+					if index, ok := staticNumberValue(expression.Children[1]); ok &&
+						(index >= int64(len(literal.Children)) || index < -int64(len(literal.Children))) {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E684", Message: "List index out of range: " + strconv.FormatInt(index, 10), Span: expression.Children[1].Span,
+						})
+					}
+				}
 				receiverType := resolvedExpressionType(result, expressionScope, receiver)
 				if receiverType.Name == "func" || receiverType.Name == "partial" {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{

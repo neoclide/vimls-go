@@ -7352,6 +7352,45 @@ func TestAnalyzeE695CannotIndexFuncref(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE684ListLiteralIndexOutOfRange(t *testing.T) {
+	tests := []struct {
+		name, source, message, span string
+	}{
+		{"empty List", "echo [][0]\n", "List index out of range: 0", "0"},
+		{"positive index", "vim9script\necho [1, 2][2]\n", "List index out of range: 2", "2"},
+		{"negative index", "vim9script\necho [1, 2][-3]\n", "List index out of range: -3", "-3"},
+		{"parenthesized List", "echo ([1])[1]\n", "List index out of range: 1", "1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E684" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E684 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let values = []\necho values[0]\n",
+		"vim9script\nvar values = [1]\nadd(values, 2)\necho values[1]\n",
+		"vim9script\nvar index = 2\necho [1][index]\n",
+		"echo [1][-1]\n",
+		"echo [1][0 : 2]\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E684" {
+				t.Fatalf("mutable or valid List reported E684: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 	tests := []struct {
 		name   string
