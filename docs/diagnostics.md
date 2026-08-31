@@ -3633,3 +3633,38 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:835-864` selects E1346 only when lookup fails and E1347 when
   the resolved value is not an interface.
 - `src/errors.h:3446-3449` defines the exact message.
+
+## Interface variable is not implemented: E1348
+
+E1348 means `Variable "{variable}" of interface "{interface}" is not
+implemented`. For a Vim9 class whose same-file `implements` entries resolve to
+interfaces, analysis reports the closing `endclass` when the first required
+object variable is absent from the class and its extended-class hierarchy.
+
+Inherited interface variables are checked before variables declared directly
+in the child interface. Direct `implements` entries retain source order, and
+the diagnostic names that direct interface even when the required variable is
+inherited from one of its parents. A static variable or method with the same
+name does not implement an interface object variable.
+
+An exact object-variable match with a different access level or type remains
+owned by E1367 or E1382 and stops validation without a secondary E1348. After
+one interface's variables are valid, its methods must also be present and
+compatible before validation reaches the next interface. Unresolved, invalid,
+or imported interface names and incomplete headers remain conservative.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_interface.vim:239-254` covers the exact missing
+  variable message and places it on `endclass`.
+- `src/testdir/test_vim9_interface.vim:1043-1056` reaches a missing variable in
+  the second directly implemented interface after the first interface's method
+  is implemented.
+- `src/testdir/test_vim9_interface.vim:1238-1271` shows that variables inherited
+  from the class hierarchy satisfy an interface and selects the first remaining
+  missing variable.
+- `src/vim9class.c:217-244,647-732` flattens inherited members parent-first and
+  checks exact names, access, and type across the class hierarchy.
+- `src/vim9class.c:799-890` checks variables before methods for each interface
+  and stops on the first failure.
+- `src/errors.h:3450-3453` defines the exact E1348 and E1349 messages.

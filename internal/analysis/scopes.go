@@ -158,6 +158,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
 	collectImplementedInterfaceNameDiagnostics(result)
+	collectImplementedInterfaceMembersDiagnostics(result)
 	collectVariableTypeMismatchDiagnostics(result)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
 	collectFuncrefVariableNameDiagnostics(result)
@@ -186,14 +187,7 @@ func collectImplementedInterfaceNameDiagnostics(result *FileAnalysis) {
 			class.Block < 0 || class.Block >= len(file.Blocks) || file.Blocks[class.Block].End < 0 {
 			continue
 		}
-		header := syntax.Span{Start: class.Name.Start, End: class.Argument.End}
-		headerInvalid := slices.ContainsFunc(file.Diagnostics, func(diagnostic syntax.Diagnostic) bool {
-			if diagnostic.Span.Start == diagnostic.Span.End {
-				return diagnostic.Span.Start >= header.Start && diagnostic.Span.Start <= header.End
-			}
-			return diagnostic.Span.Start < header.End && diagnostic.Span.End > header.Start
-		})
-		if headerInvalid {
+		if aggregateHeaderHasSyntaxDiagnostic(file, class) {
 			continue
 		}
 		scope := result.commandScopes[class]
@@ -229,6 +223,194 @@ func collectImplementedInterfaceNameDiagnostics(result *FileAnalysis) {
 				Code: "vim/E1346", Message: "Interface name not found: " + name, Span: aggregateEndSpan(file, class),
 			})
 			break
+		}
+	}
+}
+
+func aggregateHeaderHasSyntaxDiagnostic(file *syntax.File, aggregate *syntax.Command) bool {
+	if file == nil || aggregate == nil {
+		return false
+	}
+	header := syntax.Span{Start: aggregate.Name.Start, End: aggregate.Argument.End}
+	return slices.ContainsFunc(file.Diagnostics, func(diagnostic syntax.Diagnostic) bool {
+		if diagnostic.Span.Start == diagnostic.Span.End {
+			return diagnostic.Span.Start >= header.Start && diagnostic.Span.Start <= header.End
+		}
+		return diagnostic.Span.Start < header.End && diagnostic.Span.End > header.Start
+	})
+}
+
+func collectImplementedInterfaceMembersDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	interfaces := localInterfaces(file)
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Implements) == 0 ||
+			class.Block < 0 || class.Block >= len(file.Blocks) || file.Blocks[class.Block].End < 0 {
+			continue
+		}
+		if aggregateHeaderHasSyntaxDiagnostic(file, class) {
+			continue
+		}
+		scope := result.commandScopes[class]
+		if scope == nil {
+			scope = result.Root
+		}
+		resolvedImplements := make([]*syntax.Command, 0, len(class.Aggregate.Implements))
+		for _, implemented := range class.Aggregate.Implements {
+			name := file.Text(implemented)
+			declaration := resolve(scope, name, implemented.Start, false, nil)
+			if declaration == nil {
+				if dot := strings.IndexByte(name, '.'); dot > 0 {
+					if prefix := resolve(scope, name[:dot], implemented.Start, false, nil); prefix != nil && prefix.Kind == SymbolKindImport {
+						resolvedImplements = nil
+						break
+					}
+				}
+				resolvedImplements = nil
+				break
+			}
+			if declaration.Kind != SymbolKindInterface {
+				resolvedImplements = nil
+				break
+			}
+			resolved := interfaces[name]
+			if resolved == nil {
+				resolvedImplements = nil
+				break
+			}
+			resolvedImplements = append(resolvedImplements, resolved)
+		}
+		if len(resolvedImplements) != len(class.Aggregate.Implements) {
+			continue
+		}
+		implementedToName := make(map[*syntax.Command]string, len(resolvedImplements))
+		for _, implemented := range class.Aggregate.Implements {
+			interfaceName := file.Text(implemented)
+			if iface := interfaces[interfaceName]; iface != nil {
+				implementedToName[iface] = interfaceName
+			}
+		}
+		resolveParentInterface := func(current *syntax.Command, parent syntax.Span) (*syntax.Command, bool) {
+			name := file.Text(parent)
+			scope := result.commandScopes[current]
+			if scope == nil {
+				scope = result.Root
+			}
+			declaration := resolve(scope, name, parent.Start, false, nil)
+			if declaration == nil || declaration.Kind != SymbolKindInterface {
+				return nil, false
+			}
+			resolved := interfaces[name]
+			return resolved, resolved != nil
+		}
+		validateInterface := func(iface *syntax.Command, directInterfaceName string) bool {
+			seenInterfaces := make(map[*syntax.Command]bool)
+			var checkVariable func(current *syntax.Command) bool
+			checkVariable = func(current *syntax.Command) bool {
+				if current == nil || current.Aggregate == nil || current.Aggregate.Kind != syntax.BlockInterface || seenInterfaces[current] {
+					return true
+				}
+				seenInterfaces[current] = true
+				for _, parent := range current.Aggregate.Extends {
+					parentInterface, ok := resolveParentInterface(current, parent)
+					if !ok {
+						return false
+					}
+					if !checkVariable(parentInterface) {
+						return false
+					}
+				}
+				for _, memberIndex := range current.Aggregate.Members {
+					if memberIndex < 0 || memberIndex >= len(file.Commands) {
+						continue
+					}
+					member := &file.Commands[memberIndex]
+					if member.Declaration == nil || commandHasModifier(member, "static") || commandHasModifier(member, "public") {
+						continue
+					}
+					for bindingIndex, binding := range member.Declaration.Bindings {
+						name := file.Text(binding.Name)
+						if name == "" || strings.HasPrefix(name, "_") {
+							continue
+						}
+						expected := aggregateBindingType(result, member, bindingIndex)
+						actualCommand, _, found := classObjectVariableBinding(result, class, name)
+						if !found {
+							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+								Code: "vim/E1348", Message: `Variable "` + name + `" of interface "` + directInterfaceName + `" is not implemented`, Span: aggregateEndSpan(file, class),
+							})
+							return false
+						}
+						if classHasDuplicateVariableDiagnostic(result, class, name) || commandHasModifier(actualCommand, "public") {
+							return false
+						}
+						actual, _ := classObjectVariableType(result, class, name)
+						if !isUnknownType(expected) && !isUnknownType(actual) && !memberTypesCompatible(result, expected, actual) {
+							return false
+						}
+					}
+				}
+				return true
+			}
+			if !checkVariable(iface) {
+				return false
+			}
+
+			seenMethods := make(map[*syntax.Command]bool)
+			var checkMethod func(current *syntax.Command) bool
+			checkMethod = func(current *syntax.Command) bool {
+				if current == nil || current.Aggregate == nil || current.Aggregate.Kind != syntax.BlockInterface || seenMethods[current] {
+					return true
+				}
+				seenMethods[current] = true
+				for _, parent := range current.Aggregate.Extends {
+					parentInterface, ok := resolveParentInterface(current, parent)
+					if !ok {
+						return false
+					}
+					if !checkMethod(parentInterface) {
+						return false
+					}
+				}
+				for _, memberIndex := range current.Aggregate.Members {
+					if memberIndex < 0 || memberIndex >= len(file.Commands) {
+						continue
+					}
+					required := &file.Commands[memberIndex]
+					if required.Function == nil || commandHasModifier(required, "static") {
+						continue
+					}
+					name := file.Text(required.Function.Name)
+					if name == "" || strings.HasPrefix(name, "_") {
+						continue
+					}
+					actual := objectMethodInClassHierarchy(file, result.classes, class, name)
+					if actual == nil {
+						return false
+					}
+					if methodSignaturesMismatch(required.Function, actual.Function) {
+						return false
+					}
+				}
+				return true
+			}
+			if !checkMethod(iface) {
+				return false
+			}
+			return true
+		}
+		for _, implemented := range resolvedImplements {
+			interfaceName := implementedToName[implemented]
+			if interfaceName == "" {
+				continue
+			}
+			if !validateInterface(implemented, interfaceName) {
+				break
+			}
 		}
 	}
 }
