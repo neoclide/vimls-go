@@ -225,6 +225,69 @@ var incrementalDialectStateScenarios = []incrementalDialectStateScenario{
 	},
 }
 
+type incrementalCommandBoundaryScenario struct {
+	name   string
+	tags   []string
+	source string
+	cases  []incrementalMatrixCase
+}
+
+var incrementalCommandBoundaryScenarios = func() []incrementalCommandBoundaryScenario {
+	forms := "silent! %foldclose!\n1delete_ | echo one\n2delete_ | echo two\nsetlocal ts=8 | echo set\nnmap lhs a\\|b | echo map\ns#foo|bar#baz# | echo subst\necho \"a|b\" | echo string\necho value \" comment | no\nlockvar 2 g:items\nlet afterForms = 1\n"
+	ordinary := "echo ordinary | echo tail\nlet afterBars = 1\n"
+	regexp := "syntax match Foo /foo|bar/ | echo afterRegexp\nlet afterBars = 1\n"
+	mapping := "nmap lhs a\\|b | echo afterMapping\nlet afterBars = 1\n"
+	substitute := "substitute /foo|bar/baz/ | echo afterSubstitute\nlet afterBars = 1\n"
+	stringSource := "echo \"a|b\" | echo afterString\nlet afterBars = 1\n"
+	comment := "echo value\n\" comment | not command\nlet afterBars = 1\n"
+	leading := "vim9script\nautocmd BufNewFile *.match if ok\n  echo 'match'\nvar afterLeading = 1\n"
+	leadingBar := "vim9script\nautocmd BufNewFile *.match if ok\n  | echo 'match'\nvar afterLeading = 1\n"
+	legacyContinuation := "let value =\n\\ 1\nlet afterLegacyContinuation = 2\n"
+	operator := "vim9script\nvar operator = 1 +\n  2\nvar afterOperator = 3\n"
+	paren := "vim9script\nvar paren = (\n  1\n)\nvar afterParen = 3\n"
+	ternary := "vim9script\nvar ternary = true ?\n  1 :\n  2\nvar afterTernary = 3\n"
+	lambda := "vim9script\nvar lambda = (x) =>\n  x + 1\nvar afterLambda = 3\n"
+	return []incrementalCommandBoundaryScenario{
+		{
+			name: "command forms", tags: []string{"range", "modifier", "abbreviation", "bang", "register", "count"}, source: forms,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("command forms", "range", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(forms, "%", "$")}),
+				newIncrementalMatrixCase("command forms", "modifier", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(forms, "silent!", "silent")}),
+				newIncrementalMatrixCase("command forms", "abbreviation", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(forms, "setlocal", "setl")}),
+				newIncrementalMatrixCase("command forms", "bang", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(forms, "foldclose!", "foldclose")}),
+				newIncrementalMatrixCase("command forms", "register", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(forms, "1delete_", "1delete a")}),
+				newIncrementalMatrixCase("command forms", "count", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(forms, "lockvar 2", "lockvar 3")}),
+				newIncrementalMatrixCase("command forms", "insert", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(forms, "echo string", "silent ")}),
+				newIncrementalMatrixCase("command forms", "delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(forms, "one", "")}),
+				newIncrementalMatrixCase("command forms", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(forms, "foo", "bar")}),
+				newIncrementalMatrixCase("command forms", "sequence", incrementalSequence, incrementalFixedWidthSequence(forms, strings.Index(forms, "foo"), len("foo"), []string{"bar", "foo"})),
+			},
+		},
+		{name: "bar ordinary argument", tags: []string{"bar ordinary argument"}, source: ordinary, cases: []incrementalMatrixCase{newIncrementalMatrixCase("bar ordinary argument", "replace argument", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(ordinary, "ordinary", "standard")})}},
+		{name: "bar regexp", tags: []string{"bar regexp"}, source: regexp, cases: []incrementalMatrixCase{newIncrementalMatrixCase("bar regexp", "replace pattern", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(regexp, "foo|bar", "foo|baz")})}},
+		{name: "bar mapping", tags: []string{"bar mapping"}, source: mapping, cases: []incrementalMatrixCase{newIncrementalMatrixCase("bar mapping", "replace lhs", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(mapping, "a\\|b", "a\\|c")})}},
+		{name: "bar substitute", tags: []string{"bar substitute"}, source: substitute, cases: []incrementalMatrixCase{newIncrementalMatrixCase("bar substitute", "replace pattern", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(substitute, "foo|bar", "foo|baz")})}},
+		{name: "bar string", tags: []string{"bar string"}, source: stringSource, cases: []incrementalMatrixCase{newIncrementalMatrixCase("bar string", "replace string", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(stringSource, "a|b", "a|c")})}},
+		{name: "bar comment", tags: []string{"bar comment"}, source: comment, cases: []incrementalMatrixCase{newIncrementalMatrixCase("bar comment", "replace comment", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(comment, "comment | not command", "comment | still comment")})}},
+		{
+			name: "leading bar appears", tags: []string{"leading bar continuation appears"}, source: leading,
+			cases: []incrementalMatrixCase{{name: "leading bar appears", kind: incrementalInsert, edits: []incrementalTextEdit{incrementalTextInsertAt(leading, "echo 'match'", "| ")}}},
+		},
+		{
+			name: "leading bar disappears", tags: []string{"leading bar continuation disappears"}, source: leadingBar,
+			cases: []incrementalMatrixCase{{name: "leading bar disappears", kind: incrementalDelete, edits: []incrementalTextEdit{incrementalTextEditAt(leadingBar, "|", "")}}},
+		},
+		{
+			name: "legacy continuation", tags: []string{"legacy backslash continuation"}, source: legacyContinuation,
+			cases: []incrementalMatrixCase{{name: "legacy continuation", kind: incrementalDelete, edits: []incrementalTextEdit{incrementalTextEditAt(legacyContinuation, "\\ ", "")}}},
+		},
+		{name: "Vim9 operator continuation", tags: []string{"Vim9 operator continuation"}, source: operator, cases: []incrementalMatrixCase{newIncrementalMatrixCase("Vim9 operator continuation", "replace operator", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(operator, "+", "-")})}},
+		{name: "Vim9 parenthesis continuation", tags: []string{"Vim9 parenthesis continuation"}, source: paren, cases: []incrementalMatrixCase{newIncrementalMatrixCase("Vim9 parenthesis continuation", "replace opening delimiter", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(paren, "(", "[")})}},
+		{name: "Vim9 ternary continuation", tags: []string{"Vim9 ternary continuation"}, source: ternary, cases: []incrementalMatrixCase{newIncrementalMatrixCase("Vim9 ternary continuation", "replace operator", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(ternary, "?", "+")})}},
+		{name: "Vim9 lambda continuation", tags: []string{"Vim9 lambda continuation"}, source: lambda, cases: []incrementalMatrixCase{newIncrementalMatrixCase("Vim9 lambda continuation", "replace arrow", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(lambda, "=>", "->")})}},
+	}
+}()
+
 var incrementalEditCases = []incrementalEditCase{
 	{name: "legacy tail", old: "let first = 1\nlet last = 2\n", new: "let first = 1\nlet last = 20\n"},
 	{name: "vim9 middle", old: "vim9script\nvar first = 1\nvar last = 2\n", new: "vim9script\nvar first = 10\nvar last = 2\n"},
@@ -495,6 +558,178 @@ func TestReparseDialectStateMatrix(t *testing.T) {
 					incrementalDeclaration(t, got, "after")
 				}
 			})
+		}
+	}
+}
+
+func TestIncrementalEditMatrixCommandBoundary(t *testing.T) {
+	tags, kinds, names := map[string]bool{}, map[incrementalEditKind]bool{}, map[string]bool{}
+	for _, scenario := range incrementalCommandBoundaryScenarios {
+		for _, tag := range scenario.tags {
+			tags[tag] = true
+		}
+		for _, test := range scenario.cases {
+			if names[test.name] {
+				t.Fatalf("duplicate command-boundary case %q", test.name)
+			}
+			names[test.name], kinds[test.kind] = true, true
+			results := incrementalTextEditResults(scenario.source, test.edits)
+			if len(results) == 0 || test.kind == incrementalSequence && len(results) < 2 {
+				t.Fatalf("%s has insufficient edits: %d", test.name, len(results))
+			}
+			for _, result := range results {
+				if result.old == result.new || result.edit.start < 0 || result.edit.start > result.edit.oldEnd || result.edit.oldEnd > len(result.old) {
+					t.Fatalf("%s has invalid step: %#v", test.name, result)
+				}
+				valid := incrementalTextEditKindValid(test.kind, result.edit)
+				if test.kind == incrementalSequence {
+					valid = incrementalSequenceStepValid(result.edit)
+				}
+				if !valid {
+					t.Fatalf("%s step does not match kind %d: %#v", test.name, test.kind, result.edit)
+				}
+			}
+		}
+	}
+	for _, tag := range []string{"range", "modifier", "abbreviation", "bang", "register", "count", "bar ordinary argument", "bar regexp", "bar mapping", "bar substitute", "bar string", "bar comment", "leading bar continuation appears", "leading bar continuation disappears", "legacy backslash continuation", "Vim9 operator continuation", "Vim9 parenthesis continuation", "Vim9 ternary continuation", "Vim9 lambda continuation"} {
+		if !tags[tag] {
+			t.Fatalf("missing command-boundary scenario %q", tag)
+		}
+	}
+	if len(kinds) != 5 {
+		t.Fatalf("command-boundary matrix has %d edit kinds, want 5", len(kinds))
+	}
+}
+
+func TestReparseCommandBoundaryMatrix(t *testing.T) {
+	for _, scenario := range incrementalCommandBoundaryScenarios {
+		for _, test := range scenario.cases {
+			t.Run(test.name, func(t *testing.T) { runIncrementalMatrix(t, scenario.source, test) })
+		}
+	}
+}
+
+func TestCommandBoundaryMatrixASTRecovery(t *testing.T) {
+	for _, scenario := range incrementalCommandBoundaryScenarios {
+		for _, test := range scenario.cases {
+			got := runIncrementalMatrix(t, scenario.source, test)
+			switch scenario.name {
+			case "command forms":
+				canonical := make([]string, len(got.Commands))
+				for index := range got.Commands {
+					canonical[index] = got.Commands[index].Canonical
+				}
+				if len(canonical) != 16 || !slices.Equal(canonical, []string{"foldclose", "delete", "echo", "delete", "echo", "setlocal", "echo", "nmap", "echo", "substitute", "echo", "echo", "echo", "echo", "lockvar", "let"}) {
+					t.Fatalf("command forms canonical = %#v", canonical)
+				}
+				first := got.Commands[0]
+				switch strings.TrimPrefix(test.name, "command forms: ") {
+				case "range":
+					if got.Text(first.Range) != "$" {
+						t.Fatalf("range = %q", got.Text(first.Range))
+					}
+				case "modifier":
+					if len(first.Modifiers) != 1 || first.Modifiers[0].Name != "silent" || got.Text(first.Modifiers[0].Bang) != "" {
+						t.Fatalf("modifier = %#v", first.Modifiers)
+					}
+				case "abbreviation":
+					if got.Commands[5].TypedName != "setl" || got.Commands[5].Canonical != "setlocal" {
+						t.Fatalf("abbreviation command = %#v", got.Commands[5])
+					}
+				case "bang":
+					if first.Canonical != "foldclose" || got.Text(first.Bang) != "" {
+						t.Fatalf("command bang = %#v", first)
+					}
+				case "register":
+					if got.Commands[1].Canonical != "delete" || got.Text(got.Commands[1].Argument) != "a" {
+						t.Fatalf("delete register = %#v", got.Commands[1])
+					}
+				case "count":
+					if got.Text(got.Commands[14].Count) != "3" {
+						t.Fatalf("lockvar count = %q", got.Text(got.Commands[14].Count))
+					}
+				case "insert", "delete", "equal-length replace", "sequence":
+					if first.Canonical != "foldclose" {
+						t.Fatalf("command forms first command = %#v", first)
+					}
+				}
+				if strings.TrimPrefix(test.name, "command forms: ") == "range" && got.Text(first.Range) != "$" {
+					t.Fatalf("range edit was not retained: %#v", first)
+				}
+				if first.Canonical != "foldclose" {
+					t.Fatalf("foldclose bang = %#v", first)
+				}
+				incrementalDeclaration(t, got, "afterForms")
+			case "bar ordinary argument":
+				if gotCommands := []string{got.Commands[0].Canonical, got.Commands[1].Canonical, got.Commands[2].Canonical}; !slices.Equal(gotCommands, []string{"echo", "echo", "let"}) || countTokens(got, TokenSeparator) != 1 || got.Text(got.Commands[0].Argument) != "standard" || got.Text(got.Commands[1].Argument) != "tail" {
+					t.Fatalf("ordinary bar commands = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterBars")
+			case "bar regexp":
+				if gotCommands := []string{got.Commands[0].Canonical, got.Commands[1].Canonical, got.Commands[2].Canonical}; !slices.Equal(gotCommands, []string{"syntax", "echo", "let"}) || countTokens(got, TokenSeparator) != 1 || got.Text(got.Commands[0].Argument) != "match Foo /foo|baz/" {
+					t.Fatalf("regexp bar commands = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterBars")
+			case "bar mapping":
+				if gotCommands := []string{got.Commands[0].Canonical, got.Commands[1].Canonical, got.Commands[2].Canonical}; !slices.Equal(gotCommands, []string{"nmap", "echo", "let"}) || countTokens(got, TokenSeparator) != 1 || got.Text(got.Commands[0].Argument) != "lhs a\\|c " {
+					t.Fatalf("mapping bar commands = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterBars")
+			case "bar substitute":
+				if gotCommands := []string{got.Commands[0].Canonical, got.Commands[1].Canonical, got.Commands[2].Canonical}; !slices.Equal(gotCommands, []string{"substitute", "echo", "let"}) || countTokens(got, TokenSeparator) != 1 || got.Text(got.Commands[0].Argument) != "/foo|baz/baz/" {
+					t.Fatalf("substitute bar commands = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterBars")
+			case "bar string":
+				if gotCommands := []string{got.Commands[0].Canonical, got.Commands[1].Canonical, got.Commands[2].Canonical}; !slices.Equal(gotCommands, []string{"echo", "echo", "let"}) || countTokens(got, TokenSeparator) != 1 || got.Text(got.Commands[0].Argument) != "\"a|c\"" {
+					t.Fatalf("string bar commands = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterBars")
+			case "bar comment":
+				if gotCommands := []string{got.Commands[0].Canonical, got.Commands[1].Canonical}; !slices.Equal(gotCommands, []string{"echo", "let"}) || countTokens(got, TokenSeparator) != 0 || countTokens(got, TokenComment) != 1 {
+					t.Fatalf("comment bar commands = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterBars")
+			case "leading bar appears":
+				if len(got.Commands) != 3 || countTokens(got, TokenContinuation) != 1 || got.Commands[1].Canonical != "autocmd" || got.Text(got.Commands[1].Argument) != "BufNewFile *.match if ok\n  | echo 'match'" {
+					t.Fatalf("leading bar appearance = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterLeading")
+			case "leading bar disappears":
+				if len(got.Commands) != 4 || countTokens(got, TokenContinuation) != 0 || got.Commands[1].Canonical != "autocmd" || got.Text(got.Commands[1].Argument) != "BufNewFile *.match if ok" || got.Commands[2].Canonical != "echo" || got.Text(got.Commands[2].Argument) != "'match'" {
+					t.Fatalf("leading bar disappearance = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterLeading")
+			case "legacy continuation":
+				if len(got.Commands) != 3 || countTokens(got, TokenContinuation) != 0 || got.Commands[0].Canonical != "let" || got.Text(got.Commands[0].Argument) != "value =" {
+					t.Fatalf("legacy continuation = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterLegacyContinuation")
+			case "Vim9 operator continuation":
+				declaration := incrementalDeclaration(t, got, "operator")
+				if countTokens(got, TokenContinuation) != 1 || declaration.Declaration.Initializer == nil || declaration.Declaration.Initializer.Kind != ExpressionBinary || declaration.Declaration.Initializer.Value != "-" {
+					t.Fatalf("operator continuation = %#v", declaration)
+				}
+				incrementalDeclaration(t, got, "afterOperator")
+			case "Vim9 parenthesis continuation":
+				declaration := incrementalDeclaration(t, got, "paren")
+				if countTokens(got, TokenContinuation) != 2 || declaration.Declaration.Initializer == nil || declaration.Declaration.Initializer.Kind != ExpressionList {
+					t.Fatalf("parenthesis continuation = %#v", declaration)
+				}
+				incrementalDeclaration(t, got, "afterParen")
+			case "Vim9 ternary continuation":
+				declaration := incrementalDeclaration(t, got, "ternary")
+				if countTokens(got, TokenContinuation) != 2 || declaration.Declaration.Initializer == nil || declaration.Declaration.Initializer.Kind != ExpressionBinary || declaration.Declaration.Initializer.Value != "+" {
+					t.Fatalf("ternary continuation = %#v", declaration)
+				}
+				incrementalDeclaration(t, got, "afterTernary")
+			case "Vim9 lambda continuation":
+				declaration := incrementalDeclaration(t, got, "lambda")
+				if countTokens(got, TokenContinuation) != 0 || declaration.Declaration.Initializer == nil || declaration.Declaration.Initializer.Kind != ExpressionCall || got.Text(declaration.Declaration.Initializer.Operator) != "->" {
+					t.Fatalf("lambda continuation = %#v", declaration)
+				}
+				incrementalDeclaration(t, got, "afterLambda")
+			}
 		}
 	}
 }
