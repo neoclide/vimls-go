@@ -5352,6 +5352,50 @@ func TestAnalyzeE1326MissingObjectVariableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1328ConstructorDefaultValueDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, tail string }{
+		{"class string default", "vim9script\nclass A\n  def new(this.val = 'a')\n  enddef\nendclass\n", " = 'a'"},
+		{"no space", "vim9script\nclass A\n  def new(this.val='a')\n  enddef\nendclass\n", "='a'"},
+		{"new prefix", "vim9script\nclass A\n  def newNamed(this.value = 1)\n  enddef\nendclass\n", " = 1"},
+		{"enum constructor", "vim9script\nenum Result\n  Ok\n  def newValue(this.value = 1)\n  enddef\nendenum\n", " = 1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1328" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := "Constructor default value must be v:none: " + test.tail
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.tail {
+				t.Fatalf("E1328 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"top-level def", "vim9script\ndef new(this.val = 'a')\nenddef\n"},
+		{"non-constructor", "vim9script\nclass A\n  def Value(this.val = 'a')\n  enddef\nendclass\n"},
+		{"underscore constructor", "vim9script\nclass A\n  def _new(this.val = 'a')\n  enddef\nendclass\n"},
+		{"ordinary parameter", "vim9script\nclass A\n  def new(value: string = 'a')\n  enddef\nendclass\n"},
+		{"typed target", "vim9script\nclass A\n  def new(this.val: string = 'a')\n  enddef\nendclass\n"},
+		{"v none", "vim9script\nclass A\n  def new(this.val = v:none)\n  enddef\nendclass\n"},
+		{"v none prefix", "vim9script\nclass A\n  def new(this.val = v:none + 1)\n  enddef\nendclass\n"},
+		{"no default", "vim9script\nclass A\n  def new(this.val)\n  enddef\nendclass\n"},
+		{"incomplete default", "vim9script\nclass A\n  def new(this.val = )\n  enddef\nendclass\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1328" {
+					t.Fatalf("guard unexpectedly received E1328: %#v\n%s", diagnostic, test.source)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1256BuiltinCallbackArgumentDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"sort zero script", "vim9script\nsort(['a', 'b'], 0)\n", "0"},

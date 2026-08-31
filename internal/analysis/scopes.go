@@ -134,6 +134,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectMethodTypeMismatchDiagnostics(result)
 	collectDuplicateClassVariableDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
+	collectConstructorDefaultValueDiagnostics(result)
 	collectInterfaceVariableAccessDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 	collectUnreachableCodeDiagnostics(result)
@@ -168,6 +169,48 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectConstructorDefaultValueDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		aggregate := &file.Commands[index]
+		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil ||
+			(aggregate.Aggregate.Kind != syntax.BlockClass && aggregate.Aggregate.Kind != syntax.BlockInterface && aggregate.Aggregate.Kind != syntax.BlockEnum) {
+			continue
+		}
+		for _, memberIndex := range aggregate.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Canonical != "def" || member.Function == nil || !strings.HasPrefix(file.Text(member.Function.Name), "new") {
+				continue
+			}
+			for _, parameter := range member.Function.Parameters {
+				if parameter.Target == nil || parameter.Target.Kind != syntax.ExpressionMember || len(parameter.Target.Children) != 1 || parameter.Target.Children[0] == nil ||
+					parameter.Target.Children[0].Kind != syntax.ExpressionIdentifier || parameter.Target.Children[0].Value != "this" || parameter.Target.Value == "" ||
+					file.Text(parameter.Target.Operator) != "." || parameter.Type != nil || parameter.Default == nil || parameter.Default.Kind == syntax.ExpressionMissing {
+					continue
+				}
+				defaultText := file.Text(parameter.DefaultSpan)
+				if strings.HasPrefix(strings.TrimLeft(defaultText, " \t"), "v:none") {
+					continue
+				}
+				span := syntax.Span{Start: parameter.Name.End, End: parameter.DefaultSpan.End}
+				if span.Start > span.End || span.End > len(file.Source) {
+					continue
+				}
+				tail := file.Text(span)
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1328", Message: "Constructor default value must be v:none: " + tail, Span: span,
+				})
+			}
+		}
+	}
 }
 
 func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {

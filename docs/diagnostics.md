@@ -3301,3 +3301,30 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9execute.c:3360-3410` accepts variables and bound method references
   before choosing E1326 for a missing object member; `src/errors.h:3406-3407`
   defines the exact message.
+
+## Invalid constructor shorthand default: E1328
+
+E1328 means `Constructor default value must be v:none: {tail}`. Inside a Vim9
+class-like aggregate, a `def` method whose name starts with `new` may use
+`this.member` constructor shorthand parameters. If such a parameter has a
+default, its value must start with `v:none`; analysis reports the original text
+from the end of the member name through the default value so the message and
+span preserve the user's equals-sign spacing.
+
+The rule does not apply to ordinary constructor parameters, top-level
+functions, other method names, `_new`, typed `this.member` recovery, or a
+parameter without a default. Vim checks only the first six nonblank bytes of
+the default at this stage. A tail beginning with `v:none` therefore belongs to
+later expression or separator validation rather than E1328.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:1054-1066` reports the exact message for
+  `def new(this.val = 'a')`.
+- `runtime/doc/vim9class.txt:816-850` documents `v:none` as the sole constructor
+  shorthand default and explains that it leaves the member initializer in
+  control.
+- `src/userfunc.c:320-347` restricts `this.member` parameters to methods whose
+  names start with `new`, checks the six-byte `v:none` prefix, and passes the
+  untouched text beginning after the member name to the diagnostic.
+- `src/errors.h:3410-3411` defines the exact message.
