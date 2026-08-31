@@ -3995,6 +3995,12 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 			end++
 		}
 		attribute := file.Source[start:end]
+		if name, missing := missingUserCommandAttributeArgument(attribute); missing {
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{
+				Code: "vim/E179", Message: "Argument required for -" + name, Span: Span{Start: start, End: end},
+			})
+			return true
+		}
 		if strings.HasPrefix(attribute, "-nargs=") {
 			switch attribute[len("-nargs="):] {
 			case "1", "*", "?", "+":
@@ -4058,6 +4064,34 @@ func diagnoseUserCommandAttributes(file *File, command *Command) bool {
 		return true
 	}
 	return false
+}
+
+func missingUserCommandAttributeArgument(attribute string) (string, bool) {
+	if len(attribute) < 2 || attribute[0] != '-' {
+		return "", false
+	}
+	name := strings.ToLower(attribute[1:])
+	if name == "" {
+		return "", false
+	}
+	if equal := strings.IndexByte(name, '='); equal >= 0 {
+		value := name[equal+1:]
+		name = name[:equal]
+		return "completeopt", value == "" && len(name) > len("complete") && strings.HasPrefix("completeopt", name)
+	}
+	if strings.HasPrefix("addr", name) {
+		return "addr", true
+	}
+	if strings.HasPrefix("count", name) {
+		return "", false
+	}
+	if strings.HasPrefix("complete", name) {
+		return "complete", true
+	}
+	if strings.HasPrefix("completeopt", name) {
+		return "completeopt", true
+	}
+	return "", false
 }
 
 func collectedCommandStrayClose(source string, collectorEnd int) (Span, bool) {

@@ -213,6 +213,44 @@ func TestVim9UserCommandCompletionRequiresArguments(t *testing.T) {
 	}
 }
 
+func TestUserCommandMissingAttributeArgumentsReportE179(t *testing.T) {
+	tests := []struct {
+		attribute, message string
+	}{
+		{"-addr", "Argument required for -addr"},
+		{"-a", "Argument required for -addr"},
+		{"-ADDR", "Argument required for -addr"},
+		{"-complete", "Argument required for -complete"},
+		{"-com", "Argument required for -complete"},
+		{"-completeopt", "Argument required for -completeopt"},
+		{"-completeo", "Argument required for -completeopt"},
+		{"-completeopt=", "Argument required for -completeopt"},
+	}
+	for _, test := range tests {
+		t.Run(test.attribute, func(t *testing.T) {
+			source := "command! " + test.attribute + " DoCmd :\n"
+			file := Parse(source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E179" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.attribute {
+				t.Fatalf("E179 diagnostics = %#v; all diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, attribute := range []string{"-count", "-co", "-addr=lines", "-complete=file", "-completeopt=escape"} {
+		for _, diagnostic := range Parse("command! " + attribute + " DoCmd :\n").Diagnostics {
+			if diagnostic.Code == "vim/E179" {
+				t.Fatalf("valid attribute reported E179: %#v for %q", diagnostic, attribute)
+			}
+		}
+	}
+}
+
 func TestUserCommandInvalidArgumentCount(t *testing.T) {
 	tests := []struct {
 		name, source, span string
