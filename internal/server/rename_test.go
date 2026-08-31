@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
-	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -13,6 +13,8 @@ import (
 
 func TestPrepareRenameAndRenameBoundSymbol(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\nvalue += 1\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() { checks++ }
 	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 7}}
 	prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: params})
 	if err != nil {
@@ -39,6 +41,9 @@ func TestPrepareRenameAndRenameBoundSymbol(t *testing.T) {
 		if !ok || textEdit.Range != want[index] || textEdit.NewText != "renamed" {
 			t.Fatalf("edit %d = %#v", index, element)
 		}
+	}
+	if checks != 0 {
+		t.Fatalf("pure-local rename checked workspace identity %d times", checks)
 	}
 }
 
@@ -135,16 +140,135 @@ func TestRenameRejectsAutoloadReferenceWithDifferentSpelling(t *testing.T) {
 	}
 }
 
-func TestRenameIndexGenerationCheck(t *testing.T) {
-	instance, _ := openNavigationDocument(t, text.UTF16, "")
-	index := instance.workspaceIndex
-	revision := index.Revision()
-	path := writeWorkspaceFile(t, t.TempDir(), "entry.vim", "var value = 1\n")
-	if err := index.Replace(path, syntax.Parse("var value = 1\n")); err != nil {
+func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
+	t.Run("prepare retry", func(t *testing.T) {
+		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			if checks == 1 {
+				instance.workspaceMu.Lock()
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			}
+		}
+		prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: position})
+		if err != nil || prepared == nil || checks != 2 {
+			t.Fatalf("prepare=%#v checks=%d error=%v", prepared, checks, err)
+		}
+	})
+
+	t.Run("rename retry returns full edit", func(t *testing.T) {
+		instance, documentURI, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			if checks == 1 {
+				instance.workspaceMu.Lock()
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			}
+		}
+		edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Execute"})
+		if err != nil || edit == nil || checks != 2 || len(edit.DocumentChanges) != 2 {
+			t.Fatalf("edit=%#v checks=%d error=%v", edit, checks, err)
+		}
+		var openEdits, closedEdits int
+		for _, change := range edit.DocumentChanges {
+			documentEdit := change.(*protocol.TextDocumentEdit)
+			if len(documentEdit.Edits) != 1 || documentEdit.Edits[0].(*protocol.TextEdit).NewText != "Execute" {
+				t.Fatalf("document edit=%#v", documentEdit)
+			}
+			if documentEdit.TextDocument.URI == documentURI {
+				if documentEdit.TextDocument.Version == nil || *documentEdit.TextDocument.Version != 1 {
+					t.Fatalf("open document version=%#v", documentEdit.TextDocument.Version)
+				}
+				openEdits++
+			} else if documentEdit.TextDocument.Version == nil {
+				closedEdits++
+			}
+		}
+		if openEdits != 1 || closedEdits != 1 {
+			t.Fatalf("open=%d closed=%d edits=%#v", openEdits, closedEdits, edit.DocumentChanges)
+		}
+	})
+
+	t.Run("second stale returns no edit", func(t *testing.T) {
+		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			instance.workspaceMu.Lock()
+			instance.workspaceRevision++
+			instance.workspaceMu.Unlock()
+		}
+		edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Execute"})
+		if !errors.Is(err, protocol.ErrContentModified) || edit != nil || checks != 2 {
+			t.Fatalf("edit=%#v checks=%d error=%v", edit, checks, err)
+		}
+	})
+
+	t.Run("workspace miss validates identity", func(t *testing.T) {
+		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+		prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: position})
+		if err != nil || prepared != nil || checks != 1 {
+			t.Fatalf("prepare=%#v checks=%d error=%v", prepared, checks, err)
+		}
+	})
+}
+
+func TestRenameOverlayScanKeepsCapturedSnapshot(t *testing.T) {
+	source := "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n"
+	instance, documentURI, position := openWorkspaceNavigationRetryDocument(t, source)
+	otherSource := "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n"
+	otherPath := writeWorkspaceFile(t, filepath.Dir(documentURI.FsPath()), "other.vim", otherSource)
+	otherURI := uri.File(otherPath)
+	instance.documents.Open(otherURI.String(), 1, otherSource)
+	document, err := instance.navigationAt(context.Background(), documentURI.String(), position.Position)
+	if err != nil || document == nil {
+		t.Fatalf("navigation document=%#v error=%v", document, err)
+	}
+	state := instance.captureWorkspaceNavigationState()
+	target, ok := document.workspaceTargetInState(state)
+	if !ok {
+		t.Fatal("workspace target was not resolved")
+	}
+	locations, err := document.workspaceReferencesInState(context.Background(), state, target, true)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := instance.checkRenameIndex(index, revision); !errors.Is(err, protocol.ErrContentModified) {
-		t.Fatalf("generation check = %v", err)
+	openLocations, snapshots, err := instance.openWorkspaceReferenceLocationsInState(context.Background(), state, target, text.UTF16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, ok := workspaceURIPath(otherURI)
+	if !ok {
+		t.Fatalf("workspace path for %s", otherURI)
+	}
+	captured := snapshots[uri.File(path)]
+	if captured == nil || captured.Text() != otherSource {
+		t.Fatalf("scanned snapshot=%#v", captured)
+	}
+	locations = normalizeRenameLocations(append(locations, openLocations...))
+	changed := "vim9script\nimport './lib.vim' as lib\necho lib.Other()\n"
+	if _, _, err := instance.documents.Change(otherURI.String(), 2, text.UTF16, []text.Change{{Text: changed}}); err != nil {
+		t.Fatal(err)
+	}
+	edits, used, err := instance.renameEdits(context.Background(), state, snapshots, text.UTF16, "Run", "Execute", locations)
+	if err != nil || len(edits) != 3 {
+		t.Fatalf("edits=%#v used=%#v error=%v", edits, used, err)
+	}
+	for _, change := range edits {
+		documentEdit := change.(*protocol.TextDocumentEdit)
+		if documentEdit.TextDocument.URI == otherURI && (documentEdit.TextDocument.Version == nil || *documentEdit.TextDocument.Version != 1) {
+			t.Fatalf("rename switched to current snapshot version=%#v", documentEdit.TextDocument.Version)
+		}
+	}
+	current, err := document.workspaceNavigationCurrent(context.Background(), state, target, used...)
+	if err == nil || current || !errors.Is(err, protocol.ErrContentModified) {
+		t.Fatalf("current=%t error=%v", current, err)
 	}
 }
 

@@ -172,7 +172,7 @@ func (document *navigationDocument) checkWorkspaceTarget(ctx context.Context, ta
 	return nil
 }
 
-func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget) (bool, error) {
+func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, snapshots ...*text.Snapshot) (bool, error) {
 	if hook := document.server.beforeWorkspaceIdentityCheck; hook != nil {
 		hook()
 	}
@@ -181,14 +181,19 @@ func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Conte
 	if err := document.checkWorkspaceTarget(ctx, target); err != nil {
 		return false, err
 	}
+	for _, snapshot := range snapshots {
+		if snapshot == nil || snapshot == target.openSnapshot || snapshot == document.snapshot {
+			continue
+		}
+		current, ok := document.server.documents.Snapshot(snapshot.URI())
+		if !ok || current != snapshot {
+			return false, protocol.ErrContentModified
+		}
+	}
 	document.server.workspaceMu.Lock()
 	current := document.server.workspaceIdentityCurrentLocked(state.identity)
 	document.server.workspaceMu.Unlock()
 	return current, nil
-}
-
-func (document *navigationDocument) workspaceReferences(ctx context.Context, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
-	return document.workspaceReferencesInState(ctx, document.server.captureWorkspaceNavigationState(), target, includeDeclaration)
 }
 
 func (document *navigationDocument) workspaceReferencesInState(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
