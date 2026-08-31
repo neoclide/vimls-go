@@ -257,7 +257,8 @@ func (i *Index) Source(path string) (string, bool) {
 	return file.source, true
 }
 
-// Revision changes after every successful Replace or effective Remove.
+// Revision changes after every observable index state change: a successful
+// Replace, an effective Remove, or a complete-state transition.
 func (i *Index) Revision() uint64 {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -380,7 +381,12 @@ func globalNameConflictDiagnostic(event analysis.NameDeclarationEvent) syntax.Di
 // this value is false.
 func (i *Index) SetComplete(complete bool) {
 	i.mu.Lock()
+	if i.complete == complete {
+		i.mu.Unlock()
+		return
+	}
 	i.complete = complete
+	i.revision++
 	i.mu.Unlock()
 }
 

@@ -383,25 +383,45 @@ func TestIndexRevisionTracksSuccessfulChanges(t *testing.T) {
 	if got := index.Revision(); got != 0 {
 		t.Fatalf("initial revision = %d", got)
 	}
-	index.Remove(path)
+	index.SetComplete(false)
 	if got := index.Revision(); got != 0 {
+		t.Fatalf("unchanged incomplete revision = %d", got)
+	}
+	index.SetComplete(true)
+	if got := index.Revision(); got != 1 {
+		t.Fatalf("complete revision = %d", got)
+	}
+	index.SetComplete(true)
+	if got := index.Revision(); got != 1 {
+		t.Fatalf("unchanged complete revision = %d", got)
+	}
+	index.Remove(path)
+	if got := index.Revision(); got != 1 {
 		t.Fatalf("no-op remove revision = %d", got)
 	}
 	if err := index.Replace(path, file); err != nil {
 		t.Fatal(err)
 	}
-	if got := index.Revision(); got != 1 {
+	if got := index.Revision(); got != 2 {
 		t.Fatalf("replace revision = %d", got)
 	}
 	if err := index.Replace(filepath.Join(root, "other.vim"), file); !errors.Is(err, ErrIndexLimit) {
 		t.Fatalf("rejected replace error = %v", err)
 	}
-	if got := index.Revision(); got != 1 {
+	if got := index.Revision(); got != 2 {
 		t.Fatalf("rejected replace revision = %d", got)
 	}
 	index.Remove(path)
-	if got := index.Revision(); got != 2 {
+	if got := index.Revision(); got != 3 {
 		t.Fatalf("remove revision = %d", got)
+	}
+	index.SetComplete(false)
+	if got := index.Revision(); got != 4 {
+		t.Fatalf("incomplete revision = %d", got)
+	}
+	index.SetComplete(false)
+	if got := index.Revision(); got != 4 {
+		t.Fatalf("unchanged incomplete revision = %d", got)
 	}
 }
 
