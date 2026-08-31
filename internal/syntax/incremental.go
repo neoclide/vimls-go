@@ -141,8 +141,12 @@ func physicalLineStart(source string, offset int) bool {
 }
 
 func appendParsedUnits(result *File, source string, dialect Dialect, start, end int) bool {
+	firstLine := true
 	for start < end {
-		_, next := physicalLineEnd(source, start)
+		lineEnd, next := physicalLineEnd(source, start)
+		if !firstLine && leadingContinuation(source, skipSpace(source, start, lineEnd), lineEnd, dialect) {
+			return false
+		}
 		if next > end {
 			next = end
 		}
@@ -155,8 +159,22 @@ func appendParsedUnits(result *File, source string, dialect Dialect, start, end 
 		result.Tokens = append(result.Tokens, parsed.Tokens...)
 		result.Diagnostics = append(result.Diagnostics, parsed.Diagnostics...)
 		start = next
+		firstLine = false
 	}
 	return true
+}
+
+func leadingContinuation(source string, first, end int, dialect Dialect) bool {
+	if first >= end {
+		return false
+	}
+	if source[first] == '\\' {
+		return true
+	}
+	if dialect == Vim9 {
+		return vim9ContinuationComment(source, first, end) || source[first] == '|' && (first+1 >= end || source[first+1] != '|')
+	}
+	return legacyContinuationComment(source, first, end)
 }
 
 func parsedRangeIndependent(file *File, start, end int) bool {

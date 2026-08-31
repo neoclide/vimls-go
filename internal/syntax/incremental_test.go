@@ -411,6 +411,52 @@ func TestParseUnitsKeepMultilineOwnersTogether(t *testing.T) {
 	}
 }
 
+func TestReparseFallsBackForLeadingContinuation(t *testing.T) {
+	tests := []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{
+			name: "legacy slash",
+			old:  "echo 1\nlet stable = 2\nlet tail = 3\n",
+			new:  "echo 1\n\\ 2\nlet stable = 2\nlet tail = 3\n",
+		},
+		{
+			name: "legacy continuation comment",
+			old:  "echo 1\nlet stable = 2\nlet tail = 3\n",
+			new:  "echo 1\n\"\\ comment\nlet stable = 2\nlet tail = 3\n",
+		},
+		{
+			name: "vim9 leading bar",
+			old:  "vim9script\necho 1\nvar stable = 2\nvar tail = 3\n",
+			new:  "vim9script\necho 1\n| echo 2\nvar stable = 2\nvar tail = 3\n",
+		},
+		{
+			name: "vim9 continuation comment",
+			old:  "vim9script\necho 1\nvar stable = 2\nvar tail = 3\n",
+			new:  "vim9script\necho 1\n#\\ comment\nvar stable = 2\nvar tail = 3\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := checkIncrementalParser(t, Reparse, incrementalEditCase{name: test.name, old: test.old, new: test.new})
+			if len(got.Diagnostics) != 0 {
+				t.Fatalf("unexpected diagnostics: %#v", got.Diagnostics)
+			}
+			if got.incremental == nil || got.incremental.reused != 0 || got.incremental.parsed != 0 {
+				t.Fatalf("expected full fallback, metadata = %#v", got.incremental)
+			}
+		})
+	}
+}
+
+func TestLeadingContinuationDoesNotMatchDoubleBar(t *testing.T) {
+	if leadingContinuation("|| echo 2", 0, len("|| echo 2"), Vim9) {
+		t.Fatal("ordinary Vim9 || must not be treated as a leading-bar continuation")
+	}
+}
+
 func TestParseUnitScannerState(t *testing.T) {
 	file := Parse("scriptversion 4\ndef Func()\n  var value = 1\nenddef\necho 'after'\n")
 	if len(file.incremental.units) < 5 {
