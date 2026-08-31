@@ -7402,9 +7402,7 @@ func TestAnalyzeE1346MissingImplementedInterfaceDiagnostics(t *testing.T) {
 
 	for _, test := range []struct{ name, source string }{
 		{"valid interface", "vim9script\ninterface Face\nendinterface\nclass A implements Face\nendclass\n"},
-		{"resolved class", "vim9script\nclass Base\nendclass\nclass A implements Base\nendclass\n"},
 		{"resolved class stops later missing", "vim9script\nclass Base\nendclass\nclass A implements Base, Missing\nendclass\n"},
-		{"resolved variable", "vim9script\nvar Face = 1\nclass A implements Face\nendclass\n"},
 		{"import namespace", "vim9script\nimport './face.vim' as Imported\nclass A implements Imported.Face\nendclass\n"},
 		{"import namespace stops later missing", "vim9script\nimport './face.vim' as Imported\nclass A implements Imported.Face, Missing\nendclass\n"},
 		{"Legacy", "class A implements Missing\nendclass\n"},
@@ -7426,6 +7424,95 @@ func TestAnalyzeE1346MissingImplementedInterfaceDiagnostics(t *testing.T) {
 		if diagnostic.Code == "vim/E1346" {
 			t.Fatalf("header diagnostic unexpectedly retained E1346: %#v", diagnostic)
 		}
+	}
+}
+
+func TestAnalyzeE1347NotValidInterfaceDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, message string }{
+		{"prior class", "vim9script\nclass Base\nendclass\nclass A implements Base\nendclass\n", "Not a valid interface: Base"},
+		{"self class", "vim9script\nclass A implements A\nendclass\n", "Not a valid interface: A"},
+		{"enum", "vim9script\nenum Numbers\n  One\nendenum\nclass A implements Numbers\nendclass\n", "Not a valid interface: Numbers"},
+		{"type alias", "vim9script\ntype Face = number\nclass A implements Face\nendclass\n", "Not a valid interface: Face"},
+		{"function", "vim9script\ndef Check()\nenddef\nclass A implements Check\nendclass\n", "Not a valid interface: Check"},
+		{"import alias", "vim9script\nimport './face.vim' as Imported\nclass A implements Imported\nendclass\n", "Not a valid interface: Imported"},
+		{"explicit number variable", "vim9script\nvar Face: number\nclass A implements Face\nendclass\n", "Not a valid interface: Face"},
+		{"inferred number variable", "vim9script\nvar Face = 1\nclass A implements Face\nendclass\n", "Not a valid interface: Face"},
+		{"interface object variable", "vim9script\ninterface Face\nendinterface\nvar Candidate: Face\nclass A implements Candidate\nendclass\n", "Not a valid interface: Candidate"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var e1347 []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1347" {
+					e1347 = append(e1347, diagnostic)
+					continue
+				}
+				if diagnostic.Code == "vim/E1346" {
+					t.Fatalf("unexpected E1346: %#v\n%s", diagnostic, test.source)
+				}
+			}
+			if len(e1347) != 1 || e1347[0].Message != test.message || file.Text(e1347[0].Span) != "endclass" {
+				t.Fatalf("E1347 diagnostics = %#v; syntax = %#v", result.Diagnostics, file.Diagnostics)
+			}
+		})
+	}
+
+	firstInvalid := []struct{ name, source string }{
+		{"class", "vim9script\nclass Base\nendclass\nclass A implements Base, Missing\nendclass\n"},
+		{"variable", "vim9script\nvar Face: number\nclass A implements Face, Missing\nendclass\n"},
+	}
+	for _, test := range firstInvalid {
+		t.Run("first invalid "+test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1346" || diagnostic.Code == "vim/E1347" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Code != "vim/E1347" {
+				t.Fatalf("unexpected interface diagnostic count = %#v; diagnostics = %#v", got, result.Diagnostics)
+			}
+			if file.Text(got[0].Span) != "endclass" {
+				t.Fatalf("unexpected interface diagnostic span %#v", got[0].Span)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"unresolved retains only E1346", "vim9script\nclass A implements Missing, Later\nendclass\n"},
+		{"unknown variable", "vim9script\nvar Face = UnknownValue\nclass A implements Face, Missing\nendclass\n"},
+		{"qualified import", "vim9script\nimport './face.vim' as Imported\nclass A implements Imported.Face, Missing\nendclass\n"},
+		{"valid interface", "vim9script\ninterface Face\nendinterface\nclass A implements Face\nendclass\n"},
+		{"Legacy", "vim9script\nclass Base\nendclass\nlegacy class A implements Base\nendclass\n"},
+		{"header syntax error", "vim9script\nclass Base\nendclass\nclass A implements Base, Base\nendclass\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			var guard []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1346" || diagnostic.Code == "vim/E1347" {
+					guard = append(guard, diagnostic)
+				}
+			}
+			if test.name == "unresolved retains only E1346" {
+				if len(guard) != 1 {
+					t.Fatalf("expected exactly one interface diagnostic: %#v\n%s", guard, test.source)
+				}
+				if guard[0].Code != "vim/E1346" {
+					t.Fatalf("expected E1346 for unresolved name: %#v\n%s", guard, test.source)
+				}
+				if guard[0].Message != "Interface name not found: Missing" {
+					t.Fatalf("expected unresolved E1346 message: %#v\n%s", guard, test.source)
+				}
+				return
+			}
+			if len(guard) != 0 {
+				t.Fatalf("guard unexpectedly received interface diagnostic: %#v\n%s", guard, test.source)
+			}
+		})
 	}
 }
 

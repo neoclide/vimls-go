@@ -129,7 +129,6 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectAggregateLocalRedeclarationDiagnostics(result)
 	collectDuplicateTypeAliasDiagnostics(result)
-	collectMissingImplementedInterfaceDiagnostics(result)
 	collectUnimplementedAbstractMethodDiagnostics(result)
 	collectMethodAccessLevelDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
@@ -158,6 +157,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
+	collectImplementedInterfaceNameDiagnostics(result)
 	collectVariableTypeMismatchDiagnostics(result)
 	collectVim9DestructuringDiagnostics(result, file.Commands)
 	collectFuncrefVariableNameDiagnostics(result)
@@ -175,7 +175,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	return result
 }
 
-func collectMissingImplementedInterfaceDiagnostics(result *FileAnalysis) {
+func collectImplementedInterfaceNameDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
@@ -206,6 +206,18 @@ func collectMissingImplementedInterfaceDiagnostics(result *FileAnalysis) {
 				if declaration.Kind == SymbolKindInterface {
 					continue
 				}
+				if declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant {
+					if isUnknownType(declaration.Type) {
+						break
+					}
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1347", Message: "Not a valid interface: " + name, Span: aggregateEndSpan(file, class),
+					})
+					break
+				}
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1347", Message: "Not a valid interface: " + name, Span: aggregateEndSpan(file, class),
+				})
 				break
 			}
 			if dot := strings.IndexByte(name, '.'); dot > 0 {

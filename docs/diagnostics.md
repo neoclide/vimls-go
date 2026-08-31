@@ -3602,3 +3602,34 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   emits E1346 only when name lookup fails, and selects E1347 for a resolved
   value that is not an interface.
 - `src/errors.h:3446-3449` defines the exact E1346 and E1347 messages.
+
+## Not a valid interface: E1347
+
+E1347 means `Not a valid interface: {name}`. For a Vim9 class with an
+`implements` clause, analysis reports the closing `endclass` when the first
+resolved name is provably not an interface class value. Same-file classes,
+enums, type aliases, functions, import aliases, and variables with a known
+value type participate. A variable typed as an interface contains an object,
+not the interface declaration itself, so it is also invalid here.
+
+Validation follows source order. A resolved interface permits the next entry
+to be checked; an unresolved entry remains E1346, and either failure stops the
+scan. A variable whose value type remains `any` or unknown, and a qualified
+member of an imported script, remain conservative because same-file analysis
+cannot prove their runtime values. Later entries are not diagnosed after such
+an unknown result.
+
+Class-header syntax errors take priority. Legacy declarations and interface or
+enum aggregates are excluded, while a class naming itself in `implements` is a
+resolved class value and therefore receives E1347.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_interface.vim:334-351` covers a resolved regular class
+  and a number variable, both reported at the closing `endclass`.
+- `src/testdir/test_vim9_class.vim:9706-9715` covers a class attempting to
+  implement itself, and `src/testdir/test_vim9_enum.vim:350-359` covers an
+  enum used as an interface.
+- `src/vim9class.c:835-864` selects E1346 only when lookup fails and E1347 when
+  the resolved value is not an interface.
+- `src/errors.h:3446-3449` defines the exact message.
