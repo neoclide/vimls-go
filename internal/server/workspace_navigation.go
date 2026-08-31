@@ -19,50 +19,77 @@ type workspaceNavigationTarget struct {
 	openSnapshot *text.Snapshot
 }
 
+type workspaceNavigationSnapshot struct {
+	identity workspaceIdentity
+	resolver *workspace.PathResolver
+	index    *workspace.Index
+	roots    []string
+}
+
 func (document *navigationDocument) workspaceTarget() (workspaceNavigationTarget, bool) {
-	resolver, index, _ := document.server.workspaceNavigationState()
-	if resolver == nil || index == nil {
+	return document.workspaceTargetInState(document.server.captureWorkspaceNavigationState())
+}
+
+func (document *navigationDocument) workspaceTargetInState(state workspaceNavigationSnapshot) (workspaceNavigationTarget, bool) {
+	if state.resolver == nil || state.index == nil {
 		return workspaceNavigationTarget{}, false
 	}
 	if document.external != nil {
-		return document.server.resolveWorkspaceReference(resolver, index, *document.external)
+		return document.server.resolveWorkspaceReference(state.resolver, state.index, *document.external)
 	}
-	if document.declaration == nil {
+	target, needsResolver, ok := document.workspaceLocalTarget()
+	if !ok || !needsResolver {
+		return target, ok
+	}
+	if state.resolver == nil {
 		return workspaceNavigationTarget{}, false
+	}
+	path, _ := workspaceURIPath(uri.URI(document.snapshot.URI()))
+	resolution := state.resolver.ResolveAutoload(target.match.Fact.Name)
+	return target, resolution.Path != "" && sameWorkspacePath(resolution.Path, path)
+}
+
+func (document *navigationDocument) workspaceLocalTarget() (workspaceNavigationTarget, bool, bool) {
+	if document.declaration == nil {
+		return workspaceNavigationTarget{}, false, false
 	}
 	path, ok := workspaceURIPath(uri.URI(document.snapshot.URI()))
 	if !ok {
-		return workspaceNavigationTarget{}, false
+		return workspaceNavigationTarget{}, false, false
 	}
 	for _, fact := range workspace.CollectSymbolFacts(path, document.analysis.File) {
 		if fact.SelectionRange != document.declaration.Span || fact.Name != document.declaration.Name {
 			continue
 		}
 		if fact.Exported {
-			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, true
+			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, false, true
 		}
 		if strings.Contains(strings.TrimPrefix(fact.Name, "g:"), "#") {
-			resolution := resolver.ResolveAutoload(fact.Name)
-			if resolution.Path != "" && sameWorkspacePath(resolution.Path, path) {
-				return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, true
-			}
+			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, true, true
 		}
 	}
-	return workspaceNavigationTarget{}, false
+	return workspaceNavigationTarget{}, false, false
+}
+
+func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
+	s.workspaceMu.Lock()
+	roots := append([]string(nil), s.runtimePaths...)
+	if len(roots) == 0 {
+		roots = append([]string(nil), s.workspaceRoots...)
+	}
+	state := workspaceNavigationSnapshot{
+		identity: s.workspaceIdentityLocked(),
+		resolver: s.workspaceResolver,
+		index:    s.workspaceIndex,
+		roots:    roots,
+	}
+	s.workspaceMu.Unlock()
+	return state
 }
 
 func (s *Server) workspaceNavigationState() (*workspace.PathResolver, *workspace.Index, []string) {
-	s.workspaceMu.Lock()
-	workspaceRoots := append([]string(nil), s.workspaceRoots...)
-	runtimePaths := append([]string(nil), s.runtimePaths...)
-	index := s.workspaceIndex
-	resolver := s.workspaceResolver
-	s.workspaceMu.Unlock()
-	searchPaths := runtimePaths
-	if len(searchPaths) == 0 {
-		searchPaths = workspaceRoots
-	}
-	return resolver, index, searchPaths
+	state := s.captureWorkspaceNavigationState()
+	return state.resolver, state.index, state.roots
 }
 
 func (s *Server) resolveWorkspaceReference(resolver *workspace.PathResolver, index *workspace.Index, reference workspace.ExternalReferenceFact) (workspaceNavigationTarget, bool) {
@@ -145,9 +172,27 @@ func (document *navigationDocument) checkWorkspaceTarget(ctx context.Context, ta
 	return nil
 }
 
+func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget) (bool, error) {
+	if hook := document.server.beforeWorkspaceIdentityCheck; hook != nil {
+		hook()
+	}
+	document.server.publishMu.Lock()
+	defer document.server.publishMu.Unlock()
+	if err := document.checkWorkspaceTarget(ctx, target); err != nil {
+		return false, err
+	}
+	document.server.workspaceMu.Lock()
+	current := document.server.workspaceIdentityCurrentLocked(state.identity)
+	document.server.workspaceMu.Unlock()
+	return current, nil
+}
+
 func (document *navigationDocument) workspaceReferences(ctx context.Context, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
-	resolver, index, roots := document.server.workspaceNavigationState()
-	if resolver == nil || index == nil {
+	return document.workspaceReferencesInState(ctx, document.server.captureWorkspaceNavigationState(), target, includeDeclaration)
+}
+
+func (document *navigationDocument) workspaceReferencesInState(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
+	if state.resolver == nil || state.index == nil {
 		return []protocol.Location{}, document.checkCurrent(ctx)
 	}
 	locations := make([]protocol.Location, 0)
@@ -176,19 +221,19 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 		names = append(names, trimmedName)
 	}
 	if target.match.Fact.Exported {
-		if autoloadName, ok := workspaceAutoloadName(target.match.Fact.Path, target.match.Fact.Name, roots); ok {
+		if autoloadName, ok := workspaceAutoloadName(target.match.Fact.Path, target.match.Fact.Name, state.roots); ok {
 			names = append(names, autoloadName)
 		}
 	}
 	seenCandidates := make(map[workspace.ExternalReferenceFact]bool)
 	candidateSnapshots := make(map[string]*text.Snapshot)
 	for _, name := range names {
-		for _, candidate := range index.ExternalReferences(name) {
+		for _, candidate := range state.index.ExternalReferences(name) {
 			if seenCandidates[candidate.Fact] {
 				continue
 			}
 			seenCandidates[candidate.Fact] = true
-			if !workspaceReferenceMatchesTarget(resolver, candidate.Fact, target) {
+			if !workspaceReferenceMatchesTarget(state.resolver, candidate.Fact, target) {
 				continue
 			}
 			candidateURI := uri.File(candidate.Fact.Path)
@@ -206,7 +251,7 @@ func (document *navigationDocument) workspaceReferences(ctx context.Context, tar
 		}
 	}
 	if document.external != nil && !seenCandidates[*document.external] {
-		if workspaceReferenceMatchesTarget(resolver, *document.external, target) {
+		if workspaceReferenceMatchesTarget(state.resolver, *document.external, target) {
 			if location, ok := document.location(document.external.Span); ok {
 				locations = append(locations, location)
 			}

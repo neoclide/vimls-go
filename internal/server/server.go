@@ -122,6 +122,8 @@ type Server struct {
 	initialized              bool
 	watchWG                  sync.WaitGroup
 	workspaceConfiguration   bool
+
+	beforeWorkspaceIdentityCheck func()
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {

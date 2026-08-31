@@ -110,35 +110,49 @@ func (s *Server) Definition(ctx context.Context, params *protocol.DefinitionPara
 }
 
 func (s *Server) definitionLocations(ctx context.Context, params protocol.TextDocumentPositionParams) (protocol.LocationSlice, error) {
-	document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
-	if err != nil || document == nil {
-		return protocol.LocationSlice{}, err
-	}
-	if document.external != nil {
-		target, ok := document.workspaceTarget()
-		if !ok {
-			return protocol.LocationSlice{}, document.checkCurrent(ctx)
+	for attempt := range 2 {
+		document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
+		if err != nil || document == nil {
+			return protocol.LocationSlice{}, err
 		}
-		location, ok := document.server.workspaceTargetLocation(target, document.encoding)
-		if !ok {
-			return protocol.LocationSlice{}, document.checkCurrent(ctx)
+		if document.external == nil {
+			if document.declaration == nil {
+				return protocol.LocationSlice{}, nil
+			}
+			location, ok := document.location(document.declaration.Span)
+			if !ok {
+				return protocol.LocationSlice{}, document.checkCurrent(ctx)
+			}
+			if err := document.checkCurrent(ctx); err != nil {
+				return nil, err
+			}
+			return protocol.LocationSlice{location}, nil
 		}
-		if err := document.checkWorkspaceTarget(ctx, target); err != nil {
+		state := s.captureWorkspaceNavigationState()
+		target, ok := document.workspaceTargetInState(state)
+		if ok {
+			location, valid := document.server.workspaceTargetLocation(target, document.encoding)
+			if !valid {
+				ok = false
+			} else if current, err := document.workspaceNavigationCurrent(ctx, state, target); err != nil {
+				return nil, err
+			} else if current {
+				return protocol.LocationSlice{location}, nil
+			} else if attempt == 1 {
+				return nil, protocol.ErrContentModified
+			} else {
+				continue
+			}
+		}
+		if current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); err != nil {
 			return nil, err
+		} else if current {
+			return protocol.LocationSlice{}, nil
+		} else if attempt == 1 {
+			return nil, protocol.ErrContentModified
 		}
-		return protocol.LocationSlice{location}, nil
 	}
-	if document.declaration == nil {
-		return protocol.LocationSlice{}, nil
-	}
-	location, ok := document.location(document.declaration.Span)
-	if !ok {
-		return protocol.LocationSlice{}, document.checkCurrent(ctx)
-	}
-	if err := document.checkCurrent(ctx); err != nil {
-		return nil, err
-	}
-	return protocol.LocationSlice{location}, nil
+	return nil, protocol.ErrContentModified
 }
 
 func (s *Server) Declaration(ctx context.Context, params *protocol.DeclarationParams) (protocol.DeclarationResult, error) {
@@ -146,78 +160,115 @@ func (s *Server) Declaration(ctx context.Context, params *protocol.DeclarationPa
 }
 
 func (s *Server) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
-	document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
-	if err != nil || document == nil {
-		return []protocol.Location{}, err
-	}
-	if target, ok := document.workspaceTarget(); ok {
-		locations, err := document.workspaceReferences(ctx, target, params.Context.IncludeDeclaration)
-		if err != nil {
+	for attempt := range 2 {
+		document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
+		if err != nil || document == nil {
+			return []protocol.Location{}, err
+		}
+		workspaceAttempt := document.external != nil
+		if !workspaceAttempt {
+			_, _, workspaceAttempt = document.workspaceLocalTarget()
+		}
+		if workspaceAttempt {
+			state := s.captureWorkspaceNavigationState()
+			target, ok := document.workspaceTargetInState(state)
+			if ok {
+				locations, err := document.workspaceReferencesInState(ctx, state, target, params.Context.IncludeDeclaration)
+				if err != nil {
+					return nil, err
+				}
+				if current, err := document.workspaceNavigationCurrent(ctx, state, target); err != nil {
+					return nil, err
+				} else if current {
+					return locations, nil
+				} else if attempt == 1 {
+					return nil, protocol.ErrContentModified
+				} else {
+					continue
+				}
+			}
+			if current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); err != nil {
+				return nil, err
+			} else if !current {
+				if attempt == 1 {
+					return nil, protocol.ErrContentModified
+				}
+				continue
+			}
+		}
+		if document.declaration == nil {
+			return []protocol.Location{}, nil
+		}
+		spans := document.occurrences(params.Context.IncludeDeclaration)
+		locations := make([]protocol.Location, 0, len(spans))
+		for _, span := range spans {
+			if location, ok := document.location(span); ok {
+				locations = append(locations, location)
+			}
+		}
+		if err := document.checkCurrent(ctx); err != nil {
 			return nil, err
 		}
 		return locations, nil
 	}
-	if document.declaration == nil {
-		return []protocol.Location{}, nil
-	}
-	spans := document.occurrences(params.Context.IncludeDeclaration)
-	locations := make([]protocol.Location, 0, len(spans))
-	for _, span := range spans {
-		if location, ok := document.location(span); ok {
-			locations = append(locations, location)
-		}
-	}
-	if err := document.checkCurrent(ctx); err != nil {
-		return nil, err
-	}
-	return locations, nil
+	return nil, protocol.ErrContentModified
 }
 
 func (s *Server) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
-	document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
-	if err != nil || document == nil {
-		return []protocol.DocumentHighlight{}, err
-	}
-	if document.external != nil {
-		target, ok := document.workspaceTarget()
-		if !ok {
-			return []protocol.DocumentHighlight{}, document.checkCurrent(ctx)
+	for attempt := range 2 {
+		document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
+		if err != nil || document == nil {
+			return []protocol.DocumentHighlight{}, err
 		}
-		resolver, _, _ := document.server.workspaceNavigationState()
-		if resolver == nil {
-			return []protocol.DocumentHighlight{}, document.checkCurrent(ctx)
-		}
-		path, ok := workspaceURIPath(uri.URI(document.snapshot.URI()))
-		if !ok {
-			return []protocol.DocumentHighlight{}, document.checkCurrent(ctx)
-		}
-		highlights := make([]protocol.DocumentHighlight, 0)
-		for _, reference := range workspace.CollectExternalReferencesFromAnalysis(path, document.analysis.File, document.analysis) {
-			if workspaceReferenceMatchesTarget(resolver, reference, target) {
-				if rangeValue, ok := protocolRange(document.snapshot, document.encoding, reference.Span); ok {
+		if document.external == nil {
+			if document.declaration == nil {
+				return []protocol.DocumentHighlight{}, nil
+			}
+			spans := document.occurrences(true)
+			highlights := make([]protocol.DocumentHighlight, 0, len(spans))
+			for _, span := range spans {
+				if rangeValue, ok := protocolRange(document.snapshot, document.encoding, span); ok {
 					highlights = append(highlights, protocol.DocumentHighlight{Range: rangeValue, Kind: protocol.DocumentHighlightKindText})
 				}
 			}
+			if err := document.checkCurrent(ctx); err != nil {
+				return nil, err
+			}
+			return highlights, nil
 		}
-		if err := document.checkWorkspaceTarget(ctx, target); err != nil {
+		state := s.captureWorkspaceNavigationState()
+		target, ok := document.workspaceTargetInState(state)
+		if ok && state.resolver != nil {
+			path, valid := workspaceURIPath(uri.URI(document.snapshot.URI()))
+			if valid {
+				highlights := make([]protocol.DocumentHighlight, 0)
+				for _, reference := range workspace.CollectExternalReferencesFromAnalysis(path, document.analysis.File, document.analysis) {
+					if workspaceReferenceMatchesTarget(state.resolver, reference, target) {
+						if rangeValue, ok := protocolRange(document.snapshot, document.encoding, reference.Span); ok {
+							highlights = append(highlights, protocol.DocumentHighlight{Range: rangeValue, Kind: protocol.DocumentHighlightKindText})
+						}
+					}
+				}
+				if current, err := document.workspaceNavigationCurrent(ctx, state, target); err != nil {
+					return nil, err
+				} else if current {
+					return highlights, nil
+				} else if attempt == 1 {
+					return nil, protocol.ErrContentModified
+				} else {
+					continue
+				}
+			}
+		}
+		if current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); err != nil {
 			return nil, err
-		}
-		return highlights, nil
-	}
-	if document.declaration == nil {
-		return []protocol.DocumentHighlight{}, nil
-	}
-	spans := document.occurrences(true)
-	highlights := make([]protocol.DocumentHighlight, 0, len(spans))
-	for _, span := range spans {
-		if rangeValue, ok := protocolRange(document.snapshot, document.encoding, span); ok {
-			highlights = append(highlights, protocol.DocumentHighlight{Range: rangeValue, Kind: protocol.DocumentHighlightKindText})
+		} else if current {
+			return []protocol.DocumentHighlight{}, nil
+		} else if attempt == 1 {
+			return nil, protocol.ErrContentModified
 		}
 	}
-	if err := document.checkCurrent(ctx); err != nil {
-		return nil, err
-	}
-	return highlights, nil
+	return nil, protocol.ErrContentModified
 }
 
 func (document *navigationDocument) occurrences(includeDeclaration bool) []syntax.Span {
@@ -235,32 +286,51 @@ func (document *navigationDocument) occurrences(includeDeclaration bool) []synta
 }
 
 func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
-	document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
-	if err != nil || document == nil {
-		return nil, err
-	}
-	if document.external != nil {
-		target, ok := document.workspaceTarget()
-		if !ok {
-			return nil, document.checkCurrent(ctx)
-		}
-		lines := []string{"name: " + target.match.Fact.Name, "kind: " + string(target.match.Fact.Kind)}
-		_, declaration := s.analyzeWorkspaceTarget(target)
-		if declaration != nil && declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
-			lines = append(lines, "type: "+formatValueType(declaration.Type))
-		}
-		rangeValue, ok := protocolRange(document.snapshot, document.encoding, document.occurrence)
-		if !ok {
-			return nil, document.checkCurrent(ctx)
-		}
-		if err := document.checkWorkspaceTarget(ctx, target); err != nil {
+	for attempt := range 2 {
+		document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
+		if err != nil || document == nil {
 			return nil, err
 		}
-		return &protocol.Hover{
-			Contents: &protocol.MarkupContent{Kind: protocol.MarkupKindPlainText, Value: strings.Join(lines, "\n")},
-			Range:    &rangeValue,
-		}, nil
+		if document.external != nil {
+			state := s.captureWorkspaceNavigationState()
+			target, ok := document.workspaceTargetInState(state)
+			if ok {
+				lines := []string{"name: " + target.match.Fact.Name, "kind: " + string(target.match.Fact.Kind)}
+				_, declaration := s.analyzeWorkspaceTarget(target)
+				if declaration != nil && declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
+					lines = append(lines, "type: "+formatValueType(declaration.Type))
+				}
+				rangeValue, valid := protocolRange(document.snapshot, document.encoding, document.occurrence)
+				if valid {
+					if current, err := document.workspaceNavigationCurrent(ctx, state, target); err != nil {
+						return nil, err
+					} else if current {
+						return &protocol.Hover{
+							Contents: &protocol.MarkupContent{Kind: protocol.MarkupKindPlainText, Value: strings.Join(lines, "\n")},
+							Range:    &rangeValue,
+						}, nil
+					} else if attempt == 1 {
+						return nil, protocol.ErrContentModified
+					} else {
+						continue
+					}
+				}
+			}
+			if current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); err != nil {
+				return nil, err
+			} else if current {
+				return nil, nil
+			} else if attempt == 1 {
+				return nil, protocol.ErrContentModified
+			}
+			continue
+		}
+		return s.localHover(ctx, document)
 	}
+	return nil, protocol.ErrContentModified
+}
+
+func (s *Server) localHover(ctx context.Context, document *navigationDocument) (*protocol.Hover, error) {
 	if document.declaration == nil {
 		call := callAt(document.analysis.File, document.occurrence.Start)
 		if call == nil || len(call.Children) == 0 || call.Children[0].Span != document.occurrence {

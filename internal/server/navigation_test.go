@@ -142,6 +142,22 @@ func TestNavigationUsesNegotiatedPositionEncoding(t *testing.T) {
 	}
 }
 
+func TestReferencesStayPureLocalWithoutWorkspaceIdentityCheck(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 2, Character: 6},
+		},
+		Context: protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil || checks != 0 || len(references) != 2 {
+		t.Fatalf("references=%#v checks=%d error=%v", references, checks, err)
+	}
+}
+
 func TestNavigationReturnsEmptyForUnavailableTargets(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho dynamic\n")
 	unknown := protocol.TextDocumentPositionParams{
@@ -677,6 +693,134 @@ func TestCrossFileIndexFollowsBoundedStaticImports(t *testing.T) {
 	locations := definition.(protocol.LocationSlice)
 	if len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(2, 11, 14) {
 		t.Fatalf("transitive import definition = %#v", definition)
+	}
+}
+
+func TestWorkspaceIdentityNavigationRetriesCurrentResult(t *testing.T) {
+	tests := []struct {
+		name string
+		want int
+		run  func(*Server, protocol.TextDocumentPositionParams) (int, error)
+	}{
+		{name: "definition", want: 1, run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+			return len(result.(protocol.LocationSlice)), err
+		}},
+		{name: "declaration", want: 1, run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: position})
+			return len(result.(protocol.LocationSlice)), err
+		}},
+		{name: "references", want: 2, run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: position, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+			return len(result), err
+		}},
+		{name: "document highlight", want: 1, run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: position})
+			return len(result), err
+		}},
+		{name: "hover", want: 1, run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position})
+			if result == nil {
+				return 0, err
+			}
+			return 1, err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
+			checks := 0
+			instance.beforeWorkspaceIdentityCheck = func() {
+				checks++
+				if checks == 1 {
+					instance.workspaceMu.Lock()
+					instance.workspaceRevision++
+					instance.workspaceMu.Unlock()
+				}
+			}
+			count, err := test.run(instance, position)
+			if err != nil || checks != 2 || count != test.want {
+				t.Fatalf("result count=%d checks=%d error=%v", count, checks, err)
+			}
+		})
+	}
+}
+
+func TestWorkspaceIdentityNavigationDropsSecondStaleResult(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*Server, protocol.TextDocumentPositionParams) (int, error)
+	}{
+		{name: "definition", run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+			if result == nil {
+				return 0, err
+			}
+			return len(result.(protocol.LocationSlice)), err
+		}},
+		{name: "references", run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: position, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+			return len(result), err
+		}},
+		{name: "document highlight", run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: position})
+			return len(result), err
+		}},
+		{name: "hover", run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position})
+			if result == nil {
+				return 0, err
+			}
+			return 1, err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
+			checks := 0
+			instance.beforeWorkspaceIdentityCheck = func() {
+				checks++
+				instance.workspaceMu.Lock()
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			}
+			count, err := test.run(instance, position)
+			if !errors.Is(err, protocol.ErrContentModified) || count != 0 || checks != 2 {
+				t.Fatalf("result count=%d checks=%d error=%v", count, checks, err)
+			}
+		})
+	}
+}
+
+func TestWorkspaceIdentityNavigationValidatesMiss(t *testing.T) {
+	instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		instance.workspaceMu.Lock()
+		instance.workspaceRevision++
+		instance.workspaceMu.Unlock()
+	}
+	result, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	locations, ok := result.(protocol.LocationSlice)
+	if !errors.Is(err, protocol.ErrContentModified) || !ok || len(locations) != 0 || checks != 2 {
+		t.Fatalf("result=%#v checks=%d error=%v", result, checks, err)
+	}
+}
+
+func openWorkspaceNavigationRetryDocument(t *testing.T, source string) (*Server, uri.URI, protocol.TextDocumentPositionParams) {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\n")
+	mainPath := writeWorkspaceFile(t, root, "main.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForWorkspaceSymbols(t, instance, "Run", 1)
+	return instance, documentURI, protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: uint32(strings.Count(source[:strings.Index(source, "Run")], "\n")), Character: 9},
 	}
 }
 
