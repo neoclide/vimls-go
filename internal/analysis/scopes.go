@@ -118,6 +118,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	// permits, without making variables forward-visible.
 	collectEmbeddedDeclarations(result, root, file.Commands)
 	collectLambdaDeclarations(result, file.Commands)
+	collectVim9LegacyScriptVariableDiagnostics(result)
 
 	// A malformed or partially parsed enum value may remain an opaque command.
 	// The enum block is still authoritative for its one-name-per-line members.
@@ -181,6 +182,41 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectVim9LegacyScriptVariableDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil || result.File.Dialect != syntax.Vim9 || result.Root == nil {
+		return
+	}
+	file := result.File
+	scriptItems := make(map[string]bool)
+	for _, declaration := range result.Root.Declarations {
+		if declaration != nil {
+			scriptItems[declaration.Name] = true
+		}
+	}
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Dialect != syntax.Legacy || command.Declaration == nil || command.Declaration.Target == nil {
+			continue
+		}
+		switch command.Canonical {
+		case "let", "const", "final":
+		default:
+			continue
+		}
+		target := command.Declaration.Target
+		if target.Kind != syntax.ExpressionIdentifier || !validNameSpan(file, target.Span) {
+			continue
+		}
+		name := file.Text(target.Span)
+		if len(name) <= len("s:") || !strings.HasPrefix(name, "s:") || scriptItems[name[len("s:"):]] {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vim/E1269", Message: "Cannot create a Vim9 script variable in a function: " + name, Span: target.Span,
+		})
+	}
 }
 
 func collectReturnOutsideFunctionDiagnostics(result *FileAnalysis) {

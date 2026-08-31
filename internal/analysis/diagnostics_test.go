@@ -2544,6 +2544,32 @@ func TestAnalyzeE1166DictionaryRangeUnletDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1269LegacyScriptVariableInFunctionDiagnostics(t *testing.T) {
+	failing := syntax.Parse("vim9script\nfunc Declare()\n  let s:local = 123\nendfunc\nDeclare()\n")
+	var got []syntax.Diagnostic
+	for _, diagnostic := range Analyze(failing).Diagnostics {
+		if diagnostic.Code == "vim/E1269" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Cannot create a Vim9 script variable in a function: s:local" || failing.Text(got[0].Span) != "s:local" {
+		t.Fatalf("E1269 diagnostics = %#v; all diagnostics = %#v", got, Analyze(failing).Diagnostics)
+	}
+
+	guards := []string{
+		"vim9script\nvar res = []\nfunction RetArg(arg)\n  let s:res = a:arg\nendfunction\n",
+		"func Declare()\n  let s:local = 123\nendfunc\n",
+		"vim9script\nvar l = [1]\nfunction Tweak()\n  let s:l[0] = 2\nendfunction\n",
+	}
+	for _, source := range guards {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1269" {
+				t.Fatalf("guard unexpectedly received E1269: %#v in %q", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1260ImportedMemberUnletDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source, span string
