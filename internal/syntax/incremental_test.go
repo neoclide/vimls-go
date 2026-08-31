@@ -49,7 +49,7 @@ type incrementalTextEditResult struct {
 	new  string
 }
 
-type incrementalTextPositionCase struct {
+type incrementalMatrixCase struct {
 	name  string
 	kind  incrementalEditKind
 	edits []incrementalTextEdit
@@ -60,7 +60,7 @@ type incrementalTextPositionGroup struct {
 	name     string
 	position incrementalEditPosition
 	source   string
-	cases    []incrementalTextPositionCase
+	cases    []incrementalMatrixCase
 }
 
 func applyIncrementalTextEdit(source string, edit incrementalTextEdit) string {
@@ -82,10 +82,17 @@ func incrementalTextEditResults(source string, edits []incrementalTextEdit) []in
 
 func incrementalTextEditAt(source, oldText, replacement string) incrementalTextEdit {
 	start := strings.Index(source, oldText)
-	if start < 0 {
-		panic(fmt.Sprintf("incremental edit text %q not found", oldText))
+	if start < 0 || strings.Index(source[start+1:], oldText) >= 0 {
+		panic(fmt.Sprintf("incremental edit text %q is not unique", oldText))
 	}
 	return incrementalTextEdit{start: start, oldEnd: start + len(oldText), replacement: replacement}
+}
+
+func incrementalTextInsertAt(source, target, replacement string) incrementalTextEdit {
+	edit := incrementalTextEditAt(source, target, "")
+	edit.oldEnd = edit.start
+	edit.replacement = replacement
+	return edit
 }
 
 func incrementalFixedWidthSequence(source string, start, width int, replacements []string) []incrementalTextEdit {
@@ -107,8 +114,8 @@ func incrementalFixedWidthSequence(source string, start, width int, replacements
 	return edits
 }
 
-func newIncrementalTextPositionCase(groupName, name string, kind incrementalEditKind, edits []incrementalTextEdit) incrementalTextPositionCase {
-	return incrementalTextPositionCase{name: groupName + ": " + name, kind: kind, edits: edits}
+func newIncrementalMatrixCase(groupName, name string, kind incrementalEditKind, edits []incrementalTextEdit) incrementalMatrixCase {
+	return incrementalMatrixCase{name: groupName + ": " + name, kind: kind, edits: edits}
 }
 
 var incrementalTextPositionGroups = func() []incrementalTextPositionGroup {
@@ -128,12 +135,12 @@ var incrementalTextPositionGroups = func() []incrementalTextPositionGroup {
 			name:     "head",
 			position: incrementalEditHead,
 			source:   head,
-			cases: []incrementalTextPositionCase{
-				newIncrementalTextPositionCase("head", "insert", incrementalInsert, []incrementalTextEdit{{start: strings.Index(head, "中"), oldEnd: strings.Index(head, "中"), replacement: "文"}}),
-				newIncrementalTextPositionCase("head", "delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(head, "\u0301", "")}),
-				newIncrementalTextPositionCase("head", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(head, "😀", "🚀")}),
-				newIncrementalTextPositionCase("head", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(head, "e\u0301", "e")}),
-				newIncrementalTextPositionCase("head", "sequence", incrementalSequence, incrementalFixedWidthSequence(head, strings.Index(head, "😀"), len("😀"), utf8Sequence)),
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("head", "insert", incrementalInsert, []incrementalTextEdit{{start: strings.Index(head, "中"), oldEnd: strings.Index(head, "中"), replacement: "文"}}),
+				newIncrementalMatrixCase("head", "delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(head, "\u0301", "")}),
+				newIncrementalMatrixCase("head", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(head, "😀", "🚀")}),
+				newIncrementalMatrixCase("head", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(head, "e\u0301", "e")}),
+				newIncrementalMatrixCase("head", "sequence", incrementalSequence, incrementalFixedWidthSequence(head, strings.Index(head, "😀"), len("😀"), utf8Sequence)),
 				{name: "head: whole replacement", kind: incrementalLengthReplace, edits: []incrementalTextEdit{{start: 0, oldEnd: len(head), replacement: "\ufefflet whole = \"新😀e\u0301\"\t\n"}}, whole: true},
 			},
 		},
@@ -141,28 +148,82 @@ var incrementalTextPositionGroups = func() []incrementalTextPositionGroup {
 			name:     "middle",
 			position: incrementalEditMiddle,
 			source:   middle,
-			cases: []incrementalTextPositionCase{
-				newIncrementalTextPositionCase("middle", "insert", incrementalInsert, []incrementalTextEdit{{start: strings.Index(middle, "\t") + len("\t"), oldEnd: strings.Index(middle, "\t") + len("\t"), replacement: "x"}}),
-				newIncrementalTextPositionCase("middle", "delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "")}),
-				newIncrementalTextPositionCase("middle", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "center")}),
-				newIncrementalTextPositionCase("middle", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "the-middle")}),
-				newIncrementalTextPositionCase("middle", "sequence", incrementalSequence, incrementalFixedWidthSequence(middle, strings.Index(middle, "2"), len("2"), byteSequence)),
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("middle", "insert", incrementalInsert, []incrementalTextEdit{{start: strings.Index(middle, "\t") + len("\t"), oldEnd: strings.Index(middle, "\t") + len("\t"), replacement: "x"}}),
+				newIncrementalMatrixCase("middle", "delete", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "")}),
+				newIncrementalMatrixCase("middle", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "center")}),
+				newIncrementalMatrixCase("middle", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(middle, "middle", "the-middle")}),
+				newIncrementalMatrixCase("middle", "sequence", incrementalSequence, incrementalFixedWidthSequence(middle, strings.Index(middle, "2"), len("2"), byteSequence)),
 			},
 		},
 		{
 			name:     "EOF",
 			position: incrementalEditEOF,
 			source:   eof,
-			cases: []incrementalTextPositionCase{
-				newIncrementalTextPositionCase("EOF", "insert", incrementalInsert, []incrementalTextEdit{{start: len(eof), oldEnd: len(eof), replacement: "\n"}}),
-				newIncrementalTextPositionCase("EOF", "delete", incrementalDelete, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: ""}}),
-				newIncrementalTextPositionCase("EOF", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: "4"}}),
-				newIncrementalTextPositionCase("EOF", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: "42"}}),
-				newIncrementalTextPositionCase("EOF", "sequence", incrementalSequence, incrementalFixedWidthSequence(eof, len(eof)-1, len("3"), byteSequence)),
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("EOF", "insert", incrementalInsert, []incrementalTextEdit{{start: len(eof), oldEnd: len(eof), replacement: "\n"}}),
+				newIncrementalMatrixCase("EOF", "delete", incrementalDelete, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: ""}}),
+				newIncrementalMatrixCase("EOF", "equal-length replace", incrementalEqualReplace, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: "4"}}),
+				newIncrementalMatrixCase("EOF", "length-changing replace", incrementalLengthReplace, []incrementalTextEdit{{start: len(eof) - 1, oldEnd: len(eof), replacement: "42"}}),
+				newIncrementalMatrixCase("EOF", "sequence", incrementalSequence, incrementalFixedWidthSequence(eof, len(eof)-1, len("3"), byteSequence)),
 			},
 		},
 	}
 }()
+
+type incrementalDialectStateScenario struct {
+	name   string
+	tags   []string
+	source string
+	cases  []incrementalMatrixCase
+}
+
+var incrementalDialectStateScenarios = []incrementalDialectStateScenario{
+	{
+		name: "vim9script insert", tags: []string{"first effective vim9script insert"}, source: "let before = 1\nvar value = 2\n",
+		cases: []incrementalMatrixCase{{name: "vim9script insert", kind: incrementalInsert, edits: []incrementalTextEdit{incrementalTextInsertAt("let before = 1\nvar value = 2\n", "let before", "vim9script\n")}}},
+	},
+	{
+		name: "vim9script delete", tags: []string{"first effective vim9script delete"}, source: "vim9script\nvar value = 2\n",
+		cases: []incrementalMatrixCase{{name: "vim9script delete", kind: incrementalDelete, edits: []incrementalTextEdit{incrementalTextEditAt("vim9script\nvar value = 2\n", "vim9script\n", "")}}},
+	},
+	{
+		name: "vim9script move", tags: []string{"first effective vim9script move"}, source: "vim9script\n\" comment\nlet before = 1\nvar value = 2\n",
+		cases: []incrementalMatrixCase{{name: "vim9script move", kind: incrementalSequence, edits: []incrementalTextEdit{
+			incrementalTextEditAt("vim9script\n\" comment\nlet before = 1\nvar value = 2\n", "vim9script\n", ""),
+			incrementalTextInsertAt("\" comment\nlet before = 1\nvar value = 2\n", "let before", "vim9script\n"),
+		}}},
+	},
+	{
+		name: "cross dialect blocks", tags: []string{"mismatched enddef", "mismatched endfunction"},
+		source: "def LegacyDef()\n  let value = 1\nendfunction\nfunction Vim9Function()\n  var value = 1\nenddef\nlet after = 2\n",
+		cases:  []incrementalMatrixCase{{name: "cross dialect blocks", kind: incrementalEqualReplace, edits: []incrementalTextEdit{incrementalTextEditAt("def LegacyDef()\n  let value = 1\nendfunction\nfunction Vim9Function()\n  var value = 1\nenddef\nlet after = 2\n", "let value = 1\nendfunction", "let value = 2\nendfunction")}}},
+	},
+	{
+		name: "legacy root def", tags: []string{"legacy root def"}, source: "def LegacyDef()\n  let value = 1\nenddef\nlet after = 2\n",
+		cases: []incrementalMatrixCase{{name: "legacy root def", kind: incrementalEqualReplace, edits: []incrementalTextEdit{incrementalTextEditAt("def LegacyDef()\n  let value = 1\nenddef\nlet after = 2\n", "let value = 1", "let value = 2")}}},
+	},
+	{
+		name: "Vim9 root function", tags: []string{"Vim9 root function"}, source: "vim9script\nfunction Vim9Function()\n  var value = 1\nendfunction\nvar after = 2\n",
+		cases: []incrementalMatrixCase{{name: "Vim9 root function", kind: incrementalEqualReplace, edits: []incrementalTextEdit{incrementalTextEditAt("vim9script\nfunction Vim9Function()\n  var value = 1\nendfunction\nvar after = 2\n", "var value = 1", "var value = 2")}}},
+	},
+	{
+		name: "vim9cmd one-shot", tags: []string{"vim9cmd next command"}, source: "vim9cmd var oneShotVim9 = 1\nlet afterVim9cmd = 2\n",
+		cases: []incrementalMatrixCase{{name: "vim9cmd one-shot", kind: incrementalEqualReplace, edits: []incrementalTextEdit{incrementalTextEditAt("vim9cmd var oneShotVim9 = 1\nlet afterVim9cmd = 2\n", "oneShotVim9 = 1", "oneShotVim9 = 2")}}},
+	},
+	{
+		name: "legacy one-shot", tags: []string{"legacy next command"}, source: "vim9script\nlegacy let oneShotLegacy = 1\nvar afterLegacy = 2\n",
+		cases: []incrementalMatrixCase{{name: "legacy one-shot", kind: incrementalEqualReplace, edits: []incrementalTextEdit{incrementalTextEditAt("vim9script\nlegacy let oneShotLegacy = 1\nvar afterLegacy = 2\n", "oneShotLegacy = 1", "oneShotLegacy = 2")}}},
+	},
+	{
+		name: "scriptversion recovery", tags: []string{"scriptversion 1-4", "invalid scriptversion recovery"}, source: "scriptversion 1\nlet value = 1\nlet after = 2\n",
+		cases: []incrementalMatrixCase{{name: "scriptversion recovery", kind: incrementalSequence, edits: incrementalFixedWidthSequence("scriptversion 1\nlet value = 1\nlet after = 2\n", len("scriptversion "), 1, []string{"2", "3", "4", "9", "4"})}},
+	},
+	{
+		name: "length-changing scanner edit", tags: []string{"scanner length-changing replace"}, source: "let before = 1\nlet value = 2\nlet after = 3\n",
+		cases: []incrementalMatrixCase{{name: "length-changing scanner edit", kind: incrementalLengthReplace, edits: []incrementalTextEdit{incrementalTextEditAt("let before = 1\nlet value = 2\nlet after = 3\n", "value = 2", "value = 200")}}},
+	},
+}
 
 var incrementalEditCases = []incrementalEditCase{
 	{name: "legacy tail", old: "let first = 1\nlet last = 2\n", new: "let first = 1\nlet last = 20\n"},
@@ -211,7 +272,7 @@ func TestIncrementalEditMatrixTextPosition(t *testing.T) {
 			}
 			results := incrementalTextEditResults(group.source, test.edits)
 			if test.whole {
-				if len(results) != 1 || results[0].edit.start != 0 || results[0].edit.oldEnd != len(group.source) {
+				if len(results) != 1 || results[0].old == results[0].new || results[0].edit.start != 0 || results[0].edit.oldEnd != len(group.source) {
 					t.Fatalf("%s is not a whole-document replacement: %#v", test.name, test.edits)
 				}
 				continue
@@ -305,16 +366,160 @@ func TestReparseTextPositionMatrix(t *testing.T) {
 	for _, group := range incrementalTextPositionGroups {
 		for _, test := range group.cases {
 			t.Run(test.name, func(t *testing.T) {
-				previous := Parse(group.source)
-				for step, result := range incrementalTextEditResults(group.source, test.edits) {
-					if previous.Source != result.old {
-						t.Fatalf("step %d starts from %q, previous source is %q", step, result.old, previous.Source)
+				runIncrementalMatrix(t, group.source, test)
+			})
+		}
+	}
+}
+
+func TestIncrementalEditMatrixDialectState(t *testing.T) {
+	tags := make(map[string]bool)
+	kinds := make(map[incrementalEditKind]bool)
+	names := make(map[string]bool)
+	for _, scenario := range incrementalDialectStateScenarios {
+		for _, tag := range scenario.tags {
+			tags[tag] = true
+		}
+		for _, test := range scenario.cases {
+			if names[test.name] {
+				t.Fatalf("duplicate dialect matrix case %q", test.name)
+			}
+			names[test.name], kinds[test.kind] = true, true
+			results := incrementalTextEditResults(scenario.source, test.edits)
+			if len(results) == 0 {
+				t.Fatalf("%s has no edits", test.name)
+			}
+			if test.kind == incrementalSequence && len(results) < 2 {
+				t.Fatalf("%s sequence has %d steps, want at least 2", test.name, len(results))
+			}
+			for _, result := range results {
+				if result.old == result.new || result.edit.start < 0 || result.edit.start > result.edit.oldEnd || result.edit.oldEnd > len(result.old) {
+					t.Fatalf("%s has invalid or unchanged step: %#v", test.name, result)
+				}
+				if test.kind != incrementalSequence && !incrementalTextEditKindValid(test.kind, result.edit) || test.kind == incrementalSequence && !incrementalSequenceStepValid(result.edit) {
+					t.Fatalf("%s step does not match edit kind %d: %#v", test.name, test.kind, result.edit)
+				}
+			}
+			if scenario.name == "vim9script move" {
+				lines := strings.Split(results[len(results)-1].new, "\n")
+				if len(lines) < 4 || strings.TrimSpace(lines[0]) != `" comment` || strings.TrimSpace(lines[1]) != "vim9script" || strings.TrimSpace(lines[2]) != "let before = 1" {
+					t.Fatalf("vim9script was not moved to the first effective command: %q", results[len(results)-1].new)
+				}
+			}
+			if scenario.name == "scriptversion recovery" {
+				want := []string{"2", "3", "4", "9", "4"}
+				if len(results) != len(want) {
+					t.Fatalf("scriptversion steps = %d, want %d", len(results), len(want))
+				}
+				for index, result := range results {
+					fields := strings.Fields(strings.Split(result.new, "\n")[0])
+					if len(fields) != 2 || fields[0] != "scriptversion" || fields[1] != want[index] {
+						t.Fatalf("scriptversion step %d = %q, want %s", index, fields, want[index])
 					}
-					previous = checkIncrementalParserFromPrevious(t, Reparse, previous, fmt.Sprintf("%s step %d", test.name, step), result.new)
+				}
+			}
+		}
+	}
+	for _, tag := range []string{"first effective vim9script insert", "first effective vim9script delete", "first effective vim9script move", "legacy root def", "Vim9 root function", "vim9cmd next command", "legacy next command", "scriptversion 1-4", "invalid scriptversion recovery", "mismatched enddef", "mismatched endfunction"} {
+		if !tags[tag] {
+			t.Fatalf("missing dialect scenario %q", tag)
+		}
+	}
+	if len(kinds) != 5 {
+		t.Fatalf("dialect matrix has %d edit kinds, want 5", len(kinds))
+	}
+}
+
+func TestDialectStateASTRecovery(t *testing.T) {
+	for version := byte('1'); version <= '4'; version++ {
+		file := Parse(fmt.Sprintf("scriptversion %c\nlet after = 2\n", version))
+		if got := incrementalDeclaration(t, file, "after"); got.ScriptVersion != version-'0' {
+			t.Fatalf("scriptversion %c after command version = %d", version, got.ScriptVersion)
+		}
+	}
+	invalid := Parse("scriptversion 9\nlet after = 2\n")
+	if got := incrementalDeclaration(t, invalid, "after"); got.ScriptVersion != 1 {
+		t.Fatalf("invalid scriptversion after command version = %d, want 1", got.ScriptVersion)
+	}
+}
+
+func TestIncrementalTextEditAtRejectsOverlappingMatches(t *testing.T) {
+	for _, test := range []struct{ source, target string }{{"aaa", "aa"}, {"aaaa", "aaa"}} {
+		t.Run(test.source+"/"+test.target, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("accepted overlapping target %q in %q", test.target, test.source)
+				}
+			}()
+			_ = incrementalTextEditAt(test.source, test.target, "x")
+		})
+	}
+}
+
+func incrementalSequenceStepValid(edit incrementalTextEdit) bool {
+	for _, kind := range []incrementalEditKind{incrementalInsert, incrementalDelete, incrementalEqualReplace, incrementalLengthReplace} {
+		if incrementalTextEditKindValid(kind, edit) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReparseDialectStateMatrix(t *testing.T) {
+	for _, scenario := range incrementalDialectStateScenarios {
+		for _, test := range scenario.cases {
+			t.Run(test.name, func(t *testing.T) {
+				got := runIncrementalMatrix(t, scenario.source, test)
+				switch scenario.name {
+				case "vim9script insert", "vim9script move":
+					if got.Dialect != Vim9 {
+						t.Fatalf("dialect after %s = %v, want Vim9", scenario.name, got.Dialect)
+					}
+				case "vim9script delete":
+					if got.Dialect != Legacy {
+						t.Fatalf("dialect after delete = %v, want Legacy", got.Dialect)
+					}
+				case "vim9cmd one-shot":
+					vim9 := incrementalDeclaration(t, got, "oneShotVim9")
+					after := incrementalDeclaration(t, got, "afterVim9cmd")
+					if vim9.Dialect != Vim9 || after.Dialect != Legacy {
+						t.Fatalf("vim9cmd dialects = %v, %v", vim9.Dialect, after.Dialect)
+					}
+				case "legacy one-shot":
+					legacy := incrementalDeclaration(t, got, "oneShotLegacy")
+					after := incrementalDeclaration(t, got, "afterLegacy")
+					if legacy.Dialect != Legacy || after.Dialect != Vim9 {
+						t.Fatalf("legacy dialects = %v, %v", legacy.Dialect, after.Dialect)
+					}
+				case "cross dialect blocks":
+					incrementalDeclaration(t, got, "after")
 				}
 			})
 		}
 	}
+}
+
+func incrementalDeclaration(t *testing.T, file *File, name string) *Command {
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration != nil && file.Text(command.Declaration.Name) == name {
+			return command
+		}
+	}
+	t.Fatalf("declaration %q not found", name)
+	return nil
+}
+
+func runIncrementalMatrix(t *testing.T, source string, test incrementalMatrixCase) *File {
+	t.Helper()
+	previous := Parse(source)
+	for step, result := range incrementalTextEditResults(source, test.edits) {
+		if previous.Source != result.old {
+			t.Fatalf("step %d starts from %q, previous source is %q", step, result.old, previous.Source)
+		}
+		previous = checkIncrementalParserFromPrevious(t, Reparse, previous, fmt.Sprintf("%s step %d", test.name, step), result.new)
+	}
+	return previous
 }
 
 func checkIncrementalParser(t *testing.T, parse func(*File, string) *File, test incrementalEditCase) *File {
