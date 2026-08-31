@@ -54,6 +54,50 @@ func TestVim9MissingEnddefDiagnostic(t *testing.T) {
 	}
 }
 
+func TestMissingEndfunctionDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "Vim9 root legacy function",
+			source: "vim9script\nfunction Some()\n  echo 'test'\n  enfffunc\n",
+		},
+		{
+			name:   "Legacy root function",
+			source: "function Some()\n  echo 'test'\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E126" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Missing :endfunction" || file.Text(got[0].Span) != "function" {
+				t.Fatalf("E126 diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockFunction || file.Blocks[0].End != -1 {
+				t.Fatalf("function recovery block = %#v", file.Blocks)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Some()\nendfunction\n",
+		"vim9script\nfunction Some()\nendfunction\n",
+		"function Some\n",
+		"function Some invalid tail\n",
+		"vim9script\ndef Some()\nenddef\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E126") {
+			t.Fatalf("guard source unexpectedly received E126: %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestVim9NestedRedirDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

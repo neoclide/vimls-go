@@ -4049,3 +4049,22 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/userfunc.c:77-100` validates argument identifiers and reserved Legacy
   names, and `src/userfunc.c:245-545` handles multiline argument recovery.
 - `src/errors.h:302-303` defines the exact E125 message.
+
+## Missing function terminator: E126
+
+E126 means `Missing :endfunction`. Syntax analysis reports it when a parsed
+Legacy `:function` definition remains open at end of file, including a
+`:function` embedded in a Vim9-root script. The diagnostic selects the opening
+command and retains the incomplete function block and its body.
+
+A closed function and a name-only `:function` query remain valid. A malformed
+header keeps its earlier signature diagnostic without an E126 cascade, while
+an unclosed `:def` continues to use E1057.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_func.vim:401-416` distinguishes an unclosed `def`
+  (E1057) from an unclosed `func` (E126) in a Vim9 script.
+- `src/userfunc.c:1054-1061` selects E126 when the open function is not a
+  `:def` and no valid terminator is found.
+- `src/errors.h:304-305` defines the exact E126 message.
