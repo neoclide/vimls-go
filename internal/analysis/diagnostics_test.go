@@ -8557,6 +8557,117 @@ func TestAnalyzeE1359AbstractConstructorDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1360NullObjectDiagnostics(t *testing.T) {
+	class := "class C\n  var value: number\n  def Foo()\n  enddef\nendclass\n"
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{
+			name:   "script method call",
+			source: "vim9script\n" + class + "var o: C\no.Foo()\n",
+			span:   "o",
+		},
+		{
+			name:   "def member read",
+			source: "vim9script\n" + class + "def Use()\n  var o: C\n  echo o.value\nenddef\n",
+			span:   "o",
+		},
+		{
+			name:   "captured script variable",
+			source: "vim9script\n" + class + "var o: C\ndef Use()\n  o.Foo()\nenddef\n",
+			span:   "o",
+		},
+		{
+			name:   "explicit null any",
+			source: "vim9script\ndef Use()\n  var o: any = null_object\n  o.value = 1\nenddef\n",
+			span:   "o",
+		},
+		{
+			name:   "explicit typed null",
+			source: "vim9script\n" + class + "var o: C = null_object\nvar Ref = o.Foo\n",
+			span:   "o",
+		},
+		{
+			name:   "direct null literal",
+			source: "vim9script\nvar Ref = null_object.Foo\n",
+			span:   "null_object",
+		},
+		{
+			name:   "class type alias",
+			source: "vim9script\n" + class + "type Alias = C\nvar o: Alias\no.Foo()\n",
+			span:   "o",
+		},
+		{
+			name:   "generic object type",
+			source: "vim9script\n" + class + "var o: object<C>\no.Foo()\n",
+			span:   "o",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1360" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using a null object" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1360 diagnostics = %#v; syntax = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "constructed object",
+			source: "vim9script\n" + class + "var o = C.new()\no.Foo()\n",
+		},
+		{
+			name:   "assigned object",
+			source: "vim9script\n" + class + "var o: C\no = C.new()\no.Foo()\n",
+		},
+		{
+			name:   "later assignment keeps flow unknown",
+			source: "vim9script\n" + class + "var o: C\no.Foo()\no = C.new()\n",
+		},
+		{
+			name:   "lambda parameter shadows null candidate",
+			source: "vim9script\n" + class + "var o: C\nvar Callback = (o: C) => o.Foo()\n",
+		},
+		{
+			name:   "aggregate member",
+			source: "vim9script\n" + class + "class Holder\n  var o: C\n  def Use()\n    this.o.Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "interprocedural any remains unknown",
+			source: "vim9script\ndef Use(o: any)\n  o.Foo()\nenddef\nUse(null_object)\n",
+		},
+		{
+			name:   "null object as value",
+			source: "vim9script\nvar o = null_object\necho o\n",
+		},
+		{
+			name:   "incomplete member",
+			source: "vim9script\n" + class + "var o: C\no.\n",
+		},
+		{
+			name:   "legacy member",
+			source: "let o = null_object\necho o.value\n",
+		},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1360" {
+					t.Fatalf("unexpected E1360: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

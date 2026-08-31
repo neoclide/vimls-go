@@ -161,6 +161,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
+	collectNullObjectDiagnostics(result)
 	collectExtendedAggregateDiagnostics(result)
 	collectImplementedInterfaceNameDiagnostics(result)
 	collectImplementedInterfaceMembersDiagnostics(result)
@@ -1390,6 +1391,229 @@ func collectAbstractConstructorDiagnostics(result *FileAnalysis) {
 			})
 			break
 		}
+	}
+}
+
+func collectNullObjectDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	declarations := make(map[syntax.Span]*Declaration)
+	for _, declaration := range result.Declarations {
+		if declaration != nil {
+			declarations[declaration.Span] = declaration
+		}
+	}
+	aliases := localTypeAliases(file)
+	var typeDefaultsToNullObject func(*syntax.Type, *Scope, map[syntax.Span]bool) bool
+	typeDefaultsToNullObject = func(typeNode *syntax.Type, scope *Scope, seen map[syntax.Span]bool) bool {
+		if typeNode == nil || scope == nil || typeNode.Kind == syntax.TypeMissing || syntaxDiagnosticOverlaps(file.Diagnostics, typeNode.Span) {
+			return false
+		}
+		if typeNode.Kind == syntax.TypeOptional || typeNode.Kind == syntax.TypeVariadic {
+			return len(typeNode.Arguments) == 1 && typeDefaultsToNullObject(typeNode.Arguments[0], scope, seen)
+		}
+		if typeNode.Kind == syntax.TypeGeneric {
+			return typeNode.Name == "object" && len(typeNode.Arguments) == 1 &&
+				objectTypeArgumentValidity(result, scope, typeNode.Arguments[0], aliases, make(map[syntax.Span]bool)) == objectTypeValid
+		}
+		if typeNode.Kind != syntax.TypeNamed || typeNode.Name == "any" {
+			return false
+		}
+		declaration := resolve(scope, typeNode.Name, typeNode.Span.Start, false, nil)
+		if declaration == nil {
+			return false
+		}
+		switch declaration.Kind {
+		case SymbolKindClass, SymbolKindInterface, SymbolKindEnum:
+			return true
+		case SymbolKindTypeAlias:
+			if seen[declaration.Span] || aliases[declaration.Span] == nil {
+				return false
+			}
+			seen[declaration.Span] = true
+			valid := typeDefaultsToNullObject(aliases[declaration.Span], declaration.Scope, seen)
+			delete(seen, declaration.Span)
+			return valid
+		}
+		return false
+	}
+	isNullObject := func(expression *syntax.Expression) bool {
+		for expression != nil && (expression.Kind == syntax.ExpressionParenthesized || expression.Kind == syntax.ExpressionCast) && len(expression.Children) == 1 {
+			expression = expression.Children[0]
+		}
+		return expression != nil && expression.Kind == syntax.ExpressionIdentifier && strings.EqualFold(expression.Value, "null_object")
+	}
+
+	type scopedExpression struct {
+		expression *syntax.Expression
+		scope      *Scope
+		dialect    syntax.Dialect
+	}
+	var expressions []scopedExpression
+	candidates := make(map[*Declaration]bool)
+	seenLambdas := make(map[*syntax.Expression]bool)
+	var collectCommands func([]syntax.Command, *Scope)
+	var collectLambdaBodies func(*syntax.Expression, *Scope)
+	collectLambdaBodies = func(expression *syntax.Expression, scope *Scope) {
+		if expression == nil {
+			return
+		}
+		expressionScope := scope
+		if expression.Kind == syntax.ExpressionLambda && !seenLambdas[expression] {
+			seenLambdas[expression] = true
+			lambdaScope := result.lambdaScopes[expression]
+			if lambdaScope == nil {
+				lambdaScope = scope
+			}
+			expressionScope = lambdaScope
+			if expression.LambdaBody != nil {
+				collectCommands(expression.LambdaBody.Commands, lambdaScope)
+			}
+		}
+		for index, child := range expression.Children {
+			if expression.Kind != syntax.ExpressionLambda || index >= len(expression.Parameters) {
+				collectLambdaBodies(child, expressionScope)
+			}
+		}
+	}
+	collectCommands = func(commands []syntax.Command, fallback *Scope) {
+		for index := range commands {
+			command := &commands[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = fallback
+			}
+			if command.Dialect == syntax.Vim9 && command.Declaration != nil && len(command.Declaration.Bindings) == 1 {
+				binding := command.Declaration.Bindings[0]
+				declaration := declarations[binding.Name]
+				aggregateMember := declaration != nil && declaration.Scope != nil &&
+					(declaration.Scope.Kind == syntax.BlockClass || declaration.Scope.Kind == syntax.BlockInterface || declaration.Scope.Kind == syntax.BlockEnum)
+				if declaration != nil && declaration.Kind == SymbolKindVariable && !aggregateMember &&
+					!syntaxDiagnosticOverlaps(file.Diagnostics, command.Declaration.Name) {
+					initializer := command.Declaration.Initializer
+					if initializer == nil && typeDefaultsToNullObject(binding.ParsedType, scope, make(map[syntax.Span]bool)) ||
+						isNullObject(initializer) && (binding.ParsedType == nil || convertSyntaxType(binding.ParsedType).Name == "any" || typeDefaultsToNullObject(binding.ParsedType, scope, make(map[syntax.Span]bool))) {
+						candidates[declaration] = true
+					}
+				}
+			}
+			appendExpression := func(expression *syntax.Expression) {
+				if expression != nil {
+					expressions = append(expressions, scopedExpression{expression: expression, scope: scope, dialect: command.Dialect})
+					collectLambdaBodies(expression, scope)
+				}
+			}
+			for _, expression := range command.Expressions {
+				appendExpression(expression)
+			}
+			for _, expression := range command.Targets {
+				appendExpression(expression)
+			}
+			if command.Mapping != nil {
+				appendExpression(command.Mapping.RHSExpression)
+			}
+			if command.Declaration != nil {
+				appendExpression(command.Declaration.Initializer)
+			}
+			if command.For != nil {
+				appendExpression(command.For.Iterable)
+			}
+			if command.Import != nil {
+				appendExpression(command.Import.Path)
+			}
+			for _, value := range command.EnumValues {
+				appendExpression(value.Initializer)
+				for _, argument := range value.Arguments {
+					appendExpression(argument)
+				}
+			}
+			if command.Function != nil {
+				for _, parameter := range command.Function.Parameters {
+					appendExpression(parameter.Default)
+				}
+			}
+			if command.Embedded != nil {
+				collectCommands(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	collectCommands(file.Commands, result.Root)
+
+	var invalidateAssignments func(*syntax.Expression, *Scope)
+	invalidateAssignments = func(expression *syntax.Expression, scope *Scope) {
+		if expression == nil || scope == nil {
+			return
+		}
+		if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) > 0 {
+			var invalidateTarget func(*syntax.Expression)
+			invalidateTarget = func(target *syntax.Expression) {
+				if target == nil {
+					return
+				}
+				switch target.Kind {
+				case syntax.ExpressionIdentifier:
+					delete(candidates, resolve(scope, target.Value, target.Span.Start, false, nil))
+				case syntax.ExpressionList, syntax.ExpressionTuple, syntax.ExpressionParenthesized:
+					for _, child := range target.Children {
+						invalidateTarget(child)
+					}
+				}
+			}
+			invalidateTarget(expression.Children[0])
+		}
+		expressionScope := scope
+		if expression.Kind == syntax.ExpressionLambda {
+			if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
+				expressionScope = lambdaScope
+			}
+		}
+		for index, child := range expression.Children {
+			if expression.Kind != syntax.ExpressionLambda || index >= len(expression.Parameters) {
+				invalidateAssignments(child, expressionScope)
+			}
+		}
+	}
+	for _, item := range expressions {
+		invalidateAssignments(item.expression, item.scope)
+	}
+
+	seenExpressions := make(map[*syntax.Expression]bool)
+	var appendDiagnostics func(*syntax.Expression, *Scope, syntax.Dialect)
+	appendDiagnostics = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
+		if expression == nil || scope == nil || seenExpressions[expression] {
+			return
+		}
+		seenExpressions[expression] = true
+		if dialect == syntax.Vim9 && expression.Kind == syntax.ExpressionMember && len(expression.Children) == 1 &&
+			expression.Children[0] != nil && file.Text(expression.Operator) == "." && expression.Value != "" &&
+			!expressionContainsMissing(expression) && !syntaxDiagnosticOverlaps(file.Diagnostics, expression.Span) {
+			receiver := expression.Children[0]
+			null := isNullObject(receiver)
+			if !null && receiver.Kind == syntax.ExpressionIdentifier {
+				null = candidates[resolve(scope, receiver.Value, receiver.Span.Start, false, nil)]
+			}
+			if null {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1360", Message: "Using a null object", Span: receiver.Span,
+				})
+			}
+		}
+		expressionScope := scope
+		if expression.Kind == syntax.ExpressionLambda {
+			if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
+				expressionScope = lambdaScope
+			}
+		}
+		for index, child := range expression.Children {
+			if expression.Kind != syntax.ExpressionLambda || index >= len(expression.Parameters) {
+				appendDiagnostics(child, expressionScope, dialect)
+			}
+		}
+	}
+	for _, item := range expressions {
+		appendDiagnostics(item.expression, item.scope, item.dialect)
 	}
 }
 

@@ -3949,3 +3949,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9class.txt:495-506` states that an abstract class has no
   `new()` method.
 - `src/errors.h:3472-3475` defines the exact E1359 and E1360 messages.
+
+## Statically known null object use: E1360
+
+E1360 means `Using a null object`. Analysis reports it for a member read,
+member write, method call, or method reference whose receiver is provably
+`null_object`. The proof is deliberately narrow: it covers the literal itself,
+a variable initialized directly from that literal, and a non-aggregate Vim9
+variable with an object, class, interface, enum, or matching type-alias type
+but no initializer.
+
+If the variable is assigned anywhere else in the file, analysis keeps its
+runtime value unknown and does not report E1360. Class and interface members,
+function arguments, values passed through calls, and control-flow-dependent
+values are also left to runtime analysis. This prevents an LSP diagnostic from
+assuming when a function is called or which branch executed. The diagnostic
+selects the receiver that is known to be null, and malformed member expressions
+retain their syntax recovery without an E1360 cascade.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:583-665` covers uninitialized typed objects,
+  explicit `null_object`, captured script variables, and dynamically typed
+  member writes.
+- `src/testdir/test_vim9_class.vim:1844-1897` covers member reads and writes in
+  both compiled functions and script context.
+- `src/testdir/test_vim9_class.vim:6261-6380` covers method calls and method
+  references on null objects.
+- `src/eval.c:1733-1743` rejects a null object before resolving a member for an
+  evaluated lvalue.
+- `src/vim9execute.c:613-623,3339-3350,6186-6202` rejects null receivers for
+  compiled object method calls and member access.
+- `runtime/doc/vim9class.txt:798-803` documents the default null value of an
+  uninitialized object variable and the E1360 behavior.
+- `src/errors.h:3474-3475` defines the exact E1360 message.
