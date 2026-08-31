@@ -3500,6 +3500,39 @@ func TestAnalyzeE891SortFloatFuncrefDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE742FixedValueAssignmentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ source, message, span string }{
+		{"let v:event.mykey = 0\n", "Cannot change value of v:event", "v:event.mykey"},
+		{"function F(...)\n  let a:000[0] = 9\nendfunction\n", "Cannot change value of a:000", "a:000[0]"},
+		{"function F(...)\n  let a:000[0 : 1] = [9]\nendfunction\n", "Cannot change value of a:000", "a:000[0 : 1]"},
+	} {
+		file := syntax.Parse(test.source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E742" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+			t.Fatalf("E742 diagnostics = %#v", got)
+		}
+	}
+
+	for _, source := range []string{
+		"let v:errors[0] = 'message'\n",
+		"function F(...)\n  let a:000[0][0] = 9\nendfunction\n",
+		"function F(item)\n  let a:item[0] = 9\nendfunction\n",
+		"let values = [1]\nlet values[0] = 2\n",
+		"vim9script\nv:event.mykey = 0\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E742" {
+				t.Fatalf("guard unexpectedly received E742: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

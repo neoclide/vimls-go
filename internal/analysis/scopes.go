@@ -6697,6 +6697,15 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 		if dialect == syntax.Vim9 && target != nil && target.Kind == syntax.ExpressionIdentifier && target.Value == "_" {
 			return
 		}
+		if dialect == syntax.Legacy && target != nil && (target.Kind == syntax.ExpressionMember || target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) &&
+			len(target.Children) > 0 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier {
+			receiver := target.Children[0]
+			if receiver.Value == "v:event" || (receiver.Value == "a:000" && isReadOnlyLegacyArgumentTarget(scope, receiver)) {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E742", Message: "Cannot change value of " + receiver.Value, Span: target.Span,
+				})
+			}
+		}
 		if dialect == syntax.Legacy && expression.Value == "=" && target != nil && target.Kind == syntax.ExpressionIdentifier {
 			if variable, ok := vimdata.LookupVariable(target.Value); ok && variable.Flags&vimdata.VariableReadOnly == 0 {
 				expected := builtinVariableValueType(variable)
