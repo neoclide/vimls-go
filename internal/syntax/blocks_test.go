@@ -253,21 +253,26 @@ func TestNestedFunctionBangDiagnostics(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			file := Parse(test.source)
 			var got []Diagnostic
-			e477 := 0
+			var e477 []Diagnostic
 			for _, diagnostic := range file.Diagnostics {
 				if diagnostic.Code == "vim/E1117" {
 					got = append(got, diagnostic)
 				}
 				if diagnostic.Code == "vim/E477" {
-					e477++
+					e477 = append(e477, diagnostic)
 				}
 			}
-			if len(got) != test.wantE1117 || e477 != test.wantE477 {
-				t.Fatalf("E1117=%#v E477=%d, want E1117=%d E477=%d; all diagnostics = %#v", got, e477, test.wantE1117, test.wantE477, file.Diagnostics)
+			if len(got) != test.wantE1117 || len(e477) != test.wantE477 {
+				t.Fatalf("E1117=%#v E477=%#v, want E1117=%d E477=%d; all diagnostics = %#v", got, e477, test.wantE1117, test.wantE477, file.Diagnostics)
 			}
 			for _, diagnostic := range got {
 				if diagnostic.Message != test.message || file.Text(diagnostic.Span) != "!" {
 					t.Fatalf("E1117 diagnostic = %#v on %q", diagnostic, file.Text(diagnostic.Span))
+				}
+			}
+			for _, diagnostic := range e477 {
+				if diagnostic.Message != "No ! allowed" || file.Text(diagnostic.Span) != "!" {
+					t.Fatalf("E477 diagnostic = %#v on %q", diagnostic, file.Text(diagnostic.Span))
 				}
 			}
 			if test.wantAfter {

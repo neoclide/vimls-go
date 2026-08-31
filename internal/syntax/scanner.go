@@ -3028,7 +3028,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			}
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1117", Message: "Cannot use ! with nested :" + name, Span: command.Bang})
 		} else if command.Canonical == "function" && command.Dialect == Vim9 && command.Bang.Start < command.Bang.End && command.Function != nil && !strings.HasPrefix(file.Text(command.Function.Name), "g:") {
-			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "no ! allowed", Span: command.Bang})
+			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E477", Message: "No ! allowed", Span: command.Bang})
 		}
 		abstractMethod := slices.ContainsFunc(command.Modifiers, func(modifier Modifier) bool { return modifier.Name == "abstract" })
 		if command.Function != nil && constructorHasNonVoidReturnType(command.Function) && command.Dialect == Vim9 &&
