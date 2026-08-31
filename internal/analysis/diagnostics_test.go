@@ -6988,6 +6988,42 @@ func TestAnalyzeE1320ObjectAsNumberDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1300DictionaryPartialDeferDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, initializer string }{
+		{"three argument funcref", "funcref('AddDefer', ['arg1'], {})"},
+		{"dictionary-only function", "function('AddDefer', {})"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "function AddDefer(value)\nendfunction\nfunction WithDefer()\n  let Part = " + test.initializer + "\n  defer Part('arg2')\nendfunction\n"
+			file := syntax.Parse(source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1300" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use a partial with dictionary for :defer" || file.Text(got[0].Span) != "Part" {
+				t.Fatalf("E1300 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function AddDefer(value)\nendfunction\nfunction WithDefer()\n  let Part = funcref('AddDefer', ['arg1'])\n  defer Part('arg2')\nendfunction\n",
+		"function AddDefer(value)\nendfunction\nfunction WithDefer()\n  let Part = funcref('AddDefer', ['arg1'], null_dict)\n  defer Part('arg2')\nendfunction\n",
+		"function AddDefer(value)\nendfunction\nfunction WithDefer()\n  let Part = funcref('AddDefer', ['arg1'], {})\n  let Part = funcref('AddDefer', ['arg1'])\n  defer Part('arg2')\nendfunction\n",
+		"function WithDefer(Part)\n  defer a:Part('arg2')\nendfunction\n",
+		"let Part = funcref('AddDefer', ['arg1'], {})\ndefer Part('arg2')\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1300" {
+				t.Fatalf("guard unexpectedly received E1300: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1324ObjectAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"compiled concatenation", "vim9script\nclass A\nendclass\ndef F()\n  var object = A.new()\n  var text = '' .. object\nenddef\n", "object"},

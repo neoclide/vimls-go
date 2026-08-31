@@ -172,6 +172,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9DestructuringDiagnostics(result, file.Commands)
 	collectFuncrefVariableNameDiagnostics(result)
 	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
+	collectDeferDiagnostics(result, file.Commands, root)
 	collectOperatorDiagnostics(result, file.Commands, root)
 	collectAggregateAccessDiagnostics(result)
 	collectVoidValueDiagnostics(result, file.Commands)
@@ -183,6 +184,103 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectDeferDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
+	if result == nil || result.File == nil {
+		return
+	}
+	initializers := make(map[*Declaration]*syntax.Expression)
+	var collectInitializers func([]syntax.Command, *Scope)
+	collectInitializers = func(commands []syntax.Command, parent *Scope) {
+		for index := range commands {
+			command := &commands[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = parent
+			}
+			if command.Declaration != nil && len(command.Declaration.Bindings) == 1 && command.Declaration.Initializer != nil {
+				binding := command.Declaration.Bindings[0]
+				for _, declaration := range scope.Declarations {
+					if declaration.Span == binding.Name {
+						initializers[declaration] = command.Declaration.Initializer
+						break
+					}
+				}
+			}
+			if command.Embedded != nil {
+				collectInitializers(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	collectInitializers(commands, parent)
+
+	dictionaryBoundPartial := func(expression *syntax.Expression, scope *Scope, useAt int) bool {
+		for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+			expression = expression.Children[0]
+		}
+		if expression == nil {
+			return false
+		}
+		if expression.Kind == syntax.ExpressionIdentifier {
+			declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil)
+			initializer := initializers[declaration]
+			if declaration == nil || initializer == nil {
+				return false
+			}
+			for _, reference := range result.References {
+				if reference.Declaration == declaration && reference.assignmentTarget && reference.Span.Start > declaration.Span.End && reference.Span.Start < useAt {
+					return false
+				}
+			}
+			expression = initializer
+		}
+		if expression.Kind != syntax.ExpressionCall || len(expression.Children) < 3 {
+			return false
+		}
+		callee := expression.Children[0]
+		if callee == nil || callee.Kind != syntax.ExpressionIdentifier || callee.Value != "function" && callee.Value != "funcref" {
+			return false
+		}
+		dictionary := expression.Children[2]
+		if len(expression.Children) >= 4 {
+			dictionary = expression.Children[3]
+		}
+		return dictionary != nil && dictionary.Kind == syntax.ExpressionDictionary
+	}
+
+	var walk func([]syntax.Command, *Scope)
+	walk = func(commands []syntax.Command, parent *Scope) {
+		for index := range commands {
+			command := &commands[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = parent
+			}
+			insideFunction := false
+			for current := scope; current != nil; current = current.Parent {
+				if current.Kind == syntax.BlockFunction || current.Kind == syntax.BlockDef || current.Lambda != nil {
+					insideFunction = true
+					break
+				}
+			}
+			if insideFunction && command.Canonical == "defer" && len(command.Expressions) > 0 {
+				expression := command.Expressions[0]
+				if expression != nil && expression.Kind == syntax.ExpressionCall && len(expression.Children) > 0 {
+					callee := expression.Children[0]
+					if dictionaryBoundPartial(callee, scope, callee.Span.Start) {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1300", Message: "Cannot use a partial with dictionary for :defer", Span: callee.Span,
+						})
+					}
+				}
+			}
+			if command.Embedded != nil {
+				walk(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	walk(commands, parent)
 }
 
 func collectVim9LegacyScriptVariableDiagnostics(result *FileAnalysis) {
