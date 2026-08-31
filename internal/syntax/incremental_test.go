@@ -12,9 +12,10 @@ import (
 )
 
 type incrementalEditCase struct {
-	name string
-	old  string
-	new  string
+	name        string
+	old         string
+	new         string
+	expectReuse bool
 }
 
 var incrementalEditCases = []incrementalEditCase{
@@ -26,7 +27,21 @@ var incrementalEditCases = []incrementalEditCase{
 	{name: "finish", old: "let before = 1\nfinish\ndead\n", new: "let before = 2\nfinish\ndead\n"},
 }
 
-func checkIncrementalParser(t *testing.T, parse func(*File, string) *File, test incrementalEditCase) {
+var incrementalBoundaryEditCases = []incrementalEditCase{
+	{name: "head insertion", old: "let one = 1\nlet stable = 2\nlet tail = 3\n", new: "let one = 10\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "head deletion", old: "let one = 10\nlet stable = 2\nlet tail = 3\n", new: "let one = 1\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "equal replacement", old: "let one = 1\nlet stable = 2\nlet tail = 3\n", new: "let one = 2\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "variable replacement", old: "let one = 1\nlet stable = 2\nlet tail = 3\n", new: "let one = 123\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "UTF-8 length change", old: "let greeting = \"中\"\nlet stable = 2\nlet tail = 3\n", new: "let greeting = \"中文\"\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "astral replacement", old: "let mark = \"😀\"\nlet stable = 2\nlet tail = 3\n", new: "let mark = \"🚀\"\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "combining replacement", old: "let name = \"e\u0301\"\nlet stable = 2\nlet tail = 3\n", new: "let name = \"e\u0301\u0302\"\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "CRLF middle", old: "let one = 1\r\nlet two = 2\r\nlet stable = 3\r\nlet tail = 4\r\n", new: "let one = 1\r\nlet two = 20\r\nlet stable = 3\r\nlet tail = 4\r\n", expectReuse: true},
+	{name: "BOM insertion", old: "let one = 1\nlet stable = 2\nlet tail = 3\n", new: "\ufefflet one = 1\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "BOM deletion", old: "\ufefflet one = 1\nlet stable = 2\nlet tail = 3\n", new: "let one = 1\nlet stable = 2\nlet tail = 3\n", expectReuse: true},
+	{name: "EOF without trailing newline", old: "let one = 1\nlet two = 2", new: "let one = 1\nlet two = 20"},
+}
+
+func checkIncrementalParser(t *testing.T, parse func(*File, string) *File, test incrementalEditCase) *File {
 	t.Helper()
 	previous := Parse(test.old)
 	beforeJSON := marshalSyntax(t, previous)
@@ -47,6 +62,7 @@ func checkIncrementalParser(t *testing.T, parse func(*File, string) *File, test 
 	if afterAliases := syntaxAliases(previous); !slices.Equal(afterAliases, beforeAliases) {
 		t.Fatalf("%s: previous alias topology changed\nbefore: %v\nafter:  %v", test.name, beforeAliases, afterAliases)
 	}
+	return got
 }
 
 func marshalSyntax(t *testing.T, file *File) []byte {
@@ -190,6 +206,116 @@ func TestReparseMatchesFullParse(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			checkIncrementalParser(t, Reparse, test)
 		})
+	}
+}
+
+func TestReparseBoundaryEdits(t *testing.T) {
+	for _, test := range incrementalBoundaryEditCases {
+		t.Run(test.name, func(t *testing.T) {
+			got := checkIncrementalParser(t, Reparse, test)
+			if test.expectReuse && (got.incremental == nil || got.incremental.reused == 0) {
+				t.Fatalf("expected reusable suffix, metadata = %#v", got.incremental)
+			}
+		})
+	}
+}
+
+func TestReparseWholeDocumentDialectChangeFallsBack(t *testing.T) {
+	old := "let one = 1\nlet two = 2"
+	new := "vim9script\nvar alpha = 10\nvar beta = 20"
+	change := changedSource(old, new)
+	if change.Start != 0 || change.OldEnd != len(old) || change.NewEnd != len(new) {
+		t.Fatalf("whole replacement change = %#v", change)
+	}
+	previous := Parse(old)
+	if previous.Dialect != Legacy || startsWithVim9Script(old) == startsWithVim9Script(new) {
+		t.Fatalf("unexpected dialect setup: old=%v new=%v", previous.Dialect, startsWithVim9Script(new))
+	}
+	got := checkIncrementalParser(t, Reparse, incrementalEditCase{name: "whole-document dialect fallback", old: old, new: new})
+	if got.Dialect != Vim9 {
+		t.Fatalf("result dialect = %v", got.Dialect)
+	}
+	if got.incremental == nil || got.incremental.reused != 0 || got.incremental.parsed != 0 {
+		t.Fatalf("expected whole-document dialect fallback, metadata = %#v", got.incremental)
+	}
+}
+
+func TestReparseLogicalLineBarsKeepUnitBoundaries(t *testing.T) {
+	old := "echo one | echo two\nlet after = 1\nlet untouched = 2\n"
+	new := "echo one | echo three\nlet after = 1\nlet untouched = 2\n"
+	previous := Parse(old)
+	if len(previous.incremental.units) == 0 {
+		t.Fatal("missing incremental metadata")
+	}
+	if previous.incremental.units[0].commandCount != 2 {
+		t.Fatalf("first unit command count = %d", previous.incremental.units[0].commandCount)
+	}
+	got := checkIncrementalParser(t, Reparse, incrementalEditCase{name: "logical line bars", old: old, new: new})
+	if got.incremental == nil || got.incremental.reused == 0 {
+		t.Fatalf("expected unchanged third unit to be reused, metadata = %#v", got.incremental)
+	}
+}
+
+func TestReparseUnknownCommandRemainsOpaque(t *testing.T) {
+	cases := []incrementalEditCase{
+		{name: "lowercase unknown command", old: "let value = 1\nfuturecmd arg1\nlet stable = 2\nlet tail = 3\n", new: "let value = 1\nfuturecmd arg2\nlet stable = 2\nlet tail = 3\n"},
+		{name: "unknown command with short spelling", old: "let value = 1\nfutco 1\nlet stable = 2\nlet tail = 3\n", new: "let value = 1\nfutco 2\nlet stable = 2\nlet tail = 3\n"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := checkIncrementalParser(t, Reparse, test)
+			if got.incremental == nil || got.incremental.reused == 0 {
+				t.Fatalf("expected unknown-command edit to reuse suffix, metadata = %#v", got.incremental)
+			}
+			if len(got.Commands) < 2 {
+				t.Fatalf("expected unknown command, got %d commands", len(got.Commands))
+			}
+			if got.Commands[1].Kind != CommandUnknown || (got.Commands[1].Canonical != "futurecmd" && got.Commands[1].Canonical != "futco") {
+				t.Fatalf("unknown command changed: kind=%v canonical=%q", got.Commands[1].Kind, got.Commands[1].Canonical)
+			}
+		})
+	}
+}
+
+func TestReparseModifierRangeCommandRemainsParsed(t *testing.T) {
+	old := "silent! %foldclose!\nlet stable = 1\nlet tail = 2\n"
+	new := "silent! $foldclose!\nlet stable = 1\nlet tail = 2\n"
+	got := checkIncrementalParser(t, Reparse, incrementalEditCase{name: "modifier and range", old: old, new: new})
+	if got.incremental == nil || got.incremental.reused == 0 {
+		t.Fatalf("expected modifier/range edit to reuse suffix, metadata = %#v", got.incremental)
+	}
+	if len(got.Commands) < 3 {
+		t.Fatalf("expected edited command and stable suffix, got %d commands", len(got.Commands))
+	}
+	command := got.Commands[0]
+	if command.Canonical != "foldclose" {
+		t.Fatalf("command canonical = %q", command.Canonical)
+	}
+	if got.Text(command.Range) != "$" {
+		t.Fatalf("range text = %q", got.Text(command.Range))
+	}
+	if len(command.Modifiers) != 1 || command.Modifiers[0].Name != "silent" {
+		t.Fatalf("modifiers = %#v", command.Modifiers)
+	}
+	if got.Text(command.Modifiers[0].Bang) != "!" {
+		t.Fatalf("modifier bang = %q", got.Text(command.Modifiers[0].Bang))
+	}
+	if got.Text(command.Bang) != "!" {
+		t.Fatalf("command bang = %q", got.Text(command.Bang))
+	}
+}
+
+func TestReparseExAbbreviationRemainsParsed(t *testing.T) {
+	test := incrementalEditCase{
+		name: "setlocal abbreviation", old: "let one = 1\nsetl ts=8\nlet stable = 2\nlet tail = 3\n",
+		new: "let one = 1\nsetl ts=16\nlet stable = 2\nlet tail = 3\n",
+	}
+	got := checkIncrementalParser(t, Reparse, test)
+	if got.incremental == nil || got.incremental.reused == 0 {
+		t.Fatalf("expected abbreviation edit to reuse suffix, metadata = %#v", got.incremental)
+	}
+	if len(got.Commands) < 2 || got.Commands[1].Canonical != "setlocal" {
+		t.Fatalf("abbreviation command = %#v", got.Commands)
 	}
 }
 
