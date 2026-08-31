@@ -268,11 +268,19 @@ func buildIncrementalMetadata(file *File) *incrementalMetadata {
 		for {
 			extended := end
 			for index := command; index < len(file.Commands) && file.Commands[index].Span.Start < end; index++ {
+				if !sourceSpan(file.Commands[index].Span, len(file.Source)) {
+					metadata.eligible = false
+					return metadata
+				}
 				if file.Commands[index].Span.End > extended {
 					extended = file.Commands[index].Span.End
 				}
 			}
 			for index := token; index < len(file.Tokens) && file.Tokens[index].Span.Start < end; index++ {
+				if !sourceSpan(file.Tokens[index].Span, len(file.Source)) {
+					metadata.eligible = false
+					return metadata
+				}
 				if file.Tokens[index].Span.End > extended {
 					extended = file.Tokens[index].Span.End
 				}
@@ -280,7 +288,13 @@ func buildIncrementalMetadata(file *File) *incrementalMetadata {
 			if extended <= end {
 				break
 			}
-			_, end = physicalLineEnd(file.Source, max(start, extended-1))
+			nextStart := max(start, extended-1)
+			_, nextEnd := physicalLineEnd(file.Source, nextStart)
+			if nextEnd <= end || nextEnd > len(file.Source) {
+				metadata.eligible = false
+				return metadata
+			}
+			end = nextEnd
 		}
 		unit := parseUnit{
 			span: Span{Start: start, End: end}, entry: cloneParserState(state), structureEntry: structurePath(file, start),
@@ -329,6 +343,10 @@ func buildIncrementalMetadata(file *File) *incrementalMetadata {
 		metadata.eligible = false
 	}
 	return metadata
+}
+
+func sourceSpan(span Span, sourceLen int) bool {
+	return span.Start >= 0 && span.Start <= span.End && span.End <= sourceLen
 }
 
 func cloneParserState(state parserState) parserState {

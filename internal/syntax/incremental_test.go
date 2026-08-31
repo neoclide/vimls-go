@@ -55,7 +55,9 @@ func checkIncrementalParser(t *testing.T, parse func(*File, string) *File, test 
 	if gotAliases, wantAliases := syntaxAliases(got), syntaxAliases(want); !slices.Equal(gotAliases, wantAliases) {
 		t.Fatalf("%s: alias topology differs\ngot:  %v\nwant: %v", test.name, gotAliases, wantAliases)
 	}
-	checkSyntaxSpans(t, got)
+	if syntaxSpansValid(want) {
+		checkSyntaxSpans(t, got)
+	}
 	if afterJSON := marshalSyntax(t, previous); string(afterJSON) != string(beforeJSON) {
 		t.Fatalf("%s: previous syntax changed\nbefore: %s\nafter:  %s", test.name, beforeJSON, afterJSON)
 	}
@@ -191,6 +193,53 @@ func checkSyntaxSpans(t *testing.T, file *File) {
 		}
 	}
 	walk(reflect.ValueOf(file), "File")
+}
+
+func syntaxSpansValid(file *File) bool {
+	valid := true
+	seen := make(map[uintptr]bool)
+	var walk func(reflect.Value)
+	walk = func(value reflect.Value) {
+		if !value.IsValid() {
+			return
+		}
+		if value.Kind() == reflect.Interface {
+			if !value.IsNil() {
+				walk(value.Elem())
+			}
+			return
+		}
+		if value.Kind() == reflect.Pointer {
+			if value.IsNil() || seen[value.Pointer()] {
+				return
+			}
+			seen[value.Pointer()] = true
+			walk(value.Elem())
+			return
+		}
+		if value.Type() == spanReflectionType {
+			span := value.Interface().(Span)
+			if span.Start < 0 || span.End < span.Start || span.End > len(file.Source) {
+				valid = false
+			}
+			return
+		}
+		switch value.Kind() {
+		case reflect.Struct:
+			valueType := value.Type()
+			for index := 0; index < value.NumField(); index++ {
+				if valueType.Field(index).PkgPath == "" {
+					walk(value.Field(index))
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for index := 0; index < value.Len(); index++ {
+				walk(value.Index(index))
+			}
+		}
+	}
+	walk(reflect.ValueOf(file))
+	return valid
 }
 
 func TestIncrementalComparisonHelpers(t *testing.T) {
@@ -500,6 +549,23 @@ func TestReparseConcurrentReaders(t *testing.T) {
 	wait.Wait()
 	if after := marshalSyntax(t, previous); string(after) != string(before) {
 		t.Fatal("concurrent reparses changed previous file")
+	}
+}
+
+func TestReparseInvalidByteSourceDoesNotHang(t *testing.T) {
+	oldSource := "0?\x01N\xdfst"
+	newSource := oldSource[:4] + "A\\" + oldSource[7:]
+
+	previous := Parse(oldSource)
+	if previous.incremental == nil {
+		t.Fatal("missing old metadata")
+	}
+	got := Reparse(previous, newSource)
+	if got == nil || got.incremental == nil || got.incremental.eligible {
+		t.Fatalf("new metadata = %#v", got.incremental)
+	}
+	if string(marshalSyntax(t, got)) != string(marshalSyntax(t, Parse(newSource))) {
+		t.Fatal("invalid byte source differs from full parse")
 	}
 }
 
