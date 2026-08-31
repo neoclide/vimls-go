@@ -139,7 +139,8 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	writeWorkspaceFile(t, runtimeRoot, "plugin/variable.vim", "let g:Other = 1\n")
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
-	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{runtimeRoot}, workspacePathResolver(nil, []string{runtimeRoot}), nil)
+	canonicalRuntimeRoot := mustWorkspaceCanonicalPath(t, runtimeRoot)
+	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{canonicalRuntimeRoot}, workspacePathResolver(nil, []string{canonicalRuntimeRoot}), nil)
 	if len(warnings) != 0 || index.FileCount() != 2 {
 		t.Fatalf("runtimepath index: files=%d warnings=%#v", index.FileCount(), warnings)
 	}
@@ -149,6 +150,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	instance.workspaceGraphView = graph.Snapshot()
 	instance.workspaceFiles = files
 	instance.workspaceBuilt = true
+	instance.workspaceRoots = []string{canonicalRuntimeRoot}
 	instance.workspaceMu.Unlock()
 
 	variablePath := filepath.Join(runtimeRoot, "plugin/current-variable.vim")
