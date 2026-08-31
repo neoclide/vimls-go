@@ -1,9 +1,8 @@
 GO ?= go
 GO_MOD ?= -mod=readonly
 COVERAGE_MIN ?= 90
-VIM_SOURCE ?= /Users/chemzqm/lib/vim
 
-.PHONY: build check coverage format-check generate-official race test vet
+.PHONY: build check coverage format-check race test vet
 
 build:
 	mkdir -p bin
@@ -13,9 +12,6 @@ build:
 
 test:
 	$(GO) test $(GO_MOD) ./...
-
-generate-official:
-	$(GO) run $(GO_MOD) ./tools/genofficial -vim-source "$(VIM_SOURCE)"
 
 race:
 	$(GO) test $(GO_MOD) -race ./...

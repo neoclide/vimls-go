@@ -348,7 +348,7 @@ E475 is Vim's historical general-purpose `Invalid argument: {value}` error,
 not a single Vim9 type rule. The language server emits it only for
 command-specific forms whose invalid value is present directly in the source.
 
-The official compile corpus includes a top-level Vim9 declaration such as
+The official compile fixture includes a top-level Vim9 declaration such as
 `var $VAR: number`: an environment variable cannot have a type-only
 declaration without a value, so Vim9 script reports E475. The equivalent
 declaration in a `def` uses the context-specific E1016 instead.

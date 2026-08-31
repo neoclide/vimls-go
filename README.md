@@ -74,16 +74,15 @@ official scripts and a classified inventory of all 5,733 `Check*` candidates.
 An explicit 44-file syntax-test allowlist prevents the conformance migration
 from revisiting the other 318 test files. From that boundary, 3,844 helper calls
 produce 5,261 source variants: 1,761 official parser-positive cases and 3,500
-failure cases whose reviewed phase and parser-migration status are recorded in
-the official syntax migration ledger. The stability gate still parses every
-source through both independent parser entry points without executing it, using
-committed artifacts in this repository.
+failure cases retained with their Vim error arguments as provenance. The
+stability gate still parses every source through both independent parser entry
+points without executing it, using committed artifacts in this repository.
 
 See [the roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
 [language support contract](docs/language-support.md), and
 [test strategy](docs/testing.md). Semantics derived from Vim's tests are
 recorded in the [static diagnostic reference](docs/diagnostics.md). Remaining
 version-pinned research about historical error codes used by Vim9 is retained
-in the [pre-E1000 research appendix](docs/vim9-errors-under-1000.md). The
-pinned Vim failure-phase research and implementation queue live in the
-[official syntax migration ledger](docs/official-syntax-migration.md).
+in the [pre-E1000 research appendix](docs/vim9-errors-under-1000.md). Supported
+official compile-diagnostic cases live in self-contained range tests under
+`internal/analysis/official_compile_cases_e*_test.go`.

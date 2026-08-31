@@ -30,8 +30,8 @@ need them.
 Fixture metadata records expected dialect, minimum Vim version/patch, expected
 diagnostics or AST snapshot, and upstream provenance when applicable.
 
-The default upstream source checkout for explicit generation or research is
-`/Users/chemzqm/lib/vim` and must be used read-only.
+The default upstream source checkout for research is `/Users/chemzqm/lib/vim`
+and must be used read-only.
 Ordinary repository tests use repository-owned fixtures and artifacts and do not
 require any external Vim checkout.
 
@@ -65,16 +65,16 @@ classifies all 5,733 `Check*` candidates, including all 5,208 qualified
 an explicit skip. `v9.2.1015-parser-files.json` is the fixed migration boundary:
 44 syntax-relevant files are included, 24 ambiguous helper-bearing files have
 explicit exclusions, and the remaining 294 files inherit the default exclusion.
-Migration tools must process only the 44 included files; changing the pinned Vim
-version or this reviewed manifest is the only reason to revisit excluded files.
+The pinned parser-case snapshot covers only the 44 included files; changing the
+pinned Vim version or this reviewed manifest is the only reason to revisit
+excluded files.
 The generated parser-case artifact hashes that manifest and accounts for every
 one of the 3,844 selected helper calls. Static source recovery extracts 3,805
 calls into 5,261 dialect-aware variants and records an explicit reason for the
 remaining 39 skips. The 1,761 success variants are parser-positive assertions.
 The artifact keeps its 3,500 failure variants unclassified and retains their Vim
-error arguments as provenance. Their reviewed phase classification and syntax
-implementation status live separately in the official syntax migration ledger,
-so parser progress does not rewrite the pinned generated artifact.
+error arguments as provenance, so parser progress does not rewrite the pinned
+generated artifact.
 
 Full-file parsing proves stability, recovery, and span integrity, not exact Vim
 acceptance. The conformance layer must use generated helper expectations and
@@ -83,16 +83,12 @@ error provenance, AST shape, and recovery diagnostics. Every official helper
 candidate must be extracted or retained in a classified skip manifest; the
 broad corpus is not a substitute for those conformance assertions.
 
-#### Official failure migration
+#### Official parser failures
 
-Research the complete pinned failure corpus once per Vim release and keep its
-phase classification, syntax rule groups, source references, and migration
-status in [`official-syntax-migration.md`](official-syntax-migration.md). The
-compressed parser-case artifact remains the source of every exact case key and
-input; the ledger must reference it rather than copy fixture source. Do not
-rescan the corpus with a new research task for every implementation batch.
+The compressed parser-case artifact remains the source of every exact parser
+case key and input. No separate phase-classification or migration-status ledger
+is maintained.
 
-Implementation batches consume one or more non-overlapping ledger group IDs.
 Use the triage filter to verify the parser's current result, not to rediscover
 the batch. The filter accepts comma-separated substrings and reports every
 matching dialect variant, which prevents a migration from silently covering
@@ -120,24 +116,27 @@ go test -mod=readonly ./internal/syntax \
 ```
 
 The default test invocation omits `-official-case` and continues to verify the
-entire committed matrix. After the focused test and local commit, update the
-ledger status and commit reference; a changed parser result does not require a
-new Vim-source research pass.
+entire committed matrix. Add accepted cases directly to that matrix.
 
 ### Semantics
 
-The pinned `v9.2.1015-compile-cases.json.gz` corpus supplies self-contained
-official `def` and `vim9script` failure sources without starting Vim. The
-compile-diagnostic status map is the progress ledger: `true` means the static
-rule has focused Go coverage, `false` means it is pending, and permanently
-non-static errors have a separate exclusion reason.
+The range-partitioned `internal/analysis/official_compile_cases_e*_test.go`
+files supply readable, self-contained official `def` and `vim9script` failure
+sources without starting Vim. Each error code has one owning test block, and
+every case preserves its official source location in an adjacent comment and
+source-position ID alongside the exact error code and Vim source.
 
-Routine analysis tests run at most 30 deterministic official cases per error
-code. Cases that require runtime state, build features, external files, jobs,
-terminals, or definitions from Vim's test harness are not run; cover the same
-statically decidable rule with a focused Go fixture instead. Official cases
-supplement, rather than replace, direct tests for syntax forms, recovery,
-diagnostic code, message, and in-bounds source span.
+Each error code retains at most ten deterministic cases, balanced between
+`def` and script/legacy contexts when both exist. Cases that require runtime
+state, build features, external files, jobs, terminals, or definitions from
+Vim's test harness are not run; cover the same statically decidable rule with a
+focused Go fixture instead. Official cases supplement, rather than replace,
+direct tests for syntax forms, recovery, diagnostic code, message, and
+in-bounds source span.
+
+The compile fixtures are not batch-regenerated. When upgrading Vim, migrate a
+supported error code directly into its owning range test, preserving the
+upstream source location and exact code.
 
 Table and workspace fixtures cover scopes, shadowing, closures, imports/exports,
 autoload, cycles, members, generics, null values and `null_<type>` behavior,
