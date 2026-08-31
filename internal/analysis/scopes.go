@@ -64,6 +64,7 @@ type Declaration struct {
 	Span               syntax.Span
 	Mutable            bool
 	TypeParameterCount int
+	constBinding       bool
 	// Parameter distinguishes a function or lambda argument from an ordinary
 	// mutable variable without changing its navigation symbol kind.
 	Parameter bool
@@ -4740,7 +4741,10 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 			kind = SymbolKindConstant
 		}
 		for _, binding := range command.Declaration.Bindings {
-			addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
+			declaration := addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
+			if declaration != nil && command.Canonical == "const" {
+				declaration.constBinding = true
+			}
 		}
 	}
 	if command.For != nil {
@@ -6201,6 +6205,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 				for index, argument := range arguments {
 					actual[index] = result.TypeOf(argument)
 				}
+				constMutation := false
 				extendMismatch := -1
 				if !scopeUsesDefTypeRules(scope) && (builtin.Name == "extend" || builtin.Name == "extendnew") {
 					extendMismatch = extendArgumentMismatchIndex(actual)
@@ -6344,12 +6349,29 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							continue
 						}
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
+						continue
+					}
+					if scopeUsesDefTypeRules(scope) && index == 0 && !isUnknownType(actual[index]) && (strings.HasSuffix(checker, "_mod") || checker == "arg_reverse") {
+						candidate := argument
+						for candidate.Kind == syntax.ExpressionParenthesized && len(candidate.Children) == 1 {
+							candidate = candidate.Children[0]
+						}
+						if candidate.Kind == syntax.ExpressionIdentifier {
+							declaration := resolve(scope, candidate.Value, candidate.Span.Start, false, nil)
+							if declaration != nil && declaration.constBinding {
+								result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1307", Message: "Argument " + strconv.Itoa(index+1) + ": Trying to modify a const " + valueTypeDisplay(actual[index]), Span: argument.Span})
+								constMutation = true
+								break
+							}
+						}
 					}
 				}
-				collectMapCallbackReturnTypeDiagnostic(result, scope, builtin, arguments, actual)
-				collectSearchpairFlagsDiagnostic(result, scope, builtin, arguments)
-				collectSubstituteExpressionDiagnostic(result, builtin, arguments)
-				collectBuiltinCompiledStringDiagnostics(result, scope, builtin, arguments, expression.Span.Start)
+				if !constMutation {
+					collectMapCallbackReturnTypeDiagnostic(result, scope, builtin, arguments, actual)
+					collectSearchpairFlagsDiagnostic(result, scope, builtin, arguments)
+					collectSubstituteExpressionDiagnostic(result, builtin, arguments)
+					collectBuiltinCompiledStringDiagnostics(result, scope, builtin, arguments, expression.Span.Start)
+				}
 			} else if !builtinCall {
 				collectFunctionCallDiagnostics(result, scope, expression, dialect == syntax.Vim9)
 			}

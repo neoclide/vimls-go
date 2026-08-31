@@ -5146,6 +5146,100 @@ func TestAnalyzeE1306LoopNestingDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1307ConstBuiltinMutationDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, typeName string
+	}{
+		{"add list", "vim9script\ndef Func()\n  const value = [1]\n  add(value, 2)\nenddef\n", "value", "list<number>"},
+		{"extend list", "vim9script\ndef Func()\n  const value = [1]\n  extend(value, [2])\nenddef\n", "value", "list<number>"},
+		{"filter list", "vim9script\ndef Func()\n  const value = [1]\n  filter(value, (_, _) => true)\nenddef\n", "value", "list<number>"},
+		{"map list", "vim9script\ndef Func()\n  const value = [1]\n  map(value, (_, item) => item)\nenddef\n", "value", "list<number>"},
+		{"remove dictionary", "vim9script\ndef Func()\n  const value = {a: 1}\n  remove(value, 'a')\nenddef\n", "value", "dict<number>"},
+		{"reverse blob", "vim9script\ndef Func()\n  const value = 0z12\n  reverse(value)\nenddef\n", "value", "blob"},
+		{"sort list", "vim9script\ndef Func()\n  const value = [1]\n  sort(value)\nenddef\n", "value", "list<number>"},
+		{"uniq list", "vim9script\ndef Func()\n  const value = [1]\n  uniq(value)\nenddef\n", "value", "list<number>"},
+		{"filter string", "vim9script\ndef Func()\n  const value = 'text'\n  filter(value, (_, _) => true)\nenddef\n", "value", "string"},
+		{"reverse tuple", "vim9script\ndef Func()\n  const value = (1, 2)\n  reverse(value)\nenddef\n", "value", "tuple<number, number>"},
+		{"method parenthesized", "vim9script\ndef Func()\n  const value = [1]\n  (value)->add(2)\nenddef\n", "(value)", "list<number>"},
+		{"nested block", "vim9script\ndef Func()\n  const value = [1]\n  if true\n    add(value, 2)\n  endif\nenddef\n", "value", "list<number>"},
+		{"block lambda", "vim9script\nvar Callback = () => {\n  const value = [1]\n  add(value, 2)\n}\n", "value", "list<number>"},
+		{"Legacy-root def", "def Func()\n  const value = [1]\n  add(value, 2)\nenddef\n", "value", "list<number>"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1307" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := "Argument 1: Trying to modify a const " + test.typeName
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1307 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	file := syntax.Parse("vim9script\ndef Func()\n  const value = [1]\n  add(value, 'bad')\nenddef\n")
+	result := Analyze(file)
+	count := 0
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1307" {
+			count++
+		}
+		if diagnostic.Code == "vim/E1013" {
+			t.Fatalf("E1307-owned call retained E1013: %#v", result.Diagnostics)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("E1307-owned call diagnostics = %#v", result.Diagnostics)
+	}
+
+	file = syntax.Parse("vim9script\nvar Callback = () => {\n  const value = [1]\n  map(value, (_, _) => 'bad')\n}\n")
+	result = Analyze(file)
+	count = 0
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1307" {
+			count++
+		}
+		if diagnostic.Code == "vim/E1012" || diagnostic.Code == "vim/E1013" {
+			t.Fatalf("E1307-owned lambda call retained type mismatch: %#v", result.Diagnostics)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("E1307-owned lambda diagnostics = %#v", result.Diagnostics)
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"final", "vim9script\ndef Func()\n  final value = [1]\n  add(value, 2)\nenddef\n", ""},
+		{"for binding", "vim9script\ndef Func()\n  for value in [[1]]\n    add(value, 2)\n  endfor\nenddef\n", ""},
+		{"extendnew", "vim9script\ndef Func()\n  const value = [1]\n  extendnew(value, [2])\nenddef\n", ""},
+		{"insert", "vim9script\ndef Func()\n  const value = [1]\n  insert(value, 2)\nenddef\n", ""},
+		{"top-level Vim9", "vim9script\nconst value = [1]\nadd(value, 2)\n", ""},
+		{"Legacy function", "function Func()\n  const value = [1]\n  add(value, 2)\nendfunction\n", ""},
+		{"literal", "vim9script\ndef Func()\n  add([1], 2)\nenddef\n", ""},
+		{"unknown", "vim9script\ndef Func(value: any)\n  add(value, 2)\nenddef\n", ""},
+		{"first argument type mismatch", "vim9script\ndef Func()\n  const value = 1\n  add(value, 2)\nenddef\n", "vim/E1013"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1307" {
+					t.Fatalf("guard unexpectedly received E1307: %#v", result.Diagnostics)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1256BuiltinCallbackArgumentDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"sort zero script", "vim9script\nsort(['a', 'b'], 0)\n", "0"},

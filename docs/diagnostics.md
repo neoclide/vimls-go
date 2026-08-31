@@ -3116,3 +3116,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   `for`.
 - `src/vim9cmds.c:1315-1320` applies the same limit while compiling `while`.
 - `src/errors.h:3365-3366` defines the exact message.
+
+## Const value passed to a modifying builtin: E1307
+
+E1307 means `Argument {n}: Trying to modify a const {type}`. In a compiled
+`def` or lambda, analysis reports it when a modifying builtin receives a
+direct reference to a `const` binding. The diagnostic selects the argument or
+method receiver and preserves Vim's inferred container type in the message.
+
+The modifying checker set covers `add()`, `extend()`, `filter()`, `map()`,
+`remove()`, `reverse()`, `sort()`, and `uniq()`. `final` bindings and loop
+items still permit mutations of their contained value. Non-modifying variants
+such as `extendnew()` and `mapnew()` do not use E1307, and analysis does not
+propagate constness through aliases. A type error on the modified argument
+precedes E1307; once E1307 is selected, later argument and callback diagnostics
+for that call are suppressed.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_builtin.vim:179-204,1294-1337` distinguishes `const`
+  List, Dictionary, and Blob failures from successful `final` and loop-item
+  mutation for `add()` and `extend()`.
+- `src/testdir/test_vim9_builtin.vim:1637-1650,2775-2788,3649-3760` covers
+  `filter()`, `map()`, `remove()`, and `reverse()`.
+- `src/testdir/test_vim9_builtin.vim:4399-4406,5077-5084` covers `sort()` and
+  `uniq()`.
+- `src/evalfunc.c:238-267` first checks the argument type, then rejects its
+  `TTFLAG_CONST` flag and formats the concrete type name.
+- `src/evalfunc.c:1280,1348-1383` assigns the modifying checkers to these
+  builtin argument tables while keeping their non-modifying variants separate.
+- `src/errors.h:3367-3368` defines the exact message.
