@@ -2418,6 +2418,20 @@ func classObjectVariableOwner(result *FileAnalysis, class *syntax.Command, name 
 	return nil, nil, 0, false
 }
 
+func classStaticVariableOwner(result *FileAnalysis, class *syntax.Command, name string) (*syntax.Command, syntax.Span, bool) {
+	if result == nil || result.File == nil {
+		return nil, syntax.Span{}, false
+	}
+	seen := make(map[*syntax.Command]bool)
+	for current := class; current != nil && !seen[current]; current = extendedClass(result.File, result.classes, current) {
+		seen[current] = true
+		if member, bindingIndex, found := aggregateVariableBinding(result.File, current, name, true); found {
+			return current, member.Declaration.Bindings[bindingIndex].Name, true
+		}
+	}
+	return nil, syntax.Span{}, false
+}
+
 func memberTypesCompatible(result *FileAnalysis, expected, actual ValueType) bool {
 	if isUnknownType(expected) || isUnknownType(actual) {
 		return true
@@ -5978,6 +5992,9 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				if protectedVariableAccess {
 					break
 				}
+				if appendClassVariableLockDiagnostic(result, scope, target) {
+					break
+				}
 				if className, memberName, ok := nonWritableClassMemberAssignment(result, scope, target); ok {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 						Code: "vim/E1335", Message: `Variable "` + memberName + `" in class "` + className + `" is not writable`, Span: memberNameSpan(result.File, target),
@@ -6010,6 +6027,61 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			collectAssignmentDiagnostics(result, command.Embedded.Commands, scope)
 		}
 	}
+}
+
+func appendClassVariableLockDiagnostic(result *FileAnalysis, scope *Scope, target *syntax.Expression) bool {
+	if result == nil || result.File == nil || scope == nil || target == nil || expressionContainsMissing(target) ||
+		syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, target.Span) {
+		return false
+	}
+	file := result.File
+	var class *syntax.Command
+	name := ""
+	switch target.Kind {
+	case syntax.ExpressionIdentifier:
+		if target.Value == "" {
+			return false
+		}
+		class = directMethodAggregate(file, scope)
+		name = target.Value
+	case syntax.ExpressionMember:
+		if len(target.Children) != 1 || target.Children[0] == nil || target.Children[0].Kind != syntax.ExpressionIdentifier ||
+			file.Text(target.Operator) != "." || target.Value == "" {
+			return false
+		}
+		receiver := target.Children[0]
+		declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+		if declaration == nil {
+			return false
+		}
+		className := ""
+		switch declaration.Kind {
+		case SymbolKindClass:
+			className = declaration.Name
+		case SymbolKindTypeAlias:
+			className = result.classAliases[declaration.Name]
+		}
+		class = result.classes[className]
+		name = target.Value
+	default:
+		return false
+	}
+	if class == nil || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+		return false
+	}
+	owner, declarationSpan, found := classStaticVariableOwner(result, class, name)
+	if !found || owner == nil || owner.Aggregate == nil {
+		return false
+	}
+	if target.Kind == syntax.ExpressionIdentifier {
+		if declaration := resolve(scope, target.Value, target.Span.Start, false, nil); declaration != nil && declaration.Span != declarationSpan {
+			return false
+		}
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1392", Message: `Cannot (un)lock class variable "` + file.Text(target.Span) + `" in class "` + file.Text(owner.Aggregate.Name) + `"`, Span: target.Span,
+	})
+	return true
 }
 
 func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {

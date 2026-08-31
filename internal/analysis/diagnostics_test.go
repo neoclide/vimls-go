@@ -10793,6 +10793,61 @@ func TestAnalyzeE1386ObjectMethodThroughClass(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1392ClassVariableLockDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{
+			name:   "static method bare class variable lock",
+			source: "vim9script\nclass C\n  public static var sval: number = 1\n  static def Method()\n    lockvar sval\n  enddef\nendclass\n",
+			span:   "sval",
+		},
+		{
+			name:   "object method bare class variable unlock",
+			source: "vim9script\nclass C\n  public static var sval: number = 1\n  def Method()\n    unlockvar sval\n  enddef\nendclass\n",
+			span:   "sval",
+		},
+		{
+			name:   "method class variable access lock",
+			source: "vim9script\nclass C\n  public static var sval: number = 1\nendclass\ndef Test()\n  lockvar C.sval\nenddef\n",
+			span:   "C.sval",
+		},
+		{
+			name:   "script level class variable access unlock",
+			source: "vim9script\nclass C\n  public static var sval: number = 1\nendclass\nunlockvar C.sval\n",
+			span:   "C.sval",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1392" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Cannot (un)lock class variable "`+test.span+`" in class "C"` || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1392 diagnostics = %#v; source = %q", got, test.source)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass C\n  public static var sval: number = 1\n  def Method(sval: number)\n    lockvar sval\n  enddef\nendclass\n",
+		"vim9script\nclass C\n  public static var sval: number = 1\n  def Method()\n    lockvar this\n  enddef\nendclass\n",
+		"vim9script\nvar sval = [1]\nlockvar sval\n",
+		"vim9script\nclass C\n  public static var sval: number = 1\nendclass\nvar o = C.new()\nlockvar o.sval\n",
+		"vim9script\nclass C\n  public static var sval: number = 1\nendclass\nlockvar C.sval[\n",
+		"vim9script\nclass C\n  public static var sval: number = 1\nendclass\nlegacy lockvar C.sval\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1392" {
+				t.Fatalf("guard unexpectedly received E1392: %#v", diagnostic)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1376ObjectVariableThroughClass(t *testing.T) {
 	for _, use := range []string{
 		"var value = A.val",
