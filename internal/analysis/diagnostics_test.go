@@ -5396,6 +5396,60 @@ func TestAnalyzeE1328ConstructorDefaultValueDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1330InvalidVoidValueTypeDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"script variable", "vim9script\nvar value: void\n", "void"},
+		{"def local", "vim9script\ndef Func()\n  var value: void\nenddef\n", "void"},
+		{"function argument", "vim9script\ndef Func(value: void)\nenddef\n", "void"},
+		{"legacy root def argument", "def Func(value: void)\nenddef\n", "void"},
+		{"initializer", "vim9script\nvar value: void = 1\n", "void"},
+		{"list", "vim9script\nvar value: list<void>\n", "void"},
+		{"tuple", "vim9script\nvar value: tuple<void, number>\n", "void"},
+		{"dict", "vim9script\nvar value: dict<void>\n", "void"},
+		{"lambda argument", "vim9script\nvar Callback = (value: void) => value\n", "void"},
+		{"class member", "vim9script\nclass A\n  var value: void\nendclass\n", "void"},
+		{"for binding", "vim9script\nfor value: void in []\nendfor\n", "void"},
+		{"generic call", "vim9script\nFn<void>()\n", "void"},
+		{"function argument type", "vim9script\nvar callback: func(void): void\n", "void"},
+		{"type alias", "vim9script\ntype MyType = void\nvar value: MyType\n", "MyType"},
+		{"type alias member", "vim9script\ntype MyType = list<void>\n", "void"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1330" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Invalid type used in variable declaration: void" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1330 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source string }{
+		{"def return void", "vim9script\ndef Func(): void\nenddef\n"},
+		{"lambda return void", "vim9script\nvar Callback = (): void => {}\n"},
+		{"function type return void", "vim9script\nvar callback: func(): void\n"},
+		{"unused alias", "vim9script\ntype MyType = void\n"},
+		{"alias function return", "vim9script\ntype MyType = void\ndef Func(): MyType\nenddef\n"},
+		{"valid type", "vim9script\nvar value: list<number>\n"},
+		{"Legacy", "let value: void = 1\n"},
+		{"legacy function", "vim9script\nfunction Foo(value: void)\nendfunction\n"},
+		{"missing type", "vim9script\nvar value: \n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1330" {
+					t.Fatalf("guard unexpectedly received E1330: %#v\n%s", diagnostic, test.source)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1256BuiltinCallbackArgumentDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"sort zero script", "vim9script\nsort(['a', 'b'], 0)\n", "0"},

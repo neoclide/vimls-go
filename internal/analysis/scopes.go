@@ -135,6 +135,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectDuplicateClassVariableDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectConstructorDefaultValueDiagnostics(result)
+	collectInvalidVoidTypeDiagnostics(result)
 	collectInterfaceVariableAccessDiagnostics(result)
 	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
 	collectUnreachableCodeDiagnostics(result)
@@ -211,6 +212,165 @@ func collectConstructorDefaultValueDiagnostics(result *FileAnalysis) {
 			}
 		}
 	}
+}
+
+func collectInvalidVoidTypeDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	aliases := make(map[syntax.Span]*syntax.Type)
+	var collectAliases func([]syntax.Command)
+	collectAliases = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.TypeAlias != nil {
+				aliases[command.TypeAlias.Name] = command.TypeAlias.Type
+			}
+			if command.Embedded != nil {
+				collectAliases(command.Embedded.Commands)
+			}
+		}
+	}
+	collectAliases(file.Commands)
+	appendTypeDiagnostic := func(typeNode *syntax.Type, scope *Scope, allowVoid bool) {
+		if invalid := invalidVoidValueType(result, scope, typeNode, allowVoid, aliases, make(map[syntax.Span]bool)); invalid != nil {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1330", Message: "Invalid type used in variable declaration: void", Span: invalid.Span,
+			})
+		}
+	}
+	seen := make(map[*syntax.Expression]bool)
+	var walkCommands func([]syntax.Command, *Scope)
+	var walkExpression func(*syntax.Expression, *Scope, syntax.Dialect)
+	walkExpression = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
+		if expression == nil || seen[expression] {
+			return
+		}
+		seen[expression] = true
+		if dialect != syntax.Vim9 {
+			return
+		}
+		for _, typeNode := range expression.TypeArguments {
+			appendTypeDiagnostic(typeNode, scope, false)
+		}
+		expressionScope := scope
+		if expression.Kind == syntax.ExpressionLambda {
+			if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
+				expressionScope = lambdaScope
+			}
+			for _, parameter := range expression.Parameters {
+				appendTypeDiagnostic(parameter.Type, expressionScope, false)
+			}
+			appendTypeDiagnostic(expression.ReturnType, expressionScope, true)
+			if expression.LambdaBody != nil {
+				walkCommands(expression.LambdaBody.Commands, expressionScope)
+			}
+		}
+		for _, child := range expression.Children {
+			walkExpression(child, expressionScope, dialect)
+		}
+	}
+	walkCommands = func(commands []syntax.Command, fallback *Scope) {
+		for index := range commands {
+			command := &commands[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = fallback
+			}
+			if command.Dialect == syntax.Vim9 {
+				if command.TypeAlias != nil {
+					appendTypeDiagnostic(command.TypeAlias.Type, scope, true)
+				}
+				if command.Declaration != nil {
+					for _, binding := range command.Declaration.Bindings {
+						appendTypeDiagnostic(binding.ParsedType, scope, false)
+					}
+				}
+				if command.For != nil {
+					for _, binding := range command.For.Bindings {
+						appendTypeDiagnostic(binding.ParsedType, scope, false)
+					}
+				}
+			}
+			if command.Canonical == "def" && command.Function != nil {
+				for _, parameter := range command.Function.Parameters {
+					appendTypeDiagnostic(parameter.Type, scope, false)
+				}
+				appendTypeDiagnostic(command.Function.ReturnType, scope, true)
+			}
+			expressionDialect := command.Dialect
+			if command.Canonical == "def" {
+				expressionDialect = syntax.Vim9
+			}
+			for _, expression := range command.Expressions {
+				walkExpression(expression, scope, expressionDialect)
+			}
+			for _, expression := range command.Targets {
+				walkExpression(expression, scope, expressionDialect)
+			}
+			if command.Mapping != nil {
+				walkExpression(command.Mapping.RHSExpression, scope, expressionDialect)
+			}
+			if command.Declaration != nil {
+				walkExpression(command.Declaration.Initializer, scope, expressionDialect)
+			}
+			if command.For != nil {
+				walkExpression(command.For.Iterable, scope, expressionDialect)
+			}
+			if command.Import != nil {
+				walkExpression(command.Import.Path, scope, expressionDialect)
+			}
+			for _, value := range command.EnumValues {
+				walkExpression(value.Initializer, scope, expressionDialect)
+				for _, argument := range value.Arguments {
+					walkExpression(argument, scope, expressionDialect)
+				}
+			}
+			if command.Function != nil {
+				for _, parameter := range command.Function.Parameters {
+					walkExpression(parameter.Default, scope, expressionDialect)
+				}
+			}
+			if command.Embedded != nil {
+				walkCommands(command.Embedded.Commands, scope)
+			}
+		}
+	}
+	walkCommands(file.Commands, result.Root)
+}
+
+func invalidVoidValueType(result *FileAnalysis, scope *Scope, typeNode *syntax.Type, allowVoid bool, aliases map[syntax.Span]*syntax.Type, seen map[syntax.Span]bool) *syntax.Type {
+	if result == nil || scope == nil || typeNode == nil || typeNode.Kind == syntax.TypeMissing {
+		return nil
+	}
+	if typeNode.Kind == syntax.TypeNamed {
+		if typeNode.Name == "void" {
+			if allowVoid {
+				return nil
+			}
+			return typeNode
+		}
+		if declaration := resolve(scope, typeNode.Name, typeNode.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindTypeAlias && !seen[declaration.Span] {
+			if alias := aliases[declaration.Span]; alias != nil {
+				seen[declaration.Span] = true
+				invalid := invalidVoidValueType(result, scope, alias, allowVoid, aliases, seen)
+				delete(seen, declaration.Span)
+				if invalid != nil {
+					return typeNode
+				}
+			}
+		}
+	}
+	for _, argument := range typeNode.Arguments {
+		if invalid := invalidVoidValueType(result, scope, argument, false, aliases, seen); invalid != nil {
+			return invalid
+		}
+	}
+	if invalid := invalidVoidValueType(result, scope, typeNode.ReturnType, true, aliases, seen); invalid != nil {
+		return invalid
+	}
+	return nil
 }
 
 func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {

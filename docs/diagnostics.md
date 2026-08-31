@@ -3328,3 +3328,37 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   names start with `new`, checks the six-byte `v:none` prefix, and passes the
   untouched text beginning after the member name to the diagnostic.
 - `src/errors.h:3410-3411` defines the exact message.
+
+## Invalid value-declaration type: E1330
+
+E1330 means `Invalid type used in variable declaration: void`. The `void` type
+describes the absence of a returned value and therefore cannot be used where a
+Vim9 value must exist. Analysis reports the first invalid member of each type
+at the inner `void` span.
+
+Value positions include script, local, class-like member, loop-binding,
+function-parameter, and lambda-parameter declarations; container and function
+argument types; and generic call type arguments. A direct function or lambda
+return type may be `void`, but a value type nested inside that return type may
+not be. The same recursive rule applies while parsing a type alias: a direct
+`type Empty = void` is valid, whereas `type Items = list<void>` is not.
+
+When a value declaration uses a same-file alias whose expansion is invalid,
+analysis reports `void` in the message and selects the alias use as the source
+span. Alias cycles and unresolved or imported aliases remain conservative.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_assign.vim:2344-2435` covers locals, function and
+  lambda parameters, containers, class members, loop bindings, generic type
+  arguments, function types, and type-alias uses.
+- `src/testdir/test_vim9_class.vim:1242-1253` covers a `void` object variable.
+- `src/vim9type.c:1001-1016` defines the value-declaration predicate: `void`
+  and special null/none types are rejected.
+- `src/vim9type.c:1620-1651,1695-1721,1830-1853` applies the predicate to
+  container, function-argument, and tuple member types while leaving function
+  return types separate.
+- `src/userfunc.c:550-578`, `src/vim9class.c:75-101`, and
+  `src/vim9generics.c:296-311` apply it to parameters, aggregate members, and
+  generic arguments.
+- `src/errors.h:3414-3415` defines the exact message.
