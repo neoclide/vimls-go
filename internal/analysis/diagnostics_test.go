@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -785,9 +786,10 @@ func TestAnalyzeE1072InvalidComparison(t *testing.T) {
 		for _, context := range []string{"script", "def", "vim9cmd"} {
 			t.Run(test.name+"/"+context, func(t *testing.T) {
 				source := "vim9script\necho " + test.expression + "\n"
-				if context == "def" {
+				switch context {
+				case "def":
 					source = "vim9script\ndef F()\n  echo " + test.expression + "\nenddef\n"
-				} else if context == "vim9cmd" {
+				case "vim9cmd":
 					source = "vim9cmd echo " + test.expression + "\n"
 				}
 				file := syntax.Parse(source)
@@ -5140,8 +5142,8 @@ func TestAnalyzeE1306LoopNestingDiagnostics(t *testing.T) {
 		}
 		source.WriteString(strings.Repeat("  ", len(kinds)))
 		source.WriteString("var value = 1\n")
-		for index := len(kinds) - 1; index >= 0; index-- {
-			if kinds[index] == "for" {
+		for index, kind := range slices.Backward(kinds) {
+			if kind == "for" {
 				source.WriteString(strings.Repeat("  ", index))
 				source.WriteString("endfor\n")
 			} else {

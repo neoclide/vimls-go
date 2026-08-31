@@ -1142,13 +1142,16 @@ func directMethodAggregate(file *syntax.File, scope *Scope) *syntax.Command {
 			return nil
 		}
 		aggregate := enclosingAggregateCommand(file, current)
-		if aggregate == nil || aggregate.Aggregate == nil || (aggregate.Aggregate.Kind != syntax.BlockClass && aggregate.Aggregate.Kind != syntax.BlockEnum) {
+		if aggregate == nil || aggregate.Aggregate == nil {
 			return nil
 		}
-		for _, member := range aggregate.Aggregate.Members {
-			if member == header {
-				return aggregate
-			}
+		switch aggregate.Aggregate.Kind {
+		case syntax.BlockClass, syntax.BlockEnum:
+		default:
+			return nil
+		}
+		if slices.Contains(aggregate.Aggregate.Members, header) {
+			return aggregate
 		}
 		return nil
 	}
@@ -3412,18 +3415,19 @@ func appendMissingObjectVariableDiagnostic(result *FileAnalysis, scope *Scope, m
 		return
 	}
 	name := member.Value
-	if aggregate.Aggregate.Kind == syntax.BlockClass {
+	switch aggregate.Aggregate.Kind {
+	case syntax.BlockClass:
 		if _, _, found := classObjectVariableBinding(result, aggregate, name); found || objectMethodInClassHierarchy(file, result.classes, aggregate, name) != nil {
 			return
 		}
 		if !super && aggregateHasClassMember(file, aggregate, name) {
 			return
 		}
-	} else if aggregate.Aggregate.Kind == syntax.BlockEnum {
+	case syntax.BlockEnum:
 		if enumObjectAccessExists(file, aggregate, name) || !super && aggregateHasClassMember(file, aggregate, name) {
 			return
 		}
-	} else {
+	default:
 		return
 	}
 	for _, diagnostic := range result.Diagnostics {
@@ -6242,13 +6246,14 @@ func nonWritableClassMemberAssignment(result *FileAnalysis, scope *Scope, target
 		if !found || aggregate == nil || aggregate.Aggregate == nil {
 			return "", "", false
 		}
-		if aggregate.Aggregate.Kind == syntax.BlockClass {
+		switch aggregate.Aggregate.Kind {
+		case syntax.BlockClass:
 			candidate, member, _, exists := classObjectVariableOwner(result, aggregate, target.Value)
 			if exists && !commandHasModifier(member, "public") {
 				owner = candidate
 				objectVariable = true
 			}
-		} else if aggregate.Aggregate.Kind == syntax.BlockEnum {
+		case syntax.BlockEnum:
 			if target.Value == "name" || target.Value == "ordinal" {
 				owner = aggregate
 				objectVariable = true
@@ -7267,13 +7272,14 @@ func appendProtectedVariableAccessDiagnostic(result *FileAnalysis, scope *Scope,
 		if !found || aggregate == nil || aggregate.Aggregate == nil {
 			return
 		}
-		if aggregate.Aggregate.Kind == syntax.BlockClass {
+		switch aggregate.Aggregate.Kind {
+		case syntax.BlockClass:
 			candidate, variable, _, exists := classObjectVariableOwner(result, aggregate, member.Value)
 			if exists && !commandHasModifier(variable, "public") {
 				owner = candidate
 				objectVariable = true
 			}
-		} else if aggregate.Aggregate.Kind == syntax.BlockEnum {
+		case syntax.BlockEnum:
 			if variable, _, exists := aggregateVariableBinding(file, aggregate, member.Value, false); exists && !commandHasModifier(variable, "public") {
 				owner = aggregate
 				objectVariable = true
