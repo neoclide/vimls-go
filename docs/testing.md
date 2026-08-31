@@ -156,13 +156,21 @@ not supported. Run the compiled server as a subprocess for the final path.
 
 Document scenarios cover out-of-order client versions, multiple changes in one
 notification, stale analysis, close during analysis, reopen, save, cancellation,
-and workspace-folder changes.
+and workspace-folder changes. Deterministic channel barriers force one cache
+miss versus change, one close restore versus reopen, and one workspace rebuild
+versus open edit; these tests prove the intended stale branch instead of relying
+on repeated scheduler luck.
 
 ### Fuzz and properties
 
-Current fuzz targets cover framing, position round trips, complete-file parser
-recovery, expressions, and Vim9 types. Dedicated lexer and incremental-edit
-application fuzz targets remain planned. Required properties:
+Current fuzz targets cover framing, position round trips, ordered incremental
+edit application, complete-file parser recovery, expressions, and Vim9 types.
+`FuzzApplyChanges` uses bounded inputs and a test-local position oracle so every
+accepted ranged edit is compared with direct full-text replacement. Its seed
+corpus covers LF, CRLF, BOM without a final newline, combining characters,
+astral characters, and invalid UTF-8. A five-step deterministic sequence covers
+distinct BOM, combining, astral, CRLF, and EOF edit invariants. A dedicated
+lexer fuzz target remains planned. Required properties:
 
 - No panic, deadlock, unbounded loop, or uncontrolled allocation.
 - Token and AST spans remain ordered and within the source.
@@ -205,10 +213,14 @@ language oracle.
 
 ## Performance budgets
 
-Current benchmarks cover parser hot paths, command lookup, and the optional
-legacy reference comparison. Future baselines should add 1 KiB, 10 KiB,
-100 KiB, and 1 MiB documents; small and large workspaces; one-line edits;
-diagnostics; index replacement; completion; and references.
+Current benchmarks cover parser hot paths, command lookup, the optional legacy
+reference comparison, 64 KiB content-ID construction, an open-document parser
+cache hit, a changed-file full parse, and a 32-file workspace rebuild that
+includes `ParseSources`. The incremental-edit baselines use
+`-benchmem -benchtime=100x -count=1`; `B/op` and `allocs/op` measure allocation
+pressure per operation, not retained heap or peak RSS. Future baselines should
+add 1 KiB, 10 KiB, 100 KiB, and 1 MiB documents; small and large workspaces;
+one-line edits; diagnostics; index replacement; completion; and references.
 
 On a pinned release runner, fail a confirmed median or p95 time regression above
 15% or allocation regression above 20% unless the change records and approves

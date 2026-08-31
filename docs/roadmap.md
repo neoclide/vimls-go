@@ -37,6 +37,12 @@ Exit gate: table tests cover ASCII, tabs, UTF-8, UTF-16 astral characters,
 combining characters, CRLF, BOM, invalid ranges, multiple ordered edits, close,
 and reopen. Incremental edits produce the same final text as full replacement.
 
+Current status (2026-09-01): snapshots retain complete immutable text plus a
+content ID independent of URI/version/revision. Ordered incremental changes,
+including UTF-8/16/32, CRLF, BOM, combining, astral, and invalid UTF-8 cases,
+are checked against direct full replacement. Content changes still receive a
+complete parse; only exact same-content parser trees are reused.
+
 ## M2: command lexer and recovering parser core
 
 Deliver:
@@ -117,7 +123,7 @@ Exit gate: cross-file legacy autoload and Vim9 import navigation works through a
 subprocess LSP test; duplicate, missing, cyclic, symlinked, and out-of-root files
 have deterministic behavior; canceled index work leaves no partial state.
 
-Current status (2026-08-30): the document navigation surface, workspace symbol
+Current status (2026-09-01): the document navigation surface, workspace symbol
 index, open-document overlay, client-driven watched-file refresh, static Vim9
 import navigation, and legacy/Vim9 autoload navigation are implemented. A
 directed import graph is published as immutable, revisioned snapshots alongside
@@ -125,9 +131,13 @@ the index; it uses canonical identity, open-buffer overlays, and transitive
 reverse invalidation. The server dynamically registers Vim file watchers when
 the client supports it; client-provided or locally discovered runtimepath roots
 and later custom notification replacements are included in the canonical,
-bounded index. The subprocess test covers watcher registration, runtimepath and
-workspace symbols, plus cross-file definition and references. M5 remains open
-for multi-target builtin metadata, which is currently deferred.
+bounded index. Cross-file analysis and requests bind generation, index
+instance/revision, and graph revision; stale foreground requests retry once,
+while stale background results are discarded and requeued. Rebuild and
+close/reopen publication also validate current open snapshots. The subprocess
+test covers watcher registration, runtimepath and workspace symbols, plus
+cross-file definition and references. M5 remains open for multi-target builtin
+metadata, which is currently deferred.
 
 ## M6: completion and safe edits
 

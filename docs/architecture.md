@@ -41,10 +41,12 @@ defaults.
 ## Text and positions
 
 A `Snapshot` contains a URI, an internal monotonically increasing revision, an
-optional client version, immutable text, and line indexes. Changes apply in
-notification order to the previous open snapshot. Analysis captures a snapshot
-without holding the document-store lock and may publish only when URI, revision,
-and configuration revision still match.
+optional client version, immutable text, line indexes, and a SHA-256 content ID
+of the complete source bytes. The content ID excludes URI, version, revision,
+and configuration. Changes apply in notification order to the previous open
+snapshot and produce another complete immutable string. Analysis captures a
+snapshot without holding the document-store lock and may publish only while
+that snapshot and its configuration revision remain current.
 
 Syntax spans are half-open byte offsets into the original source. Tokens retain
 trivia and physical newlines. Only the LSP boundary converts positions to the
@@ -79,6 +81,24 @@ The parser follows these rules:
 The parser never expands paths, evaluates backtick expressions, compiles regexps,
 or sources runtime files. Those operations depend on mutable editor state or can
 execute user code.
+
+## Incremental editing and parser cache
+
+Incremental editing means composing LSP text changes and invalidating derived
+state; it does not splice or rebase AST nodes. A cache miss always passes the
+complete new source to `syntax.Parse`, including for a one-character edit.
+
+The open-document parser cache is keyed by URI and accepts a hit only when both
+the snapshot content ID and `syntax.File.Source` exactly match. This permits a
+same-content, newer revision to reuse one immutable parser tree while making a
+hash collision harmless. Parsing runs outside server locks, and a miss is
+installed only if the same snapshot is still current. Configuration and
+workspace revisions are deliberately absent from this pure parser key.
+
+Cached files contain only parser-owned syntax and parser diagnostics. Analysis
+copies the `File` header and diagnostics slice before adding compatibility,
+semantic, import, workspace, truncation, or publication diagnostics; those
+results never mutate the cached tree.
 
 ## Recovery
 
@@ -129,6 +149,15 @@ initialized through the option or local discovery and replaced by the custom
 Generated command and builtin metadata pins its upstream Vim tag and must be
 reproducible without requiring Vim at server runtime.
 
+Every published workspace state has an identity consisting of its generation,
+index instance and revision, and import-graph revision. Cross-file source,
+symbol facts, and graph edges used by one analysis are copied under the same
+workspace lock. Background work drops and requeues a stale result; foreground
+workspace requests retry once and return `protocol.ErrContentModified` if the
+replacement state also changes. Rebuilds additionally validate the complete set of open
+snapshot pointers before publication, and a delayed close restore cannot
+replace a reopened overlay.
+
 ## Protocol lifecycle
 
 - Before `initialize`, accept only methods allowed by LSP.
@@ -164,8 +193,12 @@ does not advertise a batch extension.
 ## Performance discipline
 
 - Use only the pinned official Vim `v9.2.1015` runtime for routine parser A/B.
-- Run five samples with identical roots, ordering, warmups, `GOMAXPROCS`, and
-  worker count; report median time, bytes/op, and allocs/op.
+- For the incremental-edit baseline, run each fixed fixture for exactly 100
+  operations with `-benchmem -benchtime=100x -count=1`; report time, bytes/op,
+  and allocs/op. Allocation metrics describe allocation pressure, not peak live
+  heap or process RSS.
+- Broader comparative studies may use five identical samples and report the
+  median, with roots, ordering, warmups, `GOMAXPROCS`, and worker count fixed.
 - Profile only parser work before selecting an optimization. Preserve complete
   AST, spans, trivia, diagnostics, loose recovery, and deterministic ordering.
 - Do not guess slice capacity from source bytes or physical line count. Do not

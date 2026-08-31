@@ -1,6 +1,6 @@
 # 基于 gopls 模型的增量编辑实施计划
 
-> 状态：待实施。
+> 状态：I0-I5 实现完成，待最终验证与性能证据。
 >
 > 本计划以仓库根目录的 `gopls-incremental-parsing.md` 为设计依据。
 > 2026-08-31 已通过提交 `038c4a0` 撤销旧的局部 AST `Reparse` 方案。
@@ -68,15 +68,18 @@ vimls-go 的“增量编辑”只发生在文本、快照、缓存和依赖失�
 - parser、analysis 和 workspace 批量任务已有有界 worker；
 - `syntax.Parse` 是完整 source 的唯一 parser oracle。
 
-当前需要修正：
+本轮已经完成：
 
-- parser cache 仍按 URI/revision 隐式关联，没有明确的内容身份；
-- 后台分析会把 compatibility/semantic diagnostics 混入随后缓存的 `File` 副本；
-- 同内容的新 revision 不能明确复用 parser tree；
-- `didSave` 无文本变化时仍会重新失效 workspace facts 和排队分析；
-- repeated `didOpen` 的旧 cache 生命周期边界不够明确；
-- workspace rebuild 会重新解析全部文件，不能复用内容未变化文件的完整 AST；
-- publish 只检查 document/config 和 graph revision，尚未统一检查 index/graph 身份。
+- Snapshot 使用基于完整 bytes 的 SHA-256 内容身份；
+- open-document parser cache 同时校验内容身份和 exact source，只保存 immutable parser tree；
+- 同内容的新 revision 可复用 parser tree，变化内容仍完整执行 `syntax.Parse`；
+- unchanged `didSave` 不再失效 workspace facts 或重复排队分析；
+- repeated `didOpen`、close/reopen 和 change-during-parse 受 snapshot lifetime barrier 保护；
+- diagnostics、workspace facts 和前台跨文件请求统一校验 workspace generation、index
+  实例/revision 与 graph revision。
+
+workspace rebuild 仍完整解析其文件集；未变化 closed-file AST cache 只有第 10.1 节的
+profile 证明必要时才另行实现。
 
 ## 4. 正确性和一致性不变量
 
@@ -189,7 +192,8 @@ type workspaceIdentity struct {
 约束：
 
 - `Snapshot` 构造时只计算一次 content ID。
-- disk workspace source 使用同一个 `text.ContentIDOf`，不重复定义 hash 规则。
+- disk workspace source 当前没有 AST cache，因而不提前计算内容身份；第 10.1 节若立项，
+  必须复用 `text.ContentIDOf`，不重复定义 hash 规则。
 - `parsedDocument` 不保存 analysis/config/target/graph 状态。
 - `workspaceIdentity.index` 只作实例身份；请求不得依靠该指针绕过 revision 复核。
 - 不建立通用 cache interface；open documents 和 workspace rebuild 只使用各自已有 map。
@@ -230,7 +234,7 @@ type workspaceIdentity struct {
 
 **Goal**
 
-让所有 immutable text snapshots 和 disk source 使用同一个稳定内容身份。
+让所有 immutable text snapshots 使用同一个稳定内容身份。
 
 **Allowed paths**
 
@@ -359,7 +363,7 @@ go test -mod=readonly ./internal/server \
 ```sh
 gofmt -w <changed-go-files>
 go test -mod=readonly ./internal/server \
-  -run 'Test(ServerDocumentParserCache|ServerRepeatedDocumentOpen|ServerStaleAnalysis|NavigationReusesCurrentParsedDocument|TargetVersionCompatibilityDiagnosticsReanalyze|ServerSkipsAnalysisForOversizedDocument)'
+  -run 'Test(ServerDocumentParserCache|ServerRepeatedDocumentOpen|ServerOldSnapshotParserCacheCannotRestoreCurrentLifetime|NavigationReusesCurrentParsedDocument|TargetVersionCompatibilityDiagnosticsReanalyze|ServerSkipsAnalysisForOversizedDocument)'
 ```
 
 ### I3：LSP 生命周期和 stale barrier
@@ -412,7 +416,7 @@ gofmt -w <changed-go-files>
 go test -mod=readonly ./internal/workspace \
   -run 'TestDocuments(OpenChangeSaveCloseAndReopen|CancelAndRejectStaleAnalysis)'
 go test -mod=readonly ./internal/server \
-  -run 'Test(ServerDocumentSynchronization|ServerDocumentHandlersCancelStaleAnalysis|AnalysisQueueCoalescesRapidDocumentChanges|ServerDocumentParserCache|ServerRepeatedDocumentOpen|ServerStaleAnalysis|TargetVersionCompatibilityDiagnosticsReanalyze|OpenDocumentsOverrideDisk|CloseRestore)'
+  -run 'Test(ServerDocumentSynchronization|ServerDocumentHandlersCancelStaleAnalysis|AnalysisQueueCoalescesRapidDocumentChanges|ServerDocumentParserCache|ServerRepeatedDocumentOpen|ServerOldSnapshotParserCacheCannotRestoreCurrentLifetime|TargetVersionCompatibilityDiagnosticsReanalyze|OpenDocumentsOverrideDisk|ServerDidCloseClearsCacheAndRestoresOnlyOpenDocument)'
 ```
 
 ### I4：workspace identity 一致性
@@ -592,6 +596,7 @@ open-document 增量编辑正确性不依赖 closed-file/workspace rebuild 的 A
 完成后的 profile 证明 workspace 全量重解析是主要成本，才增加独立任务：
 
 - build 开始时捕获上一代 `path -> {content ID, source, *syntax.File}` 只读 map；
+- disk source 的 content ID 必须复用 `text.ContentIDOf`；
 - path、content ID 和 exact source 都相同才复用；其它文件完整 `syntax.Parse`；
 - open overlay 优先于 disk，同 path 的来源状态不能混用；
 - 新 parser map 与 index/graph 在同一个 generation 检查后发布；
@@ -631,17 +636,17 @@ gopls 使用 package key 和 typerefs 阻止无关反向依赖继续失效。vim
 
 ## 12. Definition of Done
 
-- [ ] LSP edits 只在 text 层合成完整新文本。
-- [ ] `syntax.Parse` 是变化内容唯一 parser 入口；仓库没有 `Reparse` 或 AST splice。
-- [ ] Snapshot 内容身份稳定、与 version/revision 解耦。
-- [ ] parser cache 只有精确 source identity 命中，hash collision 不会误复用。
-- [ ] changed content 产生完整新 AST；same content 可复用 immutable AST。
-- [ ] parser cache 不含 compatibility/semantic/workspace/publish diagnostics。
-- [ ] analysis 对变化文件完整重建，旧 analysis 和旧 AST 保持不变。
-- [ ] didOpen/change/save/close/config 的状态转换与第 7 节一致。
-- [ ] stale document lifetime/snapshot/source 结果不能覆盖当前 URI parser cache。
-- [ ] stale document/config/workspace 结果不能替换 facts 或发布 diagnostics；纯 parser
+- [x] LSP edits 只在 text 层合成完整新文本。
+- [x] `syntax.Parse` 是变化内容唯一 parser 入口；仓库没有 `Reparse` 或 AST splice。
+- [x] Snapshot 内容身份稳定、与 version/revision 解耦。
+- [x] parser cache 只有精确 source identity 命中，hash collision 不会误复用。
+- [x] changed content 产生完整新 AST；same content 可复用 immutable AST。
+- [x] parser cache 不含 compatibility/semantic/workspace/publish diagnostics。
+- [x] analysis 对变化文件完整重建，旧 analysis 和旧 AST 保持不变。
+- [x] didOpen/change/save/close/config 的状态转换与第 7 节一致。
+- [x] stale document lifetime/snapshot/source 结果不能覆盖当前 URI parser cache。
+- [x] stale document/config/workspace 结果不能替换 facts 或发布 diagnostics；纯 parser
       cache 不因 config/index/graph 变化而失效。
 - [ ] text、workspace 和 server 的 focused correctness/race/fuzz gates 通过。
 - [ ] 全部代码完成后才记录 content identity、cache hit 和 full parse 性能。
-- [ ] 文档只描述已经实现的事实。
+- [x] 文档只描述已经实现的事实。
