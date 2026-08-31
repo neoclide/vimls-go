@@ -8453,6 +8453,110 @@ func TestAnalyzeE1358SuperNotInChildClassDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1359AbstractConstructorDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{
+			name:   "default constructor",
+			source: "vim9script\nabstract class A\n  def new()\n  enddef\nendclass\n",
+			span:   "enddef",
+		},
+		{
+			name:   "named constructor",
+			source: "vim9script\nabstract class A\n  def newValues()\n  enddef\nendclass\n",
+			span:   "enddef",
+		},
+		{
+			name:   "protected constructor",
+			source: "vim9script\nabstract class A\n  def _newPrivate()\n  enddef\nendclass\n",
+			span:   "enddef",
+		},
+		{
+			name:   "static return type priority",
+			source: "vim9script\nabstract class A\n  static def new(): number\n    return 1\n  enddef\nendclass\n",
+			span:   "enddef",
+		},
+		{
+			name:   "abstract declaration",
+			source: "vim9script\nabstract class A\n  abstract def new()\nendclass\n",
+			span:   "new",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1359" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != `Cannot define a "new" method in an abstract class` || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1359 diagnostics = %#v; syntax = %#v", got, file.Diagnostics)
+			}
+			if test.name == "static return type priority" {
+				for _, diagnostic := range file.Diagnostics {
+					if diagnostic.Code == "vim/E1365" || diagnostic.Code == "vim/E1370" {
+						t.Fatalf("abstract constructor retained lower-priority syntax diagnostic: %#v", file.Diagnostics)
+					}
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "concrete class constructor",
+			source: "vim9script\nclass A\n  def new()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "abstract class without constructor",
+			source: "vim9script\nabstract class A\n  def Build()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "uppercase New is ordinary method",
+			source: "vim9script\nabstract class A\n  static def New()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "incomplete constructor",
+			source: "vim9script\nabstract class A\n  def new()\n",
+		},
+		{
+			name:   "enum constructor",
+			source: "vim9script\nenum A\n  Value\n  def new()\n  enddef\nendenum\n",
+		},
+		{
+			name:   "legacy function",
+			source: "function new()\nendfunction\n",
+		},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1359" {
+					t.Fatalf("unexpected E1359: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+
+	result := Analyze(syntax.Parse("vim9script\nabstract class A\n  def new()\n  enddef\n  def new()\n  enddef\nendclass\n"))
+	found := false
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1359" {
+			found = true
+		}
+		if diagnostic.Code == "vim/E1355" {
+			t.Fatalf("invalid abstract constructors gained duplicate-method cascade: %#v", result.Diagnostics)
+		}
+	}
+	if !found {
+		t.Fatalf("missing E1359: %#v", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

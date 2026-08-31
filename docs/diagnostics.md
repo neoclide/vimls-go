@@ -3925,3 +3925,27 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9class.txt:667-678` defines `super.` as access to an object
   method of the base class and distinguishes static method calls.
 - `src/errors.h:3470-3473` defines the exact E1358 and E1359 messages.
+
+## Constructor in an abstract class: E1359
+
+E1359 means `Cannot define a "new" method in an abstract class`. An abstract
+Vim9 class cannot define `new`, a named `new*` constructor, or a protected
+`_new*` constructor. This includes concrete bodies and abstract declarations.
+
+A body constructor reports where its complete definition ends; an abstract
+declaration reports its method name. Abstract-class ownership takes priority
+over the static-constructor and constructor-return-type rules. Incomplete
+methods are retained without E1359, and concrete classes, enums, ordinary
+methods, and case-distinct `New` methods are unaffected.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:2976-2982` covers a concrete `new()` body in
+  an abstract class with the exact E1359 message.
+- `src/vim9class.c:1130-1155` rejects abstract-class constructors before the
+  static modifier and return-type checks.
+- `src/vim9class.c:2528-2550` defines the method before applying constructor
+  validation, so a body diagnostic is observed at its `enddef`.
+- `runtime/doc/vim9class.txt:495-506` states that an abstract class has no
+  `new()` method.
+- `src/errors.h:3472-3475` defines the exact E1359 and E1360 messages.

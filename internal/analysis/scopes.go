@@ -131,6 +131,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectAggregateLocalRedeclarationDiagnostics(result)
 	collectDuplicateTypeAliasDiagnostics(result)
+	collectAbstractConstructorDiagnostics(result)
 	collectDuplicateMethodDiagnostics(result)
 	collectUnimplementedAbstractMethodDiagnostics(result)
 	collectMethodAccessLevelDiagnostics(result)
@@ -1332,6 +1333,9 @@ func collectDuplicateMethodDiagnostics(result *FileAnalysis) {
 				continue
 			}
 			name := file.Text(member.Function.Name)
+			if commandHasModifier(aggregate, "abstract") && (strings.HasPrefix(name, "new") || strings.HasPrefix(name, "_new")) {
+				continue
+			}
 			base := strings.TrimPrefix(name, "_")
 			if base == "" {
 				continue
@@ -1351,6 +1355,40 @@ func collectDuplicateMethodDiagnostics(result *FileAnalysis) {
 				break
 			}
 			seen[base] = true
+		}
+	}
+}
+
+func collectAbstractConstructorDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		aggregate := &file.Commands[index]
+		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil || aggregate.Aggregate.Kind != syntax.BlockClass || !commandHasModifier(aggregate, "abstract") {
+			continue
+		}
+		for _, memberIndex := range aggregate.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Dialect != syntax.Vim9 || member.Canonical != "def" || member.Function == nil {
+				continue
+			}
+			name := file.Text(member.Function.Name)
+			if !strings.HasPrefix(name, "new") && !strings.HasPrefix(name, "_new") {
+				continue
+			}
+			span, complete := completedAggregateMethodSpan(file, aggregate, member)
+			if !complete {
+				continue
+			}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1359", Message: `Cannot define a "new" method in an abstract class`, Span: span,
+			})
+			break
 		}
 	}
 }
