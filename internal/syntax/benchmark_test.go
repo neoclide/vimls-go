@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 )
 
 var benchmarkParsedFile *File
+var benchmarkIncrementalFile *File
 var benchmarkExpression *Expression
 var benchmarkDiagnostics []Diagnostic
 var benchmarkConsumed int
@@ -16,6 +18,57 @@ var benchmarkOpaqueEnd int
 var benchmarkLongestOperator string
 var benchmarkModifier string
 var benchmarkModifierOK bool
+
+func BenchmarkParseIncrementalCorpus(b *testing.B) {
+	for _, dialect := range []Dialect{Legacy, Vim9} {
+		for _, size := range []int{10 << 10, 100 << 10, 1 << 20} {
+			source := incrementalBenchmarkSource(dialect, size)
+			b.Run(fmt.Sprintf("%s/%dKiB", dialect, size>>10), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					benchmarkIncrementalFile = Parse(source)
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkReparseIncrementalCorpus(b *testing.B) {
+	for _, dialect := range []Dialect{Legacy, Vim9} {
+		for _, size := range []int{10 << 10, 100 << 10, 1 << 20} {
+			b.Run(fmt.Sprintf("%s/%dKiB/middle", dialect, size>>10), func(b *testing.B) {
+				oldSource := incrementalBenchmarkSource(dialect, size)
+				offset := len(oldSource) / 2
+				for offset < len(oldSource) && (oldSource[offset] < '0' || oldSource[offset] > '9') {
+					offset++
+				}
+				newSource := oldSource[:offset] + "2" + oldSource[offset+1:]
+				previous := Parse(oldSource)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					benchmarkIncrementalFile = Reparse(previous, newSource)
+				}
+			})
+		}
+	}
+}
+
+func incrementalBenchmarkSource(dialect Dialect, size int) string {
+	var source strings.Builder
+	source.Grow(size + 64)
+	if dialect == Vim9 {
+		source.WriteString("vim9script\n")
+	}
+	for source.Len() < size {
+		if dialect == Vim9 {
+			source.WriteString("var value = 1\necho value\n")
+		} else {
+			source.WriteString("let value = 1\necho value\n")
+		}
+	}
+	return source.String()[:size]
+}
 
 func BenchmarkLookupModifier(b *testing.B) {
 	for _, test := range []struct {

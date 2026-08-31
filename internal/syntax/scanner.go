@@ -38,10 +38,19 @@ func parseSource(source string, initial Dialect) *File {
 }
 
 func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
+	return parseSourceRange(source, initial, lambdaBody, 0)
+}
+
+// parseSourceRange parses source starting at a physical source boundary. The
+// caller supplies source truncated at the desired end, so every produced span
+// remains an absolute byte span in that source. Full parsing always starts at
+// zero; incremental parsing uses this only after proving the range is an
+// independent syntax unit.
+func parseSourceRange(source string, initial Dialect, lambdaBody bool, start int) *File {
 	file := &File{Dialect: initial, Source: source, lambdaBody: lambdaBody}
 	active := initial
 	scriptVersion := uint8(1)
-	vim9Prologue := initial == Vim9 && startsWithVim9Script(source)
+	vim9Prologue := start == 0 && initial == Vim9 && startsWithVim9Script(source)
 	if vim9Prologue {
 		active = Legacy
 	}
@@ -57,8 +66,8 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 	var vim9ContinuationState vim9ContinuationScan
 	lambdaCloseCommand := -1
 	lambdaCloseOffset := -1
-	offset := 0
-	if strings.HasPrefix(source, "\ufeff") {
+	offset := start
+	if start == 0 && strings.HasPrefix(source, "\ufeff") {
 		offset = len("\ufeff")
 		file.Tokens = append(file.Tokens, Token{Kind: TokenBOM, Span: Span{End: offset}})
 	}
@@ -456,6 +465,9 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
 		return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start
 	})
+	if start == 0 {
+		file.incremental = buildIncrementalMetadata(file)
+	}
 	return file
 }
 

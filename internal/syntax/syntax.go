@@ -561,6 +561,7 @@ type File struct {
 	Blocks      []Block
 	Diagnostics []Diagnostic
 	OpaqueTail  Span
+	incremental *incrementalMetadata
 }
 
 func (f *File) Text(span Span) string {
