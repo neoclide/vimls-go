@@ -1,5 +1,9 @@
 # vimls-go 增量 AST 解析实施方案
 
+> **状态：已废弃，仅保留为历史研究。** 仓库不再实施本文的局部 AST
+> `Reparse`、checkpoint、收敛或 clone/rebase 方案。当前实施契约以仓库根目录的
+> `incremental-parsing-plan.md` 为准：LSP edit 只增量合成文本，变化内容始终完整解析。
+
 > 本文件保留现有文件名 `tree-sister.md`，正文统一使用正确名称
 > Tree-sitter。
 >
