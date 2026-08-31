@@ -1,8 +1,11 @@
 package text
 
 import (
+	"crypto/sha256"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestSnapshotPositions(t *testing.T) {
@@ -223,4 +226,188 @@ func FuzzPositionRoundTrip(f *testing.F) {
 			t.Fatalf("round trip offset %d -> %#v -> %d, %v", offset, position, got, err)
 		}
 	})
+}
+
+func TestApplyChangesDeterministicSequence(t *testing.T) {
+	current := NewSnapshot("file:///sequence.vim", 1, nil, "\ufeffAe\u0301B𐐀C\r\nline")
+	reference := current.Text()
+	edits := []struct {
+		encoding   Encoding
+		change     Change
+		start, end int
+	}{
+		{UTF8, Change{Range: &Range{Start: Position{}, End: Position{Character: 3}}}, 0, 3},
+		{UTF32, Change{Range: &Range{Start: Position{Character: 2}, End: Position{Character: 3}}, Text: "\u0300"}, 2, 4},
+		{UTF16, Change{Range: &Range{Start: Position{Character: 4}, End: Position{Character: 6}}, Text: "XY"}, 5, 9},
+		{UTF32, Change{Range: &Range{Start: Position{Character: 7}, End: Position{Line: 1}}}, 8, 10},
+		{UTF8, Change{Range: &Range{Start: Position{Character: 12}, End: Position{Character: 12}}, Text: "!"}, 12, 12},
+	}
+
+	for step, edit := range edits {
+		reference = reference[:edit.start] + edit.change.Text + reference[edit.end:]
+		version := int32(step + 2)
+		updated, err := ApplyChanges(current, uint64(step+2), &version, edit.encoding, []Change{edit.change})
+		if err != nil {
+			t.Fatalf("step %d: ApplyChanges: %v", step, err)
+		}
+		full := NewSnapshot(current.URI(), uint64(step+2), &version, reference)
+		assertSnapshotMatches(t, updated, full)
+		current = updated
+	}
+}
+
+func FuzzApplyChanges(f *testing.F) {
+	f.Add([]byte("a\nb\n"), []byte{utf8Index, 1, 2}, []byte("l"))
+	f.Add([]byte("a\r\nb\r\n"), []byte{utf16Index, 1, 2}, []byte("c"))
+	f.Add([]byte("\ufeffno final newline"), []byte{utf32Index, 0, 1}, []byte("b"))
+	f.Add([]byte("e\u0301"), []byte{utf16Index, 1, 2}, []byte("m"))
+	f.Add([]byte("a𐐀b"), []byte{utf32Index, 1, 2}, []byte("a"))
+	f.Add([]byte("a\xffb"), []byte{utf8Index, 1, 2}, []byte("i"))
+
+	f.Fuzz(func(t *testing.T, source, operations, replacements []byte) {
+		const (
+			maxSource       = 256
+			maxOperations   = 96
+			maxReplacements = 128
+			maxSteps        = 32
+			replacementSize = 16
+		)
+		if len(source) > maxSource {
+			source = source[:maxSource]
+		}
+		if len(operations) > maxOperations {
+			operations = operations[:maxOperations]
+		}
+		if len(replacements) > maxReplacements {
+			replacements = replacements[:maxReplacements]
+		}
+
+		current := NewSnapshot("file:///fuzz.vim", 1, nil, string(source))
+		reference := current.Text()
+		steps := min(len(operations)/3, maxSteps)
+		encodings := []Encoding{UTF8, UTF16, UTF32}
+		for step := range steps {
+			operation := operations[step*3 : step*3+3]
+			encoding := encodings[int(operation[0])%len(encodings)]
+			boundaries := fuzzBoundaries(reference, encoding)
+			if len(boundaries) == 0 {
+				t.Fatal("no valid edit boundaries")
+			}
+			start := boundaries[int(operation[1])%len(boundaries)]
+			end := boundaries[int(operation[2])%len(boundaries)]
+			if start.offset > end.offset {
+				start, end = end, start
+			}
+			replacement := fuzzReplacement(replacements, operation[0], replacementSize)
+			change := Change{Range: &Range{Start: start.position, End: end.position}, Text: replacement}
+
+			reference = reference[:start.offset] + replacement + reference[end.offset:]
+			version := int32(step + 2)
+			updated, err := ApplyChanges(current, uint64(step+2), &version, encoding, []Change{change})
+			if err != nil {
+				t.Fatalf("step %d: ApplyChanges: %v", step, err)
+			}
+			full := NewSnapshot(current.URI(), uint64(step+2), &version, reference)
+			assertSnapshotMatches(t, updated, full)
+			current = updated
+		}
+	})
+}
+
+func assertSnapshotMatches(t testing.TB, incremental, full *Snapshot) {
+	t.Helper()
+	if incremental.Text() != full.Text() {
+		t.Fatalf("text = %q, want %q", incremental.Text(), full.Text())
+	}
+	want := ContentID(sha256.Sum256([]byte(full.Text())))
+	if incremental.ContentID() != want {
+		t.Fatalf("content ID = %x, want %x", incremental.ContentID(), want)
+	}
+}
+
+const (
+	utf8Index = iota
+	utf16Index
+	utf32Index
+)
+
+type fuzzBoundary struct {
+	offset   int
+	position Position
+}
+
+func fuzzBoundaries(content string, encoding Encoding) []fuzzBoundary {
+	boundaries := make([]fuzzBoundary, 0, len(content)+1)
+	if position, ok := fuzzPosition(content, 0, encoding); ok {
+		boundaries = append(boundaries, fuzzBoundary{position: position})
+	}
+	for offset := 0; offset < len(content); {
+		_, size := utf8.DecodeRuneInString(content[offset:])
+		offset += size
+		if position, ok := fuzzPosition(content, offset, encoding); ok {
+			boundaries = append(boundaries, fuzzBoundary{offset: offset, position: position})
+		}
+	}
+	return boundaries
+}
+
+func fuzzPosition(content string, target int, encoding Encoding) (Position, bool) {
+	if target < 0 || target > len(content) || (encoding != UTF8 && encoding != UTF16 && encoding != UTF32) {
+		return Position{}, false
+	}
+	for line, start := 0, 0; ; line++ {
+		end := len(content)
+		next := len(content)
+		if newline := strings.IndexByte(content[start:], '\n'); newline >= 0 {
+			next = start + newline
+			end = next
+			if end > start && content[end-1] == '\r' {
+				end--
+			}
+		}
+		if target >= start && target <= end {
+			character, ok := fuzzCharacterOffset(content[start:end], target-start, encoding)
+			return Position{Line: line, Character: character}, ok
+		}
+		if next == len(content) {
+			return Position{}, false
+		}
+		start = next + 1
+	}
+}
+
+func fuzzCharacterOffset(content string, target int, encoding Encoding) (int, bool) {
+	units := 0
+	for offset := 0; offset < len(content); {
+		if offset == target {
+			return units, true
+		}
+		r, size := utf8.DecodeRuneInString(content[offset:])
+		if offset+size > target {
+			return 0, false
+		}
+		switch encoding {
+		case UTF8:
+			units += size
+		case UTF16:
+			if r > 0xffff && !(r == utf8.RuneError && size == 1) {
+				units += 2
+			} else {
+				units++
+			}
+		case UTF32:
+			units++
+		}
+		offset += size
+	}
+	return units, target == len(content)
+}
+
+func fuzzReplacement(source []byte, seed byte, maxSize int) string {
+	if len(source) == 0 {
+		return ""
+	}
+	start := int(seed) % len(source)
+	end := min(start+maxSize, len(source))
+	return string(source[start:end])
 }
