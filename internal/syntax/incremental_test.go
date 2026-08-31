@@ -1270,6 +1270,56 @@ var incrementalStructureStateScenarios = func() []incrementalCommandBoundaryScen
 	}
 }()
 
+var incrementalRecoveryScenarios = func() []incrementalCommandBoundaryScenario {
+	stringSource := "vim9script\nvar value = \"abc\nvar afterString = 1\n"
+	listSource := "vim9script\nvar values: list<number> = [\n  1,\n  2,\nvar afterList = 1\n"
+	dictionarySource := "vim9script\nvar value = {'a':\nvar afterDictionary = 1\n"
+	typeSource := "vim9script\nvar value: tuple<number, string = (1, 'x')\nvar afterType = 1\n"
+	genericSource := "vim9script\ndef Fn<T(value: T)\nenddef\nvar afterGeneric = 1\n"
+	lambdaSource := "vim9script\nvar Func = (nr: number): int => {\n  return nr\nvar afterLambda = 1\n"
+	malformedBar := "vim9script\nvar broken = [1, 2} | echo hidden\nvar afterBar = 1\n"
+	unknown := "futurecmd arg\nlet afterUnknown = 1\n"
+	closeString := incrementalTextInsertAt(stringSource, "\nvar afterString", "\"")
+	cleanString := applyIncrementalTextEdit(stringSource, closeString)
+	return []incrementalCommandBoundaryScenario{
+		{
+			name: "unterminated string transition", tags: []string{"unclosed string", "fragile to clean", "clean to fragile"}, source: stringSource,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("unterminated string transition", "close and reopen string", incrementalSequence, []incrementalTextEdit{
+				closeString,
+				incrementalTextEditAt(cleanString, "\"\nvar afterString", "\nvar afterString"),
+			})},
+		},
+		{
+			name: "unclosed list", tags: []string{"unclosed list"}, source: listSource,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("unclosed list", "replace item", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(listSource, "2", "3")})},
+		},
+		{
+			name: "unclosed dictionary", tags: []string{"unclosed dict"}, source: dictionarySource,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("unclosed dictionary", "extend key", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(dictionarySource, "':", "x")})},
+		},
+		{
+			name: "incomplete type", tags: []string{"unclosed type"}, source: typeSource,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("incomplete type", "rename declaration", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(typeSource, "value", "typed")})},
+		},
+		{
+			name: "incomplete generic signature", tags: []string{"incomplete signature/generic"}, source: genericSource,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("incomplete generic signature", "lengthen function name", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(genericSource, "Fn", "Function")})},
+		},
+		{
+			name: "unclosed lambda", tags: []string{"unclosed lambda"}, source: lambdaSource,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("unclosed lambda", "delete return keyword", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(lambdaSource, "return ", "")})},
+		},
+		{
+			name: "malformed same-line bar", tags: []string{"malformed same-line bar payload", "next-line declaration recovery"}, source: malformedBar,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("malformed same-line bar", "lengthen hidden payload", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(malformedBar, "hidden", "payload")})},
+		},
+		{
+			name: "unknown command recovery", tags: []string{"unknown command opaque"}, source: unknown,
+			cases: []incrementalMatrixCase{newIncrementalMatrixCase("unknown command recovery", "extend argument", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(unknown, "arg", "more-")})},
+		},
+	}
+}()
+
 func TestIncrementalEditMatrixStructureState(t *testing.T) {
 	seenTags, seenKinds, seenNames := map[string]bool{}, map[incrementalEditKind]bool{}, map[string]bool{}
 	for _, scenario := range incrementalStructureStateScenarios {
@@ -1484,6 +1534,128 @@ func TestStructureStateMatrixBoundaries(t *testing.T) {
 				if !reflect.DeepEqual(oldUnit.entry, newUnit.entry) || !reflect.DeepEqual(oldUnit.exit, newUnit.exit) || reflect.DeepEqual(oldUnit.structureEntry, newUnit.structureEntry) || !slices.Equal(oldUnit.structureEntry, nil) || !slices.Equal(newUnit.structureEntry, []BlockKind{BlockIf}) {
 					t.Fatalf("scanner/structure state did not diverge as expected: old=%#v new=%#v", oldUnit, newUnit)
 				}
+			}
+		}
+	}
+}
+
+func TestIncrementalEditMatrixRecovery(t *testing.T) {
+	seenTags, seenKinds, seenNames := map[string]bool{}, map[incrementalEditKind]bool{}, map[string]bool{}
+	for _, scenario := range incrementalRecoveryScenarios {
+		for _, tag := range scenario.tags {
+			seenTags[tag] = true
+		}
+		for _, test := range scenario.cases {
+			if seenNames[test.name] {
+				t.Fatalf("duplicate recovery matrix case %q", test.name)
+			}
+			seenNames[test.name], seenKinds[test.kind] = true, true
+			results := incrementalTextEditResults(scenario.source, test.edits)
+			if len(results) == 0 || test.kind == incrementalSequence && len(results) < 2 {
+				t.Fatalf("%s has insufficient edits: %d", test.name, len(results))
+			}
+			for step, result := range results {
+				if result.old == result.new || result.edit.start < 0 || result.edit.start > result.edit.oldEnd || result.edit.oldEnd > len(result.old) {
+					t.Fatalf("%s step %d is invalid: %#v", test.name, step, result)
+				}
+				valid := incrementalTextEditKindValid(test.kind, result.edit)
+				if test.kind == incrementalSequence {
+					valid = incrementalSequenceStepValid(result.edit)
+				}
+				if !valid {
+					t.Fatalf("%s step %d does not match kind %d: %#v", test.name, step, test.kind, result.edit)
+				}
+			}
+		}
+	}
+	for _, tag := range []string{"unclosed string", "unclosed list", "unclosed dict", "unclosed type", "incomplete signature/generic", "unclosed lambda", "malformed same-line bar payload", "next-line declaration recovery", "unknown command opaque", "fragile to clean", "clean to fragile"} {
+		if !seenTags[tag] {
+			t.Fatalf("missing recovery scenario %q", tag)
+		}
+	}
+	if len(seenKinds) != 5 {
+		t.Fatalf("recovery matrix has %d edit kinds, want 5", len(seenKinds))
+	}
+}
+
+func TestReparseRecoveryMatrix(t *testing.T) {
+	for _, scenario := range incrementalRecoveryScenarios {
+		for _, test := range scenario.cases {
+			t.Run(test.name, func(t *testing.T) {
+				runIncrementalMatrix(t, scenario.source, test)
+			})
+		}
+	}
+}
+
+func TestRecoveryMatrixASTRecovery(t *testing.T) {
+	for _, scenario := range incrementalRecoveryScenarios {
+		for _, test := range scenario.cases {
+			var got *File
+			if scenario.name == "unterminated string transition" {
+				got = runIncrementalMatrixSteps(t, scenario.source, test, func(step int, file *File) {
+					if step == 0 {
+						if hasDiagnostic(file, "vim/E114") {
+							t.Fatalf("%s did not restore clean string: %#v", test.name, file.Diagnostics)
+						}
+					} else if !hasDiagnostic(file, "vim/E114") {
+						t.Fatalf("%s did not restore fragile string: %#v", test.name, file.Diagnostics)
+					}
+					declaration := incrementalDeclaration(t, file, "value")
+					if declaration.Declaration.Initializer == nil || declaration.Declaration.Initializer.Kind != ExpressionString {
+						t.Fatalf("%s string initializer = %#v", test.name, declaration.Declaration.Initializer)
+					}
+					incrementalDeclaration(t, file, "afterString")
+				})
+			} else {
+				got = runIncrementalMatrix(t, scenario.source, test)
+			}
+			switch scenario.name {
+			case "unterminated string transition":
+				if !hasDiagnostic(got, "vim/E114") {
+					t.Fatalf("unterminated string diagnostics = %#v", got.Diagnostics)
+				}
+			case "unclosed list":
+				declaration := incrementalDeclaration(t, got, "values")
+				if !hasDiagnostic(got, "vimls/missing-delimiter") || declaration.Declaration.Initializer == nil || declaration.Declaration.Initializer.Kind != ExpressionList {
+					t.Fatalf("unclosed list = %#v diagnostics=%#v", declaration, got.Diagnostics)
+				}
+				incrementalDeclaration(t, got, "afterList")
+			case "unclosed dictionary":
+				declaration := incrementalDeclaration(t, got, "value")
+				if !hasDiagnostic(got, "vim/E15") || declaration.Declaration.Initializer == nil || declaration.Declaration.Initializer.Kind != ExpressionDictionary {
+					t.Fatalf("unclosed dictionary = %#v diagnostics=%#v", declaration, got.Diagnostics)
+				}
+				incrementalDeclaration(t, got, "afterDictionary")
+			case "incomplete type":
+				if !hasDiagnostic(got, "vimls/missing-type-delimiter") {
+					t.Fatalf("incomplete type diagnostics = %#v", got.Diagnostics)
+				}
+				incrementalDeclaration(t, got, "typed")
+				incrementalDeclaration(t, got, "afterType")
+			case "incomplete generic signature":
+				if !hasDiagnostic(got, "vimls/missing-generic-end") || len(got.Commands) < 2 || got.Commands[1].Function == nil {
+					t.Fatalf("incomplete generic signature = %#v diagnostics=%#v", got.Commands, got.Diagnostics)
+				}
+				incrementalDeclaration(t, got, "afterGeneric")
+			case "unclosed lambda":
+				declaration := incrementalDeclaration(t, got, "Func")
+				initializer := declaration.Declaration.Initializer
+				if !hasDiagnostic(got, "vim/E1171") || initializer == nil || initializer.Kind != ExpressionLambda || initializer.LambdaBody == nil {
+					t.Fatalf("unclosed lambda = %#v diagnostics=%#v", initializer, got.Diagnostics)
+				}
+				incrementalDeclaration(t, got, "afterLambda")
+			case "malformed same-line bar":
+				broken := incrementalDeclaration(t, got, "broken")
+				if !hasDiagnostic(got, "vim/E696") || countTokens(got, TokenSeparator) != 0 || got.Text(broken.Argument) != "broken = [1, 2} | echo payload" {
+					t.Fatalf("malformed same-line bar diagnostics=%#v tokens=%#v", got.Diagnostics, got.Tokens)
+				}
+				incrementalDeclaration(t, got, "afterBar")
+			case "unknown command recovery":
+				if len(got.Commands) < 1 || got.Commands[0].Kind != CommandUnknown || got.Commands[0].Canonical != "futurecmd" {
+					t.Fatalf("unknown command = %#v", got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterUnknown")
 			}
 		}
 	}
