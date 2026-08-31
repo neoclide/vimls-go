@@ -3487,3 +3487,35 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:4113-4141` selects E1376 for an object variable and E1422
   for an enum receiver before falling back to E1337 for a class receiver.
 - `src/errors.h:3429-3430` defines the exact message.
+
+## Method argument shadows a class variable: E1340
+
+E1340 means `Argument already declared in the class: {name}`. A direct Vim9
+class or enum method parameter cannot reuse the name of a static variable
+visible as a bare class member in that method. Analysis reports the
+parameter-name span and considers the complete aggregate, so the static
+declaration may appear before or after the method. Class methods also see
+static variables from their class hierarchy.
+
+The rule covers object methods, static methods, constructors, abstract methods,
+defaulted parameters, and named variadic parameters. The exact discard name
+`_` is exempt. Object variables, methods, top-level functions, and nested
+lambdas do not participate.
+
+A conflicting script item retains the earlier E1168 diagnostic. Malformed
+parameters remain owned by syntax recovery, duplicate parameter lists do not
+gain a secondary E1340, and Legacy functions are excluded.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:1798-1820` covers a method argument that
+  shadows a static class variable.
+- `runtime/doc/vim9class.txt:297-300` states that method argument and local
+  variable names cannot shadow class members.
+- `src/vim9class.c:979-1017,2649-2657` checks arguments from both class
+  functions and object methods against the completed direct class-member list.
+- `src/vim9compile.c:325-365,3878-3910` also checks method arguments against
+  static variables found through the defining class hierarchy.
+- `src/vim9compile.c:443-470` gives script conflicts priority before class
+  conflicts and exempts the exact `_` argument.
+- `src/errors.h:3434-3436` defines the exact message.

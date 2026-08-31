@@ -7245,6 +7245,65 @@ func TestAnalyzeE1337MissingClassVariableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1340AggregateArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, parameter string }{
+		{"object method", "vim9script\nclass A\n  static var value = 1\n  def Check(value: number)\n  enddef\nendclass\n", "value"},
+		{"static method", "vim9script\nclass A\n  static var value = 1\n  static def Check(value: number)\n  enddef\nendclass\n", "value"},
+		{"constructor default", "vim9script\nclass A\n  static var value = 1\n  def new(value: number = 1)\n  enddef\nendclass\n", "value"},
+		{"abstract method", "vim9script\nabstract class A\n  static var value = 1\n  abstract def Check(value: number)\nendclass\n", "value"},
+		{"variadic", "vim9script\nclass A\n  static var values = 1\n  def Check(...values: list<number>)\n  enddef\nendclass\n", "values"},
+		{"enum", "vim9script\nenum Fruit\n  Apple\n  static var value = 1\n  def Check(value: number)\n  enddef\nendenum\n", "value"},
+		{"protected static", "vim9script\nclass A\n  static var _value = 1\n  def Check(_value: number)\n  enddef\nendclass\n", "_value"},
+		{"public static", "vim9script\nclass A\n  public static var value = 1\n  def Check(value: number)\n  enddef\nendclass\n", "value"},
+		{"declared after method", "vim9script\nclass A\n  def Check(value: number)\n  enddef\n  static var value = 1\nendclass\n", "value"},
+		{"inherited static", "vim9script\nclass A\n  static var value = 1\nendclass\nclass B extends A\n  def Check(value: number)\n  enddef\nendclass\n", "value"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1340" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Argument already declared in the class: "+test.parameter || file.Text(got[0].Span) != test.parameter {
+				t.Fatalf("E1340 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"underscore", "vim9script\nclass A\n  static var _ = 1\n  def Check(_: number)\n  enddef\nendclass\n", ""},
+		{"object variable", "vim9script\nclass A\n  var value = 1\n  def Check(value: number)\n  enddef\nendclass\n", ""},
+		{"method", "vim9script\nclass A\n  static def Value()\n  enddef\n  def Check(Value: number)\n  enddef\nendclass\n", ""},
+		{"top level", "vim9script\nstatic var value = 1\ndef Check(value: number)\nenddef\n", ""},
+		{"nested lambda", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    var Callback = (value: number) => value\n  enddef\nendclass\n", ""},
+		{"nested def", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    def Nested(value: number)\n    enddef\n  enddef\nendclass\n", ""},
+		{"interface", "vim9script\ninterface A\n  def Check(value: number)\n  enddef\nendinterface\n", ""},
+		{"script priority", "vim9script\nvar value = 1\nclass A\n  static var value = 2\n  def Check(value: number)\n  enddef\nendclass\n", "vim/E1168"},
+		{"duplicate parameter", "vim9script\nclass A\n  static var value = 1\n  def Check(value: number, value: number)\n  enddef\nendclass\n", ""},
+		{"malformed parameter", "vim9script\nclass A\n  static var value = 1\n  def Check(value:)\n  enddef\nendclass\n", ""},
+		{"Legacy", "class A\n  static var value = 1\n  function Check(value)\n  endfunction\nendclass\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1340" {
+					t.Fatalf("guard unexpectedly received E1340: %#v\n%s", diagnostic, test.source)
+				}
+				if diagnostic.Code == test.want {
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

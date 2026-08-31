@@ -480,12 +480,17 @@ func collectArgumentShadowDiagnostics(result *FileAnalysis) {
 			continue
 		}
 		scope := declaration.Scope
-		compiled := scope.Kind == syntax.BlockDef || scope.Lambda != nil && result.File.Text(scope.Lambda.Operator) == "=>"
+		aggregateConflict := aggregateArgumentConflict(result, declaration)
+		compiled := scope.Kind == syntax.BlockDef || scope.Lambda != nil && result.File.Text(scope.Lambda.Operator) == "=>" || aggregateConflict
 		if !compiled || syntaxDiagnosticTouchesCall(result.File.Diagnostics, declaration.Span) {
 			continue
 		}
 		if scriptArgumentConflict(result, declaration) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1168", Message: "Argument already declared in the script: " + argumentScriptMessageTail(result.File, declaration), Span: declaration.Span})
+			continue
+		}
+		if aggregateConflict {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1340", Message: "Argument already declared in the class: " + declaration.Name, Span: declaration.Span})
 			continue
 		}
 		for parent := scope.Parent; parent != nil && parent != result.Root; parent = parent.Parent {
@@ -501,6 +506,61 @@ func collectArgumentShadowDiagnostics(result *FileAnalysis) {
 		}
 	next:
 	}
+}
+
+func aggregateArgumentConflict(result *FileAnalysis, parameter *Declaration) bool {
+	if result == nil || result.File == nil || parameter == nil || parameter.Scope == nil || parameter.Scope.Lambda != nil {
+		return false
+	}
+	file := result.File
+	aggregate := enclosingAggregateCommand(file, parameter.Scope)
+	if aggregate == nil || aggregate.Aggregate == nil || (aggregate.Aggregate.Kind != syntax.BlockClass && aggregate.Aggregate.Kind != syntax.BlockEnum) {
+		return false
+	}
+	var method *syntax.Command
+	for _, memberIndex := range aggregate.Aggregate.Members {
+		if memberIndex < 0 || memberIndex >= len(file.Commands) {
+			continue
+		}
+		candidate := &file.Commands[memberIndex]
+		if candidate.Dialect != syntax.Vim9 || candidate.Canonical != "def" || candidate.Function == nil {
+			continue
+		}
+		for _, candidateParameter := range candidate.Function.Parameters {
+			if parameterDeclarationSpan(file, candidateParameter) == parameter.Span {
+				method = candidate
+				break
+			}
+		}
+		if method != nil {
+			break
+		}
+	}
+	if method == nil || syntaxDiagnosticOverlaps(file.Diagnostics, method.Span) {
+		return false
+	}
+	seenParameters := make(map[string]bool)
+	for _, candidate := range method.Function.Parameters {
+		name := file.Text(parameterDeclarationSpan(file, candidate))
+		if name == "_" {
+			continue
+		}
+		if seenParameters[name] {
+			return false
+		}
+		seenParameters[name] = true
+	}
+	seenAggregates := make(map[*syntax.Command]bool)
+	for current := aggregate; current != nil && !seenAggregates[current]; current = extendedClass(file, result.classes, current) {
+		seenAggregates[current] = true
+		if _, _, found := aggregateVariableBinding(file, current, parameter.Name, true); found {
+			return true
+		}
+		if current.Aggregate.Kind != syntax.BlockClass {
+			break
+		}
+	}
+	return false
 }
 
 func scriptArgumentConflict(result *FileAnalysis, parameter *Declaration) bool {
