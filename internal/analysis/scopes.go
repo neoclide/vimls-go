@@ -6195,6 +6195,44 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 	if result == nil || result.File == nil {
 		return
 	}
+	var expressionUsesExecute func(*syntax.Expression) bool
+	var commandsUseExecute func([]syntax.Command) bool
+	expressionUsesExecute = func(expression *syntax.Expression) bool {
+		if expression == nil {
+			return false
+		}
+		if expression.Kind == syntax.ExpressionCall && len(expression.Children) > 0 && expression.Children[0] != nil &&
+			expression.Children[0].Kind == syntax.ExpressionIdentifier && expression.Children[0].Value == "execute" {
+			return true
+		}
+		if expression.LambdaBody != nil && commandsUseExecute(expression.LambdaBody.Commands) {
+			return true
+		}
+		return slices.ContainsFunc(expression.Children, expressionUsesExecute)
+	}
+	commandsUseExecute = func(commands []syntax.Command) bool {
+		for index := range commands {
+			command := &commands[index]
+			if command.Canonical == "execute" {
+				return true
+			}
+			if slices.ContainsFunc(command.Expressions, expressionUsesExecute) {
+				return true
+			}
+			if slices.ContainsFunc(command.Targets, expressionUsesExecute) || command.For != nil && expressionUsesExecute(command.For.Iterable) ||
+				command.Mapping != nil && expressionUsesExecute(command.Mapping.RHSExpression) {
+				return true
+			}
+			if command.Declaration != nil && expressionUsesExecute(command.Declaration.Initializer) {
+				return true
+			}
+			if command.Embedded != nil && commandsUseExecute(command.Embedded.Commands) {
+				return true
+			}
+		}
+		return false
+	}
+	dynamicVariableCreation := commandsUseExecute(result.File.Commands)
 	for index := range commands {
 		command := &commands[index]
 		scope := result.commandScopes[command]
@@ -6278,6 +6316,23 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 					continue
 				}
 				declaration := resolve(scope, target.Value, target.Span.Start, false, nil)
+				declared := declaration != nil
+				if !declared {
+					for current := scope; current != nil && !declared; current = current.Parent {
+						for _, candidate := range current.Declarations {
+							if candidate.Name == target.Value {
+								declared = true
+								break
+							}
+						}
+					}
+				}
+				if !dynamicVariableCreation && !declared && !strings.Contains(target.Value, ":") && !isLiteralIdentifier(target.Value) {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1246", Message: "Cannot find variable to (un)lock: " + target.Value, Span: target.Span,
+					})
+					break
+				}
 				if declaration == nil || declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant || declaration.Scope == nil || !scopeUsesDefTypeRules(declaration.Scope) {
 					continue
 				}

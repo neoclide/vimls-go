@@ -3053,6 +3053,40 @@ func TestAnalyzeE1178LocalLockDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1246MissingLockVariableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source string }{
+		{"script", "vim9script\nvar name = 'john'\nlockvar nameX\n"},
+		{"def", "vim9script\nvar name = 'john'\ndef LockIt()\n  unlockvar nameX\nenddef\nLockIt()\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1246" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot find variable to (un)lock: nameX" || file.Text(got[0].Span) != "nameX" {
+				t.Fatalf("E1246 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nlockvar g:nameX\n",
+		"vim9script\ndef LockIt()\n  lockvar nameX\nenddef\nvar nameX = []\n",
+		"vim9script\nexecute 'var nameX = []'\nlockvar nameX\n",
+		"let name = []\nlockvar nameX\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1246" {
+				t.Fatalf("guard unexpectedly received E1246: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1181IgnoredUnderscoreDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
