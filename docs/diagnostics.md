@@ -3519,3 +3519,36 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9compile.c:443-470` gives script conflicts priority before class
   conflicts and exempts the exact `_` argument.
 - `src/errors.h:3434-3436` defines the exact message.
+
+## Local declaration shadows a class variable: E1341
+
+E1341 means `Variable already declared in the class: {name}`. A Vim9 local
+declaration compiled directly in a class or enum method cannot reuse the name
+of a static variable visible as a bare class member. Analysis reports each
+conflicting declaration-name span.
+
+The rule covers `var`, `final`, and `const` bindings, destructuring and loop
+bindings, declarations in nested control-flow blocks, and a nested `def` name
+introduced by the direct method body. Static variables from the defining class
+hierarchy participate. Declarations inside that nested function or a lambda
+have their own compilation context and are excluded, as are object variables,
+methods, top-level declarations, and Legacy functions. The exact discard name
+`_` is exempt.
+
+A visible script item has priority over E1341. When E1341 applies, it owns the
+declaration instead of the generic E1006 or E1017 redeclaration diagnostics.
+Malformed declarations remain owned by syntax recovery.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:1822-1836` covers a direct method local that
+  shadows a static member.
+- `runtime/doc/vim9class.txt:297-300` forbids local-variable shadowing of class
+  members.
+- `src/vim9compile.c:325-365,440-470` searches the defining class hierarchy and
+  gives script-variable conflicts priority.
+- `src/vim9compile.c:1935-1946,2018-2030` checks new local declarations against
+  visible class variables.
+- `src/vim9compile.c:1085-1100` applies the same check to a nested `def` name in
+  the outer method compilation context.
+- `src/errors.h:3437-3439` defines the exact message.

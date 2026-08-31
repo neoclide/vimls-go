@@ -127,6 +127,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
 	collectImportedItemRedefinitionDiagnostics(result, file.Commands)
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
+	collectAggregateLocalRedeclarationDiagnostics(result)
 	collectDuplicateTypeAliasDiagnostics(result)
 	collectUnimplementedAbstractMethodDiagnostics(result)
 	collectMethodAccessLevelDiagnostics(result)
@@ -550,14 +551,103 @@ func aggregateArgumentConflict(result *FileAnalysis, parameter *Declaration) boo
 		}
 		seenParameters[name] = true
 	}
-	seenAggregates := make(map[*syntax.Command]bool)
-	for current := aggregate; current != nil && !seenAggregates[current]; current = extendedClass(file, result.classes, current) {
-		seenAggregates[current] = true
-		if _, _, found := aggregateVariableBinding(file, current, parameter.Name, true); found {
-			return true
+	return aggregateHasVisibleStaticVariable(result, aggregate, parameter.Name)
+}
+
+func collectAggregateLocalRedeclarationDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	eligible := make(map[syntax.Span]bool)
+	var collectEligible func([]syntax.Command)
+	collectEligible = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.Dialect == syntax.Vim9 {
+				if command.Declaration != nil && (command.Canonical == "var" || command.Canonical == "final" || command.Canonical == "const") {
+					for _, binding := range command.Declaration.Bindings {
+						eligible[binding.Name] = true
+					}
+				}
+				if command.For != nil {
+					for _, binding := range command.For.Bindings {
+						eligible[binding.Name] = true
+					}
+				}
+				if command.Canonical == "def" && command.Function != nil {
+					eligible[command.Function.Name] = true
+				}
+			}
+			if command.Embedded != nil {
+				collectEligible(command.Embedded.Commands)
+			}
 		}
-		if current.Aggregate.Kind != syntax.BlockClass {
-			break
+	}
+	collectEligible(result.File.Commands)
+	for _, declaration := range result.Declarations {
+		if declaration == nil || declaration.Parameter || declaration.Name == "_" || declaration.Scope == nil || !eligible[declaration.Span] ||
+			syntaxDiagnosticOverlaps(result.File.Diagnostics, declaration.Span) || syntaxDiagnosticTouchesCall(result.File.Diagnostics, declaration.Span) ||
+			(declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant && declaration.Kind != SymbolKindFunction) {
+			continue
+		}
+		aggregate := directMethodAggregate(result.File, declaration.Scope)
+		if aggregate == nil || scriptArgumentConflict(result, declaration) || !aggregateHasVisibleStaticVariable(result, aggregate, declaration.Name) {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1341", Message: "Variable already declared in the class: " + declaration.Name, Span: declaration.Span})
+		filtered := result.Diagnostics[:0]
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Span == declaration.Span && (diagnostic.Code == "vim/E1006" || diagnostic.Code == "vim/E1017") {
+				continue
+			}
+			filtered = append(filtered, diagnostic)
+		}
+		result.Diagnostics = filtered
+	}
+}
+
+func directMethodAggregate(file *syntax.File, scope *Scope) *syntax.Command {
+	for current := scope; file != nil && current != nil; current = current.Parent {
+		if current.Lambda != nil || current.Kind == syntax.BlockFunction {
+			return nil
+		}
+		if current.Kind != syntax.BlockDef || current.CommandList != nil || current.Block < 0 || current.Block >= len(file.Blocks) {
+			continue
+		}
+		header := file.Blocks[current.Block].Header
+		if header < 0 || header >= len(file.Commands) {
+			return nil
+		}
+		method := &file.Commands[header]
+		if method.Dialect != syntax.Vim9 || method.Canonical != "def" || method.Function == nil {
+			return nil
+		}
+		aggregate := enclosingAggregateCommand(file, current)
+		if aggregate == nil || aggregate.Aggregate == nil || (aggregate.Aggregate.Kind != syntax.BlockClass && aggregate.Aggregate.Kind != syntax.BlockEnum) {
+			return nil
+		}
+		for _, member := range aggregate.Aggregate.Members {
+			if member == header {
+				return aggregate
+			}
+		}
+		return nil
+	}
+	return nil
+}
+
+func aggregateHasVisibleStaticVariable(result *FileAnalysis, aggregate *syntax.Command, name string) bool {
+	if result == nil || result.File == nil || aggregate == nil || aggregate.Aggregate == nil {
+		return false
+	}
+	if aggregate.Aggregate.Kind == syntax.BlockEnum {
+		_, _, found := aggregateVariableBinding(result.File, aggregate, name, true)
+		return found
+	}
+	for current, seen := aggregate, make(map[*syntax.Command]bool); current != nil && !seen[current]; current = extendedClass(result.File, result.classes, current) {
+		seen[current] = true
+		if _, _, found := aggregateVariableBinding(result.File, current, name, true); found {
+			return true
 		}
 	}
 	return false

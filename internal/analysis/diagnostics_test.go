@@ -7304,6 +7304,80 @@ func TestAnalyzeE1340AggregateArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1341AggregateLocalRedeclarationDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"var", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    var value = 2\n  enddef\nendclass\n", "value"},
+		{"final", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    final value = 2\n  enddef\nendclass\n", "value"},
+		{"const", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    const value = 2\n  enddef\nendclass\n", "value"},
+		{"destructuring", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    var [value, other] = [1, 2]\n  enddef\nendclass\n", "value"},
+		{"for binding", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    for value in [1]\n    endfor\n  enddef\nendclass\n", "value"},
+		{"nested block", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    if true\n      var value = 2\n    endif\n  enddef\nendclass\n", "value"},
+		{"constructor", "vim9script\nclass A\n  static var value = 1\n  def new()\n    var value = 2\n  enddef\nendclass\n", "value"},
+		{"static method", "vim9script\nclass A\n  static var value = 1\n  static def Check()\n    var value = 2\n  enddef\nendclass\n", "value"},
+		{"enum", "vim9script\nenum Fruit\n  Apple\n  static var value = 1\n  def Check()\n    var value = 2\n  enddef\nendenum\n", "value"},
+		{"inherited static", "vim9script\nclass Base\n  static var value = 1\nendclass\nclass Child extends Base\n  def Check()\n    var value = 2\n  enddef\nendclass\n", "value"},
+		{"protected static", "vim9script\nclass A\n  static var _value = 1\n  def Check()\n    var _value = 2\n  enddef\nendclass\n", "_value"},
+		{"public static", "vim9script\nclass A\n  public static var value = 1\n  def Check()\n    var value = 2\n  enddef\nendclass\n", "value"},
+		{"declared after", "vim9script\nclass A\n  def Check()\n    var value = 2\n  enddef\n  static var value = 1\nendclass\n", "value"},
+		{"nested def name", "vim9script\nclass A\n  static var Nested = 1\n  def Check()\n    def Nested()\n    enddef\n  enddef\nendclass\n", "Nested"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1341" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Variable already declared in the class: "+test.span || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1341 diagnostics = %#v", result.Diagnostics)
+			}
+			for _, diagnostic := range result.Diagnostics {
+				if (diagnostic.Code == "vim/E1006" || diagnostic.Code == "vim/E1017") && file.Text(diagnostic.Span) == test.span {
+					t.Fatalf("E1341 retained %s: %#v", diagnostic.Code, result.Diagnostics)
+				}
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"underscore", "vim9script\nclass A\n  static var _ = 1\n  def Check()\n    var _ = 2\n  enddef\nendclass\n", ""},
+		{"object variable method", "vim9script\nclass A\n  var value = 1\n  static def Value()\n  enddef\n  def Check()\n    var value = 2\n    var Value = 3\n  enddef\nendclass\n", ""},
+		{"top level", "vim9script\nvar value = 1\ndef Check()\n  var value = 2\nenddef\n", ""},
+		{"class body", "vim9script\nclass A\n  static var value = 1\n  var other = value\nendclass\n", ""},
+		{"nested lambda", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    var Callback = () => { var value = 2 }\n  enddef\nendclass\n", ""},
+		{"nested def body", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    def Nested()\n      var value = 2\n    enddef\n  enddef\nendclass\n", ""},
+		{"script priority", "vim9script\nvar value = 1\nclass A\n  static var value = 2\n  def Check()\n    var value = 3\n  enddef\nendclass\n", ""},
+		{"malformed declaration", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    var value:\n  enddef\nendclass\n", ""},
+		{"one-shot Legacy", "vim9script\nclass A\n  static var value = 1\n  def Check()\n    legacy let value = 2\n  enddef\nendclass\n", ""},
+		{"Legacy", "function Check()\n  let value = 2\nendfunction\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vim/E1341" {
+					t.Fatalf("guard unexpectedly received E1341: %#v\n%s", diagnostic, test.source)
+				}
+			}
+		})
+	}
+
+	duplicate := syntax.Parse("vim9script\nclass A\n  static var value = 1\n  def Check(value: number)\n    var value = 2\n    var value = 3\n  enddef\nendclass\n")
+	duplicateResult := Analyze(duplicate)
+	var conflicts int
+	for _, diagnostic := range duplicateResult.Diagnostics {
+		if diagnostic.Code == "vim/E1341" {
+			conflicts++
+		}
+		if diagnostic.Code == "vim/E1006" || diagnostic.Code == "vim/E1017" {
+			t.Fatalf("E1341 retained secondary redeclaration diagnostic: %#v", duplicateResult.Diagnostics)
+		}
+	}
+	if conflicts != 2 {
+		t.Fatalf("E1341 conflicts = %d, diagnostics = %#v", conflicts, duplicateResult.Diagnostics)
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string
