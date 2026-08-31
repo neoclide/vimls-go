@@ -54,6 +54,50 @@ func TestDocumentLinkReturnsOnlyStaticResolvedFiles(t *testing.T) {
 	}
 }
 
+func TestDeprecatedVim9DeclarationsReachLanguageFeatures(t *testing.T) {
+	source := "vim9script\n# deprecated use NewValue\nvar OldValue = 1\n# @DEPRECATED use NewFunc\ndef OldFunc()\nenddef\necho OldValue\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+
+	result, err := instance.DocumentSymbol(context.Background(), &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbols := result.(protocol.DocumentSymbolSlice)
+	if len(symbols) != 2 || len(symbols[0].Tags) != 1 || symbols[0].Tags[0] != protocol.SymbolTagDeprecated || len(symbols[1].Tags) != 1 || symbols[1].Tags[0] != protocol.SymbolTagDeprecated {
+		t.Fatalf("document symbols = %#v", symbols)
+	}
+
+	completion, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 6, Character: 5},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deprecated := map[string]bool{}
+	for _, item := range completion.(protocol.CompletionItemSlice) {
+		if item.Label == "OldValue" || item.Label == "OldFunc" {
+			deprecated[item.Label] = len(item.Tags) == 1 && item.Tags[0] == protocol.CompletionItemTagDeprecated
+		}
+	}
+	if !deprecated["OldValue"] || !deprecated["OldFunc"] {
+		t.Fatalf("deprecated completions = %#v", deprecated)
+	}
+
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deprecatedTokens := 0
+	for index := 0; index+4 < len(tokens.Data); index += 5 {
+		if tokens.Data[index+4]&4 != 0 {
+			deprecatedTokens++
+		}
+	}
+	if deprecatedTokens != 3 {
+		t.Fatalf("deprecated semantic tokens = %d, data = %#v", deprecatedTokens, tokens.Data)
+	}
+}
+
 func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	prepare := true

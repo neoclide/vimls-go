@@ -18,13 +18,15 @@ func TestAnalyzeImportsReportsStaticLoadAndMemberErrors(t *testing.T) {
 		[]ImportMember{
 			{Span: syntax.Span{Start: 40, End: 47}, Name: "Missing", TargetKnown: true},
 			{Span: syntax.Span{Start: 50, End: 57}, Name: "Private", TargetKnown: true, Exists: true},
+			{Span: syntax.Span{Start: 58, End: 61}, Name: "Old", TargetKnown: true, Exists: true, Exported: true, Deprecated: true},
 		},
 	)
-	wantCodes := []string{"vim/E1053", "vim/E1053", "vim/E1264", "vim/E1048", "vim/E1049", "vim/E1088", "vim/E1262"}
+	wantCodes := []string{"vim/E1053", "vim/E1053", "vim/E1264", "vim/E1048", "vim/E1049", "vimls/deprecated", "vim/E1088", "vim/E1262"}
 	wantMessages := []string{
 		`Could not import "missing.vim"`, `Could not import "autoload.vim"`,
 		"Autoload import cannot use absolute or relative path: ./relative.vim",
 		"Item not found in script: Missing", "Item not exported in script: Private",
+		"Old is deprecated",
 		"Script cannot import itself", "Cannot import the same script twice: same.vim",
 	}
 	if len(diagnostics) != len(wantCodes) {

@@ -25,6 +25,7 @@ type DiagnosticDefinition struct {
 // owned by vimls-go. Keep entries here even when their messages are refined at
 // the emission site for a specific delimiter, command, or target version.
 var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
+	{Code: "vimls/deprecated", Message: "symbol is deprecated", Severity: DiagnosticHint},
 	{Code: "vimls/diagnostics-truncated", Message: "additional diagnostics were omitted", Severity: DiagnosticError},
 	{Code: "vimls/embedded-command-depth", Message: "embedded command nesting exceeds parser limit", Severity: DiagnosticError},
 	{Code: "vimls/expression-too-deep", Message: "expression nesting exceeds parser limit", Severity: DiagnosticError},

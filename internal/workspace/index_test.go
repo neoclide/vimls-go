@@ -32,6 +32,20 @@ func TestIndexLookupIncludesNestedSymbols(t *testing.T) {
 	}
 }
 
+func TestCollectSymbolFactsKeepsDeprecatedVim9Declarations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deprecated.vim")
+	facts := CollectSymbolFacts(path, syntax.Parse("vim9script\n# deprecated\nexport var OldValue = 1\n# @deprecated\nexport def OldFunc()\nenddef\n"))
+	deprecated := map[string]bool{}
+	for _, fact := range facts {
+		if fact.Name == "OldValue" || fact.Name == "OldFunc" {
+			deprecated[fact.Name] = fact.Deprecated && fact.Exported
+		}
+	}
+	if !deprecated["OldValue"] || !deprecated["OldFunc"] {
+		t.Fatalf("deprecated facts = %#v; all = %#v", deprecated, facts)
+	}
+}
+
 func TestIndexLookupOrdersSameNamesAndReplaceRemovesOldSymbols(t *testing.T) {
 	index := NewIndex(10, 10000)
 	root := t.TempDir()

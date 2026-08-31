@@ -42,6 +42,34 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 			t.Errorf("%s severity = %v, want warning", code, got)
 		}
 	}
+	if got := protocolDiagnosticSeverity("vimls/deprecated", syntax.DiagnosticError); got != protocol.DiagnosticSeverityHint {
+		t.Errorf("vimls/deprecated severity = %v, want hint", got)
+	}
+}
+
+func TestServerPublishesDeprecatedReferenceHint(t *testing.T) {
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = client
+	documentURI := uri.MustParse("file:///deprecated.vim")
+	source := "vim9script\n# deprecated\nvar Old = 1\necho Old\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: source,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnostics(t, client.published)
+	if len(params.Diagnostics) != 1 {
+		t.Fatalf("deprecated diagnostics = %#v", params.Diagnostics)
+	}
+	diagnostic := params.Diagnostics[0]
+	tags := diagnostic.Tags.Slice()
+	if diagnostic.Code != protocol.String("vimls/deprecated") || diagnostic.Severity != protocol.DiagnosticSeverityHint ||
+		diagnostic.Message != protocol.String("Old is deprecated") || len(tags) != 1 || tags[0] != protocol.DiagnosticTagDeprecated ||
+		diagnostic.Range.Start.Line != 3 {
+		t.Fatalf("deprecated diagnostic = %#v tags=%#v", diagnostic, tags)
+	}
 }
 
 func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
@@ -353,6 +381,12 @@ func TestServerPublishesImportMemberDiagnostics(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceFile(t, root, "lib.vim", `vim9script
 export var Public = 1
+# deprecated use Public
+export var Old = 0
+# @deprecated use PublicFunc
+export def OldFunc(): number
+  return 0
+enddef
 var Private = 2
 type PrivateType = number
 def Holder()
@@ -365,6 +399,8 @@ enddef
 	source := `vim9script
 import './lib.vim' as Lib
 echo Lib.Public
+echo Lib.Old
+echo Lib.OldFunc()
 echo Lib.Private
 echo Lib.Missing
 Lib.Private = 4
@@ -376,16 +412,18 @@ var typed: Lib.PrivateType
 		t.Fatal(err)
 	}
 	params := waitForDiagnosticsForURI(t, published, importerURI)
-	var e1048, e1049 []protocol.Diagnostic
+	var e1048, e1049, deprecated []protocol.Diagnostic
 	for _, diagnostic := range params.Diagnostics {
 		switch diagnostic.Code {
 		case protocol.String("vim/E1048"):
 			e1048 = append(e1048, diagnostic)
 		case protocol.String("vim/E1049"):
 			e1049 = append(e1049, diagnostic)
+		case protocol.String("vimls/deprecated"):
+			deprecated = append(deprecated, diagnostic)
 		}
 	}
-	if len(e1048) != 1 || e1048[0].Message != protocol.String("Item not found in script: Missing") || e1048[0].Range.Start.Line != 4 {
+	if len(e1048) != 1 || e1048[0].Message != protocol.String("Item not found in script: Missing") || e1048[0].Range.Start.Line != 6 {
 		t.Fatalf("E1048 diagnostics = %#v; all=%#v", e1048, params.Diagnostics)
 	}
 	if len(e1049) != 3 {
@@ -405,6 +443,15 @@ var typed: Lib.PrivateType
 	for message, remaining := range wantMessages {
 		if remaining != 0 {
 			t.Fatalf("E1049 message %q remaining=%d diagnostics=%#v", message, remaining, e1049)
+		}
+	}
+	if len(deprecated) != 2 {
+		t.Fatalf("deprecated import diagnostics = %#v; all=%#v", deprecated, params.Diagnostics)
+	}
+	for _, diagnostic := range deprecated {
+		tags := diagnostic.Tags.Slice()
+		if diagnostic.Severity != protocol.DiagnosticSeverityHint || len(tags) != 1 || tags[0] != protocol.DiagnosticTagDeprecated {
+			t.Fatalf("deprecated import diagnostic = %#v tags=%#v", diagnostic, tags)
 		}
 	}
 }

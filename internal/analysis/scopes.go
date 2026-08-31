@@ -89,6 +89,7 @@ type Declaration struct {
 	Kind               SymbolKind
 	Span               syntax.Span
 	Mutable            bool
+	Deprecated         bool
 	TypeParameterCount int
 	constBinding       bool
 	// Parameter distinguishes a function or lambda argument from an ordinary
@@ -192,6 +193,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	sort.SliceStable(result.References, func(i, j int) bool {
 		return result.References[i].Span.Start < result.References[j].Span.Start
 	})
+	collectDeprecatedReferenceDiagnostics(result)
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
 	collectNullReceiverDiagnostics(result)
@@ -215,6 +217,17 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func collectDeprecatedReferenceDiagnostics(result *FileAnalysis) {
+	for _, reference := range result.References {
+		if reference == nil || reference.Declaration == nil || !reference.Declaration.Deprecated {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vimls/deprecated", Message: reference.Declaration.Name + " is deprecated", Span: reference.Span,
+		})
+	}
 }
 
 func commandInsideFunction(command *syntax.Command, blocks []syntax.Block) bool {
@@ -7972,6 +7985,7 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 		if !emptySyntaxSpan(command.Function.Name) {
 			declaration := addDeclaration(result, declarationScope, file, command.Function.Name, functionKind(file, command, declarationScope), false)
 			if declaration != nil {
+				declaration.Deprecated = hasDeprecatedComment(file, command)
 				declaration.TypeParameterCount = len(command.Function.TypeParameters)
 			}
 		}
@@ -8008,8 +8022,11 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 		}
 		for _, binding := range command.Declaration.Bindings {
 			declaration := addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
-			if declaration != nil && command.Canonical == "const" {
-				declaration.constBinding = true
+			if declaration != nil {
+				declaration.Deprecated = hasDeprecatedComment(file, command)
+				if command.Canonical == "const" {
+					declaration.constBinding = true
+				}
 			}
 		}
 	}

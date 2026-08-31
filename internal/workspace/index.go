@@ -27,6 +27,7 @@ type SymbolFact struct {
 	Range          syntax.Span
 	SelectionRange syntax.Span
 	Detail         string
+	Deprecated     bool
 	Exported       bool
 	TopLevel       bool
 }
@@ -591,6 +592,7 @@ func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[sy
 			Range:          symbol.Range,
 			SelectionRange: symbol.SelectionRange,
 			Detail:         strings.Clone(symbol.Detail),
+			Deprecated:     symbol.Deprecated,
 			Exported:       exported[symbol.SelectionRange],
 			TopLevel:       topLevel,
 		})

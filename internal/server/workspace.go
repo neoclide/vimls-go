@@ -865,8 +865,12 @@ func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolPa
 		if !ok {
 			continue
 		}
+		information := protocol.BaseSymbolInformation{Name: match.Fact.Name, Kind: protocolSymbolKind(match.Fact.Kind)}
+		if match.Fact.Deprecated {
+			information.Tags = []protocol.SymbolTag{protocol.SymbolTagDeprecated}
+		}
 		result = append(result, protocol.WorkspaceSymbol{
-			BaseSymbolInformation: protocol.BaseSymbolInformation{Name: match.Fact.Name, Kind: protocolSymbolKind(match.Fact.Kind)},
+			BaseSymbolInformation: information,
 			Location:              &protocol.Location{URI: documentURI, Range: rangeValue},
 		})
 	}

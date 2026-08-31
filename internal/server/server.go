@@ -644,6 +644,9 @@ func documentSymbol(snapshot *text.Snapshot, encoding text.Encoding, symbol *ana
 	result := protocol.DocumentSymbol{
 		Name: symbol.Name, Kind: protocolSymbolKind(symbol.Kind), Range: rangeValue, SelectionRange: selection,
 	}
+	if symbol.Deprecated {
+		result.Tags = []protocol.SymbolTag{protocol.SymbolTagDeprecated}
+	}
 	if symbol.Detail != "" {
 		detail := symbol.Detail
 		result.Detail = &detail
@@ -1042,7 +1045,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 		if startError != nil || endError != nil {
 			continue
 		}
-		diagnostics = append(diagnostics, protocol.Diagnostic{
+		diagnostic := protocol.Diagnostic{
 			Range: protocol.Range{
 				Start: protocol.Position{Line: uint32(start.Line), Character: uint32(start.Character)},
 				End:   protocol.Position{Line: uint32(end.Line), Character: uint32(end.Character)},
@@ -1051,7 +1054,11 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 			Code:     protocol.String(item.Code),
 			Source:   protocol.NewOptional(Name),
 			Message:  protocol.String(item.Message),
-		})
+		}
+		if item.Code == "vimls/deprecated" {
+			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagDeprecated)
+		}
+		diagnostics = append(diagnostics, diagnostic)
 	}
 	if len(diagnostics) == 0 && !s.published[documentURI] {
 		return

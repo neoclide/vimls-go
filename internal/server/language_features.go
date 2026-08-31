@@ -99,6 +99,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 	if contextKind == completionContextExpression {
 		for _, declaration := range visibleDeclarations(fileAnalysis, offset) {
 			item := protocol.CompletionItem{Label: declaration.Name, Kind: completionSymbolKind(declaration.Kind)}
+			if declaration.Deprecated {
+				item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
+			}
 			item.Detail = protocol.NewOptional(string(declaration.Kind))
 			if declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
 				item.Detail = protocol.NewOptional(string(declaration.Kind) + ": " + formatValueType(declaration.Type))
@@ -193,7 +196,11 @@ func (s *Server) importMemberCompletions(documentURI string, file *syntax.File, 
 			continue
 		}
 		seen[fact.Name] = true
-		items = append(items, protocol.CompletionItem{Label: fact.Name, Kind: completionSymbolKind(fact.Kind), Detail: protocol.NewOptional("exported " + string(fact.Kind))})
+		item := protocol.CompletionItem{Label: fact.Name, Kind: completionSymbolKind(fact.Kind), Detail: protocol.NewOptional("exported " + string(fact.Kind))}
+		if fact.Deprecated {
+			item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
+		}
+		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Label < items[j].Label })
 	return items

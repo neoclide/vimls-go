@@ -19,6 +19,44 @@ func hasDiagnostic(file *syntax.File, code string) bool {
 	return false
 }
 
+func TestAnalyzeDeprecatedVim9References(t *testing.T) {
+	source := `vim9script
+# deprecated
+var Old = 1
+# @deprecated use NewFunc instead
+def OldFunc(): number
+  return Old
+enddef
+echo Old
+Old = 2
+echo OldFunc()
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []string
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vimls/deprecated" {
+			got = append(got, file.Text(diagnostic.Span)+":"+diagnostic.Message)
+		}
+	}
+	want := []string{
+		"Old:Old is deprecated",
+		"Old:Old is deprecated",
+		"Old:Old is deprecated",
+		"OldFunc:OldFunc is deprecated",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deprecated diagnostics = %#v, want %#v; all=%#v", got, want, result.Diagnostics)
+	}
+
+	legacy := Analyze(syntax.Parse("\" deprecated\nlet Old = 1\necho Old\n"))
+	for _, diagnostic := range legacy.Diagnostics {
+		if diagnostic.Code == "vimls/deprecated" {
+			t.Fatalf("legacy reference received deprecated diagnostic: %#v", legacy.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeE133ReturnOutsideFunction(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

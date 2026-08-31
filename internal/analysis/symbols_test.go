@@ -103,6 +103,34 @@ final name = 'x'
 	}
 }
 
+func TestVim9LeadingDeprecatedCommentsMarkVariablesAndFunctions(t *testing.T) {
+	file := syntax.Parse("vim9script\n# deprecated: use NewValue\nvar OldValue = 1\n# details\n# @deprecated use NewFunc\ndef OldFunc()\nenddef\n# DEPRECATED\nconst OLD = 2\n# this is deprecated\nvar Current = 3\n# deprecatedValue\ndef CurrentFunc()\nenddef\n# deprecated\n\nvar Separated = 4\n")
+	want := map[string]bool{"OldValue": true, "OldFunc": true, "OLD": true, "Current": false, "CurrentFunc": false, "Separated": false}
+	for _, symbol := range CollectSymbols(file) {
+		deprecated, ok := want[symbol.Name]
+		if ok && symbol.Deprecated != deprecated {
+			t.Errorf("symbol %s deprecated = %t, want %t", symbol.Name, symbol.Deprecated, deprecated)
+		}
+		delete(want, symbol.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing symbols: %#v", want)
+	}
+
+	for _, declaration := range Analyze(file).Declarations {
+		if declaration.Name == "OldValue" || declaration.Name == "OldFunc" || declaration.Name == "OLD" {
+			if !declaration.Deprecated {
+				t.Errorf("declaration %s is not deprecated", declaration.Name)
+			}
+		}
+	}
+
+	legacy := CollectSymbols(syntax.Parse("\" deprecated\nlet old = 1\n"))
+	if len(legacy) != 1 || legacy[0].Deprecated {
+		t.Fatalf("legacy symbols = %#v", legacy)
+	}
+}
+
 func TestCollectSymbolsSkipsControlBlocksAndKeepsSourceOrder(t *testing.T) {
 	source := `vim9script
 class C

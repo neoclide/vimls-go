@@ -238,6 +238,16 @@ func TestOpenDocumentsOverrideDiskAndClientFileEventsRebuild(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSymbolsKeepDeprecatedTag(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "deprecated.vim", "vim9script\n# @deprecated\nexport def OldFunc()\nenddef\n")
+	instance := initializeWorkspaceServer(t, root)
+	symbols := workspaceSymbols(t, instance, "OldFunc")
+	if len(symbols) != 1 || len(symbols[0].Tags) != 1 || symbols[0].Tags[0] != protocol.SymbolTagDeprecated {
+		t.Fatalf("workspace symbols = %#v", symbols)
+	}
+}
+
 func TestWorkspaceImportGraphBuildsDirectedReadySnapshot(t *testing.T) {
 	root := t.TempDir()
 	a := writeWorkspaceFile(t, root, "a.vim", "vim9script\nimport './b.vim' as B\nimport './c.vim' as C\n")

@@ -14,7 +14,7 @@ var semanticTokenTypes = []string{
 	"comment", "keyword", "modifier", "variable", "function", "method", "class", "interface", "enum", "enumMember", "type", "property",
 }
 
-var semanticTokenModifiers = []string{"declaration", "readonly"}
+var semanticTokenModifiers = []string{"declaration", "readonly", "deprecated"}
 
 type semanticFact struct {
 	span      syntax.Span
@@ -80,6 +80,9 @@ func collectSemanticFacts(file *syntax.File) []semanticFact {
 		if !declaration.Mutable {
 			modifiers |= 2
 		}
+		if declaration.Deprecated {
+			modifiers |= 4
+		}
 		facts = append(facts, semanticFact{span: declaration.Span, tokenType: semanticType(declaration.Kind), modifiers: modifiers, priority: 3})
 	}
 	for _, reference := range result.References {
@@ -89,6 +92,9 @@ func collectSemanticFacts(file *syntax.File) []semanticFact {
 		modifiers := uint32(0)
 		if !reference.Declaration.Mutable {
 			modifiers |= 2
+		}
+		if reference.Declaration.Deprecated {
+			modifiers |= 4
 		}
 		facts = append(facts, semanticFact{span: reference.Span, tokenType: semanticType(reference.Declaration.Kind), modifiers: modifiers, priority: 2})
 	}

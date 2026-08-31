@@ -3,6 +3,7 @@
 package analysis
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -36,8 +37,11 @@ type Symbol struct {
 	Range          syntax.Span
 	SelectionRange syntax.Span
 	Detail         string
+	Deprecated     bool
 	Children       []*Symbol
 }
+
+var deprecatedCommentPrefix = regexp.MustCompile(`(?i)^#[ \t]*@?deprecated(?:$|[^[:alnum:]_])`)
 
 // CollectSymbols returns document symbols in source order.  A syntax block
 // is a container only when it belongs to a declaration-bearing construct
@@ -248,6 +252,7 @@ func functionSymbol(file *syntax.File, command *syntax.Command, parent *Symbol, 
 		Range:          rangeSpan,
 		SelectionRange: name,
 		Detail:         detail,
+		Deprecated:     hasDeprecatedComment(file, command),
 	}
 }
 
@@ -269,7 +274,43 @@ func declarationSymbol(file *syntax.File, command *syntax.Command, binding synta
 		Range:          command.Span,
 		SelectionRange: binding.Name,
 		Detail:         detail,
+		Deprecated:     hasDeprecatedComment(file, command),
 	}
+}
+
+func hasDeprecatedComment(file *syntax.File, command *syntax.Command) bool {
+	if file == nil || command == nil || file.Dialect != syntax.Vim9 || command.Dialect != syntax.Vim9 || command.Span.Start <= 0 {
+		return false
+	}
+	lineStart := strings.LastIndexByte(file.Source[:command.Span.Start], '\n') + 1
+	for lineStart > 0 {
+		lineEnd := lineStart - 1
+		if lineEnd > 0 && file.Source[lineEnd-1] == '\r' {
+			lineEnd--
+		}
+		previousStart := strings.LastIndexByte(file.Source[:lineEnd], '\n') + 1
+		first := previousStart
+		for first < lineEnd && (file.Source[first] == ' ' || file.Source[first] == '\t') {
+			first++
+		}
+		if first == lineEnd || !isCommentToken(file, first, lineEnd) {
+			return false
+		}
+		if deprecatedCommentPrefix.MatchString(file.Source[first:lineEnd]) {
+			return true
+		}
+		lineStart = previousStart
+	}
+	return false
+}
+
+func isCommentToken(file *syntax.File, start, end int) bool {
+	for _, token := range file.Tokens {
+		if token.Kind == syntax.TokenComment && token.Span.Start == start && token.Span.End == end {
+			return true
+		}
+	}
+	return false
 }
 
 func enumMemberSymbol(file *syntax.File, value syntax.EnumValue) *Symbol {

@@ -104,7 +104,10 @@ func (s *Server) workspaceImportDiagnostics(documentURI string, file *syntax.Fil
 						continue
 					}
 					member.Exists = true
-					member.Exported = member.Exported || symbol.Exported
+					if symbol.Exported {
+						member.Exported = true
+						member.Deprecated = member.Deprecated || symbol.Deprecated
+					}
 				}
 			}
 		}
