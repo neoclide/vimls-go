@@ -3270,6 +3270,32 @@ func TestAnalyzeE1119ImmediateLockedListItemDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1118ImmediateConstListGrowthDiagnostic(t *testing.T) {
+	file := syntax.Parse("vim9script\ndef F()\n  const list = [1, 2]\n  list[2] = 3\nenddef\n")
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1118" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 1 || got[0].Message != "Cannot change locked list" || file.Text(got[0].Span) != "list[2]" {
+		t.Fatalf("E1118 diagnostics = %#v", result.Diagnostics)
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  const list = [1, 2]\n  list[-1] = 3\nenddef\n",
+		"vim9script\nconst list = [1]\nlist[1] = 2\n",
+		"vim9script\ndef F(index: number)\n  const list = [1]\n  list[index] = 2\nenddef\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1118" {
+				t.Fatalf("guard unexpectedly received E1118: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

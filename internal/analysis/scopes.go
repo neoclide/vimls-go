@@ -6252,10 +6252,16 @@ func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous,
 	}
 	if previous.Declaration.Initializer.Kind == syntax.ExpressionList && assigned.Kind == syntax.ExpressionIndex && len(assigned.Children) > 1 {
 		index, ok := staticTupleIndex(assigned.Children[1])
-		if ok && index >= 0 && index < len(previous.Declaration.Initializer.Children) {
+		if !ok {
+			return syntax.Diagnostic{}, false
+		}
+		if index < 0 {
+			index += len(previous.Declaration.Initializer.Children)
+		}
+		if index >= 0 && index < len(previous.Declaration.Initializer.Children) {
 			return syntax.Diagnostic{Code: "vim/E1119", Message: "Cannot change locked list item", Span: assigned.Span}, true
 		}
-		return syntax.Diagnostic{}, false
+		return syntax.Diagnostic{Code: "vim/E1118", Message: "Cannot change locked list", Span: assigned.Span}, true
 	}
 	if previous.Declaration.Initializer.Kind != syntax.ExpressionDictionary {
 		return syntax.Diagnostic{}, false
