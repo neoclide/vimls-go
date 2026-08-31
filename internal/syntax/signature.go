@@ -185,16 +185,10 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 	}
 	if offset >= len(source) || source[offset] != '(' {
-		if command.Canonical == "function" && offset < len(source) && source[offset] == '<' {
+		if offset < len(source) && source[offset] != '"' {
 			end := trimSyntaxSpaceEnd(source, offset, len(source))
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E124", Message: "missing '('",
-				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + end},
-			})
-		} else if vim9Context && offset < len(source) {
-			end := trimSyntaxSpaceEnd(source, offset, len(source))
-			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E488", Message: "trailing characters",
+				Code: "vim/E124", Message: "Missing '(': " + strings.TrimSpace(rawSource),
 				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.Start + end},
 			})
 		}

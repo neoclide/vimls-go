@@ -4004,3 +4004,23 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `runtime/doc/vim9.txt:2357-2368` documents the script-level E1363 and
   compiled E1395 distinction.
 - `src/errors.h:3482-3483` defines the exact E1363 message.
+
+## Missing function opening parenthesis: E124
+
+E124 means `Missing '(': {text}`. Syntax analysis reports it when a parsed
+`:function` or `:def` name is followed by non-comment text that does not begin
+an argument list. The diagnostic message retains Vim's complete function
+header argument, while its span selects the invalid tail after the name.
+
+A complete signature remains valid, whitespace immediately before `(` keeps
+its more specific Vim9 whitespace diagnostic, and a name-only `:function` or
+`:def` query is not treated as a malformed definition. The incomplete header
+and following commands remain in the syntax tree for editor recovery.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_user_func.vim:461-465` expects E124 for
+  `func Xfunc abc ()` and distinguishes an unclosed argument list as E125.
+- `src/userfunc.c:5213-5224` emits E124 when the byte after the parsed function
+  name is not an opening parenthesis.
+- `src/errors.h:300-303` defines the exact E124 and E125 messages.

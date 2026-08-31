@@ -2,6 +2,65 @@ package syntax
 
 import "testing"
 
+func TestFunctionMissingOpeningParenthesisDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "legacy function",
+			source:  "function Xfunc abc ()\nendfunction\nlet after = 1\n",
+			message: "Missing '(': Xfunc abc ()",
+			span:    "abc ()",
+		},
+		{
+			name:    "Vim9 def",
+			source:  "vim9script\ndef Foo abc ()\nenddef\nvar after = 1\n",
+			message: "Missing '(': Foo abc ()",
+			span:    "abc ()",
+		},
+		{
+			name:    "legacy function generic-like tail",
+			source:  "function Foo<T>()\nendfunction\nlet after = 1\n",
+			message: "Missing '(': Foo<T>()",
+			span:    "<T>()",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E124" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E488" {
+					t.Fatalf("E124 source retained trailing-character fallback: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E124 diagnostics = %#v", file.Diagnostics)
+			}
+			if len(file.Commands) < 3 || file.Commands[0].Function == nil || file.Commands[len(file.Commands)-1].Declaration == nil {
+				t.Fatalf("function or next declaration was not retained: %#v", file.Commands)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Foo()\nendfunction\n",
+		"vim9script\ndef Foo()\nenddef\n",
+		"function Foo\n",
+		"function Foo \" comment\n",
+		"vim9script\ndef Foo\n",
+		"vim9script\ndef Foo ()\nenddef\n",
+		"function Foo(\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E124") {
+			t.Fatalf("guard source unexpectedly received E124: %#v\n%s", file.Diagnostics, source)
+		}
+	}
+}
+
 func TestVim9VariadicDefaultDiagnostic(t *testing.T) {
 	tests := []struct {
 		name, source, span, defaultText string
