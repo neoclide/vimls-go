@@ -6639,6 +6639,23 @@ func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous,
 	return syntax.Diagnostic{Code: "vim/E1120", Message: "Cannot change dict", Span: assigned.Span}, true
 }
 
+func illegalVariableNameAssignmentDiagnostic(target *syntax.Expression) (syntax.Diagnostic, bool) {
+	if target == nil {
+		return syntax.Diagnostic{}, false
+	}
+	if scopeDictionary(target) {
+		return syntax.Diagnostic{Code: "vim/E461", Message: "Illegal variable name: ", Span: target.Span}, true
+	}
+	if target.Kind != syntax.ExpressionIndex || len(target.Children) < 2 || !scopeDictionary(target.Children[0]) {
+		return syntax.Diagnostic{}, false
+	}
+	key, ok := syntax.StaticDictionaryIndexKey(target.Children[1])
+	if !ok || validScopeVariableName(key) {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{Code: "vim/E461", Message: "Illegal variable name: " + key, Span: target.Children[1].Span}, true
+}
+
 // collectAssignmentDiagnostics reports statically provable assignment-target
 // errors. Dynamic targets deliberately remain opaque here.
 func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
@@ -6691,6 +6708,12 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 		scope := result.commandScopes[command]
 		if scope == nil {
 			scope = parent
+		}
+		if command.Declaration != nil && command.Declaration.Assignment.Start < command.Declaration.Assignment.End {
+			if diagnostic, ok := illegalVariableNameAssignmentDiagnostic(command.Declaration.Target); ok &&
+				!syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) && !syntaxDiagnosticOverlaps(result.Diagnostics, diagnostic.Span) {
+				result.Diagnostics = append(result.Diagnostics, diagnostic)
+			}
 		}
 		if previousScope != nil && previousScope != scope {
 			clear(recentGlobalAssignments)
@@ -9331,6 +9354,58 @@ func emptyRequiredStringDiagnostic(function vimdata.BuiltinFunction, arguments [
 	return syntax.Diagnostic{}, false
 }
 
+func validScopeVariableName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index := 0; index < len(name); index++ {
+		character := name[index]
+		if character >= utf8.RuneSelf {
+			continue
+		}
+		letter := character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z'
+		if letter || character == '_' || index > 0 && (character >= '0' && character <= '9' || character == '#') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func scopeDictionary(expression *syntax.Expression) bool {
+	for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	return expression != nil && expression.Kind == syntax.ExpressionIdentifier && len(expression.Value) == 2 &&
+		expression.Value[1] == ':' && strings.ContainsRune("gslabwtv", rune(expression.Value[0]))
+}
+
+func illegalVariableNameBuiltinDiagnostic(function vimdata.BuiltinFunction, arguments []*syntax.Expression, dialect syntax.Dialect) (syntax.Diagnostic, bool) {
+	nameIndex := -1
+	switch function.Name {
+	case "setbufvar", "settabvar", "setwinvar":
+		nameIndex = 1
+	case "settabwinvar":
+		nameIndex = 2
+	}
+	if nameIndex >= 0 && nameIndex < len(arguments) {
+		if name, ok := syntax.StaticDictionaryIndexKey(arguments[nameIndex]); ok && !strings.HasPrefix(name, "&") && !validScopeVariableName(name) {
+			return syntax.Diagnostic{Code: "vim/E461", Message: "Illegal variable name: " + name, Span: arguments[nameIndex].Span}, true
+		}
+	}
+	if function.Name != "extend" || len(arguments) < 2 || !scopeDictionary(arguments[0]) || arguments[1] == nil || arguments[1].Kind != syntax.ExpressionDictionary {
+		return syntax.Diagnostic{}, false
+	}
+	for index := 0; index+1 < len(arguments[1].Children); index += 2 {
+		keyExpression := arguments[1].Children[index]
+		key, ok := syntax.StaticDictionaryKey(keyExpression, dialect)
+		if ok && !validScopeVariableName(key) {
+			return syntax.Diagnostic{Code: "vim/E461", Message: "Illegal variable name: " + key, Span: keyExpression.Span}, true
+		}
+	}
+	return syntax.Diagnostic{}, false
+}
+
 func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
 	seen := make(map[*syntax.Expression]bool)
 	var walkCommands func([]syntax.Command, *Scope)
@@ -9346,11 +9421,14 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 			if len(expression.Children) > 0 {
 				callee = expression.Children[0]
 			}
-			emptyRequiredString := false
+			callValueError := false
 			if builtinCall {
-				if diagnostic, ok := emptyRequiredStringDiagnostic(builtin, arguments, dialect); ok {
+				if diagnostic, ok := illegalVariableNameBuiltinDiagnostic(builtin, arguments, dialect); ok {
 					result.Diagnostics = append(result.Diagnostics, diagnostic)
-					emptyRequiredString = true
+					callValueError = true
+				} else if diagnostic, ok := emptyRequiredStringDiagnostic(builtin, arguments, dialect); ok {
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
+					callValueError = true
 				}
 			}
 			sortFloatFuncref := false
@@ -9390,7 +9468,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 					}
 				}
 			}
-			if emptyRequiredString {
+			if callValueError {
 				// The value error owns the call before ordinary type checks.
 			} else if sortFloatFuncref {
 				// The item conversion error owns the call.

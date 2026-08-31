@@ -3132,6 +3132,51 @@ func TestAnalyzeE1175NonEmptyStringArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE461IllegalVariableNameDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, message string
+	}{
+		{"empty scope name", "let v:=5\n", "v:", "Illegal variable name: "},
+		{"scope dictionary index", "let g:[\"a;b\"] = 10\n", `"a;b"`, "Illegal variable name: a;b"},
+		{"extend scope dictionary", "call extend(g:, {'-!': 10})\n", "'-!'", "Illegal variable name: -!"},
+		{"setbufvar", "vim9script\nsetbufvar('%', '', 10)\n", "''", "Illegal variable name: "},
+		{"settabvar", "vim9script\nsettabvar(1, '', 10)\n", "''", "Illegal variable name: "},
+		{"settabwinvar", "vim9script\nsettabwinvar(1, 1, '', 10)\n", "''", "Illegal variable name: "},
+		{"setwinvar", "vim9script\nsetwinvar(1, '', 10)\n", "''", "Illegal variable name: "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E461" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E461 diagnostics = %#v; all diagnostics = %#v", got, result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"let g:\n",
+		"let g:['valid'] = 1\n",
+		"let key = '-!'\nlet g:[key] = 1\n",
+		"call extend(g:, values)\n",
+		"call extend({}, {'-!': 1})\n",
+		"call setbufvar(1, name, 1)\n",
+		"call setbufvar(1, '&syntax', 'vim')\n",
+		"let v:errmsg = ''\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E461" {
+				t.Fatalf("guard unexpectedly received E461: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1148CannotIndexRuntimeDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"compiled nested string", "vim9script\ndef F()\n  var dict = {value: 'text'}\n  dict.value[0] = 1\nenddef\n", "dict.value"},
