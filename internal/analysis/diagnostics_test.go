@@ -10881,6 +10881,47 @@ func TestAnalyzeE1560RejectsTypeArgumentsForNonGenericFunction(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1558UnknownFileLocalGenericFunction(t *testing.T) {
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{"direct call", "vim9script\nMy1558<number>()\n", "My1558"},
+		{"call inside def", "vim9script\ndef Use()\n  Missing<string>()\nenddef\n", "Missing"},
+		{"function reference", "vim9script\nvar Ref = function(Missing<bool>)\n", "Missing"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1558" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Unknown generic function: "+test.want || file.Text(got[0].Span) != test.want {
+				t.Fatalf("E1558 diagnostics = %#v", got)
+			}
+		})
+	}
+}
+
+func TestAnalyzeE1558FileLocalGuards(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\ndef Generic<T>()\nenddef\nGeneric<number>()\n",
+		"vim9script\nGeneric<number>()\ndef Generic<T>()\nenddef\n",
+		"vim9script\ndef Regular()\nenddef\nRegular<number>()\n",
+		"vim9script\ng:External<number>()\n",
+		"vim9script\nAuto#External<number>()\n",
+		"vim9script\nvar object: any\nobject.Missing<number>()\n",
+		"vim9script\nlen<number>([])\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1558" {
+				t.Fatalf("guard unexpectedly received E1558: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1559RequiresGenericTypeArguments(t *testing.T) {
 	tests := []struct {
 		name string

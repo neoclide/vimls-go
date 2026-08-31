@@ -8884,7 +8884,18 @@ func appendNonGenericFunctionDiagnostic(result *FileAnalysis, expression *syntax
 		return
 	}
 	declaration := resolve(scope, callee.Value, callee.Span.Start, true, hidden)
-	if declaration == nil || !functionSymbolKind(declaration.Kind) || declaration.TypeParameterCount > 0 {
+	if declaration == nil {
+		if result.File.Dialect == syntax.Vim9 && validScopeVariableName(callee.Value) && !strings.Contains(callee.Value, "#") &&
+			!syntaxDiagnosticOverlaps(result.File.Diagnostics, callee.Span) {
+			if _, builtin := vimdata.LookupFunction(callee.Value); !builtin {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1558", Message: "Unknown generic function: " + callee.Value, Span: callee.Span,
+				})
+			}
+		}
+		return
+	}
+	if !functionSymbolKind(declaration.Kind) || declaration.TypeParameterCount > 0 {
 		return
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
