@@ -349,7 +349,6 @@ func collectVim9ScriptFunctionDeletionDiagnostics(result *FileAnalysis, commands
 	if result == nil || result.File == nil || result.File.Dialect != syntax.Vim9 {
 		return
 	}
-	file := result.File
 	var walk func([]syntax.Command, *Scope)
 	walk = func(commands []syntax.Command, parent *Scope) {
 		for index := range commands {
