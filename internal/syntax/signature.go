@@ -339,17 +339,35 @@ func parseFunctionSignature(file *File, command *Command) {
 		} else {
 			attributeStart := offset
 			attributeEnd := offset
+			closure := false
 			for offset < len(rawSource) {
 				wordEnd := scanWord(rawSource, offset, len(rawSource))
 				word := rawSource[offset:wordEnd]
 				if word != "range" && word != "dict" && word != "abort" && word != "closure" {
 					break
 				}
+				closure = closure || word == "closure"
 				attributeEnd = wordEnd
 				offset = skipSyntaxSpace(rawSource, wordEnd, len(rawSource))
 			}
 			if attributeEnd > attributeStart {
 				function.Attributes = Span{Start: command.Argument.Start + attributeStart, End: command.Argument.Start + attributeEnd}
+			}
+			if closure && !file.lambdaBody {
+				topLevel := true
+				if command.Block >= 0 && command.Block < len(file.Blocks) {
+					for parent := file.Blocks[command.Block].Parent; parent >= 0 && parent < len(file.Blocks); parent = file.Blocks[parent].Parent {
+						if file.Blocks[parent].Kind == BlockFunction || file.Blocks[parent].Kind == BlockDef {
+							topLevel = false
+							break
+						}
+					}
+				}
+				if topLevel {
+					file.Diagnostics = append(file.Diagnostics, Diagnostic{
+						Code: "vim/E932", Message: "Closure function should not be at top level: " + file.Text(function.Name), Span: function.Name,
+					})
+				}
 			}
 			if offset < len(rawSource) && rawSource[offset] != '"' && !(rawSource[offset] == '#' && command.Dialect == Vim9 && offset > tailStart && isExpressionSpace(rawSource[offset-1])) {
 				file.Diagnostics = append(file.Diagnostics, Diagnostic{

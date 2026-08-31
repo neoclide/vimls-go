@@ -205,6 +205,55 @@ func TestFunctionArgumentOrderDiagnostic(t *testing.T) {
 	}
 }
 
+func TestFunctionClosureDisallowedAtTopLevelDiagnostic(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "legacy top-level closure",
+			source:  "function F1() closure\nendfunction\n",
+			message: "Closure function should not be at top level: F1",
+			span:    "F1",
+		},
+		{
+			name:    "vim9-root function closure",
+			source:  "vim9script\nfunction F2() closure\nendfunction\n",
+			message: "Closure function should not be at top level: F2",
+			span:    "F2",
+		},
+		{
+			name:    "abort closure order",
+			source:  "function F3() abort closure\nendfunction\n",
+			message: "Closure function should not be at top level: F3",
+			span:    "F3",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E932" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E932 diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function Outer()\n  function Inner() closure\n  endfunction\nendfunction\n",
+		"vim9script\ndef Outer()\n  function Inner() closure\n  endfunction\nenddef\n",
+		"vim9script\nfunction Normal()\nendfunction\n",
+	} {
+		file := Parse(source)
+		if hasDiagnostic(file, "vim/E932") {
+			t.Fatalf("guard unexpectedly received E932: %#v", file.Diagnostics)
+		}
+	}
+}
+
 func TestLegacyFunctionNameCapitalDiagnostic(t *testing.T) {
 	for _, test := range []struct {
 		name, source, function string
