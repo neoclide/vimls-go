@@ -129,6 +129,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
 	collectAggregateLocalRedeclarationDiagnostics(result)
 	collectDuplicateTypeAliasDiagnostics(result)
+	collectDuplicateMethodDiagnostics(result)
 	collectUnimplementedAbstractMethodDiagnostics(result)
 	collectMethodAccessLevelDiagnostics(result)
 	collectGenericMethodOverrideDiagnostics(result)
@@ -283,7 +284,7 @@ func collectImplementedInterfaceNameDiagnostics(result *FileAnalysis) {
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Implements) == 0 ||
-			class.Block < 0 || class.Block >= len(file.Blocks) || file.Blocks[class.Block].End < 0 {
+			class.Block < 0 || class.Block >= len(file.Blocks) || file.Blocks[class.Block].End < 0 || aggregateHasDuplicateMethodDiagnostic(result, class) {
 			continue
 		}
 		if aggregateHeaderHasSyntaxDiagnostic(file, class) {
@@ -348,7 +349,7 @@ func collectImplementedInterfaceMembersDiagnostics(result *FileAnalysis) {
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Implements) == 0 ||
-			class.Block < 0 || class.Block >= len(file.Blocks) || file.Blocks[class.Block].End < 0 {
+			class.Block < 0 || class.Block >= len(file.Blocks) || file.Blocks[class.Block].End < 0 || aggregateHasDuplicateMethodDiagnostic(result, class) {
 			continue
 		}
 		if aggregateHeaderHasSyntaxDiagnostic(file, class) {
@@ -1304,6 +1305,83 @@ func collectPublicUnderscoreVariableDiagnostics(result *FileAnalysis) {
 	}
 }
 
+func collectDuplicateMethodDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		aggregate := &file.Commands[index]
+		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil ||
+			aggregate.Aggregate.Kind != syntax.BlockClass && aggregate.Aggregate.Kind != syntax.BlockInterface && aggregate.Aggregate.Kind != syntax.BlockEnum {
+			continue
+		}
+		seen := make(map[string]bool)
+		for _, memberIndex := range aggregate.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			if member.Dialect != syntax.Vim9 || member.Canonical != "def" || member.Function == nil {
+				continue
+			}
+			diagnosticSpan, complete := completedAggregateMethodSpan(file, aggregate, member)
+			if !complete {
+				continue
+			}
+			name := file.Text(member.Function.Name)
+			base := strings.TrimPrefix(name, "_")
+			if base == "" {
+				continue
+			}
+			if seen[base] {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1355", Message: "Duplicate function: " + name, Span: diagnosticSpan,
+				})
+				filtered := result.Diagnostics[:0]
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == "vim/E1073" && diagnostic.Span == member.Function.Name {
+						continue
+					}
+					filtered = append(filtered, diagnostic)
+				}
+				result.Diagnostics = filtered
+				break
+			}
+			seen[base] = true
+		}
+	}
+}
+
+func completedAggregateMethodSpan(file *syntax.File, aggregate, method *syntax.Command) (syntax.Span, bool) {
+	if file == nil || aggregate == nil || aggregate.Aggregate == nil || method == nil || method.Function == nil {
+		return syntax.Span{}, false
+	}
+	if method.Block >= 0 && method.Block < len(file.Blocks) && file.Blocks[method.Block].End >= 0 {
+		if syntaxDiagnosticOverlaps(file.Diagnostics, file.Blocks[method.Block].Span) {
+			return syntax.Span{}, false
+		}
+		return aggregateEndSpan(file, method), true
+	}
+	if aggregate.Aggregate.Kind == syntax.BlockInterface || commandHasModifier(method, "abstract") {
+		if syntaxDiagnosticOverlaps(file.Diagnostics, method.Span) {
+			return syntax.Span{}, false
+		}
+		return method.Function.Name, true
+	}
+	return syntax.Span{}, false
+}
+
+func aggregateHasDuplicateMethodDiagnostic(result *FileAnalysis, aggregate *syntax.Command) bool {
+	if result == nil || result.File == nil || aggregate == nil || aggregate.Block < 0 || aggregate.Block >= len(result.File.Blocks) {
+		return false
+	}
+	span := result.File.Blocks[aggregate.Block].Span
+	return slices.ContainsFunc(result.Diagnostics, func(diagnostic syntax.Diagnostic) bool {
+		return diagnostic.Code == "vim/E1355" && diagnostic.Span.Start >= span.Start && diagnostic.Span.End <= span.End
+	})
+}
+
 func collectDuplicateClassVariableDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
@@ -1580,7 +1658,8 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 	classes := localClasses(file)
 	for index := range file.Commands {
 		class := &file.Commands[index]
-		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Extends) == 0 {
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Extends) == 0 ||
+			aggregateHasDuplicateMethodDiagnostic(result, class) {
 			continue
 		}
 		super := classes[file.Text(class.Aggregate.Extends[0])]
@@ -1638,7 +1717,8 @@ func collectUnimplementedAbstractMethodDiagnostics(result *FileAnalysis) {
 	file := result.File
 	for index := range file.Commands {
 		class := &file.Commands[index]
-		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || commandHasModifier(class, "abstract") {
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || commandHasModifier(class, "abstract") ||
+			aggregateHasDuplicateMethodDiagnostic(result, class) {
 			continue
 		}
 		parent := extendedClass(file, result.classes, class)
@@ -1700,7 +1780,7 @@ func collectMethodAccessLevelDiagnostics(result *FileAnalysis) {
 	file := result.File
 	for index := range file.Commands {
 		class := &file.Commands[index]
-		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || aggregateHasDuplicateMethodDiagnostic(result, class) {
 			continue
 		}
 		for _, memberIndex := range class.Aggregate.Members {
@@ -1873,7 +1953,7 @@ func collectInterfaceVariableAccessDiagnostics(result *FileAnalysis) {
 	interfaces := localInterfaces(file)
 	for index := range file.Commands {
 		class := &file.Commands[index]
-		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || aggregateHasDuplicateMethodDiagnostic(result, class) {
 			continue
 		}
 		reported := make(map[string]bool)
@@ -2095,7 +2175,7 @@ func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
 	interfaces := localInterfaces(file)
 	for index := range file.Commands {
 		class := &file.Commands[index]
-		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || aggregateHasDuplicateMethodDiagnostic(result, class) {
 			continue
 		}
 		reported := make(map[string]bool)

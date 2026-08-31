@@ -3819,3 +3819,33 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9class.c:315-348` validates self-extension, resolution, and the
   required class/interface category in that order.
 - `src/errors.h:3462-3465` defines the exact E1354 and E1355 messages.
+
+## Duplicate function: E1355
+
+E1355 means `Duplicate function: {name}`. Within one Vim9 class, interface, or
+enum, method names are unique across object methods, static methods, abstract
+declarations, and constructors. A single leading underscore marks protected
+access and does not create a separate name, so `_Foo` conflicts with `Foo`.
+
+Comparison is case-sensitive and does not cross aggregate boundaries or class
+inheritance. A body method is considered defined only after its complete
+`enddef`; interface and abstract declarations are complete on their header.
+The diagnostic retains the later spelling and points at the location where
+that later definition becomes complete. Duplicate-method ownership suppresses
+generic, access, interface, and override cascades for the same aggregate.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:2407-2417` covers two methods with the same
+  public spelling and reports the later definition.
+- `src/testdir/test_vim9_class.vim:4648-4686` covers protected/public spelling
+  collisions in both orders.
+- `src/testdir/test_vim9_class.vim:6108-6165` covers collisions between static
+  and object methods.
+- `src/vim9class.c:1101-1126` compares normalized names across both method
+  collections.
+- `src/vim9class.c:2538-2564` performs the duplicate check after a method has
+  been defined and before adding it to either collection.
+- `runtime/doc/vim9class.txt:638-642` forbids method overloading by argument
+  type.
+- `src/errors.h:3464-3467` defines the exact E1355 and E1356 messages.

@@ -8078,6 +8078,121 @@ func TestAnalyzeE1354CannotExtendDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1355DuplicateFunctionDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message, span string
+	}{
+		{
+			name:    "object methods",
+			source:  "vim9script\nclass A\n  def Foo()\n  enddef\n  def Foo()\n  enddef\nendclass\n",
+			message: "Duplicate function: Foo",
+			span:    "enddef",
+		},
+		{
+			name:    "protected and public spellings",
+			source:  "vim9script\nclass A\n  def _Foo()\n  enddef\n  def Foo()\n  enddef\nendclass\n",
+			message: "Duplicate function: Foo",
+			span:    "enddef",
+		},
+		{
+			name:    "object and static methods",
+			source:  "vim9script\nclass A\n  def Foo()\n  enddef\n  static def _Foo()\n  enddef\nendclass\n",
+			message: "Duplicate function: _Foo",
+			span:    "enddef",
+		},
+		{
+			name:    "abstract methods",
+			source:  "vim9script\nabstract class A\n  abstract def Foo()\n  abstract def _Foo()\nendclass\n",
+			message: "Duplicate function: _Foo",
+			span:    "_Foo",
+		},
+		{
+			name:    "interface methods",
+			source:  "vim9script\ninterface A\n  def Foo()\n  def Foo()\nendinterface\n",
+			message: "Duplicate function: Foo",
+			span:    "Foo",
+		},
+		{
+			name:    "enum methods",
+			source:  "vim9script\nenum A\n  Value\n  def Foo()\n  enddef\n  static def Foo()\n  enddef\nendenum\n",
+			message: "Duplicate function: Foo",
+			span:    "enddef",
+		},
+		{
+			name:    "constructors",
+			source:  "vim9script\nclass A\n  def new()\n  enddef\n  def _new()\n  enddef\nendclass\n",
+			message: "Duplicate function: _new",
+			span:    "enddef",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1355" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1355 diagnostics = %#v; syntax = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "case-sensitive names",
+			source: "vim9script\nclass A\n  def Foo()\n  enddef\n  def FOO()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "different aggregates",
+			source: "vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nclass B\n  def Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "inherited override",
+			source: "vim9script\nclass A\n  def Foo()\n  enddef\nendclass\nclass B extends A\n  def Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "method and variable",
+			source: "vim9script\nclass A\n  var Foo: any\n  def Foo()\n  enddef\nendclass\n",
+		},
+		{
+			name:   "incomplete second method",
+			source: "vim9script\nclass A\n  def Foo()\n  enddef\n  def Foo()\n",
+		},
+		{
+			name:   "legacy functions",
+			source: "function Foo()\nendfunction\nfunction Foo()\nendfunction\n",
+		},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1355" {
+					t.Fatalf("unexpected E1355: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+
+	result := Analyze(syntax.Parse("vim9script\nabstract class A\n  abstract def Foo(value: number)\nendclass\nclass B extends A implements Missing\n  def Foo(value: string)\n  enddef\n  def Foo(value: number)\n  enddef\nendclass\n"))
+	found := false
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1355" {
+			found = true
+		}
+		switch diagnostic.Code {
+		case "vim/E1346", "vim/E1349", "vim/E1373", "vim/E1377", "vim/E1383", "vim/E1432", "vim/E1433", "vim/E1434":
+			t.Fatalf("E1355 retained semantic cascade: %#v", result.Diagnostics)
+		}
+	}
+	if !found {
+		t.Fatalf("missing E1355: %#v", result.Diagnostics)
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string
