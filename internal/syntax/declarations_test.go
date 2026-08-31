@@ -378,6 +378,102 @@ func TestOfficialVimParserMissingImplementsName(t *testing.T) {
 	assertFileSpans(t, file)
 }
 
+func TestOfficialVimParserDuplicateImplements(t *testing.T) {
+	file := Parse("vim9script\ninterface I\nendinterface\nclass C implements I implements I\nendclass\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1350" || file.Diagnostics[0].Message != `Duplicate "implements"` || file.Text(file.Diagnostics[0].Span) != "implements" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	var class *Command
+	for index := range file.Commands {
+		if file.Commands[index].Aggregate != nil && file.Text(file.Commands[index].Aggregate.Name) == "C" {
+			class = &file.Commands[index]
+			break
+		}
+	}
+	if class == nil || class.Aggregate == nil || file.Text(class.Aggregate.Name) != "C" || len(class.Aggregate.Implements) != 1 || file.Text(class.Aggregate.Implements[0]) != "I" {
+		t.Fatalf("class = %#v", class)
+	}
+	if class.Block < 0 || file.Blocks[class.Block].Kind != BlockClass || file.Blocks[class.Block].End < 0 {
+		t.Fatalf("commands/blocks = %#v", file.Commands)
+	}
+	following := -1
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+			following = index
+			break
+		}
+	}
+	if following < 0 || file.Commands[following].Canonical != "var" || file.Text(file.Commands[following].Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+
+	missing := Parse("vim9script\nclass C implements I implements\nendclass\n")
+	if len(missing.Diagnostics) != 1 || missing.Diagnostics[0].Code != "vim/E1350" || missing.Text(missing.Diagnostics[0].Span) != "implements" || hasDiagnostic(missing, "vim/E1389") {
+		t.Fatalf("missing-name diagnostics = %#v", missing.Diagnostics)
+	}
+
+	for _, test := range []struct {
+		name, source, owner string
+	}{
+		{"single clause", "vim9script\nclass C implements I\nendclass\n", ""},
+		{"duplicate list entry", "vim9script\nclass C implements I, I\nendclass\n", "vim/E1351"},
+		{"interface owns implements", "vim9script\ninterface C implements I\nendinterface\n", "vim/E1381"},
+		{"Legacy root", "class C implements I implements I\nendclass\n", "vim/E1316"},
+		{"one-shot Legacy", "vim9script\nlegacy class C implements I implements I\nendclass\n", "vim/E1316"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parsed := Parse(test.source)
+			if hasDiagnostic(parsed, "vim/E1350") {
+				t.Fatalf("guard unexpectedly received E1350: %#v", parsed.Diagnostics)
+			}
+			if test.owner != "" && !hasDiagnostic(parsed, test.owner) {
+				t.Fatalf("guard diagnostics = %#v, want %s", parsed.Diagnostics, test.owner)
+			}
+		})
+	}
+}
+
+func TestOfficialVimParserDuplicateImplementsWithEnum(t *testing.T) {
+	file := Parse("vim9script\ninterface I\nendinterface\nenum C implements I implements\n  Apple\nendenum\nvar after = 1\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1350" || file.Diagnostics[0].Message != `Duplicate "implements"` || file.Text(file.Diagnostics[0].Span) != "implements" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	var enum *Aggregate
+	for index := range file.Commands {
+		if file.Commands[index].Aggregate != nil && file.Commands[index].Aggregate.Kind == BlockEnum && file.Text(file.Commands[index].Aggregate.Name) == "C" {
+			enum = file.Commands[index].Aggregate
+			break
+		}
+	}
+	if enum == nil || enum.Kind != BlockEnum || file.Text(enum.Name) != "C" || len(enum.Implements) != 1 || file.Text(enum.Implements[0]) != "I" {
+		t.Fatalf("enum = %#v", enum)
+	}
+	var enumBlock *Block
+	for index := range file.Blocks {
+		if file.Blocks[index].Kind == BlockEnum && file.Blocks[index].End >= 0 {
+			enumBlock = &file.Blocks[index]
+			break
+		}
+	}
+	if enumBlock == nil || enumBlock.Kind != BlockEnum || enumBlock.End < 0 {
+		t.Fatalf("commands/blocks = %#v", file.Commands)
+	}
+	following := -1
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration != nil && file.Text(command.Declaration.Name) == "after" {
+			following = index
+			break
+		}
+	}
+	if following < 0 || file.Commands[following].Canonical != "var" || file.Text(file.Commands[following].Declaration.Name) != "after" {
+		t.Fatalf("following declaration = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9EnumValues(t *testing.T) {
 	source := "vim9script\nenum Color\n  Red,\n  RGB(1, 2 + 3, 'blue')\nendenum\n"
 	file := Parse(source)

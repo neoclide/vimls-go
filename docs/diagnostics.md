@@ -3702,3 +3702,26 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   across the class hierarchy.
 - `src/vim9class.c:878-887` checks variables before methods for each interface.
 - `src/errors.h:3452-3455` defines the exact E1349 and E1350 messages.
+
+## Duplicate implements clause: E1350
+
+E1350 means `Duplicate "implements"`. A Vim9 class or enum declaration may
+contain only one `implements` clause. The parser reports the second keyword
+itself before attempting to parse another interface name, so the same error
+also owns a repeated clause with a missing name.
+
+The first clause's interface list remains in the recovering aggregate, and the
+block plus following declarations remain available. Repeating an interface
+inside one comma-separated list is instead E1351. An interface declaration
+using `implements` is E1381, while Legacy declarations retain their dialect
+diagnostics.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_interface.vim:212-224` covers the exact duplicate
+  clause and reports it on the class header.
+- `src/vim9class.c:2038-2051` rejects a second `implements` keyword before
+  scanning its following name.
+- `runtime/doc/vim9class.txt:695-699` states that `implements` can appear only
+  once and distinguishes duplicate entries in one list.
+- `src/errors.h:3454-3457` defines the exact E1350 and E1351 messages.
