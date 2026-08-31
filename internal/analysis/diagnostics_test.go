@@ -3533,6 +3533,39 @@ func TestAnalyzeE742FixedValueAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE741ImmediateLockedValueDiagnostics(t *testing.T) {
+	for _, test := range []struct{ source, message, span string }{
+		{"let value = 1\nlockvar value\nlet value = 2\n", "Value is locked: value", "value"},
+		{"let values = [1]\nlockvar values\nlet values[0] = 2\n", "Value is locked: values[0]", "values[0]"},
+		{"let values = {'one': 1}\nlockvar values\nlet values.one = 2\n", "Value is locked: values.one", "values.one"},
+	} {
+		file := syntax.Parse(test.source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E741" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+			t.Fatalf("E741 diagnostics = %#v", got)
+		}
+	}
+
+	for _, source := range []string{
+		"let values = [1]\nlockvar 0 values\nlet values[0] = 2\n",
+		"let value = 1\nlockvar value\nunlockvar value\nlet value = 2\n",
+		"let first = 1\nlet second = 2\nlockvar first\nlet second = 3\n",
+		"let values = [[1]]\nlockvar values\nlet values[0][0] = 2\n",
+		"vim9script\nvar value = 1\nlockvar 0 value\nvalue = 2\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E741" {
+				t.Fatalf("guard unexpectedly received E741: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

@@ -6286,6 +6286,27 @@ func immediateLockedAssignment(file *syntax.File, previous, current *syntax.Comm
 	return assigned
 }
 
+func immediateLockedValueDiagnostic(file *syntax.File, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
+	if file == nil || previous == nil || current == nil || previous.Canonical != "lockvar" || len(previous.Targets) != 1 {
+		return syntax.Diagnostic{}, false
+	}
+	locked := previous.Targets[0]
+	assigned := directAssignmentTarget(current)
+	if locked == nil || assigned == nil || expressionContainsMissing(locked) || expressionContainsMissing(assigned) {
+		return syntax.Diagnostic{}, false
+	}
+	if locked.Kind == syntax.ExpressionIdentifier && assigned.Kind == syntax.ExpressionIdentifier && locked.Value == assigned.Value {
+		return syntax.Diagnostic{Code: "vim/E741", Message: "Value is locked: " + assigned.Value, Span: assigned.Span}, true
+	}
+	if previous.Count.Start != previous.Count.End || locked.Kind != syntax.ExpressionIdentifier ||
+		(assigned.Kind != syntax.ExpressionMember && assigned.Kind != syntax.ExpressionIndex && assigned.Kind != syntax.ExpressionSlice) ||
+		len(assigned.Children) == 0 || assigned.Children[0] == nil || assigned.Children[0].Kind != syntax.ExpressionIdentifier ||
+		assigned.Children[0].Value != locked.Value {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{Code: "vim/E741", Message: "Value is locked: " + file.Text(assigned.Span), Span: assigned.Span}, true
+}
+
 func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
 	if result == nil || result.File == nil || scope == nil || previous == nil || current == nil {
 		return syntax.Diagnostic{}, false
@@ -6408,10 +6429,17 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			clear(recentGlobalAssignments)
 		}
 		if previousScope == scope {
-			if assigned := immediateLockedAssignment(result.File, previous, command); assigned != nil && !syntaxDiagnosticOverlaps(result.File.Diagnostics, assigned.Span) {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E1122", Message: "Variable is locked: " + assigned.Value, Span: assigned.Span,
-				})
+			if command.Dialect == syntax.Legacy {
+				if diagnostic, ok := immediateLockedValueDiagnostic(result.File, previous, command); ok && !syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
+				}
+			}
+			if command.Dialect == syntax.Vim9 {
+				if assigned := immediateLockedAssignment(result.File, previous, command); assigned != nil && !syntaxDiagnosticOverlaps(result.File.Diagnostics, assigned.Span) {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1122", Message: "Variable is locked: " + assigned.Value, Span: assigned.Span,
+					})
+				}
 			}
 			if diagnostic, ok := immediateLockedItemDiagnostic(result, scope, previous, command); ok &&
 				!syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
