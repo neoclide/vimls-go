@@ -14,11 +14,11 @@ func TestDocumentsOpenChangeSaveCloseAndReopen(t *testing.T) {
 	if opened.Revision() != 1 || documents.Len() != 1 {
 		t.Fatalf("open revision = %d, len = %d", opened.Revision(), documents.Len())
 	}
-	changed, err := documents.Change("file:///a.vim", 2, text.UTF16, []text.Change{{
+	changed, textChanged, err := documents.Change("file:///a.vim", 2, text.UTF16, []text.Change{{
 		Range: &text.Range{Start: text.Position{Character: 9}, End: text.Position{Character: 11}},
 		Text:  "value",
 	}})
-	if err != nil {
+	if err != nil || !textChanged {
 		t.Fatal(err)
 	}
 	if changed.Text() != "let x = 'value'\n" || changed.Revision() != 2 {
@@ -28,23 +28,31 @@ func TestDocumentsOpenChangeSaveCloseAndReopen(t *testing.T) {
 		t.Fatal("open snapshot changed")
 	}
 
-	if saved, err := documents.Save("file:///a.vim", nil); err != nil || saved != changed {
-		t.Fatalf("save without text = %#v, %v", saved, err)
+	sameChange, textChanged, err := documents.Change("file:///a.vim", 3, text.UTF16, []text.Change{{Text: changed.Text()}})
+	if err != nil || textChanged || sameChange == changed || sameChange.Revision() != 3 {
+		t.Fatalf("same change = %#v, changed = %v, error = %v", sameChange, textChanged, err)
 	}
-	same := changed.Text()
-	if saved, err := documents.Save("file:///a.vim", &same); err != nil || saved != changed {
-		t.Fatalf("save same text = %#v, %v", saved, err)
+	analysis, ok := documents.BeginAnalysis(context.Background(), "file:///a.vim")
+	if !ok {
+		t.Fatal("analysis did not start")
+	}
+	if saved, textChanged, err := documents.Save("file:///a.vim", nil); err != nil || textChanged || saved != sameChange || analysis.Context.Err() != nil {
+		t.Fatalf("save without text = %#v, changed = %v, error = %v", saved, textChanged, err)
+	}
+	same := sameChange.Text()
+	if saved, textChanged, err := documents.Save("file:///a.vim", &same); err != nil || textChanged || saved != sameChange || analysis.Context.Err() != nil {
+		t.Fatalf("save same text = %#v, changed = %v, error = %v", saved, textChanged, err)
 	}
 	replacement := "vim9script\n"
-	saved, err := documents.Save("file:///a.vim", &replacement)
-	if err != nil || saved.Text() != replacement || saved.Revision() != 3 {
-		t.Fatalf("save replacement = %#v, %v", saved, err)
+	saved, textChanged, err := documents.Save("file:///a.vim", &replacement)
+	if err != nil || !textChanged || saved.Text() != replacement || saved.Revision() != 4 || analysis.Context.Err() == nil {
+		t.Fatalf("save replacement = %#v, changed = %v, error = %v", saved, textChanged, err)
 	}
 	if !documents.Close("file:///a.vim") || documents.Close("file:///a.vim") || documents.Len() != 0 {
 		t.Fatal("close behavior is incorrect")
 	}
 	reopened := documents.Open("file:///a.vim", 1, "reopened")
-	if reopened.Revision() != 4 || reopened.Text() != "reopened" {
+	if reopened.Revision() != 5 || reopened.Text() != "reopened" {
 		t.Fatalf("reopened = %#v", reopened)
 	}
 }
@@ -53,17 +61,17 @@ func TestDocumentsRejectStaleInvalidAndMissingChanges(t *testing.T) {
 	documents := NewDocuments()
 	documents.Open("u", 4, "abc")
 	for _, version := range []int32{3, 4} {
-		if _, err := documents.Change("u", version, text.UTF16, []text.Change{{Text: "stale"}}); !errors.Is(err, ErrStaleVersion) {
+		if _, _, err := documents.Change("u", version, text.UTF16, []text.Change{{Text: "stale"}}); !errors.Is(err, ErrStaleVersion) {
 			t.Fatalf("version %d error = %v", version, err)
 		}
 	}
-	if _, err := documents.Change("missing", 1, text.UTF16, nil); !errors.Is(err, ErrDocumentNotOpen) {
+	if _, _, err := documents.Change("missing", 1, text.UTF16, nil); !errors.Is(err, ErrDocumentNotOpen) {
 		t.Fatalf("missing change error = %v", err)
 	}
-	if _, err := documents.Save("missing", nil); !errors.Is(err, ErrDocumentNotOpen) {
+	if _, _, err := documents.Save("missing", nil); !errors.Is(err, ErrDocumentNotOpen) {
 		t.Fatalf("missing save error = %v", err)
 	}
-	if _, err := documents.Change("u", 5, text.UTF16, []text.Change{{Range: &text.Range{Start: text.Position{Character: 9}}}}); !errors.Is(err, text.ErrInvalidPosition) {
+	if _, _, err := documents.Change("u", 5, text.UTF16, []text.Change{{Range: &text.Range{Start: text.Position{Character: 9}}}}); !errors.Is(err, text.ErrInvalidPosition) {
 		t.Fatalf("invalid change error = %v", err)
 	}
 	snapshot, _ := documents.Snapshot("u")
@@ -84,7 +92,7 @@ func TestDocumentsCancelAndRejectStaleAnalysis(t *testing.T) {
 	if !ok || first.Context.Err() == nil || !documents.IsCurrent(second) {
 		t.Fatal("replacement analysis did not cancel the first")
 	}
-	if _, err := documents.Change("file:///a.vim", 2, text.UTF16, []text.Change{{Text: "new"}}); err != nil {
+	if _, _, err := documents.Change("file:///a.vim", 2, text.UTF16, []text.Change{{Text: "new"}}); err != nil {
 		t.Fatal(err)
 	}
 	if second.Context.Err() == nil || documents.IsCurrent(second) {
@@ -119,7 +127,7 @@ func TestDocumentsSnapshotsAreSortedAndIndependent(t *testing.T) {
 	if len(snapshots) != 2 || snapshots[0].URI() != "file:///a.vim" || snapshots[1].URI() != "file:///z.vim" {
 		t.Fatalf("snapshot order = %#v", snapshots)
 	}
-	if _, err := documents.Change("file:///z.vim", 2, text.UTF8, []text.Change{{Text: "updated"}}); err != nil {
+	if _, _, err := documents.Change("file:///z.vim", 2, text.UTF8, []text.Change{{Text: "updated"}}); err != nil {
 		t.Fatal(err)
 	}
 	snapshots[0] = nil

@@ -52,36 +52,37 @@ func (d *Documents) Open(uri string, version int32, content string) *text.Snapsh
 	return snapshot
 }
 
-func (d *Documents) Change(uri string, version int32, encoding text.Encoding, changes []text.Change) (*text.Snapshot, error) {
+func (d *Documents) Change(uri string, version int32, encoding text.Encoding, changes []text.Change) (*text.Snapshot, bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	current := d.documents[uri]
 	if current == nil {
-		return nil, ErrDocumentNotOpen
+		return nil, false, ErrDocumentNotOpen
 	}
 	if previousVersion, ok := current.snapshot.Version(); ok && version <= previousVersion {
-		return nil, ErrStaleVersion
+		return nil, false, ErrStaleVersion
 	}
 	nextRevision := d.nextRevision + 1
 	snapshot, err := text.ApplyChanges(current.snapshot, nextRevision, &version, encoding, changes)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	changed := snapshot.Text() != current.snapshot.Text()
 	current.cancelAnalysis()
 	current.snapshot = snapshot
 	d.nextRevision = nextRevision
-	return snapshot, nil
+	return snapshot, changed, nil
 }
 
-func (d *Documents) Save(uri string, content *string) (*text.Snapshot, error) {
+func (d *Documents) Save(uri string, content *string) (*text.Snapshot, bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	current := d.documents[uri]
 	if current == nil {
-		return nil, ErrDocumentNotOpen
+		return nil, false, ErrDocumentNotOpen
 	}
 	if content == nil || *content == current.snapshot.Text() {
-		return current.snapshot, nil
+		return current.snapshot, false, nil
 	}
 	d.nextRevision++
 	version, hasVersion := current.snapshot.Version()
@@ -91,7 +92,7 @@ func (d *Documents) Save(uri string, content *string) (*text.Snapshot, error) {
 	}
 	current.cancelAnalysis()
 	current.snapshot = text.NewSnapshot(uri, d.nextRevision, versionPointer, *content)
-	return current.snapshot, nil
+	return current.snapshot, true, nil
 }
 
 func (d *Documents) Close(uri string) bool {

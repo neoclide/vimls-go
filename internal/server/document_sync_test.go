@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -94,18 +96,68 @@ func TestServerDocumentHandlersCancelStaleAnalysis(t *testing.T) {
 	if analysis.Context.Err() == nil || instance.documents.IsCurrent(analysis) {
 		t.Fatal("document change did not invalidate active analysis")
 	}
+	sameChange, ok := instance.documents.BeginAnalysis(context.Background(), documentURI.String())
+	if !ok {
+		t.Fatal("analysis did not start after change")
+	}
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI},
+			Version:                3,
+		},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{Text: "new"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if sameChange.Context.Err() == nil || instance.documents.IsCurrent(sameChange) {
+		t.Fatal("same-content change did not invalidate active analysis")
+	}
+	unchangedSave, ok := instance.documents.BeginAnalysis(context.Background(), documentURI.String())
+	if !ok {
+		t.Fatal("analysis did not start after same-content change")
+	}
+	if err := instance.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if unchangedSave.Context.Err() != nil || !instance.documents.IsCurrent(unchangedSave) {
+		t.Fatal("save without text invalidated active analysis")
+	}
+	sameText := "new"
+	if err := instance.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Text:         &sameText,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if unchangedSave.Context.Err() != nil || !instance.documents.IsCurrent(unchangedSave) {
+		t.Fatal("same-text save invalidated active analysis")
+	}
+	savedText := "saved"
+	if err := instance.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Text:         &savedText,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if unchangedSave.Context.Err() == nil || instance.documents.IsCurrent(unchangedSave) {
+		t.Fatal("changed save did not invalidate active analysis")
+	}
 	// Repeating the same client version is stale and must not replace the snapshot.
 	_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
 		TextDocument: protocol.VersionedTextDocumentIdentifier{
 			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI},
-			Version:                2,
+			Version:                3,
 		},
 		ContentChanges: []protocol.TextDocumentContentChangeEvent{
 			&protocol.TextDocumentContentChangeWholeDocument{Text: "stale"},
 		},
 	})
 	snapshot, ok := instance.documents.Snapshot(documentURI.String())
-	if !ok || snapshot.Text() != "new" {
+	if !ok || snapshot.Text() != "saved" {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{
@@ -116,6 +168,71 @@ func TestServerDocumentHandlersCancelStaleAnalysis(t *testing.T) {
 	if instance.documents.Len() != 0 {
 		t.Fatal("document was not closed")
 	}
+}
+
+func TestServerUnchangedSavePreservesAnalysisAndWorkspace(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	defer instance.stopAnalysis()
+	root := t.TempDir()
+	path := filepath.Join(root, "save.vim")
+	documentURI := uri.File(path)
+	source := "let g:save_cache_sentinel = 1\n"
+	instance.setWorkspaceRoots([]string{root})
+	opened := instance.documents.Open(documentURI.String(), 1, source)
+	instance.replaceWorkspaceFile(documentURI.String(), syntax.Parse(source))
+
+	instance.workspaceMu.Lock()
+	indexedSource, indexed := instance.workspaceIndex.Source(path)
+	workspaceRevision := instance.workspaceRevision
+	graphRevision := instance.workspaceGraphView.Revision()
+	workspacePending := len(instance.workspacePending)
+	instance.workspaceMu.Unlock()
+	if !indexed || indexedSource != source {
+		t.Fatalf("workspace source = %q, indexed = %v", indexedSource, indexed)
+	}
+
+	// A non-zero worker count prevents startAnalysis from starting a worker, so
+	// an accidental call leaves a deterministic pending entry for this test.
+	instance.analysisMu.Lock()
+	instance.analysisWorkers = 1
+	instance.analysisMu.Unlock()
+	assertUnchanged := func(save string) {
+		t.Helper()
+		instance.analysisMu.Lock()
+		pending := len(instance.analysisPending)
+		running := len(instance.analysisRunning)
+		instance.analysisMu.Unlock()
+		if pending != 0 || running != 0 {
+			t.Fatalf("%s save analysis: pending = %d, running = %d", save, pending, running)
+		}
+		instance.workspaceMu.Lock()
+		gotSource, ok := instance.workspaceIndex.Source(path)
+		gotWorkspaceRevision := instance.workspaceRevision
+		gotGraphRevision := instance.workspaceGraphView.Revision()
+		gotWorkspacePending := len(instance.workspacePending)
+		instance.workspaceMu.Unlock()
+		if !ok || gotSource != source || gotWorkspaceRevision != workspaceRevision || gotGraphRevision != graphRevision || gotWorkspacePending != workspacePending {
+			t.Fatalf("%s save workspace: source = %q, indexed = %v, revision = %d, graph = %d, pending = %d", save, gotSource, ok, gotWorkspaceRevision, gotGraphRevision, gotWorkspacePending)
+		}
+		snapshot, ok := instance.documents.Snapshot(documentURI.String())
+		if !ok || snapshot != opened {
+			t.Fatalf("%s save snapshot = %#v", save, snapshot)
+		}
+	}
+
+	if err := instance.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertUnchanged("without text")
+	if err := instance.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Text:         &source,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertUnchanged("with matching text")
 }
 
 func TestAnalysisQueueCoalescesRapidDocumentChanges(t *testing.T) {

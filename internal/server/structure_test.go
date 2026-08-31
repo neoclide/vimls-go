@@ -147,7 +147,7 @@ func TestStructureCancellationAndUnavailableDocument(t *testing.T) {
 		t.Fatalf("structure document snapshot = %#v, error = %v", snapshot, err)
 	}
 	version := int32(2)
-	if _, err := current.documents.Change(documentURI.String(), version, text.UTF16, []text.Change{{Text: "vim9script\nvar changed = 1\n"}}); err != nil {
+	if _, _, err := current.documents.Change(documentURI.String(), version, text.UTF16, []text.Change{{Text: "vim9script\nvar changed = 1\n"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := current.structureCurrent(context.Background(), snapshot); !errors.Is(err, protocol.ErrContentModified) {

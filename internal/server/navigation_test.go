@@ -234,7 +234,7 @@ func TestNavigationCancellationAndSnapshotInvalidation(t *testing.T) {
 		t.Fatalf("navigation document = %#v, error = %v", document, err)
 	}
 	version := int32(2)
-	if _, err := instance.documents.Change(documentURI.String(), version, text.UTF16, []text.Change{{Text: "vim9script\nvar changed = 1\n"}}); err != nil {
+	if _, _, err := instance.documents.Change(documentURI.String(), version, text.UTF16, []text.Change{{Text: "vim9script\nvar changed = 1\n"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := document.checkCurrent(context.Background()); !errors.Is(err, protocol.ErrContentModified) {
@@ -587,7 +587,7 @@ func TestCrossFileNavigationUsesNegotiatedEncodingAndInvalidatesOpenTarget(t *te
 	if !ok || target.openSnapshot == nil {
 		t.Fatalf("open workspace target = %#v", target)
 	}
-	if _, err := instance.documents.Change(targetURI.String(), 2, text.UTF8, []text.Change{{Text: "vim9script\nexport def Changed()\nenddef\n"}}); err != nil {
+	if _, _, err := instance.documents.Change(targetURI.String(), 2, text.UTF8, []text.Change{{Text: "vim9script\nexport def Changed()\nenddef\n"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := document.checkWorkspaceTarget(context.Background(), target); !errors.Is(err, protocol.ErrContentModified) {

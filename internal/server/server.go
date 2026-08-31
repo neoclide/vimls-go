@@ -501,8 +501,8 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 	encoding := s.encoding
 	s.mu.Unlock()
 	s.publishMu.Lock()
-	snapshot, err := s.documents.Change(params.TextDocument.URI.String(), params.TextDocument.Version, encoding, changes)
-	if err == nil {
+	snapshot, changed, err := s.documents.Change(params.TextDocument.URI.String(), params.TextDocument.Version, encoding, changes)
+	if err == nil && changed {
 		s.removeWorkspaceURI(snapshot.URI())
 	}
 	s.publishMu.Unlock()
@@ -516,14 +516,14 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 
 func (s *Server) DidSave(_ context.Context, params *protocol.DidSaveTextDocumentParams) error {
 	s.publishMu.Lock()
-	snapshot, err := s.documents.Save(params.TextDocument.URI.String(), params.Text)
-	if err == nil {
+	snapshot, changed, err := s.documents.Save(params.TextDocument.URI.String(), params.Text)
+	if err == nil && changed {
 		s.removeWorkspaceURI(snapshot.URI())
 	}
 	s.publishMu.Unlock()
 	if err != nil {
 		s.logf("vimls: ignored save for %s: %v", params.TextDocument.URI, err)
-	} else {
+	} else if changed {
 		s.startAnalysis(params.TextDocument.URI.String())
 	}
 	return nil
