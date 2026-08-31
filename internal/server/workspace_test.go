@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -235,6 +236,169 @@ func TestOpenDocumentsOverrideDiskAndClientFileEventsRebuild(t *testing.T) {
 	}
 	if symbols := workspaceSymbols(t, instance, "diskName"); len(symbols) != 0 {
 		t.Fatalf("stale disk symbols after client event = %#v", symbols)
+	}
+}
+
+func TestWorkspaceRestoreInstallsCapturedDiskSourceAndFacts(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './target.vim' as Target\n")
+	target := writeWorkspaceFile(t, root, "target.vim", "vim9script\nexport var Value = 1\n")
+	path, target = mustWorkspaceCanonicalPath(t, path), mustWorkspaceCanonicalPath(t, target)
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(path).String()
+	restore, ok := instance.captureWorkspaceRestore(documentURI)
+	if !ok {
+		t.Fatal("restore was not captured")
+	}
+	instance.workspaceMu.Lock()
+	if err := instance.workspaceIndex.Replace(path, syntax.Parse("vim9script\nvar stale = 1\n")); err != nil {
+		instance.workspaceMu.Unlock()
+		t.Fatal(err)
+	}
+	if err := instance.workspaceGraph.Replace(path, nil); err != nil {
+		instance.workspaceMu.Unlock()
+		t.Fatal(err)
+	}
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceMu.Unlock()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dependents := instance.installWorkspaceRestore(restore, syntax.Parse(string(content))); len(dependents) != 0 {
+		t.Fatalf("restore dependents=%#v", dependents)
+	}
+	instance.workspaceMu.Lock()
+	source, indexed := instance.workspaceIndex.Source(path)
+	graph := instance.workspaceGraphView
+	instance.workspaceMu.Unlock()
+	if !indexed || source != string(content) {
+		t.Fatalf("restored source=%q indexed=%t", source, indexed)
+	}
+	if outgoing := graph.Outgoing(path); len(outgoing) != 1 || !sameWorkspacePath(outgoing[0].Target, target) {
+		t.Fatalf("restored facts=%#v", outgoing)
+	}
+}
+
+func TestWorkspaceRestoreRejectsReopenedURIAndAliasOverlay(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "restore.vim", "vim9script\nimport './disk.vim' as Disk\n")
+	diskTarget := writeWorkspaceFile(t, root, "disk.vim", "vim9script\nexport var Disk = 1\n")
+	sentinelTarget := writeWorkspaceFile(t, root, "sentinel.vim", "vim9script\nexport var Sentinel = 1\n")
+	path, diskTarget, sentinelTarget = mustWorkspaceCanonicalPath(t, path), mustWorkspaceCanonicalPath(t, diskTarget), mustWorkspaceCanonicalPath(t, sentinelTarget)
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(path).String()
+	diskSource := "vim9script\nimport './disk.vim' as Disk\n"
+	sentinelSource := "vim9script\nimport './sentinel.vim' as Sentinel\n"
+	installSentinel := func() uint64 {
+		t.Helper()
+		instance.workspaceMu.Lock()
+		defer instance.workspaceMu.Unlock()
+		if err := instance.workspaceIndex.Replace(path, syntax.Parse(sentinelSource)); err != nil {
+			t.Fatal(err)
+		}
+		facts := collectWorkspaceImportFacts(path, syntax.Parse(sentinelSource), instance.workspaceResolver, nil)
+		if err := instance.workspaceGraph.Replace(path, facts); err != nil {
+			t.Fatal(err)
+		}
+		instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+		return instance.workspaceRevision
+	}
+	assertSentinel := func(label string, revision uint64) {
+		t.Helper()
+		instance.workspaceMu.Lock()
+		source, indexed := instance.workspaceIndex.Source(path)
+		graph := instance.workspaceGraphView
+		gotRevision := instance.workspaceRevision
+		instance.workspaceMu.Unlock()
+		if !indexed || source != sentinelSource || gotRevision != revision {
+			t.Fatalf("%s source=%q indexed=%t revision=%d want %d", label, source, indexed, gotRevision, revision)
+		}
+		if outgoing := graph.Outgoing(path); len(outgoing) != 1 || !sameWorkspacePath(outgoing[0].Target, sentinelTarget) || sameWorkspacePath(outgoing[0].Target, diskTarget) {
+			t.Fatalf("%s facts=%#v", label, outgoing)
+		}
+	}
+	restore, ok := instance.captureWorkspaceRestore(documentURI)
+	if !ok {
+		t.Fatal("restore was not captured")
+	}
+	instance.documents.Open(documentURI, 1, "vim9script\nvar reopened = 1\n")
+	revision := installSentinel()
+	if dependents := instance.installWorkspaceRestore(restore, syntax.Parse(diskSource)); len(dependents) != 0 {
+		t.Fatalf("reopened restore dependents=%#v", dependents)
+	}
+	assertSentinel("reopened", revision)
+	instance.documents.Close(documentURI)
+	restore, ok = instance.captureWorkspaceRestore(documentURI)
+	if !ok {
+		t.Fatal("alias restore was not captured")
+	}
+	alias := filepath.Join(root, "alias.vim")
+	if err := os.Symlink(path, alias); err != nil {
+		t.Skipf("cannot create symlink overlay: %v", err)
+	}
+	instance.documents.Open(uri.File(alias).String(), 1, "vim9script\nvar alias = 1\n")
+	revision = installSentinel()
+	if dependents := instance.installWorkspaceRestore(restore, syntax.Parse(diskSource)); len(dependents) != 0 {
+		t.Fatalf("alias restore dependents=%#v", dependents)
+	}
+	assertSentinel("alias", revision)
+}
+
+func TestWorkspaceRestoreGenerationStaleSchedulesMergedRebuild(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "restore.vim", "vim9script\nimport './target.vim' as Target\n")
+	target := writeWorkspaceFile(t, root, "target.vim", "vim9script\nexport var Value = 1\n")
+	path, target = mustWorkspaceCanonicalPath(t, path), mustWorkspaceCanonicalPath(t, target)
+	instance := initializeWorkspaceServer(t, root)
+	restore, ok := instance.captureWorkspaceRestore(uri.File(path).String())
+	if !ok {
+		t.Fatal("restore was not captured")
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceIndex.Remove(path)
+	instance.workspaceGraph.Remove(path)
+	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+	instance.workspaceRevision++
+	instance.workspaceMu.Unlock()
+	if dependents := instance.installWorkspaceRestore(restore, syntax.Parse("vim9script\nimport './target.vim' as Target\n")); len(dependents) != 0 {
+		t.Fatalf("stale restore dependents=%#v", dependents)
+	}
+	instance.workspaceWG.Wait()
+	instance.workspaceMu.Lock()
+	source, indexed := instance.workspaceIndex.Source(path)
+	graph := instance.workspaceGraphView
+	instance.workspaceMu.Unlock()
+	if !indexed || source != "vim9script\nimport './target.vim' as Target\n" {
+		t.Fatalf("rebuilt source=%q indexed=%t", source, indexed)
+	}
+	if outgoing := graph.Outgoing(path); len(outgoing) != 1 || !sameWorkspacePath(outgoing[0].Target, target) {
+		t.Fatalf("rebuilt facts=%#v", outgoing)
+	}
+}
+
+func TestWorkspaceRestoreCancelledDoesNotInstallOrRebuild(t *testing.T) {
+	root := t.TempDir()
+	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "restore.vim", "vim9script\nvar disk = 1\n"))
+	instance := initializeWorkspaceServer(t, root)
+	restore, ok := instance.captureWorkspaceRestore(uri.File(path).String())
+	if !ok {
+		t.Fatal("restore was not captured")
+	}
+	instance.workspaceMu.Lock()
+	source, indexed := instance.workspaceIndex.Source(path)
+	revision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	instance.stopAnalysis()
+	if dependents := instance.installWorkspaceRestore(restore, syntax.Parse("vim9script\nvar changed = 1\n")); len(dependents) != 0 {
+		t.Fatalf("cancelled restore dependents=%#v", dependents)
+	}
+	instance.workspaceMu.Lock()
+	gotSource, gotIndexed := instance.workspaceIndex.Source(path)
+	gotRevision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	if gotSource != source || gotIndexed != indexed || gotRevision != revision {
+		t.Fatalf("cancelled restore source=%q indexed=%t revision=%d", gotSource, gotIndexed, gotRevision)
 	}
 }
 

@@ -536,12 +536,14 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	delete(s.analysisPending, documentURI)
 	s.analysisMu.Unlock()
 	s.publishMu.Lock()
-	s.documents.Close(documentURI)
-	s.restoreWorkspaceDocument(documentURI)
+	closed := s.documents.Close(documentURI)
 	delete(s.parsed, documentURI)
 	clearDiagnostics := s.published[documentURI]
 	delete(s.published, documentURI)
 	s.publishMu.Unlock()
+	if closed {
+		s.restoreWorkspaceDocument(documentURI)
+	}
 	if clearDiagnostics {
 		s.clearDiagnostics(documentURI)
 	}
@@ -1153,14 +1155,17 @@ func (s *Server) clearDiagnostics(documentURI string) {
 }
 
 func (s *Server) stopAnalysis() {
+	s.workspaceMu.Lock()
 	s.analysisMu.Lock()
 	if s.analysisStopped {
 		s.analysisMu.Unlock()
+		s.workspaceMu.Unlock()
 		return
 	}
 	s.analysisStopped = true
 	s.analysisCancel()
 	s.analysisMu.Unlock()
+	s.workspaceMu.Unlock()
 	s.analysisWG.Wait()
 	// Synchronize with a rebuild that may have checked analysisContext just
 	// before cancellation, so its WaitGroup.Add completes before Wait starts.

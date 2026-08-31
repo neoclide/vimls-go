@@ -171,7 +171,7 @@ func (s *Server) refreshWorkspaceResolver() {
 func (s *Server) scheduleWorkspaceRebuild() {
 	s.workspaceMu.Lock()
 	s.workspaceRevision++
-	if s.workspaceRunning || s.analysisContext.Err() != nil {
+	if s.workspaceRunning || s.analysisStopped || s.analysisContext.Err() != nil {
 		s.workspaceMu.Unlock()
 		return
 	}
@@ -197,12 +197,13 @@ func (s *Server) workspaceIndexWorker() {
 		openSnapshots := s.documents.Snapshots()
 
 		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, resolver, openSnapshots)
-		if s.analysisContext.Err() != nil {
-			s.workspaceMu.Lock()
+		s.workspaceMu.Lock()
+		if s.analysisStopped || s.analysisContext.Err() != nil {
 			s.workspaceRunning = false
 			s.workspaceMu.Unlock()
 			return
 		}
+		s.workspaceMu.Unlock()
 
 		s.publishMu.Lock()
 		if !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
@@ -210,6 +211,12 @@ func (s *Server) workspaceIndexWorker() {
 			continue
 		}
 		s.workspaceMu.Lock()
+		if s.analysisStopped || s.analysisContext.Err() != nil {
+			s.workspaceRunning = false
+			s.workspaceMu.Unlock()
+			s.publishMu.Unlock()
+			return
+		}
 		if revision != s.workspaceRevision {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
@@ -616,52 +623,109 @@ func (s *Server) removeWorkspaceURI(documentURI string) {
 	s.workspaceMu.Unlock()
 }
 
-func (s *Server) restoreWorkspaceDocument(documentURI string) {
+type workspaceRestore struct {
+	documentURI   string
+	path          string
+	revision      uint64
+	knownDiskFile bool
+}
+
+// captureWorkspaceRestore records the state that a disk restore must still
+// match. The caller performs filesystem I/O only after this method returns.
+func (s *Server) captureWorkspaceRestore(documentURI string) (workspaceRestore, bool) {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
+	if !ok {
+		return workspaceRestore{}, false
+	}
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if _, open := s.documents.Snapshot(documentURI); open {
+		return workspaceRestore{}, false
+	}
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	if s.analysisStopped || s.analysisContext.Err() != nil || !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
+		return workspaceRestore{}, false
+	}
+	_, knownDiskFile := s.workspaceFiles[path]
+	return workspaceRestore{documentURI: documentURI, path: path, revision: s.workspaceRevision, knownDiskFile: knownDiskFile}, true
+}
+
+func (s *Server) restoreWorkspaceDocument(documentURI string) {
+	restore, ok := s.captureWorkspaceRestore(documentURI)
 	if !ok {
 		return
 	}
-	s.workspaceMu.Lock()
-	_, knownDiskFile := s.workspaceFiles[path]
-	s.workspaceMu.Unlock()
 	var file *syntax.File
-	if !knownDiskFile {
+	if !restore.knownDiskFile {
 		file = nil
-	} else if content, err := os.ReadFile(path); err == nil && len(content) <= maxFileBytes {
+	} else if content, err := os.ReadFile(restore.path); err == nil && len(content) <= maxFileBytes {
 		file = syntax.Parse(string(content))
 	}
+	dependents := s.installWorkspaceRestore(restore, file)
+	s.startWorkspaceDependents(dependents)
+}
+
+// installWorkspaceRestore conditionally applies a disk result captured by
+// captureWorkspaceRestore. It intentionally performs no filesystem I/O or
+// parsing while holding server locks.
+func (s *Server) installWorkspaceRestore(restore workspaceRestore, file *syntax.File) []string {
+	s.publishMu.Lock()
+	openSnapshots := s.documents.Snapshots()
+	originalOpen := false
+	overlayOpen := false
 	openByPath := make(map[string]*text.Snapshot)
-	for _, snapshot := range s.documents.Snapshots() {
-		if openPath, valid := workspaceURIPath(uri.URI(snapshot.URI())); valid && snapshot.ByteLen() <= maxFileBytes {
-			openByPath[openPath] = snapshot
+	for _, snapshot := range openSnapshots {
+		if snapshot.URI() == restore.documentURI {
+			originalOpen = true
+		}
+		if openPath, valid := workspaceURIPath(uri.URI(snapshot.URI())); valid {
+			if sameWorkspacePath(openPath, restore.path) {
+				overlayOpen = true
+			}
+			if snapshot.ByteLen() <= maxFileBytes {
+				openByPath[openPath] = snapshot
+			}
 		}
 	}
 	s.workspaceMu.Lock()
-	if !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
+	if s.analysisStopped || s.analysisContext.Err() != nil || originalOpen || overlayOpen {
 		s.workspaceMu.Unlock()
-		return
+		s.publishMu.Unlock()
+		return nil
 	}
-	s.queueWorkspaceDependentsLocked(path)
+	if restore.revision != s.workspaceRevision {
+		s.workspaceMu.Unlock()
+		s.publishMu.Unlock()
+		s.scheduleWorkspaceRebuild()
+		return nil
+	}
+	if !workspacePathInRoots(restore.path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
+		s.workspaceMu.Unlock()
+		s.publishMu.Unlock()
+		return nil
+	}
+	s.queueWorkspaceDependentsLocked(restore.path)
 	if file == nil {
-		s.workspaceIndex.Remove(path)
-		s.workspaceGraph.Remove(path)
+		s.workspaceIndex.Remove(restore.path)
+		s.workspaceGraph.Remove(restore.path)
 	} else {
-		if err := s.workspaceIndex.Replace(path, file); err != nil {
+		if err := s.workspaceIndex.Replace(restore.path, file); err != nil {
 			s.workspaceIndex.SetComplete(false)
-			s.workspaceIndex.Remove(path)
+			s.workspaceIndex.Remove(restore.path)
 		}
-		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath), func(target string) bool {
+		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(restore.path, file, s.workspaceResolver, openByPath), func(target string) bool {
 			if openByPath[target] != nil {
 				return true
 			}
 			_, ok := s.workspaceIndex.Source(target)
 			return ok
 		})
-		if err := s.workspaceGraph.Replace(path, facts); err != nil {
-			s.logf("vimls: restore import graph for %s: %v", path, err)
+		if err := s.workspaceGraph.Replace(restore.path, facts); err != nil {
+			s.logf("vimls: restore import graph for %s: %v", restore.path, err)
 		}
 	}
-	delete(s.workspacePending, path)
+	delete(s.workspacePending, restore.path)
 	if s.workspaceBuilt && len(s.workspacePending) == 0 {
 		s.workspaceGraph.SetReady(true)
 	}
@@ -669,7 +733,8 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 	s.workspaceRevision++
 	dependents := s.readyWorkspaceDependentsLocked()
 	s.workspaceMu.Unlock()
-	s.startWorkspaceDependents(dependents)
+	s.publishMu.Unlock()
+	return dependents
 }
 
 func (s *Server) queueWorkspaceDependentsLocked(path string) {

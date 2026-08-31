@@ -171,6 +171,55 @@ func TestServerDocumentHandlersCancelStaleAnalysis(t *testing.T) {
 	}
 }
 
+func TestServerDidCloseClearsCacheAndRestoresOnlyOpenDocument(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "close.vim", "vim9script\nvar diskValue = 1\n")
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\nvar overlayValue = 1\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, ok := instance.documents.Snapshot(documentURI.String())
+	if !ok || instance.parseSnapshot(snapshot) == nil {
+		t.Fatal("open document was not cached")
+	}
+	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.publishMu.Lock()
+	_, cached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if cached || instance.documents.Len() != 0 {
+		t.Fatalf("close cache=%t documents=%d", cached, instance.documents.Len())
+	}
+	instance.workspaceMu.Lock()
+	source, indexed := instance.workspaceIndex.Source(path)
+	instance.workspaceMu.Unlock()
+	if !indexed || source != "vim9script\nvar diskValue = 1\n" {
+		t.Fatalf("restored source = %q, indexed = %t", source, indexed)
+	}
+
+	instance.workspaceMu.Lock()
+	if err := instance.workspaceIndex.Replace(path, syntax.Parse("vim9script\nvar untouched = 1\n")); err != nil {
+		instance.workspaceMu.Unlock()
+		t.Fatal(err)
+	}
+	revision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	source, indexed = instance.workspaceIndex.Source(path)
+	gotRevision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	if !indexed || source != "vim9script\nvar untouched = 1\n" || gotRevision != revision {
+		t.Fatalf("unopened close source=%q indexed=%t revision=%d want %d", source, indexed, gotRevision, revision)
+	}
+}
+
 func TestServerDocumentParserCache(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	documentURI := uri.MustParse("file:///parser-cache.vim")
