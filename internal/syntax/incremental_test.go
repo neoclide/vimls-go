@@ -1173,6 +1173,322 @@ func TestEmbeddedOwnerMatrixBoundaries(t *testing.T) {
 	}
 }
 
+var incrementalStructureStateScenarios = func() []incrementalCommandBoundaryScenario {
+	structural := "vim9script\nif true\n  var ifValue = 1\nendif\nfor item in [1]\n  var forValue = item\nendfor\nwhile false\n  var whileValue = 1\nendwhile\ntry\n  var tryValue = 1\ncatch /one/\n  var caught = 2\nfinally\n  var finalized = 3\nendtry\nif true\n  var stable = 4\nendif\n"
+	stableBlocks := "vim9script\nif true\n  var first = 1\nendif\nif true\n  var stable = 2\nendif\n"
+	withoutUnclosedIf := "vim9script\nvar before = 1\nvar stable = 2\n"
+	withUnclosedIf := "vim9script\nvar before = 1\nif true\nvar stable = 2\n"
+	duplicateFinally := "vim9script\ntry\n  var work = 1\nfinally\nfinally\nendtry\nvar afterFinally = 2\n"
+	catchAll := "vim9script\ntry\n  var work = 1\ncatch\ncatch /later/\nendtry\nvar afterCatch = 2\n"
+	bareFor := "vim9script\nfor\nvar afterBareFor = 1\n"
+	classRecovery := "vim9script\nclass Shape\n  def\n  enddef\nendclass\nvar afterClass = 1\n"
+	interfaceRecovery := "vim9script\ninterface SomethingWrong\n  def GetCount(): number\n    return 5\n  enddef\nendinterface\nvar afterInterface = 1\n"
+	redir := "vim9script\ndef Capture()\n  redir => message\n  echo 'hello'\n  redir END\nenddef\nvar afterRedir = 1\n"
+	removeAndRestore := func(start int, text string) []incrementalTextEdit {
+		remove := incrementalTextEditAtOffset(structural, start, text, "")
+		changed := applyIncrementalTextEdit(structural, remove)
+		return []incrementalTextEdit{remove, incrementalTextEditAtOffset(changed, remove.start, "", text)}
+	}
+	return []incrementalCommandBoundaryScenario{
+		{
+			name: "structural opener and closer edits", tags: []string{"if opener/closer", "for opener/closer", "while opener/closer", "try opener/closer"}, source: structural,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore if opener", incrementalSequence, removeAndRestore(strings.Index(structural, "if true\n  var ifValue"), "if true\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore if closer", incrementalSequence, removeAndRestore(strings.Index(structural, "endif\nfor item"), "endif\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore try opener", incrementalSequence, removeAndRestore(strings.Index(structural, "try\n  var tryValue"), "try\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore try closer", incrementalSequence, removeAndRestore(strings.Index(structural, "endtry\nif true"), "endtry\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore for opener", incrementalSequence, removeAndRestore(strings.Index(structural, "for item in [1]"), "for item in [1]\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore for closer", incrementalSequence, removeAndRestore(strings.Index(structural, "endfor\nwhile false"), "endfor\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore while opener", incrementalSequence, removeAndRestore(strings.Index(structural, "while false\n  var whileValue"), "while false\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "delete and restore while closer", incrementalSequence, removeAndRestore(strings.Index(structural, "endwhile\ntry"), "endwhile\n")),
+				newIncrementalMatrixCase("structural opener and closer edits", "replace while opener", incrementalEqualReplace, []incrementalTextEdit{incrementalTextEditAt(structural, "while false", "while value")}),
+				newIncrementalMatrixCase("structural opener and closer edits", "extend try catch", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(structural, "catch /one/", "catch /one|two/")}),
+			},
+		},
+		{
+			name: "duplicate finally recovery", tags: []string{"duplicate finally", "multiple finally"}, source: duplicateFinally,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("duplicate finally recovery", "remove and restore duplicate finally", incrementalSequence, func() []incrementalTextEdit {
+					remove := incrementalTextEditAtOffset(duplicateFinally, strings.LastIndex(duplicateFinally, "finally\n"), "finally\n", "")
+					changed := applyIncrementalTextEdit(duplicateFinally, remove)
+					return []incrementalTextEdit{remove, incrementalTextInsertAt(changed, "endtry\n", "finally\n")}
+				}()),
+			},
+		},
+		{
+			name: "catch-all change", tags: []string{"catch-all change"}, source: catchAll,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("catch-all change", "make first catch patterned", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(catchAll, "catch\ncatch /later/", "catch /first/\ncatch /later/")}),
+			},
+		},
+		{
+			name: "bare for recovery", tags: []string{"invalid bare-for recovery"}, source: bareFor,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("bare for recovery", "complete for header", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAt(bareFor, "for\n", "for item in [1]\n")}),
+			},
+		},
+		{
+			name: "class method recovery", tags: []string{"class method recovery"}, source: classRecovery,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("class method recovery", "recover missing method name", incrementalLengthReplace, []incrementalTextEdit{incrementalTextEditAtOffset(classRecovery, strings.Index(classRecovery, "  def\n")+2, "def\n", "def Draw()\n")}),
+			},
+		},
+		{
+			name: "interface method recovery", tags: []string{"interface method-body recovery"}, source: interfaceRecovery,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("interface method recovery", "remove invalid method body", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(interfaceRecovery, "    return 5\n  enddef\n", "")}),
+			},
+		},
+		{
+			name: "redir break and restore", tags: []string{"Vim9 redir open/close", "redir break and restore"}, source: redir,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("redir break and restore", "close removal and restoration", incrementalSequence, func() []incrementalTextEdit {
+					remove := incrementalTextEditAt(redir, "redir END\n", "")
+					changed := applyIncrementalTextEdit(redir, remove)
+					return []incrementalTextEdit{remove, incrementalTextInsertAt(changed, "enddef\n", "  redir END\n")}
+				}()),
+			},
+		},
+		{
+			name: "structure index shift", tags: []string{"numeric Block index shift", "stable structurePath"}, source: stableBlocks,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("structure index shift", "insert preceding block", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(stableBlocks, "if true\n  var stable", "if true\n  var inserted = 1\nendif\n")}),
+			},
+		},
+		{
+			name: "unclosed if structure recovery", tags: []string{"unclosed if before declaration", "downstream declaration survives"}, source: withoutUnclosedIf,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("unclosed if structure recovery", "add unclosed if", incrementalInsert, []incrementalTextEdit{incrementalTextInsertAt(withoutUnclosedIf, "var stable", "if true\n")}),
+			},
+		},
+		{
+			name: "remove unclosed if structure recovery", tags: []string{"remove unclosed if", "scanner state converges"}, source: withUnclosedIf,
+			cases: []incrementalMatrixCase{
+				newIncrementalMatrixCase("remove unclosed if structure recovery", "remove unclosed if", incrementalDelete, []incrementalTextEdit{incrementalTextEditAt(withUnclosedIf, "if true\n", "")}),
+			},
+		},
+	}
+}()
+
+func TestIncrementalEditMatrixStructureState(t *testing.T) {
+	seenTags, seenKinds, seenNames := map[string]bool{}, map[incrementalEditKind]bool{}, map[string]bool{}
+	for _, scenario := range incrementalStructureStateScenarios {
+		for _, tag := range scenario.tags {
+			seenTags[tag] = true
+		}
+		for _, test := range scenario.cases {
+			if seenNames[test.name] {
+				t.Fatalf("duplicate structure-state matrix case %q", test.name)
+			}
+			seenNames[test.name], seenKinds[test.kind] = true, true
+			results := incrementalTextEditResults(scenario.source, test.edits)
+			if len(results) == 0 || test.kind == incrementalSequence && len(results) < 2 {
+				t.Fatalf("%s has insufficient edits: %d", test.name, len(results))
+			}
+			for step, result := range results {
+				if result.old == result.new || !incrementalTextEditKindValid(test.kind, result.edit) && test.kind != incrementalSequence || test.kind == incrementalSequence && !incrementalSequenceStepValid(result.edit) {
+					t.Fatalf("%s step %d is invalid: %#v", test.name, step, result.edit)
+				}
+			}
+		}
+	}
+	for _, tag := range []string{"if opener/closer", "for opener/closer", "while opener/closer", "try opener/closer", "catch-all change", "duplicate finally", "multiple finally", "invalid bare-for recovery", "class method recovery", "interface method-body recovery", "Vim9 redir open/close", "redir break and restore", "numeric Block index shift", "stable structurePath", "unclosed if before declaration", "downstream declaration survives", "remove unclosed if", "scanner state converges"} {
+		if !seenTags[tag] {
+			t.Fatalf("missing structure-state scenario %q", tag)
+		}
+	}
+	if len(seenKinds) != 5 {
+		t.Fatalf("structure-state matrix has %d edit kinds, want 5", len(seenKinds))
+	}
+}
+
+func TestReparseStructureStateMatrix(t *testing.T) {
+	for _, scenario := range incrementalStructureStateScenarios {
+		for _, test := range scenario.cases {
+			t.Run(test.name, func(t *testing.T) {
+				runIncrementalMatrix(t, scenario.source, test)
+			})
+		}
+	}
+}
+
+func TestStructureStateMatrixBoundaries(t *testing.T) {
+	structuralChanges := map[string]struct {
+		kind   BlockKind
+		opener bool
+	}{
+		"structural opener and closer edits: delete and restore if opener":    {kind: BlockIf, opener: true},
+		"structural opener and closer edits: delete and restore if closer":    {kind: BlockIf},
+		"structural opener and closer edits: delete and restore try opener":   {kind: BlockTry, opener: true},
+		"structural opener and closer edits: delete and restore try closer":   {kind: BlockTry},
+		"structural opener and closer edits: delete and restore for opener":   {kind: BlockFor, opener: true},
+		"structural opener and closer edits: delete and restore for closer":   {kind: BlockFor},
+		"structural opener and closer edits: delete and restore while opener": {kind: BlockWhile, opener: true},
+		"structural opener and closer edits: delete and restore while closer": {kind: BlockWhile},
+	}
+	blockCount := func(file *File, kind BlockKind) int {
+		count := 0
+		for _, block := range file.Blocks {
+			if block.Kind == kind {
+				count++
+			}
+		}
+		return count
+	}
+	for _, scenario := range incrementalStructureStateScenarios {
+		for _, test := range scenario.cases {
+			var got *File
+			if change, ok := structuralChanges[test.name]; ok {
+				beforeCount := blockCount(Parse(scenario.source), change.kind)
+				got = runIncrementalMatrixSteps(t, scenario.source, test, func(step int, file *File) {
+					if step != 0 {
+						return
+					}
+					if change.opener {
+						if gotCount := blockCount(file, change.kind); gotCount >= beforeCount {
+							t.Fatalf("%s opener removal kept %d %s blocks, want fewer than %d", test.name, gotCount, change.kind, beforeCount)
+						}
+						return
+					}
+					for _, block := range file.Blocks {
+						if block.Kind == change.kind && block.End < 0 {
+							return
+						}
+					}
+					t.Fatalf("%s closer removal did not leave an unclosed %s block: %#v", test.name, change.kind, file.Blocks)
+				})
+			} else if scenario.name == "duplicate finally recovery" {
+				got = runIncrementalMatrixSteps(t, scenario.source, test, func(step int, file *File) {
+					if step == 0 && hasDiagnostic(file, "vim/E607") {
+						t.Fatalf("duplicate finally removal still reported E607: %#v", file.Diagnostics)
+					}
+				})
+			} else if scenario.name == "redir break and restore" {
+				got = runIncrementalMatrixSteps(t, scenario.source, test, func(step int, file *File) {
+					if step == 0 && !hasDiagnostic(file, "vim/E1185") {
+						t.Fatalf("redir close removal did not report missing END: %#v", file.Diagnostics)
+					}
+				})
+			} else {
+				got = runIncrementalMatrix(t, scenario.source, test)
+			}
+			switch scenario.name {
+			case "structural opener and closer edits":
+				stable := incrementalDeclaration(t, got, "stable")
+				if gotPath := structurePath(got, stable.Declaration.Name.Start); !slices.Equal(gotPath, []BlockKind{BlockIf}) {
+					t.Fatalf("stable structure path = %#v", gotPath)
+				}
+			case "duplicate finally recovery":
+				if !hasDiagnostic(got, "vim/E607") || len(got.Blocks) != 1 || got.Blocks[0].Kind != BlockTry {
+					t.Fatalf("duplicate finally recovery = %#v blocks=%#v", got.Diagnostics, got.Blocks)
+				}
+				incrementalDeclaration(t, got, "afterFinally")
+			case "catch-all change":
+				if !hasDiagnostic(Parse(scenario.source), "vim/E1033") {
+					t.Fatalf("catch-all baseline did not report E1033")
+				}
+				if hasDiagnostic(got, "vim/E1033") || len(got.Blocks) != 1 || got.Blocks[0].Kind != BlockTry {
+					t.Fatalf("catch-all change = %#v blocks=%#v", got.Diagnostics, got.Blocks)
+				}
+				incrementalDeclaration(t, got, "afterCatch")
+			case "bare for recovery":
+				if !hasDiagnostic(Parse(scenario.source), "vim/E690") {
+					t.Fatalf("bare-for baseline did not report E690")
+				}
+				if hasDiagnostic(got, "vim/E690") || len(got.Blocks) != 1 || got.Blocks[0].Kind != BlockFor {
+					t.Fatalf("bare-for recovery = %#v blocks=%#v", got.Diagnostics, got.Blocks)
+				}
+				incrementalDeclaration(t, got, "afterBareFor")
+			case "class method recovery":
+				if !hasDiagnostic(Parse(scenario.source), "vim/E1318") {
+					t.Fatalf("class recovery baseline did not report E1318")
+				}
+				if hasDiagnostic(got, "vim/E1318") || len(got.Blocks) < 1 || got.Blocks[0].Kind != BlockClass || got.Blocks[0].End < 0 {
+					t.Fatalf("class recovery = %#v blocks=%#v", got.Diagnostics, got.Blocks)
+				}
+				incrementalDeclaration(t, got, "afterClass")
+			case "interface method recovery":
+				if !hasDiagnostic(Parse(scenario.source), "vim/E1345") {
+					t.Fatalf("interface recovery baseline did not report E1345")
+				}
+				if hasDiagnostic(got, "vim/E1345") || len(got.Blocks) != 1 || got.Blocks[0].Kind != BlockInterface {
+					t.Fatalf("interface recovery = %#v blocks=%#v", got.Diagnostics, got.Blocks)
+				}
+				incrementalDeclaration(t, got, "afterInterface")
+			case "redir break and restore":
+				if len(got.Commands) < 2 || got.Commands[1].Canonical != "def" || len(got.Diagnostics) != 0 {
+					t.Fatalf("redir recovery = %#v commands=%#v", got.Diagnostics, got.Commands)
+				}
+				redirCount := 0
+				redirArguments := make([]string, 0, 2)
+				for _, command := range got.Commands {
+					if command.Canonical == "redir" {
+						redirCount++
+						redirArguments = append(redirArguments, got.Text(command.Argument))
+					}
+				}
+				if redirCount != 2 || !slices.Equal(redirArguments, []string{"=> message", "END"}) {
+					t.Fatalf("redir commands = %d %#v, commands=%#v", redirCount, redirArguments, got.Commands)
+				}
+				incrementalDeclaration(t, got, "afterRedir")
+			case "structure index shift":
+				stable := incrementalDeclaration(t, got, "stable")
+				before := Parse(scenario.source)
+				beforeStable := incrementalDeclaration(t, before, "stable")
+				beforePath := structurePath(before, beforeStable.Declaration.Name.Start)
+				beforeIndex, afterIndex := -1, -1
+				for index, block := range before.Blocks {
+					if block.Kind == BlockIf && block.Span.Start <= beforeStable.Declaration.Name.Start && beforeStable.Declaration.Name.Start <= block.Span.End {
+						beforeIndex = index
+						break
+					}
+				}
+				for index, block := range got.Blocks {
+					if block.Kind == BlockIf && block.Span.Start <= stable.Declaration.Name.Start && stable.Declaration.Name.Start <= block.Span.End {
+						afterIndex = index
+						break
+					}
+				}
+				afterPath := structurePath(got, stable.Declaration.Name.Start)
+				if beforeIndex < 0 || afterIndex <= beforeIndex || !slices.Equal(beforePath, []BlockKind{BlockIf}) || !slices.Equal(afterPath, []BlockKind{BlockIf}) {
+					t.Fatalf("stable block/path did not shift: before=%d/%#v after=%d/%#v blocks=%#v", beforeIndex, beforePath, afterIndex, afterPath, got.Blocks)
+				}
+			case "unclosed if structure recovery":
+				stable := incrementalDeclaration(t, got, "stable")
+				gotPath := structurePath(got, stable.Declaration.Name.Start)
+				if !hasDiagnostic(got, "vimls/missing-end") || len(got.Blocks) != 1 || !slices.Equal(gotPath, []BlockKind{BlockIf}) {
+					t.Fatalf("unclosed if recovery = %#v path=%#v", got.Diagnostics, gotPath)
+				}
+			case "remove unclosed if structure recovery":
+				stable := incrementalDeclaration(t, got, "stable")
+				if len(got.Blocks) != 0 || len(structurePath(got, stable.Declaration.Name.Start)) != 0 {
+					t.Fatalf("removed unclosed if recovery = blocks=%#v path=%#v", got.Blocks, structurePath(got, stable.Declaration.Name.Start))
+				}
+			}
+			if scenario.name == "unclosed if structure recovery" {
+				old := Parse(scenario.source)
+				newFile := got
+				oldStable := incrementalDeclaration(t, old, "stable")
+				newStable := incrementalDeclaration(t, newFile, "stable")
+				unitFor := func(file *File, offset int) parseUnit {
+					for _, unit := range file.incremental.units {
+						if unit.span.Start <= offset && offset < unit.span.End {
+							return unit
+						}
+					}
+					t.Fatalf("no metadata unit contains offset %d", offset)
+					return parseUnit{}
+				}
+				oldUnit := unitFor(old, oldStable.Declaration.Name.Start)
+				newUnit := unitFor(newFile, newStable.Declaration.Name.Start)
+				if !reflect.DeepEqual(oldUnit.entry, newUnit.entry) || !reflect.DeepEqual(oldUnit.exit, newUnit.exit) || reflect.DeepEqual(oldUnit.structureEntry, newUnit.structureEntry) || !slices.Equal(oldUnit.structureEntry, nil) || !slices.Equal(newUnit.structureEntry, []BlockKind{BlockIf}) {
+					t.Fatalf("scanner/structure state did not diverge as expected: old=%#v new=%#v", oldUnit, newUnit)
+				}
+			}
+		}
+	}
+}
+
 func incrementalDeclaration(t *testing.T, file *File, name string) *Command {
 	for index := range file.Commands {
 		command := &file.Commands[index]
