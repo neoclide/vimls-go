@@ -3421,3 +3421,41 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9compile.c:1635-1665,2070-2105` applies the same rules to assignment
   targets, and `src/vim9class.c:3626-3637` defines descendant object access.
 - `src/errors.h:3420-3421` defines the exact message.
+
+## Variable is not writable: E1335
+
+E1335 means `Variable "{variable}" in class "{class}" is not writable`.
+Vim9 aggregate variables without `public` are readable outside their class but
+cannot be written there. Analysis reports the member-name span for a complete
+ordinary or compound assignment, or a `lockvar`/`unlockvar` target, whose
+receiver resolves to a same-file class or enum.
+
+An object variable is writable inside its defining class and descendant
+classes. An inherited variable therefore names the class that defined it in
+the diagnostic. A static variable is writable only inside its exact defining
+class. Public variables bypass E1335, while an inaccessible underscore-prefixed
+variable is E1333. If access is allowed, `final` and `const` assignment remains
+owned by E1409; access denial takes priority and produces E1335 instead.
+
+At script level, writes to built-in enum object variables such as `name` and
+`ordinal` also produce E1335. The corresponding compiled-function and enum
+constructor cases retain their more specific E1423, E1426, and E1427
+diagnostics. Unknown values, imported aggregates, incomplete member targets,
+and wrong receiver kinds remain conservative or owned by their existing
+diagnostics.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:860-925` covers nested typed object members
+  and distinguishes an explicitly public final member from a default one.
+- `src/testdir/test_vim9_class.vim:1460-1500,1685-1720` covers descendant and
+  external writes to static variables, compound assignment, and public access.
+- `src/testdir/test_vim9_class.vim:1945-2010` covers inherited object variables
+  and uses the defining class in the diagnostic.
+- `src/testdir/test_vim9_class.vim:3685-3770` applies E1335 before the general
+  object-member `lockvar` restriction when access itself is denied.
+- `src/testdir/test_vim9_enum.vim:1200-1225,1280-1305` distinguishes
+  script-level E1335 for `name` and `ordinal` from compiled-function E1423.
+- `src/vim9compile.c:1627-1663,2051-2105` checks object and static write access
+  before read-only flags and aggregate-specific mutation rules.
+- `src/errors.h:3423-3424` defines the exact message.

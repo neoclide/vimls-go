@@ -7124,6 +7124,68 @@ func TestAnalyzeE1333ProtectedVariableAccessDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1335NonWritableAggregateVariableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, member, owner string }{
+		{"external object", "vim9script\nclass Base\n  var value = 1\nendclass\nvar base = Base.new()\nbase.value = 2\n", "value", "Base"},
+		{"typed parameter", "vim9script\nclass Base\n  var value = 1\nendclass\ndef Change(base: Base)\n  base.value = 2\nenddef\n", "value", "Base"},
+		{"inherited owner", "vim9script\nclass Base\n  var value = 1\nendclass\nclass Child extends Base\nendclass\nvar child = Child.new()\nchild.value = 2\n", "value", "Base"},
+		{"nested typed member", "vim9script\nclass Inner\n  var value = 1\nendclass\nclass Outer\n  var inner: Inner\nendclass\nvar outer = Outer.new()\nouter.inner.value = 2\n", "value", "Inner"},
+		{"static external", "vim9script\nclass Base\n  static var value = 1\nendclass\nBase.value = 2\n", "value", "Base"},
+		{"static descendant", "vim9script\nclass Base\n  static var value = 1\nendclass\nclass Child extends Base\n  static def Check()\n    Base.value = 2\n  enddef\nendclass\n", "value", "Base"},
+		{"compound", "vim9script\nclass Base\n  var value = 1\nendclass\nvar base = Base.new()\nbase.value += 1\n", "value", "Base"},
+		{"lockvar", "vim9script\nclass Base\n  var value = 1\nendclass\nvar base = Base.new()\nlockvar base.value\n", "value", "Base"},
+		{"unlockvar", "vim9script\nclass Base\n  var value = 1\nendclass\nvar base = Base.new()\nunlockvar base.value\n", "value", "Base"},
+		{"enum name script", "vim9script\nenum Fruit\n  Apple\nendenum\nFruit.Apple.name = 'pear'\n", "name", "Fruit"},
+		{"enum ordinal script", "vim9script\nenum Fruit\n  Apple\nendenum\nFruit.Apple.ordinal = 2\n", "ordinal", "Fruit"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1335" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := `Variable "` + test.member + `" in class "` + test.owner + `" is not writable`
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.member {
+				t.Fatalf("E1335 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct{ name, source, want string }{
+		{"owner and descendant access", "vim9script\nclass Base\n  var value = 1\n  def Check()\n    this.value = 2\n  enddef\nendclass\nclass Child extends Base\n  def Check()\n    this.value = 2\n    super.value = 3\n  enddef\nendclass\n", ""},
+		{"owner static access", "vim9script\nclass Base\n  static var value = 1\n  static def Check()\n    Base.value = 2\n  enddef\nendclass\n", ""},
+		{"public", "vim9script\nclass Base\n  public var value = 1\nendclass\nvar base = Base.new()\nbase.value = 2\n", ""},
+		{"protected final", "vim9script\nclass Base\n  final _value = 1\nendclass\nvar base = Base.new()\nbase._value = 2\n", "vim/E1333"},
+		{"default final outside", "vim9script\nclass Base\n  final value = 1\nendclass\nvar base = Base.new()\nbase.value = 2\n", "vim/E1335"},
+		{"public final", "vim9script\nclass Base\n  public final value = 1\nendclass\nvar base = Base.new()\nbase.value = 2\n", "vim/E1409"},
+		{"enum def", "vim9script\nenum Fruit\n  Apple\nendenum\ndef Check()\n  Fruit.Apple.name = 'pear'\nenddef\n", "vim/E1423"},
+		{"enum constructor", "vim9script\nenum Fruit\n  Apple\n  def new()\n    this.name = 'pear'\n  enddef\nendenum\n", "vim/E1427"},
+		{"protected intermediate", "vim9script\nclass Inner\n  final value = 1\nendclass\nclass Outer\n  var _inner: Inner\nendclass\nvar outer = Outer.new()\nouter._inner.value = 2\n", "vim/E1333"},
+		{"unknown", "vim9script\nvar value: any\nvalue.member = 1\n", ""},
+		{"incomplete", "vim9script\nclass Base\n  var value = 1\nendclass\nvar base = Base.new()\nbase. = 1\n", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			count := 0
+			for _, diagnostic := range result.Diagnostics {
+				switch diagnostic.Code {
+				case "vim/E1333", "vim/E1335", "vim/E1409", "vim/E1423", "vim/E1426", "vim/E1427":
+					if diagnostic.Code != test.want {
+						t.Fatalf("guard received unexpected diagnostic: %#v\n%s", diagnostic, test.source)
+					}
+					count++
+				}
+			}
+			if test.want != "" && count != 1 {
+				t.Fatalf("diagnostics = %#v, want one %s", result.Diagnostics, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

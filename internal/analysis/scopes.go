@@ -4803,8 +4803,31 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				break
 			}
 		}
-		if (command.Canonical == "lockvar" || command.Canonical == "unlockvar") && command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) {
+		if (command.Canonical == "lockvar" || command.Canonical == "unlockvar") && command.Dialect == syntax.Vim9 {
 			for _, target := range command.Targets {
+				before := len(result.Diagnostics)
+				appendProtectedVariableAccessDiagnostic(result, scope, target)
+				protectedVariableAccess := false
+				if target != nil {
+					for _, diagnostic := range result.Diagnostics {
+						if diagnostic.Code == "vim/E1333" && diagnostic.Span.Start >= target.Span.Start && diagnostic.Span.End <= target.Span.End {
+							protectedVariableAccess = true
+							break
+						}
+					}
+				}
+				if protectedVariableAccess {
+					break
+				}
+				if className, memberName, ok := nonWritableClassMemberAssignment(result, scope, target); ok {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E1335", Message: `Variable "` + memberName + `" in class "` + className + `" is not writable`, Span: memberNameSpan(result.File, target),
+					})
+					break
+				}
+				if len(result.Diagnostics) != before {
+					break
+				}
 				if target == nil || target.Kind != syntax.ExpressionIdentifier || target.Value == "this" || syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, target.Span) {
 					continue
 				}
@@ -4854,12 +4877,28 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 		if dialect == syntax.Vim9 && target != nil && target.Kind == syntax.ExpressionIdentifier && target.Value == "_" {
 			return
 		}
-		if enumName, memberName, ok := enumAssignmentTarget(result, scope, target); ok &&
+		if dialect == syntax.Vim9 {
+			appendProtectedVariableAccessDiagnostic(result, scope, target)
+		}
+		protectedVariableAccess := false
+		if target != nil {
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1333" && diagnostic.Span.Start >= target.Span.Start && diagnostic.Span.End <= target.Span.End {
+					protectedVariableAccess = true
+					break
+				}
+			}
+		}
+		if className, memberName, ok := nonWritableClassMemberAssignment(result, scope, target); dialect == syntax.Vim9 && !protectedVariableAccess && ok {
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1335", Message: `Variable "` + memberName + `" in class "` + className + `" is not writable`, Span: memberNameSpan(result.File, target),
+			})
+		} else if enumName, memberName, ok := enumAssignmentTarget(result, scope, target); !protectedVariableAccess && ok &&
 			(target.Children[0].Kind != syntax.ExpressionMember || scopeContainsDef(scope) && !scopeWithinVim9Enum(result.File, scope, enumName)) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1423", Message: "Enum value \"" + enumName + "." + memberName + "\" cannot be modified", Span: target.Span,
 			})
-		} else if className, memberName, ok := readOnlyClassMemberAssignment(result, scope, target); ok {
+		} else if className, memberName, ok := readOnlyClassMemberAssignment(result, scope, target); !protectedVariableAccess && ok {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 				Code: "vim/E1409", Message: "Cannot change read-only variable \"" + memberName + "\" in class \"" + className + "\"", Span: memberNameSpan(result.File, target),
 			})
@@ -5002,6 +5041,87 @@ func invalidAssignmentReceiver(result *FileAnalysis, scope *Scope, target *synta
 		return receiver
 	}
 	return nil
+}
+
+func nonWritableClassMemberAssignment(result *FileAnalysis, scope *Scope, target *syntax.Expression) (string, string, bool) {
+	if result == nil || result.File == nil || scope == nil || target == nil || target.Kind != syntax.ExpressionMember ||
+		len(target.Children) != 1 || target.Children[0] == nil || target.Value == "" || result.File.Text(target.Operator) != "." ||
+		expressionContainsMissing(target) || syntaxDiagnosticOverlaps(result.File.Diagnostics, target.Span) {
+		return "", "", false
+	}
+	file := result.File
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1333" && diagnostic.Span.Start >= target.Span.Start && diagnostic.Span.End <= target.Span.End {
+			return "", "", false
+		}
+	}
+	owner := (*syntax.Command)(nil)
+	objectVariable := false
+	if receiver := target.Children[0]; receiver.Kind == syntax.ExpressionIdentifier {
+		if declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil); declaration != nil {
+			className := ""
+			switch declaration.Kind {
+			case SymbolKindClass, SymbolKindEnum:
+				className = declaration.Name
+			case SymbolKindTypeAlias:
+				className = result.classAliases[declaration.Name]
+			}
+			if className != "" {
+				aggregate := result.classes[className]
+				if aggregate == nil {
+					aggregate = localEnum(file, className)
+				}
+				if member, _, found := aggregateVariableBinding(file, aggregate, target.Value, true); found && !commandHasModifier(member, "public") {
+					owner = aggregate
+				}
+			}
+		}
+	}
+	if owner == nil {
+		_, aggregate, _, found := objectAggregateReceiver(result, scope, target.Children[0], make(map[*syntax.Expression]bool))
+		if !found || aggregate == nil || aggregate.Aggregate == nil {
+			return "", "", false
+		}
+		if aggregate.Aggregate.Kind == syntax.BlockClass {
+			candidate, member, _, exists := classObjectVariableOwner(result, aggregate, target.Value)
+			if exists && !commandHasModifier(member, "public") {
+				owner = candidate
+				objectVariable = true
+			}
+		} else if aggregate.Aggregate.Kind == syntax.BlockEnum {
+			if target.Value == "name" || target.Value == "ordinal" {
+				owner = aggregate
+				objectVariable = true
+			} else if member, _, exists := aggregateVariableBinding(file, aggregate, target.Value, false); exists && !commandHasModifier(member, "public") {
+				owner = aggregate
+				objectVariable = true
+			}
+			if scopeContainsDef(scope) {
+				return "", "", false
+			}
+			if owner == nil {
+				return "", "", false
+			}
+		}
+	}
+	if owner == nil || owner.Aggregate == nil {
+		return "", "", false
+	}
+	current := enclosingAggregateCommand(file, scope)
+	allowed := current == owner
+	if objectVariable && !allowed && owner.Aggregate.Kind == syntax.BlockClass && current != nil && current.Aggregate != nil && current.Aggregate.Kind == syntax.BlockClass {
+		for seen := make(map[*syntax.Command]bool); current != nil && !seen[current]; current = extendedClass(file, result.classes, current) {
+			seen[current] = true
+			if current == owner {
+				allowed = true
+				break
+			}
+		}
+	}
+	if allowed {
+		return "", "", false
+	}
+	return file.Text(owner.Aggregate.Name), target.Value, true
 }
 
 func readOnlyClassMemberAssignment(result *FileAnalysis, scope *Scope, target *syntax.Expression) (string, string, bool) {
@@ -5949,6 +6069,11 @@ func appendProtectedVariableAccessDiagnostic(result *FileAnalysis, scope *Scope,
 		return
 	}
 	file := result.File
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1333" && diagnostic.Span == memberNameSpan(file, member) {
+			return
+		}
+	}
 	owner := (*syntax.Command)(nil)
 	objectVariable := false
 	if receiver := member.Children[0]; receiver.Kind == syntax.ExpressionIdentifier {
