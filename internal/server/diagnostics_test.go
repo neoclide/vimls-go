@@ -10,6 +10,7 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -634,6 +635,69 @@ enddef
 	}
 	if len(imports) != 2 || imports[0].Code != protocol.String("vim/E1049") || imports[0].Range.Start.Line != 2 || imports[1].Code != protocol.String("vim/E1048") || imports[1].Range.Start.Line != 3 {
 		t.Fatalf("autoload member diagnostics = %#v; all=%#v", imports, params.Diagnostics)
+	}
+}
+
+func TestWorkspaceImportDiagnosticsUsesMatchingOpenSnapshot(t *testing.T) {
+	root := t.TempDir()
+	targetPath := filepath.Join(root, "lib.vim")
+	importerPath := filepath.Join(root, "main.vim")
+	targetSource := "vim9script\nexport var Public = 1\n"
+	importerSource := "vim9script\nimport './lib.vim' as Lib\necho Lib.Missing\n"
+
+	index := workspace.NewIndex(0, 0)
+	if err := index.Replace(targetPath, syntax.Parse(targetSource)); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(true)
+	graph := workspace.NewImportGraph()
+	if err := graph.Replace(importerPath, []workspace.ImportFact{{
+		Target: targetPath, ImportPath: "'./lib.vim'", PathSpan: syntax.Span{Start: 11, End: 30},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	graph.SetReady(true)
+
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.workspaceMu.Lock()
+	instance.workspaceRoots = []string{root}
+	instance.workspaceIndex = index
+	instance.workspaceGraph = graph
+	instance.workspaceGraphView = graph.Snapshot()
+	instance.workspaceMu.Unlock()
+
+	importer := syntax.Parse(importerSource)
+	analysisResult := analysis.Analyze(importer)
+	targetURI := uri.File(targetPath)
+	snapshot := instance.documents.Open(targetURI.String(), 1, targetSource)
+	// Deliberately violate the cache/source invariant: this sentinel proves
+	// the exact-revision open-snapshot path uses parseSnapshot's cached result.
+	cacheRouteSentinel := syntax.Parse("let g:legacy = 1\n")
+	instance.publishMu.Lock()
+	instance.parsed[targetURI.String()] = parsedDocument{revision: snapshot.Revision(), file: cacheRouteSentinel}
+	instance.publishMu.Unlock()
+
+	_, ready, diagnostics := instance.workspaceImportDiagnostics(uri.File(importerPath).String(), importer, analysisResult)
+	if !ready {
+		t.Fatal("import graph is not ready")
+	}
+	if len(diagnostics) != 0 {
+		t.Fatalf("matching open target did not use cached parser result: %#v", diagnostics)
+	}
+
+	// Restore a valid cached parser result before testing the source-mismatch
+	// fallback, so that assertion does not depend on the sentinel above.
+	instance.publishMu.Lock()
+	instance.parsed[targetURI.String()] = parsedDocument{revision: snapshot.Revision(), file: syntax.Parse(targetSource)}
+	instance.publishMu.Unlock()
+	instance.documents.Open(targetURI.String(), 2, "vim9script\nexport var Other = 1\n")
+	_, ready, diagnostics = instance.workspaceImportDiagnostics(uri.File(importerPath).String(), importer, analysisResult)
+	if !ready {
+		t.Fatal("import graph is not ready after target change")
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1048" {
+		t.Fatalf("source-mismatched open target did not use captured index source: %#v", diagnostics)
 	}
 }
 
