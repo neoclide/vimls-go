@@ -45,6 +45,9 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 	if got := protocolDiagnosticSeverity("vimls/deprecated", syntax.DiagnosticError); got != protocol.DiagnosticSeverityHint {
 		t.Errorf("vimls/deprecated severity = %v, want hint", got)
 	}
+	if got := protocolDiagnosticSeverity("vimls/unused-variable", syntax.DiagnosticError); got != protocol.DiagnosticSeverityHint {
+		t.Errorf("vimls/unused-variable severity = %v, want hint", got)
+	}
 }
 
 func TestServerPublishesDeprecatedReferenceHint(t *testing.T) {
@@ -69,6 +72,31 @@ func TestServerPublishesDeprecatedReferenceHint(t *testing.T) {
 		diagnostic.Message != protocol.String("Old is deprecated") || len(tags) != 1 || tags[0] != protocol.DiagnosticTagDeprecated ||
 		diagnostic.Range.Start.Line != 3 {
 		t.Fatalf("deprecated diagnostic = %#v tags=%#v", diagnostic, tags)
+	}
+}
+
+func TestServerPublishesUnusedVariableHint(t *testing.T) {
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = client
+	documentURI := uri.MustParse("file:///unused.vim")
+	source := "vim9script\nvar Unused = 1\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: source,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnostics(t, client.published)
+	if len(params.Diagnostics) != 1 {
+		t.Fatalf("unused variable diagnostics = %#v", params.Diagnostics)
+	}
+	diagnostic := params.Diagnostics[0]
+	tags := diagnostic.Tags.Slice()
+	if diagnostic.Code != protocol.String("vimls/unused-variable") || diagnostic.Severity != protocol.DiagnosticSeverityHint ||
+		diagnostic.Message != protocol.String("Unused is declared but never used") || len(tags) != 1 || tags[0] != protocol.DiagnosticTagUnnecessary ||
+		diagnostic.Range.Start.Line != 1 {
+		t.Fatalf("unused variable diagnostic = %#v tags=%#v", diagnostic, tags)
 	}
 }
 

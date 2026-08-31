@@ -92,6 +92,7 @@ type Declaration struct {
 	Deprecated         bool
 	TypeParameterCount int
 	constBinding       bool
+	unusedCandidate    bool
 	// Parameter distinguishes a function or lambda argument from an ordinary
 	// mutable variable without changing its navigation symbol kind.
 	Parameter bool
@@ -213,6 +214,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
 	collectAssignmentDiagnostics(result, file.Commands, root)
 	collectNameOnlyExpressionDiagnostics(result, file.Commands, root)
+	collectUnusedVariableDiagnostics(result)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
@@ -226,6 +228,31 @@ func collectDeprecatedReferenceDiagnostics(result *FileAnalysis) {
 		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vimls/deprecated", Message: reference.Declaration.Name + " is deprecated", Span: reference.Span,
+		})
+	}
+}
+
+func collectUnusedVariableDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil || len(result.File.Diagnostics) != 0 {
+		return
+	}
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code != "vimls/deprecated" {
+			return
+		}
+	}
+	used := make(map[*Declaration]bool)
+	for _, reference := range result.References {
+		if reference != nil && reference.Declaration != nil {
+			used[reference.Declaration] = true
+		}
+	}
+	for _, declaration := range result.Declarations {
+		if declaration == nil || !declaration.unusedCandidate || declaration.Name == "_" || used[declaration] {
+			continue
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vimls/unused-variable", Message: declaration.Name + " is declared but never used", Span: declaration.Span,
 		})
 	}
 }
@@ -8024,6 +8051,7 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 			declaration := addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
 			if declaration != nil {
 				declaration.Deprecated = hasDeprecatedComment(file, command)
+				declaration.unusedCandidate = command.Dialect == syntax.Vim9 && !commandHasModifier(command, "export") && unusedVariableScope(commandScope)
 				if command.Canonical == "const" {
 					declaration.constBinding = true
 				}
@@ -8037,12 +8065,28 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 			kind = SymbolKindConstant
 		}
 		for _, binding := range command.For.Bindings {
-			addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
+			declaration := addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
+			if declaration != nil {
+				declaration.unusedCandidate = command.Dialect == syntax.Vim9 && unusedVariableScope(commandScope)
+			}
 		}
 	}
 	for _, value := range command.EnumValues {
 		addDeclaration(result, commandScope, file, value.Name, SymbolKindEnumMember, false)
 	}
+}
+
+func unusedVariableScope(scope *Scope) bool {
+	for current := scope; current != nil; current = current.Parent {
+		if current.Lambda != nil || current.Kind == syntax.BlockDef {
+			return true
+		}
+		switch current.Kind {
+		case syntax.BlockClass, syntax.BlockInterface, syntax.BlockEnum:
+			return false
+		}
+	}
+	return true
 }
 
 // parameterDeclarationSpan returns the lexical name introduced by a function

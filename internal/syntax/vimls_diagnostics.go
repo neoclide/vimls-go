@@ -54,6 +54,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/unexpected-branch", Message: "branch command has no matching block", Severity: DiagnosticError},
 	{Code: "vimls/unexpected-end", Message: "end command has no matching block", Severity: DiagnosticError},
 	{Code: "vimls/unexpected-token", Message: "unexpected token in expression", Severity: DiagnosticError},
+	{Code: "vimls/unused-variable", Message: "variable is declared but never used", Severity: DiagnosticHint},
 }
 
 // LookupVimlsDiagnostic returns metadata for a vimls-owned diagnostic code.

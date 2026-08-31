@@ -57,6 +57,59 @@ echo OldFunc()
 	}
 }
 
+func TestAnalyzeUnusedVim9Variables(t *testing.T) {
+	source := `vim9script
+var ScriptUnused = 1
+var ScriptUsed = 2
+echo ScriptUsed
+var Assigned = 0
+Assigned = 1
+export var Public = 3
+class Box
+  var member = 1
+  def Method()
+    var MethodUnused = 1
+    var MethodUsed = 2
+    echo MethodUsed
+  enddef
+endclass
+def Func(arg: number)
+  const LocalUnused = 1
+  final LocalUsed = 2
+  echo LocalUsed
+  for LoopUnused in [1]
+  endfor
+  for LoopUsed in [1]
+    echo LoopUsed
+  endfor
+enddef
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []string
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vimls/unused-variable" {
+			got = append(got, file.Text(diagnostic.Span)+":"+diagnostic.Message)
+		}
+	}
+	want := []string{
+		"ScriptUnused:ScriptUnused is declared but never used",
+		"MethodUnused:MethodUnused is declared but never used",
+		"LocalUnused:LocalUnused is declared but never used",
+		"LoopUnused:LoopUnused is declared but never used",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unused variable diagnostics = %#v, want %#v; all=%#v", got, want, result.Diagnostics)
+	}
+
+	legacy := Analyze(syntax.Parse("let unused = 1\n"))
+	for _, diagnostic := range legacy.Diagnostics {
+		if diagnostic.Code == "vimls/unused-variable" {
+			t.Fatalf("legacy variable received unused diagnostic: %#v", legacy.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeE133ReturnOutsideFunction(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

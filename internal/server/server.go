@@ -1057,6 +1057,8 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, g
 		}
 		if item.Code == "vimls/deprecated" {
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagDeprecated)
+		} else if item.Code == "vimls/unused-variable" {
+			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagUnnecessary)
 		}
 		diagnostics = append(diagnostics, diagnostic)
 	}
