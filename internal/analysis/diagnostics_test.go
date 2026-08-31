@@ -3202,6 +3202,40 @@ func TestAnalyzeE1122ImmediateLockedAssignmentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1121ImmediateLockedDictionaryItemDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"locked item", "vim9script\nvar dict = {one: 1, two: 2}\nlockvar dict.one\ndict.one = 3\n", "dict.one"},
+		{"compiled const existing key", "vim9script\ndef F()\n  const dict = {one: 1, two: 2}\n  dict['one'] = 3\nenddef\n", "dict['one']"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1121" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot change dict item" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1121 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nvar dict = {one: 1}\nlockvar dict.one\ndict.two = 2\n",
+		"vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n",
+		"vim9script\nconst dict = {one: 1}\ndict.one = 2\n",
+		"vim9script\nvar dict = {one: 1}\nlockvar dict.one\necho dict.one\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1121" {
+				t.Fatalf("guard unexpectedly received E1121: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1181IgnoredUnderscoreDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

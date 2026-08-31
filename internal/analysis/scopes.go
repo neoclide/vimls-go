@@ -6189,6 +6189,21 @@ func knownAssignmentType(name string) bool {
 	}
 }
 
+func directAssignmentTarget(command *syntax.Command) *syntax.Expression {
+	if command == nil {
+		return nil
+	}
+	if command.Declaration != nil && command.Declaration.Target != nil && command.Declaration.Initializer != nil {
+		return command.Declaration.Target
+	}
+	for _, expression := range command.Expressions {
+		if expression != nil && expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) > 0 {
+			return expression.Children[0]
+		}
+	}
+	return nil
+}
+
 func immediateLockedAssignment(file *syntax.File, previous, current *syntax.Command) *syntax.Expression {
 	if file == nil || previous == nil || current == nil {
 		return nil
@@ -6202,21 +6217,51 @@ func immediateLockedAssignment(file *syntax.File, previous, current *syntax.Comm
 			return nil
 		}
 	}
-	assigned := (*syntax.Expression)(nil)
-	if current.Declaration != nil && current.Declaration.Target != nil && current.Declaration.Initializer != nil {
-		assigned = current.Declaration.Target
-	} else {
-		for _, expression := range current.Expressions {
-			if expression != nil && expression.Kind == syntax.ExpressionAssignment && expression.Value == "=" && len(expression.Children) > 0 {
-				assigned = expression.Children[0]
-				break
-			}
-		}
-	}
+	assigned := directAssignmentTarget(current)
 	if locked == nil || assigned == nil || locked.Kind != syntax.ExpressionIdentifier || assigned.Kind != syntax.ExpressionIdentifier || locked.Value != assigned.Value {
 		return nil
 	}
 	return assigned
+}
+
+func immediateLockedDictionaryItemDiagnostic(result *FileAnalysis, scope *Scope, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
+	if result == nil || result.File == nil || scope == nil || previous == nil || current == nil {
+		return syntax.Diagnostic{}, false
+	}
+	file := result.File
+	assigned := directAssignmentTarget(current)
+	if assigned == nil || assigned.Kind != syntax.ExpressionMember && assigned.Kind != syntax.ExpressionIndex {
+		return syntax.Diagnostic{}, false
+	}
+	if previous.Canonical == "lockvar" && previous.Count.Start == previous.Count.End && len(previous.Targets) == 1 && len(assigned.Children) > 0 &&
+		resolvedExpressionType(result, scope, assigned.Children[0]).Name == "dict" &&
+		file.Text(previous.Targets[0].Span) == file.Text(assigned.Span) {
+		return syntax.Diagnostic{Code: "vim/E1121", Message: "Cannot change dict item", Span: assigned.Span}, true
+	}
+	if !scopeUsesDefTypeRules(scope) || previous.Canonical != "const" || previous.Declaration == nil || previous.Declaration.Target == nil ||
+		previous.Declaration.Target.Kind != syntax.ExpressionIdentifier || previous.Declaration.Initializer == nil || previous.Declaration.Initializer.Kind != syntax.ExpressionDictionary ||
+		len(assigned.Children) == 0 || assigned.Children[0] == nil || assigned.Children[0].Kind != syntax.ExpressionIdentifier ||
+		assigned.Children[0].Value != previous.Declaration.Target.Value {
+		return syntax.Diagnostic{}, false
+	}
+	key := assigned.Value
+	if assigned.Kind == syntax.ExpressionIndex {
+		if len(assigned.Children) < 2 {
+			return syntax.Diagnostic{}, false
+		}
+		var ok bool
+		key, ok = syntax.StaticDictionaryKey(assigned.Children[1], current.Dialect)
+		if !ok {
+			return syntax.Diagnostic{}, false
+		}
+	}
+	for index := 0; index+1 < len(previous.Declaration.Initializer.Children); index += 2 {
+		candidate, ok := syntax.StaticDictionaryKey(previous.Declaration.Initializer.Children[index], previous.Dialect)
+		if ok && candidate == key {
+			return syntax.Diagnostic{Code: "vim/E1121", Message: "Cannot change dict item", Span: assigned.Span}, true
+		}
+	}
+	return syntax.Diagnostic{}, false
 }
 
 // collectAssignmentDiagnostics reports statically provable assignment-target
@@ -6276,6 +6321,10 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1122", Message: "Variable is locked: " + assigned.Value, Span: assigned.Span,
 				})
+			}
+			if diagnostic, ok := immediateLockedDictionaryItemDiagnostic(result, scope, previous, command); ok &&
+				!syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
+				result.Diagnostics = append(result.Diagnostics, diagnostic)
 			}
 		}
 		previous, previousScope = command, scope
