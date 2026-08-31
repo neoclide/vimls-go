@@ -6952,6 +6952,42 @@ func TestAnalyzeStrictStringConversionDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1320ObjectAsNumberDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"script condition", "vim9script\nclass A\nendclass\nvar object = A.new()\nif object\nendif\n", "object"},
+		{"script compound assignment", "vim9script\nclass A\nendclass\nvar number = 1\nvar object = A.new()\nnumber += object\n", "object"},
+		{"script binary operation", "vim9script\nclass A\nendclass\nvar object = A.new()\nvar number = 1 + object\n", "object"},
+		{"script unary operation", "vim9script\nclass A\nendclass\nvar object = A.new()\nvar number = +object\n", "object"},
+		{"script ternary condition", "vim9script\nclass A\nendclass\nvar object = A.new()\nvar number = object ? 1 : 0\n", "object"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1320" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using an Object as a Number" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1320 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F(value: any)\n  if value\n  endif\nenddef\n",
+		"vim9script\nclass A\nendclass\nif A\nendif\n",
+		"vim9script\nclass A\nendclass\ndef F(object: A)\n  if object\n  endif\nenddef\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1320" {
+				t.Fatalf("guard unexpectedly received E1320: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1324ObjectAsStringDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"compiled concatenation", "vim9script\nclass A\nendclass\ndef F()\n  var object = A.new()\n  var text = '' .. object\nenddef\n", "object"},

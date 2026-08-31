@@ -4574,17 +4574,28 @@ func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnos
 	}
 }
 
-func objectAsStringDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (syntax.Diagnostic, bool) {
+func knownObjectExpression(result *FileAnalysis, scope *Scope, expression *syntax.Expression) bool {
 	if result == nil || expression == nil || expressionContainsMissing(expression) {
-		return syntax.Diagnostic{}, false
+		return false
 	}
 	if expression.Kind == syntax.ExpressionIdentifier {
 		if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindClass {
-			return syntax.Diagnostic{}, false
+			return false
 		}
 	}
 	name := result.TypeOf(expression).Name
-	if name != "object" && result.classes[name] == nil {
+	return name == "object" || result.classes[name] != nil
+}
+
+func objectAsNumberDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (syntax.Diagnostic, bool) {
+	if !knownObjectExpression(result, scope, expression) {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{Code: "vim/E1320", Message: "Using an Object as a Number", Span: expression.Span}, true
+}
+
+func objectAsStringDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (syntax.Diagnostic, bool) {
+	if !knownObjectExpression(result, scope, expression) {
 		return syntax.Diagnostic{}, false
 	}
 	return syntax.Diagnostic{Code: "vim/E1324", Message: "Using an Object as a String", Span: expression.Span}, true
@@ -4920,7 +4931,15 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 							objectConcat = true
 						}
 					}
-					if !objectConcat && (invalidTarget || invalidScriptConcat) {
+					objectNumber := false
+					if numericCompound && !scopeUsesDefTypeRules(expressionScope) && (targetType.Name == "number" || targetType.Name == "float") {
+						if diagnostic, ok := objectAsNumberDiagnostic(result, expressionScope, expression.Children[1]); ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
+							objectNumber = true
+							compoundTypeError = true
+						}
+					}
+					if !objectConcat && !objectNumber && (invalidTarget || invalidScriptConcat) {
 						symbol := strings.TrimSuffix(op, "=")
 						if symbol == ".." {
 							symbol = "."
@@ -5064,7 +5083,10 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						containerConcat := op == "+" && left.Name == right.Name && (left.Name == "list" || left.Name == "tuple" || left.Name == "blob")
 						diagnostic, ok := syntax.Diagnostic{}, false
 						if !containerConcat && command.Dialect == syntax.Vim9 {
-							diagnostic, ok = stringAsNumberDiagnostic(result, leftOperand)
+							diagnostic, ok = objectAsNumberDiagnostic(result, expressionScope, leftOperand)
+							if !ok {
+								diagnostic, ok = stringAsNumberDiagnostic(result, leftOperand)
+							}
 						}
 						if !containerConcat {
 							if !ok {
@@ -5075,7 +5097,10 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 							leftNumeric := left.Name == "number" || left.Name == "float"
 							if (right.Name != "list" && right.Name != "blob") || leftNumeric {
 								if command.Dialect == syntax.Vim9 {
-									diagnostic, ok = stringAsNumberDiagnostic(result, rightOperand)
+									diagnostic, ok = objectAsNumberDiagnostic(result, expressionScope, rightOperand)
+									if !ok {
+										diagnostic, ok = stringAsNumberDiagnostic(result, rightOperand)
+									}
 								}
 								if !ok {
 									diagnostic, ok = numericConversionDiagnostic(right, rightOperand.Span)
@@ -5163,7 +5188,14 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			if expression.Kind == syntax.ExpressionUnary && (expression.Value == "+" || expression.Value == "-") && len(expression.Children) == 1 && !expressionContainsMissing(expression) {
 				operand := expression.Children[0]
 				if command.Dialect == syntax.Vim9 {
-					if diagnostic, ok := stringAsNumberDiagnostic(result, operand); ok {
+					diagnostic, ok := syntax.Diagnostic{}, false
+					if !scopeUsesDefTypeRules(expressionScope) {
+						diagnostic, ok = objectAsNumberDiagnostic(result, expressionScope, operand)
+					}
+					if !ok {
+						diagnostic, ok = stringAsNumberDiagnostic(result, operand)
+					}
+					if ok {
 						result.Diagnostics = append(result.Diagnostics, diagnostic)
 					}
 				}
@@ -5187,6 +5219,11 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 					if diagnostic, ok := numberAsBoolDiagnostic(condition); ok {
 						result.Diagnostics = append(result.Diagnostics, diagnostic)
+					}
+					if !scopeUsesDefTypeRules(expressionScope) {
+						if diagnostic, ok := objectAsNumberDiagnostic(result, expressionScope, condition); ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
+						}
 					}
 				}
 				switch result.TypeOf(condition).Name {
@@ -5769,6 +5806,9 @@ func collectConditionTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, 
 		return
 	}
 	if !scopeUsesDefTypeRules(scope) {
+		if diagnostic, ok := objectAsNumberDiagnostic(result, scope, condition); ok {
+			result.Diagnostics = append(result.Diagnostics, diagnostic)
+		}
 		return
 	}
 	actual := result.TypeOf(condition)
