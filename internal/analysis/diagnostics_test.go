@@ -3399,6 +3399,39 @@ func TestAnalyzeE995LegacyConstExistingVariableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE963VimVariableTypeDiagnostics(t *testing.T) {
+	for _, test := range []struct{ source, message, span string }{
+		{"let v:errors = ''\n", "Setting v:errors to value with wrong type", "''"},
+		{"let v:oldfiles = {}\n", "Setting v:oldfiles to value with wrong type", "{}"},
+	} {
+		file := syntax.Parse(test.source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E963" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+			t.Fatalf("E963 diagnostics = %#v", got)
+		}
+	}
+
+	for _, source := range []string{
+		"let v:errors = []\n",
+		"let v:errmsg = []\n",
+		"let v:event = ''\n",
+		"vim9script\nv:errors = ''\n",
+		"let v:errors[0] = 1\n",
+		"let v:errors = DynamicValue()\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E963" {
+				t.Fatalf("guard unexpectedly received E963: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)

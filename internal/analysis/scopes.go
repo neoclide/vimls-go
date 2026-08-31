@@ -6684,6 +6684,17 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 		if dialect == syntax.Vim9 && target != nil && target.Kind == syntax.ExpressionIdentifier && target.Value == "_" {
 			return
 		}
+		if dialect == syntax.Legacy && expression.Value == "=" && target != nil && target.Kind == syntax.ExpressionIdentifier {
+			if variable, ok := vimdata.LookupVariable(target.Value); ok && variable.Flags&vimdata.VariableReadOnly == 0 {
+				expected := builtinVariableValueType(variable)
+				actual := result.TypeOf(expression.Children[1])
+				if !isUnknownType(expected) && expected.Name != "string" && expected.Name != "number" && !isUnknownType(actual) && expected.Name != actual.Name {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E963", Message: "Setting v:" + strings.TrimPrefix(target.Value, "v:") + " to value with wrong type", Span: expression.Children[1].Span,
+					})
+				}
+			}
+		}
 		appendDotNotAllowedAfterNumberDiagnostic(result, scope, expression, target)
 		if dialect == syntax.Vim9 {
 			appendProtectedVariableAccessDiagnostic(result, scope, target)
