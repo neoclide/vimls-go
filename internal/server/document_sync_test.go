@@ -556,6 +556,59 @@ func TestServerChangeRejectsPausedParseCacheMiss(t *testing.T) {
 	}
 }
 
+func BenchmarkParseCacheHit(b *testing.B) {
+	instance := New(nil, nil, io.Discard)
+	b.Cleanup(instance.stopAnalysis)
+	line := "var cache_value = 111111111111111111111111111111111111111111111111\n"
+	source := "vim9script\n" + strings.Repeat(line, (64*1024-len("vim9script\n"))/len(line))
+	snapshot := instance.documents.Open("file:///parse-cache-hit.vim", 1, source)
+	first := instance.parseSnapshot(snapshot)
+	second := instance.parseSnapshot(snapshot)
+	if first == nil || second != first {
+		b.Fatalf("cache preflight: first=%p second=%p", first, second)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(snapshot.ByteLen()))
+	for b.Loop() {
+		instance.parseSnapshot(snapshot)
+	}
+}
+
+func BenchmarkParseCacheChangedFile(b *testing.B) {
+	instance := New(nil, nil, io.Discard)
+	b.Cleanup(instance.stopAnalysis)
+	line := "var cache_value = 111111111111111111111111111111111111111111111111\n"
+	baseSource := "vim9script\n" + strings.Repeat(line, (64*1024-len("vim9script\n"))/len(line))
+	baseSnapshot := instance.documents.Open("file:///parse-cache-changed.vim", 1, baseSource)
+	baseFile := instance.parseSnapshot(baseSnapshot)
+	changedSource := strings.Replace(baseSource, "111111", "222222", 1)
+	version := int32(2)
+	changedSnapshot := text.NewSnapshot(baseSnapshot.URI(), 2, &version, changedSource)
+	if baseFile == nil || baseSnapshot.ContentID() == changedSnapshot.ContentID() || baseSource == changedSource {
+		b.Fatalf("changed parse preflight: base=%p sameID=%t sameSource=%t", baseFile, baseSnapshot.ContentID() == changedSnapshot.ContentID(), baseSource == changedSource)
+	}
+	if changedFile := instance.parseSnapshot(changedSnapshot); changedFile == nil || changedFile.Source != changedSource {
+		b.Fatalf("changed parse preflight = %#v", changedFile)
+	}
+	instance.publishMu.Lock()
+	cached := instance.parsed[baseSnapshot.URI()]
+	instance.publishMu.Unlock()
+	if cached.file != baseFile || cached.contentID != baseSnapshot.ContentID() {
+		b.Fatalf("changed preflight replaced base cache: file=%p want=%p contentID=%x want=%x", cached.file, baseFile, cached.contentID, baseSnapshot.ContentID())
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(changedSnapshot.ByteLen()))
+	for b.Loop() {
+		instance.parseSnapshot(changedSnapshot)
+	}
+	instance.publishMu.Lock()
+	cached = instance.parsed[baseSnapshot.URI()]
+	instance.publishMu.Unlock()
+	if cached.file != baseFile || cached.contentID != baseSnapshot.ContentID() {
+		b.Fatalf("changed parse replaced base cache: file=%p want=%p contentID=%x want=%x", cached.file, baseFile, cached.contentID, baseSnapshot.ContentID())
+	}
+}
+
 func TestServerParseImportTargetRequiresExactOpenSource(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	documentURI := uri.File(filepath.Join(t.TempDir(), "import-target.vim"))

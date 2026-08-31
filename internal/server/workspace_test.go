@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1138,6 +1139,56 @@ func TestServerRebuildRejectsCapturedSnapshotAfterOpenEdit(t *testing.T) {
 	instance.workspaceMu.Unlock()
 	if hookCalls != 2 || !built || !indexed || source != currentSource || !graph.Has(path) {
 		t.Fatalf("stale rebuild published: hooks=%d built=%t indexed=%t source=%q graphHas=%t", hookCalls, built, indexed, source, graph.Has(path))
+	}
+}
+
+func BenchmarkWorkspaceRebuild(b *testing.B) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	b.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })
+	root := b.TempDir()
+	paths := make([]string, 0, 32)
+	totalBytes := 0
+	for fileNumber := range 32 {
+		var source strings.Builder
+		source.WriteString("vim9script\n")
+		for functionNumber := range 64 {
+			fmt.Fprintf(&source, "def Benchmark_%02d_%02d(): number\n  return %d\nenddef\n", fileNumber, functionNumber, functionNumber)
+		}
+		content := source.String()
+		path := filepath.Join(root, fmt.Sprintf("benchmark-%02d.vim", fileNumber))
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			b.Fatal(err)
+		}
+		canonical, err := workspace.CanonicalPath(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		paths = append(paths, canonical)
+		totalBytes += len(content)
+	}
+	canonicalRoot, err := workspace.CanonicalPath(root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	roots := []string{canonicalRoot}
+	resolver := workspacePathResolver(roots, nil)
+	if resolver == nil {
+		b.Fatal("workspace resolver is nil")
+	}
+	instance := New(nil, nil, io.Discard)
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(context.Background(), roots, resolver, nil)
+	if len(diskFiles) != len(paths) || !index.Complete() || !graph.Snapshot().Ready() || len(warnings) != 0 {
+		b.Fatalf("workspace preflight: diskFiles=%d complete=%t ready=%t warnings=%#v", len(diskFiles), index.Complete(), graph.Snapshot().Ready(), warnings)
+	}
+	for _, path := range paths {
+		if source, ok := index.Source(path); !ok || source == "" || !graph.Snapshot().Has(path) {
+			b.Fatalf("workspace preflight missing %q: indexed=%t source=%q graph=%t", path, ok, source, graph.Snapshot().Has(path))
+		}
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(totalBytes))
+	for b.Loop() {
+		instance.buildWorkspaceIndex(context.Background(), roots, resolver, nil)
 	}
 }
 
