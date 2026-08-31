@@ -1056,7 +1056,7 @@ func vim9ScriptArgumentDiagnostic(source string, argument Span) (string, string,
 		word := source[wordStart:start]
 		if word == "noclear" {
 			if foundNoClear {
-				return "vim/E983", "duplicate argument: noclear", Span{Start: wordStart, End: start}, false
+				return "vim/E983", "Duplicate argument: noclear", Span{Start: wordStart, End: start}, false
 			}
 			foundNoClear = true
 		} else {
@@ -2867,7 +2867,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 				seenNested = true
 			}
 			if duplicate && !duplicateReported {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E983", Message: "duplicate ++once/++nested", Span: modifier.Span})
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E983", Message: "Duplicate argument: " + file.Text(modifier.Span), Span: modifier.Span})
 				duplicateReported = true
 			}
 		}

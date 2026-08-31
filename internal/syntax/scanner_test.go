@@ -116,6 +116,9 @@ func TestVim9ScriptArgumentsAndRecovery(t *testing.T) {
 		if diagnostic.Span != (Span{Start: test.start, End: test.start + len(test.span)}) || file.Text(diagnostic.Span) != test.span {
 			t.Fatalf("invalid vim9script %q diagnostic span = %#v (%q), want %q", test.argument, diagnostic.Span, file.Text(diagnostic.Span), test.span)
 		}
+		if test.code == "vim/E983" && diagnostic.Message != "Duplicate argument: noclear" {
+			t.Fatalf("invalid vim9script %q diagnostic message = %q", test.argument, diagnostic.Message)
+		}
 		if len(file.Commands) != 2 || file.Commands[0].Dialect != Legacy || file.Commands[1].Canonical != "var" || file.Commands[1].Dialect != Vim9 {
 			t.Fatalf("invalid vim9script %q did not recover in Vim9 mode: %#v", test.argument, file.Commands)
 		}

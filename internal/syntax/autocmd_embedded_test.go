@@ -311,6 +311,9 @@ func TestAutocmdModifierBoundariesAndDuplicates(t *testing.T) {
 	if !hasDiagnostic(duplicate, "vim/E983") || len(duplicate.Diagnostics) != 1 || duplicate.Commands[0].Autocmd == nil || len(duplicate.Commands[0].Autocmd.Modifiers) != 4 {
 		t.Fatalf("duplicate modifiers = %#v, diagnostics = %#v", duplicate.Commands[0].Autocmd, duplicate.Diagnostics)
 	}
+	if duplicate.Diagnostics[0].Message != "Duplicate argument: ++once" || duplicate.Text(duplicate.Diagnostics[0].Span) != "++once" {
+		t.Fatalf("duplicate modifier diagnostic = %#v", duplicate.Diagnostics[0])
+	}
 }
 
 func TestVim9AutocmdCommandListContinuation(t *testing.T) {
