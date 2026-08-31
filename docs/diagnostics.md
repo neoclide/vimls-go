@@ -3146,3 +3146,26 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/evalfunc.c:1280,1348-1383` assigns the modifying checkers to these
   builtin argument tables while keeping their non-modifying variants separate.
 - `src/errors.h:3367-3368` defines the exact message.
+
+## Lowercase class name: E1314
+
+E1314 means `Class name must start with an uppercase letter: {argument}`. In a
+Vim9 class or abstract class declaration, the first name byte must be an ASCII
+uppercase letter. Analysis selects the parsed class name while retaining Vim's
+full trimmed declaration argument in the message.
+
+The uppercase check happens before the malformed-name E1315 check. A lowercase,
+numeric, underscore, or non-ASCII first byte therefore owns the diagnostic even
+when invalid punctuation follows the name. The recovering aggregate and block
+remain available, and parsing continues after `endclass`. A Legacy class is
+owned by E1316 instead.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:5-27` distinguishes the Vim9-only class
+  requirement, lowercase-name E1314, and malformed-name E1315.
+- `src/vim9class.c:1945-1963` routes both `class` and `abstract class` through
+  the same declaration logic.
+- `src/vim9class.c:1965-1993` checks the Vim9-script gate, then ASCII uppercase,
+  then whitespace after the name in that order.
+- `src/errors.h:3385-3388` defines E1314 and the following E1315 message.

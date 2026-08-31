@@ -1225,6 +1225,51 @@ func TestVim9EnumExtendsReportsE1416(t *testing.T) {
 	}
 }
 
+func TestVim9ClassNameReportsE1314(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span, message string
+	}{
+		{"ordinary lowercase recovery", "vim9script\nclass notWorking\nendclass\nvar after = 1\n", "notWorking", "Class name must start with an uppercase letter: notWorking"},
+		{"abstract lowercase", "vim9script\nabstract class lower\nendclass\n", "lower", "Class name must start with an uppercase letter: lower"},
+		{"digit", "vim9script\nclass 1Thing\nendclass\n", "1Thing", "Class name must start with an uppercase letter: 1Thing"},
+		{"underscore", "vim9script\nclass _Thing\nendclass\n", "_Thing", "Class name must start with an uppercase letter: _Thing"},
+		{"non-ASCII", "vim9script\nclass ÄThing\nendclass\n", "ÄThing", "Class name must start with an uppercase letter: ÄThing"},
+		{"before whitespace diagnostic", "vim9script\nclass lower!\nendclass\n", "lower", "Class name must start with an uppercase letter: lower!"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1314" {
+					got = append(got, diagnostic)
+				}
+				if diagnostic.Code == "vim/E1315" {
+					t.Fatalf("E1314 source retained E1315: %#v", file.Diagnostics)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1314 diagnostics = %#v", file.Diagnostics)
+			}
+			if file.Commands[1].Aggregate == nil || file.Text(file.Commands[1].Aggregate.Name) != test.span || len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockClass || file.Blocks[0].End < 0 {
+				t.Fatalf("class recovery = %#v, blocks = %#v", file.Commands, file.Blocks)
+			}
+			if test.name == "ordinary lowercase recovery" && (len(file.Commands) != 4 || file.Commands[3].Declaration == nil) {
+				t.Fatalf("following declaration recovery = %#v", file.Commands)
+			}
+			assertFileSpans(t, file)
+		})
+	}
+
+	valid := Parse("vim9script\nclass Working\nendclass\n")
+	if hasDiagnostic(valid, "vim/E1314") {
+		t.Fatalf("valid class diagnostics = %#v", valid.Diagnostics)
+	}
+	legacy := Parse("class lower\nendclass\n")
+	if !hasDiagnostic(legacy, "vim/E1316") || hasDiagnostic(legacy, "vim/E1314") {
+		t.Fatalf("Legacy class diagnostics = %#v", legacy.Diagnostics)
+	}
+}
+
 func TestVim9LowercaseEnumNameReportsE1415(t *testing.T) {
 	file := Parse("vim9script\nenum foo\nendenum\n")
 	var got []Diagnostic
