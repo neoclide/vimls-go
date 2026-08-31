@@ -7961,6 +7961,123 @@ func TestAnalyzeE1353ClassNameNotFoundDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1354CannotExtendDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, message string
+	}{
+		{
+			name:    "resolved variable",
+			source:  "vim9script\nvar Parent = 1\nclass Child extends Parent\nendclass\n",
+			message: "Cannot extend Parent",
+		},
+		{
+			name:    "class extends itself",
+			source:  "vim9script\nclass Child extends Child\nendclass\n",
+			message: "Cannot extend Child",
+		},
+		{
+			name:    "class extends interface",
+			source:  "vim9script\ninterface Parent\nendinterface\nclass Child extends Parent\nendclass\n",
+			message: "Cannot extend Parent",
+		},
+		{
+			name:    "interface extends class",
+			source:  "vim9script\nclass Parent\nendclass\ninterface Child extends Parent\nendinterface\n",
+			message: "Cannot extend Parent",
+		},
+		{
+			name:    "class extends enum",
+			source:  "vim9script\nenum Parent\n  Value\nendenum\nclass Child extends Parent\nendclass\n",
+			message: "Cannot extend Parent",
+		},
+		{
+			name:    "class extends scalar alias",
+			source:  "vim9script\ntype Parent = number\nclass Child extends Parent\nendclass\n",
+			message: "Cannot extend Parent",
+		},
+		{
+			name:    "class extends interface alias",
+			source:  "vim9script\ninterface Face\nendinterface\ntype Parent = Face\nclass Child extends Parent\nendclass\n",
+			message: "Cannot extend Parent",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E1354" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != test.message || (file.Text(got[0].Span) != "endclass" && file.Text(got[0].Span) != "endinterface") {
+				t.Fatalf("E1354 diagnostics = %#v; syntax = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "valid class parent",
+			source: "vim9script\nclass Parent\nendclass\nclass Child extends Parent\nendclass\n",
+		},
+		{
+			name:   "valid interface parent",
+			source: "vim9script\ninterface Parent\nendinterface\ninterface Child extends Parent\nendinterface\n",
+		},
+		{
+			name:   "valid class alias chain",
+			source: "vim9script\nclass Parent\nendclass\ntype First = Parent\ntype Second = First\nclass Child extends Second\nendclass\n",
+		},
+		{
+			name:   "valid interface alias",
+			source: "vim9script\ninterface Parent\nendinterface\ntype Alias = Parent\ninterface Child extends Alias\nendinterface\n",
+		},
+		{
+			name:   "missing parent belongs to e1353",
+			source: "vim9script\nclass Child extends Missing\nendclass\n",
+		},
+		{
+			name:   "unknown variable remains conservative",
+			source: "vim9script\ndef Get(): any\n  return null\nenddef\nvar Parent = Get()\nclass Child extends Parent\nendclass\n",
+		},
+		{
+			name:   "qualified import remains conservative",
+			source: "vim9script\nimport './parent.vim' as Imported\nclass Child extends Imported.Parent\nendclass\n",
+		},
+		{
+			name:   "imported alias target remains conservative",
+			source: "vim9script\nimport './parent.vim' as Imported\ntype Parent = Imported.Parent\nclass Child extends Parent\nendclass\n",
+		},
+		{
+			name:   "duplicate header suppresses semantic validation",
+			source: "vim9script\nclass Child extends Parent extends\nendclass\n",
+		},
+		{
+			name:   "incomplete aggregate suppresses semantic validation",
+			source: "vim9script\nvar Parent = 1\nclass Child extends Parent\n",
+		},
+		{
+			name:   "enum owns e1416",
+			source: "vim9script\nclass Parent\nendclass\nenum Child extends Parent\n  Value\nendenum\n",
+		},
+		{
+			name:   "legacy aggregate",
+			source: "class Child extends Parent\nendclass\n",
+		},
+	} {
+		t.Run("guard "+test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1354" {
+					t.Fatalf("unexpected E1354: %#v", result.Diagnostics)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeE1369DuplicateClassVariables(t *testing.T) {
 	for _, test := range []struct {
 		name    string

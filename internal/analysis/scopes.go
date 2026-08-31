@@ -157,7 +157,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	})
 	collectImportNamespaceDiagnostics(result)
 	inferTypes(result)
-	collectExtendedAggregateNameDiagnostics(result)
+	collectExtendedAggregateDiagnostics(result)
 	collectImplementedInterfaceNameDiagnostics(result)
 	collectImplementedInterfaceMembersDiagnostics(result)
 	collectVariableTypeMismatchDiagnostics(result)
@@ -177,11 +177,12 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	return result
 }
 
-func collectExtendedAggregateNameDiagnostics(result *FileAnalysis) {
+func collectExtendedAggregateDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
 	file := result.File
+	aliases := localTypeAliases(file)
 	for index := range file.Commands {
 		aggregate := &file.Commands[index]
 		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil || aggregate.Aggregate.Kind != syntax.BlockInterface && aggregate.Aggregate.Kind != syntax.BlockClass ||
@@ -197,19 +198,80 @@ func collectExtendedAggregateNameDiagnostics(result *FileAnalysis) {
 		if scope == nil {
 			scope = result.Root
 		}
-		if declaration := resolve(scope, extendsName, aggregate.Aggregate.Extends[0].Start, false, nil); declaration != nil {
+		declaration := resolve(scope, extendsName, aggregate.Aggregate.Extends[0].Start, false, nil)
+		if declaration == nil {
+			if dot := strings.IndexByte(extendsName, '.'); dot > 0 {
+				if prefix := resolve(scope, extendsName[:dot], aggregate.Aggregate.Extends[0].Start, false, nil); prefix != nil && prefix.Kind == SymbolKindImport {
+					continue
+				}
+			}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E1353", Message: "Class name not found: " + extendsName, Span: aggregateEndSpan(file, aggregate),
+			})
 			continue
 		}
-		if dot := strings.IndexByte(extendsName, '.'); dot > 0 {
-			if prefix := resolve(scope, extendsName[:dot], aggregate.Aggregate.Extends[0].Start, false, nil); prefix != nil && prefix.Kind == SymbolKindImport {
+		if declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant {
+			if isUnknownType(declaration.Type) {
 				continue
 			}
 		}
+		kind, known := extendedAggregateTargetKind(result, scope, declaration, aliases, make(map[syntax.Span]bool))
+		if !known {
+			continue
+		}
+		valid := aggregate.Aggregate.Kind == syntax.BlockClass && kind == SymbolKindClass ||
+			aggregate.Aggregate.Kind == syntax.BlockInterface && kind == SymbolKindInterface
+		if valid && extendsName != file.Text(aggregate.Aggregate.Name) {
+			continue
+		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-			Code:    "vim/E1353",
-			Message: "Class name not found: " + extendsName,
+			Code:    "vim/E1354",
+			Message: "Cannot extend " + extendsName,
 			Span:    aggregateEndSpan(file, aggregate),
 		})
+	}
+}
+
+func extendedAggregateTargetKind(result *FileAnalysis, scope *Scope, declaration *Declaration, aliases map[syntax.Span]*syntax.Type, seen map[syntax.Span]bool) (SymbolKind, bool) {
+	if result == nil || result.File == nil || scope == nil || declaration == nil {
+		return "", false
+	}
+	switch declaration.Kind {
+	case SymbolKindClass, SymbolKindInterface, SymbolKindEnum:
+		return declaration.Kind, true
+	case SymbolKindTypeAlias:
+		if seen[declaration.Span] {
+			return "", false
+		}
+		typeNode := aliases[declaration.Span]
+		if typeNode == nil || typeNode.Kind == syntax.TypeMissing || syntaxDiagnosticOverlaps(result.File.Diagnostics, typeNode.Span) {
+			return "", false
+		}
+		if typeNode.Kind != syntax.TypeNamed {
+			return "", true
+		}
+		if isKnownNonAggregateTypeName(typeNode.Name) {
+			return "", true
+		}
+		target := resolve(scope, typeNode.Name, typeNode.Span.Start, false, nil)
+		if target == nil {
+			return "", false
+		}
+		seen[declaration.Span] = true
+		kind, known := extendedAggregateTargetKind(result, scope, target, aliases, seen)
+		delete(seen, declaration.Span)
+		return kind, known
+	default:
+		return "", true
+	}
+}
+
+func isKnownNonAggregateTypeName(name string) bool {
+	switch name {
+	case "any", "blob", "bool", "channel", "dict", "float", "func", "job", "list", "number", "object", "string", "tuple", "void":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -502,20 +564,7 @@ func collectTypeDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	aliases := make(map[syntax.Span]*syntax.Type)
-	var collectAliases func([]syntax.Command)
-	collectAliases = func(commands []syntax.Command) {
-		for index := range commands {
-			command := &commands[index]
-			if command.TypeAlias != nil {
-				aliases[command.TypeAlias.Name] = command.TypeAlias.Type
-			}
-			if command.Embedded != nil {
-				collectAliases(command.Embedded.Commands)
-			}
-		}
-	}
-	collectAliases(file.Commands)
+	aliases := localTypeAliases(file)
 	appendTypeDiagnostic := func(typeNode *syntax.Type, scope *Scope, allowVoid bool) {
 		if invalid := invalidObjectValueType(result, scope, typeNode, aliases, make(map[syntax.Span]bool)); invalid != (syntax.Span{}) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -628,6 +677,27 @@ func collectTypeDiagnostics(result *FileAnalysis) {
 		}
 	}
 	walkCommands(file.Commands, result.Root)
+}
+
+func localTypeAliases(file *syntax.File) map[syntax.Span]*syntax.Type {
+	aliases := make(map[syntax.Span]*syntax.Type)
+	if file == nil {
+		return aliases
+	}
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.TypeAlias != nil {
+				aliases[command.TypeAlias.Name] = command.TypeAlias.Type
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	return aliases
 }
 
 func invalidVoidValueType(result *FileAnalysis, scope *Scope, typeNode *syntax.Type, allowVoid bool, aliases map[syntax.Span]*syntax.Type, seen map[syntax.Span]bool) *syntax.Type {

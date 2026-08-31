@@ -3795,3 +3795,27 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
 - `src/vim9type.c:1920-1977` accepts `object<any>` and object-valued inner
   types, and reports E1353 for a parsed non-object inner type.
 - `src/errors.h:3460-3463` defines the exact E1353 and E1354 messages.
+
+## Cannot extend: E1354
+
+E1354 means `Cannot extend {name}`. After an `extends` name resolves, a Vim9
+class requires a class target and a Vim9 interface requires an interface
+target. A class also cannot extend itself, an interface, or an enum. The same
+rules apply through local type-alias chains.
+
+The diagnostic belongs to the aggregate terminator. Unknown inferred values,
+qualified imports, and aliases whose imported target is unavailable remain
+conservative. An unresolved unqualified name remains E1353, while malformed or
+incomplete headers retain their syntax or recovery diagnostics.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:2396-2403` covers extending a resolved
+  scalar variable and reports E1354 on `endclass`.
+- `src/testdir/test_vim9_class.vim:9699-9707` covers a class extending itself.
+- `src/testdir/test_vim9_interface.vim:1058-1076` covers both class/interface
+  category mismatches.
+- `src/testdir/test_vim9_enum.vim:340-349` covers a class extending an enum.
+- `src/vim9class.c:315-348` validates self-extension, resolution, and the
+  required class/interface category in that order.
+- `src/errors.h:3462-3465` defines the exact E1354 and E1355 messages.
