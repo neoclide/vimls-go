@@ -3322,8 +3322,16 @@ func enclosingObjectMethodClass(file *syntax.File, scope *Scope) *syntax.Command
 }
 
 func enclosingClassMethod(file *syntax.File, scope *Scope) (*syntax.Command, *syntax.Command) {
-	aggregate := enclosingClassCommand(file, scope)
-	if aggregate == nil || aggregate.Aggregate == nil {
+	return enclosingAggregateMethod(file, scope, false)
+}
+
+func enclosingSuperMethod(file *syntax.File, scope *Scope) (*syntax.Command, *syntax.Command) {
+	return enclosingAggregateMethod(file, scope, true)
+}
+
+func enclosingAggregateMethod(file *syntax.File, scope *Scope, allowEnum bool) (*syntax.Command, *syntax.Command) {
+	aggregate := enclosingAggregateCommand(file, scope)
+	if aggregate == nil || aggregate.Aggregate == nil || aggregate.Aggregate.Kind != syntax.BlockClass && (!allowEnum || aggregate.Aggregate.Kind != syntax.BlockEnum) {
 		return nil, nil
 	}
 	for current := scope; current != nil; current = current.Parent {
@@ -3358,11 +3366,25 @@ func appendSuperMustBeFollowedByDotDiagnostic(result *FileAnalysis, file *syntax
 		syntaxDiagnosticOverlaps(file.Diagnostics, expression.Span) {
 		return
 	}
-	if aggregate, method := enclosingClassMethod(file, scope); aggregate == nil || method == nil {
+	if aggregate, method := enclosingSuperMethod(file, scope); aggregate == nil || method == nil {
 		return
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1356", Message: `"super" must be followed by a dot`, Span: expression.Span,
+	})
+}
+
+func appendSuperOutsideClassMethodDiagnostic(result *FileAnalysis, file *syntax.File, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
+	if result == nil || file == nil || scope == nil || expression == nil || dialect != syntax.Vim9 || expression.Kind != syntax.ExpressionMember ||
+		len(expression.Children) == 0 || expression.Children[0] == nil || expression.Children[0].Kind != syntax.ExpressionIdentifier ||
+		expression.Children[0].Value != "super" || file.Text(expression.Operator) != "." || syntaxDiagnosticOverlaps(file.Diagnostics, expression.Span) {
+		return
+	}
+	if aggregate, method := enclosingSuperMethod(file, scope); aggregate != nil && method != nil {
+		return
+	}
+	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		Code: "vim/E1357", Message: `Using "super" not in a class method`, Span: expression.Children[0].Span,
 	})
 }
 
@@ -6609,6 +6631,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		// Value is the member spelling, not a lexical variable.  Only the
 		// receiver expression participates in same-file resolution.
 		if dialect == syntax.Vim9 {
+			appendSuperOutsideClassMethodDiagnostic(result, file, scope, expression, dialect)
 			appendMissingEnumValueDiagnostic(result, scope, expression)
 			appendObjectMethodThroughClassDiagnostic(result, scope, expression)
 		}

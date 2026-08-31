@@ -3875,3 +3875,28 @@ Representative source evidence for Vim v9.2.1015 (`5ab969f`):
   preserving object-method context through nested closures.
 - `src/vim9expr.c:990-1002` requires `.` after `super` in that static context.
 - `src/errors.h:3466-3469` defines the exact E1356 and E1357 messages.
+
+## Super outside a class method: E1357
+
+E1357 means `Using "super" not in a class method`. A dotted `super.member`
+receiver is valid only while compiling a class or enum method, constructor, or
+a Lambda nested in one of those methods. Script-level expressions, ordinary
+top-level defs and Lambdas, and class member initializers report the `super`
+keyword.
+
+A method context without a parent aggregate is not E1357; it proceeds to the
+E1358 check. Bare `super` remains owned by the missing-dot and ordinary name
+rules, while whitespace before `.` remains E1356. Legacy member expressions do
+not gain this Vim9 semantic diagnostic.
+
+Representative source evidence for Vim v9.2.1015 (`5ab969f`):
+
+- `src/testdir/test_vim9_class.vim:11076-11091` covers `super.member` in a
+  top-level def with the exact E1357 message.
+- `src/testdir/test_vim9_class.vim:11015-11037` confirms that a Lambda nested
+  in an object method retains its method context.
+- `src/vim9expr.c:358-372` emits E1357 when a `super` member lookup has no
+  current class method.
+- `src/vim9compile.c:39-62` handles object methods and constructors as class
+  contexts before parent validation.
+- `src/errors.h:3468-3471` defines the exact E1357 and E1358 messages.
