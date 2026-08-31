@@ -3073,6 +3073,8 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 								Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tailStart, End: command.Argument.End},
 							})
 						}
+					} else if diagnostic, ok := vim9ScopedVariableTypeDiagnostic(file, command, typedDeclaration); ok {
+						leftDiagnostics = append(leftDiagnostics, diagnostic)
 					} else {
 						leftDiagnostics = append(leftDiagnostics, Diagnostic{
 							Code: "vim/E488", Message: "trailing characters", Span: Span{Start: tailStart, End: command.Argument.End},
@@ -3229,6 +3231,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			declaration := parseDeclarationHead(file, source, command.Argument.Start, command.Dialect)
 			cannotLockOption := diagnoseCannotLockOption(file, command, declaration)
 			diagnoseVim9ScopeDeclaration(file, command, declaration, false)
+			if diagnostic, ok := vim9ScopedVariableTypeDiagnostic(file, command, declaration); ok {
+				file.Diagnostics = append(file.Diagnostics, diagnostic)
+			}
 			diagnoseVim9IllegalDeclarationName(file, command, declaration)
 			diagnoseVim9ReservedDeclarationName(file, command, declaration)
 			diagnoseVim9OptionDeclaration(file, command, declaration)
@@ -3251,6 +3256,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
 		diagnoseCannotLockOption(file, command, declaration)
 		diagnoseVim9ScopeDeclaration(file, command, declaration, true)
+		if diagnostic, ok := vim9ScopedVariableTypeDiagnostic(file, command, declaration); ok {
+			file.Diagnostics = append(file.Diagnostics, diagnostic)
+		}
 		diagnoseVim9IllegalDeclarationName(file, command, declaration)
 		diagnoseVim9ReservedDeclarationName(file, command, declaration)
 		diagnoseVim9OptionDeclaration(file, command, declaration)
@@ -5330,6 +5338,24 @@ func diagnoseVim9ScopeDeclaration(file *File, command *Command, declaration *Dec
 	if diagnostic, ok := vim9ScopeDeclarationDiagnostic(file, command, declaration.Name); ok && (command.Canonical == "var" || diagnostic.Code == "vim/E1101") {
 		file.Diagnostics = append(file.Diagnostics, diagnostic)
 	}
+}
+
+func vim9ScopedVariableTypeDiagnostic(file *File, command *Command, declaration *Declaration) (Diagnostic, bool) {
+	if file == nil || command == nil || declaration == nil || command.Dialect != Vim9 || command.Canonical == "var" ||
+		commandInsideBlock(command, file.Blocks, BlockDef) || commandInsideBlock(command, file.Blocks, BlockFunction) ||
+		declaration.Name.Start < 0 || declaration.Name.End <= declaration.Name.Start || declaration.Name.End > len(file.Source) {
+		return Diagnostic{}, false
+	}
+	name := file.Text(declaration.Name)
+	if len(name) < 3 || name[1] != ':' || !strings.ContainsRune("gwbt", rune(name[0])) || !isVimIdentifierByte(name[2]) {
+		return Diagnostic{}, false
+	}
+	delimiter := skipSpace(file.Source, declaration.Name.End, command.Argument.End)
+	if delimiter >= command.Argument.End || file.Source[delimiter] != ':' {
+		return Diagnostic{}, false
+	}
+	span := Span{Start: declaration.Name.Start, End: delimiter + 1}
+	return Diagnostic{Code: "vim/E1304", Message: "Cannot use type with this variable: " + file.Text(span), Span: span}, true
 }
 
 func vim9ForHeaderIsComment(file *File, command *Command) bool {

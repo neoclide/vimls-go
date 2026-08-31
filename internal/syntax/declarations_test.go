@@ -2268,6 +2268,47 @@ func TestVim9E1016ScopeGuards(t *testing.T) {
 	assertFileSpans(t, constants)
 }
 
+func TestVim9ScopedVariableTypeDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+	}{
+		{"window", "vim9script\nw:foo: number = 1\n", "w:foo:"},
+		{"tab", "vim9script\nt:foo: bool = true\n", "t:foo:"},
+		{"buffer", "vim9script\nb:foo: string = 'x'\n", "b:foo:"},
+		{"global", "vim9script\ng:foo: number = 1\n", "g:foo:"},
+		{"scoped const", "vim9script\nconst w:FOO: number = 1\n", "w:FOO:"},
+		{"scoped final", "vim9script\nfinal g:FOO: number = 1\n", "g:FOO:"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := Parse(test.source)
+			var got []Diagnostic
+			for _, diagnostic := range file.Diagnostics {
+				if diagnostic.Code == "vim/E1304" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Cannot use type with this variable: "+test.span || file.Text(got[0].Span) != test.span {
+				t.Fatalf("source = %q, diagnostics = %#v", test.source, file.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F()\n  w:foo: number = 1\nenddef\n",
+		"vim9script\nvar g:foo: number = 1\n",
+		"vim9script\ng:foo = 1\n",
+		"vim9script\nvar foo: number = 1\n",
+		"let w:foo: number = 1\n",
+		"vim9script\nw:\n",
+	} {
+		for _, diagnostic := range Parse(source).Diagnostics {
+			if diagnostic.Code == "vim/E1304" {
+				t.Fatalf("guard unexpectedly received E1304: %#v in source %q", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestVim9E1020CompoundDeclarationAssignment(t *testing.T) {
 	tests := []struct {
 		name, source string
