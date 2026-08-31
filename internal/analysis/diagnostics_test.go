@@ -3087,6 +3087,51 @@ func TestAnalyzeE1246MissingLockVariableDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1175NonEmptyStringArgumentDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source, span string
+		argument           int
+	}{
+		{"exepath", "vim9script\nexepath('')\n", "''", 1},
+		{"finddir", "vim9script\nfinddir(\"\")\n", `""`, 1},
+		{"findfile", "vim9script\nfindfile('')\n", "''", 1},
+		{"exists", "vim9script\nexists('')\n", "''", 1},
+		{"mkdir method", "vim9script\n''->mkdir()\n", "''", 1},
+		{"readfile", "vim9script\nreadfile('')\n", "''", 1},
+		{"gettext legacy", "gettext('')\n", "''", 1},
+		{"bindtextdomain second", "bindtextdomain('package', '')\n", "''", 2},
+		{"ngettext second", "ngettext('one', '', 2)\n", "''", 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1175" {
+					got = append(got, diagnostic)
+				}
+			}
+			message := "Non-empty string required for argument " + strconv.Itoa(test.argument)
+			if len(got) != 1 || got[0].Message != message || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1175 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ngettext('message')\n",
+		"vim9script\nvar name = ''\nfindfile(name)\n",
+		"exepath('')\n",
+		"remote_startserver('')\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1175" {
+				t.Fatalf("guard unexpectedly received E1175: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1181IgnoredUnderscoreDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		name, source string

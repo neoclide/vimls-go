@@ -8670,6 +8670,40 @@ func builtinCallArguments(file *syntax.File, call *syntax.Expression) (vimdata.B
 	return builtin, arguments, true
 }
 
+func emptyRequiredStringDiagnostic(function vimdata.BuiltinFunction, arguments []*syntax.Expression, dialect syntax.Dialect) (syntax.Diagnostic, bool) {
+	var indexes []int
+	switch function.Name {
+	case "bindtextdomain":
+		indexes = []int{0, 1}
+	case "gettext":
+		indexes = []int{0}
+	case "ngettext":
+		indexes = []int{0, 1}
+	case "exepath", "exists", "finddir", "findfile", "mkdir", "readfile":
+		if dialect != syntax.Vim9 {
+			return syntax.Diagnostic{}, false
+		}
+		indexes = []int{0}
+	default:
+		return syntax.Diagnostic{}, false
+	}
+	for _, index := range indexes {
+		if index >= len(arguments) {
+			continue
+		}
+		literal := arguments[index]
+		for literal != nil && literal.Kind == syntax.ExpressionParenthesized && len(literal.Children) == 1 {
+			literal = literal.Children[0]
+		}
+		if literal != nil && literal.Kind == syntax.ExpressionString && (literal.Value == "''" || literal.Value == `""`) {
+			return syntax.Diagnostic{
+				Code: "vim/E1175", Message: "Non-empty string required for argument " + strconv.Itoa(index+1), Span: literal.Span,
+			}, true
+		}
+	}
+	return syntax.Diagnostic{}, false
+}
+
 func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
 	seen := make(map[*syntax.Expression]bool)
 	var walkCommands func([]syntax.Command, *Scope)
@@ -8685,7 +8719,16 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 			if len(expression.Children) > 0 {
 				callee = expression.Children[0]
 			}
-			if builtinCall && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && builtin.Name == "exists_compiled" {
+			emptyRequiredString := false
+			if builtinCall {
+				if diagnostic, ok := emptyRequiredStringDiagnostic(builtin, arguments, dialect); ok {
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
+					emptyRequiredString = true
+				}
+			}
+			if emptyRequiredString {
+				// The value error owns the call before ordinary type checks.
+			} else if builtinCall && dialect == syntax.Vim9 && scopeUsesDefTypeRules(scope) && builtin.Name == "exists_compiled" {
 				explicit := arguments
 				switch {
 				case expression.Value == "" && callee != nil && callee.Kind == syntax.ExpressionMember:
