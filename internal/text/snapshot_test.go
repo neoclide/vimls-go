@@ -334,6 +334,35 @@ func TestApplyChangesDeterministicSequence(t *testing.T) {
 		}
 		full := NewSnapshot(current.URI(), uint64(step+2), &version, reference)
 		assertSnapshotMatches(t, updated, full)
+		switch step {
+		case 0:
+			if strings.HasPrefix(updated.Text(), "\ufeff") {
+				t.Fatal("step 0: BOM was not removed")
+			}
+		case 1:
+			if got, want := updated.Text(), "Ae\u0300B𐐀C\r\nline"; got != want {
+				t.Fatalf("step 1: combining mark replacement = %q, want %q", got, want)
+			}
+		case 2:
+			if got, want := updated.Text(), "Ae\u0300BXYC\r\nline"; got != want {
+				t.Fatalf("step 2: UTF-16 astral replacement = %q, want %q", got, want)
+			}
+		case 3:
+			position, err := updated.Position(updated.ByteLen(), UTF32)
+			if err != nil || updated.LineCount() != 1 || position != (Position{Character: 11}) {
+				t.Fatalf("step 3: CRLF removal line count = %d, end position = %#v, %v", updated.LineCount(), position, err)
+			}
+		case 4:
+			eof := updated.ByteLen()
+			position, err := updated.Position(eof, UTF8)
+			if err != nil || position != (Position{Character: 13}) {
+				t.Fatalf("step 4: EOF position = %#v, %v", position, err)
+			}
+			offset, err := updated.Offset(position, UTF8)
+			if err != nil || offset != eof {
+				t.Fatalf("step 4: EOF offset = %d, %v; want %d", offset, err, eof)
+			}
+		}
 		current = updated
 	}
 }
