@@ -390,7 +390,11 @@ func TestServerAnalysisDoesNotMutateParserCache(t *testing.T) {
 
 func TestServerRepeatedDocumentOpenClearsParserCache(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
-	instance.stopAnalysis()
+	t.Cleanup(instance.stopAnalysis)
+	// Prevent handlers from starting a worker while keeping the context live.
+	instance.analysisMu.Lock()
+	instance.analysisWorkers = 1
+	instance.analysisMu.Unlock()
 	documentURI := uri.MustParse("file:///reopen-parser-cache.vim")
 	params := &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: documentURI, Version: 1, Text: "vim9script\nvar value = 1\n",
@@ -403,6 +407,15 @@ func TestServerRepeatedDocumentOpenClearsParserCache(t *testing.T) {
 		t.Fatal("first snapshot is missing")
 	}
 	first := instance.parseSnapshot(firstSnapshot)
+	if first == nil {
+		t.Fatal("first parse is nil")
+	}
+	instance.publishMu.Lock()
+	firstCached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if firstCached.file != first || firstCached.contentID != firstSnapshot.ContentID() {
+		t.Fatalf("first parser cache: file=%p want=%p contentID=%x want=%x", firstCached.file, first, firstCached.contentID, firstSnapshot.ContentID())
+	}
 
 	params.TextDocument.Version = 2
 	if err := instance.DidOpen(context.Background(), params); err != nil {
@@ -418,14 +431,22 @@ func TestServerRepeatedDocumentOpenClearsParserCache(t *testing.T) {
 	if !ok || secondSnapshot == firstSnapshot {
 		t.Fatalf("second snapshot = %#v", secondSnapshot)
 	}
-	if got := instance.parseSnapshot(secondSnapshot); got == first {
-		t.Fatal("repeated didOpen reused prior lifetime parser tree")
+	second := instance.parseSnapshot(secondSnapshot)
+	if second == nil {
+		t.Fatal("second parse is nil")
+	}
+	if second.Source != params.TextDocument.Text || second == first {
+		t.Fatalf("second parse: file=%p source=%q wantSource=%q first=%p", second, second.Source, params.TextDocument.Text, first)
 	}
 }
 
 func TestServerOldSnapshotParserCacheCannotRestoreCurrentLifetime(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
-	instance.stopAnalysis()
+	t.Cleanup(instance.stopAnalysis)
+	// Prevent handlers from starting a worker while keeping the context live.
+	instance.analysisMu.Lock()
+	instance.analysisWorkers = 1
+	instance.analysisMu.Unlock()
 	documentURI := uri.MustParse("file:///old-snapshot-parser-cache.vim")
 	oldSource := "vim9script\nvar old = 1\n"
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
@@ -438,6 +459,15 @@ func TestServerOldSnapshotParserCacheCannotRestoreCurrentLifetime(t *testing.T) 
 		t.Fatal("old snapshot is missing")
 	}
 	oldFile := instance.parseSnapshot(oldSnapshot)
+	if oldFile == nil || oldFile.Source != oldSource {
+		t.Fatalf("old parse = %#v", oldFile)
+	}
+	instance.publishMu.Lock()
+	oldCached := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if oldCached.file != oldFile || oldCached.contentID != oldSnapshot.ContentID() {
+		t.Fatalf("old parser cache: file=%p want=%p contentID=%x want=%x", oldCached.file, oldFile, oldCached.contentID, oldSnapshot.ContentID())
+	}
 
 	currentSource := "vim9script\nvar current = 1\n"
 	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
@@ -453,6 +483,9 @@ func TestServerOldSnapshotParserCacheCannotRestoreCurrentLifetime(t *testing.T) 
 		t.Fatal("current snapshot is missing")
 	}
 	currentFile := instance.parseSnapshot(currentSnapshot)
+	if currentFile == nil || currentFile.Source != currentSource {
+		t.Fatalf("current parse = %#v", currentFile)
+	}
 	if stale := instance.parseSnapshot(oldSnapshot); stale == nil || stale.Source != oldSource {
 		t.Fatalf("old snapshot parse after change = %#v", stale)
 	}
@@ -486,6 +519,9 @@ func TestServerOldSnapshotParserCacheCannotRestoreCurrentLifetime(t *testing.T) 
 		t.Fatalf("reopened snapshot = %#v", reopened)
 	}
 	reopenedFile := instance.parseSnapshot(reopened)
+	if reopenedFile == nil || reopenedFile.Source != oldSource {
+		t.Fatalf("reopened parse = %#v", reopenedFile)
+	}
 	if reopenedFile == oldFile {
 		t.Fatal("reopened lifetime reused old parser tree")
 	}
