@@ -5758,6 +5758,29 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 	if syntaxDiagnosticOverlaps(result.File.Diagnostics, loop.Iterable.Span) || syntaxDiagnosticOverlaps(result.Diagnostics, loop.Iterable.Span) {
 		return
 	}
+	if command.Dialect == syntax.Vim9 && loop.Iterable.Kind == syntax.ExpressionList {
+		targetStart := command.Argument.Start
+		for targetStart < loop.Iterable.Span.Start && (result.File.Source[targetStart] == ' ' || result.File.Source[targetStart] == '\t') {
+			targetStart++
+		}
+		destructuring := targetStart < loop.Iterable.Span.Start && result.File.Source[targetStart] == '['
+		if destructuring {
+			fixed := 0
+			for _, binding := range loop.Bindings {
+				if !binding.Rest {
+					fixed++
+				}
+			}
+			for _, item := range loop.Iterable.Children {
+				if item != nil && item.Kind == syntax.ExpressionList && len(item.Children) < fixed {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E711", Message: "List value does not have enough items", Span: item.Span,
+					})
+					return
+				}
+			}
+		}
+	}
 	iterable := result.TypeOf(loop.Iterable)
 	if command.Dialect != syntax.Vim9 {
 		if !isUnknownType(iterable) && iterable.Name != "list" && iterable.Name != "tuple" && iterable.Name != "string" && iterable.Name != "blob" {

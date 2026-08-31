@@ -3601,6 +3601,39 @@ func TestAnalyzeE719DictionarySliceDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE711ForDestructuringCardinalityDiagnostics(t *testing.T) {
+	for _, test := range []struct{ source, span string }{
+		{"vim9script\ndef F()\n  for [left, right] in [[1], [2, 3]]\n  endfor\nenddef\n", "[1]"},
+		{"vim9script\nfor [left, middle; rest] in [[1, 2, 3], [4]]\nendfor\n", "[4]"},
+	} {
+		file := syntax.Parse(test.source)
+		var got []syntax.Diagnostic
+		for _, diagnostic := range Analyze(file).Diagnostics {
+			if diagnostic.Code == "vim/E711" {
+				got = append(got, diagnostic)
+			}
+		}
+		if len(got) != 1 || got[0].Message != "List value does not have enough items" || file.Text(got[0].Span) != test.span {
+			t.Fatalf("E711 diagnostics = %#v", got)
+		}
+	}
+
+	for _, source := range []string{
+		"vim9script\nfor [left, right] in [[1, 2], [3, 4]]\nendfor\n",
+		"vim9script\nfor [left, right] in [[1, 2, 3]]\nendfor\n",
+		"vim9script\nvar values = [[1], [2, 3]]\nfor [left, right] in values\nendfor\n",
+		"vim9script\nvar value = [1]\nfor [left, right] in [value]\nendfor\n",
+		"for [left, right] in [[1]]\nendfor\n",
+		"vim9script\nfor value in [[1]]\nendfor\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E711" {
+				t.Fatalf("guard unexpectedly received E711: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1120ImmediateConstDictionaryChangeDiagnostic(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F()\n  const dict = {one: 1}\n  dict['two'] = 2\nenddef\n")
 	result := Analyze(file)
