@@ -142,6 +142,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectPublicUnderscoreVariableDiagnostics(result)
 	collectPublicProtectedMemberNameDiagnostics(result)
 	collectConstructorDefaultValueDiagnostics(result)
+	collectUninitializedObjectVariableDiagnostics(result)
 	collectTypeDiagnostics(result)
 	collectInterfaceVariableAccessDiagnostics(result)
 	collectReturnOutsideFunctionDiagnostics(result)
@@ -1377,6 +1378,61 @@ func collectPublicUnderscoreVariableDiagnostics(result *FileAnalysis) {
 			})
 		}
 	}
+}
+
+func collectUninitializedObjectVariableDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	file := result.File
+	for index := range file.Commands {
+		class := &file.Commands[index]
+		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
+			continue
+		}
+		for _, memberIndex := range class.Aggregate.Members {
+			if memberIndex < 0 || memberIndex >= len(file.Commands) {
+				continue
+			}
+			member := &file.Commands[memberIndex]
+			declaration := member.Declaration
+			if declaration == nil || declaration.Initializer == nil || commandHasModifier(member, "static") ||
+				syntaxDiagnosticOverlaps(file.Diagnostics, declaration.Initializer.Span) {
+				continue
+			}
+			name := file.Text(declaration.Name)
+			if span, found := uninitializedSelfReference(file, declaration.Initializer, name); found {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E1430", Message: "Uninitialized object variable '" + name + "' referenced", Span: span,
+				})
+			}
+		}
+	}
+}
+
+func uninitializedSelfReference(file *syntax.File, expression *syntax.Expression, name string) (syntax.Span, bool) {
+	if file == nil || expression == nil || name == "" || expression.Kind == syntax.ExpressionLambda {
+		return syntax.Span{}, false
+	}
+	if expression.Kind == syntax.ExpressionMember && expression.Value == name && len(expression.Children) > 0 {
+		receiver := expression.Children[0]
+		for receiver != nil && receiver.Kind == syntax.ExpressionParenthesized && len(receiver.Children) == 1 {
+			receiver = receiver.Children[0]
+		}
+		if receiver != nil && receiver.Kind == syntax.ExpressionIdentifier && receiver.Value == "this" && file.Text(expression.Operator) == "." {
+			return memberNameSpan(file, expression), true
+		}
+	}
+	start := 0
+	if expression.Kind == syntax.ExpressionAssignment {
+		start = 1
+	}
+	for _, child := range expression.Children[start:] {
+		if span, found := uninitializedSelfReference(file, child, name); found {
+			return span, true
+		}
+	}
+	return syntax.Span{}, false
 }
 
 func collectDuplicateMethodDiagnostics(result *FileAnalysis) {

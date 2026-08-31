@@ -2769,6 +2769,42 @@ func TestAnalyzeE1168ScriptArgumentDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE1430UninitializedObjectVariableDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, initializer string }{
+		{"direct self reference", "this.x"},
+		{"parenthesized receiver", "(this).x"},
+		{"nested immediate read", "string(this.x)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\nclass Foo\n  var x: string = " + test.initializer + "\nendclass\nvar foo = Foo.new('ok')\n"
+			file := syntax.Parse(source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1430" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Uninitialized object variable 'x' referenced" || file.Text(got[0].Span) != "x" || got[0].Span.Start != strings.LastIndex(source, "x") {
+				t.Fatalf("E1430 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\nclass Foo\n  var x: string = ''\n  var Y: func(): string = () => this.x\nendclass\n",
+		"vim9script\nclass Foo\n  var x: string = ''\n  var y: string = this.x\nendclass\n",
+		"vim9script\nclass Foo\n  static var x: any = this.x\nendclass\n",
+		"vim9script\nclass Foo\n  var x: string = ''\n  def Get(): string\n    return this.x\n  enddef\nendclass\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1430" {
+				t.Fatalf("guard unexpectedly received E1430: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1523LegacyForIterableDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"number", "for item in 99\nendfor\nlet after = 1\n", "99"},
