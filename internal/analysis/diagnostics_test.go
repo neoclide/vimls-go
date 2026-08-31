@@ -6890,7 +6890,7 @@ func TestAnalyzeStrictStringConversionDiagnostics(t *testing.T) {
 			name: "class and object values",
 			source: "vim9script\nclass A\nendclass\ndef Func()\n  var object = A.new()\n" +
 				"  var objectText = object .. ''\n  var classText = A .. ''\nenddef\n",
-			want: []struct{ message, text string }{{"Cannot convert object to string", "object"}, {"Cannot convert class to string", "A"}},
+			want: []struct{ message, text string }{{"Cannot convert class to string", "A"}},
 		},
 		{
 			name:   "legacy-root def",
@@ -6949,6 +6949,40 @@ func TestAnalyzeStrictStringConversionDiagnostics(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnalyzeE1324ObjectAsStringDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, span string }{
+		{"compiled concatenation", "vim9script\nclass A\nendclass\ndef F()\n  var object = A.new()\n  var text = '' .. object\nenddef\n", "object"},
+		{"script concatenation", "vim9script\nclass A\nendclass\nvar object = A.new()\nvar text = 'call ' .. object\n", "object"},
+		{"script compound assignment", "vim9script\nclass A\nendclass\nvar text = ''\nvar object = A.new()\ntext ..= object\n", "object"},
+		{"known null object", "vim9script\ndef F()\n  var object = null_object\n  var text = '' .. object\nenddef\n", "object"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vim/E1324" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Message != "Using an Object as a String" || file.Text(got[0].Span) != test.span {
+				t.Fatalf("E1324 diagnostics = %#v", result.Diagnostics)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"vim9script\ndef F(value: any)\n  var text = '' .. value\nenddef\n",
+		"vim9script\nclass A\nendclass\nvar text = '' .. A\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E1324" {
+				t.Fatalf("guard unexpectedly received E1324: %#v\n%s", diagnostic, source)
+			}
+		}
 	}
 }
 

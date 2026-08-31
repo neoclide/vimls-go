@@ -4574,9 +4574,28 @@ func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnos
 	}
 }
 
+func objectAsStringDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (syntax.Diagnostic, bool) {
+	if result == nil || expression == nil || expressionContainsMissing(expression) {
+		return syntax.Diagnostic{}, false
+	}
+	if expression.Kind == syntax.ExpressionIdentifier {
+		if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil && declaration.Kind == SymbolKindClass {
+			return syntax.Diagnostic{}, false
+		}
+	}
+	name := result.TypeOf(expression).Name
+	if name != "object" && result.classes[name] == nil {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{Code: "vim/E1324", Message: "Using an Object as a String", Span: expression.Span}, true
+}
+
 func strictStringConversionDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression, interpolate bool) (syntax.Diagnostic, bool) {
 	if result == nil || expression == nil {
 		return syntax.Diagnostic{}, false
+	}
+	if diagnostic, ok := objectAsStringDiagnostic(result, scope, expression); ok {
+		return diagnostic, true
 	}
 	typ := result.TypeOf(expression)
 	name := typ.Name
@@ -4596,11 +4615,8 @@ func strictStringConversionDiagnostic(result *FileAnalysis, scope *Scope, expres
 	if isUnknownType(ValueType{Name: name}) || name == "string" || name == "special" || name == "bool" || name == "number" || name == "float" || interpolate && (name == "list" || name == "tuple" || name == "dict") {
 		return syntax.Diagnostic{}, false
 	}
-	if result.classes[name] != nil {
-		name = "object"
-	}
 	switch name {
-	case "list", "tuple", "dict", "void", "blob", "func", "partial", "job", "channel", "class", "object", "typealias":
+	case "list", "tuple", "dict", "void", "blob", "func", "partial", "job", "channel", "class", "typealias":
 	default:
 		return syntax.Diagnostic{}, false
 	}
@@ -4897,7 +4913,14 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					numericCompound := op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%="
 					invalidTarget := numericCompound && targetType.Name == "dict"
 					invalidScriptConcat := (op == ".=" || op == "..=") && !scopeUsesDefTypeRules(expressionScope) && targetType.Name == "string" && (rightType.Name == "list" || rightType.Name == "dict")
-					if invalidTarget || invalidScriptConcat {
+					objectConcat := false
+					if (op == ".=" || op == "..=") && !scopeUsesDefTypeRules(expressionScope) && targetType.Name == "string" {
+						if diagnostic, ok := objectAsStringDiagnostic(result, expressionScope, expression.Children[1]); ok {
+							result.Diagnostics = append(result.Diagnostics, diagnostic)
+							objectConcat = true
+						}
+					}
+					if !objectConcat && (invalidTarget || invalidScriptConcat) {
 						symbol := strings.TrimSuffix(op, "=")
 						if symbol == ".." {
 							symbol = "."
@@ -5112,6 +5135,9 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					left, right := expression.Children[0], expression.Children[1]
 					leftType, rightType := result.TypeOf(left), result.TypeOf(right)
 					diagnostic, ok := stringConversionDiagnostic(leftType, left.Span)
+					if !ok && command.Dialect == syntax.Vim9 {
+						diagnostic, ok = objectAsStringDiagnostic(result, expressionScope, left)
+					}
 					if !ok && command.Dialect == syntax.Vim9 && (leftType.Name == "job" || leftType.Name == "channel") {
 						diagnostic = syntax.Diagnostic{Code: "vim/E908", Message: "Using an invalid value as a String: " + leftType.Name, Span: left.Span}
 						ok = true
@@ -5124,6 +5150,9 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 							ok = true
 						} else {
 							diagnostic, ok = stringConversionDiagnostic(rightType, right.Span)
+							if !ok && command.Dialect == syntax.Vim9 {
+								diagnostic, ok = objectAsStringDiagnostic(result, expressionScope, right)
+							}
 						}
 					}
 					if ok {
