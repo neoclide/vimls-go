@@ -72,12 +72,22 @@ type UserCommandFact struct {
 	BufferLocal bool
 }
 
+// GlobalNameFact is a statically named global function or variable that is
+// still present after replaying direct declarations and deletions in one file.
+type GlobalNameFact struct {
+	Path string
+	Name string
+	Span syntax.Span
+	Kind analysis.NameDeclarationKind
+}
+
 type indexedFile struct {
 	bytes      int
 	source     string
 	facts      []SymbolFact
 	references []ExternalReferenceFact
 	commands   []UserCommandFact
+	globals    []GlobalNameFact
 }
 
 // Index stores symbols from a bounded set of syntax files. All methods are
@@ -92,6 +102,7 @@ type Index struct {
 	byName         map[string][]SymbolFact
 	byExternalName map[string][]ExternalReferenceFact
 	byUserCommand  map[string][]UserCommandFact
+	byGlobalName   map[string][]GlobalNameFact
 	complete       bool
 }
 
@@ -106,6 +117,7 @@ func NewIndex(maxFiles, maxBytes int) *Index {
 		byName:         make(map[string][]SymbolFact),
 		byExternalName: make(map[string][]ExternalReferenceFact),
 		byUserCommand:  make(map[string][]UserCommandFact),
+		byGlobalName:   make(map[string][]GlobalNameFact),
 	}
 }
 
@@ -123,7 +135,8 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	sortFacts(facts)
 	references := CollectExternalReferences(normalized, file)
 	commands := CollectUserCommandFacts(normalized, file)
-	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references, commands: commands}
+	globals := CollectGlobalNameFacts(normalized, file)
+	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references, commands: commands, globals: globals}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -144,6 +157,7 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 		i.removeFactsLocked(old.facts)
 		i.removeExternalReferencesLocked(old.references)
 		i.removeUserCommandsLocked(old.commands)
+		i.removeGlobalNamesLocked(old.globals)
 	}
 	i.files[normalized] = indexed
 	i.bytes = indexedBytes
@@ -161,6 +175,9 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	}
 	for _, command := range commands {
 		i.byUserCommand[command.Name] = append(i.byUserCommand[command.Name], command)
+	}
+	for _, fact := range globals {
+		i.byGlobalName[fact.Name] = append(i.byGlobalName[fact.Name], fact)
 	}
 	i.revision++
 	return nil
@@ -181,6 +198,7 @@ func (i *Index) Remove(path string) {
 	i.removeFactsLocked(old.facts)
 	i.removeExternalReferencesLocked(old.references)
 	i.removeUserCommandsLocked(old.commands)
+	i.removeGlobalNamesLocked(old.globals)
 	delete(i.files, normalized)
 	i.bytes -= old.bytes
 	i.revision++
@@ -275,6 +293,85 @@ func (i *Index) UserCommandNames() []string {
 	i.mu.RUnlock()
 	sort.Strings(names)
 	return names
+}
+
+// GlobalNameFacts returns the active global declarations with name. Results
+// are independent of the index and retain their declaration locations.
+func (i *Index) GlobalNameFacts(name string) []GlobalNameFact {
+	if name == "" {
+		return nil
+	}
+	i.mu.RLock()
+	facts := append([]GlobalNameFact(nil), i.byGlobalName[name]...)
+	i.mu.RUnlock()
+	sort.SliceStable(facts, func(left, right int) bool {
+		if facts[left].Path != facts[right].Path {
+			return facts[left].Path < facts[right].Path
+		}
+		if facts[left].Span.Start != facts[right].Span.Start {
+			return facts[left].Span.Start < facts[right].Span.Start
+		}
+		return facts[left].Kind < facts[right].Kind
+	})
+	return facts
+}
+
+// GlobalNameConflictDiagnostics warns on current-file declarations that have
+// an opposite-kind declaration in another indexed file. Same-file conflicts
+// are owned by analysis.Analyze and are skipped here.
+func (i *Index) GlobalNameConflictDiagnostics(path string, file *syntax.File) []syntax.Diagnostic {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil {
+		return nil
+	}
+	active := make(map[string]map[analysis.NameDeclarationKind]bool)
+	diagnostics := make([]syntax.Diagnostic, 0)
+	for _, event := range analysis.CollectNameDeclarationEvents(file) {
+		if event.Scope != analysis.NameDeclarationGlobal {
+			continue
+		}
+		if active[event.Name] == nil {
+			active[event.Name] = make(map[analysis.NameDeclarationKind]bool)
+		}
+		if event.Delete {
+			delete(active[event.Name], event.Kind)
+			continue
+		}
+		opposite := analysis.NameDeclarationVariable
+		if event.Kind == analysis.NameDeclarationVariable {
+			opposite = analysis.NameDeclarationFunction
+		}
+		localConflict := active[event.Name][opposite]
+		if localConflict {
+			continue
+		}
+		i.mu.RLock()
+		conflict := false
+		for _, fact := range i.byGlobalName[event.Name] {
+			if fact.Path != normalized && fact.Kind == opposite {
+				conflict = true
+				break
+			}
+		}
+		i.mu.RUnlock()
+		if conflict {
+			diagnostics = append(diagnostics, globalNameConflictDiagnostic(event))
+			continue
+		}
+		active[event.Name][event.Kind] = true
+	}
+	return diagnostics
+}
+
+func globalNameConflictDiagnostic(event analysis.NameDeclarationEvent) syntax.Diagnostic {
+	if event.Kind == analysis.NameDeclarationVariable {
+		return syntax.Diagnostic{
+			Code: "vim/E705", Message: "Variable " + event.Name + " conflicts with a function declared in the global scope; rename one to avoid runtime conflicts", Span: event.Span,
+		}
+	}
+	return syntax.Diagnostic{
+		Code: "vim/E707", Message: "Function " + event.Name + " conflicts with a variable declared in the global scope; rename one to avoid runtime conflicts", Span: event.Span,
+	}
 }
 
 // SetComplete records whether every discovered source fitted in the index.
@@ -417,6 +514,54 @@ func CollectUserCommandFacts(path string, file *syntax.File) []UserCommandFact {
 		}
 	}
 	collect(file.Commands)
+	return facts
+}
+
+// CollectGlobalNameFacts replays direct global declarations and deletions in
+// one file and returns the declarations still active at the end of that file.
+func CollectGlobalNameFacts(path string, file *syntax.File) []GlobalNameFact {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil {
+		return nil
+	}
+	type factKey struct {
+		name string
+		kind analysis.NameDeclarationKind
+	}
+	active := make(map[factKey]GlobalNameFact)
+	for _, event := range analysis.CollectNameDeclarationEvents(file) {
+		if event.Scope != analysis.NameDeclarationGlobal {
+			continue
+		}
+		key := factKey{name: event.Name, kind: event.Kind}
+		if event.Delete {
+			delete(active, key)
+			continue
+		}
+		opposite := analysis.NameDeclarationVariable
+		if event.Kind == analysis.NameDeclarationVariable {
+			opposite = analysis.NameDeclarationFunction
+		}
+		if _, conflict := active[factKey{name: event.Name, kind: opposite}]; conflict {
+			continue
+		}
+		if _, exists := active[key]; !exists {
+			active[key] = GlobalNameFact{Path: normalized, Name: strings.Clone(event.Name), Span: event.Span, Kind: event.Kind}
+		}
+	}
+	facts := make([]GlobalNameFact, 0, len(active))
+	for _, fact := range active {
+		facts = append(facts, fact)
+	}
+	sort.SliceStable(facts, func(left, right int) bool {
+		if facts[left].Name != facts[right].Name {
+			return facts[left].Name < facts[right].Name
+		}
+		if facts[left].Kind != facts[right].Kind {
+			return facts[left].Kind < facts[right].Kind
+		}
+		return facts[left].Span.Start < facts[right].Span.Start
+	})
 	return facts
 }
 
@@ -915,6 +1060,21 @@ func (i *Index) removeUserCommandsLocked(facts []UserCommandFact) {
 				i.byUserCommand[fact.Name] = append(matches[:index], matches[index+1:]...)
 				if len(i.byUserCommand[fact.Name]) == 0 {
 					delete(i.byUserCommand, fact.Name)
+				}
+				break
+			}
+		}
+	}
+}
+
+func (i *Index) removeGlobalNamesLocked(facts []GlobalNameFact) {
+	for _, fact := range facts {
+		matches := i.byGlobalName[fact.Name]
+		for index, candidate := range matches {
+			if candidate == fact {
+				i.byGlobalName[fact.Name] = append(matches[:index], matches[index+1:]...)
+				if len(i.byGlobalName[fact.Name]) == 0 {
+					delete(i.byGlobalName, fact.Name)
 				}
 				break
 			}

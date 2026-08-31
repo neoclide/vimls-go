@@ -37,6 +37,11 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 	if got := protocolDiagnosticSeverity("vim/E464", syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
 		t.Errorf("vim/E464 severity = %v, want warning", got)
 	}
+	for _, code := range []string{"vim/E705", "vim/E707"} {
+		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
+			t.Errorf("%s severity = %v, want warning", code, got)
+		}
+	}
 }
 
 func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
@@ -65,6 +70,43 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	index.SetComplete(false)
 	if diagnostics := instance.userCommandAbbreviationDiagnostics(file); len(diagnostics) != 0 {
 		t.Fatalf("incomplete runtimepath index produced E464: %#v", diagnostics)
+	}
+}
+
+func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	writeWorkspaceFile(t, runtimeRoot, "plugin/function.vim", "function Shared()\nendfunction\n")
+	writeWorkspaceFile(t, runtimeRoot, "plugin/variable.vim", "let g:Other = 1\n")
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{runtimeRoot}, workspacePathResolver(nil, []string{runtimeRoot}), nil)
+	if len(warnings) != 0 || index.FileCount() != 2 {
+		t.Fatalf("runtimepath index: files=%d warnings=%#v", index.FileCount(), warnings)
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceIndex = index
+	instance.workspaceGraph = graph
+	instance.workspaceGraphView = graph.Snapshot()
+	instance.workspaceFiles = files
+	instance.workspaceBuilt = true
+	instance.workspaceMu.Unlock()
+
+	variablePath := filepath.Join(runtimeRoot, "plugin/current-variable.vim")
+	variableFile := syntax.Parse("let g:Shared = 1\n")
+	if got := instance.globalNameConflictDiagnostics(uri.File(variablePath).String(), variableFile); len(got) != 1 || got[0].Code != "vim/E705" {
+		t.Fatalf("E705 diagnostics = %#v", got)
+	}
+	functionPath := filepath.Join(runtimeRoot, "plugin/current-function.vim")
+	functionFile := syntax.Parse("function Other()\nendfunction\n")
+	if got := instance.globalNameConflictDiagnostics(uri.File(functionPath).String(), functionFile); len(got) != 1 || got[0].Code != "vim/E707" {
+		t.Fatalf("E707 diagnostics = %#v", got)
+	}
+
+	instance.workspaceMu.Lock()
+	instance.workspaceBuilt = false
+	instance.workspaceMu.Unlock()
+	if got := instance.globalNameConflictDiagnostics(uri.File(variablePath).String(), variableFile); len(got) != 0 {
+		t.Fatalf("unready index produced global conflict warning: %#v", got)
 	}
 }
 

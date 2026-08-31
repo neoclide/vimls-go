@@ -38,6 +38,31 @@ type FileAnalysis struct {
 	classes                     map[string]*syntax.Command
 }
 
+type NameDeclarationKind uint8
+
+const (
+	NameDeclarationFunction NameDeclarationKind = iota + 1
+	NameDeclarationVariable
+)
+
+type NameDeclarationScope uint8
+
+const (
+	NameDeclarationScript NameDeclarationScope = iota + 1
+	NameDeclarationGlobal
+)
+
+// NameDeclarationEvent is a statically visible change to Vim's script-local
+// or global function/variable tables. Delete events retain their source span
+// so callers can replay one file in source order without executing it.
+type NameDeclarationEvent struct {
+	Name   string
+	Span   syntax.Span
+	Kind   NameDeclarationKind
+	Scope  NameDeclarationScope
+	Delete bool
+}
+
 // Scope is a lexical region. Root has Block == -1 and an empty Kind. Other
 // scopes correspond to a block in either the top-level syntax.File or an
 // embedded CommandList; CommandList identifies the latter's local index.
@@ -120,6 +145,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectLambdaDeclarations(result, file.Commands)
 	collectLegacyFunctionOverwriteRiskDiagnostics(result, file.Commands)
 	collectUserCommandOverwriteRiskDiagnostics(result, file.Commands)
+	collectNameDeclarationConflictDiagnostics(result)
 	collectVim9LegacyScriptVariableDiagnostics(result)
 
 	// A malformed or partially parsed enum value may remain an opaque command.
@@ -188,6 +214,134 @@ func Analyze(file *syntax.File) *FileAnalysis {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
 	return result
+}
+
+func commandInsideFunction(command *syntax.Command, blocks []syntax.Block) bool {
+	if command == nil {
+		return false
+	}
+	for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
+		if blocks[block].Kind == syntax.BlockFunction || blocks[block].Kind == syntax.BlockDef {
+			return true
+		}
+	}
+	return false
+}
+
+func staticNameDeclaration(file *syntax.File, span syntax.Span, dialect syntax.Dialect, kind NameDeclarationKind, insideFunction bool) (NameDeclarationEvent, bool) {
+	if file == nil || span.Start < 0 || span.Start >= span.End || span.End > len(file.Source) || syntaxDiagnosticOverlaps(file.Diagnostics, span) {
+		return NameDeclarationEvent{}, false
+	}
+	raw := file.Text(span)
+	scope := NameDeclarationScope(0)
+	name := raw
+	switch {
+	case strings.HasPrefix(raw, "g:"):
+		scope, name = NameDeclarationGlobal, raw[2:]
+	case strings.HasPrefix(raw, "s:"):
+		scope, name = NameDeclarationScript, raw[2:]
+	case len(raw) > len("<SID>") && strings.EqualFold(raw[:len("<SID>")], "<SID>"):
+		scope, name = NameDeclarationScript, raw[len("<SID>"):]
+	case kind == NameDeclarationFunction && dialect == syntax.Legacy:
+		scope = NameDeclarationGlobal
+	case kind == NameDeclarationVariable && dialect == syntax.Legacy && !insideFunction:
+		scope = NameDeclarationGlobal
+	default:
+		return NameDeclarationEvent{}, false
+	}
+	if !validScopeVariableName(name) {
+		return NameDeclarationEvent{}, false
+	}
+	return NameDeclarationEvent{Name: strings.Clone(name), Span: span, Kind: kind, Scope: scope}, true
+}
+
+// CollectNameDeclarationEvents returns direct, statically named script-local
+// and global function/variable declarations and deletions in source order.
+// Deferred command bodies and dynamic names remain opaque.
+func CollectNameDeclarationEvents(file *syntax.File) []NameDeclarationEvent {
+	if file == nil {
+		return nil
+	}
+	events := make([]NameDeclarationEvent, 0)
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		insideFunction := commandInsideFunction(command, file.Blocks)
+		if command.Function != nil {
+			if event, ok := staticNameDeclaration(file, command.Function.Name, command.Dialect, NameDeclarationFunction, false); ok {
+				events = append(events, event)
+			}
+		}
+		if command.Declaration != nil {
+			for _, binding := range command.Declaration.Bindings {
+				if event, ok := staticNameDeclaration(file, binding.Name, command.Dialect, NameDeclarationVariable, insideFunction); ok {
+					events = append(events, event)
+				}
+			}
+		}
+		if command.Canonical == "delfunction" {
+			for _, target := range command.Targets {
+				if target != nil && target.Kind == syntax.ExpressionIdentifier {
+					if event, ok := staticNameDeclaration(file, target.Span, command.Dialect, NameDeclarationFunction, false); ok {
+						event.Delete = true
+						events = append(events, event)
+					}
+				}
+			}
+		}
+		if command.Canonical == "unlet" {
+			for _, target := range command.Targets {
+				if target != nil && target.Kind == syntax.ExpressionIdentifier {
+					if event, ok := staticNameDeclaration(file, target.Span, command.Dialect, NameDeclarationVariable, insideFunction); ok {
+						event.Delete = true
+						events = append(events, event)
+					}
+				}
+			}
+		}
+	}
+	sort.SliceStable(events, func(left, right int) bool { return events[left].Span.Start < events[right].Span.Start })
+	return events
+}
+
+func nameDeclarationConflictDiagnostic(event NameDeclarationEvent) syntax.Diagnostic {
+	if event.Kind == NameDeclarationVariable {
+		return syntax.Diagnostic{
+			Code: "vim/E705", Message: "Variable " + event.Name + " conflicts with a function declared in the same scope; rename one to avoid runtime conflicts", Span: event.Span,
+		}
+	}
+	return syntax.Diagnostic{
+		Code: "vim/E707", Message: "Function " + event.Name + " conflicts with a variable declared in the same scope; rename one to avoid runtime conflicts", Span: event.Span,
+	}
+}
+
+func collectNameDeclarationConflictDiagnostics(result *FileAnalysis) {
+	if result == nil || result.File == nil {
+		return
+	}
+	type tableKey struct {
+		scope NameDeclarationScope
+		name  string
+	}
+	tables := make(map[tableKey]map[NameDeclarationKind]bool)
+	for _, event := range CollectNameDeclarationEvents(result.File) {
+		key := tableKey{scope: event.Scope, name: event.Name}
+		if tables[key] == nil {
+			tables[key] = make(map[NameDeclarationKind]bool)
+		}
+		if event.Delete {
+			delete(tables[key], event.Kind)
+			continue
+		}
+		opposite := NameDeclarationVariable
+		if event.Kind == NameDeclarationVariable {
+			opposite = NameDeclarationFunction
+		}
+		if tables[key][opposite] {
+			result.Diagnostics = append(result.Diagnostics, nameDeclarationConflictDiagnostic(event))
+			continue
+		}
+		tables[key][event.Kind] = true
+	}
 }
 
 func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {

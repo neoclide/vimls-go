@@ -88,6 +88,67 @@ func TestIndexUserCommandNamesTrackReplaceAndRemove(t *testing.T) {
 	}
 }
 
+func TestIndexGlobalNameFactsTrackLocationsAndDeletes(t *testing.T) {
+	index := NewIndex(10, 10000)
+	root := t.TempDir()
+	path := filepath.Join(root, "globals.vim")
+	source := "function Shared()\nendfunction\nfunction Gone()\nendfunction\ndelfunction Gone\nlet g:Value = 1\nlet g:Removed = 1\nunlet g:Removed\nlet s:ScriptOnly = 1\n"
+	if err := index.Replace(path, syntax.Parse(source)); err != nil {
+		t.Fatal(err)
+	}
+	functions := index.GlobalNameFacts("Shared")
+	variables := index.GlobalNameFacts("Value")
+	if len(functions) != 1 || functions[0].Kind != analysis.NameDeclarationFunction || functions[0].Span.Start != 9 {
+		t.Fatalf("global function facts = %#v", functions)
+	}
+	if len(variables) != 1 || variables[0].Kind != analysis.NameDeclarationVariable || variables[0].Span.Start <= functions[0].Span.Start {
+		t.Fatalf("global variable facts = %#v", variables)
+	}
+	if len(index.GlobalNameFacts("Gone")) != 0 || len(index.GlobalNameFacts("Removed")) != 0 || len(index.GlobalNameFacts("ScriptOnly")) != 0 {
+		t.Fatalf("deleted or script-local facts leaked: gone=%#v removed=%#v script=%#v", index.GlobalNameFacts("Gone"), index.GlobalNameFacts("Removed"), index.GlobalNameFacts("ScriptOnly"))
+	}
+}
+
+func TestIndexGlobalNameConflictDiagnostics(t *testing.T) {
+	index := NewIndex(10, 10000)
+	root := t.TempDir()
+	functionPath := filepath.Join(root, "function.vim")
+	variablePath := filepath.Join(root, "variable.vim")
+	if err := index.Replace(functionPath, syntax.Parse("function Shared()\nendfunction\n")); err != nil {
+		t.Fatal(err)
+	}
+	variableFile := syntax.Parse("let g:Shared = 1\n")
+	if got := index.GlobalNameConflictDiagnostics(variablePath, variableFile); len(got) != 1 || got[0].Code != "vim/E705" || variableFile.Text(got[0].Span) != "g:Shared" {
+		t.Fatalf("E705 diagnostics = %#v", got)
+	}
+	if err := index.Replace(variablePath, variableFile); err != nil {
+		t.Fatal(err)
+	}
+	otherFunctionPath := filepath.Join(root, "other-function.vim")
+	otherFunction := syntax.Parse("function g:Shared()\nendfunction\n")
+	if got := index.GlobalNameConflictDiagnostics(otherFunctionPath, otherFunction); len(got) != 1 || got[0].Code != "vim/E707" || otherFunction.Text(got[0].Span) != "g:Shared" {
+		t.Fatalf("E707 diagnostics = %#v", got)
+	}
+
+	localConflict := syntax.Parse("function LocalOnly()\nendfunction\nlet g:LocalOnly = 1\n")
+	localPath := filepath.Join(root, "local.vim")
+	if err := index.Replace(localPath, localConflict); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.GlobalNameConflictDiagnostics(localPath, localConflict); len(got) != 0 {
+		t.Fatalf("same-file conflict duplicated by index: %#v", got)
+	}
+
+	deletedPath := filepath.Join(root, "deleted.vim")
+	if err := index.Replace(deletedPath, syntax.Parse("function Deleted()\nendfunction\ndelfunction Deleted\n")); err != nil {
+		t.Fatal(err)
+	}
+	deletedVariable := syntax.Parse("let g:Deleted = 1\n")
+	if got := index.GlobalNameConflictDiagnostics(filepath.Join(root, "deleted-variable.vim"), deletedVariable); len(got) != 0 {
+		t.Fatalf("deleted indexed function produced warning: %#v", got)
+	}
+}
+
 func TestIndexSearchRanksSubsequencesAndLimitsResults(t *testing.T) {
 	index := NewIndex(10, 10000)
 	root := t.TempDir()

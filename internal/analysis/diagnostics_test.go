@@ -3177,6 +3177,44 @@ func TestAnalyzeE461IllegalVariableNameDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeE705E707NameConflictWarnings(t *testing.T) {
+	for _, test := range []struct {
+		name, source, code, span string
+	}{
+		{"script variable after function", "function s:Shared()\nendfunction\nlet s:Shared = 1\n", "vim/E705", "s:Shared"},
+		{"script function after variable", "let s:Shared = 1\nfunction s:Shared()\nendfunction\n", "vim/E707", "s:Shared"},
+		{"global variable after function", "function Shared()\nendfunction\nlet g:Shared = 1\n", "vim/E705", "g:Shared"},
+		{"global function after variable", "let g:Shared = 1\nfunction Shared()\nendfunction\n", "vim/E707", "Shared"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vim/E705" || diagnostic.Code == "vim/E707" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || got[0].Code != test.code || file.Text(got[0].Span) != test.span || !strings.Contains(got[0].Message, "rename one") {
+				t.Fatalf("name conflict diagnostics = %#v", got)
+			}
+		})
+	}
+
+	for _, source := range []string{
+		"function s:Shared()\nendfunction\ndelfunction s:Shared\nlet s:Shared = 1\n",
+		"let g:Shared = 1\nunlet g:Shared\nfunction Shared()\nendfunction\n",
+		"function Shared()\nendfunction\nlet s:Shared = 1\n",
+		"function Shared()\nendfunction\nfunction Other()\n  let Shared = 1\nendfunction\n",
+		"let g:Shared = 1\nlet g:Shared = 2\n",
+	} {
+		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+			if diagnostic.Code == "vim/E705" || diagnostic.Code == "vim/E707" {
+				t.Fatalf("guard unexpectedly received name conflict warning: %#v\n%s", diagnostic, source)
+			}
+		}
+	}
+}
+
 func TestAnalyzeE1148CannotIndexRuntimeDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, span string }{
 		{"compiled nested string", "vim9script\ndef F()\n  var dict = {value: 'text'}\n  dict.value[0] = 1\nenddef\n", "dict.value"},
