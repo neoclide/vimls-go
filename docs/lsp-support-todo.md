@@ -121,9 +121,9 @@ for dynamic names.
 - [x] Finish Vim9 type checking for primitive values, containers, tuples,
   functions, objects, interfaces, enums, generics, `any`, `void` and null
   values. Preserve `unknown` as an analyzer state, never a source type.
-- [ ] Continue the official compile-diagnostic migration one Vim error code per
-  reviewable test change, using readable cases in the owning
-  `official_compile_cases_e*_test.go` file.
+- [x] Complete the Vim 9.2.1015 official compile-diagnostic inventory. Add
+  future supported error codes one per reviewable test change, using readable
+  cases in the owning `official_compile_cases_e*_test.go` file.
 
 Exit gate: every supported diagnostic has official evidence, exact code/message
 and byte range tests; incomplete or dynamic code does not create a false error.

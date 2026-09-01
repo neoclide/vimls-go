@@ -1,6 +1,6 @@
 # Vim error code support
 
-This document is generated from the native `vim/E…` diagnostics referenced by production Go source under `internal/` and `cmd/`, combined with the support decisions in [`vim-lsp-pending-errors.md`](../vim-lsp-pending-errors.md). The inventory is pinned to the current repository and Vim 9.2.1015 evidence.
+This inventory covers the native `vim/E…` diagnostics referenced by production Go source under `internal/` and `cmd/`. It is pinned to the current repository and Vim 9.2.1015 evidence.
 
 ## Reading the status
 
@@ -3216,7 +3216,7 @@ Inventory: **460 supported** (250 full and 210 partial) and **7 explicitly unsup
 
 - **Completeness**: Partial
 - **Overview**: type arguments on non-generic function are rejected
-- **Implementation and tests**: internal/analysis; internal/analysis/diagnostics_test.go:10859; vim-lsp-pending-errors.md; Vim help vim9.txt
+- **Implementation and tests**: internal/analysis; internal/analysis/diagnostics_test.go:10859; Vim help vim9.txt
 - **Static-analysis boundary**: Explicitly scoped to file-local generic/regular functions; no dynamic global lookup.
 
 ### E1561: Duplicate type variable name
