@@ -2,22 +2,130 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
   release:
+    name: Build and Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.26.x"
-      - run: go run ./tools/release -version "$GITHUB_REF_NAME" -epoch "$(git log -1 --format=%ct)"
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Determine release version
+        id: vars
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v ]]; then
+            TAG="v${TAG}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes from git log
+        run: |
+          TAG="${{ github.ref_name }}"
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${TAG}"
+          else
+            RANGE="${TAG}"
+          fi
+          echo "## Changes" > release_notes.md
+          git log "$RANGE" --format="* %s (%h)" --no-merges -n 30 >> release_notes.md
+
+      - name: Run checks and tests
+        run: |
+          go vet -mod=readonly ./...
+          go test -mod=readonly ./...
+
+      - name: Build executable binaries and archives
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          TARGETS=(
+            "darwin/amd64"
+            "darwin/arm64"
+            "linux/amd64"
+            "linux/arm64"
+            "linux/arm/7"
+            "windows/amd64"
+            "windows/arm64"
+            "freebsd/amd64"
+          )
+
+          for target in "${TARGETS[@]}"; do
+            IFS="/" read -r GOOS GOARCH GOARM <<< "$target"
+
+            ARCH_SUFFIX="${GOARCH}"
+            if [ -n "$GOARM" ]; then
+              ARCH_SUFFIX="armv${GOARM}"
+              export GOARM
+            else
+              unset GOARM
+            fi
+
+            EXE_SUFFIX=""
+            if [ "$GOOS" = "windows" ]; then
+              EXE_SUFFIX=".exe"
+            fi
+
+            BINARY_NAME="vimls-${GOOS}-${ARCH_SUFFIX}${EXE_SUFFIX}"
+            OUTPUT_BIN="dist/${BINARY_NAME}"
+
+            echo "Building $OUTPUT_BIN..."
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -mod=readonly -trimpath \
+              -ldflags="-s -w -buildid= -X github.com/neoclide/vimls-go/internal/server.Version=${TAG}" \
+              -o "$OUTPUT_BIN" ./cmd/vimls
+
+            chmod +x "$OUTPUT_BIN" || true
+
+            TEMP_DIR="$(mktemp -d)"
+            if [ "$GOOS" = "windows" ]; then
+              cp "$OUTPUT_BIN" "$TEMP_DIR/vimls.exe"
+              cp README.md "$TEMP_DIR/"
+              if [ -d "LICENSES" ]; then
+                mkdir -p "$TEMP_DIR/LICENSES"
+                cp LICENSES/* "$TEMP_DIR/LICENSES/"
+              fi
+              (cd "$TEMP_DIR" && zip -q -r "$GITHUB_WORKSPACE/dist/vimls-${TAG}-${GOOS}-${ARCH_SUFFIX}.zip" .)
+            else
+              cp "$OUTPUT_BIN" "$TEMP_DIR/vimls"
+              cp README.md "$TEMP_DIR/"
+              if [ -d "LICENSES" ]; then
+                mkdir -p "$TEMP_DIR/LICENSES"
+                cp LICENSES/* "$TEMP_DIR/LICENSES/"
+              fi
+              tar -czf "$GITHUB_WORKSPACE/dist/vimls-${TAG}-${GOOS}-${ARCH_SUFFIX}.tar.gz" -C "$TEMP_DIR" .
+            fi
+            rm -rf "$TEMP_DIR"
+          done
+
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/*
