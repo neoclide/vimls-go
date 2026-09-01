@@ -427,7 +427,7 @@ P1a 低风险，约 200-300 行 + 并发测试；P1b 是 M5/M6 最需要小心�
    - 弃用别名返回 `SoftError` 语义；
    - 不认识的字段 warning（当前静默忽略），便于用户发现拼写错误。
 3. `Initialize` 和 `DidChangeConfiguration` 只调用 `options.Set`；`ForClientCapabilities` 记录 `workspace/configuration`、watch dynamic/relative、rename prepare 等能力，把 `Initialize` 里一串布尔变量收敛进 options。
-4. 文档生成：加 `tools/gensettings`（纯 Go，模式同 `tools/gencommands`），用 `go/ast` 读取 `Options` 字段 doc 注释 + 反射 `DefaultOptions()`，生成 `docs/settings.md` 的“User settings”区块；`docs/language-support.md` 保留行为契约，链接到 settings 文档。`make check` 中校验生成文件无漂移（gopls 的 `doc/generate` 同样做 write/diff 两态）。
+4. 文档生成：加 `tools/gensettings`（纯 Go，模式同 `tools/genmetadata`），用 `go/ast` 读取 `Options` 字段 doc 注释 + 反射 `DefaultOptions()`，生成 `docs/settings.md` 的“User settings”区块；`docs/language-support.md` 保留行为契约，链接到 settings 文档。`make check` 中校验生成文件无漂移（gopls 的 `doc/generate` 同样做 write/diff 两态）。
 
 **成本/风险**
 
@@ -514,7 +514,7 @@ vimls 已有 `internal/syntax/vimls_diagnostics.go` 的 31 个 vimls 定义；`v
 1. `tools/generrors` 从 pinned Vim `v9.2.1015` 的 `src/errors.h` 生成 `internal/vimdata/errors_generated.go`：
    - 字段 `Code, Name, DefaultMessage, Supported bool, Kind, DefaultSeverity`；
    - `Supported` 只对已迁移官方 compile case / `docs/diagnostics.md` 证据的 E 码为 true；
-   - 生成器记录 tag/commit，逻辑与 `tools/gencommands` 一致。
+   - 生成器记录 tag/commit，逻辑与 `tools/genmetadata` 一致。
 2. `syntax.Diagnostic` 只增加协议无关字段（span 仍是 byte）：`Tags`、`Related`、`Data`；`DiagnosticDefinition` 增加 `Source/Help`。`LookupDiagnostic(code)` 同时查 vimls 定义和生成 E 码表。
 3. 删除 `protocolDiagnosticSeverity` 中的硬编码 E 码，改为查表；未知 E 码在测试中失败（panic on bug 原则），生产 fallback Error。
 4. 后续 code action 可以给诊断绑定 `Data`，避免 code action 阶段重新扫描整个文件；quickfix 用 `diagnostic.Code` 精确匹配，保留现有 `clientHasDiagnostic` 的 range 检查。
@@ -806,7 +806,7 @@ gopls 的快照印证了 vimls-go 已有架构选择：**不可变文档快照�
 | 索引/图 | `internal/workspace/index.go`、`import_graph.go`、`files.go` |
 | 诊断定义 | `internal/syntax/vimls_diagnostics.go` |
 | 语义分析 | `internal/analysis/scopes.go`、`types.go`、`diagnostics_test.go` |
-| 生成器 | `tools/gencommands`、`tools/genbuiltins`、`tools/genoptions`、`tools/genvariables` |
+| 生成器 | `tools/genmetadata` |
 | 测试策略/架构/路线 | `docs/testing.md`、`docs/architecture.md`、`docs/roadmap.md`、`docs/diagnostics.md` |
 | subprocess 测试 | `test/integration/lsp_subprocess_test.go` |
 | 本地 gate | `Makefile` |

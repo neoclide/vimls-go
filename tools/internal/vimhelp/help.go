@@ -35,8 +35,8 @@ func ParseTags(source []byte) (map[string]string, error) {
 		if len(fields) < 2 || fields[0] == "" || fields[1] == "" {
 			return nil, fmt.Errorf("invalid Vim help tag at line %d", lineNumber+1)
 		}
-		if previous, duplicate := result[fields[0]]; duplicate && previous != fields[1] {
-			return nil, fmt.Errorf("Vim help tag %q appears in %s and %s", fields[0], previous, fields[1])
+		if previous, duplicate := result[fields[0]]; duplicate {
+			return nil, fmt.Errorf("Vim help tag %q appears more than once (%s and %s)", fields[0], previous, fields[1])
 		}
 		result[fields[0]] = fields[1]
 	}

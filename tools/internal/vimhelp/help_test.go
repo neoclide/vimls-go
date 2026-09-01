@@ -15,6 +15,17 @@ func TestParseTags(t *testing.T) {
 	}
 }
 
+func TestParseTagsRejectsDuplicates(t *testing.T) {
+	for _, source := range []string{
+		"foo()\tbuiltin.txt\t/*foo()*\nfoo()\tbuiltin.txt\t/*foo()*\n",
+		"foo()\tbuiltin.txt\t/*foo()*\nfoo()\teval.txt\t/*foo()*\n",
+	} {
+		if _, err := ParseTags([]byte(source)); err == nil || !strings.Contains(err.Error(), "appears more than once") {
+			t.Fatalf("duplicate tag error = %v", err)
+		}
+	}
+}
+
 func TestExtractAndConvertMarkdown(t *testing.T) {
 	source := []byte(`foo({expr})                                      *foo()* *oldfoo()*
 	Return a |Number| for {expr}.
@@ -63,6 +74,16 @@ func TestExtractSharesDocumentationAcrossAdjacentTagLines(t *testing.T) {
 	}
 	if docs[":one"].Markdown != "Shared documentation." || docs[":two"].Markdown != docs[":one"].Markdown || docs[":three"].Markdown != "Third documentation." {
 		t.Fatalf("documentation = %#v", docs)
+	}
+}
+
+func TestExtractRejectsDuplicateAndMissingTargets(t *testing.T) {
+	source := []byte("foo() *foo()*\nDocumentation.\n")
+	if _, err := Extract("builtin.txt", source, []string{"foo()", "foo()"}); err == nil || !strings.Contains(err.Error(), "duplicate target tag") {
+		t.Fatalf("duplicate target error = %v", err)
+	}
+	if _, err := Extract("builtin.txt", source, []string{"missing()"}); err == nil || !strings.Contains(err.Error(), "tags missing") {
+		t.Fatalf("missing target error = %v", err)
 	}
 }
 

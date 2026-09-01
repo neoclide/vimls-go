@@ -132,10 +132,10 @@ and byte range tests; incomplete or dynamic code does not create a false error.
 
 - [x] Pin the syntax/metadata ceiling and default target to Vim v9.2.1015.
   Earlier syntax stays supported; later syntax waits for a pin update.
-- [ ] Separate Vim and Neovim metadata instead of reusing the old server's
+- [x] Separate Vim and Neovim metadata instead of reusing the old server's
   `isNeovim` flag as a parser switch. Add a target only after its behavior and
   data source are defined.
-- [ ] Add a documented refresh/verification command for pinned metadata and
+- [x] Add a documented refresh/verification command for pinned metadata and
   fail tests on duplicate names and invalid help tags.
 
 Exit gate: generated and handwritten metadata is traceable to v9.2.1015 and

@@ -209,7 +209,7 @@ vimls-go 现状：
 - 新建 `internal/vimdata/errors_generated.go`，生成器从 pinned Vim tag 的 `src/errors.h` 抽取完整索引：编号、宏名、默认消息（`errors.h` 的 `INIT(= N_("E...: ..."))` 就是稳定默认文本），但只把“已经有 official compile case 或 `docs/diagnostics.md` 证据支持”的 E 码标记为 `Supported`。未迁移的 E 码只进索引、不产生诊断消息，避免冒充支持。
 - 表结构建议：`Code string, Name string, Message string, Supported bool, Severity vimdata.DiagnosticSeverity, Kind enum(parser/semantic/compat), Source string(evidence location)`。severity 用 `internal/vimdata` 自己的 enum 或 `uint8`，避免 `vimdata -> syntax` 反向依赖；`internal/server` 负责转成 LSP severity。
 - `protocolDiagnosticSeverity` 改为查表，硬编码只作为 fallback。
-- vimls-owned 定义也迁到同一个表（或 JSON manifest + generator），保留 `vimls/*` 前缀；生成器必须像 `tools/gencommands` 一样校验 pinned tag/commit。
+- vimls-owned 定义也迁到同一个表（或 JSON manifest + generator），保留 `vimls/*` 前缀；生成器必须像 `tools/genmetadata` 一样校验 pinned tag/commit。
 - 本地化现在不做；Vim 本身的错误文本在不同 locale 下也不稳定，1.0 保持英文。
 
 ### 2.7 Pull + push 诊断双轨
@@ -650,7 +650,7 @@ typescript-go 证明了一件事：一个从旧实现移植来的、规模很大
 | 索引/图 | `internal/workspace/index.go`、`import_graph.go` |
 | 诊断定义 | `internal/syntax/vimls_diagnostics.go` |
 | 诊断严重性映射 | `internal/server/server.go` 的 `protocolDiagnosticSeverity` |
-| 生成器 | `tools/gencommands/main.go`、`tools/genbuiltins/main.go`、`tools/genoptions/main.go`、`tools/genvariables/main.go` |
+| 生成器 | `tools/genmetadata` |
 | 架构/测试/路线 | `docs/architecture.md`、`docs/testing.md`、`docs/roadmap.md`、`docs/diagnostics.md` |
 | CI | `.github/workflows/ci.yml` |
 | 本地 gate | `Makefile` |

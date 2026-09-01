@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestParseSourceFixture(t *testing.T) {
+func TestParseFunctionSourceFixture(t *testing.T) {
 	source := []byte(`/* Lists of functions that check the argument types of a builtin function. */
 static argcheck_T arg2_string[] = {arg_string, arg_string};
 static argcheck_T arg2_instanceof[] = {
@@ -27,7 +27,7 @@ static const funcentry_T global_functions[] =
 #endif
             },
 };`)
-	functions, err := parseSource(source)
+	functions, err := parseFunctionSource(source)
 	if err != nil {
 		t.Fatal(err)
 	}

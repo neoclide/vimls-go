@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestParseSourceAndTerms(t *testing.T) {
+func TestParseOptionSourceAndTerms(t *testing.T) {
 	source := []byte(`#define PV_BETA OPT_BUF(BV_BETA)
 #define PV_GAMMA OPT_BOTH(OPT_WIN(WV_GAMMA))
 static struct vimoption options[] = {
@@ -19,7 +19,7 @@ static struct vimoption options[] = {
 #define p_term(sss, vvv) {sss, NULL, P_STRING, (char_u *)&vvv, PV_NONE}
 p_term("t_ZZ", T_ZZ)
 `)
-	options, err := parseSource(source)
+	options, err := parseOptionSource(source)
 	if err != nil || len(options) != 3 {
 		t.Fatalf("options = %#v, err = %v", options, err)
 	}
@@ -39,7 +39,7 @@ p_term("t_ZZ", T_ZZ)
 }
 
 func TestParseSourceRejectsMalformedInput(t *testing.T) {
-	if _, err := parseSource([]byte("static struct vimoption options[] = {};")); err == nil {
-		t.Fatal("parseSource accepted an empty options table")
+	if _, err := parseOptionSource([]byte("static struct vimoption options[] = {};")); err == nil {
+		t.Fatal("parseOptionSource accepted an empty options table")
 	}
 }

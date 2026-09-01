@@ -87,3 +87,31 @@ version-pinned research about historical error codes used by Vim9 is retained
 in the [pre-E1000 research appendix](docs/vim9-errors-under-1000.md). Supported
 official compile-diagnostic cases live in self-contained range tests under
 `internal/analysis/official_compile_cases_e*_test.go`.
+
+## Refresh pinned Vim metadata
+
+All command, builtin-function, option, variable, event, modifier, and completion
+metadata describes official Vim v9.2.1015 only. Neovim-specific tables are not
+merged into `internal/vimdata`.
+
+Point `VIM_SOURCE` at an official Vim Git checkout. The metadata generator
+reads the pinned tag with `git show`, so the checkout's current branch may be
+newer:
+
+```sh
+VIM_SOURCE=/path/to/vim make metadata-check
+```
+
+`metadata-check` regenerates the four generated Go tables into a temporary
+directory, compares them byte-for-byte with the repository, and runs metadata,
+duplicate-name, help-tag, and generator tests. To intentionally refresh the
+committed generated tables after advancing the pin, run:
+
+```sh
+VIM_SOURCE=/path/to/vim make metadata-refresh
+VIM_SOURCE=/path/to/vim make metadata-check
+```
+
+The generator first verifies that the configured Vim tag resolves to its
+hard-coded commit. Review the generated diff and update curated completion
+metadata/provenance tests in the same pin-advance change.

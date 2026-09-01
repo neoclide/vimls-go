@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestParseSourceFixture(t *testing.T) {
+func TestParseVariableSourceFixture(t *testing.T) {
 	source := []byte(`vimvars[VV_LEN] =
 {
     {VV_NAME("count", VAR_NUMBER), NULL, VV_COMPAT+VV_RO},
     {VV_NAME("oldfiles", VAR_LIST), &t_list_string, 0},
 };`)
-	variables, err := parseSource(source)
+	variables, err := parseVariableSource(source)
 	if err != nil {
 		t.Fatal(err)
 	}
