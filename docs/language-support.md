@@ -352,6 +352,11 @@ Document symbols, folding ranges, and selection ranges retain their nested
 function, class, interface, and enum structure through end-of-file when a block
 terminator is still missing, so incomplete editing state remains navigable.
 
+Published diagnostics are sorted by source byte span and capped at 200 per
+document. When more diagnostics exist, the server retains the first 199 and
+uses the final slot for `vimls/diagnostics-truncated` at end-of-file. Reanalyzing
+an unchanged snapshot produces the same retained diagnostics and marker.
+
 For statically resolved local Vim9 members, navigation follows inherited
 methods and variables, default constructors, and enum values. When an object
 type or constructor initializer proves both an interface or abstract member and

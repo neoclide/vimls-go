@@ -257,7 +257,7 @@ position encoding; every code action round-trips through a reparsed document.
   deprecation severities, including whether each category can be disabled.
 - [ ] Publish related information for cross-file import/export/type errors when
   the authoritative declaration is known.
-- [ ] Keep the 200-diagnostic limit deterministic and indicate truncation
+- [x] Keep the 200-diagnostic limit deterministic and indicate truncation
   without replacing more useful earlier diagnostics.
 - [ ] Test configuration changes against in-flight parsing, workspace graph
   replacement, close/reopen and target-version changes.

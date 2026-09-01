@@ -304,12 +304,35 @@ func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
 	instance.mu.Unlock()
 	_, _ = instance.Initialize(context.Background(), &protocol.InitializeParams{})
 	documentURI := uri.MustParse("file:///many-diagnostics.vim")
+	source := strings.Repeat("if true\n", maxDiagnosticsPerDocument+25)
 	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: strings.Repeat("if true\n", maxDiagnosticsPerDocument+25)},
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
 	})
-	result := waitForDiagnostics(t, client.published)
-	if len(result.Diagnostics) != maxDiagnosticsPerDocument || result.Diagnostics[len(result.Diagnostics)-1].Code != protocol.String("vimls/diagnostics-truncated") {
-		t.Fatalf("diagnostic count = %d, last = %#v", len(result.Diagnostics), result.Diagnostics[len(result.Diagnostics)-1])
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) != maxDiagnosticsPerDocument {
+		t.Fatalf("diagnostic count = %d, want %d", len(first.Diagnostics), maxDiagnosticsPerDocument)
+	}
+	marker := first.Diagnostics[len(first.Diagnostics)-1]
+	wantEOF := protocol.Position{Line: uint32(maxDiagnosticsPerDocument + 25)}
+	if marker.Code != protocol.String("vimls/diagnostics-truncated") || marker.Range.Start != wantEOF || marker.Range.End != wantEOF {
+		t.Fatalf("diagnostic count = %d, last = %#v", len(first.Diagnostics), first.Diagnostics[len(first.Diagnostics)-1])
+	}
+	for index, diagnostic := range first.Diagnostics[:len(first.Diagnostics)-1] {
+		if diagnostic.Code == protocol.String("vimls/diagnostics-truncated") || index > 0 && first.Diagnostics[index-1].Range.Start.Line > diagnostic.Range.Start.Line {
+			t.Fatalf("retained diagnostic %d = %#v", index, diagnostic)
+		}
+	}
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{Text: source},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second := waitForDiagnostics(t, client.published)
+	if !reflect.DeepEqual(first.Diagnostics, second.Diagnostics) {
+		t.Fatalf("diagnostic truncation changed across identical analysis:\nfirst=%#v\nsecond=%#v", first.Diagnostics, second.Diagnostics)
 	}
 }
 
