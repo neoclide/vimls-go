@@ -185,6 +185,7 @@ const (
 	completionContextAutocmdEvent
 	completionContextImportPath
 	completionContextMember
+	completionContextMappingArgument
 )
 
 func completionContextAt(file *syntax.File, offset int) completionContext {
@@ -222,6 +223,14 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 					return
 				}
 			}
+		}
+		if completionMappingArgumentAt(file, command, offset) {
+			result = completionContextMappingArgument
+			return
+		}
+		if command.Mapping != nil && command.Argument.Start <= offset && offset <= command.Argument.End {
+			result = completionContextNone
+			return
 		}
 		if command.Import != nil && command.Import.Path != nil && command.Import.Path.Kind == syntax.ExpressionString &&
 			command.Import.PathSpan.Start < offset && offset < command.Import.PathSpan.End {
@@ -309,6 +318,47 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		return completionContextCommand
 	}
 	return completionContextNone
+}
+
+func completionMappingArgumentAt(file *syntax.File, command *syntax.Command, offset int) bool {
+	if file == nil || command == nil || command.Mapping == nil || offset < command.Argument.Start || offset > command.Argument.End {
+		return false
+	}
+	if command.Mapping.LHS.Start < command.Mapping.LHS.End && command.Mapping.LHS.Start <= offset && offset <= command.Mapping.LHS.End && !completionMappingArgumentPrefix(file.Text(command.Mapping.LHS)) {
+		return false
+	}
+	position := command.Argument.Start
+	for position < offset {
+		for position < offset && (file.Source[position] == ' ' || file.Source[position] == '\t') {
+			position++
+		}
+		if position == offset {
+			return true
+		}
+		if file.Source[position] != '<' {
+			return false
+		}
+		close := strings.IndexByte(file.Source[position:offset], '>')
+		if close < 0 {
+			return true
+		}
+		name := strings.ToLower(file.Source[position+1 : position+close])
+		if name != "buffer" && name != "nowait" && name != "silent" && name != "special" && name != "script" && name != "expr" && name != "unique" {
+			return false
+		}
+		position += close + 1
+	}
+	return true
+}
+
+func completionMappingArgumentPrefix(value string) bool {
+	value = strings.ToLower(value)
+	for _, argument := range []string{"<buffer>", "<nowait>", "<silent>", "<special>", "<script>", "<expr>", "<unique>"} {
+		if strings.HasPrefix(argument, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func memberExpressionAt(expression *syntax.Expression, offset int) *syntax.Expression {

@@ -200,6 +200,73 @@ func TestCompletionIncludesLegacyArgumentAndLocalPrefixes(t *testing.T) {
 	}
 }
 
+func TestCompletionMappingArgumentsStayBeforeLHS(t *testing.T) {
+	all := []string{"<buffer>", "<nowait>", "<silent>", "<special>", "<script>", "<expr>", "<unique>"}
+	for _, command := range []string{"nmap ", "unmap "} {
+		items := mappingCompletionItems(t, command, len(command))
+		for _, label := range all {
+			if item := completionItemWithLabel(items, label); item == nil || item.Kind != protocol.CompletionItemKindKeyword {
+				t.Errorf("%q missing %q from %#v", command, label, items)
+			}
+		}
+		if len(items) != len(all) {
+			t.Errorf("%q returned %d items, want %d: %#v", command, len(items), len(all), items)
+		}
+	}
+
+	clear := mappingCompletionItems(t, "mapclear ", len("mapclear "))
+	if len(clear) != 1 || clear[0].Label != "<buffer>" {
+		t.Fatalf("mapclear arguments = %#v", clear)
+	}
+
+	for _, label := range all {
+		source := "nmap " + label + " "
+		items := mappingCompletionItems(t, source, len(source))
+		if completionItemWithLabel(items, label) != nil {
+			t.Errorf("used mapping argument %q returned in %#v", label, items)
+		}
+	}
+
+	for _, cursor := range []int{len("nmap <bu"), len("nmap <buffer>")} {
+		source := "nmap <buffer>"
+		items := mappingCompletionItems(t, source, cursor)
+		item := completionItemWithLabel(items, "<buffer>")
+		if item == nil {
+			t.Fatalf("current mapping argument missing at %d from %#v", cursor, items)
+		}
+		edit, ok := item.TextEdit.(*protocol.TextEdit)
+		if !ok || edit.Range != navigationRange(0, 5, 13) || edit.NewText != "<buffer>" {
+			t.Fatalf("mapping argument edit at %d = %#v", cursor, item.TextEdit)
+		}
+	}
+
+	for _, source := range []string{"nmap lhs", "nmap lhs rhs"} {
+		if items := mappingCompletionItems(t, source, len(source)); len(items) != 0 {
+			t.Errorf("mapping LHS/RHS %q returned %#v", source, items)
+		}
+	}
+	if items := mappingCompletionItems(t, "nmap lhs", len("nmap ")); len(items) != 0 {
+		t.Errorf("mapping LHS start returned %#v", items)
+	}
+	for _, source := range []string{"nmap <buffer> lhs", "nmap <buffer> <F5>"} {
+		if items := mappingCompletionItems(t, source, len("nmap <buffer> ")); len(items) != 0 {
+			t.Errorf("mapping LHS start in %q returned %#v", source, items)
+		}
+	}
+}
+
+func mappingCompletionItems(t *testing.T, source string, cursor int) protocol.CompletionItemSlice {
+	t.Helper()
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Character: uint32(cursor)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return completionItems(t, result)
+}
+
 func TestCompletionRespectsForwardVisibility(t *testing.T) {
 	source := "vim9script\necho fut\necho Lat\nvar future = 1\ndef Later()\nenddef\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

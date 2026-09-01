@@ -217,6 +217,10 @@ for direct builtins and parameter-name snippets for same-file functions. They
 also receive a legacy `function`/`endfunction` or Vim9 `def`/`enddef` block
 template according to the root dialect; plain-text clients receive none of
 these templates.
+Mapping commands complete the pinned `:map-arguments` values only before the
+LHS and omit flags already present on the command. Ordinary mapping RHS text
+remains opaque and never receives expression completion solely because it is a
+mapping payload.
 Completion resolve and builtin-call hover include the pinned broad return type
 when Vim's metadata provides one; builtin-function, Ex-command, option, and
 predefined-variable hover plus builtin signature help also include bounded

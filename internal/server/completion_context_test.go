@@ -14,6 +14,8 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 	}{
 		{"set noig", "noig", completionContextSetOption}, {"syntax key", "key", completionContextSyntaxSubcommand}, {"syntax keyword Group key", "Group", completionContextSyntaxGroup}, {"highlight link One Two", "Two", completionContextHighlight}, {"autocmd BufE *.vim echo 1", "BufE", completionContextAutocmdHead}, {"autocmd Group BufE *.vim echo 1", "BufE", completionContextAutocmdEvent}, {"silent echo 1", "silent", completionContextModifier},
 		{":", ":", completionContextCommand},
+		{"nmap <bu", "<bu", completionContextMappingArgument}, {"nmap <buffer> <si", "<si", completionContextMappingArgument},
+		{"nmap lhs", "lhs", completionContextNone}, {"nmap lhs <bu", "<bu", completionContextNone},
 		{"echo 'value'", "value", completionContextNone}, {"\" echo value", "value", completionContextNone}, {"map x value", "value", completionContextNone}, {"loadkeymap\na a", "a a", completionContextNone},
 		{"let x =<< END\nvalue\nEND", "value", completionContextNone}, {"append\nvalue\n.", "value", completionContextNone}, {"finish\nvalue", "value", completionContextNone},
 	}
@@ -41,6 +43,10 @@ func TestCompletionSelectionsClampInvalidOffsets(t *testing.T) {
 		selection = completionImportPathSelection("abc", offset)
 		if selection.start < 0 || selection.start > selection.cursor || selection.cursor > selection.end || selection.end > 3 {
 			t.Fatalf("path selection at %d = %#v", offset, selection)
+		}
+		selection = completionMappingArgumentSelection("abc", offset)
+		if selection.start < 0 || selection.start > selection.cursor || selection.cursor > selection.end || selection.end > 3 {
+			t.Fatalf("mapping selection at %d = %#v", offset, selection)
 		}
 	}
 }

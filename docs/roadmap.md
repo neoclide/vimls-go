@@ -161,7 +161,8 @@ edits, lazy resolve documentation, cancellation and a soft budget. Only the
 tested `.`, `:` and `&` member, command/scoped-name and option triggers are
 advertised. Snippet-capable clients receive required-argument direct-call
 snippets and dialect-specific legacy/Vim9 function blocks; other clients retain
-plain edits. Direct
+plain edits. Mapping special arguments complete only before the LHS; ordinary
+RHS payloads stay opaque. Direct
 builtin (including receiver-adjusted `->` methods), same-file user-function,
 static-imported exported-function, and directly bound function-value signature
 help are implemented, as are local class/object methods, inherited methods,

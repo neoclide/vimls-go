@@ -278,6 +278,12 @@ func TestLSPSubprocess(t *testing.T) {
 	if !strings.Contains(string(snippetCompletion["result"]), `"label":"Add"`) || !strings.Contains(string(snippetCompletion["result"]), `"insertTextFormat":2`) || !strings.Contains(string(snippetCompletion["result"]), `"newText":"Add(${1:left}, ${2:right})$0"`) {
 		t.Fatalf("snippet completion = %s", snippetCompletion)
 	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///mapping.vim","languageId":"vim","version":1,"text":"nmap <bu"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100011,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///mapping.vim"},"position":{"line":0,"character":8}}}`)
+	mappingCompletion := readResponse(t, reader, "100011")
+	if !strings.Contains(string(mappingCompletion["result"]), `"label":"<buffer>"`) || !strings.Contains(string(mappingCompletion["result"]), `"newText":"<buffer>"`) || !strings.Contains(string(mappingCompletion["result"]), `"start":{"line":0,"character":5}`) {
+		t.Fatalf("mapping completion = %s", mappingCompletion)
+	}
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100005,"method":"shutdown"}`)
 	shutdown := readResponse(t, reader, "100005")

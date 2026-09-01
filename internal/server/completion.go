@@ -54,6 +54,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		}
 		contextKind := completionContextAt(file, offset)
 		selection := completionSelectionAt(snapshot.Text(), offset)
+		if contextKind == completionContextMappingArgument {
+			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
+		}
 		if contextKind == completionContextImportPath {
 			selection = completionImportPathSelection(snapshot.Text(), offset)
 			state := s.captureWorkspaceNavigationState()
@@ -277,6 +280,36 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 				}
 			}
+		} else if contextKind == completionContextMappingArgument {
+			var mapping *syntax.Mapping
+			walkCommands(file.Commands, func(command *syntax.Command) {
+				if mapping == nil && command.Mapping != nil && command.Argument.Start <= offset && offset <= command.Argument.End {
+					mapping = command.Mapping
+				}
+			})
+			if mapping != nil {
+				arguments := []struct {
+					label string
+					used  bool
+				}{
+					{label: "<buffer>", used: mapping.Buffer},
+					{label: "<nowait>", used: mapping.Nowait},
+					{label: "<silent>", used: mapping.Silent},
+					{label: "<special>", used: mapping.Special},
+					{label: "<script>", used: mapping.Script},
+					{label: "<expr>", used: mapping.Expr},
+					{label: "<unique>", used: mapping.Unique},
+				}
+				current := snapshot.Text()[selection.start:selection.end]
+				for index, argument := range arguments {
+					if argument.used && !strings.EqualFold(current, argument.label) || mapping.Kind == syntax.MappingClear && index != 0 {
+						continue
+					}
+					if !add(protocol.CompletionItem{Label: argument.label, Kind: protocol.CompletionItemKindKeyword}, 8000, completionSourceCommand) {
+						break
+					}
+				}
+			}
 		} else {
 			for _, command := range vimdata.Commands() {
 				if !strings.HasPrefix(command.Name, selection.prefix) {
@@ -401,6 +434,28 @@ func completionSelectionAt(source string, cursor int) completionSelection {
 	}
 	selection.prefix = source[selection.start:cursor]
 	return selection
+}
+
+func completionMappingArgumentSelection(source string, cursor int) completionSelection {
+	if cursor < 0 {
+		cursor = 0
+	} else if cursor > len(source) {
+		cursor = len(source)
+	}
+	start, end := cursor, cursor
+	for start > 0 && source[start-1] != '<' && source[start-1] != ' ' && source[start-1] != '\t' && source[start-1] != '\n' && source[start-1] != '\r' {
+		start--
+	}
+	if start > 0 && source[start-1] == '<' {
+		start--
+	}
+	for end < len(source) && source[end] != '>' && source[end] != ' ' && source[end] != '\t' && source[end] != '\n' && source[end] != '\r' {
+		end++
+	}
+	if end < len(source) && source[end] == '>' {
+		end++
+	}
+	return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
 }
 
 func isCompletionIdentifierRune(r rune) bool {

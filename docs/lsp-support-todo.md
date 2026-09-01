@@ -156,8 +156,8 @@ regular expressions.
   ambiguity and root-safety rules as navigation.
 - [ ] Add `has()` feature names and `expand()` special tokens from pinned Vim
   help/source data.
-- [ ] Add mapping arguments such as `<buffer>` and command-specific mapping
-  completion without parsing arbitrary right-hand sides as expressions.
+- [x] Add the pinned `:map-arguments` set before the mapping LHS, omit already
+  used flags, and keep ordinary mapping right-hand sides outside completion.
 - [ ] Add `:highlight` argument keys and value enums, while retaining local
   syntax/highlight group completion.
 - [ ] Add `:colorscheme` names from safe indexed runtimepath `colors/`
