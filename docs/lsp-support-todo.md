@@ -83,7 +83,7 @@ there are no unqualified claims such as "full expressions" or "full Vim9".
 
 ### Legacy Vim script syntax and binding
 
-- [ ] Complete structured parsing and recovery for legacy forms still retained
+- [x] Complete structured parsing and recovery for legacy forms still retained
   as opaque arguments where semantics need them: scoped assignments,
   destructuring, function attributes/varargs, mappings, autocommands, user
   commands and nested Ex payloads.
