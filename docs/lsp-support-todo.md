@@ -97,7 +97,7 @@ there are no unqualified claims such as "full expressions" or "full Vim9".
 - [ ] Add conservative checks for legacy mutability, callable arity and
   container operations only where Vim behavior is independent of runtime
   state.
-- [ ] Test `scriptversion`, legacy continuations, bars/comments, abbreviations,
+- [x] Test `scriptversion`, legacy continuations, bars/comments, abbreviations,
   command modifiers and one-command `vim9cmd` overrides at their actual command
   boundaries.
 
