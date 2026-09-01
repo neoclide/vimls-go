@@ -10574,11 +10574,33 @@ func resolve(scope *Scope, name string, offset int, preferFunction bool, hidden 
 	if name == "" {
 		return nil
 	}
+	explicitArgument := strings.HasPrefix(name, "a:") && len(name) > 2
+	explicitLocal := strings.HasPrefix(name, "l:") && len(name) > 2
+	explicitName := name
+	if explicitArgument || explicitLocal {
+		explicitName = name[2:]
+		insideFunction := false
+		for current := scope; current != nil; current = current.Parent {
+			if current.Kind == syntax.BlockFunction {
+				insideFunction = true
+				break
+			}
+		}
+		if !insideFunction {
+			return nil
+		}
+	}
 	for current := scope; current != nil; current = current.Parent {
 		var latest *Declaration
 		var forwardFunction *Declaration
 		for _, declaration := range current.Declarations {
-			if !resolvedNameEqual(declaration.Name, name) || hidden[declaration.Span] {
+			matches := resolvedNameEqual(declaration.Name, name)
+			if explicitArgument {
+				matches = declaration.Parameter && declaration.Name == explicitName
+			} else if explicitLocal {
+				matches = !declaration.Parameter && declaration.Name == explicitName
+			}
+			if !matches || hidden[declaration.Span] {
 				continue
 			}
 			if preferFunction && declaration.Kind == SymbolKindFunction || preferFunction && declaration.Kind == SymbolKindMethod || preferFunction && declaration.Kind == SymbolKindConstructor {
@@ -10596,6 +10618,9 @@ func resolve(scope *Scope, name string, offset int, preferFunction bool, hidden 
 		}
 		if latest != nil {
 			return latest
+		}
+		if (explicitArgument || explicitLocal) && current.Kind == syntax.BlockFunction {
+			return nil
 		}
 	}
 	return nil

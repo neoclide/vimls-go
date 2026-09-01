@@ -155,6 +155,32 @@ func TestLegacyScriptLocalPrefixNavigation(t *testing.T) {
 	}
 }
 
+func TestLegacyArgumentAndLocalPrefixNavigation(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "function! Run(arg)\n  let local = a:arg\n  echo l:local a:arg\nendfunction\n")
+	tests := []struct {
+		name     string
+		position protocol.Position
+		want     protocol.Range
+	}{
+		{name: "argument", position: protocol.Position{Line: 2, Character: 17}, want: navigationRange(0, 14, 17)},
+		{name: "local", position: protocol.Position{Line: 2, Character: 10}, want: navigationRange(1, 6, 11)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			locations := definition.(protocol.LocationSlice)
+			if len(locations) != 1 || locations[0].Range != test.want {
+				t.Fatalf("definition = %#v, want %#v", definition, test.want)
+			}
+		})
+	}
+}
+
 func TestLocalVim9MemberNavigation(t *testing.T) {
 	source := "vim9script\nclass Base\n  var value: number\n  def Resize(width: number)\n  enddef\nendclass\nclass Child extends Base\nendclass\nvar child = Child.new()\necho child.Resize(1)\necho child.value\necho Child.new()\nenum Color\n  Red,\n  Green\nendenum\necho Color.Red\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

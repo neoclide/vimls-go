@@ -78,6 +78,27 @@ func TestAnalyzeLegacyScriptLocalFunctionPrefixesShareBinding(t *testing.T) {
 	}
 }
 
+func TestAnalyzeLegacyArgumentAndLocalPrefixesStayInFunction(t *testing.T) {
+	result := Analyze(syntax.Parse("let local = 0\nfunction! Run(arg)\n  let local = a:arg\n  echo l:local a:arg\nendfunction\necho l:local\n"))
+	functionScope := result.Scopes[1]
+	if len(functionScope.Declarations) != 2 || !functionScope.Declarations[0].Parameter {
+		t.Fatalf("function declarations = %#v", functionScope.Declarations)
+	}
+	if len(result.References) != 4 {
+		t.Fatalf("references = %#v", result.References)
+	}
+	if result.References[0].Declaration != functionScope.Declarations[0] || result.References[1].Declaration != functionScope.Declarations[1] || result.References[2].Declaration != functionScope.Declarations[0] {
+		t.Fatalf("prefixed references = %#v", result.References[:3])
+	}
+	if result.References[3].Declaration != nil {
+		t.Fatalf("script-level l: reference escaped function scope: %#v", result.References[3])
+	}
+	vim9 := Analyze(syntax.Parse("vim9script\ndef Run(arg: number)\n  var local = 1\n  echo a:arg l:local\nenddef\n"))
+	if len(vim9.References) != 2 || vim9.References[0].Declaration != nil || vim9.References[1].Declaration != nil {
+		t.Fatalf("legacy prefixes resolved inside :def: %#v", vim9.References)
+	}
+}
+
 func TestAnalyzeVariableUseBeforeDeclarationStaysUnresolved(t *testing.T) {
 	source := "echo value\nvar value = value\necho value\n"
 	result := Analyze(syntax.Parse("vim9script\n" + source))
