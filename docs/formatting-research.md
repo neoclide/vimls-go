@@ -5,6 +5,8 @@ vimls-go. The behavior baseline is Vim **v9.2.1015**. Earlier supported Vim 9.1
 and 9.2 patches remain compatibility targets; syntax added after v9.2.1015 is
 outside the current language contract.
 
+Status: implemented for document and range indentation Formatting.
+
 ## Decision
 
 The first Formatting implementation should be a **source-preserving indentation

@@ -4,6 +4,8 @@ let s:vim9_counts = {}
 let s:running_status = ''
 let s:stopped_status = ''
 let s:shutdown_done = 0
+let s:legacy_formatted = 0
+let s:vim9_formatted = 0
 
 function! s:has_error_diagnostic() abort
   return get(lsp#get_buffer_diagnostics_counts(), 'error', 0) > 0
@@ -18,7 +20,6 @@ try
     call add(v:errors, 'expected exact Vim patch v9.2.1015')
   endif
   execute 'edit ' .. fnameescape($VIMLS_CLIENT_WORKSPACE .. '/legacy.vim')
-  setfiletype vim
   call assert_equal('vim', &filetype)
   if lsp#utils#_wait(10000, {-> lsp#get_server_status('vimls') ==# 'running'}, 10) != 0
     call add(v:errors, 'vimls did not initialize: ' .. lsp#get_server_status('vimls'))
@@ -28,14 +29,23 @@ try
     call add(v:errors, 'legacy diagnostics timed out')
   endif
   let s:legacy_counts = lsp#get_buffer_diagnostics_counts()
+  silent LspDocumentFormatSync
+  let s:legacy_formatted = getline(3) ==# '  let value = 1'
+  if !s:legacy_formatted
+    call add(v:errors, 'legacy formatting was not applied: ' .. string(getline(1, '$')))
+  endif
 
   execute 'edit ' .. fnameescape($VIMLS_CLIENT_WORKSPACE .. '/vim9.vim')
-  setfiletype vim
   call assert_equal('vim', &filetype)
   if lsp#utils#_wait(10000, function('s:has_error_diagnostic'), 10) != 0
     call add(v:errors, 'Vim9 diagnostics timed out')
   endif
   let s:vim9_counts = lsp#get_buffer_diagnostics_counts()
+  silent LspDocumentFormatSync
+  let s:vim9_formatted = getline(4) ==# '  var value = 1'
+  if !s:vim9_formatted
+    call add(v:errors, 'Vim9 formatting was not applied: ' .. string(getline(1, '$')))
+  endif
 
   call lsp#send_request('vimls', {
         \ 'method': 'shutdown',
@@ -63,7 +73,9 @@ call writefile([
       \ 'patch-9.2.1016=' .. has('patch-9.2.1016'),
       \ 'running_status=' .. s:running_status,
       \ 'legacy_diagnostics=' .. string(s:legacy_counts),
+      \ 'legacy_formatted=' .. s:legacy_formatted,
       \ 'vim9_diagnostics=' .. string(s:vim9_counts),
+      \ 'vim9_formatted=' .. s:vim9_formatted,
       \ 'shutdown_response=' .. s:shutdown_done,
       \ 'stopped_status=' .. s:stopped_status,
       \ 'v:errors=' .. string(v:errors),

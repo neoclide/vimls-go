@@ -136,10 +136,11 @@ Deliver:
   import completion with resolve documentation.
 - Signature help, prepare rename, rename, and syntax-backed code actions.
 - Semantic tokens after syntax classifications are stable.
+- Source-preserving document and range indentation formatting.
 
 Exit gate: completion and signature results are relevant to dialect/scope and
 bounded; rename refuses dynamic/ambiguous symbols and produces non-overlapping,
-version-valid edits; token ranges remain valid for Unicode text.
+version-valid edits; token and Formatting ranges remain valid for Unicode text.
 
 Current status (2026-09-01): static import/source document links and contextual
 completion for Ex commands, modifiers, scoped declarations (including legacy
@@ -199,6 +200,11 @@ rename cover constructors, static/object/factory-return methods, and enum values
 with open-buffer overlays, complete-index guards, captured document versions,
 and workspace-staleness rejection.
 
+Document and range Formatting use one syntax-backed indentation plan for Legacy
+and Vim9 files. They return minimal leading-whitespace edits, preserve opaque
+and literal payloads, honor the negotiated position encoding and reject stale
+document snapshots. The pinned Vim/vim-lsp smoke applies edits in both dialects.
+
 ## M7: compatibility, performance, and 1.0 release
 
 Deliver:
@@ -236,10 +242,12 @@ Windows on amd64 and arm64 through `tools/release`, with SHA-256 checksums.
 - Completion with resolve and signature help.
 - Prepare rename and rename for provably safe symbols.
 - Semantic tokens and focused code actions.
+- Source-preserving document and range Formatting.
 
-[Formatting](formatting-research.md), call hierarchy, embedded-language
-delegation, and nonstandard client extensions are post-1.0 unless real client
-validation shows one is required for a usable baseline.
+Call hierarchy, embedded-language delegation, general pretty-printing and
+nonstandard client extensions are post-1.0 unless real client validation shows
+one is required for a usable baseline. The implemented Formatting contract is
+documented in [Formatting research](formatting-research.md).
 
 ## Planning gates
 

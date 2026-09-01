@@ -93,7 +93,7 @@ endfunction
 	reader := jsonrpc.NewReader(stdout)
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"completion":{"completionItem":{"snippetSupport":true}},"hover":{"contentFormat":["markdown"]},"signatureHelp":{"signatureInformation":{"documentationFormat":["plaintext"]}},"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232","runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) {
+	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
@@ -337,6 +337,18 @@ endfunction
 	colorschemeCompletion := readResponse(t, reader, "100013")
 	if !strings.Contains(string(colorschemeCompletion["result"]), `"label":"default"`) || !strings.Contains(string(colorschemeCompletion["result"]), `"newText":"default"`) || !strings.Contains(string(colorschemeCompletion["result"]), `"start":{"line":0,"character":12}`) {
 		t.Fatalf("colorscheme completion = %s", colorschemeCompletion)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///format-vim9.vim","languageId":"vim","version":1,"text":"vim9script\nif true\necho 1\nendif\n"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100014,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///format-vim9.vim"},"options":{"tabSize":2,"insertSpaces":true}}}`)
+	formatting := readResponse(t, reader, "100014")
+	if !strings.Contains(string(formatting["result"]), `"start":{"line":2,"character":0}`) || !strings.Contains(string(formatting["result"]), `"end":{"line":2,"character":0}`) || !strings.Contains(string(formatting["result"]), `"newText":"  "`) {
+		t.Fatalf("document formatting = %s", formatting)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///format-legacy.vim","languageId":"vim","version":1,"text":"function! Demo()\nlet value = 1\nendfunction\n"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100015,"method":"textDocument/rangeFormatting","params":{"textDocument":{"uri":"file:///format-legacy.vim"},"range":{"start":{"line":1,"character":0},"end":{"line":2,"character":0}},"options":{"tabSize":2,"insertSpaces":true}}}`)
+	rangeFormatting := readResponse(t, reader, "100015")
+	if !strings.Contains(string(rangeFormatting["result"]), `"start":{"line":1,"character":0}`) || !strings.Contains(string(rangeFormatting["result"]), `"end":{"line":1,"character":0}`) || !strings.Contains(string(rangeFormatting["result"]), `"newText":"  "`) {
+		t.Fatalf("range formatting = %s", rangeFormatting)
 	}
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100005,"method":"shutdown"}`)

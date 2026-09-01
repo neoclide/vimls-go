@@ -19,6 +19,7 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 | Navigation | Definition, declaration, references, document highlights and document links for statically resolved local, imported, global and autoload symbols. |
 | Symbols and structure | Document symbols, workspace symbols, folding ranges and selection ranges. |
 | Safe editing | Prepare rename, rename, semantic highlighting, inferred-type inlay hints and a small set of syntax quick fixes. |
+| Formatting | Source-preserving indentation for a whole document or selected range. Only proven leading whitespace is changed. |
 | Workspace updates | Incremental document synchronization, workspace folders, watched Vim files and runtimepath refreshes. |
 
 Legacy and Vim9 files may use the same workspace. The server understands
@@ -27,8 +28,9 @@ language rules.
 
 ## Current limitations
 
-- Formatting, on-type formatting, call hierarchy, type hierarchy and
-  implementation lookup are not available.
+- On-type formatting, call hierarchy, type hierarchy and implementation lookup
+  are not available. Formatting adjusts indentation only; it does not rewrite
+  expressions, spacing, wrapping or embedded languages.
 - Rename is offered only when every affected symbol can be resolved safely.
   Autoload function rename and other namespace-changing edits are rejected.
 - Code actions are limited to a few unambiguous syntax repairs; there is no

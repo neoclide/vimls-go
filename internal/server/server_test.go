@@ -73,23 +73,30 @@ func TestNegotiatePositionEncoding(t *testing.T) {
 	}
 }
 
-func TestInitializeDoesNotAdvertiseFormatting(t *testing.T) {
+func TestInitializeAdvertisesFormatting(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	result, err := instance.Initialize(context.Background(), &protocol.InitializeParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if result.Capabilities.DocumentFormattingProvider == nil || result.Capabilities.DocumentRangeFormattingProvider == nil {
+		t.Fatalf("formatting capabilities = %#v", result.Capabilities)
+	}
 	encoded, err := protocol.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capability := range []string{
-		`"documentFormattingProvider"`,
-		`"documentRangeFormattingProvider"`,
-		`"documentOnTypeFormattingProvider"`,
-	} {
-		if bytes.Contains(encoded, []byte(capability)) {
-			t.Fatalf("initialize result advertised %s: %s", capability, encoded)
+	for _, capability := range []string{`"documentFormattingProvider":true`, `"documentRangeFormattingProvider":true`} {
+		if !bytes.Contains(encoded, []byte(capability)) {
+			t.Fatalf("initialize result omitted %s: %s", capability, encoded)
+		}
+	}
+	if bytes.Contains(encoded, []byte(`"documentOnTypeFormattingProvider"`)) {
+		t.Fatalf("initialize result advertised on-type formatting: %s", encoded)
+	}
+	for _, method := range []string{protocol.MethodTextDocumentFormatting, protocol.MethodTextDocumentRangeFormatting} {
+		if !implementedMethod(method) {
+			t.Fatalf("formatting method %q is not implemented", method)
 		}
 	}
 }

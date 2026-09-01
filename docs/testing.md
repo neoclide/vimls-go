@@ -213,7 +213,8 @@ inside the server.
 Its Go harness generates the clean driver in a test-owned temporary directory,
 requires exactly patch v9.2.1015, and records `v:version`, the current and next
 patch probes, `v:errors`, `:messages`, stdout, stderr and exit status for every
-fixture. Run it against a pinned source build with:
+fixture. The same lane compares Legacy and Vim9 owned-line indentation from the
+Go planner with Vim's `=` result. Run it against a pinned source build with:
 
 ```sh
 make oracle VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
@@ -233,9 +234,10 @@ checkout or read user configuration.
 
 The clean Vim fixture initializes the built vimls process, opens one incomplete
 legacy file and one incomplete Vim9 file, waits for an error diagnostic from
-each, then completes the LSP shutdown/exit sequence. It also exercises a
-server-to-client `workspace/configuration` request, matching vim-lsp's default
-capabilities. Run the exact pinned lane with:
+each, applies document Formatting to both buffers, then completes the LSP
+shutdown/exit sequence. It also exercises a server-to-client
+`workspace/configuration` request, matching vim-lsp's default capabilities. Run
+the exact pinned lane with:
 
 ```sh
 make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
