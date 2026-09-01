@@ -94,7 +94,7 @@ stability gate still parses every source through both independent parser entry
 points without executing it, using committed artifacts in this repository.
 
 See [the roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
-[language support contract](docs/language-support.md), and
+[language server features](docs/language-support.md), and
 [test strategy](docs/testing.md). Semantics derived from Vim's tests are
 recorded in the [static diagnostic reference](docs/diagnostics.md). Remaining
 version-pinned research about historical error codes used by Vim9 is retained

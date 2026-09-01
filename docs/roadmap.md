@@ -16,7 +16,7 @@ Deliver:
   handling.
 - `initialize`, `initialized`, `shutdown`, and `exit` lifecycle.
 - Parse and validate `vimls.targetVersion` from initialization/workspace
-  configuration using the contract in `docs/language-support.md`.
+  configuration using `docs/configuration.md`.
 - Logging to stderr and no non-protocol stdout output.
 
 Exit gate: fragmented and coalesced frames, malformed JSON, unknown methods,
@@ -61,12 +61,12 @@ diagnostic and must not prevent recovery to later commands.
 
 ## M3: full legacy and Vim9 syntax
 
-Deliver the remaining syntax in `language-support.md`, including functions,
+Deliver the remaining syntax in `syntax-coverage.md`, including functions,
 classes, interfaces, enums, type aliases, generics, imports/exports, complex
 expressions, mappings, autocommands, and embedded payload preservation.
 
-Current verified syntax is recorded once in `language-support.md` and in focused
-package tests. Generated official positive and negative cases are the primary
+Current verified syntax is recorded in `syntax-coverage.md` and focused package
+tests. Generated official positive and negative cases are the primary
 per-form evidence. Focused curated tests cover mixed-dialect transitions and
 incomplete-input recovery once per shared parser mechanism, rather than
 duplicating every syntax form across those contexts. Historical version
