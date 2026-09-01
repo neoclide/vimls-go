@@ -110,7 +110,7 @@ for dynamic names.
 - [x] Complete declarations and expressions for typed variables, destructuring,
   lambdas, method chains, function values and nested generic/container/tuple
   types, with byte-stable recovery for incomplete input.
-- [ ] Complete class, abstract class, interface and enum semantics: constructors,
+- [x] Complete class, abstract class, interface and enum semantics: constructors,
   static/object members, access control, inheritance, implementation,
   overriding, generic methods, enum values and `this`/`super` binding.
 - [ ] Complete `def` scopes and closures, default/optional/variadic parameters,
