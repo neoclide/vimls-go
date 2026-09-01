@@ -932,6 +932,9 @@ func readOnlyClassMemberAssignment(result *FileAnalysis, scope *Scope, target *s
 		}
 	}
 	for current := class; current != nil; current = extendedClass(file, classes, current) {
+		if current.Aggregate == nil {
+			continue
+		}
 		for _, memberIndex := range current.Aggregate.Members {
 			if memberIndex < 0 || memberIndex >= len(file.Commands) {
 				continue

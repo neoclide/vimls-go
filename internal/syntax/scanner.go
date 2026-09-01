@@ -1105,6 +1105,9 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if baseDialect == Legacy || commandStart < end && file.Source[commandStart] == ':' {
 			start = scanRange(file.Source, start, end)
 		} else if rangeEnd := scanRange(file.Source, start, end); rangeEnd > start && vim9ModifierRangeRequiresColon(file.Source, start, rangeEnd, end) {
+			if rangeEnd > end {
+				rangeEnd = end
+			}
 			start = rangeEnd
 			invalidVim9Range = true
 			wordEnd := scanWord(file.Source, rangeEnd, end)
