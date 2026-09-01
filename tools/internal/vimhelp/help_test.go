@@ -54,3 +54,21 @@ func TestToMarkdownHandlesExpectedOutputAndReopensExample(t *testing.T) {
 		t.Fatalf("Markdown =\n%s", markdown)
 	}
 }
+
+func TestExtractSharesDocumentationAcrossAdjacentTagLines(t *testing.T) {
+	source := []byte("\t*:one*\n\t*:two*\nShared documentation.\n\n\t*:three*\nThird documentation.\n")
+	docs, err := Extract("commands.txt", source, []string{":one", ":two", ":three"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if docs[":one"].Markdown != "Shared documentation." || docs[":two"].Markdown != docs[":one"].Markdown || docs[":three"].Markdown != "Third documentation." {
+		t.Fatalf("documentation = %#v", docs)
+	}
+}
+
+func TestToMarkdownEndsExampleAtUnindentedProse(t *testing.T) {
+	markdown := ToMarkdown("To disable encryption: >\n\t:set key=\n\nYou can select another method: >\n\t:setlocal cm=xchacha20v2\nUsing it requires support.")
+	if strings.Count(markdown, "```vim") != 2 || strings.Count(markdown, "```") != 4 || !strings.Contains(markdown, "```\nYou can select") || !strings.Contains(markdown, "```\nUsing it requires support.") {
+		t.Fatalf("Markdown =\n%s", markdown)
+	}
+}

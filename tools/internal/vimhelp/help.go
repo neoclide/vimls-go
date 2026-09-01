@@ -95,6 +95,14 @@ func Extract(sourceName string, source []byte, targets []string) (map[string]Doc
 		sort.Strings(missing)
 		return nil, fmt.Errorf("Vim help tags missing from %s: %s", sourceName, strings.Join(missing, ", "))
 	}
+	for index := 0; index+1 < len(boundaries); {
+		if ToMarkdown(strings.Join(lines[boundaries[index].line:boundaries[index+1].line], "\n")) != "" {
+			index++
+			continue
+		}
+		boundaries[index+1].tags = append(boundaries[index+1].tags, boundaries[index].tags...)
+		boundaries = append(boundaries[:index], boundaries[index+1:]...)
+	}
 
 	result := make(map[string]Documentation, len(targets))
 	for index, current := range boundaries {
@@ -136,6 +144,9 @@ func ToMarkdown(source string) string {
 				output = append(output, "```")
 				inExample = false
 				line = strings.TrimPrefix(trimmedLeft, "<")
+			} else if line != "" && len(line) == len(trimmedLeft) {
+				output = append(output, "```")
+				inExample = false
 			} else {
 				output = append(output, strings.TrimPrefix(line, "\t"))
 				continue

@@ -19,8 +19,10 @@ const (
 
 // Command describes one built-in Ex command from the pinned Vim baseline.
 type Command struct {
-	Name  string
-	Flags CommandFlags
+	Name                string
+	Flags               CommandFlags
+	Documentation       string
+	DocumentationSource string
 }
 
 // Commands returns the pinned built-in Ex command table in its source order.
