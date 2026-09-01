@@ -1196,6 +1196,117 @@ func BenchmarkWorkspaceRebuild(b *testing.B) {
 	}
 }
 
+func BenchmarkRuntimepathIndexing(b *testing.B) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	b.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })
+	var runtimePaths []string
+	totalBytes := 0
+	for rootNumber := range 2 {
+		root := filepath.Join(b.TempDir(), fmt.Sprintf("runtime-%d", rootNumber))
+		for fileNumber := range 128 {
+			directory := "plugin"
+			filename := fmt.Sprintf("file-%03d.vim", fileNumber)
+			content := fmt.Sprintf("function! BenchmarkRoot%dFunc%d(value)\n  return a:value\nendfunction\n", rootNumber, fileNumber)
+			if fileNumber%2 != 0 {
+				directory = "autoload/benchmark"
+				filename = fmt.Sprintf("file_%03d.vim", fileNumber)
+				content = fmt.Sprintf("function! benchmark#file_%03d#Func(value)\n  return a:value\nendfunction\n", fileNumber)
+			}
+			path := filepath.Join(root, directory, filename)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				b.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				b.Fatal(err)
+			}
+			totalBytes += len(content)
+		}
+		canonical, err := workspace.CanonicalPath(root)
+		if err != nil {
+			b.Fatal(err)
+		}
+		runtimePaths = append(runtimePaths, canonical)
+	}
+	roots := workspaceIndexRoots(nil, runtimePaths)
+	resolver := workspacePathResolver(nil, runtimePaths)
+	instance := New(nil, nil, io.Discard)
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(context.Background(), roots, runtimePaths, resolver, nil)
+	if len(diskFiles) != 256 || index.FileCount() != 256 || !index.Complete() || !graph.Snapshot().Ready() || len(warnings) != 0 {
+		b.Fatalf("runtimepath preflight: disk=%d index=%d complete=%t ready=%t warnings=%#v", len(diskFiles), index.FileCount(), index.Complete(), graph.Snapshot().Ready(), warnings)
+	}
+	b.ReportAllocs()
+	b.SetBytes(int64(totalBytes))
+	b.ResetTimer()
+	for b.Loop() {
+		instance.buildWorkspaceIndex(context.Background(), roots, runtimePaths, resolver, nil)
+	}
+}
+
+func BenchmarkReverseDependentReanalysis(b *testing.B) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	b.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })
+	root := b.TempDir()
+	paths := make([]string, 32)
+	for index := len(paths) - 1; index >= 0; index-- {
+		source := "vim9script\nexport var Value = 1\n"
+		if index+1 < len(paths) {
+			source = fmt.Sprintf("vim9script\nimport './file-%02d.vim' as Next\nexport var Value = Next.Value\n", index+1)
+		}
+		path := filepath.Join(root, fmt.Sprintf("file-%02d.vim", index))
+		if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+			b.Fatal(err)
+		}
+		canonical, err := workspace.CanonicalPath(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		paths[index] = canonical
+	}
+	canonicalRoot, err := workspace.CanonicalPath(root)
+	if err != nil {
+		b.Fatal(err)
+	}
+	roots := []string{canonicalRoot}
+	resolver := workspacePathResolver(roots, nil)
+	instance := New(nil, nil, io.Discard)
+	b.Cleanup(instance.stopAnalysis)
+	for index, path := range paths {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		instance.documents.Open(uri.File(path).String(), int32(index+1), string(source))
+	}
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(context.Background(), roots, nil, resolver, instance.documents.Snapshots())
+	view := graph.Snapshot()
+	dependents := view.ReverseDependents(paths[len(paths)-1])
+	if len(diskFiles) != len(paths) || len(dependents) != len(paths)-1 || !index.Complete() || !view.Ready() || len(warnings) != 0 {
+		b.Fatalf("dependent preflight: disk=%d dependents=%d complete=%t ready=%t warnings=%#v", len(diskFiles), len(dependents), index.Complete(), view.Ready(), warnings)
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceRoots = roots
+	instance.workspaceResolver = resolver
+	instance.workspaceIndex = index
+	instance.workspaceGraph = graph
+	instance.workspaceGraphView = view
+	instance.workspaceFiles = diskFiles
+	instance.workspaceBuilt = true
+	instance.workspaceMu.Unlock()
+	instance.analysisMu.Lock()
+	instance.analysisWorkers = 1
+	instance.analysisMu.Unlock()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		instance.workspaceMu.Lock()
+		dependents = instance.workspaceGraphView.ReverseDependents(paths[len(paths)-1])
+		instance.workspaceMu.Unlock()
+		for _, path := range dependents {
+			instance.analyzeDocument(uri.File(path).String())
+		}
+	}
+}
+
 func initializeWorkspaceServer(t *testing.T, root string) *Server {
 	t.Helper()
 	instance := New(nil, nil, io.Discard)

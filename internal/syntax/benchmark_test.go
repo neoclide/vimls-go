@@ -17,6 +17,31 @@ var benchmarkLongestOperator string
 var benchmarkModifier string
 var benchmarkModifierOK bool
 
+func BenchmarkParseLargeFile(b *testing.B) {
+	payload := strings.Repeat("x", 480)
+	tests := []struct {
+		name, prefix, line string
+	}{
+		{name: "legacy", line: "let g:benchmark_value = '" + payload + "'\n"},
+		{name: "vim9", prefix: "vim9script\n", line: "var benchmark_value = '" + payload + "'\n"},
+	}
+	for _, test := range tests {
+		for _, size := range []struct {
+			name  string
+			bytes int
+		}{{"100KiB", 100 << 10}, {"1MiB", 1 << 20}} {
+			b.Run(test.name+"/"+size.name, func(b *testing.B) {
+				source := test.prefix + strings.Repeat(test.line, max(1, (size.bytes-len(test.prefix))/len(test.line)))
+				b.ReportAllocs()
+				b.SetBytes(int64(len(source)))
+				for b.Loop() {
+					benchmarkParsedFile = Parse(source)
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkLookupModifier(b *testing.B) {
 	for _, test := range []struct {
 		name string

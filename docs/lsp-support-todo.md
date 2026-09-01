@@ -280,7 +280,7 @@ configuration, index or import-graph revision.
   or modifying user configuration.
 - [x] Fuzz parser, framing and position/edit boundaries; retain every crash,
   hang or memory-growth input in the permanent corpus.
-- [ ] Benchmark large files, runtimepath indexing, completion latency, reverse
+- [x] Benchmark large files, runtimepath indexing, completion latency, reverse
   dependent reanalysis and full workspace rebuilds against documented limits.
 - [ ] Complete Linux/macOS CI, Windows build/integration coverage, vulnerability
   scanning, install documentation and reproducible release archives.

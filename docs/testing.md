@@ -236,13 +236,29 @@ parser cache. These tests must remain deterministic without timing sleeps.
 ## Performance budgets
 
 Current benchmarks cover parser hot paths, command lookup, the optional legacy
-reference comparison, 64 KiB content-ID construction, an open-document parser
-cache hit, a changed-file full parse, and a 32-file workspace rebuild that
-includes `ParseSources`. The incremental-edit baselines use
+reference comparison, 64 KiB content-ID construction, parser-cache hits and
+changed-file full parses. The standing end-to-end workloads are:
+
+| Benchmark | Fixed workload | Limit |
+| --- | --- | --- |
+| `BenchmarkParseLargeFile` | Legacy and Vim9 files at 100 KiB and 1 MiB | Confirmed time regression at most 15%; allocation regression at most 20% |
+| `BenchmarkCompletionLatency` | Complete cached LSP requests in 1 KiB and 100 KiB Vim9 files | Must remain below the 100 ms completion budget; the same regression limits apply |
+| `BenchmarkRuntimepathIndexing` | Two runtime roots containing 256 Vim files | Same regression limits |
+| `BenchmarkReverseDependentReanalysis` | One changed leaf with 31 transitive open dependents | Same regression limits |
+| `BenchmarkWorkspaceRebuild` | 32 files containing 64 functions each | Same regression limits |
+
+Run those fixed workloads on the pinned runner with:
+
+```sh
+go test -mod=readonly ./internal/syntax ./internal/server -run '^$' \
+  -bench '^(BenchmarkParseLargeFile|BenchmarkCompletionLatency|BenchmarkRuntimepathIndexing|BenchmarkReverseDependentReanalysis|BenchmarkWorkspaceRebuild)$' \
+  -benchmem -benchtime=10x -count=5
+```
+
+The incremental-edit baselines continue to use
 `-benchmem -benchtime=100x -count=1`; `B/op` and `allocs/op` measure allocation
-pressure per operation, not retained heap or peak RSS. Future baselines should
-add 1 KiB, 10 KiB, 100 KiB, and 1 MiB documents; small and large workspaces;
-one-line edits; diagnostics; index replacement; completion; and references.
+pressure per operation, not retained heap or peak RSS. Add new sizes or
+workloads only when a measured production case is not represented.
 
 On a pinned release runner, fail a confirmed median or p95 time regression above
 15% or allocation regression above 20% unless the change records and approves

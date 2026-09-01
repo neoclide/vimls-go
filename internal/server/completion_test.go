@@ -13,7 +13,48 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
+
+var benchmarkCompletionResult protocol.CompletionResult
+
+func BenchmarkCompletionLatency(b *testing.B) {
+	for _, size := range []struct {
+		name  string
+		bytes int
+	}{{"1KiB", 1 << 10}, {"100KiB", 100 << 10}} {
+		b.Run(size.name, func(b *testing.B) {
+			instance := New(nil, nil, io.Discard)
+			b.Cleanup(instance.stopAnalysis)
+			line := "# completion benchmark padding keeps the symbol set realistic\n"
+			source := "vim9script\nvar benchmark_value = 1\n" + strings.Repeat(line, max(1, (size.bytes-len("vim9script\nvar benchmark_value = 1\n"))/len(line))) + "echo strl"
+			documentURI := uri.MustParse("file:///completion-benchmark.vim")
+			snapshot := instance.documents.Open(documentURI.String(), 1, source)
+			position, err := snapshot.Position(len(source), text.UTF16)
+			if err != nil {
+				b.Fatal(err)
+			}
+			params := &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Position:     protocol.Position{Line: uint32(position.Line), Character: uint32(position.Character)},
+			}}
+			result, err := instance.Completion(context.Background(), params)
+			list, ok := result.(*protocol.CompletionList)
+			if err != nil || !ok || !hasCompletion(list.Items, "strlen", protocol.CompletionItemKindFunction) {
+				b.Fatalf("completion preflight = %#v, %v", result, err)
+			}
+			b.ReportAllocs()
+			b.SetBytes(int64(len(source)))
+			b.ResetTimer()
+			for b.Loop() {
+				benchmarkCompletionResult, err = instance.Completion(context.Background(), params)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func TestCompletionFunctionSnippetEscapesAndDefaultIsPlain(t *testing.T) {
 	if got, snippet := completionFunctionSnippet("Call", []string{"a$", `b}\\`}, false); snippet || got != "Call" {
