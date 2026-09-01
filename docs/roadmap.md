@@ -235,6 +235,9 @@ configuration. Run it with:
 make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
 ```
 
+Tag releases build deterministic CGO-free archives for Linux, macOS and
+Windows on amd64 and arm64 through `tools/release`, with SHA-256 checksums.
+
 ## Required 1.0 LSP surface
 
 - Lifecycle and cancellation.

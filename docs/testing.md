@@ -349,11 +349,20 @@ go run -mod=readonly ./tools/covercheck -profile coverage.out -min 90
 go test -mod=readonly -run TestLSPSubprocess ./test/integration
 ```
 
-Planned scheduled/release gates add committed fuzz seeds, bounded fuzzing,
-benchmarks, Vim compatibility lanes, `govulncheck`, cross-platform builds,
-version output, and a clean stdio handshake.
+Planned scheduled/release gates add bounded live fuzzing and benchmark
+regression checks.
 
 ## Release evidence
+
+Pushing a `v*` tag runs `tools/release`, which builds CGO-free amd64 and arm64
+binaries for Linux, macOS and Windows with `-trimpath`, an empty Go build ID and
+the tag injected into `vimls --version`. Tar and zip entries use the commit
+timestamp, stable paths and modes; `checksums.txt` lists the SHA-256 of every
+archive. Generate the same assets locally with:
+
+```sh
+go run ./tools/release -version vX.Y.Z -epoch "$(git log -1 --format=%ct)"
+```
 
 A release report records exact Go and Vim versions, commands, test counts,
 race/fuzz duration, benchmark runner and deltas, supported capabilities,

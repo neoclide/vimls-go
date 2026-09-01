@@ -22,7 +22,6 @@ import (
 
 const (
 	Name                      = "vimls"
-	Version                   = "dev"
 	maxFileBytes              = 4 << 20
 	maxPendingRequests        = 128
 	maxParallelAnalysis       = 4
@@ -31,6 +30,8 @@ const (
 	maxIndexBytes             = 256 << 20
 	maxWorkspaceSymbols       = 200
 )
+
+var Version = "dev"
 
 const MethodDidChangeRuntimepath = "vimls/didChangeRuntimepath"
 const fileWatchRegistrationID = "vimls-watch-vim-files"

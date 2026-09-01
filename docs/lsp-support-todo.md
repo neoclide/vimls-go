@@ -281,7 +281,7 @@ configuration, index or import-graph revision.
   hang or memory-growth input in the permanent corpus.
 - [x] Benchmark large files, runtimepath indexing, completion latency, reverse
   dependent reanalysis and full workspace rebuilds against documented limits.
-- [ ] Complete Linux/macOS CI, Windows build/integration coverage, vulnerability
+- [x] Complete Linux/macOS CI, Windows build/integration coverage, vulnerability
   scanning, install documentation and reproducible release archives.
 
 Exit gate: `gofmt` is clean, `go test ./...`, `go test -race ./...` and
