@@ -10,7 +10,7 @@ outside the current language contract.
 The first Formatting implementation should be a **source-preserving indentation
 formatter** for both Legacy Vim script and Vim9 script:
 
-- expose only `textDocument/formatting`;
+- expose `textDocument/formatting` and `textDocument/rangeFormatting`;
 - compute indentation from the existing dialect-aware syntax tree and physical
   source spans;
 - return small, line-local edits that replace leading whitespace only;
@@ -60,6 +60,7 @@ blocks, continuations, comments and heredocs.
 
 | Input | Required behavior |
 | --- | --- |
+| Whole document or range | Use the complete document for syntax context, then return only safe indentation edits requested by the operation. |
 | Legacy and Vim9 files | Format both dialects from the same request path while respecting each command's contextual dialect. |
 | Named blocks | Indent bodies and align branch/end commands with their owning block. |
 | Function and `def` bodies | Indent bodies and multiline declarations when the parser has complete ownership. |
@@ -85,7 +86,7 @@ style is required.
 - rewriting `|`, comments or continuation markers;
 - sorting declarations, imports, dictionaries or commands;
 - formatting embedded Python, Ruby, Perl, Lua, shell or other languages;
-- `textDocument/rangeFormatting` and `textDocument/onTypeFormatting`;
+- `textDocument/onTypeFormatting`;
 - project-specific style configuration beyond the standard LSP indentation
   options.
 
@@ -124,8 +125,8 @@ The implementation can be two small pieces:
 1. A pure syntax-layer function, placed next to the existing AST, accepts a
    parsed immutable file plus `tabSize` and `insertSpaces`. It returns byte-span
    replacements for proven leading indentation.
-2. A server handler converts those byte spans to the client's negotiated LSP
-   position encoding and returns `protocol.TextEdit` values.
+2. The document and range handlers convert those byte spans to the client's
+   negotiated LSP position encoding and return `protocol.TextEdit` values.
 
 The syntax layer should use a minimal internal edit value containing a source
 span and replacement text. It must not depend on LSP types.
@@ -166,10 +167,11 @@ safe basis for reconstructing whole expressions or commands.
 
 ### LSP behavior
 
-The handler should follow the
-[`textDocument/formatting` contract](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/lsp/3.18/language/formatting.md):
+Both handlers should follow the
+[document and range Formatting contracts](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/lsp/3.18/language/formatting.md):
 
 - advertise `documentFormattingProvider` only when the handler is complete;
+- advertise `documentRangeFormattingProvider` at the same time;
 - honor required `tabSize` and `insertSpaces` for newly generated indentation;
 - return an empty edit list when the document needs no safe changes;
 - return sorted, non-overlapping, line-local edits rather than one replacement
@@ -183,11 +185,23 @@ Small edits preserve editor diagnostics, selections and other tracked ranges.
 This also follows the VS Code language-feature guidance to return the
 [`smallest possible text edits`](https://github.com/microsoft/vscode-docs/blob/main/api/language-extensions/programmatic-language-features.md).
 
-Range formatting should not be advertised initially. Correct indentation often
-depends on a block opener, delimiter or continuation before the requested
-range, and a range may bisect a heredoc or logical command. A future range
-implementation can compute whole-document indentation context and retain only
-edits whose complete syntax units lie inside the requested range.
+Range formatting must not parse or indent the selected substring in isolation.
+The shared planner computes the same candidate edits from the complete immutable
+document, so a block opener, delimiter or continuation before the range still
+provides context. The range handler then filters that plan. It returns an edit
+only when the complete leading-whitespace span is inside the half-open request
+range; a zero-width insertion must be before the range end. In particular:
+
+- a first line selected from a character after its indentation is unchanged;
+- a line at the exclusive range end is unchanged;
+- no edit expands the requested range or changes a partially selected prefix;
+- protected heredoc, opaque and payload spans remain protected even when fully
+  selected;
+- formatting the full document range produces the same edits as document
+  formatting.
+
+This needs no second formatter or syntax-unit expansion. It is a boundary
+filter over the same independently safe, line-local edits.
 
 On-type formatting should also wait. It operates on incomplete input under a
 tighter latency budget and needs a separate contract for which typed characters
@@ -222,6 +236,10 @@ visually plausible whitespace change can alter program meaning.
 - UTF-8, UTF-16 and UTF-32 LSP edit-range tests, including astral and combining
   characters before an edited line.
 - Sorted, non-overlapping and minimal-edit assertions.
+- Range tests for mid-line starts, exclusive ends, empty ranges, complete lines
+  and ranges nested inside blocks whose opener is outside the range.
+- An assertion that no range edit crosses either requested boundary and that a
+  full-document range equals document formatting.
 - Idempotence: applying Formatting twice produces no second edit.
 - Parse preservation: after applying edits, the command/block/expression shape
   is unchanged when spans and trivia are ignored, and no new diagnostic is
@@ -249,7 +267,8 @@ never invoke Vim or source a user's runtimepath.
 
 ### Server and client tests
 
-- initialize advertises Formatting only after the handler tests pass;
+- initialize advertises document and range Formatting only after both handler
+  tests pass;
 - a request returns the same edits for the same immutable snapshot;
 - an intervening document version rejects the stale result;
 - applying returned edits through a real LSP client gives the expected buffer;
@@ -262,11 +281,12 @@ never invoke Vim or source a user's runtimepath.
    mark each physical line as owned or protected.
 2. **Add the pure indentation planner.** Implement only leading-indent byte
    edits beside the syntax tree and satisfy preservation/idempotence tests.
-3. **Add whole-document LSP Formatting.** Convert positions, enforce snapshot
-   freshness, advertise the capability and add real-client smoke coverage.
-4. **Evaluate, do not assume, further scope.** Add range formatting, safe
-   `trim` heredoc shifting or optional whitespace cleanup only when each has an
-   independent semantic contract and oracle evidence.
+3. **Add document and range LSP Formatting.** Share one plan, filter range
+   edits, convert positions, enforce snapshot freshness, advertise both
+   capabilities and add real-client smoke coverage.
+4. **Evaluate, do not assume, further scope.** Add safe `trim` heredoc shifting
+   or optional whitespace cleanup only when each has an independent semantic
+   contract and oracle evidence.
 
 General expression pretty-printing should remain deferred until the parser has
 a genuinely lossless concrete representation of all expression and command
@@ -280,6 +300,8 @@ Formatting is ready to advertise when all of the following are true:
 - Legacy and Vim9 owned-line fixtures match the v9.2.1015 indentation oracle;
 - protected regions are byte-identical before and after formatting;
 - every returned edit is minimal, sorted and non-overlapping;
+- range formatting never edits outside its half-open range, and a full-document
+  range is equivalent to document formatting;
 - formatting is idempotent and preserves parse structure and diagnostics;
 - all negotiated position encodings and newline forms pass;
 - stale snapshots cannot return edits;
