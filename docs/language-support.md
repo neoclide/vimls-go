@@ -350,10 +350,12 @@ builtin functions, parameters, imports, Vim9 types and aggregate members.
 Declaration, readonly, static, deprecated and default-library modifiers are
 emitted only from syntax, analysis or pinned Vim metadata facts. Token positions
 use the negotiated encoding. Inlay hints expose only already-inferred
-variable/constant types that were not written explicitly. Code actions are
-limited to a unique, known missing block terminator and never execute Vim
-script. The server does not advertise document, range, or on-type formatting.
-Source-wide rewriting and speculative type fixes are outside the 1.0 surface.
+variable/constant types that were not written explicitly. Code actions repair
+one uniquely matched missing block or parameter terminator, callable argument
+list, or compiled-call comma. Every candidate is applied to an in-memory copy
+and reparsed before it is returned. They never execute Vim script. The server
+does not advertise document, range, or on-type formatting. Source-wide
+rewriting and speculative type fixes are outside the 1.0 surface.
 
 Document symbols, folding ranges, and selection ranges retain their nested
 function, class, interface, and enum structure through end-of-file when a block

@@ -49,6 +49,14 @@ type semanticFact struct {
 	priority  uint8
 }
 
+type syntaxQuickFix struct {
+	diagnostic       syntax.Diagnostic
+	clientDiagnostic protocol.Diagnostic
+	span             syntax.Span
+	newText          string
+	title            string
+}
+
 func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 	if err != nil {
@@ -381,35 +389,25 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 	if !allowsQuickFix(params.Context.Only) {
 		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
 	}
-	missing := make([]syntax.Diagnostic, 0)
+	fixes := make([]syntaxQuickFix, 0, 1)
 	for _, diagnostic := range file.Diagnostics {
-		if diagnostic.Code == "vimls/missing-end" {
-			missing = append(missing, diagnostic)
+		diagnosticRange, validDiagnosticRange := protocolRange(snapshot, encoding, diagnostic.Span)
+		clientDiagnostic, matched := matchingClientDiagnostic(params.Context.Diagnostics, diagnostic.Code, diagnosticRange)
+		if !validDiagnosticRange || !matched || !rangesOverlapOrTouch(params.Range, diagnosticRange) {
+			continue
+		}
+		if fix, ok := syntaxQuickFixFor(file, diagnostic); ok && syntaxQuickFixReparses(file, fix) {
+			fix.clientDiagnostic = clientDiagnostic
+			fixes = append(fixes, fix)
 		}
 	}
-	if len(missing) != 1 {
+	if len(fixes) != 1 {
 		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
 	}
-	diagnosticRange, validDiagnosticRange := protocolRange(snapshot, encoding, missing[0].Span)
-	if !validDiagnosticRange || !clientHasDiagnostic(params.Context.Diagnostics, "vimls/missing-end", diagnosticRange) || !rangesOverlap(params.Range, diagnosticRange) {
+	fix := fixes[0]
+	editRange, validEditRange := protocolRange(snapshot, encoding, fix.span)
+	if !validEditRange {
 		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
-	}
-	block, endCommand, ok := missingEndBlock(file, missing[0])
-	if !ok {
-		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
-	}
-	endPosition, positionErr := snapshot.Position(len(file.Source), encoding)
-	if positionErr != nil {
-		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
-	}
-	indent := lineIndent(file.Source, file.Commands[block.Header].Span.Start)
-	newText := indent + endCommand + "\n"
-	if file.Source != "" && !strings.HasSuffix(file.Source, "\n") {
-		newText = "\n" + newText
-	}
-	editRange := protocol.Range{
-		Start: protocol.Position{Line: uint32(endPosition.Line), Character: uint32(endPosition.Character)},
-		End:   protocol.Position{Line: uint32(endPosition.Line), Character: uint32(endPosition.Character)},
 	}
 	preferred := true
 	kind := protocol.CodeActionKindQuickFix
@@ -418,11 +416,11 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 	if versioned {
 		versionPointer = &version
 	}
-	edit := &protocol.TextEdit{Range: editRange, NewText: newText}
+	edit := &protocol.TextEdit{Range: editRange, NewText: fix.newText}
 	action := &protocol.CodeAction{
-		Title:       "Insert :" + endCommand,
+		Title:       fix.title,
 		Kind:        &kind,
-		Diagnostics: params.Context.Diagnostics,
+		Diagnostics: []protocol.Diagnostic{fix.clientDiagnostic},
 		IsPreferred: &preferred,
 		Edit: &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{&protocol.TextDocumentEdit{
 			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
@@ -438,6 +436,72 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 	return []protocol.CommandOrCodeAction{action}, nil
 }
 
+func syntaxQuickFixFor(file *syntax.File, diagnostic syntax.Diagnostic) (syntaxQuickFix, bool) {
+	if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(file.Source) {
+		return syntaxQuickFix{}, false
+	}
+	fix := syntaxQuickFix{diagnostic: diagnostic}
+	switch diagnostic.Code {
+	case "vimls/missing-end":
+		block, endCommand, ok := missingEndBlock(file, diagnostic)
+		if !ok {
+			return syntaxQuickFix{}, false
+		}
+		indent := lineIndent(file.Source, file.Commands[block.Header].Span.Start)
+		fix.span = syntax.Span{Start: len(file.Source), End: len(file.Source)}
+		fix.newText = indent + endCommand + "\n"
+		if file.Source != "" && !strings.HasSuffix(file.Source, "\n") {
+			fix.newText = "\n" + fix.newText
+		}
+		fix.title = "Insert :" + endCommand
+	case "vimls/missing-parameter-end":
+		fix.span = syntax.Span{Start: diagnostic.Span.End, End: diagnostic.Span.End}
+		fix.newText = ")"
+		fix.title = "Insert missing )"
+	case "vimls/missing-method-call":
+		if diagnostic.Span.Start != diagnostic.Span.End {
+			return syntaxQuickFix{}, false
+		}
+		fix.span = diagnostic.Span
+		fix.newText = "()"
+		fix.title = "Insert missing ()"
+	case "vim/E1123":
+		if diagnostic.Message != "Missing comma before argument" {
+			return syntaxQuickFix{}, false
+		}
+		start := diagnostic.Span.Start
+		for start > 0 && (file.Source[start-1] == ' ' || file.Source[start-1] == '\t') {
+			start--
+		}
+		if start == diagnostic.Span.Start || start == 0 || file.Source[start-1] == '\n' || file.Source[start-1] == '\r' {
+			return syntaxQuickFix{}, false
+		}
+		fix.span = syntax.Span{Start: start, End: diagnostic.Span.Start}
+		fix.newText = ", "
+		fix.title = "Insert missing comma"
+	default:
+		return syntaxQuickFix{}, false
+	}
+	return fix, true
+}
+
+func syntaxQuickFixReparses(file *syntax.File, fix syntaxQuickFix) bool {
+	if fix.span.Start < 0 || fix.span.End < fix.span.Start || fix.span.End > len(file.Source) {
+		return false
+	}
+	source := file.Source[:fix.span.Start] + fix.newText + file.Source[fix.span.End:]
+	reparsed := syntax.Parse(source)
+	if len(reparsed.Diagnostics) >= len(file.Diagnostics) {
+		return false
+	}
+	for _, diagnostic := range reparsed.Diagnostics {
+		if diagnostic.Code == fix.diagnostic.Code && diagnostic.Message == fix.diagnostic.Message {
+			return false
+		}
+	}
+	return true
+}
+
 func allowsQuickFix(only []protocol.CodeActionKind) bool {
 	if len(only) == 0 {
 		return true
@@ -450,16 +514,22 @@ func allowsQuickFix(only []protocol.CodeActionKind) bool {
 	return false
 }
 
-func clientHasDiagnostic(diagnostics []protocol.Diagnostic, code string, rangeValue protocol.Range) bool {
+func matchingClientDiagnostic(diagnostics []protocol.Diagnostic, code string, rangeValue protocol.Range) (protocol.Diagnostic, bool) {
 	for _, diagnostic := range diagnostics {
 		if value, ok := diagnostic.Code.(protocol.String); ok && string(value) == code && diagnostic.Range == rangeValue {
-			return true
+			return diagnostic, true
 		}
 	}
-	return false
+	return protocol.Diagnostic{}, false
 }
 
-func rangesOverlap(left, right protocol.Range) bool {
+func rangesOverlapOrTouch(left, right protocol.Range) bool {
+	if left.Start == left.End {
+		return !positionLess(left.Start, right.Start) && !positionLess(right.End, left.Start)
+	}
+	if right.Start == right.End {
+		return !positionLess(right.Start, left.Start) && !positionLess(left.End, right.Start)
+	}
 	return positionLess(left.Start, right.End) && positionLess(right.Start, left.End)
 }
 

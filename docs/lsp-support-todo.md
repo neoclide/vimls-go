@@ -242,7 +242,7 @@ request returns `ContentModified`.
   imports, types, classes/interfaces/enums, members and deprecated symbols.
 - [x] Add token modifiers only when analysis proves declaration, readonly,
   static, deprecated or default-library status.
-- [ ] Add safe syntax-backed quick fixes beyond a missing block terminator only
+- [x] Add safe syntax-backed quick fixes beyond a missing block terminator only
   when there is exactly one valid edit, for example an unambiguous missing
   keyword or dialect-specific terminator.
 - [x] Do not add formatting, source-wide rewriting or speculative type fixes to

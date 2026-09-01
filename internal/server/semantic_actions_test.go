@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 )
@@ -160,6 +161,90 @@ func TestCodeActionInsertsKnownMissingEnd(t *testing.T) {
 	textEdit := documentEdit.Edits[0].(*protocol.TextEdit)
 	if textEdit.Range != navigationRange(3, 0, 0) || textEdit.NewText != "endif\n" {
 		t.Fatalf("text edit = %#v", textEdit)
+	}
+}
+
+func TestCodeActionRepairsOnlyUniqueSyntaxBackedEdit(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		code       string
+		diagnostic protocol.Range
+		title      string
+		edit       protocol.Range
+		newText    string
+		fixed      string
+	}{
+		{
+			name:       "function parameter terminator",
+			source:     "vim9script\ndef F(arg: number\nenddef\n",
+			code:       "vimls/missing-parameter-end",
+			diagnostic: navigationRange(1, 5, 17),
+			title:      "Insert missing )",
+			edit:       navigationRange(1, 17, 17),
+			newText:    ")",
+			fixed:      "vim9script\ndef F(arg: number)\nenddef\n",
+		},
+		{
+			name:       "method call parentheses",
+			source:     "vim9script\nvar x = 123->(Func)\n",
+			code:       "vimls/missing-method-call",
+			diagnostic: navigationRange(1, 19, 19),
+			title:      "Insert missing ()",
+			edit:       navigationRange(1, 19, 19),
+			newText:    "()",
+			fixed:      "vim9script\nvar x = 123->(Func)()\n",
+		},
+		{
+			name:       "compiled call comma",
+			source:     "vim9script\ndef F()\n  echo len(1 2)\nenddef\n",
+			code:       "vim/E1123",
+			diagnostic: navigationRange(2, 13, 14),
+			title:      "Insert missing comma",
+			edit:       navigationRange(2, 12, 13),
+			newText:    ", ",
+			fixed:      "vim9script\ndef F()\n  echo len(1, 2)\nenddef\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			diagnostic := protocol.Diagnostic{Range: test.diagnostic, Code: protocol.String(test.code)}
+			actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Range:        test.diagnostic,
+				Context:      protocol.CodeActionContext{Diagnostics: []protocol.Diagnostic{diagnostic}},
+			})
+			if err != nil || len(actions) != 1 {
+				t.Fatalf("actions = %#v, error = %v", actions, err)
+			}
+			action := actions[0].(*protocol.CodeAction)
+			documentEdit := action.Edit.DocumentChanges[0].(*protocol.TextDocumentEdit)
+			textEdit := documentEdit.Edits[0].(*protocol.TextEdit)
+			if action.Title != test.title || textEdit.Range != test.edit || textEdit.NewText != test.newText {
+				t.Fatalf("action = %#v, edit = %#v", action, textEdit)
+			}
+			if parsed := syntax.Parse(test.fixed); len(parsed.Diagnostics) != 0 {
+				t.Fatalf("fixed source diagnostics = %#v", parsed.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestCodeActionRejectsMultipleValidEdits(t *testing.T) {
+	source := "vim9script\nvar x = 123->(One)\nvar y = 456->(Two)\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	diagnostics := []protocol.Diagnostic{
+		{Range: navigationRange(1, 18, 18), Code: protocol.String("vimls/missing-method-call")},
+		{Range: navigationRange(2, 18, 18), Code: protocol.String("vimls/missing-method-call")},
+	}
+	actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Range:        protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 3}},
+		Context:      protocol.CodeActionContext{Diagnostics: diagnostics},
+	})
+	if err != nil || len(actions) != 0 {
+		t.Fatalf("actions = %#v, error = %v", actions, err)
 	}
 }
 
