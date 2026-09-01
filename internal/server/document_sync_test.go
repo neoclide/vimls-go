@@ -84,6 +84,9 @@ func TestServerDocumentHandlersCancelStaleAnalysis(t *testing.T) {
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
 		t.Fatal(err)
 	}
+	// This test owns the active analysis contexts directly. Stop the server's
+	// background worker so a queued open/change analysis cannot replace them.
+	instance.stopAnalysis()
 	documentURI := uri.MustParse("file:///direct.vim")
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "old"},
