@@ -237,9 +237,9 @@ Windows on amd64 and arm64 through `tools/release`, with SHA-256 checksums.
 - Prepare rename and rename for provably safe symbols.
 - Semantic tokens and focused code actions.
 
-Formatting, call hierarchy, inlay hints, embedded-language delegation, and
-nonstandard client extensions are post-1.0 unless real client validation shows
-one is required for a usable baseline.
+[Formatting](formatting-research.md), call hierarchy, embedded-language
+delegation, and nonstandard client extensions are post-1.0 unless real client
+validation shows one is required for a usable baseline.
 
 ## Planning gates
 
