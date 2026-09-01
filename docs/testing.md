@@ -258,11 +258,13 @@ Current behavior-sensitive coverage:
 - Vim v9.2.1015 with pinned vim-lsp commit
   `e10d186452743beb7b43d2b3427020832f930c2b` for legacy and Vim9 diagnostics
   plus clean shutdown.
+- Linux and macOS run the formatting, test, race, vet and build gates.
+- Windows builds all packages and runs the compiled stdio integration scenario.
+- Linux runs `govulncheck` v1.1.4 against all packages.
 
 Planned scheduled and release coverage:
 
-- Windows build and subprocess protocol test.
-- Full race, fuzz, corpus, vulnerability, and benchmark lanes.
+- Bounded live-fuzz and benchmark-regression lanes.
 
 Each Vim lane first proves its actual version and required `+eval`/Vim9 support.
 

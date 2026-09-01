@@ -34,6 +34,25 @@ jobs:
           go-version: "1.26.x"
       - run: make format-check coverage
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+      - run: go build ./...
+      - run: go test ./test/integration -run '^TestLSPSubprocess$' -count=1
+
+  vulnerability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+
   vim-oracle:
     runs-on: ubuntu-latest
     steps:
