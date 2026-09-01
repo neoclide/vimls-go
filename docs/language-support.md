@@ -202,23 +202,70 @@ Static Vim9 import paths and direct `:source` filenames become document links
 only when the workspace resolver finds one safe regular file. Completion is
 contextual and bounded: command positions use the pinned Ex command table,
 expression positions use visible declarations and pinned builtin functions,
-and a statically resolved import namespace exposes only exported members.
+legacy `a:` and `l:` prefixes expose only visible arguments and locals, and
+explicit `g:`, `b:`, `w:`, `t:`, `s:` and `v:` declarations retain their
+namespace spelling. Forward variables are excluded while statically declared
+functions remain callable before their declaration. A statically resolved
+import namespace exposes only exported members.
 Unknown and dynamic contexts return no inferred candidates.
 Completion resolve and builtin-call hover include the pinned broad return type
-when Vim's metadata provides one; unknown dynamic return helpers are omitted.
+when Vim's metadata provides one; builtin-function, Ex-command, option, and
+predefined-variable hover plus builtin signature help also include bounded
+pinned Vim documentation using the client's preferred Markdown or plain-text
+format. Accepted Ex-command abbreviations resolve to canonical command help.
+Unknown dynamic return helpers are omitted.
 
-Signature help currently covers statically bound user functions using their
-parsed parameters, defaults, and return type. Rename covers same-file bound
-symbols and cross-file static import members; every spelling must match the
-target declaration, so dynamic, ambiguous, namespace-changing, and autoload
-spellings that require different edits are rejected. Open-file edits carry
-their snapshot versions and closed indexed files use a null version.
+Signature help currently covers direct built-in calls and built-in `->` method
+calls using pinned Vim help signatures, plus statically bound same-file user
+functions and exported functions reached through a static Vim9 import. User
+signatures use their parsed parameters, defaults, and return type; imported
+signatures honor open-document overlays and workspace revisions. Method
+signatures omit the receiver parameter and adjust the active parameter.
+Directly bound function-typed values use their inferred or declared argument,
+optional, variadic, and return-type facts. A same-file declaration shadows a
+built-in name. Local Vim9 object/class methods, explicit and default
+constructors, and inherited methods are resolved with object-versus-class
+receiver validation; contextual `this` and `super` calls use their enclosing
+class. Imported aggregates cover direct constructors/static methods, explicitly
+typed objects, constructor-inferred objects, and chained constructor calls;
+local type aliases, local return values, and copy initializers retain the same
+binding. Imported factory return values, same-block direct assignments, and
+statically typed list/dictionary extraction also retain imported aggregate
+types. A later dynamic assignment invalidates the earlier fact, and assignments
+inside conditional blocks are not treated as unconditional. Open target buffers
+override indexed source. Dynamic callees remain unsupported. Rename
+covers same-file bound symbols and cross-file static import members. Legacy
+`s:` and `<SID>` function spellings share one local binding; navigation and
+highlights include both, while rename preserves each occurrence's prefix.
+Cross-file autoload navigation accepts the optional declaration/reference
+`g:` spelling, but autoload rename remains rejected because changing its name
+also changes the runtimepath file contract. Imported Vim9 aggregate navigation
+and rename cover statically resolved constructors, static methods, typed object
+methods, factory-return methods, and enum values across indexed files. Open
+target buffers override disk content. References scan only statically proven
+receivers, and rename is disabled while the workspace index is incomplete.
+Other dynamic, ambiguous, and namespace-changing edits are rejected. Open-file
+edits carry their captured snapshot versions and closed indexed files use a
+null version; workspace changes retry once and then return `ContentModified`.
 
 Full semantic tokens combine command/modifier/comment syntax with bound symbol
 declarations and references, using the negotiated position encoding. Inlay
 hints expose only already-inferred variable/constant types that were not
 written explicitly. Code actions are limited to a unique, known missing block
 terminator and never execute Vim script.
+
+Document symbols, folding ranges, and selection ranges retain their nested
+function, class, interface, and enum structure through end-of-file when a block
+terminator is still missing, so incomplete editing state remains navigable.
+
+For statically resolved local Vim9 members, navigation follows inherited
+methods and variables, default constructors, and enum values. When an object
+type or constructor initializer proves both an interface or abstract member and
+its concrete implementation, Declaration returns the contract while Definition
+returns the implementation. References and highlights join both declarations
+with calls through either statically proven receiver type. Constructor rename
+is rejected; other member rename is offered only for the complete proven local
+binding set.
 
 ## Semantics required for 1.0
 

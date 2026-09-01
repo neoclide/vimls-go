@@ -153,15 +153,39 @@ bounded; rename refuses dynamic/ambiguous symbols and produces non-overlapping,
 version-valid edits; token ranges remain valid for Unicode text.
 
 Current status (2026-09-01): static import/source document links and contextual
-completion for Ex commands, modifiers, scoped declarations, builtin functions,
+completion for Ex commands, modifiers, scoped declarations (including legacy
+argument/local namespace spellings), builtin functions,
 static imports, Vim9 object members, options, autocmd events, and bounded import
 paths are implemented. Completion uses deterministic scoring, negotiated LSP
-edits, lazy resolve documentation, cancellation and a soft budget. User-function
-signature help, safe same-file/static-import rename, full semantic tokens,
-inferred-type inlay hints, and the deterministic missing-block-end quick fix are
-also implemented. The stdio subprocess test exercises the completion and resolve
-wire contracts. M6 remains open for target-version filtering of pinned completion
-metadata and broader stable semantic classifications.
+edits, lazy resolve documentation, cancellation and a soft budget. Direct
+builtin (including receiver-adjusted `->` methods), same-file user-function,
+static-imported exported-function, and directly bound function-value signature
+help are implemented, as are local class/object methods, inherited methods,
+explicit/default constructors, and imported aggregate constructors, static
+methods, typed objects, constructor-inferred objects, and chained calls. Safe
+local imported-type propagation also covers type aliases, local returns, and
+copy initializers, imported factory returns, same-block direct assignments, and
+statically typed container extraction. Safe same-file/static-import rename, full semantic tokens,
+inferred-type inlay hints, and the deterministic missing-block-end quick fix
+are also implemented. Hover and builtin signature documentation honor the
+client's ordered Markdown/plain-text preferences, are bounded safely at UTF-8
+boundaries, and reuse pinned Vim help for builtin functions, Ex commands
+(including abbreviations), options, and predefined variables. The Ex-command
+generator records matching help provenance alongside command facts. The stdio
+subprocess test exercises completion, resolve, hover, and the implemented
+signature-help wire contracts. M6 remains open for target-version filtering of
+pinned completion metadata and broader stable semantic classifications.
+Legacy local navigation treats `s:` and `<SID>` as one binding while preserving
+each spelling during rename; autoload navigation accepts an optional `g:`
+prefix and keeps rename disabled when the file contract cannot be updated.
+Incomplete function/class/interface/enum blocks retain document-symbol
+hierarchy plus folding and selection ranges through end-of-file.
+Local Vim9 navigation resolves inherited methods/variables, constructors, and
+enum values, and separates interface/abstract declarations from statically
+known concrete definitions. Imported aggregate member navigation and safe
+rename cover constructors, static/object/factory-return methods, and enum values
+with open-buffer overlays, complete-index guards, captured document versions,
+and workspace-staleness rejection.
 
 ## M7: compatibility, performance, and 1.0 release
 
