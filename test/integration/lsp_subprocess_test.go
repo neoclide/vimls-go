@@ -45,7 +45,24 @@ func TestLSPSubprocess(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(runtimeRoot, "plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runtimeRoot, "plugin", "runtime.vim"), []byte("vim9script\nvar runtimeName = 1\n"), 0o600); err != nil {
+	legacyPlugin := `" Return the supplied value for runtimepath integration coverage.
+function! RuntimeGlobal(value) abort
+  return a:value
+endfunction
+command! -nargs=1 RuntimeEcho echo RuntimeGlobal(<args>)
+`
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "plugin", "runtime.vim"), []byte(legacyPlugin), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(runtimeRoot, "autoload"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacyAutoload := `" Convert the supplied value to upper case.
+function! acme#Format(value) abort
+  return toupper(a:value)
+endfunction
+`
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "autoload", "acme.vim"), []byte(legacyAutoload), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(runtimeRoot, "colors"), 0o700); err != nil {
@@ -226,10 +243,28 @@ func TestLSPSubprocess(t *testing.T) {
 			t.Fatalf("workspace symbols = %s", workspaceSymbols)
 		}
 	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99999,"method":"workspace/symbol","params":{"query":"runtimeName"}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99999,"method":"workspace/symbol","params":{"query":"RuntimeGlobal"}}`)
 	runtimeSymbols := readJSON(t, reader)
-	if string(runtimeSymbols["id"]) != "99999" || !strings.Contains(string(runtimeSymbols["result"]), `"name":"runtimeName"`) || !strings.Contains(string(runtimeSymbols["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, filepath.Join(runtimeRoot, "plugin", "runtime.vim")))) {
+	if string(runtimeSymbols["id"]) != "99999" || !strings.Contains(string(runtimeSymbols["result"]), `"name":"RuntimeGlobal"`) || !strings.Contains(string(runtimeSymbols["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, filepath.Join(runtimeRoot, "plugin", "runtime.vim")))) {
 		t.Fatalf("runtimepath symbols = %s", runtimeSymbols)
+	}
+	legacyMain := "let g:result = RuntimeGlobal(1)\necho acme#Format('x')\n"
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///legacy-main.vim","languageId":"vim","version":1,"text":%q}}}`, legacyMain))
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99990,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///legacy-main.vim"},"position":{"line":1,"character":10}}}`)
+	legacyDefinition := readResponse(t, reader, "99990")
+	if !strings.Contains(string(legacyDefinition["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, filepath.Join(runtimeRoot, "autoload", "acme.vim")))) || !strings.Contains(string(legacyDefinition["result"]), `"start":{"line":1,"character":10}`) {
+		t.Fatalf("legacy autoload definition = %s", legacyDefinition)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99991,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///legacy-main.vim"},"position":{"line":0,"character":18}}}`)
+	legacyHover := readResponse(t, reader, "99991")
+	if !strings.Contains(string(legacyHover["result"]), `RuntimeGlobal(value)`) || !strings.Contains(string(legacyHover["result"]), `Return the supplied value`) {
+		t.Fatalf("legacy runtime hover = %s", legacyHover)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///legacy-completion.vim","languageId":"vim","version":1,"text":"echo RuntimeG"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99993,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///legacy-completion.vim"},"position":{"line":0,"character":13}}}`)
+	legacyCompletion := readResponse(t, reader, "99993")
+	if !strings.Contains(string(legacyCompletion["result"]), `"label":"RuntimeGlobal"`) || !strings.Contains(string(legacyCompletion["result"]), `"detail":"RuntimeGlobal(value)"`) || !strings.Contains(string(legacyCompletion["result"]), `Return the supplied value`) {
+		t.Fatalf("legacy runtime completion = %s", legacyCompletion)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, uri.File(workspaceMain), workspaceMainSource))
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100000,"method":"textDocument/definition","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10}}}`, uri.File(workspaceMain)))
@@ -273,6 +308,7 @@ func TestLSPSubprocess(t *testing.T) {
 		t.Fatalf("imported object method signature help = %s", importedObjectMethodSignature)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///missing-end.vim","languageId":"vim","version":1,"text":"vim9script\nif true\n  echo 'x'\n"}}}`)
+	readPublishedDiagnostic(t, reader, "file:///missing-end.vim", "vimls/missing-end")
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100004,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"file:///missing-end.vim"},"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"context":{"diagnostics":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"code":"vimls/missing-end","message":"block is missing its end command"}],"only":["quickfix"]}}}`)
 	codeActions := readResponse(t, reader, "100004")
 	if !strings.Contains(string(codeActions["result"]), `"title":"Insert :endif"`) || !strings.Contains(string(codeActions["result"]), `"newText":"endif\n"`) {
@@ -560,6 +596,23 @@ func readResponse(t *testing.T, reader *jsonrpc.Reader, id string) map[string]js
 		}
 		if _, notification := message["method"]; !notification {
 			t.Fatalf("unexpected response while waiting for %s: %s", id, message)
+		}
+	}
+}
+
+func readPublishedDiagnostic(t *testing.T, reader *jsonrpc.Reader, documentURI, code string) {
+	t.Helper()
+	for {
+		message := readJSON(t, reader)
+		if string(message["method"]) != `"textDocument/publishDiagnostics"` {
+			if _, response := message["id"]; response {
+				t.Fatalf("unexpected response while waiting for diagnostics: %s", message)
+			}
+			continue
+		}
+		payload := string(message["params"])
+		if strings.Contains(payload, fmt.Sprintf(`"uri":%q`, documentURI)) && strings.Contains(payload, fmt.Sprintf(`"code":%q`, code)) {
+			return
 		}
 	}
 }

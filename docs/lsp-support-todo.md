@@ -269,7 +269,7 @@ configuration, index or import-graph revision.
 
 ## P3: integration, performance and release evidence
 
-- [ ] Add stdio golden scenarios containing both a realistic legacy plugin and
+- [x] Add stdio golden scenarios containing both a realistic legacy plugin and
   a realistic Vim9 import/class project. Exercise initialize, sync,
   diagnostics, completion/resolve, hover, signature, navigation, symbols,
   rename and shutdown.

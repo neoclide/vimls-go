@@ -22,6 +22,15 @@ testdata/official/                 pinned generated Vim corpus and metadata
 test/integration/                  subprocess JSON-RPC/LSP scenarios
 ```
 
+`TestLSPSubprocess` runs one clean stdio session containing both a legacy
+runtime plugin (global function, user command and autoload function) and a Vim9
+import/class workspace. It covers initialization and shutdown, document sync,
+published diagnostics, completion and resolve, hover, signature help,
+navigation, symbols, rename, semantic tokens and syntax-backed code actions.
+The legacy runtime assertions also prove that indexed signatures and leading
+comments reach completion/hover and that autoload definitions retain their
+runtimepath source location.
+
 Mixed-dialect, incomplete-input, Unicode, workspace, and fuzz regression cases
 currently live beside their owning Go packages. Dedicated shared fixture and
 Vim-oracle directories should be introduced only when real cross-package cases
