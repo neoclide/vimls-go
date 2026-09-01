@@ -394,10 +394,11 @@ binding set.
 - Conservative legacy inference and conservative handling of `execute()`,
   `eval()`, dynamically formed names, user commands, and runtimepath mutation.
 
-Arity diagnostics currently cover direct calls to statically named Vim built-in
-functions using the pinned function metadata. User-defined functions, scoped or
-member calls, and dynamically resolved call targets remain conservative
-`unknown` until their signatures can be resolved without guessing.
+Arity diagnostics cover direct calls and `->` methods for statically named Vim
+built-ins, same-file legacy functions and Vim9 `def`/lambda/function values,
+local aggregate members and constructors, and exported functions or members
+reached through a static import. Dynamically resolved, ambiguous or invalidated
+call targets remain conservative `unknown`.
 
 ## File discovery
 

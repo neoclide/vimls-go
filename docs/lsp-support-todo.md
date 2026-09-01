@@ -115,7 +115,7 @@ for dynamic names.
   overriding, generic methods, enum values and `this`/`super` binding.
 - [x] Complete `def` scopes and closures, default/optional/variadic parameters,
   return analysis, `defer`, reachable control flow and statically bound calls.
-- [ ] Complete import/export/autoload semantics for aliases, exported members,
+- [x] Complete import/export/autoload semantics for aliases, exported members,
   types, classes, cycles, diamonds, open-buffer overlays and reverse-dependent
   reanalysis. Dynamic and unsafe targets remain unknown.
 - [ ] Finish Vim9 type checking for primitive values, containers, tuples,
