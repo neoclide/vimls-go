@@ -9,7 +9,26 @@ import (
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"go.lsp.dev/protocol"
 )
+
+func TestCompletionCapabilitiesFromClient(t *testing.T) {
+	enabled := true
+	capabilities := completionCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{Completion: &protocol.CompletionClientCapabilities{CompletionItem: &protocol.ClientCompletionItemOptions{
+		SnippetSupport:       &enabled,
+		InsertReplaceSupport: &enabled,
+		PreselectSupport:     &enabled,
+		DeprecatedSupport:    &enabled,
+		TagSupport:           protocol.CompletionItemTagOptions{ValueSet: []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}},
+		DocumentationFormat:  []protocol.MarkupKind{protocol.MarkupKindPlainText, protocol.MarkupKindMarkdown},
+	}}})
+	if !capabilities.snippet || !capabilities.insertReplace || !capabilities.preselect || !capabilities.deprecated || !capabilities.tags || !capabilities.docsMarkdown {
+		t.Fatalf("completion capabilities = %#v", capabilities)
+	}
+	if capabilities := completionCapabilitiesFromClient(nil); capabilities != (completionCapabilities{}) {
+		t.Fatalf("absent completion capabilities = %#v", capabilities)
+	}
+}
 
 func TestParseTargetVersion(t *testing.T) {
 	tests := []struct {

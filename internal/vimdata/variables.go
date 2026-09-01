@@ -1,5 +1,7 @@
 package vimdata
 
+import "sort"
+
 // VariableFlags are the properties stored in Vim's pinned vimvars[] table.
 type VariableFlags uint8
 
@@ -35,3 +37,11 @@ func LookupVariable(name string) (Variable, bool) {
 
 // BuiltinVariableCount reports the number of variables in Vim's vimvars[].
 func BuiltinVariableCount() int { return len(builtinVariables) }
+
+// Variables returns the pinned vimvars[] table by canonical v: name. Callers
+// own the returned slice.
+func Variables() []Variable {
+	result := append([]Variable(nil), builtinVariables[:]...)
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
+}

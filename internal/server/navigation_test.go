@@ -855,8 +855,8 @@ func TestWorkspaceIdentityCompletionRetry(t *testing.T) {
 		}
 	}
 	result, err := instance.Completion(context.Background(), params)
-	items, ok := result.(protocol.CompletionItemSlice)
-	if err != nil || !ok || !hasCompletionLabel(items, "Run") || checks != 2 {
+	items := completionItems(t, result)
+	if err != nil || !hasCompletionLabel(items, "Run") || checks != 2 {
 		t.Fatalf("completion=%#v checks=%d error=%v", result, checks, err)
 	}
 }

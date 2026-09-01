@@ -30,6 +30,85 @@ func TestPathResolverResolvesRelativeImport(t *testing.T) {
 	}
 }
 
+func TestPathResolverImportPathCompletionsAreBoundedAndPreserveSpelling(t *testing.T) {
+	root := t.TempDir()
+	from := filepath.Join(root, "plugin", "main.vim")
+	writeResolverFile(t, from, "vim9script\n")
+	writeResolverFile(t, filepath.Join(root, "plugin", "local.vim"), "vim9script\n")
+	writeResolverFile(t, filepath.Join(root, "plugin", "skip.txt"), "")
+	if err := os.Mkdir(filepath.Join(root, "plugin", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewPathResolver(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, incomplete := resolver.ImportPathCompletions(from, "./", false, 200)
+	if incomplete || len(items) != 2 || items[0].Display != "./local.vim" || items[1].Display != "./nested/" || items[1].Path == "" || !items[1].IsDir {
+		t.Fatalf("relative completions = %#v, incomplete=%v", items, incomplete)
+	}
+}
+
+func TestPathResolverImportPathCompletionsRuntimeAbsoluteAndLimit(t *testing.T) {
+	root, runtimePath := t.TempDir(), t.TempDir()
+	from := filepath.Join(root, "main.vim")
+	writeResolverFile(t, from, "vim9script\n")
+	writeResolverFile(t, filepath.Join(root, "absolute.vim"), "")
+	writeResolverFile(t, filepath.Join(runtimePath, "import", "one.vim"), "")
+	writeResolverFile(t, filepath.Join(runtimePath, "autoload", "two.vim"), "")
+	resolver, err := NewPathResolver(root, []string{runtimePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		prefix   string
+		autoload bool
+		want     string
+	}{{"", false, "one.vim"}, {"", true, "two.vim"}, {filepath.Join(root, "absolute"), false, filepath.ToSlash(filepath.Join(root, "absolute.vim"))}} {
+		items, incomplete := resolver.ImportPathCompletions(from, test.prefix, test.autoload, 1)
+		if incomplete || len(items) != 1 || items[0].Display != test.want || items[0].IsDir {
+			t.Fatalf("%#v = %#v incomplete=%v", test, items, incomplete)
+		}
+	}
+	writeResolverFile(t, filepath.Join(runtimePath, "import", "two.vim"), "")
+	if _, incomplete := resolver.ImportPathCompletions(from, "", false, 1); !incomplete {
+		t.Fatal("limit did not mark incomplete")
+	}
+}
+
+func TestPathResolverImportPathCompletionsRejectEscapes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink test")
+	}
+	root, outside := t.TempDir(), t.TempDir()
+	from := filepath.Join(root, "main.vim")
+	writeResolverFile(t, from, "vim9script\n")
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := NewPathResolver(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items, _ := resolver.ImportPathCompletions(from, "./escape/", false, 200); len(items) != 0 {
+		t.Fatalf("escaped completions = %#v", items)
+	}
+	if items, _ := resolver.ImportPathCompletions(from, "../", false, 200); len(items) != 0 {
+		t.Fatalf("parent escape = %#v", items)
+	}
+	inside := filepath.Join(root, "nested", "main.vim")
+	writeResolverFile(t, inside, "vim9script\n")
+	writeResolverFile(t, filepath.Join(root, "root.vim"), "vim9script\n")
+	items, _ := resolver.ImportPathCompletions(inside, "../", false, 200)
+	found := false
+	for _, item := range items {
+		found = found || item.Display == "../root.vim"
+	}
+	if !found {
+		t.Fatalf("safe parent completion = %#v", items)
+	}
+}
+
 func TestPathResolverSearchesRuntimeImportAndAutoloadInOrder(t *testing.T) {
 	root := t.TempDir()
 	first := t.TempDir()

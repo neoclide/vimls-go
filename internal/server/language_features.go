@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -72,97 +71,32 @@ func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLink
 	return nil, protocol.ErrContentModified
 }
 
-func (s *Server) Completion(ctx context.Context, params *protocol.CompletionParams) (protocol.CompletionResult, error) {
-	for attempt := range 2 {
-		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
-		if err != nil {
-			return nil, err
-		}
-		if snapshot == nil || file == nil {
-			return protocol.CompletionItemSlice{}, nil
-		}
-		offset, err := snapshot.Offset(fromProtocolPosition(params.Position), encoding)
-		if err != nil {
-			return protocol.CompletionItemSlice{}, s.structureCurrent(ctx, snapshot)
-		}
-		if alias, member := importMemberContext(snapshot.Text(), offset); member {
-			state := s.captureWorkspaceNavigationState()
-			items, target := s.importMemberCompletionsInState(snapshot.URI(), file, alias, state)
-			document := navigationDocument{server: s, snapshot: snapshot}
-			current, err := document.workspaceNavigationCurrent(ctx, state, target)
-			if err != nil {
-				return nil, err
-			}
-			if current {
-				return items, nil
-			}
-			if attempt == 1 {
-				return nil, protocol.ErrContentModified
-			}
-			continue
-		}
-		fileAnalysis := analysis.Analyze(file)
-		contextKind := completionContextAt(file, offset)
-		if contextKind == completionContextNone {
-			return protocol.CompletionItemSlice{}, s.structureCurrent(ctx, snapshot)
-		}
-		items := make(map[string]protocol.CompletionItem)
-		add := func(item protocol.CompletionItem) {
-			if item.Label == "" || len(items) >= maxCompletionItems {
-				return
-			}
-			if _, exists := items[item.Label]; !exists {
-				items[item.Label] = item
-			}
-		}
-		if contextKind == completionContextExpression {
-			for _, declaration := range visibleDeclarations(fileAnalysis, offset) {
-				item := protocol.CompletionItem{Label: declaration.Name, Kind: completionSymbolKind(declaration.Kind)}
-				if declaration.Deprecated {
-					item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
-				}
-				item.Detail = protocol.NewOptional(string(declaration.Kind))
-				if declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
-					item.Detail = protocol.NewOptional(string(declaration.Kind) + ": " + formatValueType(declaration.Type))
-				}
-				add(item)
-			}
-			for _, function := range vimdata.BuiltinFunctions() {
-				add(protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction})
-			}
-		} else {
-			for _, command := range vimdata.Commands() {
-				add(protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword})
-			}
-		}
-		result := make(protocol.CompletionItemSlice, 0, len(items))
-		for _, item := range items {
-			result = append(result, item)
-		}
-		sort.Slice(result, func(i, j int) bool { return result[i].Label < result[j].Label })
-		if err := s.structureCurrent(ctx, snapshot); err != nil {
-			return nil, err
-		}
-		return result, nil
-	}
-	return nil, protocol.ErrContentModified
-}
-
 func importMemberContext(source string, offset int) (string, bool) {
 	if offset < 0 || offset > len(source) {
 		return "", false
 	}
+	lineStart := strings.LastIndexByte(source[:offset], '\n') + 1
+	remaining := 256
 	start := offset
-	for start > 0 && isCompletionIdentifierByte(source[start-1]) {
+	for start > lineStart && remaining > 0 && isCompletionIdentifierByte(source[start-1]) {
 		start--
+		remaining--
 	}
-	if start == 0 || source[start-1] != '.' {
+	if start > lineStart && remaining == 0 && isCompletionIdentifierByte(source[start-1]) {
+		return "", false
+	}
+	if start == lineStart || source[start-1] != '.' {
 		return "", false
 	}
 	end := start - 1
 	start = end
-	for start > 0 && isCompletionIdentifierByte(source[start-1]) {
+	remaining--
+	for start > lineStart && remaining > 0 && isCompletionIdentifierByte(source[start-1]) {
 		start--
+		remaining--
+	}
+	if start > lineStart && remaining == 0 && isCompletionIdentifierByte(source[start-1]) {
+		return "", false
 	}
 	if start == end {
 		return "", false
@@ -239,36 +173,183 @@ const (
 	completionContextNone completionContext = iota
 	completionContextCommand
 	completionContextExpression
+	completionContextModifier
+	completionContextSetOption
+	completionContextSyntaxSubcommand
+	completionContextSyntaxGroup
+	completionContextHighlight
+	completionContextAutocmdHead
+	completionContextAutocmdEvent
+	completionContextImportPath
+	completionContextMember
 )
 
 func completionContextAt(file *syntax.File, offset int) completionContext {
+	if file == nil || offset < 0 || offset > len(file.Source) || spanContains(file.OpaqueTail, offset) {
+		return completionContextNone
+	}
 	for _, token := range file.Tokens {
 		if token.Kind == syntax.TokenComment && token.Span.Start <= offset && offset <= token.Span.End {
 			return completionContextNone
 		}
 	}
-	insideString := false
+	rejected := false
 	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Heredoc != nil && (spanContains(command.Heredoc.Body, offset) || offset == command.Heredoc.Body.End) || command.TextBody != nil && (spanContains(command.TextBody.Body, offset) || offset == command.TextBody.Body.End) || command.Keymap != nil && (spanContains(command.Keymap.Body, offset) || offset == command.Keymap.Body.End) || command.Mapping != nil && (spanContains(command.Mapping.RHS, offset) || offset == command.Mapping.RHS.End) {
+			rejected = true
+		}
 		walkCommandExpressions(command, func(expression *syntax.Expression) {
 			if (expression.Kind == syntax.ExpressionString || expression.Kind == syntax.ExpressionInterpolatedString) && expression.Span.Start < offset && offset < expression.Span.End {
-				insideString = true
+				rejected = true
 			}
 		})
 	})
-	if insideString {
+	if rejected {
 		return completionContextNone
+	}
+	result := completionContextNone
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if !spanContains(command.Span, offset) && offset != command.Span.End {
+			return
+		}
+		if command.Set != nil {
+			for _, option := range command.Set.Options {
+				if spanContains(option.Name, offset) || offset == option.Name.End {
+					result = completionContextSetOption
+					return
+				}
+			}
+		}
+		if command.Import != nil && command.Import.Path != nil && command.Import.Path.Kind == syntax.ExpressionString &&
+			command.Import.PathSpan.Start < offset && offset < command.Import.PathSpan.End {
+			result = completionContextImportPath
+			return
+		}
+		if command.Syntax != nil {
+			if spanContains(command.Syntax.Subcommand, offset) || offset == command.Syntax.Subcommand.End {
+				result = completionContextSyntaxSubcommand
+				return
+			}
+			if spanContains(command.Syntax.Group, offset) || offset == command.Syntax.Group.End {
+				result = completionContextSyntaxGroup
+				return
+			}
+			for _, span := range command.Syntax.Keywords {
+				if spanContains(span, offset) || offset == span.End {
+					result = completionContextSyntaxGroup
+					return
+				}
+			}
+		}
+		if command.Canonical == "syntax" && (spanContains(command.Argument, offset) || offset == command.Argument.End) {
+			if completionArgumentWord(file.Source, command.Argument, offset) == 0 {
+				result = completionContextSyntaxSubcommand
+			} else {
+				result = completionContextSyntaxGroup
+			}
+			return
+		}
+		if command.Highlight != nil && (spanContains(command.Highlight.Group, offset) || offset == command.Highlight.Group.End || spanContains(command.Highlight.LinkTarget, offset) || offset == command.Highlight.LinkTarget.End) {
+			result = completionContextHighlight
+			return
+		}
+		if command.Autocmd != nil {
+			if spanContains(command.Autocmd.Head, offset) || offset == command.Autocmd.Head.End {
+				result = completionContextAutocmdHead
+				return
+			}
+			for _, event := range command.Autocmd.Events {
+				if spanContains(event, offset) || offset == event.End {
+					result = completionContextAutocmdEvent
+					return
+				}
+			}
+		}
+		if command.Canonical == "autocmd" && (spanContains(command.Argument, offset) || offset == command.Argument.End) && completionArgumentWord(file.Source, command.Argument, offset) > 0 {
+			result = completionContextAutocmdEvent
+			return
+		}
+		for _, modifier := range command.Modifiers {
+			if spanContains(modifier.Span, offset) || offset == modifier.Span.End {
+				result = completionContextModifier
+				return
+			}
+		}
+		if result != completionContextNone {
+			return
+		}
+		if command.Span.Start <= offset && offset <= command.Name.End {
+			result = completionContextCommand
+			return
+		}
+		if spanContains(command.Argument, offset) || offset == command.Argument.End {
+			result = completionContextExpression
+		}
+		for _, expression := range append(append([]*syntax.Expression(nil), command.Expressions...), command.Targets...) {
+			if expression != nil && (spanContains(expression.Span, offset) || offset == expression.Span.End) {
+				result = completionContextExpression
+			}
+			if memberExpressionAt(expression, offset) != nil {
+				result = completionContextMember
+			}
+		}
+		if command.Declaration != nil && command.Declaration.Initializer != nil && (spanContains(command.Declaration.Initializer.Span, offset) || offset == command.Declaration.Initializer.Span.End) {
+			result = completionContextExpression
+		}
+	})
+	if result != completionContextNone {
+		return result
 	}
 	lineStart := strings.LastIndexByte(file.Source[:offset], '\n') + 1
 	if strings.TrimSpace(file.Source[lineStart:offset]) == "" {
 		return completionContextCommand
 	}
-	contextKind := completionContextExpression
+	return completionContextNone
+}
+
+func memberExpressionAt(expression *syntax.Expression, offset int) *syntax.Expression {
+	if expression == nil || offset < expression.Span.Start || offset > expression.Span.End {
+		return nil
+	}
+	for _, child := range expression.Children {
+		if member := memberExpressionAt(child, offset); member != nil {
+			return member
+		}
+	}
+	if expression.Kind == syntax.ExpressionMember && expression.Operator.Start < offset && offset <= expression.Span.End {
+		return expression
+	}
+	return nil
+}
+
+func completionAggregateAt(file *syntax.File, offset int) bool {
+	found := false
 	walkCommands(file.Commands, func(command *syntax.Command) {
-		if command.Span.Start <= offset && offset <= command.Name.End {
-			contextKind = completionContextCommand
+		if command.Aggregate != nil && (spanContains(command.Argument, offset) || offset == command.Argument.End) {
+			found = true
 		}
 	})
-	return contextKind
+	return found
+}
+
+func completionArgumentWord(source string, span syntax.Span, offset int) int {
+	word, inWord := 0, false
+	for i := span.Start; i < span.End && i < len(source); i++ {
+		space := source[i] == ' ' || source[i] == '\t'
+		if !space && !inWord {
+			inWord = true
+			if i > span.Start {
+				word++
+			}
+		}
+		if space {
+			inWord = false
+		}
+		if i >= offset {
+			break
+		}
+	}
+	return word
 }
 
 func (s *Server) CompletionResolve(ctx context.Context, item *protocol.CompletionItem) (*protocol.CompletionItem, error) {
@@ -280,11 +361,36 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 	}
 	result := *item
 	if function, ok := vimdata.LookupFunction(item.Label); ok {
-		result.Detail = protocol.NewOptional(builtinFunctionDetail(function))
+		if _, set := result.Detail.Get(); !set {
+			result.Detail = protocol.NewOptional(builtinFunctionDetail(function))
+		}
+		if result.Documentation == nil && function.Documentation != "" {
+			result.Documentation = protocol.String(function.Documentation)
+		}
+		return &result, nil
+	}
+	if option, ok := vimdata.LookupOption(item.Label); ok {
+		if _, set := result.Detail.Get(); !set {
+			result.Detail = protocol.NewOptional(completionOptionDetail(option))
+		}
+		if result.Documentation == nil && option.Documentation != "" {
+			result.Documentation = protocol.String(option.Documentation)
+		}
+		return &result, nil
+	}
+	if variable, ok := vimdata.LookupVariable(item.Label); ok {
+		if _, set := result.Detail.Get(); !set {
+			result.Detail = protocol.NewOptional("variable: " + variable.Type)
+		}
+		if result.Documentation == nil && variable.Documentation != "" {
+			result.Documentation = protocol.String(variable.Documentation)
+		}
 		return &result, nil
 	}
 	if command, ok := vimdata.Lookup(item.Label); ok && command.Name == item.Label {
-		result.Detail = protocol.NewOptional("Ex command")
+		if _, set := result.Detail.Get(); !set {
+			result.Detail = protocol.NewOptional("Ex command")
+		}
 	}
 	return &result, nil
 }
@@ -301,32 +407,6 @@ func builtinFunctionDetail(function vimdata.BuiltinFunction) string {
 		detail += ": " + returnType
 	}
 	return detail
-}
-
-func visibleDeclarations(result *analysis.FileAnalysis, offset int) []*analysis.Declaration {
-	if result == nil {
-		return nil
-	}
-	var scope *analysis.Scope
-	for _, candidate := range result.Scopes {
-		if candidate.Span.Start <= offset && offset <= candidate.Span.End && (scope == nil || candidate.Span.End-candidate.Span.Start < scope.Span.End-scope.Span.Start) {
-			scope = candidate
-		}
-	}
-	if scope == nil {
-		scope = result.Root
-	}
-	declarations := make([]*analysis.Declaration, 0)
-	for current := scope; current != nil; current = current.Parent {
-		for index := range slices.Backward(current.Declarations) {
-			declaration := current.Declarations[index]
-			if declaration.Span.Start > offset && declaration.Kind != analysis.SymbolKindFunction && declaration.Kind != analysis.SymbolKindMethod && declaration.Kind != analysis.SymbolKindConstructor {
-				continue
-			}
-			declarations = append(declarations, declaration)
-		}
-	}
-	return declarations
 }
 
 func completionSymbolKind(kind analysis.SymbolKind) protocol.CompletionItemKind {

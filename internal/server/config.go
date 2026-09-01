@@ -7,12 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/workspace"
+	"go.lsp.dev/protocol"
 )
 
 const DefaultTargetVersion = "9.1.0000"
@@ -21,6 +24,33 @@ const MaximumTargetVersion = "9.2.1015"
 var ErrInvalidTargetVersion = errors.New("invalid Vim target version")
 
 const defaultUnresolvedSeverity = syntax.DiagnosticWarning
+
+const completionBudget = 100 * time.Millisecond
+const completionCompleteFunctionCalls = false
+
+type completionCapabilities struct {
+	snippet       bool
+	insertReplace bool
+	preselect     bool
+	deprecated    bool
+	tags          bool
+	docsMarkdown  bool
+}
+
+func completionCapabilitiesFromClient(textDocument *protocol.TextDocumentClientCapabilities) completionCapabilities {
+	if textDocument == nil || textDocument.Completion == nil || textDocument.Completion.CompletionItem == nil {
+		return completionCapabilities{}
+	}
+	item := textDocument.Completion.CompletionItem
+	return completionCapabilities{
+		snippet:       item.SnippetSupport != nil && *item.SnippetSupport,
+		insertReplace: item.InsertReplaceSupport != nil && *item.InsertReplaceSupport,
+		preselect:     item.PreselectSupport != nil && *item.PreselectSupport,
+		deprecated:    item.DeprecatedSupport != nil && *item.DeprecatedSupport,
+		tags:          len(item.TagSupport.ValueSet) > 0,
+		docsMarkdown:  slices.Contains(item.DocumentationFormat, protocol.MarkupKindMarkdown),
+	}
+}
 
 type TargetVersion struct {
 	Major  int

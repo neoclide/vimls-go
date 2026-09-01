@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -21,6 +22,106 @@ type PathResolution struct {
 	Path       string
 	Candidates []string
 	Dynamic    bool
+}
+
+type PathCompletion struct {
+	Display string
+	Path    string
+	IsDir   bool
+}
+
+// ImportPathCompletions returns direct children for a literal import path.
+// It deliberately does not recurse: completion must not turn an edit into a
+// workspace walk. The bool reports that a caller-visible limit was reached.
+func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool, limit int) ([]PathCompletion, bool) {
+	if r == nil || limit <= 0 || !safeImportCompletionPrefix(prefix) {
+		return nil, false
+	}
+	var roots []string
+	if isAbsolutePath(prefix) {
+		roots = []string{filepath.VolumeName(prefix) + string(filepath.Separator)}
+	} else if strings.HasPrefix(prefix, ".") {
+		base := r.root
+		if from != "" {
+			if absolute, err := filepath.Abs(from); err == nil {
+				base = filepath.Dir(absolute)
+			}
+		}
+		roots = []string{base}
+	} else {
+		directory := "import"
+		if autoload {
+			directory = "autoload"
+		}
+		for _, runtimePath := range r.runtimePaths {
+			roots = append(roots, filepath.Join(runtimePath, directory))
+		}
+	}
+	result := make([]PathCompletion, 0)
+	seen := make(map[string]struct{})
+	fromCanonical, _ := r.Canonical(from)
+	truncated := false
+	for _, root := range roots {
+		dirPart, name := filepath.Split(filepath.FromSlash(prefix))
+		directory := filepath.Join(root, dirPart)
+		canonical, ok := r.Canonical(directory)
+		if !ok {
+			continue
+		}
+		entries, err := os.ReadDir(canonical)
+		if err != nil {
+			continue
+		}
+		if len(entries) > 200 {
+			entries = entries[:200]
+			truncated = true
+		}
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Name(), name) {
+				continue
+			}
+			if !entry.IsDir() && !strings.HasSuffix(entry.Name(), ".vim") {
+				continue
+			}
+			path := filepath.Join(canonical, entry.Name())
+			info, err := os.Stat(path)
+			if err != nil || (!info.IsDir() && !info.Mode().IsRegular()) {
+				continue
+			}
+			if _, ok := r.Canonical(path); !ok {
+				continue
+			}
+			pathCanonical, _ := r.Canonical(path)
+			if fromCanonical != "" && pathCanonical == fromCanonical {
+				continue
+			}
+			value := filepath.ToSlash(filepath.Join(dirPart, entry.Name()))
+			if strings.HasPrefix(prefix, "./") && !strings.HasPrefix(value, "./") {
+				value = "./" + value
+			}
+			if info.IsDir() {
+				value += "/"
+			}
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			if len(result) == limit || len(result) == 2000 {
+				truncated = true
+				continue
+			}
+			result = append(result, PathCompletion{Display: value, Path: path, IsDir: info.IsDir()})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Display < result[j].Display })
+	return result, truncated
+}
+
+func safeImportCompletionPrefix(prefix string) bool {
+	if strings.ContainsAny(prefix, "\x00\r\n") || strings.Contains(prefix, "\\") {
+		return false
+	}
+	return true
 }
 
 // PathResolver resolves Vim9 imports and source paths using only local files.

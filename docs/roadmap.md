@@ -152,14 +152,16 @@ Exit gate: completion and signature results are relevant to dialect/scope and
 bounded; rename refuses dynamic/ambiguous symbols and produces non-overlapping,
 version-valid edits; token ranges remain valid for Unicode text.
 
-Current status (2026-08-30): static import/source document links, contextual Ex
-command, visible declaration, builtin function and static import-member
-completion, completion resolve detail, user-function signature help, safe
-same-file/static-import rename, full semantic tokens, inferred-type inlay hints,
-and the deterministic missing-block-end quick fix are implemented. The stdio
-subprocess test exercises these capabilities. M6 remains open for versioned
-modifier/option/event metadata, builtin parameter/documentation metadata,
-import-path completion, and broader stable semantic classifications.
+Current status (2026-09-01): static import/source document links and contextual
+completion for Ex commands, modifiers, scoped declarations, builtin functions,
+static imports, Vim9 object members, options, autocmd events, and bounded import
+paths are implemented. Completion uses deterministic scoring, negotiated LSP
+edits, lazy resolve documentation, cancellation and a soft budget. User-function
+signature help, safe same-file/static-import rename, full semantic tokens,
+inferred-type inlay hints, and the deterministic missing-block-end quick fix are
+also implemented. The stdio subprocess test exercises the completion and resolve
+wire contracts. M6 remains open for target-version filtering of pinned completion
+metadata and broader stable semantic classifications.
 
 ## M7: compatibility, performance, and 1.0 release
 

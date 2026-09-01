@@ -70,7 +70,7 @@ func TestLSPSubprocess(t *testing.T) {
 	reader := jsonrpc.NewReader(stdout)
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232","runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) {
+	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":["."]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
@@ -125,13 +125,25 @@ func TestLSPSubprocess(t *testing.T) {
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":90,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":12,"character":5}}}`)
 	completion := readJSON(t, reader)
-	if string(completion["id"]) != "90" || !strings.Contains(string(completion["result"]), `"label":"Add"`) || !strings.Contains(string(completion["result"]), `"label":"abs"`) {
+	if string(completion["id"]) != "90" || !strings.Contains(string(completion["result"]), `"isIncomplete":false`) || !strings.Contains(string(completion["result"]), `"label":"Add"`) || !strings.Contains(string(completion["result"]), `"label":"abs"`) || !strings.Contains(string(completion["result"]), `"textEdit"`) {
 		t.Fatalf("completion = %s", completion)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":91,"method":"completionItem/resolve","params":{"label":"abs","kind":3}}`)
 	completionResolve := readJSON(t, reader)
-	if string(completionResolve["id"]) != "91" || !strings.Contains(string(completionResolve["result"]), `builtin function`) {
+	if string(completionResolve["id"]) != "91" || !strings.Contains(string(completionResolve["result"]), `builtin function`) || !strings.Contains(string(completionResolve["result"]), `"documentation"`) {
 		t.Fatalf("completion resolve = %s", completionResolve)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-command.vim","languageId":"vim","version":1,"text":"ec"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":910,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///completion-command.vim"},"position":{"line":0,"character":2}}}`)
+	commandCompletion := readJSON(t, reader)
+	if string(commandCompletion["id"]) != "910" || !strings.Contains(string(commandCompletion["result"]), `"label":"echo"`) {
+		t.Fatalf("command completion = %s", commandCompletion)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-utf16.vim","languageId":"vim","version":1,"text":"vim9script\necho \"💩\" | echo strlen('')"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":911,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///completion-utf16.vim"},"position":{"line":1,"character":21}}}`)
+	utf16Completion := readJSON(t, reader)
+	if string(utf16Completion["id"]) != "911" || !strings.Contains(string(utf16Completion["result"]), `"label":"strlen"`) || !strings.Contains(string(utf16Completion["result"]), `"start":{"line":1,"character":17}`) || !strings.Contains(string(utf16Completion["result"]), `"end":{"line":1,"character":23}`) {
+		t.Fatalf("UTF-16 completion = %s", utf16Completion)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":92,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":12,"character":12}}}`)
 	signature := readJSON(t, reader)

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/jsonrpc"
@@ -86,6 +87,7 @@ type Server struct {
 	cancellations       map[jsonrpc2.ID]context.CancelFunc
 	documents           *workspace.Documents
 	encoding            text.Encoding
+	completion          completionCapabilities
 	exitOnce            sync.Once
 	exitCode            chan int
 	analysisMu          sync.Mutex
@@ -130,6 +132,7 @@ type Server struct {
 	workspaceConfiguration   bool
 
 	beforeWorkspaceIdentityCheck func()
+	completionNow                func() time.Time
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {
@@ -159,6 +162,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		workspaceFiles:      make(map[string]struct{}),
 		workspacePending:    make(map[string]struct{}),
 		workspaceDependents: make(map[string]struct{}),
+		completionNow:       time.Now,
 	}
 }
 
@@ -383,6 +387,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 	prepareRename := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.Rename != nil && params.Capabilities.TextDocument.Rename.PrepareSupport != nil && *params.Capabilities.TextDocument.Rename.PrepareSupport
 	codeActionLiterals := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.CodeAction != nil && params.Capabilities.TextDocument.CodeAction.CodeActionLiteralSupport.CodeActionKind.ValueSet != nil
+	completion := completionCapabilitiesFromClient(params.Capabilities.TextDocument)
 	s.mu.Lock()
 	s.targetVersion = targetVersion
 	s.targetOverride = targetOverride
@@ -399,6 +404,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 		}
 	}
 	s.encoding = encoding
+	s.completion = completion
 	s.state = stateActive
 	s.watchDynamicRegistration = watchDynamic
 	s.watchRelativePatterns = watchRelative
@@ -432,7 +438,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 			SelectionRangeProvider:    protocol.Boolean(true),
 			WorkspaceSymbolProvider:   protocol.Boolean(true),
 			DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &documentLinkResolve},
-			CompletionProvider:        &protocol.CompletionOptions{ResolveProvider: &completionResolve},
+			CompletionProvider:        &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{"."}},
 			SignatureHelpProvider:     &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{","}},
 			RenameProvider:            renameProvider,
 			SemanticTokensProvider: &protocol.SemanticTokensOptions{
