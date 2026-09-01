@@ -115,9 +115,10 @@ packages in advance of the milestone that needs them.
 
       gofmt -w <changed-go-files>
       go test ./...
-      go test -race ./...
       go vet ./...
 
+- Do not run race tests or collect coverage unless the user or the task's
+  validation requirements explicitly request them.
 - Parser and framing fuzz targets must never panic, hang, or grow memory without
   bound. Add every discovered crash input to the permanent corpus.
 
