@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -219,5 +220,41 @@ func TestStructureCancellationAndUnavailableDocument(t *testing.T) {
 	}
 	if err := current.structureCurrent(context.Background(), snapshot); !errors.Is(err, protocol.ErrContentModified) {
 		t.Fatalf("modified structure error = %v", err)
+	}
+}
+
+func TestStructureCollectorRetainsEveryTypedChild(t *testing.T) {
+	span := func(start, end int) syntax.Span { return syntax.Span{Start: start, End: end} }
+	source := strings.Repeat("x", 200)
+	typeNode := &syntax.Type{Span: span(30, 38), Arguments: []*syntax.Type{{Span: span(31, 34)}}, ReturnType: &syntax.Type{Span: span(35, 37)}}
+	expression := &syntax.Expression{
+		Span:       span(40, 70),
+		Children:   []*syntax.Expression{{Span: span(41, 45)}},
+		Parameters: []syntax.Parameter{{Name: span(46, 48), Target: &syntax.Expression{Span: span(49, 51)}, Type: typeNode, Default: &syntax.Expression{Span: span(52, 54)}}},
+		ReturnType: typeNode,
+		LambdaBody: &syntax.File{Source: source, Commands: []syntax.Command{{Span: span(55, 60), Name: span(55, 57)}}},
+	}
+	command := syntax.Command{
+		Span: span(0, 180), Name: span(0, 3),
+		Heredoc:     &syntax.Heredoc{Body: span(4, 8), EndMarker: span(8, 10)},
+		TextBody:    &syntax.TextBody{Body: span(11, 15), EndMarker: span(15, 17)},
+		Embedded:    &syntax.CommandList{Span: span(18, 29), Blocks: []syntax.Block{{Span: span(19, 28)}}, Commands: []syntax.Command{{Span: span(20, 27), Name: span(20, 22)}}},
+		Declaration: &syntax.Declaration{Bindings: []syntax.Binding{{Name: span(71, 73), ParsedType: typeNode}}, Initializer: expression},
+		For:         &syntax.ForLoop{Bindings: []syntax.Binding{{Name: span(74, 76), ParsedType: typeNode}}, Iterable: expression},
+		Function:    &syntax.Function{Name: span(77, 80), TypeParameters: []syntax.TypeParameter{{Span: span(81, 82)}}, Parameters: expression.Parameters, ReturnType: typeNode},
+		Aggregate:   &syntax.Aggregate{Name: span(83, 86), Extends: []syntax.Span{span(87, 90)}, Implements: []syntax.Span{span(91, 94)}},
+		TypeAlias:   &syntax.TypeAlias{Name: span(95, 98), Type: typeNode},
+		EnumValues:  []syntax.EnumValue{{Name: span(99, 102), Initializer: expression, Arguments: []*syntax.Expression{expression}}},
+		Import:      &syntax.Import{Alias: span(103, 106), Path: expression},
+		Mapping:     &syntax.Mapping{LHS: span(107, 110), RHS: span(111, 114), RHSExpression: expression},
+		Expressions: []*syntax.Expression{expression}, Targets: []*syntax.Expression{expression},
+	}
+	file := &syntax.File{Source: source, Blocks: []syntax.Block{{Span: span(0, 180)}}, Commands: []syntax.Command{command}}
+	collector := collectSpans(file)
+	if len(collector.spans) < 30 || len(collector.folds) != 4 {
+		t.Fatalf("spans=%d folds=%#v", len(collector.spans), collector.folds)
+	}
+	if chain := structureSelectionChain(collector.spans, 42, len(source)); len(chain) < 2 || chain[0] != span(41, 45) || chain[len(chain)-1] != span(0, len(source)) {
+		t.Fatalf("selection chain = %#v", chain)
 	}
 }

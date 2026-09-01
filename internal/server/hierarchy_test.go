@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
@@ -741,5 +742,55 @@ func TestHierarchyReverseQueriesDoNotMixSameNamesAcrossFiles(t *testing.T) {
 	secondIncoming, err := instance.IncomingCalls(context.Background(), &protocol.CallHierarchyIncomingCallsParams{Item: prepareCall(secondURI)})
 	if err != nil || len(secondIncoming) != 0 {
 		t.Fatalf("second incoming = %#v, %v", secondIncoming, err)
+	}
+}
+
+func TestHierarchyHelperBoundaries(t *testing.T) {
+	span := func(start, end int) syntax.Span { return syntax.Span{Start: start, End: end} }
+	for _, test := range []struct {
+		child  analysis.SymbolKind
+		parent analysis.SymbolKind
+		kind   analysis.TypeRelationKind
+		want   bool
+	}{
+		{analysis.SymbolKindClass, analysis.SymbolKindClass, analysis.TypeRelationExtends, true},
+		{analysis.SymbolKindInterface, analysis.SymbolKindInterface, analysis.TypeRelationExtends, true},
+		{analysis.SymbolKindEnum, analysis.SymbolKindInterface, analysis.TypeRelationImplements, true},
+		{analysis.SymbolKindClass, analysis.SymbolKindInterface, analysis.TypeRelationImplements, true},
+		{analysis.SymbolKindClass, analysis.SymbolKindInterface, analysis.TypeRelationExtends, false},
+		{analysis.SymbolKindInterface, analysis.SymbolKindClass, analysis.TypeRelationImplements, false},
+	} {
+		if got := validTypeRelation(test.child, test.parent, test.kind); got != test.want {
+			t.Errorf("validTypeRelation(%q, %q, %d) = %v, want %v", test.child, test.parent, test.kind, got, test.want)
+		}
+	}
+	if !implementationMemberCategory(analysis.SymbolKindVariable, analysis.SymbolKindConstant) || implementationMemberCategory(analysis.SymbolKindMethod, analysis.SymbolKindVariable) || !callHierarchyKind(analysis.SymbolKindConstructor) || callHierarchyKind(analysis.SymbolKindClass) || !typeHierarchyKind(analysis.SymbolKindTypeAlias) || aggregateHierarchyKind(analysis.SymbolKindTypeAlias) {
+		t.Fatal("hierarchy kind classification is incorrect")
+	}
+
+	leftType := &syntax.Type{Kind: syntax.TypeGeneric, Name: "T", ArgumentCountKnown: true, Arguments: []*syntax.Type{{Kind: syntax.TypeNamed, Name: "number"}}, ReturnType: &syntax.Type{Kind: syntax.TypeNamed, Name: "string"}}
+	rightType := &syntax.Type{Kind: syntax.TypeGeneric, Name: "U", ArgumentCountKnown: true, Arguments: []*syntax.Type{{Kind: syntax.TypeNamed, Name: "number"}}, ReturnType: &syntax.Type{Kind: syntax.TypeNamed, Name: "string"}}
+	if !equalSyntaxType(leftType, rightType, map[string]string{"T": "U"}) || equalSyntaxType(leftType, rightType, nil) || !compatibleFunctionSignature(&syntax.Command{Function: &syntax.Function{TypeParameters: []syntax.TypeParameter{{Name: "T"}}, Parameters: []syntax.Parameter{{Type: leftType}}, ReturnType: leftType}}, &syntax.Command{Function: &syntax.Function{TypeParameters: []syntax.TypeParameter{{Name: "U"}}, Parameters: []syntax.Parameter{{Type: rightType}}, ReturnType: rightType}}) {
+		t.Fatal("generic function signature comparison is incorrect")
+	}
+	if !equalValueType(analysis.ValueType{Name: "float"}, analysis.ValueType{Name: "number"}) || !equalValueType(analysis.ValueType{Name: analysis.ValueTypeAny}, analysis.ValueType{Name: "dict"}) || equalValueType(analysis.ValueType{}, analysis.ValueType{Name: "number"}) || equalValueType(analysis.ValueType{Name: "list", Arguments: []analysis.ValueType{{Name: "number"}}}, analysis.ValueType{Name: "list", Arguments: []analysis.ValueType{{Name: "string"}}}) {
+		t.Fatal("value type comparison is incorrect")
+	}
+
+	ranges := deduplicateRanges([]protocol.Range{navigationRange(1, 0, 2), navigationRange(0, 0, 1), navigationRange(1, 0, 2)})
+	if len(ranges) != 2 || ranges[0] != navigationRange(0, 0, 1) || ranges[1] != navigationRange(1, 0, 2) {
+		t.Fatalf("deduplicated ranges = %#v", ranges)
+	}
+	source := "class Item\nendclass\n"
+	symbol := hierarchySymbol{fact: workspace.SymbolFact{Path: "/tmp/item.vim", Name: "Item", Kind: analysis.SymbolKindClass, Range: span(0, 19), SelectionRange: span(6, 10)}, source: source}
+	items, err := typeHierarchyItems([]hierarchySymbol{symbol, symbol}, text.UTF16, 1)
+	if err != nil || len(items) != 1 || items[0].Name != "Item" || len(items[0].Data) == 0 {
+		t.Fatalf("type hierarchy items = %#v, %v", items, err)
+	}
+	if _, err := typeHierarchyItems([]hierarchySymbol{symbol, {fact: workspace.SymbolFact{Path: "/tmp/other.vim", Name: "Other", Kind: analysis.SymbolKindClass, Range: span(0, 1), SelectionRange: span(0, 1)}, source: "x"}}, text.UTF16, 1); err == nil {
+		t.Fatal("type hierarchy limit succeeded")
+	}
+	if item, ok := callHierarchyItem(hierarchySymbol{fact: workspace.SymbolFact{Path: "/tmp/bad.vim", Name: "Bad", Kind: analysis.SymbolKindFunction, Range: span(0, 1), SelectionRange: span(2, 3)}, source: "x"}, text.UTF16); ok || item.Name != "" {
+		t.Fatalf("invalid call item = %#v", item)
 	}
 }
