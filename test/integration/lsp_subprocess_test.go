@@ -284,6 +284,12 @@ func TestLSPSubprocess(t *testing.T) {
 	if !strings.Contains(string(mappingCompletion["result"]), `"label":"<buffer>"`) || !strings.Contains(string(mappingCompletion["result"]), `"newText":"<buffer>"`) || !strings.Contains(string(mappingCompletion["result"]), `"start":{"line":0,"character":5}`) {
 		t.Fatalf("mapping completion = %s", mappingCompletion)
 	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///highlight.vim","languageId":"vim","version":1,"text":"highlight Normal cterm=bold,und"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100012,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///highlight.vim"},"position":{"line":0,"character":31}}}`)
+	highlightCompletion := readResponse(t, reader, "100012")
+	if !strings.Contains(string(highlightCompletion["result"]), `"label":"underline"`) || !strings.Contains(string(highlightCompletion["result"]), `"newText":"underline"`) || !strings.Contains(string(highlightCompletion["result"]), `"start":{"line":0,"character":28}`) {
+		t.Fatalf("highlight completion = %s", highlightCompletion)
+	}
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100005,"method":"shutdown"}`)
 	shutdown := readResponse(t, reader, "100005")

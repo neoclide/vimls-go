@@ -2,10 +2,10 @@
 
 ## Target
 
-vimls-go analyzes both legacy Vim script and Vim9 script from Vim 9.1.0000
-through Vim 9.2.1015. Vim 9.1 is the compatibility floor. The parser recognizes
-the complete 9.2.1015 syntax surface, while the selected target version controls
-compatibility diagnostics for later forms.
+vimls-go analyzes both legacy Vim script and Vim9 script through Vim v9.2.1015.
+That tag is the current grammar and metadata ceiling and the default target.
+Syntax available in earlier Vim releases remains supported; syntax introduced
+after v9.2.1015 is not supported until the pinned source and data advance.
 
 The server analyzes the language used by Vim configuration and plugin files. It
 does not implement a Vim editor client and it does not treat Neovim Lua as Vim
@@ -97,7 +97,6 @@ every gated form. Known anchors include:
 
 | Form | Minimum target | Behavior below the minimum |
 | --- | --- | --- |
-| Classes, interfaces, and `:type` aliases in the 9.1 baseline | 9.1.0000 | Parse normally |
 | `ctermfont` in `:highlight` | 9.1.0030 | Preserve the attribute and emit one compatibility diagnostic |
 | Enums | 9.1.0219 | Preserve syntax and emit one compatibility diagnostic |
 | Heredocs inside Vim9 `:command { ... }` blocks | 9.1.0312 | Preserve syntax and emit one compatibility diagnostic |
@@ -111,24 +110,23 @@ every gated form. Known anchors include:
 | `:clipreset` and `:wlrestore` | 9.1.1485 | Preserve the command and emit one compatibility diagnostic |
 | Generic functions | 9.1.1577 | Preserve syntax and emit one compatibility diagnostic |
 
-Before implementing another gated feature, `language_researcher` must verify its
-first patch against the official Vim tags/tests and add it to the manifest and
-fixtures. A Vim 9.1.0000 oracle lane must reject later-only forms while the
-server still recovers to subsequent declarations.
+These historical boundaries support compatibility diagnostics for earlier
+targets. New language behavior must be verified against the pinned v9.2.1015
+source, help, tests, and clean executable.
 
 ## Target-version configuration
 
-The client setting is `vimls.targetVersion`. It accepts `major.minor`,
-`major.minor.patch`, or `latest`; omitted patches normalize to zero, so `9.1`
-means `9.1.0000`. The default is `9.1.0000`. `latest` selects the highest Vim
-version described by the server's embedded, tested feature manifest, currently
-`9.2.1015`, not the version of an executable found on `PATH`.
+The client setting `vimls.targetVersion` remains available for historical
+compatibility diagnostics. It accepts `major.minor`, `major.minor.patch`, or
+`latest`; omitted patches normalize to zero. The default and `latest` both
+select `9.2.1015`, not the version of an executable found on `PATH`. Selecting
+an older target does not make that Vim release part of the support contract.
 
 Configuration precedence is:
 
 1. `initializationOptions.targetVersion` for an explicit session override.
 2. The `vimls.targetVersion` value returned by `workspace/configuration`.
-3. The `9.1.0000` default.
+3. The `9.2.1015` default.
 
 The server rejects versions below 9.1 and malformed values with a visible
 configuration warning while retaining the previous valid target. On
@@ -221,6 +219,11 @@ Mapping commands complete the pinned `:map-arguments` values only before the
 LHS and omit flags already present on the command. Ordinary mapping RHS text
 remains opaque and never receives expression completion solely because it is a
 mapping payload.
+`:highlight` completion retains local group names and adds the v9.2.1015
+argument keys, attributes, terminal color names, reset values, and the portable
+GUI color suggestions listed in `syntax.txt`. Dynamic `v:colornames`, numeric
+colors/fonts, and arbitrary terminal/font payloads are intentionally not
+enumerated.
 Completion resolve and builtin-call hover include the pinned broad return type
 when Vim's metadata provides one; builtin-function, Ex-command, option, and
 predefined-variable hover plus builtin signature help also include bounded
@@ -315,19 +318,14 @@ extension alone is not sufficient to identify a Vim script.
 - Analyzing embedded Python, Ruby, Perl, Lua, shell, or another heredoc language
   beyond preserving its range for a future embedded-language integration.
 - Providing exact static types for every legacy value.
-- Supporting Vim releases older than 9.1.
+- Supporting Vim syntax introduced after v9.2.1015 without first advancing and
+  verifying the pinned source and metadata.
 
 ## Version evidence
 
-Every version-sensitive fixture records its minimum Vim version or patch. The
-compatibility corpus contains at least:
-
-- Vim 9.1.0000 behavior for the minimum boundary.
-- The latest published 9.1 patch used by CI.
-- The latest stable Vim release.
-- Official accept/fail examples for each syntax feature added after 9.1, plus
-  mixed legacy/Vim9 examples where that feature actually crosses a dialect
-  boundary.
+Every behavior-sensitive fixture records its Vim tag. The primary corpus and
+oracle lane use v9.2.1015; historical boundary fixtures verify compatibility
+diagnostics for earlier targets.
 
 When official help and observed behavior disagree, record a focused upstream
 test reproduction and treat the executable behavior for that exact version as
@@ -338,8 +336,6 @@ authoritative.
 - [Vim v9.2.1015 source and tests](https://github.com/vim/vim/tree/v9.2.1015/src/testdir)
 - [Vim v9.2.1015 `vim9.txt`](https://github.com/vim/vim/blob/v9.2.1015/runtime/doc/vim9.txt)
 - [Vim v9.2.1015 `eval.txt`](https://github.com/vim/vim/blob/v9.2.1015/runtime/doc/eval.txt)
-- [Vim v9.1.0000 compatibility baseline](https://github.com/vim/vim/tree/v9.1.0000)
-- [Vim 9.1 `runtime/filetype.vim`](https://github.com/vim/vim/blob/v9.1.0000/runtime/filetype.vim)
 - [Enum tests at 9.1.0219](https://github.com/vim/vim/blob/v9.1.0219/src/testdir/test_vim9_enum.vim)
 - [Tuple types at 9.1.1232](https://github.com/vim/vim/blob/v9.1.1232/runtime/doc/vim9.txt)
 - [Generic functions at 9.1.1577](https://github.com/vim/vim/blob/v9.1.1577/runtime/doc/vim9.txt)

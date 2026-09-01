@@ -18,8 +18,8 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-const DefaultTargetVersion = "9.1.0000"
 const MaximumTargetVersion = "9.2.1015"
+const DefaultTargetVersion = MaximumTargetVersion
 
 var ErrInvalidTargetVersion = errors.New("invalid Vim target version")
 
@@ -147,10 +147,10 @@ func targetVersionFromOptions(raw any) (TargetVersion, bool, string) {
 			return fallback, false, ""
 		}
 		if err := json.Unmarshal(value, &options); err != nil {
-			return fallback, false, "vimls: initializationOptions must be an object; using target 9.1.0000"
+			return fallback, false, "vimls: initializationOptions must be an object; using target " + DefaultTargetVersion
 		}
 	default:
-		return fallback, false, "vimls: initializationOptions must be an object; using target 9.1.0000"
+		return fallback, false, "vimls: initializationOptions must be an object; using target " + DefaultTargetVersion
 	}
 	target, exists := options["targetVersion"]
 	if !exists || target == nil {
@@ -158,11 +158,11 @@ func targetVersionFromOptions(raw any) (TargetVersion, bool, string) {
 	}
 	value, ok := target.(string)
 	if !ok {
-		return fallback, false, "vimls: targetVersion must be a string; using target 9.1.0000"
+		return fallback, false, "vimls: targetVersion must be a string; using target " + DefaultTargetVersion
 	}
 	version, err := ParseTargetVersion(value)
 	if err != nil {
-		return fallback, false, fmt.Sprintf("vimls: %v; using target 9.1.0000", err)
+		return fallback, false, fmt.Sprintf("vimls: %v; using target %s", err, DefaultTargetVersion)
 	}
 	return version, true, ""
 }

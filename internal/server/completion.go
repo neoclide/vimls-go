@@ -56,6 +56,8 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		selection := completionSelectionAt(snapshot.Text(), offset)
 		if contextKind == completionContextMappingArgument {
 			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
+		} else if contextKind == completionContextHighlightKey || contextKind == completionContextHighlightValue {
+			selection = completionHighlightSelection(snapshot.Text(), file, offset, contextKind == completionContextHighlightValue)
 		}
 		if contextKind == completionContextImportPath {
 			selection = completionImportPathSelection(snapshot.Text(), offset)
@@ -267,6 +269,32 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
+		} else if contextKind == completionContextHighlightKey {
+			for _, name := range []string{"term=", "start=", "stop=", "cterm=", "ctermfg=", "ctermbg=", "ctermul=", "ctermfont=", "gui=", "guifg=", "guibg=", "guisp=", "font=", "NONE"} {
+				if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindProperty}, 8000, completionSourceCommand) {
+					break
+				}
+			}
+		} else if contextKind == completionContextHighlightValue {
+			key := completionHighlightKey(file, snapshot.Text(), offset, selection.start)
+			var values []string
+			switch key {
+			case "term", "cterm", "gui":
+				values = []string{"bold", "standout", "underline", "undercurl", "underdouble", "underdotted", "underdashed", "italic", "reverse", "inverse", "nocombine", "strikethrough", "NONE"}
+			case "ctermfg", "ctermbg", "ctermul":
+				values = []string{"fg", "bg", "ul", "Black", "Blue", "Brown", "Cyan", "DarkBlue", "DarkCyan", "DarkGray", "DarkGreen", "DarkGrey", "DarkMagenta", "DarkRed", "DarkYellow", "Gray", "Green", "Grey", "LightBlue", "LightCyan", "LightGray", "LightGreen", "LightGrey", "LightMagenta", "LightRed", "LightYellow", "Magenta", "NONE", "Red", "White", "Yellow"}
+			case "ctermfont":
+				values = []string{"NONE"}
+			case "guifg", "guibg", "guisp":
+				values = []string{"NONE", "bg", "background", "fg", "foreground", "Red", "LightRed", "DarkRed", "Green", "LightGreen", "DarkGreen", "SeaGreen", "Blue", "LightBlue", "DarkBlue", "SlateBlue", "Cyan", "LightCyan", "DarkCyan", "Magenta", "LightMagenta", "DarkMagenta", "Yellow", "LightYellow", "Brown", "DarkYellow", "Gray", "LightGray", "DarkGray", "Black", "White", "Orange", "Purple", "Violet"}
+			case "font":
+				values = []string{"NONE"}
+			}
+			for _, value := range values {
+				if !add(protocol.CompletionItem{Label: value, Kind: protocol.CompletionItemKindEnumMember}, 8000, completionSourceCommand) {
+					break
+				}
+			}
 		} else if contextKind == completionContextAutocmdHead || contextKind == completionContextAutocmdEvent {
 			for _, event := range vimdata.AutocmdEvents() {
 				if !add(protocol.CompletionItem{Label: event.Name, Kind: protocol.CompletionItemKindEvent}, 8000, completionSourceBuiltin) {
@@ -456,6 +484,87 @@ func completionMappingArgumentSelection(source string, cursor int) completionSel
 		end++
 	}
 	return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
+}
+
+func completionHighlightSelection(source string, file *syntax.File, cursor int, value bool) completionSelection {
+	if cursor < 0 {
+		cursor = 0
+	} else if cursor > len(source) {
+		cursor = len(source)
+	}
+	start, end := cursor, cursor
+	var attribute *syntax.HighlightAttribute
+	want := completionContextHighlightKey
+	if value {
+		want = completionContextHighlightValue
+	}
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		contextKind, ok := completionHighlightContextAt(file, command, cursor)
+		if attribute == nil && ok && contextKind == want {
+			attribute = completionHighlightAttributeAt(command, cursor, value)
+		}
+	})
+	if attribute != nil {
+		if value && attribute.Value.Start < attribute.Value.End {
+			start, end = attribute.Value.Start, attribute.Value.End
+		} else if !value {
+			start, end = attribute.Key.Start, attribute.Key.End
+			if attribute.Equal.Start < attribute.Equal.End {
+				end = attribute.Equal.End
+			}
+		}
+	}
+	if start != cursor || end != cursor {
+		if value {
+			if comma := strings.LastIndexByte(source[start:cursor], ','); comma >= 0 {
+				start += comma + 1
+			}
+			if comma := strings.IndexByte(source[cursor:end], ','); comma >= 0 {
+				end = cursor + comma
+			}
+		}
+		return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
+	}
+	for start > 0 && !isCompletionSpace(source[start-1]) {
+		start--
+	}
+	for end < len(source) && !isCompletionSpace(source[end]) {
+		end++
+	}
+	equal := strings.IndexByte(source[start:end], '=')
+	if value && equal >= 0 {
+		start += equal + 1
+		if comma := strings.LastIndexByte(source[start:cursor], ','); comma >= 0 {
+			start += comma + 1
+		}
+		if comma := strings.IndexByte(source[cursor:end], ','); comma >= 0 {
+			end = cursor + comma
+		}
+	} else if equal >= 0 {
+		end = start + equal + 1
+	}
+	return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
+}
+
+func completionHighlightKey(file *syntax.File, source string, cursor, valueStart int) string {
+	var key string
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		contextKind, ok := completionHighlightContextAt(file, command, cursor)
+		if key == "" && ok && contextKind == completionContextHighlightValue {
+			if attribute := completionHighlightAttributeAt(command, cursor, true); attribute != nil {
+				key = file.Text(attribute.Key)
+			}
+		}
+	})
+	if key != "" {
+		return strings.ToLower(key)
+	}
+	start := valueStart
+	for start > 0 && !isCompletionSpace(source[start-1]) {
+		start--
+	}
+	key, _, _ = strings.Cut(source[start:valueStart], "=")
+	return strings.ToLower(key)
 }
 
 func isCompletionIdentifierRune(r rune) bool {

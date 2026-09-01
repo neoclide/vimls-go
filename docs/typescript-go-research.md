@@ -51,7 +51,7 @@ typescript-go：
 
 vimls-go：
 
-- 定位：Legacy Vim script + Vim9 script 的 Go 语言服务器，语法源钉在 Vim `v9.2.1015`，兼容地板 Vim 9.1。
+- 定位：Legacy Vim script + Vim9 script 的 Go 语言服务器，语法和元数据目前支持到 Vim `v9.2.1015`；更早语法继续支持，之后新增语法等待提升版本钉点。
 - 规模：Go 文件 141 个，其中 `*_test.go` 83 个，总行数约 86,944 行。
 - 包边界已经清晰：`jsonrpc / text / syntax / analysis / workspace / server / vimdata`，依赖方向从 server 指向小包。
 - 测试资产：Vim `src/testdir` 全部 362 个 `.vim` 文件（8,558,061 字节）、3,267 个官方抽取脚本、5,733 个 `Check*` 候选的 inventory、5,261 个 parser 变体，全部以 committed artifacts 离线运行。
@@ -668,4 +668,3 @@ typescript-go 证明了一件事：一个从旧实现移植来的、规模很大
 | 协议类型来源 | `go.lsp.dev/protocol` | 自生成 meta-model codec |
 | framing 上限 | header 8KiB / body 16MiB | 无显式上限 |
 | 文件监听 | 客户端 LSP watcher | 客户端优先，Windows/FSEvents 内置 fallback |
-

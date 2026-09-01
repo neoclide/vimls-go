@@ -1,7 +1,8 @@
 # vimls-go
 
-vimls-go is a Go language server for legacy Vim script and Vim9 script. It
-targets Vim 9.1 and newer stable releases.
+vimls-go is a Go language server for legacy Vim script and Vim9 script. Its
+grammar and metadata currently support Vim syntax through v9.2.1015. Earlier
+syntax remains supported; syntax introduced after that tag is not yet covered.
 
 The repository is being built milestone by milestone from the contracts in
 `docs/`. The server currently provides bounded stdio and TCP transports,

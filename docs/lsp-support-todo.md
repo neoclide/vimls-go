@@ -124,22 +124,18 @@ for dynamic names.
 Exit gate: every supported diagnostic has official evidence, exact code/message
 and byte range tests; incomplete or dynamic code does not create a false error.
 
-### Versioned behavior and builtin data
+### Pinned behavior and builtin data
 
-- [ ] Attach the minimum Vim patch to all syntax, command, option, function and
-  variable metadata introduced after 9.1.0000.
-- [ ] Filter completion, hover and signature results by `vimls.targetVersion`;
-  parsing may recognize newer syntax, but editor suggestions must not present
-  unavailable APIs as valid for the selected target.
+- [x] Pin the syntax/metadata ceiling and default target to Vim v9.2.1015.
+  Earlier syntax stays supported; later syntax waits for a pin update.
 - [ ] Separate Vim and Neovim metadata instead of reusing the old server's
   `isNeovim` flag as a parser switch. Add a target only after its behavior and
   data source are defined.
 - [ ] Add a documented refresh/verification command for pinned metadata and
-  fail tests on duplicate names, invalid help tags or unsupported version
-  ranges.
+  fail tests on duplicate names and invalid help tags.
 
-Exit gate: 9.1.0000 and the maximum embedded target produce different, tested
-results where their syntax or builtin sets differ.
+Exit gate: generated and handwritten metadata is traceable to v9.2.1015 and
+does not silently mix Vim or Neovim data.
 
 ## P1: close high-value LSP usability gaps
 
@@ -158,8 +154,9 @@ regular expressions.
   help/source data.
 - [x] Add the pinned `:map-arguments` set before the mapping LHS, omit already
   used flags, and keep ordinary mapping right-hand sides outside completion.
-- [ ] Add `:highlight` argument keys and value enums, while retaining local
-  syntax/highlight group completion.
+- [x] Add `:highlight` argument keys and finite help-listed values, while
+  retaining local syntax/highlight group completion. Dynamic `v:colornames`
+  and numeric payloads remain user input rather than enumerations.
 - [ ] Add `:colorscheme` names from safe indexed runtimepath `colors/`
   directories, respecting runtimepath precedence and workspace limits.
 - [ ] Add command-specific completion for augroups, user-command attributes,
@@ -173,8 +170,7 @@ regular expressions.
   client supports snippets. Legacy `function`/`endfunction` and Vim9
   `def`/`enddef` block templates are dialect-specific; plain-text clients keep
   ordinary completion edits.
-- [ ] Add target-version filtering, documentation and deterministic truncation
-  tests for every new source.
+- [ ] Add documentation and deterministic truncation tests for every new source.
 
 Exit gate: completion tests cover prefix replacement, Unicode/CRLF positions,
 comments and strings, incomplete input, client capabilities, cancellation,
@@ -269,7 +265,7 @@ configuration, index or import-graph revision.
   a realistic Vim9 import/class project. Exercise initialize, sync,
   diagnostics, completion/resolve, hover, signature, navigation, symbols,
   rename and shutdown.
-- [ ] Add the pinned Vim 9.1 and latest-stable oracle lanes defined by
+- [ ] Add the pinned Vim v9.2.1015 oracle lane defined by
   `docs/testing.md`; record version and patch level for every behavior-sensitive
   fixture.
 - [ ] Add real Vim/vim-lsp and Neovim built-in LSP smoke tests without reading

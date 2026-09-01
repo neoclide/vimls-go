@@ -2,8 +2,9 @@
 
 ## Mission
 
-Build a Go language server for legacy Vim script and Vim9 script. The minimum
-supported Vim release is 9.1; newer stable Vim releases must remain supported.
+Build a Go language server for legacy Vim script and Vim9 script. The current
+grammar and metadata ceiling is Vim v9.2.1015: earlier syntax remains supported,
+while syntax introduced after that tag is unsupported until the pin advances.
 Legacy Vim script and Vim9 script have independent root parsers. Cross-dialect
 constructs are retained with loose recovery and are not errors merely because
 they mix dialects; exhaustive support for `def` in a legacy-root file and
@@ -42,7 +43,7 @@ before use, preserve all local changes, and query the exact release tag needed;
 its current HEAD may be newer than vimls-go's configured target.
 
 Record the Vim version and patch level for version-sensitive behavior. Never
-turn behavior observed only on a newer Vim into an unconditional Vim 9.1 rule.
+turn behavior observed outside the pinned Vim tag into an unconditional rule.
 
 ## Language invariants
 

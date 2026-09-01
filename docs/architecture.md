@@ -9,8 +9,8 @@
 - Parse legacy Vim script and Vim9 script through independent root parsers.
   Retain cross-dialect constructs with loose recovery without requiring an
   exhaustive matrix of mixed combinations.
-- Use Vim `v9.2.1015` as the production grammar source and Vim 9.1 as the
-  compatibility floor.
+- Use Vim `v9.2.1015` as the production grammar and metadata ceiling. Earlier
+  syntax is included; later syntax waits for an explicit pin update.
 - Analyze untrusted source without executing or sourcing it.
 - Recover through incomplete editor input without unbounded work.
 
@@ -227,6 +227,5 @@ does not advertise a batch extension.
 
 - [Vim v9.2.1015 source and tests](https://github.com/vim/vim/tree/v9.2.1015)
 - [Vim v9.2.1015 Vim9 reference](https://github.com/vim/vim/blob/v9.2.1015/runtime/doc/vim9.txt)
-- [Vim v9.1.0000 compatibility baseline](https://github.com/vim/vim/tree/v9.1.0000)
 - [Language Server Protocol 3.18](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/)
 - [JSON-RPC 2.0](https://www.jsonrpc.org/specification)

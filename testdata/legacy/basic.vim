@@ -1,4 +1,4 @@
-" Curated legacy Vim script parser fixture for Vim 9.1.
+" Curated legacy Vim script parser fixture for Vim v9.2.1015.
 if exists('g:loaded_example')
   finish
 endif

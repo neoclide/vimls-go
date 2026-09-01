@@ -46,6 +46,12 @@ func TestLanguageFeatureCapabilitiesRespectClientOrder(t *testing.T) {
 }
 
 func TestParseTargetVersion(t *testing.T) {
+	if DefaultTargetVersion != "9.2.1015" {
+		t.Fatalf("default target = %q", DefaultTargetVersion)
+	}
+	if DefaultTargetVersion != MaximumTargetVersion {
+		t.Fatalf("default target = %q, maximum = %q", DefaultTargetVersion, MaximumTargetVersion)
+	}
 	tests := []struct {
 		input string
 		want  string

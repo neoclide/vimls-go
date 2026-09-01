@@ -267,6 +267,129 @@ func mappingCompletionItems(t *testing.T, source string, cursor int) protocol.Co
 	return completionItems(t, result)
 }
 
+func TestCompletionHighlightArgumentsAndValues(t *testing.T) {
+	keys := []string{"term=", "start=", "stop=", "cterm=", "ctermfg=", "ctermbg=", "ctermul=", "ctermfont=", "gui=", "guifg=", "guibg=", "guisp=", "font=", "NONE"}
+	items := highlightCompletionItems(t, "highlight Normal ", len("highlight Normal "))
+	for _, label := range keys {
+		if item := completionItemWithLabel(items, label); item == nil || item.Kind != protocol.CompletionItemKindProperty {
+			t.Errorf("highlight key %q missing from %#v", label, items)
+		}
+	}
+	if len(items) != len(keys) {
+		t.Fatalf("highlight keys = %d items, want %d: %#v", len(items), len(keys), items)
+	}
+	if item := completionItemWithLabel(items, "blend="); item != nil {
+		t.Fatalf("unsupported highlight key returned: %#v", item)
+	}
+	items = highlightCompletionItems(t, "highlight link MyGroup My", len("highlight link MyGroup My"))
+	if completionItemWithLabel(items, "MyGroup") == nil || completionItemWithLabel(items, "term=") != nil {
+		t.Fatalf("highlight link group completion = %#v", items)
+	}
+
+	source := "highlight Normal cterm=bold"
+	items = highlightCompletionItems(t, source, len("highlight Normal cterm"))
+	item := completionItemWithLabel(items, "cterm=")
+	if item == nil {
+		t.Fatalf("current highlight key missing from %#v", items)
+	}
+	edit, ok := item.TextEdit.(*protocol.TextEdit)
+	if !ok || edit.Range != navigationRange(0, 17, 23) || edit.NewText != "cterm=" {
+		t.Fatalf("highlight key edit = %#v", item.TextEdit)
+	}
+
+	attributes := []string{"bold", "standout", "underline", "undercurl", "underdouble", "underdotted", "underdashed", "italic", "reverse", "inverse", "nocombine", "strikethrough", "NONE"}
+	items = highlightCompletionItems(t, "highlight Normal cterm=", len("highlight Normal cterm="))
+	for _, label := range attributes {
+		if completionItemWithLabel(items, label) == nil {
+			t.Errorf("highlight attribute %q missing from %#v", label, items)
+		}
+	}
+	if len(items) != len(attributes) {
+		t.Fatalf("highlight attributes = %d items, want %d: %#v", len(items), len(attributes), items)
+	}
+
+	source = "highlight Normal cterm=bold,underd"
+	items = highlightCompletionItems(t, source, len(source))
+	item = completionItemWithLabel(items, "underdouble")
+	if item == nil {
+		t.Fatalf("comma-separated highlight value missing from %#v", items)
+	}
+	edit, ok = item.TextEdit.(*protocol.TextEdit)
+	if !ok || edit.Range != navigationRange(0, 28, 34) || edit.NewText != "underdouble" {
+		t.Fatalf("highlight value edit = %#v", item.TextEdit)
+	}
+	source = "highlight Normal cterm = under"
+	items = highlightCompletionItems(t, source, len(source))
+	item = completionItemWithLabel(items, "underline")
+	if item == nil {
+		t.Fatalf("spaced highlight value missing from %#v", items)
+	}
+	edit, ok = item.TextEdit.(*protocol.TextEdit)
+	if !ok || edit.Range != navigationRange(0, 25, 30) || edit.NewText != "underline" {
+		t.Fatalf("spaced highlight value edit = %#v", item.TextEdit)
+	}
+
+	for _, test := range []struct {
+		source string
+		want   []string
+	}{
+		{source: "highlight Normal ctermfg=", want: []string{"fg", "bg", "ul", "Black", "DarkGrey", "LightYellow", "NONE"}},
+		{source: "highlight Normal ctermfont=", want: []string{"NONE"}},
+		{source: "highlight Normal guifg=", want: []string{"NONE", "background", "foreground", "SeaGreen", "SlateBlue", "Orange", "Violet"}},
+		{source: "highlight Normal font=", want: []string{"NONE"}},
+	} {
+		items = highlightCompletionItems(t, test.source, len(test.source))
+		for _, label := range test.want {
+			if completionItemWithLabel(items, label) == nil {
+				t.Errorf("%q value %q missing from %#v", test.source, label, items)
+			}
+		}
+		if strings.Contains(test.source, "ctermfont") && len(items) != 1 {
+			t.Errorf("ctermfont finite values = %#v", items)
+		}
+	}
+	items = highlightCompletionItems(t, "highlight Normal cterm = ", len("highlight Normal cterm = "))
+	if completionItemWithLabel(items, "bold") == nil {
+		t.Fatalf("empty spaced highlight value = %#v", items)
+	}
+	for _, source := range []string{"highlight Normal start=", "highlight Normal stop=", "highlight Normal guifg='salmon pink'"} {
+		if items := highlightCompletionItems(t, source, len(source)); len(items) != 0 {
+			t.Errorf("arbitrary highlight value %q returned %#v", source, items)
+		}
+	}
+}
+
+func TestCompletionHighlightValueUsesUTF16EditRange(t *testing.T) {
+	source := "vim9script\r\nhighlight Ω cterm=und"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 21},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := completionItemWithLabel(completionItems(t, result), "underline")
+	if item == nil {
+		t.Fatalf("UTF-16 highlight completion missing from %#v", completionItems(t, result))
+	}
+	edit, ok := item.TextEdit.(*protocol.TextEdit)
+	if !ok || edit.Range != navigationRange(1, 18, 21) || edit.NewText != "underline" {
+		t.Fatalf("UTF-16 highlight edit = %#v", item.TextEdit)
+	}
+}
+
+func highlightCompletionItems(t *testing.T, source string, cursor int) protocol.CompletionItemSlice {
+	t.Helper()
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Character: uint32(cursor)},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return completionItems(t, result)
+}
+
 func TestCompletionRespectsForwardVisibility(t *testing.T) {
 	source := "vim9script\necho fut\necho Lat\nvar future = 1\ndef Later()\nenddef\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

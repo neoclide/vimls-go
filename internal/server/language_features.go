@@ -181,6 +181,8 @@ const (
 	completionContextSyntaxSubcommand
 	completionContextSyntaxGroup
 	completionContextHighlight
+	completionContextHighlightKey
+	completionContextHighlightValue
 	completionContextAutocmdHead
 	completionContextAutocmdEvent
 	completionContextImportPath
@@ -214,6 +216,9 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 	result := completionContextNone
 	walkCommands(file.Commands, func(command *syntax.Command) {
 		if !spanContains(command.Span, offset) && offset != command.Span.End {
+			if contextKind, ok := completionHighlightContextAt(file, command, offset); ok {
+				result = contextKind
+			}
 			return
 		}
 		if command.Set != nil {
@@ -263,6 +268,10 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		}
 		if command.Highlight != nil && (spanContains(command.Highlight.Group, offset) || offset == command.Highlight.Group.End || spanContains(command.Highlight.LinkTarget, offset) || offset == command.Highlight.LinkTarget.End) {
 			result = completionContextHighlight
+			return
+		}
+		if contextKind, ok := completionHighlightContextAt(file, command, offset); ok {
+			result = contextKind
 			return
 		}
 		if command.Autocmd != nil {
@@ -318,6 +327,73 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		return completionContextCommand
 	}
 	return completionContextNone
+}
+
+func completionHighlightContextAt(file *syntax.File, command *syntax.Command, offset int) (completionContext, bool) {
+	if file == nil || command == nil || command.Highlight == nil || command.Highlight.Group.Start == command.Highlight.Group.End ||
+		offset <= command.Highlight.Group.End {
+		return completionContextNone, false
+	}
+	if command.Highlight.Kind == syntax.HighlightClear || command.Highlight.Kind == syntax.HighlightLink {
+		return completionContextNone, true
+	}
+	if offset > command.Span.End {
+		for position := command.Span.End; position < offset; position++ {
+			if file.Source[position] != ' ' && file.Source[position] != '\t' {
+				return completionContextNone, false
+			}
+		}
+	}
+	if attribute := completionHighlightAttributeAt(command, offset, false); attribute != nil {
+		return completionContextHighlightKey, true
+	}
+	if attribute := completionHighlightAttributeAt(command, offset, true); attribute != nil {
+		if attribute.Quoted {
+			return completionContextNone, true
+		}
+		return completionContextHighlightValue, true
+	}
+	start := offset
+	for start > command.Highlight.Group.End && !isCompletionSpace(file.Source[start-1]) {
+		start--
+	}
+	equal := strings.IndexByte(file.Source[start:offset], '=')
+	if equal >= 0 {
+		return completionContextHighlightValue, true
+	}
+	return completionContextHighlightKey, true
+}
+
+func completionHighlightAttributeAt(command *syntax.Command, offset int, value bool) *syntax.HighlightAttribute {
+	if command == nil || command.Highlight == nil {
+		return nil
+	}
+	for index := range command.Highlight.Attributes {
+		attribute := &command.Highlight.Attributes[index]
+		if value {
+			end := attribute.Value.End
+			if attribute.Quoted {
+				end++
+			}
+			if attribute.Equal.Start < attribute.Equal.End && attribute.Equal.End <= offset &&
+				(attribute.Value.Start == attribute.Value.End || offset <= end) {
+				return attribute
+			}
+			continue
+		}
+		end := attribute.Key.End
+		if attribute.Equal.Start < attribute.Equal.End {
+			end = attribute.Equal.Start
+		}
+		if attribute.Key.Start <= offset && offset <= end {
+			return attribute
+		}
+	}
+	return nil
+}
+
+func isCompletionSpace(character byte) bool {
+	return character == ' ' || character == '\t' || character == '\n' || character == '\r'
 }
 
 func completionMappingArgumentAt(file *syntax.File, command *syntax.Command, offset int) bool {

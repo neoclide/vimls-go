@@ -385,7 +385,7 @@ func TestServerPublishesVersionedSemanticDiagnosticsAndClearsThem(t *testing.T) 
 	instance.mu.Lock()
 	instance.client = client
 	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{InitializationOptions: []byte(`{"targetVersion":"9.1.0000"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	documentURI := uri.MustParse("file:///semantic-diagnostics.vim")
@@ -1022,19 +1022,15 @@ func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {
 	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "vim9script\nenum Color\n  Red\nendenum\n"},
 	})
-	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vimls/target-version") {
-		t.Fatalf("default-target diagnostics = %#v", first)
-	}
 	snapshot, ok := instance.documents.Snapshot(documentURI.String())
 	if !ok {
 		t.Fatal("snapshot is missing")
 	}
 	raw := instance.parseSnapshot(snapshot)
-	_ = instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: []byte(`{"targetVersion":"9.2.1015"}`)})
-	cleared := waitForDiagnostics(t, client.published)
-	if len(cleared.Diagnostics) != 0 {
-		t.Fatalf("updated-target diagnostics = %#v", cleared)
+	_ = instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: []byte(`{"targetVersion":"9.1.0000"}`)})
+	updated := waitForDiagnostics(t, client.published)
+	if len(updated.Diagnostics) != 1 || updated.Diagnostics[0].Code != protocol.String("vimls/target-version") {
+		t.Fatalf("historical-target diagnostics = %#v", updated)
 	}
 	current, ok := instance.documents.Snapshot(documentURI.String())
 	if !ok || current != snapshot || instance.parseSnapshot(current) != raw {

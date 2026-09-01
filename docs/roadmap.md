@@ -2,8 +2,8 @@
 
 ## Definition of done
 
-Version 1.0 is complete only when the language-support contract is covered for
-Vim 9.1 and the latest stable Vim, the required LSP features below work through
+Version 1.0 is complete only when the language-support contract is covered
+through the pinned Vim v9.2.1015 ceiling, the required LSP features work through
 the real stdio server, and all release gates pass. Parser acceptance alone is
 not language-server completion.
 
@@ -69,8 +69,8 @@ Current verified syntax is recorded once in `language-support.md` and in focused
 package tests. Generated official positive and negative cases are the primary
 per-form evidence. Focused curated tests cover mixed-dialect transitions and
 incomplete-input recovery once per shared parser mechanism, rather than
-duplicating every syntax form across those contexts. Version-boundary evidence
-is required only for forms introduced after the 9.1 compatibility floor.
+duplicating every syntax form across those contexts. Historical version
+boundaries retain focused compatibility-diagnostic evidence.
 
 Complete parsing and semantics for `def` in a legacy-root file and `function`
 in a Vim9-root file are deferred. Existing tests for those combinations remain,
@@ -162,7 +162,8 @@ tested `.`, `:` and `&` member, command/scoped-name and option triggers are
 advertised. Snippet-capable clients receive required-argument direct-call
 snippets and dialect-specific legacy/Vim9 function blocks; other clients retain
 plain edits. Mapping special arguments complete only before the LHS; ordinary
-RHS payloads stay opaque. Direct
+RHS payloads stay opaque. Highlight definitions complete pinned argument keys
+and finite help-listed values without losing local group completion. Direct
 builtin (including receiver-adjusted `->` methods), same-file user-function,
 static-imported exported-function, and directly bound function-value signature
 help are implemented, as are local class/object methods, inherited methods,
@@ -178,8 +179,8 @@ boundaries, and reuse pinned Vim help for builtin functions, Ex commands
 (including abbreviations), options, and predefined variables. The Ex-command
 generator records matching help provenance alongside command facts. The stdio
 subprocess test exercises completion, resolve, hover, and the implemented
-signature-help wire contracts. M6 remains open for target-version filtering of
-pinned completion metadata and broader stable semantic classifications.
+signature-help wire contracts. M6 remains open for broader stable semantic
+classifications.
 Legacy local navigation treats `s:` and `<SID>` as one binding while preserving
 each spelling during rename; autoload navigation accepts an optional `g:`
 prefix and keeps rename disabled when the file contract cannot be updated.
@@ -196,23 +197,23 @@ and workspace-staleness rejection.
 
 Deliver:
 
-- CI for Vim 9.1.0000, latest published 9.1 patch, and latest stable Vim.
+- CI and clean-oracle coverage for Vim v9.2.1015.
 - Linux/macOS builds on each change; Windows build and integration coverage
   before release.
 - Fuzz corpus, large-file/workspace benchmarks, vulnerability scan, changelog,
   installation/client examples, and reproducible release archives.
 
 Exit gate: all checks in `docs/testing.md` pass; no open crash/data-corruption,
-protocol lifecycle, false-edit, or minimum-version blockers; performance budgets
+protocol lifecycle or false-edit blockers; performance budgets
 hold on the documented runner; a clean install passes the repository's Go stdio
-harness plus pinned smoke fixtures for Vim 9.1 with `vim-lsp` and Neovim with its
+harness plus pinned smoke fixtures for Vim v9.2.1015 with `vim-lsp` and Neovim with its
 built-in LSP client. Each editor fixture must initialize the server, open one
 legacy and one Vim9 file, observe the expected diagnostics, then shut down
 cleanly.
 
 Pinned client smoke baseline:
 
-- Vim `9.1.1365` with `vim-lsp` commit
+- Vim `9.2.1015` with `vim-lsp` commit
   `e10d186452743beb7b43d2b3427020832f930c2b`, checked out below
   `.test-tools/vim-lsp` by the M7 CI setup.
 - Neovim `0.12.4` using its built-in LSP client.

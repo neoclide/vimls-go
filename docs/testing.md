@@ -198,12 +198,12 @@ inside the server.
 Per change:
 
 - Supported Go versions from `go.mod` on Linux.
-- Vim 9.1.0000 and latest stable Vim for relevant oracle cases.
+- Vim v9.2.1015 for relevant oracle cases.
 - Build on Linux and macOS.
 
 Planned scheduled and release coverage:
 
-- Latest published 9.1 patch in addition to the minimum and latest stable.
+- A pinned clean Vim v9.2.1015 oracle lane.
 - Windows build and subprocess protocol test.
 - Full race, fuzz, corpus, vulnerability, and benchmark lanes.
 
