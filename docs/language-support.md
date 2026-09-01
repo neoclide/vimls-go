@@ -344,13 +344,16 @@ Other dynamic, ambiguous, and namespace-changing edits are rejected. Open-file
 edits carry their captured snapshot versions and closed indexed files use a
 null version; workspace changes retry once and then return `ContentModified`.
 
-Full semantic tokens combine command/modifier/comment syntax with bound symbol
-declarations and references, using the negotiated position encoding. Inlay
-hints expose only already-inferred variable/constant types that were not
-written explicitly. Code actions are limited to a unique, known missing block
-terminator and never execute Vim script. The server does not advertise document,
-range, or on-type formatting. Source-wide rewriting and speculative type fixes
-are outside the 1.0 surface.
+Full semantic tokens combine command/modifier/comment syntax with scoped legacy
+names, options, registers, environment and predefined variables, user and
+builtin functions, parameters, imports, Vim9 types and aggregate members.
+Declaration, readonly, static, deprecated and default-library modifiers are
+emitted only from syntax, analysis or pinned Vim metadata facts. Token positions
+use the negotiated encoding. Inlay hints expose only already-inferred
+variable/constant types that were not written explicitly. Code actions are
+limited to a unique, known missing block terminator and never execute Vim
+script. The server does not advertise document, range, or on-type formatting.
+Source-wide rewriting and speculative type fixes are outside the 1.0 surface.
 
 Document symbols, folding ranges, and selection ranges retain their nested
 function, class, interface, and enum structure through end-of-file when a block

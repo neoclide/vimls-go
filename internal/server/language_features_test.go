@@ -101,7 +101,7 @@ func TestDeprecatedVim9DeclarationsReachLanguageFeatures(t *testing.T) {
 	}
 	deprecatedTokens := 0
 	for index := 0; index+4 < len(tokens.Data); index += 5 {
-		if tokens.Data[index+4]&4 != 0 {
+		if tokens.Data[index+4]&semanticDeprecated != 0 {
 			deprecatedTokens++
 		}
 	}

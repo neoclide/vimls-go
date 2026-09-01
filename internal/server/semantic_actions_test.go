@@ -16,11 +16,11 @@ func TestSemanticTokensFullClassifiesSyntaxAndBoundSymbols(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []uint32{
-		0, 0, 10, 1, 0,
-		1, 0, 5, 1, 0,
+		0, 0, 10, 1, 16,
+		1, 0, 5, 1, 16,
 		0, 6, 5, 3, 3,
 		1, 0, 9, 0, 0,
-		1, 0, 4, 1, 0,
+		1, 0, 4, 1, 16,
 		0, 5, 5, 3, 2,
 	}
 	if len(tokens.Data) != len(want) {
@@ -31,6 +31,111 @@ func TestSemanticTokensFullClassifiesSyntaxAndBoundSymbols(t *testing.T) {
 			t.Fatalf("semantic data[%d] = %d, want %d; all = %#v", index, tokens.Data[index], want[index], tokens.Data)
 		}
 	}
+}
+
+func TestSemanticTokensClassifyLegacyNamesAndPinnedBuiltins(t *testing.T) {
+	source := "let g:value = &ignorecase\necho g:value @a $HOME v:version len([])\ncommand! Build echo 1\nBuild\nfunction! s:Run(arg)\n  echo a:arg\n  call <SID>Run(1)\nendfunction\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSemanticToken(t, tokens.Data, 0, 4, semanticNamespace, 0)
+	assertSemanticToken(t, tokens.Data, 0, 6, semanticVariable, semanticDeclaration)
+	assertSemanticToken(t, tokens.Data, 0, 14, semanticVariable, semanticDefaultLibrary)
+	assertSemanticToken(t, tokens.Data, 1, 13, semanticVariable, 0)
+	assertSemanticToken(t, tokens.Data, 1, 16, semanticVariable, 0)
+	assertSemanticToken(t, tokens.Data, 1, 22, semanticNamespace, 0)
+	assertSemanticTokenHasModifiers(t, tokens.Data, 1, 24, semanticVariable, semanticDefaultLibrary)
+	assertSemanticToken(t, tokens.Data, 1, 32, semanticFunction, semanticDefaultLibrary)
+	assertSemanticToken(t, tokens.Data, 2, 9, semanticFunction, semanticDeclaration)
+	assertSemanticToken(t, tokens.Data, 3, 0, semanticFunction, 0)
+	assertSemanticToken(t, tokens.Data, 4, 10, semanticNamespace, 0)
+	assertSemanticToken(t, tokens.Data, 4, 12, semanticFunction, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 4, 16, semanticParameter, semanticDeclaration)
+	assertSemanticToken(t, tokens.Data, 5, 7, semanticNamespace, 0)
+	assertSemanticToken(t, tokens.Data, 5, 9, semanticParameter, 0)
+	assertSemanticToken(t, tokens.Data, 6, 7, semanticNamespace, 0)
+	assertSemanticToken(t, tokens.Data, 6, 12, semanticFunction, semanticReadonly)
+}
+
+func TestSemanticTokensClassifyVim9DeclarationsAndProvenModifiers(t *testing.T) {
+	source := "vim9script\nimport './mod.vim' as mod\nclass Thing\n  static final Value = 1\n  static def Build(arg: number)\n    echo arg\n  enddef\nendclass\n# @deprecated\nconst old = 1\necho old\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSemanticToken(t, tokens.Data, 1, 22, semanticNamespace, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 2, 6, semanticClass, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 3, 15, semanticProperty, semanticDeclaration|semanticReadonly|semanticStatic)
+	assertSemanticToken(t, tokens.Data, 4, 13, semanticMethod, semanticDeclaration|semanticReadonly|semanticStatic)
+	assertSemanticToken(t, tokens.Data, 4, 19, semanticParameter, semanticDeclaration)
+	assertSemanticToken(t, tokens.Data, 5, 9, semanticParameter, 0)
+	assertSemanticToken(t, tokens.Data, 9, 6, semanticVariable, semanticDeclaration|semanticReadonly|semanticDeprecated)
+	assertSemanticToken(t, tokens.Data, 10, 5, semanticVariable, semanticReadonly|semanticDeprecated)
+}
+
+func TestSemanticTokensClassifyVim9TypesEnumsAndMembers(t *testing.T) {
+	source := "vim9script\ninterface Shape\n  def Draw()\nendinterface\nenum Color\n  Red\nendenum\ntype Alias = number\nvar shape: Shape\nshape.Draw()\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSemanticToken(t, tokens.Data, 1, 10, semanticInterface, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 2, 6, semanticMethod, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 4, 5, semanticEnum, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 5, 2, semanticEnumMember, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 7, 5, semanticTypeName, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 8, 11, semanticTypeName, 0)
+	assertSemanticToken(t, tokens.Data, 9, 6, semanticMethod, 0)
+}
+
+func TestSemanticTokensClassifyImportedTypesAndMembers(t *testing.T) {
+	source := "vim9script\nimport './m.vim' as mod\nvar item: mod.Item\nmod.Build()\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSemanticToken(t, tokens.Data, 1, 20, semanticNamespace, semanticDeclaration|semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 2, 10, semanticNamespace, 0)
+	assertSemanticToken(t, tokens.Data, 2, 14, semanticTypeName, 0)
+	assertSemanticToken(t, tokens.Data, 3, 0, semanticNamespace, semanticReadonly)
+	assertSemanticToken(t, tokens.Data, 3, 4, semanticMethod, 0)
+}
+
+func assertSemanticToken(t *testing.T, data []uint32, wantLine, wantCharacter, wantType, wantModifiers uint32) {
+	t.Helper()
+	tokenType, modifiers, ok := semanticTokenAt(data, wantLine, wantCharacter)
+	if !ok || tokenType != wantType || modifiers != wantModifiers {
+		t.Fatalf("token at %d:%d = type %d modifiers %d found %t; data = %#v", wantLine, wantCharacter, tokenType, modifiers, ok, data)
+	}
+}
+
+func assertSemanticTokenHasModifiers(t *testing.T, data []uint32, wantLine, wantCharacter, wantType, wantModifiers uint32) {
+	t.Helper()
+	tokenType, modifiers, ok := semanticTokenAt(data, wantLine, wantCharacter)
+	if !ok || tokenType != wantType || modifiers&wantModifiers != wantModifiers {
+		t.Fatalf("token at %d:%d = type %d modifiers %d found %t; data = %#v", wantLine, wantCharacter, tokenType, modifiers, ok, data)
+	}
+}
+
+func semanticTokenAt(data []uint32, wantLine, wantCharacter uint32) (uint32, uint32, bool) {
+	line, character := uint32(0), uint32(0)
+	for index := 0; index+4 < len(data); index += 5 {
+		line += data[index]
+		if data[index] == 0 {
+			character += data[index+1]
+		} else {
+			character = data[index+1]
+		}
+		if line == wantLine && character == wantCharacter {
+			return data[index+3], data[index+4], true
+		}
+	}
+	return 0, 0, false
 }
 
 func TestCodeActionInsertsKnownMissingEnd(t *testing.T) {

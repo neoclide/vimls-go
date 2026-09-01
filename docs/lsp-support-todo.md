@@ -237,10 +237,10 @@ request returns `ContentModified`.
 
 ### Semantic tokens and code actions
 
-- [ ] Finish stable token classification for legacy scope prefixes, options,
+- [x] Finish stable token classification for legacy scope prefixes, options,
   registers, environment variables, user commands, functions, parameters,
   imports, types, classes/interfaces/enums, members and deprecated symbols.
-- [ ] Add token modifiers only when analysis proves declaration, readonly,
+- [x] Add token modifiers only when analysis proves declaration, readonly,
   static, deprecated or default-library status.
 - [ ] Add safe syntax-backed quick fixes beyond a missing block terminator only
   when there is exactly one valid edit, for example an unambiguous missing

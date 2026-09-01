@@ -7,14 +7,40 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 	"go.lsp.dev/protocol"
 )
 
 var semanticTokenTypes = []string{
-	"comment", "keyword", "modifier", "variable", "function", "method", "class", "interface", "enum", "enumMember", "type", "property",
+	"comment", "keyword", "modifier", "variable", "function", "method", "class", "interface", "enum", "enumMember", "type", "property", "namespace", "parameter",
 }
 
-var semanticTokenModifiers = []string{"declaration", "readonly", "deprecated"}
+var semanticTokenModifiers = []string{"declaration", "readonly", "deprecated", "static", "defaultLibrary"}
+
+const (
+	semanticComment uint32 = iota
+	semanticKeyword
+	semanticModifier
+	semanticVariable
+	semanticFunction
+	semanticMethod
+	semanticClass
+	semanticInterface
+	semanticEnum
+	semanticEnumMember
+	semanticTypeName
+	semanticProperty
+	semanticNamespace
+	semanticParameter
+)
+
+const (
+	semanticDeclaration uint32 = 1 << iota
+	semanticReadonly
+	semanticDeprecated
+	semanticStatic
+	semanticDefaultLibrary
+)
 
 type semanticFact struct {
 	span      syntax.Span
@@ -60,30 +86,107 @@ func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.Semant
 
 func collectSemanticFacts(file *syntax.File) []semanticFact {
 	facts := make([]semanticFact, 0, len(file.Tokens))
+	commandKinds := make(map[syntax.Span]syntax.CommandKind)
+	staticDeclarations := make(map[syntax.Span]bool)
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		commandKinds[command.Name] = command.Kind
+		isStatic := false
+		for _, modifier := range command.Modifiers {
+			if modifier.Name == "static" {
+				isStatic = true
+				break
+			}
+		}
+		if isStatic {
+			if command.Function != nil {
+				staticDeclarations[command.Function.Name] = true
+			}
+			if command.Declaration != nil {
+				for _, binding := range command.Declaration.Bindings {
+					staticDeclarations[binding.Name] = true
+				}
+			}
+		}
+		if command.UserCommand != nil && command.UserCommand.Name.End > command.UserCommand.Name.Start {
+			facts = append(facts, semanticFact{span: command.UserCommand.Name, tokenType: semanticFunction, modifiers: semanticDeclaration, priority: 3})
+		}
+		if command.Function != nil {
+			for _, parameter := range command.Function.TypeParameters {
+				facts = append(facts, semanticFact{span: parameter.Span, tokenType: semanticTypeName, modifiers: semanticDeclaration, priority: 2})
+			}
+			for _, parameter := range command.Function.Parameters {
+				collectTypeSemanticFacts(parameter.Type, &facts)
+			}
+			collectTypeSemanticFacts(command.Function.ReturnType, &facts)
+		}
+		if command.Declaration != nil {
+			for _, binding := range command.Declaration.Bindings {
+				collectTypeSemanticFacts(binding.ParsedType, &facts)
+			}
+		}
+		if command.For != nil {
+			for _, binding := range command.For.Bindings {
+				collectTypeSemanticFacts(binding.ParsedType, &facts)
+			}
+		}
+		if command.TypeAlias != nil {
+			collectTypeSemanticFacts(command.TypeAlias.Type, &facts)
+		}
+		if command.Aggregate != nil {
+			for _, span := range command.Aggregate.Extends {
+				facts = append(facts, semanticFact{span: span, tokenType: semanticTypeName, priority: 1})
+			}
+			for _, span := range command.Aggregate.Implements {
+				facts = append(facts, semanticFact{span: span, tokenType: semanticTypeName, priority: 1})
+			}
+		}
+		if command.Set != nil {
+			for _, option := range command.Set.Options {
+				if _, ok := vimdata.LookupOption(file.Text(option.Name)); ok {
+					facts = append(facts, semanticFact{span: option.Name, tokenType: semanticVariable, modifiers: semanticDefaultLibrary, priority: 2})
+				}
+			}
+		}
+		walkCommandExpressions(command, func(expression *syntax.Expression) {
+			collectExpressionSemanticFacts(file, expression, &facts)
+		})
+	})
 	for _, token := range file.Tokens {
 		var tokenType uint32
+		modifiers := uint32(0)
 		switch token.Kind {
 		case syntax.TokenComment:
-			tokenType = 0
+			tokenType = semanticComment
 		case syntax.TokenCommand:
-			tokenType = 1
+			kind, known := commandKinds[token.Span]
+			if known && kind == syntax.CommandUser {
+				tokenType = semanticFunction
+			} else {
+				tokenType = semanticKeyword
+				if known && (kind == syntax.CommandBuiltin || kind == syntax.CommandBlockStart || kind == syntax.CommandBlockEnd) {
+					modifiers = semanticDefaultLibrary
+				}
+			}
 		case syntax.TokenModifier:
-			tokenType = 2
+			tokenType = semanticModifier
 		default:
 			continue
 		}
-		facts = append(facts, semanticFact{span: token.Span, tokenType: tokenType, priority: 1})
+		facts = append(facts, semanticFact{span: token.Span, tokenType: tokenType, modifiers: modifiers, priority: 1})
 	}
 	result := analysis.Analyze(file)
 	for _, declaration := range result.Declarations {
-		modifiers := uint32(1)
+		modifiers := semanticDeclaration
 		if !declaration.Mutable {
-			modifiers |= 2
+			modifiers |= semanticReadonly
 		}
 		if declaration.Deprecated {
-			modifiers |= 4
+			modifiers |= semanticDeprecated
 		}
-		facts = append(facts, semanticFact{span: declaration.Span, tokenType: semanticType(declaration.Kind), modifiers: modifiers, priority: 3})
+		if staticDeclarations[declaration.Span] {
+			modifiers |= semanticStatic
+		}
+		appendSymbolSemanticFacts(file, &facts, declaration.Span, semanticType(declaration), modifiers, 3)
 	}
 	for _, reference := range result.References {
 		if reference.Declaration == nil {
@@ -91,12 +194,15 @@ func collectSemanticFacts(file *syntax.File) []semanticFact {
 		}
 		modifiers := uint32(0)
 		if !reference.Declaration.Mutable {
-			modifiers |= 2
+			modifiers |= semanticReadonly
 		}
 		if reference.Declaration.Deprecated {
-			modifiers |= 4
+			modifiers |= semanticDeprecated
 		}
-		facts = append(facts, semanticFact{span: reference.Span, tokenType: semanticType(reference.Declaration.Kind), modifiers: modifiers, priority: 2})
+		if staticDeclarations[reference.Declaration.Span] {
+			modifiers |= semanticStatic
+		}
+		appendSymbolSemanticFacts(file, &facts, reference.Span, semanticType(reference.Declaration), modifiers, 2)
 	}
 	sort.SliceStable(facts, func(i, j int) bool {
 		if facts[i].span.Start != facts[j].span.Start {
@@ -120,25 +226,148 @@ func collectSemanticFacts(file *syntax.File) []semanticFact {
 	return filtered
 }
 
-func semanticType(kind analysis.SymbolKind) uint32 {
-	switch kind {
-	case analysis.SymbolKindFunction:
-		return 4
-	case analysis.SymbolKindMethod, analysis.SymbolKindConstructor:
-		return 5
-	case analysis.SymbolKindClass:
-		return 6
-	case analysis.SymbolKindInterface:
-		return 7
-	case analysis.SymbolKindEnum:
-		return 8
-	case analysis.SymbolKindEnumMember:
-		return 9
-	case analysis.SymbolKindTypeAlias:
-		return 10
-	default:
-		return 3
+func semanticType(declaration *analysis.Declaration) uint32 {
+	if declaration.Parameter {
+		return semanticParameter
 	}
+	if declaration.Scope != nil && (declaration.Scope.Kind == syntax.BlockClass || declaration.Scope.Kind == syntax.BlockInterface) &&
+		(declaration.Kind == analysis.SymbolKindVariable || declaration.Kind == analysis.SymbolKindConstant) {
+		return semanticProperty
+	}
+	switch declaration.Kind {
+	case analysis.SymbolKindImport:
+		return semanticNamespace
+	case analysis.SymbolKindFunction:
+		return semanticFunction
+	case analysis.SymbolKindMethod, analysis.SymbolKindConstructor:
+		return semanticMethod
+	case analysis.SymbolKindClass:
+		return semanticClass
+	case analysis.SymbolKindInterface:
+		return semanticInterface
+	case analysis.SymbolKindEnum:
+		return semanticEnum
+	case analysis.SymbolKindEnumMember:
+		return semanticEnumMember
+	case analysis.SymbolKindTypeAlias:
+		return semanticTypeName
+	default:
+		return semanticVariable
+	}
+}
+
+func appendSymbolSemanticFacts(file *syntax.File, facts *[]semanticFact, span syntax.Span, tokenType, modifiers uint32, priority uint8) {
+	name := file.Text(span)
+	prefixLength := 0
+	if len(name) >= 2 && name[1] == ':' && strings.ContainsRune("gbwtslav", rune(name[0])) {
+		prefixLength = 2
+	} else if len(name) >= len("<SID>") && strings.EqualFold(name[:len("<SID>")], "<SID>") {
+		prefixLength = len("<SID>")
+	}
+	if prefixLength == 0 {
+		*facts = append(*facts, semanticFact{span: span, tokenType: tokenType, modifiers: modifiers, priority: priority})
+		return
+	}
+	*facts = append(*facts, semanticFact{span: syntax.Span{Start: span.Start, End: span.Start + prefixLength}, tokenType: semanticNamespace, priority: priority})
+	if span.Start+prefixLength < span.End {
+		*facts = append(*facts, semanticFact{span: syntax.Span{Start: span.Start + prefixLength, End: span.End}, tokenType: tokenType, modifiers: modifiers, priority: priority})
+	}
+}
+
+func collectExpressionSemanticFacts(file *syntax.File, expression *syntax.Expression, facts *[]semanticFact) {
+	for _, typeNode := range expression.TypeArguments {
+		collectTypeSemanticFacts(typeNode, facts)
+	}
+	collectTypeSemanticFacts(expression.CastType, facts)
+	collectTypeSemanticFacts(expression.ReturnType, facts)
+	for _, parameter := range expression.Parameters {
+		collectTypeSemanticFacts(parameter.Type, facts)
+	}
+	if expression.Kind == syntax.ExpressionCall && len(expression.Children) > 0 {
+		callee := expression.Children[0]
+		if callee.Kind == syntax.ExpressionIdentifier {
+			modifiers := uint32(0)
+			if _, ok := vimdata.LookupFunction(callee.Value); ok {
+				modifiers = semanticDefaultLibrary
+			}
+			*facts = append(*facts, semanticFact{span: callee.Span, tokenType: semanticFunction, modifiers: modifiers, priority: 1})
+		} else if callee.Kind == syntax.ExpressionMember {
+			if member, ok := expressionMemberSpan(callee); ok {
+				*facts = append(*facts, semanticFact{span: member, tokenType: semanticMethod, priority: 1})
+			}
+		}
+	}
+	if expression.Kind == syntax.ExpressionMember {
+		if member, ok := expressionMemberSpan(expression); ok {
+			*facts = append(*facts, semanticFact{span: member, tokenType: semanticProperty, priority: 1})
+		}
+	}
+	if expression.Kind != syntax.ExpressionIdentifier {
+		return
+	}
+	modifiers := uint32(0)
+	tokenType := semanticVariable
+	classify := false
+	switch {
+	case strings.HasPrefix(expression.Value, "&"):
+		classify = true
+		if _, ok := vimdata.LookupOption(expression.Value); ok {
+			modifiers |= semanticDefaultLibrary
+		}
+	case strings.HasPrefix(expression.Value, "@"), strings.HasPrefix(expression.Value, "$"):
+		classify = true
+	case strings.HasPrefix(expression.Value, "v:"):
+		classify = true
+		if variable, ok := vimdata.LookupVariable(expression.Value); ok {
+			modifiers |= semanticDefaultLibrary
+			if variable.Flags&(vimdata.VariableReadOnly|vimdata.VariableSandboxReadOnly) != 0 {
+				modifiers |= semanticReadonly
+			}
+		}
+	case len(expression.Value) >= 2 && expression.Value[1] == ':' && strings.ContainsRune("gbwtsla", rune(expression.Value[0])):
+		classify = true
+		if expression.Value[0] == 'a' {
+			tokenType = semanticParameter
+		}
+	}
+	if classify {
+		appendSymbolSemanticFacts(file, facts, expression.Span, tokenType, modifiers, 1)
+	}
+}
+
+func expressionMemberSpan(expression *syntax.Expression) (syntax.Span, bool) {
+	if expression == nil || expression.Kind != syntax.ExpressionMember || expression.Value == "" || len(expression.Value) > expression.Span.End-expression.Span.Start {
+		return syntax.Span{}, false
+	}
+	return syntax.Span{Start: expression.Span.End - len(expression.Value), End: expression.Span.End}, true
+}
+
+func collectTypeSemanticFacts(typeNode *syntax.Type, facts *[]semanticFact) {
+	if typeNode == nil {
+		return
+	}
+	if typeNode.Name != "" && typeNode.Name != "?" && typeNode.Name != "..." {
+		name := typeNode.Name
+		start := typeNode.Span.Start
+		if dot := strings.LastIndexByte(name, '.'); dot > 0 {
+			*facts = append(*facts, semanticFact{span: syntax.Span{Start: start, End: start + dot}, tokenType: semanticNamespace, priority: 1})
+			start += dot + 1
+			name = name[dot+1:]
+		}
+		end := start + len(name)
+		if end <= typeNode.Span.End {
+			modifiers := uint32(0)
+			switch name {
+			case "any", "blob", "bool", "channel", "dict", "float", "func", "job", "list", "number", "object", "string", "tuple", "void":
+				modifiers = semanticDefaultLibrary
+			}
+			*facts = append(*facts, semanticFact{span: syntax.Span{Start: start, End: end}, tokenType: semanticTypeName, modifiers: modifiers, priority: 1})
+		}
+	}
+	for _, argument := range typeNode.Arguments {
+		collectTypeSemanticFacts(argument, facts)
+	}
+	collectTypeSemanticFacts(typeNode.ReturnType, facts)
 }
 
 func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CommandOrCodeAction, error) {
