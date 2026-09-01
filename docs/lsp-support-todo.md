@@ -94,7 +94,7 @@ there are no unqualified claims such as "full expressions" or "full Vim9".
 - [x] Complete statically provable legacy global function/variable and autoload
   references across workspace/runtimepath files, including duplicate and
   load-order ambiguity behavior.
-- [ ] Add conservative checks for legacy mutability, callable arity and
+- [x] Add conservative checks for legacy mutability, callable arity and
   container operations only where Vim behavior is independent of runtime
   state.
 - [x] Test `scriptversion`, legacy continuations, bars/comments, abbreviations,
