@@ -245,7 +245,7 @@ request returns `ContentModified`.
 - [ ] Add safe syntax-backed quick fixes beyond a missing block terminator only
   when there is exactly one valid edit, for example an unambiguous missing
   keyword or dialect-specific terminator.
-- [ ] Do not add formatting, source-wide rewriting or speculative type fixes to
+- [x] Do not add formatting, source-wide rewriting or speculative type fixes to
   the 1.0 surface.
 
 Exit gate: token streams are sorted, non-overlapping and valid in negotiated

@@ -73,6 +73,27 @@ func TestNegotiatePositionEncoding(t *testing.T) {
 	}
 }
 
+func TestInitializeDoesNotAdvertiseFormatting(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	result, err := instance.Initialize(context.Background(), &protocol.InitializeParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := protocol.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, capability := range []string{
+		`"documentFormattingProvider"`,
+		`"documentRangeFormattingProvider"`,
+		`"documentOnTypeFormattingProvider"`,
+	} {
+		if bytes.Contains(encoded, []byte(capability)) {
+			t.Fatalf("initialize result advertised %s: %s", capability, encoded)
+		}
+	}
+}
+
 func TestLogfSerializesConcurrentWriters(t *testing.T) {
 	var output bytes.Buffer
 	instance := New(nil, nil, &output)
