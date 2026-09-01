@@ -55,6 +55,7 @@ const (
 	ExternalReferenceImportMember ExternalReferenceKind = iota + 1
 	ExternalReferenceAutoload
 	ExternalReferenceGlobalFunction
+	ExternalReferenceGlobalVariable
 )
 
 // ExternalReferenceFact is a statically provable cross-file reference. Import
@@ -663,6 +664,31 @@ func (i *Index) GlobalFunction(name string) (SymbolMatch, bool) {
 	return match, found
 }
 
+// GlobalVariable returns one unambiguous top-level legacy global variable.
+func (i *Index) GlobalVariable(name string) (SymbolMatch, bool) {
+	name = strings.TrimPrefix(name, "g:")
+	if name == "" {
+		return SymbolMatch{}, false
+	}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	var match SymbolMatch
+	found := false
+	for _, candidateName := range []string{name, "g:" + name} {
+		for _, fact := range i.byName[candidateName] {
+			if !fact.TopLevel || fact.Dialect != syntax.Legacy || fact.Kind != analysis.SymbolKindVariable && fact.Kind != analysis.SymbolKindConstant {
+				continue
+			}
+			if found && (match.Fact.Path != fact.Path || match.Fact.SelectionRange != fact.SelectionRange) {
+				return SymbolMatch{}, false
+			}
+			match = SymbolMatch{Fact: fact, Source: i.files[fact.Path].source}
+			found = true
+		}
+	}
+	return match, found
+}
+
 // FunctionCompletions returns indexed callable function names. Autoload
 // functions are available in both dialects. includeLegacyGlobals additionally
 // includes ordinary legacy global functions.
@@ -1178,6 +1204,8 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 			// Autoload variables and functions both resolve by their full name.
 		} else if file.Dialect == syntax.Legacy && directCalls[reference.Span] {
 			kind = ExternalReferenceGlobalFunction
+		} else if file.Dialect == syntax.Legacy && strings.HasPrefix(reference.Name, "g:") {
+			kind = ExternalReferenceGlobalVariable
 		} else {
 			continue
 		}

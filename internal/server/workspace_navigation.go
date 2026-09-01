@@ -159,6 +159,14 @@ func (s *Server) resolveWorkspaceReference(state workspaceNavigationSnapshot, re
 		return s.lookupWorkspaceTarget(state.index, match.Fact.Path, func(fact workspace.SymbolFact) bool {
 			return fact.SelectionRange == match.Fact.SelectionRange && fact.Kind == analysis.SymbolKindFunction
 		})
+	case workspace.ExternalReferenceGlobalVariable:
+		match, ok := state.index.GlobalVariable(reference.Name)
+		if !ok {
+			return workspaceNavigationTarget{}, false
+		}
+		return s.lookupWorkspaceTarget(state.index, match.Fact.Path, func(fact workspace.SymbolFact) bool {
+			return fact.SelectionRange == match.Fact.SelectionRange && (fact.Kind == analysis.SymbolKindVariable || fact.Kind == analysis.SymbolKindConstant)
+		})
 	default:
 		return workspaceNavigationTarget{}, false
 	}
@@ -314,7 +322,7 @@ func (document *navigationDocument) workspaceReferencesInState(ctx context.Conte
 
 	names := []string{target.match.Fact.Name}
 	trimmedName := strings.TrimPrefix(target.match.Fact.Name, "g:")
-	if strings.Contains(trimmedName, "#") {
+	if trimmedName != target.match.Fact.Name || strings.Contains(trimmedName, "#") {
 		names = append(names, trimmedName)
 	}
 	if target.match.Fact.Exported {
@@ -537,6 +545,9 @@ func workspaceReferenceMatchesTarget(state workspaceNavigationSnapshot, referenc
 		return target.match.Fact.Exported && name == reference.Name[strings.LastIndexByte(reference.Name, '#')+1:]
 	case workspace.ExternalReferenceGlobalFunction:
 		match, ok := state.index.GlobalFunction(reference.Name)
+		return ok && sameWorkspacePath(match.Fact.Path, target.match.Fact.Path) && match.Fact.SelectionRange == target.match.Fact.SelectionRange
+	case workspace.ExternalReferenceGlobalVariable:
+		match, ok := state.index.GlobalVariable(reference.Name)
 		return ok && sameWorkspacePath(match.Fact.Path, target.match.Fact.Path) && match.Fact.SelectionRange == target.match.Fact.SelectionRange
 	default:
 		return false

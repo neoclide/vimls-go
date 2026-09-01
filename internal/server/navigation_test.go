@@ -948,6 +948,42 @@ func TestCrossFileLegacyGlobalFunctionCompletionDefinitionAndHover(t *testing.T)
 	}
 }
 
+func TestCrossFileLegacyGlobalVariableDefinitionReferencesAndAmbiguity(t *testing.T) {
+	root := t.TempDir()
+	targetPath := writeWorkspaceFile(t, root, "globals.vim", "let g:WorkspaceValue = 1\n")
+	mainPath := writeWorkspaceFile(t, root, "plugin.vim", "echo g:WorkspaceValue\n")
+	otherPath := writeWorkspaceFile(t, root, "other.vim", "let copy = g:WorkspaceValue\n")
+	instance := initializeWorkspaceServer(t, root)
+	mainURI := uri.File(mainPath)
+	instance.documents.Open(mainURI.String(), 1, "echo g:WorkspaceValue\n")
+	position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Character: 10}}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	locations := definition.(protocol.LocationSlice)
+	if err != nil || len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(0, 4, 20) {
+		t.Fatalf("global variable definition = %#v, %v", definition, err)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: position, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil || len(references) != 3 {
+		t.Fatalf("global variable references = %#v, %v", references, err)
+	}
+	wantURIs := []uri.URI{canonicalTestURI(t, targetPath), canonicalTestURI(t, mainPath), canonicalTestURI(t, otherPath)}
+	sort.Slice(wantURIs, func(i, j int) bool { return wantURIs[i] < wantURIs[j] })
+	for index := range wantURIs {
+		if references[index].URI != wantURIs[index] {
+			t.Errorf("reference %d = %#v, want URI %s", index, references[index], wantURIs[index])
+		}
+	}
+	duplicatePath := writeWorkspaceFile(t, root, "duplicate.vim", "let g:WorkspaceValue = 2\n")
+	duplicate := syntax.Parse("let g:WorkspaceValue = 2\n")
+	if err := instance.workspaceIndex.Replace(duplicatePath, duplicate); err != nil {
+		t.Fatal(err)
+	}
+	definition, err = instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil || len(definition.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("ambiguous global variable definition = %#v, %v", definition, err)
+	}
+}
+
 func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 	root := t.TempDir()
 	targetPath := writeWorkspaceFile(t, root, filepath.Join("autoload", "api.vim"), "vim9script\n# Return the cached result.\nexport def Run(arg: string = 'ok'): string\n  return arg\nenddef\n")

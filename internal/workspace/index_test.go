@@ -118,6 +118,9 @@ func TestIndexGlobalNameFactsTrackLocationsAndDeletes(t *testing.T) {
 	if len(variables) != 1 || variables[0].Kind != analysis.NameDeclarationVariable || variables[0].Span.Start <= functions[0].Span.Start {
 		t.Fatalf("global variable facts = %#v", variables)
 	}
+	if match, ok := index.GlobalVariable("g:Value"); !ok || match.Fact.Name != "g:Value" || match.Fact.SelectionRange != variables[0].Span {
+		t.Fatalf("global variable match = %#v, %t", match, ok)
+	}
 	if len(index.GlobalNameFacts("Gone")) != 0 || len(index.GlobalNameFacts("Removed")) != 0 || len(index.GlobalNameFacts("ScriptOnly")) != 0 {
 		t.Fatalf("deleted or script-local facts leaked: gone=%#v removed=%#v script=%#v", index.GlobalNameFacts("Gone"), index.GlobalNameFacts("Removed"), index.GlobalNameFacts("ScriptOnly"))
 	}
@@ -307,13 +310,13 @@ enddef
 	}
 
 	legacyPath := filepath.Join(root, "legacy.vim")
-	legacySource := "call foo#bar#Run()\nlet value = g:foo#bar#Value\n"
+	legacySource := "call foo#bar#Run()\nlet value = g:foo#bar#Value\necho g:WorkspaceValue\n"
 	legacy := syntax.Parse(legacySource)
 	legacyReferences := CollectExternalReferences(legacyPath, legacy)
-	if len(legacyReferences) != 2 || legacyReferences[0].Name != "foo#bar#Run" || legacyReferences[1].Name != "foo#bar#Value" {
+	if len(legacyReferences) != 3 || legacyReferences[0].Name != "foo#bar#Run" || legacyReferences[1].Name != "foo#bar#Value" || legacyReferences[2].Name != "WorkspaceValue" || legacyReferences[2].Kind != ExternalReferenceGlobalVariable {
 		t.Fatalf("autoload references = %#v", legacyReferences)
 	}
-	for _, reference := range legacyReferences {
+	for _, reference := range legacyReferences[:2] {
 		if reference.Kind != ExternalReferenceAutoload {
 			t.Fatalf("autoload reference = %#v", reference)
 		}
