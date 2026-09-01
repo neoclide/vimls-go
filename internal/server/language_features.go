@@ -111,11 +111,6 @@ func isCompletionIdentifierByte(value byte) bool {
 	return value == '_' || value >= '0' && value <= '9' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
 }
 
-func (s *Server) importMemberCompletions(documentURI string, file *syntax.File, alias string) protocol.CompletionItemSlice {
-	items, _ := s.importMemberCompletionsInState(documentURI, file, alias, s.captureWorkspaceNavigationState())
-	return items
-}
-
 func (s *Server) importMemberCompletionsInState(documentURI string, file *syntax.File, alias string, state workspaceNavigationSnapshot) (protocol.CompletionItemSlice, workspaceNavigationTarget) {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
 	if !ok || state.resolver == nil || state.index == nil {
@@ -597,37 +592,28 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 		return nil, nil
 	}
 	result := *item
-	if function, ok := vimdata.LookupFunction(item.Label); ok {
+	applyMetadata := func(detail, documentation string) {
 		if _, set := result.Detail.Get(); !set {
-			result.Detail = protocol.NewOptional(builtinFunctionDetail(function))
+			result.Detail = protocol.NewOptional(detail)
 		}
-		if result.Documentation == nil && function.Documentation != "" {
-			result.Documentation = protocol.String(function.Documentation)
+		if result.Documentation == nil && documentation != "" {
+			result.Documentation = protocol.String(documentation)
 		}
+	}
+	if function, ok := vimdata.LookupFunction(item.Label); ok {
+		applyMetadata(builtinFunctionDetail(function), function.Documentation)
 		return &result, nil
 	}
 	if option, ok := vimdata.LookupOption(item.Label); ok {
-		if _, set := result.Detail.Get(); !set {
-			result.Detail = protocol.NewOptional(completionOptionDetail(option))
-		}
-		if result.Documentation == nil && option.Documentation != "" {
-			result.Documentation = protocol.String(option.Documentation)
-		}
+		applyMetadata(completionOptionDetail(option), option.Documentation)
 		return &result, nil
 	}
 	if variable, ok := vimdata.LookupVariable(item.Label); ok {
-		if _, set := result.Detail.Get(); !set {
-			result.Detail = protocol.NewOptional("variable: " + variable.Type)
-		}
-		if result.Documentation == nil && variable.Documentation != "" {
-			result.Documentation = protocol.String(variable.Documentation)
-		}
+		applyMetadata("variable: "+variable.Type, variable.Documentation)
 		return &result, nil
 	}
 	if command, ok := vimdata.Lookup(item.Label); ok && command.Name == item.Label {
-		if _, set := result.Detail.Get(); !set {
-			result.Detail = protocol.NewOptional("Ex command")
-		}
+		applyMetadata("Ex command", "")
 	}
 	return &result, nil
 }
@@ -1417,7 +1403,7 @@ func formatFunctionValueSignature(name string, typ analysis.ValueType) (string, 
 
 func formatBuiltinFunctionSignature(function vimdata.BuiltinFunction) (string, []protocol.ParameterInformation) {
 	label := ""
-	for _, line := range strings.Split(function.Documentation, "\n") {
+	for line := range strings.SplitSeq(function.Documentation, "\n") {
 		if strings.HasPrefix(line, function.Name+"(") && strings.HasSuffix(line, ")") {
 			label = line
 			continue

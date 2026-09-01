@@ -26,10 +26,6 @@ type workspaceNavigationSnapshot struct {
 	roots    []string
 }
 
-func (document *navigationDocument) workspaceTarget() (workspaceNavigationTarget, bool) {
-	return document.workspaceTargetInState(document.server.captureWorkspaceNavigationState())
-}
-
 func (document *navigationDocument) workspaceTargetInState(state workspaceNavigationSnapshot) (workspaceNavigationTarget, bool) {
 	if state.resolver == nil || state.index == nil {
 		return workspaceNavigationTarget{}, false
@@ -125,11 +121,6 @@ func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
 	}
 	s.workspaceMu.Unlock()
 	return state
-}
-
-func (s *Server) workspaceNavigationState() (*workspace.PathResolver, *workspace.Index, []string) {
-	state := s.captureWorkspaceNavigationState()
-	return state.resolver, state.index, state.roots
 }
 
 func (s *Server) resolveWorkspaceReference(state workspaceNavigationSnapshot, reference workspace.ExternalReferenceFact) (workspaceNavigationTarget, bool) {

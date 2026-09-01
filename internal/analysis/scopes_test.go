@@ -180,9 +180,10 @@ var result = make(outer)
 		case "value":
 			valueRef = reference
 		case "outer":
-			if reference.Declaration == result.Scopes[2].Declarations[0] {
+			switch reference.Declaration {
+			case result.Scopes[2].Declarations[0]:
 				innerOuterRef = reference
-			} else if reference.Declaration == outer {
+			case outer:
 				capturedOuterRef = reference
 			}
 		}

@@ -97,6 +97,3 @@ func LookupFunction(name string) (BuiltinFunction, bool) {
 	}
 	return BuiltinFunction{}, false
 }
-
-// BuiltinFunctionCount reports the number of functions in the pinned table.
-func BuiltinFunctionCount() int { return len(builtinFunctions) }

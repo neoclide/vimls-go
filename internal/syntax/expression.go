@@ -1219,9 +1219,10 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 					if current.span.Start-p.base >= lineEnd {
 						break
 					}
-					if current.text == "(" {
+					switch current.text {
+					case "(":
 						depth++
-					} else if current.text == ")" {
+					case ")":
 						depth--
 					}
 					end = current.span.End
@@ -2362,7 +2363,7 @@ func (p *expressionParser) parseDictionaryOrLambda() *Expression {
 	if p.current().text == "}" {
 		end = p.current().span.End
 		p.advance()
-	} else if !malformed && p.dialect == Vim9 {
+	} else if !malformed {
 		// A value followed by a missing separator is E722.  A trailing comma,
 		// or an empty/incomplete dictionary, is instead the missing-end case.
 		code := "vim/E723"
@@ -2898,25 +2899,6 @@ func (lexer *expressionLexer) scan() expressionToken {
 func (lexer *expressionLexer) finish(kind expressionTokenKind, start, end int) expressionToken {
 	lexer.offset = end
 	return expressionToken{kind: kind, span: Span{Start: lexer.base + start, End: lexer.base + end}, text: lexer.source[start:end]}
-}
-
-// lexExpression is retained for diagnostics and narrow callers that need the
-// complete token list.  The expression parser itself advances the lexer on
-// demand and does not allocate this slice.
-func lexExpression(source string, base int, dialect Dialect) []expressionToken {
-	return lexExpressionWithVersion(source, base, dialect, 1)
-}
-
-func lexExpressionWithVersion(source string, base int, dialect Dialect, scriptVersion uint8) []expressionToken {
-	lexer := newExpressionLexerWithVersion(source, base, dialect, scriptVersion)
-	var tokens []expressionToken
-	for {
-		tokens = append(tokens, lexer.current)
-		if lexer.current.kind == expressionEOF {
-			return tokens
-		}
-		lexer.advance()
-	}
 }
 
 // scanInterpolatedStringEnd follows Vim's eval_interp_string() segmentation:

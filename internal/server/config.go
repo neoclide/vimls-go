@@ -31,7 +31,6 @@ type completionCapabilities struct {
 	snippet       bool
 	insertReplace bool
 	preselect     bool
-	deprecated    bool
 	tags          bool
 	docsMarkdown  bool
 }
@@ -77,7 +76,6 @@ func completionCapabilitiesFromClient(textDocument *protocol.TextDocumentClientC
 		snippet:       item.SnippetSupport != nil && *item.SnippetSupport,
 		insertReplace: item.InsertReplaceSupport != nil && *item.InsertReplaceSupport,
 		preselect:     item.PreselectSupport != nil && *item.PreselectSupport,
-		deprecated:    item.DeprecatedSupport != nil && *item.DeprecatedSupport,
 		tags:          len(item.TagSupport.ValueSet) > 0,
 		docsMarkdown:  slices.Contains(item.DocumentationFormat, protocol.MarkupKindMarkdown),
 	}

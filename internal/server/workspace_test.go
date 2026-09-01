@@ -992,18 +992,18 @@ func TestWorkspaceSymbolIdentityRetry(t *testing.T) {
 func TestWorkspaceResolverIsReusedUntilRootsChange(t *testing.T) {
 	root := t.TempDir()
 	instance := initializeWorkspaceServer(t, root)
-	first, _, _ := instance.workspaceNavigationState()
-	second, _, _ := instance.workspaceNavigationState()
+	first := instance.captureWorkspaceNavigationState().resolver
+	second := instance.captureWorkspaceNavigationState().resolver
 	if first == nil || second != first {
 		t.Fatalf("resolver was rebuilt without a workspace change: %p, %p", first, second)
 	}
 	instance.setRuntimePaths([]string{root})
-	invalidated, _, _ := instance.workspaceNavigationState()
+	invalidated := instance.captureWorkspaceNavigationState().resolver
 	if invalidated != nil {
 		t.Fatalf("resolver was retained after runtimepath change: %p", invalidated)
 	}
 	instance.refreshWorkspaceResolver()
-	refreshed, _, _ := instance.workspaceNavigationState()
+	refreshed := instance.captureWorkspaceNavigationState().resolver
 	if refreshed == nil || refreshed == first {
 		t.Fatalf("resolver was not refreshed: before=%p after=%p", first, refreshed)
 	}

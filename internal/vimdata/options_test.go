@@ -46,8 +46,8 @@ func TestLookupOptionMetadata(t *testing.T) {
 	if IsTerminalOptionName("term") {
 		t.Fatal("IsTerminalOptionName(\"term\") = true")
 	}
-	if BuiltinOptionCount() != 562 {
-		t.Fatalf("BuiltinOptionCount() = %d, want 562", BuiltinOptionCount())
+	if len(builtinOptions) != 562 {
+		t.Fatalf("len(builtinOptions) = %d, want 562", len(builtinOptions))
 	}
 	seenCanonical := make(map[string]Option, len(builtinOptions))
 	seenShort := make(map[string]Option, len(builtinOptions))

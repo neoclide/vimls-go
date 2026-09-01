@@ -162,13 +162,14 @@ func memberNavigationSymbols(file *syntax.File, result *analysis.FileAnalysis, m
 	}
 	declaration, definition := resolved, resolved
 	if !classReceiver && !hasInterfaceImplementationDiagnostic(result) {
-		if container.Kind == analysis.SymbolKindInterface {
+		switch container.Kind {
+		case analysis.SymbolKindInterface:
 			if concrete := concreteMemberContainer(file, result, symbols, member.Children[0]); concrete != nil {
 				if candidate, _, found := memberSymbolInContainer(file, symbols, concrete, member.Value, false); found && sameMemberCategory(resolved.Kind, candidate.Kind) {
 					definition = candidate
 				}
 			}
-		} else if container.Kind == analysis.SymbolKindClass {
+		case analysis.SymbolKindClass:
 			interfaceMember := implementedInterfaceMember(file, symbols, container, member.Value, resolved.Kind)
 			abstractMember := inheritedAbstractMember(file, symbols, container, member.Value, resolved.Kind)
 			if interfaceMember != nil && abstractMember == nil {

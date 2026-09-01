@@ -148,6 +148,12 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 		file.Diagnostics = append(file.Diagnostics, diagnostic)
 	}
 	source := maskVim9Comments(file.Text(command.Argument))
+	appendNameWhitespaceDiagnostic := func(start, end int) {
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{
+			Code: "vim/E1315", Message: "White space required after name: " + file.Source[command.Argument.Start+start:command.Argument.Start+end],
+			Span: Span{Start: command.Argument.Start + start, End: command.Argument.Start + end},
+		})
+	}
 	nameStart := skipEnumSpace(source, 0, len(source))
 	nameEnd := scanWord(source, nameStart, len(source))
 	if nameEnd == nameStart {
@@ -176,10 +182,7 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 		}
 		if nameEnd < len(source) && !isExpressionSpace(source[nameEnd]) {
 			argumentEnd := trimEnumSpaceEnd(source, nameStart, len(source))
-			file.Diagnostics = append(file.Diagnostics, Diagnostic{
-				Code: "vim/E1315", Message: "White space required after name: " + file.Source[command.Argument.Start+nameStart:command.Argument.Start+argumentEnd],
-				Span: Span{Start: command.Argument.Start + nameStart, End: command.Argument.Start + argumentEnd},
-			})
+			appendNameWhitespaceDiagnostic(nameStart, argumentEnd)
 			return
 		}
 	}
@@ -241,10 +244,7 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 			valueEnd := scanClassName(source, valueStart, len(source))
 			if command.Dialect == Vim9 && valueEnd < len(source) && !isExpressionSpace(source[valueEnd]) {
 				end := trimEnumSpaceEnd(source, valueStart, len(source))
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{
-					Code: "vim/E1315", Message: "White space required after name: " + file.Source[command.Argument.Start+valueStart:command.Argument.Start+end],
-					Span: Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + end},
-				})
+				appendNameWhitespaceDiagnostic(valueStart, end)
 				return
 			}
 			if valueEnd > valueStart {
@@ -270,10 +270,7 @@ func parseAggregate(file *File, command *Command, kind BlockKind) {
 			invalidComma := valueEnd < len(source) && source[valueEnd] == ',' && valueEnd+1 < len(source) && !isExpressionSpace(source[valueEnd+1])
 			if command.Dialect == Vim9 && (invalidEnd || invalidComma) {
 				end := trimEnumSpaceEnd(source, valueStart, len(source))
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{
-					Code: "vim/E1315", Message: "White space required after name: " + file.Source[command.Argument.Start+valueStart:command.Argument.Start+end],
-					Span: Span{Start: command.Argument.Start + valueStart, End: command.Argument.Start + end},
-				})
+				appendNameWhitespaceDiagnostic(valueStart, end)
 				return
 			}
 			if valueEnd == valueStart {

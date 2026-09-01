@@ -35,9 +35,6 @@ func LookupVariable(name string) (Variable, bool) {
 	return Variable{}, false
 }
 
-// BuiltinVariableCount reports the number of variables in Vim's vimvars[].
-func BuiltinVariableCount() int { return len(builtinVariables) }
-
 // Variables returns the pinned vimvars[] table by canonical v: name. Callers
 // own the returned slice.
 func Variables() []Variable {

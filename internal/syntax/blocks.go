@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// CommandInsideFunction reports whether command belongs to a :def or
+// :function block in blocks.
+func CommandInsideFunction(command *Command, blocks []Block) bool {
+	if command == nil {
+		return false
+	}
+	for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
+		if blocks[block].Kind == BlockDef || blocks[block].Kind == BlockFunction {
+			return true
+		}
+	}
+	return false
+}
+
 func buildBlocks(file *File) {
 	const (
 		classMethodAbstract uint8 = iota + 1

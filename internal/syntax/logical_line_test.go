@@ -112,7 +112,7 @@ func TestLogicalViewAppendsOrdinaryNewlineDirectly(t *testing.T) {
 		t.Fatalf("ordinary line physical tokens = %#v, pending = %v", view.Physical, view.hasPendingNewline)
 	}
 	file := &File{Dialect: Legacy, Source: source}
-	scanLogicalCommands(file, &view, Legacy)
+	scanLogicalCommandsWithContext(file, &view, Legacy, "", false, 1)
 	want := []Token{
 		{Kind: TokenCommand, Span: Span{Start: 0, End: 4}},
 		{Kind: TokenWhitespace, Span: Span{Start: 4, End: 5}},

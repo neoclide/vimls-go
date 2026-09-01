@@ -1257,17 +1257,21 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if !invalidModifierRange && len(parsedModifiers) > 0 && parsedModifiers[len(parsedModifiers)-1].Name == "vim9cmd" {
 			missingVim9cmd = start >= end || start < end && (file.Source[start] == '|' || isCommentStart(file.Source, start, start, end, baseDialect, vimdata.Command{}))
 		}
+		missingModifierDiagnostic := Diagnostic{}
+		if missingLegacyModifierCommand || missingVim9cmd || missingVim9ModifierCommand {
+			last := parsedModifiers[len(parsedModifiers)-1]
+			if missingLegacyModifierCommand {
+				missingModifierDiagnostic = Diagnostic{Code: "vim/E1234", Message: "legacy must be followed by a command", Span: last.Span}
+			} else if missingVim9cmd {
+				missingModifierDiagnostic = Diagnostic{Code: "vim/E1164", Message: "vim9cmd must be followed by a command", Span: last.Span}
+			} else {
+				missingModifierDiagnostic = Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span}
+			}
+		}
 		emptyPrefix := commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < end && file.Source[commandStart] == ':'
 		if start < end && file.Source[start] == '|' || start >= end && emptyPrefix {
-			if missingLegacyModifierCommand || missingVim9cmd || missingVim9ModifierCommand {
-				last := parsedModifiers[len(parsedModifiers)-1]
-				if missingLegacyModifierCommand {
-					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1234", Message: "legacy must be followed by a command", Span: last.Span})
-				} else if missingVim9cmd {
-					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1164", Message: "vim9cmd must be followed by a command", Span: last.Span})
-				} else {
-					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
-				}
+			if missingModifierDiagnostic.Code != "" {
+				file.Diagnostics = append(file.Diagnostics, missingModifierDiagnostic)
 			}
 			file.Commands = append(file.Commands, Command{
 				Kind: CommandEmpty, Dialect: dialect, baseDialect: baseDialect, Span: Span{Start: commandStart, End: start}, Range: commandRange, Modifiers: parsedModifiers, Block: -1,
@@ -1284,15 +1288,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		if start < end && ((!explicitHashCommand && isCommentStart(file.Source, start, start, end, dialect, vimdata.Command{})) || missingLegacyModifierCommand || missingVim9ModifierCommand || missingVim9cmd) {
 			file.Tokens = append(file.Tokens, Token{Kind: TokenComment, Span: Span{Start: start, End: end}})
 			if commandRange.Start < commandRange.End || len(parsedModifiers) > 0 || commandStart < start {
-				if missingLegacyModifierCommand || missingVim9cmd || missingVim9ModifierCommand {
-					last := parsedModifiers[len(parsedModifiers)-1]
-					if missingLegacyModifierCommand {
-						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1234", Message: "legacy must be followed by a command", Span: last.Span})
-					} else if missingVim9cmd {
-						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1164", Message: "vim9cmd must be followed by a command", Span: last.Span})
-					} else {
-						file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1082", Message: "command modifier without command", Span: last.Span})
-					}
+				if missingModifierDiagnostic.Code != "" {
+					file.Diagnostics = append(file.Diagnostics, missingModifierDiagnostic)
 				}
 				file.Commands = append(file.Commands, Command{
 					Kind: CommandEmpty, Dialect: dialect, Span: Span{Start: commandStart, End: start},
@@ -1644,9 +1641,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				Code: "vim/E1231", Message: "Cannot use a bar to separate commands here: " + strings.TrimSpace(file.Source[separator.Start:lineEnd]), Span: separator,
 			})
 		}
-		dynamicHeredoc := parsedCommand.Heredoc != nil && parsedCommand.Canonical == "execute"
-		if !dynamicHeredoc && parsedCommand.Canonical == "execute" {
-			dynamicHeredoc = detectExecuteHeredoc(file, &parsedCommand)
+		if parsedCommand.Heredoc == nil && parsedCommand.Canonical == "execute" {
+			detectExecuteHeredoc(file, &parsedCommand)
 		}
 		file.Commands = append(file.Commands, parsedCommand)
 		if builtIn && metadata.Flags&vimdata.NeedArgument != 0 && argumentStart == argumentEnd && !invalidNonWhite {

@@ -293,13 +293,14 @@ func collectExpressionSemanticFacts(file *syntax.File, expression *syntax.Expres
 	}
 	if expression.Kind == syntax.ExpressionCall && len(expression.Children) > 0 {
 		callee := expression.Children[0]
-		if callee.Kind == syntax.ExpressionIdentifier {
+		switch callee.Kind {
+		case syntax.ExpressionIdentifier:
 			modifiers := uint32(0)
 			if _, ok := vimdata.LookupFunction(callee.Value); ok {
 				modifiers = semanticDefaultLibrary
 			}
 			*facts = append(*facts, semanticFact{span: callee.Span, tokenType: semanticFunction, modifiers: modifiers, priority: 1})
-		} else if callee.Kind == syntax.ExpressionMember {
+		case syntax.ExpressionMember:
 			if member, ok := expressionMemberSpan(callee); ok {
 				*facts = append(*facts, semanticFact{span: member, tokenType: semanticMethod, priority: 1})
 			}

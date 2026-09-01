@@ -53,13 +53,7 @@ func scanVim9CommandArgument(source string, start, end int, metadata vimdata.Com
 		return scanSyntaxArgument(source, start, end, Vim9, parsed, metadata)
 	}
 	if metadata.Name == "set" || metadata.Name == "setlocal" || metadata.Name == "setglobal" {
-		node, argumentEnd, separator, comment, diagnostics := parseSetCommand(source, start, end, Vim9)
-		parsed.Set = node
-		if len(diagnostics) > 0 {
-			parsed.boundaryExpression = &expressionBoundary{argument: Span{Start: start, End: end}, diagnostics: diagnostics}
-			return argumentEnd, Span{}, Span{}, parsed.boundaryExpression
-		}
-		return argumentEnd, separator, comment, nil
+		return scanSetCommandArgument(source, start, end, Vim9, parsed)
 	}
 	if isMappingCommand(metadata.Name) {
 		argumentEnd, separator, comment := scanMappingArgumentEnd(source, start, end)

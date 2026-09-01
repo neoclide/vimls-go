@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -55,15 +56,16 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		}
 		contextKind := completionContextAt(file, offset)
 		selection := completionSelectionAt(snapshot.Text(), offset)
-		if contextKind == completionContextMappingArgument {
+		switch contextKind {
+		case completionContextMappingArgument:
 			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
-		} else if contextKind == completionContextSetOperator || contextKind == completionContextSetValue || contextKind == completionContextUserCommandAttribute || contextKind == completionContextUserCommandAttributeValue {
+		case completionContextSetOperator, completionContextSetValue, completionContextUserCommandAttribute, completionContextUserCommandAttributeValue:
 			selection = completionCommandPartSelection(file, offset, contextKind)
-		} else if contextKind == completionContextHighlightKey || contextKind == completionContextHighlightValue {
+		case completionContextHighlightKey, completionContextHighlightValue:
 			selection = completionHighlightSelection(snapshot.Text(), file, offset, contextKind == completionContextHighlightValue)
-		} else if contextKind == completionContextColorscheme {
+		case completionContextColorscheme:
 			selection = completionColorschemeSelection(snapshot.Text(), offset)
-		} else if contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+		case completionContextHasFeature, completionContextExpandSpecial:
 			selection = completionBuiltinStringSelection(file, offset, contextKind)
 		}
 		if contextKind == completionContextImportPath {
@@ -666,22 +668,20 @@ func completionCommandPartSelection(file *syntax.File, cursor int, contextKind c
 	case completionContextSetOperator:
 		option := completionSetOptionAt(file, cursor)
 		if option != nil {
-			end := option.Operator.End
-			if end < cursor {
-				end = cursor
-			}
+			end := max(option.Operator.End, cursor)
 			return completionSelection{start: option.Name.End, cursor: cursor, end: end, prefix: file.Source[option.Name.End:cursor]}
 		}
 	case completionContextSetValue:
 		option := completionSetOptionAt(file, cursor)
 		if option != nil {
-			start, end := option.Value.Start, option.Value.End
+			start := option.Value.Start
 			for index := option.Value.Start; index < cursor; index++ {
 				if file.Source[index] == ',' {
 					start = index + 1
 				}
 			}
-			for end = cursor; end < option.Value.End && file.Source[end] != ','; end++ {
+			end := cursor
+			for ; end < option.Value.End && file.Source[end] != ','; end++ {
 			}
 			return completionSelection{start: start, cursor: cursor, end: end, prefix: file.Source[start:cursor]}
 		}
@@ -691,13 +691,14 @@ func completionCommandPartSelection(file *syntax.File, cursor int, contextKind c
 			if contextKind == completionContextUserCommandAttribute {
 				return completionSelection{start: attribute.Span.Start, cursor: cursor, end: attribute.Name.End, prefix: file.Source[attribute.Span.Start:cursor]}
 			}
-			start, end := attribute.Value.Start, attribute.Value.End
+			start := attribute.Value.Start
 			for index := start; index < cursor; index++ {
 				if file.Source[index] == ',' {
 					start = index + 1
 				}
 			}
-			for end = cursor; end < attribute.Value.End && file.Source[end] != ','; end++ {
+			end := cursor
+			for ; end < attribute.Value.End && file.Source[end] != ','; end++ {
 			}
 			return completionSelection{start: start, cursor: cursor, end: end, prefix: file.Source[start:cursor]}
 		}
@@ -1014,8 +1015,7 @@ func visibleCompletionDeclarations(result *analysis.FileAnalysis, offset int) []
 	var declarations []visibleCompletionDeclaration
 	depth := 0
 	for current := scope; current != nil; current, depth = current.Parent, depth+1 {
-		for index := len(current.Declarations) - 1; index >= 0; index-- {
-			declaration := current.Declarations[index]
+		for _, declaration := range slices.Backward(current.Declarations) {
 			if seen[declaration.Name] || declaration.Span.Start > offset && declaration.Kind != analysis.SymbolKindFunction && declaration.Kind != analysis.SymbolKindMethod && declaration.Kind != analysis.SymbolKindConstructor {
 				continue
 			}
@@ -1240,9 +1240,6 @@ func (s *Server) completionList(snapshot *text.Snapshot, encoding text.Encoding,
 		item.FilterText = protocol.NewOptional(filterText)
 		if candidate.item.Tags != nil && !capabilities.tags {
 			item.Tags = nil
-			if capabilities.deprecated {
-				item.Deprecated = protocol.NewOptional(true)
-			}
 		}
 		if capabilities.preselect && index == 0 {
 			item.Preselect = protocol.NewOptional(true)

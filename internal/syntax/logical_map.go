@@ -3,7 +3,7 @@ package syntax
 // parseLogicalCommandDetails parses a command against Vim's normalized
 // logical-line text, then maps every produced node back to the original
 // source.  The public Command header has already been mapped by
-// scanLogicalCommands().
+// scanLogicalCommandsWithContext().
 func parseLogicalCommandDetails(file *File, command *Command) {
 	logical := command.logical
 	if logical == nil {

@@ -123,13 +123,23 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	instance.workspaceMu.Unlock()
 
 	file := syntax.Parse("BuildP\nLocalC\nBuildProject\n")
-	diagnostics := instance.userCommandAbbreviationDiagnostics(file)
+	currentPath := mustWorkspaceCanonicalPath(t, filepath.Join(runtimeRoot, "plugin/current.vim"))
+	instance.workspaceMu.Lock()
+	snapshot := instance.workspaceAnalysisSnapshotLocked(currentPath, file)
+	instance.workspaceMu.Unlock()
+	if !snapshot.indexComplete {
+		t.Fatal("complete runtimepath index was not captured")
+	}
+	diagnostics := analysis.UserCommandAbbreviationDiagnostics(file, snapshot.userCommandNames)
 	if len(diagnostics) != 2 || file.Text(diagnostics[0].Span) != "BuildP" || file.Text(diagnostics[1].Span) != "LocalC" {
 		t.Fatalf("E464 diagnostics = %#v", diagnostics)
 	}
 	index.SetComplete(false)
-	if diagnostics := instance.userCommandAbbreviationDiagnostics(file); len(diagnostics) != 0 {
-		t.Fatalf("incomplete runtimepath index produced E464: %#v", diagnostics)
+	instance.workspaceMu.Lock()
+	snapshot = instance.workspaceAnalysisSnapshotLocked(currentPath, file)
+	instance.workspaceMu.Unlock()
+	if snapshot.indexComplete || len(snapshot.userCommandNames) != 0 {
+		t.Fatalf("incomplete runtimepath index was exposed: %#v", snapshot.userCommandNames)
 	}
 }
 
@@ -155,19 +165,26 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 
 	variablePath := filepath.Join(runtimeRoot, "plugin/current-variable.vim")
 	variableFile := syntax.Parse("let g:Shared = 1\n")
-	if got := instance.globalNameConflictDiagnostics(uri.File(variablePath).String(), variableFile); len(got) != 1 || got[0].Code != "vim/E705" {
+	instance.workspaceMu.Lock()
+	variableSnapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, variablePath), variableFile)
+	instance.workspaceMu.Unlock()
+	if got := variableSnapshot.globalDiagnostics; len(got) != 1 || got[0].Code != "vim/E705" {
 		t.Fatalf("E705 diagnostics = %#v", got)
 	}
 	functionPath := filepath.Join(runtimeRoot, "plugin/current-function.vim")
 	functionFile := syntax.Parse("function Other()\nendfunction\n")
-	if got := instance.globalNameConflictDiagnostics(uri.File(functionPath).String(), functionFile); len(got) != 1 || got[0].Code != "vim/E707" {
+	instance.workspaceMu.Lock()
+	functionSnapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, functionPath), functionFile)
+	instance.workspaceMu.Unlock()
+	if got := functionSnapshot.globalDiagnostics; len(got) != 1 || got[0].Code != "vim/E707" {
 		t.Fatalf("E707 diagnostics = %#v", got)
 	}
 
 	instance.workspaceMu.Lock()
 	instance.workspaceBuilt = false
+	variableSnapshot = instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, variablePath), variableFile)
 	instance.workspaceMu.Unlock()
-	if got := instance.globalNameConflictDiagnostics(uri.File(variablePath).String(), variableFile); len(got) != 0 {
+	if got := variableSnapshot.globalDiagnostics; len(got) != 0 {
 		t.Fatalf("unready index produced global conflict warning: %#v", got)
 	}
 	instance.workspaceMu.Lock()
@@ -182,9 +199,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 
 func TestAutoloadExportedFunctionVariableConflictUsesE707(t *testing.T) {
 	root := t.TempDir()
-	instance := New(nil, nil, io.Discard)
-	t.Cleanup(instance.stopAnalysis)
-	instance.setWorkspaceRoots([]string{root})
+	canonicalRoot := mustWorkspaceCanonicalPath(t, root)
 	source := "vim9script\n\nvar Clash = 'value'\n\nexport def Clash()\nenddef\n"
 
 	for _, test := range []struct {
@@ -198,7 +213,7 @@ func TestAutoloadExportedFunctionVariableConflictUsesE707(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(source)
 			result := analysis.Analyze(file)
-			diagnostics := instance.autoloadExportedFunctionDiagnostics(uri.File(test.path).String(), file, result, result.Diagnostics)
+			diagnostics := autoloadExportedFunctionDiagnostics(mustWorkspaceCanonicalPath(t, test.path), []string{canonicalRoot}, file, result, result.Diagnostics)
 			if len(diagnostics) != 1 || diagnostics[0].Code != test.want || file.Text(diagnostics[0].Span) != "Clash" {
 				t.Fatalf("diagnostics = %#v, want one %s for Clash", diagnostics, test.want)
 			}
@@ -208,10 +223,8 @@ func TestAutoloadExportedFunctionVariableConflictUsesE707(t *testing.T) {
 
 func TestAutoloadE707RequiresVariableBeforeExportedDef(t *testing.T) {
 	root := t.TempDir()
-	instance := New(nil, nil, io.Discard)
-	t.Cleanup(instance.stopAnalysis)
-	instance.setRuntimePaths([]string{root})
-	documentURI := uri.File(filepath.Join(root, "autoload", "clash.vim")).String()
+	canonicalRoot := mustWorkspaceCanonicalPath(t, root)
+	path := mustWorkspaceCanonicalPath(t, filepath.Join(root, "autoload", "clash.vim"))
 
 	for _, test := range []struct {
 		name   string
@@ -224,7 +237,7 @@ func TestAutoloadE707RequiresVariableBeforeExportedDef(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(test.source)
 			result := analysis.Analyze(file)
-			diagnostics := instance.autoloadExportedFunctionDiagnostics(documentURI, file, result, result.Diagnostics)
+			diagnostics := autoloadExportedFunctionDiagnostics(path, []string{canonicalRoot}, file, result, result.Diagnostics)
 			if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1041" {
 				t.Fatalf("diagnostics = %#v, want one vim/E1041", diagnostics)
 			}
@@ -1025,12 +1038,12 @@ func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
 		match:        workspace.SymbolMatch{Fact: targetFact, Source: targetSource},
 		openSnapshot: targetSnapshot,
 	}
-	if _, err := instance.openWorkspaceReferenceLocations(context.Background(), target, text.UTF16); err != nil {
+	if _, _, err := instance.openWorkspaceReferenceLocationsInState(context.Background(), instance.captureWorkspaceNavigationState(), target, text.UTF16); err != nil {
 		t.Fatal(err)
 	}
 	assertCached("rename open references", mainSnapshot, mainFile, mainDiagnostics)
 
-	items := instance.importMemberCompletions(mainSnapshot.URI(), mainFile, "Lib")
+	items, _ := instance.importMemberCompletionsInState(mainSnapshot.URI(), mainFile, "Lib", instance.captureWorkspaceNavigationState())
 	if len(items) != 1 || items[0].Label != "Value" {
 		t.Fatalf("open import completion = %#v", items)
 	}

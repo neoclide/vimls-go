@@ -136,7 +136,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	result.classValueExempt = make(map[syntax.Span]bool)
 	result.superMemberExempt = make(map[syntax.Span]bool)
 	result.classAliases = localClassAliases(file)
-	result.classes = localClasses(file)
+	result.classes = localAggregates(file, syntax.BlockClass)
 	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
 	collectLambdaScopesCommands(result, root, file.Commands)
 
@@ -257,18 +257,6 @@ func collectUnusedVariableDiagnostics(result *FileAnalysis) {
 	}
 }
 
-func commandInsideFunction(command *syntax.Command, blocks []syntax.Block) bool {
-	if command == nil {
-		return false
-	}
-	for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
-		if blocks[block].Kind == syntax.BlockFunction || blocks[block].Kind == syntax.BlockDef {
-			return true
-		}
-	}
-	return false
-}
-
 func staticNameDeclaration(file *syntax.File, span syntax.Span, dialect syntax.Dialect, kind NameDeclarationKind, insideFunction bool) (NameDeclarationEvent, bool) {
 	if file == nil || span.Start < 0 || span.Start >= span.End || span.End > len(file.Source) || syntaxDiagnosticOverlaps(file.Diagnostics, span) {
 		return NameDeclarationEvent{}, false
@@ -306,7 +294,7 @@ func CollectNameDeclarationEvents(file *syntax.File) []NameDeclarationEvent {
 	events := make([]NameDeclarationEvent, 0)
 	for index := range file.Commands {
 		command := &file.Commands[index]
-		insideFunction := commandInsideFunction(command, file.Blocks)
+		insideFunction := syntax.CommandInsideFunction(command, file.Blocks)
 		if command.Function != nil {
 			if event, ok := staticNameDeclaration(file, command.Function.Name, command.Dialect, NameDeclarationFunction, false); ok {
 				events = append(events, event)
@@ -852,7 +840,7 @@ func collectImplementedInterfaceMembersDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	interfaces := localInterfaces(file)
+	interfaces := localAggregates(file, syntax.BlockInterface)
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Implements) == 0 ||
@@ -1008,10 +996,7 @@ func collectImplementedInterfaceMembersDiagnostics(result *FileAnalysis) {
 				}
 				return true
 			}
-			if !checkMethod(iface) {
-				return false
-			}
-			return true
+			return checkMethod(iface)
 		}
 		for _, implemented := range resolvedImplements {
 			interfaceName := implementedToName[implemented]
@@ -1707,7 +1692,7 @@ func collectDuplicateTypeAliasDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localClasses(file)
+	classes := localAggregates(file, syntax.BlockClass)
 	seen := make(map[string]bool)
 	classAliases := make(map[string]bool)
 	for index := range file.Commands {
@@ -1791,7 +1776,7 @@ func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localClasses(file)
+	classes := localAggregates(file, syntax.BlockClass)
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
@@ -2268,7 +2253,7 @@ func collectDuplicateClassVariableDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localClasses(file)
+	classes := localAggregates(file, syntax.BlockClass)
 	for index := range file.Commands {
 		aggregate := &file.Commands[index]
 		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil ||
@@ -2536,7 +2521,7 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localClasses(file)
+	classes := localAggregates(file, syntax.BlockClass)
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Extends) == 0 ||
@@ -2710,7 +2695,7 @@ func collectVariableTypeMismatchDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	interfaces := localInterfaces(file)
+	interfaces := localAggregates(file, syntax.BlockInterface)
 	for _, iface := range interfaces {
 		reported := make(map[string]bool)
 		for _, memberIndex := range iface.Aggregate.Members {
@@ -2831,7 +2816,7 @@ func collectInterfaceVariableAccessDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	interfaces := localInterfaces(file)
+	interfaces := localAggregates(file, syntax.BlockInterface)
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || aggregateHasDuplicateMethodDiagnostic(result, class) {
@@ -2892,18 +2877,18 @@ func classHasDuplicateVariableDiagnostic(result *FileAnalysis, class *syntax.Com
 	return false
 }
 
-func localInterfaces(file *syntax.File) map[string]*syntax.Command {
-	interfaces := make(map[string]*syntax.Command)
+func localAggregates(file *syntax.File, kind syntax.BlockKind) map[string]*syntax.Command {
+	aggregates := make(map[string]*syntax.Command)
 	if file == nil {
-		return interfaces
+		return aggregates
 	}
 	for index := range file.Commands {
 		command := &file.Commands[index]
-		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockInterface {
-			interfaces[file.Text(command.Aggregate.Name)] = command
+		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == kind {
+			aggregates[file.Text(command.Aggregate.Name)] = command
 		}
 	}
-	return interfaces
+	return aggregates
 }
 
 func aggregateBindingType(result *FileAnalysis, command *syntax.Command, bindingIndex int) ValueType {
@@ -3067,7 +3052,7 @@ func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	interfaces := localInterfaces(file)
+	interfaces := localAggregates(file, syntax.BlockInterface)
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || aggregateHasDuplicateMethodDiagnostic(result, class) {
@@ -5994,7 +5979,7 @@ func objectCompoundAssignment(result *FileAnalysis, scope *Scope, expression *sy
 		return nil, false
 	}
 	className := assignmentTargetType(result, scope, target).Name
-	if localClasses(result.File)[className] == nil || !declarationCanHoldObjectClass(result.File, declaration, className) {
+	if localAggregates(result.File, syntax.BlockClass)[className] == nil || !declarationCanHoldObjectClass(result.File, declaration, className) {
 		return nil, false
 	}
 	return target, true
@@ -6315,16 +6300,14 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		if (target.Kind == syntax.ExpressionList || target.Kind == syntax.ExpressionTuple) && appendDestructuringTypeMismatchDiagnostic(result, scope, target, expression.Children[1], nil) {
 			return
 		}
-		if target != nil && target.Kind == syntax.ExpressionIndex && len(target.Children) > 0 && resolvedExpressionType(result, scope, target.Children[0]).Name == "tuple" {
-			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-				Code: "vim/E1532", Message: "Cannot modify a tuple", Span: target.Span,
-			})
-			return
-		}
-		if target != nil && target.Kind == syntax.ExpressionSlice && len(target.Children) > 0 && resolvedExpressionType(result, scope, target.Children[0]).Name == "tuple" {
-			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-				Code: "vim/E1533", Message: "Cannot slice a tuple", Span: target.Span,
-			})
+		if target != nil && len(target.Children) > 0 && (target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) &&
+			resolvedExpressionType(result, scope, target.Children[0]).Name == "tuple" {
+			diagnostic := syntax.Diagnostic{Code: "vim/E1532", Message: "Cannot modify a tuple", Span: target.Span}
+			if target.Kind == syntax.ExpressionSlice {
+				diagnostic.Code = "vim/E1533"
+				diagnostic.Message = "Cannot slice a tuple"
+			}
+			result.Diagnostics = append(result.Diagnostics, diagnostic)
 			return
 		}
 		if sliceAssignmentNeedsE1165(result, scope, expression) {
@@ -6376,7 +6359,7 @@ func compiledMemberReceiverType(result *FileAnalysis, scope *Scope, expression *
 		declaration = resolve(scope, receiverExpression.Value, receiverExpression.Span.Start, false, nil)
 	}
 	receiver := resolvedExpressionType(result, scope, receiverExpression)
-	interfaces := localInterfaces(result.File)
+	interfaces := localAggregates(result.File, syntax.BlockInterface)
 	invalid := !isUnknownType(receiver) && receiver.Name != "dict" && receiver.Name != "object" && result.classes[receiver.Name] == nil &&
 		result.classAliases[receiver.Name] == "" && interfaces[receiver.Name] == nil && receiver.Name != "enum" && localEnum(result.File, receiver.Name) == nil &&
 		(declaration == nil || declaration.Kind != SymbolKindClass && declaration.Kind != SymbolKindInterface && declaration.Kind != SymbolKindEnum && declaration.Kind != SymbolKindTypeAlias)
@@ -7642,7 +7625,7 @@ func readOnlyClassMemberAssignment(result *FileAnalysis, scope *Scope, target *s
 		return "", "", false
 	}
 	file := result.File
-	classes := localClasses(file)
+	classes := localAggregates(file, syntax.BlockClass)
 	var class *syntax.Command
 	static := false
 	if target.Kind == syntax.ExpressionIdentifier {
@@ -8847,7 +8830,7 @@ func appendAbstractSuperMethodDiagnostic(result *FileAnalysis, file *syntax.File
 	if class == nil || class.Aggregate == nil || len(class.Aggregate.Extends) == 0 {
 		return
 	}
-	classes := localClasses(file)
+	classes := localAggregates(file, syntax.BlockClass)
 	seen := make(map[*syntax.Command]bool)
 	for current := classes[file.Text(class.Aggregate.Extends[0])]; current != nil; current = extendedClass(file, classes, current) {
 		if seen[current] {
@@ -8868,22 +8851,8 @@ func appendAbstractSuperMethodDiagnostic(result *FileAnalysis, file *syntax.File
 	}
 }
 
-func localClasses(file *syntax.File) map[string]*syntax.Command {
-	classes := make(map[string]*syntax.Command)
-	if file == nil {
-		return classes
-	}
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		if command.Dialect == syntax.Vim9 && command.Aggregate != nil && command.Aggregate.Kind == syntax.BlockClass {
-			classes[file.Text(command.Aggregate.Name)] = command
-		}
-	}
-	return classes
-}
-
 func localClassAliases(file *syntax.File) map[string]string {
-	classes := localClasses(file)
+	classes := localAggregates(file, syntax.BlockClass)
 	targets := make(map[string]string)
 	for index := range file.Commands {
 		alias := file.Commands[index].TypeAlias

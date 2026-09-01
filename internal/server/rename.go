@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -84,9 +85,7 @@ func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRena
 				if err != nil {
 					return nil, err
 				}
-				for documentURI, snapshot := range document.memberSnapshots {
-					scannedSnapshots[documentURI] = snapshot
-				}
+				maps.Copy(scannedSnapshots, document.memberSnapshots)
 				locations = normalizeRenameLocations(append(locations, openLocations...))
 				_, usedSnapshots, err := s.renameEdits(ctx, state, scannedSnapshots, document.encoding, target.match.Fact.Name, "", locations)
 				if err != nil {
@@ -200,9 +199,7 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 				if err != nil {
 					return nil, err
 				}
-				for documentURI, snapshot := range document.memberSnapshots {
-					scannedSnapshots[documentURI] = snapshot
-				}
+				maps.Copy(scannedSnapshots, document.memberSnapshots)
 				locations = normalizeRenameLocations(append(locations, openLocations...))
 				documentChanges, usedSnapshots, err := s.renameEdits(ctx, state, scannedSnapshots, document.encoding, target.match.Fact.Name, params.NewName, locations)
 				if err != nil {
@@ -400,11 +397,6 @@ func (s *Server) renameEdits(ctx context.Context, workspaceState workspaceNaviga
 		})
 	}
 	return changes, openSnapshots, nil
-}
-
-func (s *Server) openWorkspaceReferenceLocations(ctx context.Context, target workspaceNavigationTarget, encoding text.Encoding) ([]protocol.Location, error) {
-	locations, _, err := s.openWorkspaceReferenceLocationsInState(ctx, s.captureWorkspaceNavigationState(), target, encoding)
-	return locations, err
 }
 
 func (s *Server) openWorkspaceReferenceLocationsInState(ctx context.Context, workspaceState workspaceNavigationSnapshot, target workspaceNavigationTarget, encoding text.Encoding) ([]protocol.Location, map[uri.URI]*text.Snapshot, error) {

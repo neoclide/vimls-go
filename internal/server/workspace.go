@@ -503,7 +503,7 @@ func collectWorkspaceImportFacts(importer string, file *syntax.File, resolver *w
 	collect = func(commands []syntax.Command, blocks []syntax.Block, deferred bool) {
 		for index := range commands {
 			command := &commands[index]
-			insideFunction := deferred || workspaceCommandInsideFunction(command, blocks)
+			insideFunction := deferred || syntax.CommandInsideFunction(command, blocks)
 			if command.Import != nil && !insideFunction {
 				importNode := command.Import
 				resolution := workspace.PathResolution{Dynamic: true}
@@ -533,18 +533,6 @@ func collectWorkspaceImportFacts(importer string, file *syntax.File, resolver *w
 	}
 	collect(file.Commands, file.Blocks, false)
 	return facts
-}
-
-func workspaceCommandInsideFunction(command *syntax.Command, blocks []syntax.Block) bool {
-	if command == nil {
-		return false
-	}
-	for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
-		if blocks[block].Kind == syntax.BlockDef || blocks[block].Kind == syntax.BlockFunction {
-			return true
-		}
-	}
-	return false
 }
 
 func retainWorkspaceImportTargets(facts []workspace.ImportFact, known func(string) bool) []workspace.ImportFact {

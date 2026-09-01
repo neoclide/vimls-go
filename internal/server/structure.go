@@ -183,24 +183,23 @@ func validStructureSpan(span syntax.Span, sourceLength int) bool {
 
 func collectStructureSpans(file *syntax.File) []syntax.Span {
 	collector := collectSpans(file)
-	sort.SliceStable(collector.spans, func(left, right int) bool {
-		if collector.spans[left].Start != collector.spans[right].Start {
-			return collector.spans[left].Start < collector.spans[right].Start
-		}
-		return collector.spans[left].End < collector.spans[right].End
-	})
+	sortStructureSpans(collector.spans)
 	return collector.spans
 }
 
 func collectFoldingSpans(file *syntax.File) []syntax.Span {
 	collector := collectSpans(file)
-	sort.SliceStable(collector.folds, func(left, right int) bool {
-		if collector.folds[left].Start != collector.folds[right].Start {
-			return collector.folds[left].Start < collector.folds[right].Start
-		}
-		return collector.folds[left].End < collector.folds[right].End
-	})
+	sortStructureSpans(collector.folds)
 	return collector.folds
+}
+
+func sortStructureSpans(spans []syntax.Span) {
+	sort.SliceStable(spans, func(left, right int) bool {
+		if spans[left].Start != spans[right].Start {
+			return spans[left].Start < spans[right].Start
+		}
+		return spans[left].End < spans[right].End
+	})
 }
 
 func collectSpans(file *syntax.File) structureSpanCollector {

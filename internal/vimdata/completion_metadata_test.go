@@ -60,7 +60,7 @@ func TestCompletionMetadataTables(t *testing.T) {
 			t.Fatal("empty completion metadata name")
 		}
 	}
-	if len(options) != BuiltinOptionCount() || len(variables) != BuiltinVariableCount() {
+	if len(options) != len(builtinOptions) || len(variables) != len(builtinVariables) {
 		t.Fatal("completion metadata lost entries")
 	}
 	for i := 1; i < len(options); i++ {

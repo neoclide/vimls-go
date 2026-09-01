@@ -622,7 +622,6 @@ func TestIndexRejectsInvalidInputAndIsolatedResults(t *testing.T) {
 	}
 	result[0].Path = "mutated"
 	result[0].Range.Start = 999
-	result = append(result, SymbolFact{Name: "caller-only"})
 	file.Source = "var changed = 2\n"
 	file.Commands = nil
 	again := index.Lookup("value")

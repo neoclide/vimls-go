@@ -793,7 +793,7 @@ func searchRank(query, foldedQuery, name string) (int, bool) {
 		return 0, true
 	}
 	queryIndex := 0
-	for _, nameRune := range []rune(foldedName) {
+	for _, nameRune := range foldedName {
 		if nameRune == queryRunes[queryIndex] {
 			queryIndex++
 			if queryIndex == len(queryRunes) {
@@ -1208,7 +1208,7 @@ func emptyIndexSpan(span syntax.Span) bool {
 func collectImports(commands []syntax.Command, blocks []syntax.Block, deferred bool, imports map[syntax.Span]*syntax.Import, all *[]*syntax.Import) {
 	for index := range commands {
 		command := &commands[index]
-		insideFunction := deferred || indexCommandInsideFunction(command, blocks)
+		insideFunction := deferred || syntax.CommandInsideFunction(command, blocks)
 		if command.Import != nil && !insideFunction {
 			*all = append(*all, command.Import)
 			if command.Import.Alias.Start < command.Import.Alias.End {
@@ -1219,18 +1219,6 @@ func collectImports(commands []syntax.Command, blocks []syntax.Block, deferred b
 			collectImports(command.Embedded.Commands, command.Embedded.Blocks, insideFunction, imports, all)
 		}
 	}
-}
-
-func indexCommandInsideFunction(command *syntax.Command, blocks []syntax.Block) bool {
-	if command == nil {
-		return false
-	}
-	for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
-		if blocks[block].Kind == syntax.BlockDef || blocks[block].Kind == syntax.BlockFunction {
-			return true
-		}
-	}
-	return false
 }
 
 func defaultImportName(raw string) string {

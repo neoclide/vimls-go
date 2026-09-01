@@ -402,11 +402,12 @@ func TestPathResolverResolvesSourceRelativeToRoot(t *testing.T) {
 	for _, spec := range []string{"scripts/source.vim", "scripts/source\\ file.vim", "'quoted.vim'", "trailing\\ "} {
 		result := resolver.ResolveSource(filepath.Join(root, "other.vim"), spec)
 		want := target
-		if spec == "scripts/source\\ file.vim" {
+		switch spec {
+		case "scripts/source\\ file.vim":
 			want = spaceTarget
-		} else if spec == "'quoted.vim'" {
+		case "'quoted.vim'":
 			want = quotedTarget
-		} else if spec == "trailing\\ " {
+		case "trailing\\ ":
 			want = trailingTarget
 		}
 		if result.Path != mustResolverCanonical(t, want) || len(result.Candidates) != 1 {

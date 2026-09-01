@@ -5,6 +5,18 @@ import (
 	"testing"
 )
 
+func expressionTokens(source string, base int, dialect Dialect, scriptVersion uint8) []expressionToken {
+	lexer := newExpressionLexerWithVersion(source, base, dialect, scriptVersion)
+	var tokens []expressionToken
+	for {
+		tokens = append(tokens, lexer.current)
+		if lexer.current.kind == expressionEOF {
+			return tokens
+		}
+		lexer.advance()
+	}
+}
+
 func TestExpressionLexerTokenGolden(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -71,7 +83,7 @@ func TestExpressionLexerTokenGolden(t *testing.T) {
 				label = "base=100"
 			}
 			t.Run(test.name+"/"+label, func(t *testing.T) {
-				tokens := lexExpressionWithVersion(test.source, base, test.dialect, test.scriptVersion)
+				tokens := expressionTokens(test.source, base, test.dialect, test.scriptVersion)
 				if len(tokens) != len(test.want)+1 {
 					t.Fatalf("tokens = %#v, want %d tokens", tokens, len(test.want)+1)
 				}
@@ -1677,11 +1689,11 @@ func TestOfficialUnnamedRegisterBesideDoubleQuotedString(t *testing.T) {
 	source := `['foo', @"]->setline("]=<<"->count('='))`
 	expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)
 	if len(diagnostics) != 0 || expression.Kind != ExpressionCall {
-		t.Fatalf("tokens = %#v, expression = %#v, diagnostics = %#v", lexExpression(source, 0, Vim9), expression, diagnostics)
+		t.Fatalf("tokens = %#v, expression = %#v, diagnostics = %#v", expressionTokens(source, 0, Vim9, 1), expression, diagnostics)
 	}
 	expression, diagnostics = parseExpression(source, 100, Vim9)
 	if len(diagnostics) != 0 || expression.Kind != ExpressionCall {
-		t.Fatalf("based tokens = %#v, expression = %#v, diagnostics = %#v", lexExpression(source, 100, Vim9), expression, diagnostics)
+		t.Fatalf("based tokens = %#v, expression = %#v, diagnostics = %#v", expressionTokens(source, 100, Vim9, 1), expression, diagnostics)
 	}
 }
 

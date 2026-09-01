@@ -75,10 +75,6 @@ func optionLookupName(name string) string {
 	return name
 }
 
-// BuiltinOptionCount reports the number of normal and terminal options in the
-// pinned Vim options[] table.
-func BuiltinOptionCount() int { return len(builtinOptions) }
-
 // Options returns the pinned options[] table by canonical name.  Callers own
 // the returned slice.
 func Options() []Option {

@@ -30,8 +30,8 @@ func TestLookupVariableMetadata(t *testing.T) {
 			t.Errorf("LookupVariable(%q) = %#v, true", name, variable)
 		}
 	}
-	if BuiltinVariableCount() != 118 {
-		t.Fatalf("BuiltinVariableCount() = %d, want 118", BuiltinVariableCount())
+	if len(builtinVariables) != 118 {
+		t.Fatalf("len(builtinVariables) = %d, want 118", len(builtinVariables))
 	}
 	seen := make(map[string]Variable, len(builtinVariables))
 	for _, variable := range builtinVariables {

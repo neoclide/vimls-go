@@ -300,10 +300,6 @@ func (view logicalView) byteSpan(index int) Span {
 	return Span{Start: view.Source.End, End: view.Source.End}
 }
 
-func scanLogicalCommands(file *File, view *logicalView, dialect Dialect) int {
-	return scanLogicalCommandsWithContext(file, view, dialect, "", false, 1)
-}
-
 func scanLogicalCommandsWithContext(file *File, view *logicalView, dialect Dialect, directAggregateKind BlockKind, nestedFunction bool, scriptVersion uint8) int {
 	if dialect == Legacy && view.identity && !strings.Contains(view.Text, "vim9") && !strings.Contains(view.Text, "def ") && !strings.Contains(view.Text, "def\t") {
 		first := len(file.Commands)

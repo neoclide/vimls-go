@@ -18,11 +18,10 @@ func TestCompletionCapabilitiesFromClient(t *testing.T) {
 		SnippetSupport:       &enabled,
 		InsertReplaceSupport: &enabled,
 		PreselectSupport:     &enabled,
-		DeprecatedSupport:    &enabled,
 		TagSupport:           protocol.CompletionItemTagOptions{ValueSet: []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}},
 		DocumentationFormat:  []protocol.MarkupKind{protocol.MarkupKindPlainText, protocol.MarkupKindMarkdown},
 	}}})
-	if !capabilities.snippet || !capabilities.insertReplace || !capabilities.preselect || !capabilities.deprecated || !capabilities.tags || !capabilities.docsMarkdown {
+	if !capabilities.snippet || !capabilities.insertReplace || !capabilities.preselect || !capabilities.tags || !capabilities.docsMarkdown {
 		t.Fatalf("completion capabilities = %#v", capabilities)
 	}
 	if capabilities := completionCapabilitiesFromClient(nil); capabilities != (completionCapabilities{}) {

@@ -980,43 +980,6 @@ func (s *Server) analyzeDocument(documentURI string) {
 	s.publishSyntax(work, file, workspaceSnapshot.identity)
 }
 
-func (s *Server) userCommandAbbreviationDiagnostics(file *syntax.File) []syntax.Diagnostic {
-	s.workspaceMu.Lock()
-	index := s.workspaceIndex
-	ready := s.workspaceBuilt && len(s.workspacePending) == 0
-	s.workspaceMu.Unlock()
-	if !ready || index == nil || !index.Complete() {
-		return nil
-	}
-	return analysis.UserCommandAbbreviationDiagnostics(file, index.UserCommandNames())
-}
-
-func (s *Server) globalNameConflictDiagnostics(documentURI string, file *syntax.File) []syntax.Diagnostic {
-	path, ok := workspaceURIPath(uri.URI(documentURI))
-	if !ok {
-		return nil
-	}
-	s.workspaceMu.Lock()
-	index := s.workspaceIndex
-	ready := s.workspaceBuilt && len(s.workspacePending) == 0
-	s.workspaceMu.Unlock()
-	if !ready || index == nil {
-		return nil
-	}
-	return index.GlobalNameConflictDiagnostics(path, file)
-}
-
-func (s *Server) autoloadExportedFunctionDiagnostics(documentURI string, file *syntax.File, result *analysis.FileAnalysis, diagnostics []syntax.Diagnostic) []syntax.Diagnostic {
-	path, ok := workspaceURIPath(uri.URI(documentURI))
-	if !ok || file == nil || result == nil || result.Root == nil {
-		return diagnostics
-	}
-	s.workspaceMu.Lock()
-	roots := workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)
-	s.workspaceMu.Unlock()
-	return autoloadExportedFunctionDiagnostics(path, roots, file, result, diagnostics)
-}
-
 func autoloadExportedFunctionDiagnostics(path string, roots []string, file *syntax.File, result *analysis.FileAnalysis, diagnostics []syntax.Diagnostic) []syntax.Diagnostic {
 	if path == "" || file == nil || result == nil || result.Root == nil {
 		return diagnostics
@@ -1186,9 +1149,10 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 			Source:   protocol.NewOptional(Name),
 			Message:  protocol.String(item.Message),
 		}
-		if item.Code == "vimls/deprecated" {
+		switch item.Code {
+		case "vimls/deprecated":
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagDeprecated)
-		} else if item.Code == "vimls/unused-variable" {
+		case "vimls/unused-variable":
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagUnnecessary)
 		}
 		if diagnosticRelatedInformation && item.Related.URI != "" {

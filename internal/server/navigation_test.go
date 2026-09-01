@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1001,7 +1002,7 @@ func TestCrossFileLegacyGlobalVariableDefinitionReferencesAndAmbiguity(t *testin
 		t.Fatalf("global variable references = %#v, %v", references, err)
 	}
 	wantURIs := []uri.URI{canonicalTestURI(t, targetPath), canonicalTestURI(t, mainPath), canonicalTestURI(t, otherPath)}
-	sort.Slice(wantURIs, func(i, j int) bool { return wantURIs[i] < wantURIs[j] })
+	slices.Sort(wantURIs)
 	for index := range wantURIs {
 		if references[index].URI != wantURIs[index] {
 			t.Errorf("reference %d = %#v, want URI %s", index, references[index], wantURIs[index])
@@ -1161,7 +1162,7 @@ func TestCrossFileNavigationUsesNegotiatedEncodingAndInvalidatesOpenTarget(t *te
 	if err != nil || document == nil {
 		t.Fatalf("navigation document = %#v, error = %v", document, err)
 	}
-	target, ok := document.workspaceTarget()
+	target, ok := document.workspaceTargetInState(instance.captureWorkspaceNavigationState())
 	if !ok || target.openSnapshot == nil {
 		t.Fatalf("open workspace target = %#v", target)
 	}

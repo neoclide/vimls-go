@@ -6,6 +6,16 @@ import (
 	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
+func scanSetCommandArgument(source string, start, end int, dialect Dialect, parsed *Command) (int, Span, Span, *expressionBoundary) {
+	node, argumentEnd, separator, comment, diagnostics := parseSetCommand(source, start, end, dialect)
+	parsed.Set = node
+	if len(diagnostics) > 0 {
+		parsed.boundaryExpression = &expressionBoundary{argument: Span{Start: start, End: end}, diagnostics: diagnostics}
+		return argumentEnd, Span{}, Span{}, parsed.boundaryExpression
+	}
+	return argumentEnd, separator, comment, nil
+}
+
 // parseSetCommand parses the small, syntax-only part of Vim's :set family.
 // Option names are deliberately not looked up: Vim's option table is mutable
 // across versions and user-defined terminal options are valid input here.
