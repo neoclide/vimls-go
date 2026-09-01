@@ -55,6 +55,8 @@ jobs:
 
   vim-oracle:
     runs-on: ubuntu-latest
+    env:
+      VIMRUNTIME: ${{ github.workspace }}/.test-tools/vim/runtime
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
