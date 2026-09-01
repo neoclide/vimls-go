@@ -128,3 +128,7 @@ VIM_SOURCE=/path/to/vim make metadata-check
 The generator first verifies that the configured Vim tag resolves to its
 hard-coded commit. Review the generated diff and update curated completion
 metadata/provenance tests in the same pin-advance change.
+
+## LICENSE
+
+MIT
