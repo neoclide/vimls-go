@@ -178,6 +178,8 @@ const (
 	completionContextExpression
 	completionContextModifier
 	completionContextSetOption
+	completionContextSetOperator
+	completionContextSetValue
 	completionContextSyntaxSubcommand
 	completionContextSyntaxGroup
 	completionContextHighlight
@@ -185,6 +187,9 @@ const (
 	completionContextHighlightValue
 	completionContextAutocmdHead
 	completionContextAutocmdEvent
+	completionContextAugroup
+	completionContextUserCommandAttribute
+	completionContextUserCommandAttributeValue
 	completionContextColorscheme
 	completionContextImportPath
 	completionContextMember
@@ -229,8 +234,34 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		}
 		if command.Set != nil {
 			for _, option := range command.Set.Options {
+				if option.Value.Start <= offset && offset <= option.Value.End && option.Operator.Start < option.Operator.End {
+					result = completionContextSetValue
+					return
+				}
+				if option.Name.End < offset && offset <= option.Span.End {
+					result = completionContextSetOperator
+					return
+				}
 				if spanContains(option.Name, offset) || offset == option.Name.End {
 					result = completionContextSetOption
+					return
+				}
+			}
+		}
+		if command.Canonical == "augroup" && (spanContains(command.Augroup, offset) || offset == command.Augroup.End) {
+			result = completionContextAugroup
+			return
+		}
+		if command.UserCommand != nil {
+			for _, attribute := range command.UserCommand.Attributes {
+				if attribute.Equal.Start < attribute.Equal.End && attribute.Value.Start <= offset && offset <= attribute.Value.End {
+					result = completionContextUserCommandAttributeValue
+					return
+				}
+				nameStart := attribute.Span.Start
+				nameEnd := attribute.Name.End
+				if nameStart <= offset && offset <= nameEnd {
+					result = completionContextUserCommandAttribute
 					return
 				}
 			}

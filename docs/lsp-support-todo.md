@@ -162,7 +162,7 @@ regular expressions.
   and numeric payloads remain user input rather than enumerations.
 - [x] Add `:colorscheme` names from safe indexed runtimepath `colors/`
   directories, respecting runtimepath precedence and workspace limits.
-- [ ] Add command-specific completion for augroups, user-command attributes,
+- [x] Add command-specific completion for augroups, user-command attributes,
   `:set` operators/values and other finite enums only after their command AST
   identifies the cursor position.
 - [x] Advertise the trigger characters actually supported by tests. `.`, `:`,

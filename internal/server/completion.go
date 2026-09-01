@@ -57,6 +57,8 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		selection := completionSelectionAt(snapshot.Text(), offset)
 		if contextKind == completionContextMappingArgument {
 			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
+		} else if contextKind == completionContextSetOperator || contextKind == completionContextSetValue || contextKind == completionContextUserCommandAttribute || contextKind == completionContextUserCommandAttributeValue {
+			selection = completionCommandPartSelection(file, offset, contextKind)
 		} else if contextKind == completionContextHighlightKey || contextKind == completionContextHighlightValue {
 			selection = completionHighlightSelection(snapshot.Text(), file, offset, contextKind == completionContextHighlightValue)
 		} else if contextKind == completionContextColorscheme {
@@ -359,6 +361,78 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 				}
 			}
+		} else if contextKind == completionContextSetOperator {
+			option := completionSetOptionAt(file, offset)
+			if option != nil {
+				metadata, known := vimdata.LookupOption(file.Text(option.Name))
+				operators := []string{"?", "&", "&vi", "&vim"}
+				if known && metadata.Type == vimdata.OptionBool {
+					operators = append(operators, "!", "<")
+				} else {
+					operators = append(operators, "<", "=", ":", "+=", "^=", "-=")
+				}
+				for _, operator := range operators {
+					if !add(protocol.CompletionItem{Label: operator, Kind: protocol.CompletionItemKindOperator}, 8000, completionSourceCommand) {
+						break
+					}
+				}
+			}
+		} else if contextKind == completionContextSetValue {
+			option := completionSetOptionAt(file, offset)
+			if option != nil {
+				for _, value := range vimdata.OptionValues(file.Text(option.Name)) {
+					if !add(protocol.CompletionItem{Label: value, Kind: protocol.CompletionItemKindEnumMember}, 8000, completionSourceBuiltin) {
+						break
+					}
+				}
+			}
+		} else if contextKind == completionContextAugroup {
+			for _, name := range completionAugroups(file) {
+				if name != "END" && !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindModule}, 10000, completionSourceLocal) {
+					break
+				}
+			}
+		} else if contextKind == completionContextUserCommandAttribute {
+			command, current := completionUserCommandAttributeAt(file, offset)
+			used := make(map[string]bool)
+			if command != nil && command.UserCommand != nil {
+				for index := range command.UserCommand.Attributes {
+					attribute := &command.UserCommand.Attributes[index]
+					if attribute != current {
+						used[strings.ToLower(file.Text(attribute.Name))] = true
+					}
+				}
+			}
+			for _, attribute := range []string{"addr=", "bang", "bar", "buffer", "complete=", "completeopt=", "count", "keepscript", "nargs=", "range", "register"} {
+				if used[strings.TrimSuffix(attribute, "=")] {
+					continue
+				}
+				if !add(protocol.CompletionItem{Label: "-" + attribute, Kind: protocol.CompletionItemKindProperty}, 8000, completionSourceCommand) {
+					break
+				}
+			}
+		} else if contextKind == completionContextUserCommandAttributeValue {
+			_, attribute := completionUserCommandAttributeAt(file, offset)
+			var values []string
+			if attribute != nil {
+				switch completionUserCommandAttributeName(file.Text(attribute.Name)) {
+				case "addr":
+					values = []string{"arguments", "buffers", "lines", "loaded_buffers", "other", "quickfix", "tabs", "windows"}
+				case "complete":
+					if !strings.Contains(file.Text(attribute.Value), ",") {
+						values = []string{"arglist", "augroup", "behave", "breakpoint", "buffer", "color", "command", "compiler", "cscope", "custom", "customlist", "diff_buffer", "dir", "dir_in_path", "environment", "event", "expression", "file", "file_in_path", "filetype", "filetypecmd", "function", "help", "highlight", "history", "keymap", "locale", "mapclear", "mapping", "menu", "messages", "option", "packadd", "retab", "runtime", "scriptnames", "shellcmd", "shellcmdline", "sign", "syntax", "syntime", "tag", "tag_listfiles", "user", "var"}
+					}
+				case "completeopt":
+					values = []string{"escape"}
+				case "nargs":
+					values = []string{"0", "1", "_", "*", "?", "+"}
+				}
+			}
+			for _, value := range values {
+				if !add(protocol.CompletionItem{Label: value, Kind: protocol.CompletionItemKindEnumMember}, 8000, completionSourceCommand) {
+					break
+				}
+			}
 		} else if contextKind == completionContextSyntaxSubcommand {
 			for _, name := range []string{"keyword", "match", "region", "cluster", "case", "conceal", "spell", "include", "clear", "list", "sync", "iskeyword", "foldlevel", "enable", "manual", "on", "off", "reset"} {
 				if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindKeyword}, 8000, completionSourceCommand) {
@@ -584,6 +658,96 @@ func completionSelectionAt(source string, cursor int) completionSelection {
 	}
 	selection.prefix = source[selection.start:cursor]
 	return selection
+}
+
+func completionCommandPartSelection(file *syntax.File, cursor int, contextKind completionContext) completionSelection {
+	selection := completionSelectionAt(file.Source, cursor)
+	switch contextKind {
+	case completionContextSetOperator:
+		option := completionSetOptionAt(file, cursor)
+		if option != nil {
+			end := option.Operator.End
+			if end < cursor {
+				end = cursor
+			}
+			return completionSelection{start: option.Name.End, cursor: cursor, end: end, prefix: file.Source[option.Name.End:cursor]}
+		}
+	case completionContextSetValue:
+		option := completionSetOptionAt(file, cursor)
+		if option != nil {
+			start, end := option.Value.Start, option.Value.End
+			for index := option.Value.Start; index < cursor; index++ {
+				if file.Source[index] == ',' {
+					start = index + 1
+				}
+			}
+			for end = cursor; end < option.Value.End && file.Source[end] != ','; end++ {
+			}
+			return completionSelection{start: start, cursor: cursor, end: end, prefix: file.Source[start:cursor]}
+		}
+	case completionContextUserCommandAttribute, completionContextUserCommandAttributeValue:
+		_, attribute := completionUserCommandAttributeAt(file, cursor)
+		if attribute != nil {
+			if contextKind == completionContextUserCommandAttribute {
+				return completionSelection{start: attribute.Span.Start, cursor: cursor, end: attribute.Name.End, prefix: file.Source[attribute.Span.Start:cursor]}
+			}
+			start, end := attribute.Value.Start, attribute.Value.End
+			for index := start; index < cursor; index++ {
+				if file.Source[index] == ',' {
+					start = index + 1
+				}
+			}
+			for end = cursor; end < attribute.Value.End && file.Source[end] != ','; end++ {
+			}
+			return completionSelection{start: start, cursor: cursor, end: end, prefix: file.Source[start:cursor]}
+		}
+	}
+	return selection
+}
+
+func completionSetOptionAt(file *syntax.File, offset int) *syntax.SetOption {
+	var foundOption *syntax.SetOption
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if foundOption != nil || command.Set == nil {
+			return
+		}
+		for index := range command.Set.Options {
+			option := &command.Set.Options[index]
+			if option.Span.Start <= offset && offset <= option.Span.End {
+				foundOption = option
+				return
+			}
+		}
+	})
+	return foundOption
+}
+
+func completionUserCommandAttributeAt(file *syntax.File, offset int) (*syntax.Command, *syntax.UserCommandAttribute) {
+	var foundCommand *syntax.Command
+	var foundAttribute *syntax.UserCommandAttribute
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if foundAttribute != nil || command.UserCommand == nil {
+			return
+		}
+		for index := range command.UserCommand.Attributes {
+			attribute := &command.UserCommand.Attributes[index]
+			if attribute.Span.Start <= offset && offset <= attribute.Span.End {
+				foundCommand, foundAttribute = command, attribute
+				return
+			}
+		}
+	})
+	return foundCommand, foundAttribute
+}
+
+func completionUserCommandAttributeName(name string) string {
+	name = strings.ToLower(name)
+	for _, canonical := range []string{"complete", "completeopt", "addr", "nargs"} {
+		if name != "" && strings.HasPrefix(canonical, name) {
+			return canonical
+		}
+	}
+	return name
 }
 
 func completionBuiltinStringSelection(file *syntax.File, cursor int, contextKind completionContext) completionSelection {

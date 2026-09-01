@@ -200,6 +200,10 @@ func scanSetOperator(source string, start, end int) int {
 		if start+1 < end && source[start+1] == '=' {
 			return start + 2
 		}
+		// Retain an incomplete assignment operator for editor completion.
+		if start+1 == end || isSpace(source[start+1]) {
+			return start + 1
+		}
 		return start
 	}
 	if source[start] == '&' {
@@ -208,6 +212,8 @@ func scanSetOperator(source string, start, end int) int {
 			return start + 4
 		case start+3 <= end && source[start:start+3] == "&vi":
 			return start + 3
+		case start+2 <= end && source[start:start+2] == "&v" && (start+2 == end || isSpace(source[start+2])):
+			return start + 2
 		default:
 			return start + 1
 		}

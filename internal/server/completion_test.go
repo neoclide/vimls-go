@@ -378,6 +378,84 @@ func TestCompletionHighlightValueUsesUTF16EditRange(t *testing.T) {
 	}
 }
 
+func TestCompletionCommandSpecificFiniteValues(t *testing.T) {
+	items := commandPartCompletionItems(t, "augroup Existing\naugroup END\naugroup Exi", 2, uint32(len("augroup Exi")))
+	if completionItemWithLabel(items, "Existing") == nil || completionItemWithLabel(items, "END") != nil {
+		t.Fatalf("augroup completions = %#v", items)
+	}
+
+	items = commandPartCompletionItems(t, "command -co", 0, uint32(len("command -co")))
+	for _, label := range []string{"-complete=", "-completeopt=", "-count"} {
+		if completionItemWithLabel(items, label) == nil {
+			t.Errorf("user-command attribute %q missing from %#v", label, items)
+		}
+	}
+	items = commandPartCompletionItems(t, "command -bang -ba", 0, uint32(len("command -bang -ba")))
+	if completionItemWithLabel(items, "-bar") == nil || completionItemWithLabel(items, "-bang") != nil {
+		t.Fatalf("used user-command attributes = %#v", items)
+	}
+
+	for _, test := range []struct {
+		source string
+		want   []string
+	}{
+		{source: "command -addr=lo", want: []string{"loaded_buffers"}},
+		{source: "command -nargs=", want: []string{"0", "1", "_", "*", "?", "+"}},
+		{source: "command -complete=fi", want: []string{"file", "file_in_path", "filetype", "filetypecmd"}},
+		{source: "command -completeopt=", want: []string{"escape"}},
+		{source: "command -compl=fi", want: []string{"file", "filetype"}},
+		{source: "set ff=do", want: []string{"dos"}},
+		{source: "set background=", want: []string{"light", "dark"}},
+		{source: "set path+", want: []string{"+="}},
+	} {
+		items = commandPartCompletionItems(t, test.source, 0, uint32(len(test.source)))
+		for _, label := range test.want {
+			if completionItemWithLabel(items, label) == nil {
+				t.Errorf("%q completion %q missing from %#v", test.source, label, items)
+			}
+		}
+	}
+
+	items = commandPartCompletionItems(t, "set ignorecase!", 0, uint32(len("set ignorecase!")))
+	if completionItemWithLabel(items, "!") == nil || completionItemWithLabel(items, "=") != nil {
+		t.Fatalf("boolean set operators = %#v", items)
+	}
+	items = commandPartCompletionItems(t, "set ignorecase<", 0, uint32(len("set ignorecase<")))
+	if completionItemWithLabel(items, "<") == nil {
+		t.Fatalf("boolean local-reset operator = %#v", items)
+	}
+	for _, source := range []string{"set encoding=utf", "command -complete=custom,Func"} {
+		if items := commandPartCompletionItems(t, source, 0, uint32(len(source))); len(items) != 0 {
+			t.Errorf("dynamic/body completion %q returned %#v", source, items)
+		}
+	}
+}
+
+func TestCompletionSetValueUsesUTF16CRLFRange(t *testing.T) {
+	source := "augroup Ω\r\nset ff=do"
+	items := commandPartCompletionItems(t, source, 1, uint32(len("set ff=do")))
+	item := completionItemWithLabel(items, "dos")
+	if item == nil {
+		t.Fatalf("set value completion = %#v", items)
+	}
+	edit, ok := item.TextEdit.(*protocol.TextEdit)
+	if !ok || edit.Range != navigationRange(1, 7, 9) || edit.NewText != "dos" {
+		t.Fatalf("set value edit = %#v", item.TextEdit)
+	}
+}
+
+func commandPartCompletionItems(t *testing.T, source string, line, character uint32) protocol.CompletionItemSlice {
+	t.Helper()
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: line, Character: character},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return completionItems(t, result)
+}
+
 func highlightCompletionItems(t *testing.T, source string, cursor int) protocol.CompletionItemSlice {
 	t.Helper()
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

@@ -13,6 +13,9 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		want       completionContext
 	}{
 		{"set noig", "noig", completionContextSetOption}, {"syntax key", "key", completionContextSyntaxSubcommand}, {"syntax keyword Group key", "Group", completionContextSyntaxGroup}, {"highlight link One Two", "Two", completionContextHighlight}, {"autocmd BufE *.vim echo 1", "BufE", completionContextAutocmdHead}, {"autocmd Group BufE *.vim echo 1", "BufE", completionContextAutocmdEvent}, {"silent echo 1", "silent", completionContextModifier},
+		{"set path+", "path+", completionContextSetOperator}, {"set ff=un", "un", completionContextSetValue},
+		{"augroup Pro", "Pro", completionContextAugroup}, {"command -co", "-co", completionContextUserCommandAttribute}, {"command -nargs=", "-nargs=", completionContextUserCommandAttributeValue},
+		{"command Build echo -nargs=", "-nargs=", completionContextExpression}, {"augroup One extra", "extra", completionContextExpression},
 		{":", ":", completionContextCommand},
 		{"nmap <bu", "<bu", completionContextMappingArgument}, {"nmap <buffer> <si", "<si", completionContextMappingArgument},
 		{"highlight Normal cte", "cte", completionContextHighlightKey}, {"highlight Normal cterm=bo", "bo", completionContextHighlightValue}, {"highlight Normal cterm=bold,un", "un", completionContextHighlightValue},

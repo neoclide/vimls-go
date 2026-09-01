@@ -88,3 +88,19 @@ func TestLookupOptionMetadata(t *testing.T) {
 		t.Fatalf("option type counts = %#v, want bool=157 number=89 string=316", typeCounts)
 	}
 }
+
+func TestOptionValuesArePinnedAndCopied(t *testing.T) {
+	values := OptionValues("ff")
+	if len(values) != 3 || values[0] != "unix" || values[2] != "mac" {
+		t.Fatalf("OptionValues(ff) = %#v", values)
+	}
+	values[0] = "changed"
+	if got := OptionValues("fileformat")[0]; got != "unix" {
+		t.Fatalf("OptionValues returned shared storage: %q", got)
+	}
+	for _, name := range []string{"ignorecase", "encoding", "nosuchoption"} {
+		if values := OptionValues(name); len(values) != 0 {
+			t.Errorf("OptionValues(%q) = %#v", name, values)
+		}
+	}
+}

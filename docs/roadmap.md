@@ -157,15 +157,19 @@ completion for Ex commands, modifiers, scoped declarations (including legacy
 argument/local namespace spellings), builtin functions,
 static imports, Vim9 object members, options, autocmd events, and bounded import
 paths are implemented. Completion uses deterministic scoring, negotiated LSP
-edits, lazy resolve documentation, cancellation and a soft budget. Only the
-tested `.`, `:` and `&` member, command/scoped-name and option triggers are
-advertised. Snippet-capable clients receive required-argument direct-call
+edits, lazy resolve documentation, cancellation and a soft budget. The tested
+`.`, `:`, `&`, `#`, `<`, `"` and `'` member, command/scoped-name, option,
+autoload, mapping-token and builtin-string triggers are advertised.
+Snippet-capable clients receive required-argument direct-call
 snippets and dialect-specific legacy/Vim9 function blocks; other clients retain
 plain edits. Mapping special arguments complete only before the LHS; ordinary
 RHS payloads stay opaque. Highlight definitions complete pinned argument keys
 and finite help-listed values without losing local group completion. Color
 scheme names come from bounded, non-recursive `colors/*.vim` lookups across the
 configured runtimepath, with the first duplicate taking precedence. The
+structured `:augroup`, `:command`, and `:set` command nodes now bound group,
+user-command attribute, operator, and pinned fixed-option-value completion;
+replacement bodies and dynamic values remain excluded. The
 workspace rebuild records runtime-relative source paths once; colorscheme,
 runtime import and autoload foreground requests reuse that immutable index
 instead of searching runtimepath again. The same index retains global and

@@ -241,6 +241,16 @@ resolution and path completion, so foreground requests do not rescan those
 directories. Names omit `.vim`; duplicate names use the first runtimepath
 entry, nested directories and non-Vim files are ignored, and the 2,000-item
 completion limit applies.
+`:augroup` completes groups declared in the current syntax tree. The structured
+`:command` header completes the v9.2.1015 attribute names and the finite
+`-addr`, `-complete`, `-completeopt`, and `-nargs` values; attributes already
+present are omitted. The `:set`, `:setlocal`, and `:setglobal` syntax nodes
+complete type-appropriate operators and fixed values from 30 pinned option
+callbacks, including comma-separated value segments. Paths, encodings,
+numbers, custom completion function names, and other dynamic values remain
+user input. These completions are unavailable in replacement command bodies
+or extra operands because those spans are outside the corresponding header
+node.
 The first static string argument to direct `has()` calls completes the 208
 fixed feature spellings and 14 runtime/version spellings recognized by Vim
 v9.2.1015. The first argument or method receiver of `expand()` completes the

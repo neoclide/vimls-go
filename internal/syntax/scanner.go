@@ -2674,6 +2674,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	if len(command.EnumValues) > 0 {
 		return
 	}
+	if command.Canonical == "augroup" {
+		start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
+		command.Augroup = Span{Start: start, End: scanWord(file.Source, start, command.Argument.End)}
+	}
+	if command.Canonical == "command" {
+		command.UserCommand = parseUserCommandDefinition(file.Source, command.Argument)
+	}
 	if command.Dialect == Vim9 && command.Canonical == "elseif" && command.Argument.Start >= command.Argument.End {
 		code := "vim/E15"
 		if commandInsideBlock(command, file.Blocks, BlockDef) {
@@ -3981,31 +3988,56 @@ func userCommandBodySpan(source string, argument Span) (Span, bool) {
 	return Span{Start: bodyStart, End: argument.End}, true
 }
 
+func parseUserCommandDefinition(source string, argument Span) *UserCommandDefinition {
+	node := &UserCommandDefinition{}
+	start := skipSpace(source, argument.Start, argument.End)
+	for start < argument.End && source[start] == '-' {
+		end := start
+		for end < argument.End && !isSpace(source[end]) {
+			end++
+		}
+		attribute := UserCommandAttribute{Span: Span{Start: start, End: end}}
+		nameEnd := end
+		if equal := strings.IndexByte(source[start:end], '='); equal >= 0 {
+			equal += start
+			nameEnd = equal
+			attribute.Equal = Span{Start: equal, End: equal + 1}
+			attribute.Value = Span{Start: equal + 1, End: end}
+		}
+		attribute.Name = Span{Start: start + 1, End: nameEnd}
+		node.Attributes = append(node.Attributes, attribute)
+		start = skipSpace(source, end, argument.End)
+	}
+	nameEnd := scanWord(source, start, argument.End)
+	node.Name = Span{Start: start, End: nameEnd}
+	if body, ok := userCommandBodySpan(source, argument); ok {
+		node.Body = body
+	}
+	return node
+}
+
 // DefinedUserCommand returns the full name of a :command definition. Listing
 // and query forms do not define a command and therefore return ok=false.
 func DefinedUserCommand(file *File, command *Command) (name string, span Span, bufferLocal bool, ok bool) {
 	if file == nil || command == nil || command.Canonical != "command" || command.Argument.Start >= command.Argument.End {
 		return "", Span{}, false, false
 	}
-	if _, body := userCommandBodySpan(file.Source, command.Argument); !body {
+	definition := command.UserCommand
+	if definition == nil {
+		definition = parseUserCommandDefinition(file.Source, command.Argument)
+	}
+	if definition.Body.Start >= definition.Body.End {
 		return "", Span{}, false, false
 	}
-	start := skipSpace(file.Source, command.Argument.Start, command.Argument.End)
-	for start < command.Argument.End && file.Source[start] == '-' {
-		end := start
-		for end < command.Argument.End && !isSpace(file.Source[end]) {
-			end++
-		}
-		if file.Source[start:end] == "-buffer" {
+	for _, attribute := range definition.Attributes {
+		if file.Text(attribute.Span) == "-buffer" {
 			bufferLocal = true
 		}
-		start = skipSpace(file.Source, end, command.Argument.End)
 	}
-	nameEnd := scanWord(file.Source, start, command.Argument.End)
-	if nameEnd == start {
+	if definition.Name.Start >= definition.Name.End {
 		return "", Span{}, false, false
 	}
-	span = Span{Start: start, End: nameEnd}
+	span = definition.Name
 	return file.Text(span), span, bufferLocal, true
 }
 

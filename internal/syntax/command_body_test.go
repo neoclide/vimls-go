@@ -113,6 +113,32 @@ func TestUserCommandReplacementBody(t *testing.T) {
 	}
 }
 
+func TestUserCommandHeaderAndAugroupSyntax(t *testing.T) {
+	file := Parse("command -nargs=* -complete=custom,Complete Build echo <args>\naugroup Project\n")
+	command := &file.Commands[0]
+	if command.UserCommand == nil || len(command.UserCommand.Attributes) != 2 || file.Text(command.UserCommand.Name) != "Build" || file.Text(command.UserCommand.Body) != "echo <args>" {
+		t.Fatalf("user command syntax = %#v", command.UserCommand)
+	}
+	if got := file.Text(command.UserCommand.Attributes[0].Name); got != "nargs" || file.Text(command.UserCommand.Attributes[0].Value) != "*" {
+		t.Fatalf("first attribute = %#v", command.UserCommand.Attributes[0])
+	}
+	if got := file.Text(command.UserCommand.Attributes[1].Name); got != "complete" || file.Text(command.UserCommand.Attributes[1].Value) != "custom,Complete" {
+		t.Fatalf("second attribute = %#v", command.UserCommand.Attributes[1])
+	}
+	group := &file.Commands[1]
+	if file.Text(group.Augroup) != "Project" {
+		t.Fatalf("augroup syntax = %#v", group.Augroup)
+	}
+
+	incomplete := Parse("command -comp=\naugroup ")
+	if incomplete.Commands[0].UserCommand == nil || incomplete.Text(incomplete.Commands[0].UserCommand.Attributes[0].Value) != "" {
+		t.Fatalf("incomplete user command = %#v", incomplete.Commands[0].UserCommand)
+	}
+	if incomplete.Commands[1].Augroup.Start != incomplete.Commands[1].Augroup.End {
+		t.Fatalf("incomplete augroup = %#v", incomplete.Commands[1].Augroup)
+	}
+}
+
 func TestUserCommandListingAndQueryHaveNoBody(t *testing.T) {
 	for _, source := range []string{
 		"command\n",

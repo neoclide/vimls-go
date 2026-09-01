@@ -86,3 +86,49 @@ func Options() []Option {
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
+
+// OptionValues returns fixed values offered by Vim's v9.2.1015 :set
+// completion callbacks. Dynamic values such as encodings, paths, events and
+// runtime names are deliberately excluded. Callers own the returned slice.
+func OptionValues(name string) []string {
+	option, ok := LookupOption(name)
+	if !ok {
+		return nil
+	}
+	values := fixedOptionValues[option.Name]
+	return append([]string(nil), values...)
+}
+
+var fixedOptionValues = map[string][]string{
+	"ambiwidth":            {"single", "double"},
+	"background":           {"light", "dark"},
+	"backspace":            {"indent", "eol", "start", "nostop"},
+	"backupcopy":           {"yes", "auto", "no", "breaksymlink", "breakhardlink"},
+	"belloff":              {"all", "backspace", "cursor", "complete", "copy", "ctrlg", "error", "esc", "ex", "hangul", "insertmode", "lang", "mess", "showmatch", "operator", "register", "shell", "spell", "term", "wildmode"},
+	"browsedir":            {"current", "last", "buffer"},
+	"bufhidden":            {"hide", "unload", "delete", "wipe"},
+	"buftype":              {"nofile", "nowrite", "quickfix", "help", "terminal", "acwrite", "prompt", "popup"},
+	"casemap":              {"internal", "keepascii"},
+	"completefuzzycollect": {"keyword", "files", "whole_line"},
+	"completeopt":          {"menu", "menuone", "longest", "preview", "popup", "popuphidden", "noinsert", "noselect", "fuzzy", "nosort", "preinsert", "nearest"},
+	"cursorlineopt":        {"line", "screenline", "number", "both"},
+	"debug":                {"msg", "throw", "beep"},
+	"display":              {"lastline", "truncate", "uhex"},
+	"eadirection":          {"both", "ver", "hor"},
+	"fileformat":           {"unix", "dos", "mac"},
+	"fileformats":          {"unix", "dos", "mac"},
+	"foldclose":            {"all"},
+	"foldmethod":           {"manual", "expr", "marker", "indent", "syntax", "diff"},
+	"foldopen":             {"all", "block", "hor", "mark", "percent", "quickfix", "search", "tag", "insert", "undo", "jump"},
+	"jumpoptions":          {"stack"},
+	"keymodel":             {"startsel", "stopsel"},
+	"mousemodel":           {"extend", "popup", "popup_setpos", "mac"},
+	"selection":            {"inclusive", "exclusive", "old"},
+	"selectmode":           {"mouse", "key", "cmd"},
+	"switchbuf":            {"useopen", "usetab", "split", "newtab", "vsplit", "uselast"},
+	"tagcase":              {"followic", "ignore", "match", "followscs", "smart"},
+	"ttymouse":             {"xterm", "xterm2", "dec", "netterm", "jsbterm", "pterm", "urxvt", "sgr"},
+	"virtualedit":          {"block", "insert", "all", "onemore", "none", "NONE"},
+	"wildmode":             {"full", "longest", "list", "lastused", "noselect", "noinsert"},
+	"wildoptions":          {"fuzzy", "tagfile", "pum", "exacttext"},
+}

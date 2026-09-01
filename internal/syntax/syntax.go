@@ -95,6 +95,8 @@ type Command struct {
 	Highlight          *Highlight
 	Syntax             *SyntaxCommand
 	Set                *SetCommand
+	Augroup            Span
+	UserCommand        *UserCommandDefinition
 	Substitute         *Substitute
 	Autocmd            *AutocmdCommand
 	logical            *logicalCommandView
@@ -190,6 +192,22 @@ type SetOption struct {
 	Name     Span
 	Operator Span
 	Value    Span
+}
+
+// UserCommandDefinition retains the structured :command header. Attributes
+// are present for both complete definitions and incomplete/listing forms so
+// editor features can identify the header without reparsing its text.
+type UserCommandDefinition struct {
+	Attributes []UserCommandAttribute
+	Name       Span
+	Body       Span
+}
+
+type UserCommandAttribute struct {
+	Span  Span
+	Name  Span
+	Equal Span
+	Value Span
 }
 
 // SyntaxCommand is the command-specific syntax shared by :syntax keyword,

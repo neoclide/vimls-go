@@ -93,6 +93,21 @@ func TestSetCommandAllOperatorsAndText(t *testing.T) {
 	assertFileSpans(t, file)
 }
 
+func TestSetCommandRetainsIncompleteOperators(t *testing.T) {
+	file := Parse("set path+ tabstop&v")
+	if len(file.Commands) != 1 || file.Commands[0].Set == nil || len(file.Commands[0].Set.Options) != 2 {
+		t.Fatalf("set syntax = %#v", file.Commands)
+	}
+	options := file.Commands[0].Set.Options
+	if file.Text(options[0].Operator) != "+" || file.Text(options[1].Operator) != "&v" {
+		t.Fatalf("operators = %q, %q", file.Text(options[0].Operator), file.Text(options[1].Operator))
+	}
+	opaque := Parse("set path+value")
+	if options := opaque.Commands[0].Set.Options; len(options) != 1 || options[0].Operator.Start != options[0].Operator.End || opaque.Text(options[0].Span) != "path+value" {
+		t.Fatalf("non-operator plus = %#v", options)
+	}
+}
+
 func TestSetCommandSpecialPrefixesAndEscapes(t *testing.T) {
 	source := "set no<t_k1> novicefoo termcapfoo all? all_ foo=one\\ two\\|three\x16|four \"comment | echo hidden\n"
 	file := (LegacyParser{}).Parse(source)
