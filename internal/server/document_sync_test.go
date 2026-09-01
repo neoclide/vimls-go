@@ -539,6 +539,33 @@ func TestServerOldSnapshotParserCacheCannotRestoreCurrentLifetime(t *testing.T) 
 	}
 }
 
+func TestServerDocumentEditAnalyzesOnceWhenUpdatingWorkspaceIndex(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	root := t.TempDir()
+	path := filepath.Join(root, "plugin", "main.vim")
+	documentURI := uri.File(path)
+	instance.workspaceRoots = []string{root}
+
+	instance.documents.Open(documentURI.String(), 1, "vim9script\nvar Before = 1\n")
+	instance.analyzeDocument(documentURI.String())
+
+	calls := 0
+	instance.beforeAnalyzeForTest = func(*syntax.File) { calls++ }
+	updatedSource := "vim9script\nvar After = 2\n"
+	_, changed, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: updatedSource}})
+	if err != nil || !changed {
+		t.Fatalf("document change: changed=%t err=%v", changed, err)
+	}
+	instance.analyzeDocument(documentURI.String())
+	if calls != 1 {
+		t.Fatalf("analysis calls for one document edit = %d, want 1", calls)
+	}
+	if source, ok := instance.workspaceIndex.Source(path); !ok || source != updatedSource {
+		t.Fatalf("workspace index source = %q, indexed=%t; want %q", source, ok, updatedSource)
+	}
+}
+
 func TestServerChangeRejectsPausedParseCacheMiss(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)

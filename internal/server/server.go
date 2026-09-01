@@ -125,6 +125,7 @@ type Server struct {
 	// The following hooks are test-only synchronization seams. They are set
 	// before use and are always called outside server locks.
 	beforeParseSnapshotCacheMissForTest func(*text.Snapshot)
+	beforeAnalyzeForTest                func(*syntax.File)
 	beforeWorkspaceRestoreReadForTest   func(workspaceRestore)
 	beforeWorkspaceBuildForTest         func([]*text.Snapshot)
 
@@ -958,6 +959,9 @@ func (s *Server) analyzeDocument(documentURI string) {
 		parsed.Diagnostics = append([]syntax.Diagnostic(nil), raw.Diagnostics...)
 		file = &parsed
 		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
+		if s.beforeAnalyzeForTest != nil {
+			s.beforeAnalyzeForTest(file)
+		}
 		fileAnalysis = analysis.Analyze(file)
 		if work.Context.Err() != nil {
 			return
@@ -966,7 +970,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if work.Context.Err() != nil {
 		return
 	}
-	workspaceSnapshot, ok := s.prepareSyntax(work, file)
+	workspaceSnapshot, ok := s.prepareSyntax(work, file, fileAnalysis)
 	if !ok {
 		return
 	}
@@ -975,8 +979,15 @@ func (s *Server) analyzeDocument(documentURI string) {
 		return
 	}
 	versionedAnalysis := *fileAnalysis
-	versionedAnalysis.Diagnostics = analysisDiagnosticsForTarget(file, fileAnalysis.Diagnostics, target)
-	versionedAnalysis.Diagnostics = autoloadExportedFunctionDiagnostics(workspaceSnapshot.path, workspaceSnapshot.roots, file, fileAnalysis, versionedAnalysis.Diagnostics)
+	versionedAnalysis.Diagnostics = analysis.DiagnosticsForVersion(file, fileAnalysis.Diagnostics, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})
+	autoload := false
+	for _, root := range workspaceSnapshot.roots {
+		if _, ok := workspaceAutoloadPath(workspaceSnapshot.path, root); ok {
+			autoload = true
+			break
+		}
+	}
+	versionedAnalysis.Diagnostics = analysis.AutoloadExportedDefDiagnostics(file, fileAnalysis, autoload, versionedAnalysis.Diagnostics)
 	file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
 	importDiagnostics := s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)
 	if !workspaceSnapshot.ready || work.Context.Err() != nil {
@@ -1002,94 +1013,18 @@ func (s *Server) analyzeDocument(documentURI string) {
 	s.publishSyntax(work, file, workspaceSnapshot.identity)
 }
 
-func autoloadExportedFunctionDiagnostics(path string, roots []string, file *syntax.File, result *analysis.FileAnalysis, diagnostics []syntax.Diagnostic) []syntax.Diagnostic {
-	if path == "" || file == nil || result == nil || result.Root == nil {
-		return diagnostics
-	}
-	autoload := false
-	for _, root := range roots {
-		if _, ok := workspaceAutoloadPath(path, root); ok {
-			autoload = true
-			break
-		}
-	}
-	if !autoload {
-		return diagnostics
-	}
-	versioned := diagnostics
-	copied := false
-	for index := range diagnostics {
-		diagnostic := diagnostics[index]
-		if diagnostic.Code != "vim/E1041" || !autoloadExportedDefVariableConflict(file, result, diagnostic.Span) {
-			continue
-		}
-		if !copied {
-			versioned = append([]syntax.Diagnostic(nil), diagnostics...)
-			copied = true
-		}
-		name := file.Text(diagnostic.Span)
-		versioned[index].Code = "vim/E707"
-		versioned[index].Message = "Function name conflicts with variable: " + name
-	}
-	return versioned
-}
-
-func autoloadExportedDefVariableConflict(file *syntax.File, result *analysis.FileAnalysis, span syntax.Span) bool {
-	var function *syntax.Command
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		if command.Canonical == "def" && command.Function != nil && command.Function.Name == span && serverCommandHasModifier(command, "export") {
-			function = command
-			break
-		}
-	}
-	if function == nil {
-		return false
-	}
-	name := file.Text(span)
-	for _, declaration := range result.Root.Declarations {
-		if declaration != nil && declaration.Span.Start < span.Start && declaration.Name == name &&
-			(declaration.Kind == analysis.SymbolKindVariable || declaration.Kind == analysis.SymbolKindConstant) {
-			return true
-		}
-	}
-	return false
-}
-
-func serverCommandHasModifier(command *syntax.Command, name string) bool {
-	for _, modifier := range command.Modifiers {
-		if modifier.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func analysisDiagnosticsForTarget(file *syntax.File, diagnostics []syntax.Diagnostic, target TargetVersion) []syntax.Diagnostic {
-	if target.Major > 9 || target.Major == 9 && (target.Minor > 2 || target.Minor == 2 && target.Patch >= 507) {
-		return diagnostics
-	}
-	versioned := append([]syntax.Diagnostic(nil), diagnostics...)
-	for index := range versioned {
-		if versioned[index].Code == "vim/E1406" {
-			versioned[index].Code = "vim/E1369"
-			versioned[index].Message = "Duplicate variable: " + file.Text(versioned[index].Span)
-		}
-	}
-	return versioned
-}
-
-func (s *Server) prepareSyntax(analysis workspace.Analysis, file *syntax.File) (workspaceAnalysisSnapshot, bool) {
+func (s *Server) prepareSyntax(work workspace.Analysis, file *syntax.File, result *analysis.FileAnalysis) (workspaceAnalysisSnapshot, bool) {
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
-	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
+	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(work) {
 		return workspaceAnalysisSnapshot{}, false
 	}
-	documentURI := analysis.Snapshot.URI()
-	if analysis.Snapshot.ByteLen() > maxFileBytes {
+	documentURI := work.Snapshot.URI()
+	if work.Snapshot.ByteLen() > maxFileBytes {
 		file = nil
+		result = nil
 	}
-	workspaceSnapshot, dependents := s.replaceWorkspaceFileWithSnapshot(documentURI, file)
+	workspaceSnapshot, dependents := s.replaceWorkspaceFileWithAnalysisSnapshot(documentURI, file, result)
 	s.startWorkspaceDependents(dependents)
 	return workspaceSnapshot, true
 }

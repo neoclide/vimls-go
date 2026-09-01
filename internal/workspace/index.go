@@ -254,6 +254,15 @@ func NewIndex(maxFiles, maxBytes int, relationLimits ...int) *Index {
 // Replace atomically replaces path's symbols. If either configured limit would
 // be exceeded, ErrIndexLimit is returned and the previous entry is unchanged.
 func (i *Index) Replace(path string, file *syntax.File) error {
+	return i.ReplaceWithAnalysis(path, file, nil)
+}
+
+// ReplaceWithAnalysis atomically replaces path's symbols. A result belonging
+// to file is reused for external-reference and call facts; nil or mismatched
+// results fall back to a fresh analysis for independently discovered files.
+// If either configured limit would be exceeded, ErrIndexLimit is returned and
+// the previous entry is unchanged.
+func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *analysis.FileAnalysis) error {
 	if file == nil {
 		return ErrIndexNilFile
 	}
@@ -261,7 +270,9 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	if err != nil {
 		return err
 	}
-	result := analysis.Analyze(file)
+	if result == nil || result.File != file {
+		result = analysis.Analyze(file)
+	}
 	facts := CollectSymbolFacts(normalized, file)
 	sortFacts(facts)
 	references := CollectExternalReferencesFromAnalysis(normalized, file, result)

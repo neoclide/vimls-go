@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
@@ -586,6 +587,10 @@ func (s *Server) replaceWorkspaceFile(documentURI string, file *syntax.File) []s
 // every cross-file input needed by its analysis under publishMu -> workspaceMu.
 // The caller holds publishMu when the document-current check matters.
 func (s *Server) replaceWorkspaceFileWithSnapshot(documentURI string, file *syntax.File) (workspaceAnalysisSnapshot, []string) {
+	return s.replaceWorkspaceFileWithAnalysisSnapshot(documentURI, file, nil)
+}
+
+func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, file *syntax.File, result *analysis.FileAnalysis) (workspaceAnalysisSnapshot, []string) {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
 	openByPath := make(map[string]*text.Snapshot)
 	for _, snapshot := range s.documents.Snapshots() {
@@ -626,7 +631,7 @@ func (s *Server) replaceWorkspaceFileWithSnapshot(documentURI string, file *synt
 		return snapshot, dependents
 	}
 	s.queueWorkspaceDependentsLocked(path)
-	if err := s.workspaceIndex.Replace(path, file); err != nil {
+	if err := s.workspaceIndex.ReplaceWithAnalysis(path, file, result); err != nil {
 		s.workspaceIndex.SetComplete(false)
 		s.workspaceIndex.Remove(path)
 		s.workspaceGraph.Remove(path)
