@@ -304,7 +304,8 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		return result
 	}
 	lineStart := strings.LastIndexByte(file.Source[:offset], '\n') + 1
-	if strings.TrimSpace(file.Source[lineStart:offset]) == "" {
+	linePrefix := strings.TrimSpace(file.Source[lineStart:offset])
+	if linePrefix == "" || linePrefix == ":" {
 		return completionContextCommand
 	}
 	return completionContextNone

@@ -208,6 +208,10 @@ namespace spelling. Forward variables are excluded while statically declared
 functions remain callable before their declaration. A statically resolved
 import namespace exposes only exported members.
 Unknown and dynamic contexts return no inferred candidates.
+Completion advertises only `.`, `:` and `&` as trigger characters; tests bind
+them to member, command/scoped-name and option contexts respectively. Autoload,
+index, environment, mapping-token and quote triggers remain manual until their
+bounded providers can return a useful result immediately after the character.
 Completion resolve and builtin-call hover include the pinned broad return type
 when Vim's metadata provides one; builtin-function, Ex-command, option, and
 predefined-variable hover plus builtin signature help also include bounded

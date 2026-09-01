@@ -157,7 +157,9 @@ completion for Ex commands, modifiers, scoped declarations (including legacy
 argument/local namespace spellings), builtin functions,
 static imports, Vim9 object members, options, autocmd events, and bounded import
 paths are implemented. Completion uses deterministic scoring, negotiated LSP
-edits, lazy resolve documentation, cancellation and a soft budget. Direct
+edits, lazy resolve documentation, cancellation and a soft budget. Only the
+tested `.`, `:` and `&` member, command/scoped-name and option triggers are
+advertised. Direct
 builtin (including receiver-adjusted `->` methods), same-file user-function,
 static-imported exported-function, and directly bound function-value signature
 help are implemented, as are local class/object methods, inherited methods,

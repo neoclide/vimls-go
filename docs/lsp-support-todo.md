@@ -165,9 +165,10 @@ regular expressions.
 - [ ] Add command-specific completion for augroups, user-command attributes,
   `:set` operators/values and other finite enums only after their command AST
   identifies the cursor position.
-- [ ] Advertise the trigger characters actually supported by tests. Evaluate
-  the old server's `.`, `:`, `#`, `[`, `&`, `$`, `<`, `"` and `'` individually;
-  do not advertise a character that causes broad irrelevant lists.
+- [x] Advertise the trigger characters actually supported by tests. `.`, `:`
+  and `&` select proven member, command/scoped-name, and option contexts. `#`,
+  `[`, `$`, `<`, `"` and `'` remain unadvertised until a bounded provider has
+  a useful result immediately after that character.
 - [ ] Enable function-call and block snippets only when the client supports
   snippets. Provide separate legacy (`function`/`endfunction`) and Vim9
   (`def`/`enddef`) forms and never insert a dialect-invalid template.

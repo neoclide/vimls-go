@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -125,6 +126,9 @@ func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 	if capabilities.DocumentLinkProvider == nil || capabilities.CompletionProvider == nil || capabilities.SignatureHelpProvider == nil || capabilities.RenameProvider == nil || capabilities.SemanticTokensProvider == nil || capabilities.CodeActionProvider == nil || capabilities.InlayHintProvider == nil {
 		t.Fatalf("language capabilities = %#v", capabilities)
 	}
+	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("completion trigger characters = %#v, want %#v", got, want)
+	}
 	for _, method := range []string{
 		protocol.MethodTextDocumentDocumentLink,
 		protocol.MethodTextDocumentCompletion,
@@ -139,6 +143,35 @@ func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 		if !implementedMethod(method) {
 			t.Errorf("method %q is not implemented", method)
 		}
+	}
+}
+
+func TestAdvertisedCompletionTriggersReturnContextualItems(t *testing.T) {
+	tests := []struct {
+		name, source, trigger, label string
+		line, character              uint32
+		kind                         protocol.CompletionItemKind
+	}{
+		{name: "member", source: "vim9script\nclass Box\n  var value: number\nendclass\nvar box = Box.new()\necho box.\n", trigger: ".", label: "value", line: 5, character: 9, kind: protocol.CompletionItemKindField},
+		{name: "command", source: ":\n", trigger: ":", label: "echo", line: 0, character: 1, kind: protocol.CompletionItemKindKeyword},
+		{name: "scope", source: "let g:scoped = 1\necho g:\n", trigger: ":", label: "g:scoped", line: 1, character: 7, kind: protocol.CompletionItemKindVariable},
+		{name: "option", source: "echo &\n", trigger: "&", label: "&ignorecase", line: 0, character: 6, kind: protocol.CompletionItemKindProperty},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			trigger := test.trigger
+			result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character}},
+				Context:                    protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: &trigger},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasCompletion(completionItems(t, result), test.label, test.kind) {
+				t.Fatalf("trigger %q missing %q in %#v", test.trigger, test.label, completionItems(t, result))
+			}
+		})
 	}
 }
 
