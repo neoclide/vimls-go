@@ -253,7 +253,7 @@ position encoding; every code action round-trips through a reparsed document.
 
 ## P2: diagnostics and configuration quality
 
-- [ ] Define stable policy for parser, compatibility, unresolved, unused and
+- [x] Define stable policy for parser, compatibility, unresolved, unused and
   deprecation severities, including whether each category can be disabled.
 - [ ] Publish related information for cross-file import/export/type errors when
   the authoritative declaration is known.

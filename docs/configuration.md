@@ -87,6 +87,23 @@ workspace settings do not replace it. `unresolvedSeverity` remains dynamically
 configurable. Invalid updates retain the previous valid value and produce a
 visible warning.
 
+## Diagnostic policy
+
+Diagnostic categories have stable default severities:
+
+| Category | LSP severity | Configurable or disabled |
+| --- | --- | --- |
+| Parser and structural errors | error | fixed; cannot be disabled |
+| Target-version compatibility | error | fixed; selecting a compatible `targetVersion` removes the mismatch |
+| Unresolved function, variable, import alias, or autoload name (`E117`, `E121`, `E1001`, `E1089`) | warning | severity may be `error`, `warning`, `information`, or `hint`; cannot be disabled |
+| Runtime-dependent or cross-file conflict warnings (`E122`, `E174`, `E464`, `E705`, `E707`) | warning | fixed; cannot be disabled |
+| Unused Vim9 variables | hint with the LSP `unnecessary` tag | fixed; cannot be disabled |
+| Deprecated Vim9 references | hint with the LSP `deprecated` tag | fixed; cannot be disabled |
+
+Unknown diagnostics default to error. The value `off` is deliberately invalid
+for `unresolvedSeverity`; an invalid initialization value falls back to warning,
+and an invalid workspace update retains the previous valid severity.
+
 ## Runtimepath changes
 
 Runtimepath is not a workspace setting. Send the custom notification below
