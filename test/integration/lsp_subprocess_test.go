@@ -48,6 +48,12 @@ func TestLSPSubprocess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(runtimeRoot, "plugin", "runtime.vim"), []byte("vim9script\nvar runtimeName = 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(runtimeRoot, "colors"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "colors", "default.vim"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
@@ -289,6 +295,12 @@ func TestLSPSubprocess(t *testing.T) {
 	highlightCompletion := readResponse(t, reader, "100012")
 	if !strings.Contains(string(highlightCompletion["result"]), `"label":"underline"`) || !strings.Contains(string(highlightCompletion["result"]), `"newText":"underline"`) || !strings.Contains(string(highlightCompletion["result"]), `"start":{"line":0,"character":28}`) {
 		t.Fatalf("highlight completion = %s", highlightCompletion)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///colorscheme.vim","languageId":"vim","version":1,"text":"colorscheme defa"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100013,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///colorscheme.vim"},"position":{"line":0,"character":16}}}`)
+	colorschemeCompletion := readResponse(t, reader, "100013")
+	if !strings.Contains(string(colorschemeCompletion["result"]), `"label":"default"`) || !strings.Contains(string(colorschemeCompletion["result"]), `"newText":"default"`) || !strings.Contains(string(colorschemeCompletion["result"]), `"start":{"line":0,"character":12}`) {
+		t.Fatalf("colorscheme completion = %s", colorschemeCompletion)
 	}
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100005,"method":"shutdown"}`)

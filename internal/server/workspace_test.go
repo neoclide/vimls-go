@@ -635,7 +635,7 @@ func TestWorkspaceImportGraphOmitsUnreadableTarget(t *testing.T) {
 	}
 	resolver := workspacePathResolver([]string{root}, nil)
 	instance := New(nil, nil, io.Discard)
-	_, graph, _, _ := instance.buildWorkspaceIndex(context.Background(), []string{root}, resolver, nil)
+	_, graph, _, _ := instance.buildWorkspaceIndex(context.Background(), []string{root}, nil, resolver, nil)
 	mainPath = mustWorkspaceCanonicalPath(t, mainPath)
 	imports := graph.Snapshot().Imports(mainPath)
 	if len(imports) != 1 || imports[0].Target != "" || imports[0].Missing || imports[0].Dynamic || len(graph.Snapshot().Outgoing(mainPath)) != 0 {
@@ -1180,7 +1180,7 @@ func BenchmarkWorkspaceRebuild(b *testing.B) {
 		b.Fatal("workspace resolver is nil")
 	}
 	instance := New(nil, nil, io.Discard)
-	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(context.Background(), roots, resolver, nil)
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(context.Background(), roots, nil, resolver, nil)
 	if len(diskFiles) != len(paths) || !index.Complete() || !graph.Snapshot().Ready() || len(warnings) != 0 {
 		b.Fatalf("workspace preflight: diskFiles=%d complete=%t ready=%t warnings=%#v", len(diskFiles), index.Complete(), graph.Snapshot().Ready(), warnings)
 	}
@@ -1192,7 +1192,7 @@ func BenchmarkWorkspaceRebuild(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(totalBytes))
 	for b.Loop() {
-		instance.buildWorkspaceIndex(context.Background(), roots, resolver, nil)
+		instance.buildWorkspaceIndex(context.Background(), roots, nil, resolver, nil)
 	}
 }
 

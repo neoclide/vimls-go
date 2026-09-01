@@ -35,7 +35,7 @@ func (document *navigationDocument) workspaceTargetInState(state workspaceNaviga
 		return workspaceNavigationTarget{}, false
 	}
 	if document.external != nil {
-		target, ok := document.server.resolveWorkspaceReference(state.resolver, state.index, *document.external)
+		target, ok := document.server.resolveWorkspaceReference(state, *document.external)
 		if !ok || document.externalMember == "" {
 			return target, ok
 		}
@@ -49,7 +49,7 @@ func (document *navigationDocument) workspaceTargetInState(state workspaceNaviga
 		return workspaceNavigationTarget{}, false
 	}
 	path, _ := workspaceURIPath(uri.URI(document.snapshot.URI()))
-	resolution := state.resolver.ResolveAutoload(target.match.Fact.Name)
+	resolution := resolveAutoloadInState(state, target.match.Fact.Name)
 	return target, resolution.Path != "" && sameWorkspacePath(resolution.Path, path)
 }
 
@@ -128,29 +128,82 @@ func (s *Server) workspaceNavigationState() (*workspace.PathResolver, *workspace
 	return state.resolver, state.index, state.roots
 }
 
-func (s *Server) resolveWorkspaceReference(resolver *workspace.PathResolver, index *workspace.Index, reference workspace.ExternalReferenceFact) (workspaceNavigationTarget, bool) {
+func (s *Server) resolveWorkspaceReference(state workspaceNavigationSnapshot, reference workspace.ExternalReferenceFact) (workspaceNavigationTarget, bool) {
+	if state.index == nil {
+		return workspaceNavigationTarget{}, false
+	}
 	switch reference.Kind {
 	case workspace.ExternalReferenceImportMember:
-		resolution := resolver.ResolveImportPath(reference.Path, reference.ImportPath, reference.ImportAutoload)
+		resolution := resolveImportPathInState(state, reference.Path, reference.ImportPath, reference.ImportAutoload)
 		if resolution.Dynamic || resolution.Path == "" {
 			return workspaceNavigationTarget{}, false
 		}
-		return s.lookupWorkspaceTarget(index, resolution.Path, func(fact workspace.SymbolFact) bool {
+		return s.lookupWorkspaceTarget(state.index, resolution.Path, func(fact workspace.SymbolFact) bool {
 			return fact.Exported && fact.Name == reference.Name
 		})
 	case workspace.ExternalReferenceAutoload:
-		resolution := resolver.ResolveAutoload(reference.Name)
+		resolution := resolveAutoloadInState(state, reference.Name)
 		if resolution.Path == "" {
 			return workspaceNavigationTarget{}, false
 		}
 		baseName := reference.Name[strings.LastIndexByte(reference.Name, '#')+1:]
-		return s.lookupWorkspaceTarget(index, resolution.Path, func(fact workspace.SymbolFact) bool {
+		return s.lookupWorkspaceTarget(state.index, resolution.Path, func(fact workspace.SymbolFact) bool {
 			name := strings.TrimPrefix(fact.Name, "g:")
 			return name == reference.Name || fact.Exported && name == baseName
+		})
+	case workspace.ExternalReferenceGlobalFunction:
+		match, ok := state.index.GlobalFunction(reference.Name)
+		if !ok {
+			return workspaceNavigationTarget{}, false
+		}
+		return s.lookupWorkspaceTarget(state.index, match.Fact.Path, func(fact workspace.SymbolFact) bool {
+			return fact.SelectionRange == match.Fact.SelectionRange && fact.Kind == analysis.SymbolKindFunction
 		})
 	default:
 		return workspaceNavigationTarget{}, false
 	}
+}
+
+func resolveImportInState(state workspaceNavigationSnapshot, from string, file *syntax.File, importNode *syntax.Import) workspace.PathResolution {
+	if file == nil || importNode == nil {
+		return workspace.PathResolution{}
+	}
+	return resolveImportPathInState(state, from, file.Text(importNode.PathSpan), importNode.Autoload)
+}
+
+func resolveImportPathInState(state workspaceNavigationSnapshot, from, raw string, autoload bool) workspace.PathResolution {
+	if workspace.RuntimeImport(raw) {
+		path, ok := workspace.StaticImportPath(raw)
+		if !ok {
+			return workspace.PathResolution{Dynamic: true}
+		}
+		directory := "import"
+		if autoload {
+			directory = "autoload"
+		}
+		if state.index != nil {
+			if target, found := state.index.RuntimeFile(filepath.ToSlash(filepath.Join(directory, filepath.FromSlash(path)))); found {
+				return workspace.PathResolution{Path: target}
+			}
+		}
+		return workspace.PathResolution{}
+	}
+	if state.resolver == nil {
+		return workspace.PathResolution{}
+	}
+	return state.resolver.ResolveImportPath(from, raw, autoload)
+}
+
+func resolveAutoloadInState(state workspaceNavigationSnapshot, name string) workspace.PathResolution {
+	relative, ok := workspace.AutoloadPath(name)
+	if !ok || state.index == nil {
+		return workspace.PathResolution{}
+	}
+	path, ok := state.index.RuntimeFile(relative)
+	if !ok {
+		return workspace.PathResolution{}
+	}
+	return workspace.PathResolution{Path: path}
 }
 
 func (s *Server) lookupWorkspaceTarget(index *workspace.Index, path string, accept func(workspace.SymbolFact) bool) (workspaceNavigationTarget, bool) {
@@ -277,7 +330,7 @@ func (document *navigationDocument) workspaceReferencesInState(ctx context.Conte
 				continue
 			}
 			seenCandidates[candidate.Fact] = true
-			if !workspaceReferenceMatchesTarget(state.resolver, candidate.Fact, target) {
+			if !workspaceReferenceMatchesTarget(state, candidate.Fact, target) {
 				continue
 			}
 			candidateURI := uri.File(candidate.Fact.Path)
@@ -295,7 +348,7 @@ func (document *navigationDocument) workspaceReferencesInState(ctx context.Conte
 		}
 	}
 	if document.external != nil && !seenCandidates[*document.external] {
-		if workspaceReferenceMatchesTarget(state.resolver, *document.external, target) {
+		if workspaceReferenceMatchesTarget(state, *document.external, target) {
 			if location, ok := document.location(document.external.Span); ok {
 				locations = append(locations, location)
 			}
@@ -397,7 +450,7 @@ func (document *navigationDocument) workspaceMemberReferencesInState(ctx context
 				if !matched {
 					reference := importedAggregateReferenceForReceiver(path, file, result, expression.Children[0], facts)
 					if reference != nil {
-						base, ok := document.server.resolveWorkspaceReference(state.resolver, state.index, *reference)
+						base, ok := document.server.resolveWorkspaceReference(state, *reference)
 						if ok {
 							member, ok := document.server.resolveWorkspaceMemberTarget(base, expression.Value, importedMemberClassReceiver(file, expression.Children[0]))
 							matched = ok && sameWorkspaceMemberTarget(member, target)
@@ -467,16 +520,13 @@ func (s *Server) analyzeWorkspaceTarget(target workspaceNavigationTarget) (*anal
 	return result, nil
 }
 
-func workspaceReferenceMatchesTarget(resolver *workspace.PathResolver, reference workspace.ExternalReferenceFact, target workspaceNavigationTarget) bool {
-	if resolver == nil {
-		return false
-	}
+func workspaceReferenceMatchesTarget(state workspaceNavigationSnapshot, reference workspace.ExternalReferenceFact, target workspaceNavigationTarget) bool {
 	switch reference.Kind {
 	case workspace.ExternalReferenceImportMember:
-		resolution := resolver.ResolveImportPath(reference.Path, reference.ImportPath, reference.ImportAutoload)
+		resolution := resolveImportPathInState(state, reference.Path, reference.ImportPath, reference.ImportAutoload)
 		return !resolution.Dynamic && resolution.Path != "" && sameWorkspacePath(resolution.Path, target.match.Fact.Path) && target.match.Fact.Exported && reference.Name == target.match.Fact.Name
 	case workspace.ExternalReferenceAutoload:
-		resolution := resolver.ResolveAutoload(reference.Name)
+		resolution := resolveAutoloadInState(state, reference.Name)
 		if resolution.Path == "" || !sameWorkspacePath(resolution.Path, target.match.Fact.Path) {
 			return false
 		}
@@ -485,6 +535,9 @@ func workspaceReferenceMatchesTarget(resolver *workspace.PathResolver, reference
 			return true
 		}
 		return target.match.Fact.Exported && name == reference.Name[strings.LastIndexByte(reference.Name, '#')+1:]
+	case workspace.ExternalReferenceGlobalFunction:
+		match, ok := state.index.GlobalFunction(reference.Name)
+		return ok && sameWorkspacePath(match.Fact.Path, target.match.Fact.Path) && match.Fact.SelectionRange == target.match.Fact.SelectionRange
 	default:
 		return false
 	}

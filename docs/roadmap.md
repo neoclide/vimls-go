@@ -163,7 +163,15 @@ advertised. Snippet-capable clients receive required-argument direct-call
 snippets and dialect-specific legacy/Vim9 function blocks; other clients retain
 plain edits. Mapping special arguments complete only before the LHS; ordinary
 RHS payloads stay opaque. Highlight definitions complete pinned argument keys
-and finite help-listed values without losing local group completion. Direct
+and finite help-listed values without losing local group completion. Color
+scheme names come from bounded, non-recursive `colors/*.vim` lookups across the
+configured runtimepath, with the first duplicate taking precedence. The
+workspace rebuild records runtime-relative source paths once; colorscheme,
+runtime import and autoload foreground requests reuse that immutable index
+instead of searching runtimepath again. The same index retains global and
+autoload function locations, signatures, and leading comments for completion,
+definition, and hover; exported Vim9 autoload short names derive their callable
+prefix from the indexed `autoload/` path. Direct
 builtin (including receiver-adjusted `->` methods), same-file user-function,
 static-imported exported-function, and directly bound function-value signature
 help are implemented, as are local class/object methods, inherited methods,

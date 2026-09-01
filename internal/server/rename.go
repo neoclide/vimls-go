@@ -430,7 +430,7 @@ func (s *Server) openWorkspaceReferenceLocationsInState(ctx context.Context, wor
 		}
 		fileAnalysis := analysis.Analyze(file)
 		for _, reference := range workspace.CollectExternalReferencesFromAnalysis(path, file, fileAnalysis) {
-			if !workspaceReferenceMatchesTarget(workspaceState.resolver, reference, target) {
+			if !workspaceReferenceMatchesTarget(workspaceState, reference, target) {
 				continue
 			}
 			if rangeValue, ok := protocolRange(snapshot, encoding, reference.Span); ok {

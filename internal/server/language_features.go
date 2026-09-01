@@ -37,7 +37,7 @@ func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLink
 				var target string
 				switch {
 				case command.Import != nil:
-					resolution := state.resolver.ResolveImport(path, file, command.Import)
+					resolution := resolveImportInState(state, path, file, command.Import)
 					if resolution.Dynamic || resolution.Path == "" {
 						return
 					}
@@ -126,7 +126,7 @@ func (s *Server) importMemberCompletionsInState(documentURI string, file *syntax
 		if targetPath != "" || command.Import == nil || file.Text(command.Import.Alias) != alias {
 			return
 		}
-		resolution := state.resolver.ResolveImport(path, file, command.Import)
+		resolution := resolveImportInState(state, path, file, command.Import)
 		if !resolution.Dynamic {
 			targetPath = resolution.Path
 		}
@@ -185,6 +185,7 @@ const (
 	completionContextHighlightValue
 	completionContextAutocmdHead
 	completionContextAutocmdEvent
+	completionContextColorscheme
 	completionContextImportPath
 	completionContextMember
 	completionContextMappingArgument
@@ -285,6 +286,12 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 					return
 				}
 			}
+		}
+		if command.Canonical == "colorscheme" && offset > command.Name.End &&
+			(spanContains(command.Argument, offset) || offset == command.Argument.End) &&
+			completionArgumentWord(file.Source, command.Argument, offset) == 0 {
+			result = completionContextColorscheme
+			return
 		}
 		if command.Canonical == "autocmd" && (spanContains(command.Argument, offset) || offset == command.Argument.End) && completionArgumentWord(file.Source, command.Argument, offset) > 0 {
 			result = completionContextAutocmdEvent

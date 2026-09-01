@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -586,7 +587,7 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Value != "name: Run\nkind: function\ntype: func(): number" || hover.Range == nil || *hover.Range != navigationRange(2, 17, 20) {
+	if !ok || content.Value != "name: Run\nkind: function\nsignature: Run(): number\ntype: func(): number" || hover.Range == nil || *hover.Range != navigationRange(2, 17, 20) {
 		t.Fatalf("cross-file hover = %#v", hover)
 	}
 
@@ -865,16 +866,60 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 	}
 }
 
+func TestCrossFileLegacyGlobalFunctionCompletionDefinitionAndHover(t *testing.T) {
+	root := t.TempDir()
+	targetPath := writeWorkspaceFile(t, root, "functions.vim", "\" Run the indexed task.\nfunction GlobalRun(arg, ...)\nendfunction\n")
+	source := "call GlobalR\ncall GlobalRun('x')\n"
+	mainPath := writeWorkspaceFile(t, root, "plugin.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	mainURI := uri.File(mainPath)
+	instance.documents.Open(mainURI.String(), 1, source)
+
+	completion, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 0, Character: 12},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := completionItems(t, completion)
+	if len(items) != 1 || items[0].Label != "GlobalRun" {
+		t.Fatalf("legacy global function completion = %#v", items)
+	}
+	if detail, ok := items[0].Detail.Get(); !ok || detail != "GlobalRun(arg, ...)" {
+		t.Fatalf("legacy global function detail = %#v", items[0])
+	}
+
+	position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 1, Character: 9}}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	locations, ok := definition.(protocol.LocationSlice)
+	if err != nil || !ok || len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(1, 9, 18) {
+		t.Fatalf("legacy global function definition = %#v, %v", definition, err)
+	}
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position})
+	if err != nil || hover == nil {
+		t.Fatalf("legacy global function hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || !strings.Contains(content.Value, "signature: GlobalRun(arg, ...)") || !strings.Contains(content.Value, "Run the indexed task.") {
+		t.Fatalf("legacy global function hover content = %#v", hover.Contents)
+	}
+}
+
 func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 	root := t.TempDir()
-	targetPath := writeWorkspaceFile(t, root, filepath.Join("autoload", "api.vim"), "vim9script\nexport def Run(): string\n  return 'ok'\nenddef\n")
+	targetPath := writeWorkspaceFile(t, root, filepath.Join("autoload", "api.vim"), "vim9script\n# Return the cached result.\nexport def Run(arg: string = 'ok'): string\n  return arg\nenddef\n")
 	legacyPath := writeWorkspaceFile(t, root, "legacy.vim", "call api#Run()\n")
 	importPath := writeWorkspaceFile(t, root, "plugin.vim", "vim9script\nimport autoload 'api.vim'\necho api.Run()\n")
-	instance := initializeWorkspaceServer(t, root)
-	legacyURI := uri.File(legacyPath)
+	vim9Path := writeWorkspaceFile(t, root, "direct.vim", "vim9script\necho api#Run()\n")
 	targetURI := canonicalTestURI(t, targetPath)
+	instance := initializeWorkspaceServer(t, root)
+	if err := os.Remove(targetPath); err != nil {
+		t.Fatal(err)
+	}
+	legacyURI := uri.File(legacyPath)
 	indexedLegacyURI := canonicalTestURI(t, legacyPath)
 	importURI := canonicalTestURI(t, importPath)
+	vim9URI := canonicalTestURI(t, vim9Path)
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: legacyURI, Version: 1, Text: "call api#Run()\n",
 	}}); err != nil {
@@ -889,7 +934,7 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != targetURI || locations[0].Range != navigationRange(1, 11, 14) {
+	if len(locations) != 1 || locations[0].URI != targetURI || locations[0].Range != navigationRange(2, 11, 14) {
 		t.Fatalf("Vim9 autoload definition = %#v", definition)
 	}
 	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
@@ -900,9 +945,10 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []protocol.Location{
-		{URI: targetURI, Range: navigationRange(1, 11, 14)},
+		{URI: targetURI, Range: navigationRange(2, 11, 14)},
 		{URI: indexedLegacyURI, Range: navigationRange(0, 5, 12)},
 		{URI: importURI, Range: navigationRange(2, 9, 12)},
+		{URI: vim9URI, Range: navigationRange(1, 5, 12)},
 	}
 	sort.SliceStable(want, func(left, right int) bool { return want[left].URI < want[right].URI })
 	if len(references) != len(want) {
@@ -912,6 +958,34 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 		if references[index] != want[index] {
 			t.Errorf("reference %d = %#v, want %#v", index, references[index], want[index])
 		}
+	}
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position})
+	if err != nil || hover == nil {
+		t.Fatalf("Vim9 autoload hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || !strings.Contains(content.Value, "signature: api#Run(arg: string = 'ok'): string") || !strings.Contains(content.Value, "Return the cached result.") {
+		t.Fatalf("Vim9 autoload hover content = %#v", hover.Contents)
+	}
+	completionSource := "vim9script\necho api#R\n"
+	completionPath := writeWorkspaceFile(t, root, "completion.vim", completionSource)
+	completionURI := uri.File(completionPath)
+	instance.documents.Open(completionURI.String(), 1, completionSource)
+	completion, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: completionURI}, Position: protocol.Position{Line: 1, Character: 10},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := completionItems(t, completion)
+	if len(items) != 1 || items[0].Label != "api#Run" {
+		t.Fatalf("Vim9 autoload completion = %#v", items)
+	}
+	if detail, ok := items[0].Detail.Get(); !ok || detail != "api#Run(arg: string = 'ok'): string" {
+		t.Fatalf("Vim9 autoload completion detail = %#v", items[0])
+	}
+	if documentation, ok := items[0].Documentation.(protocol.String); !ok || string(documentation) != "Return the cached result." {
+		t.Fatalf("Vim9 autoload completion documentation = %#v", items[0].Documentation)
 	}
 }
 
@@ -1256,14 +1330,14 @@ func TestImportCompletionOpenTargetStaleIsImmediate(t *testing.T) {
 	}
 }
 
-func TestCompletionStaysPureLocalWithoutWorkspaceIdentityCheck(t *testing.T) {
+func TestExpressionCompletionChecksWorkspaceFunctionIndexIdentity(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
 	checks := 0
 	instance.beforeWorkspaceIdentityCheck = func() { checks++ }
 	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 10},
 	}})
-	if err != nil || result == nil || checks != 0 {
+	if err != nil || result == nil || checks != 1 {
 		t.Fatalf("completion=%#v checks=%d error=%v", result, checks, err)
 	}
 }

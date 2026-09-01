@@ -18,6 +18,7 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		{"highlight Normal cte", "cte", completionContextHighlightKey}, {"highlight Normal cterm=bo", "bo", completionContextHighlightValue}, {"highlight Normal cterm=bold,un", "un", completionContextHighlightValue},
 		{"highlight Normal cterm = under", "under", completionContextHighlightValue},
 		{"highlight Normal ", "Normal ", completionContextHighlightKey}, {"highlight Normal guifg='salmon pink'", "pink", completionContextNone},
+		{"colorscheme ", "colorscheme ", completionContextColorscheme}, {"colorscheme def", "def", completionContextColorscheme}, {"colorscheme default extra", "extra", completionContextExpression},
 		{"nmap lhs", "lhs", completionContextNone}, {"nmap lhs <bu", "<bu", completionContextNone},
 		{"echo 'value'", "value", completionContextNone}, {"\" echo value", "value", completionContextNone}, {"map x value", "value", completionContextNone}, {"loadkeymap\na a", "a a", completionContextNone},
 		{"let x =<< END\nvalue\nEND", "value", completionContextNone}, {"append\nvalue\n.", "value", completionContextNone}, {"finish\nvalue", "value", completionContextNone},
@@ -51,6 +52,10 @@ func TestCompletionSelectionsClampInvalidOffsets(t *testing.T) {
 		if selection.start < 0 || selection.start > selection.cursor || selection.cursor > selection.end || selection.end > 3 {
 			t.Fatalf("mapping selection at %d = %#v", offset, selection)
 		}
+		selection = completionColorschemeSelection("abc", offset)
+		if selection.start < 0 || selection.start > selection.cursor || selection.cursor > selection.end || selection.end > 3 {
+			t.Fatalf("colorscheme selection at %d = %#v", offset, selection)
+		}
 	}
 }
 
@@ -69,6 +74,10 @@ func FuzzCompletionContext(f *testing.F) {
 		path := completionImportPathSelection(source, offset)
 		if path.start < 0 || path.start > path.cursor || path.cursor > path.end || path.end > len(source) {
 			t.Fatalf("path selection = %#v for %d bytes at %d", path, len(source), offset)
+		}
+		colorscheme := completionColorschemeSelection(source, offset)
+		if colorscheme.start < 0 || colorscheme.start > colorscheme.cursor || colorscheme.cursor > colorscheme.end || colorscheme.end > len(source) {
+			t.Fatalf("colorscheme selection = %#v for %d bytes at %d", colorscheme, len(source), offset)
 		}
 	})
 }

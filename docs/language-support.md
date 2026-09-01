@@ -162,8 +162,10 @@ old Vim watcher registration before registering the new roots.
 
 Cross-file navigation resolves statically provable direct members of Vim9 and
 legacy `:import` namespaces, including default filename-derived aliases,
-qualified type names, and `import autoload`. It also resolves legacy
-`foo#bar#Name` autoload references to `autoload/foo/bar.vim`. Only exported
+qualified type names, and `import autoload`. It also resolves legacy and Vim9
+`foo#bar#Name` autoload references to `autoload/foo/bar.vim`. Legacy autoload
+declarations retain that full name; exported Vim9 autoload declarations retain
+their source short name and derive the callable prefix from the file path. Only exported
 import targets and unique declarations are authoritative. Dynamic import
 expressions, private or ambiguous items, missing files, unsafe symlink targets,
 and paths outside initialized workspace/runtimepath roots return empty results
@@ -199,7 +201,8 @@ another error contract.
 Static Vim9 import paths and direct `:source` filenames become document links
 only when the workspace resolver finds one safe regular file. Completion is
 contextual and bounded: command positions use the pinned Ex command table,
-expression positions use visible declarations and pinned builtin functions,
+expression positions use visible declarations, indexed autoload functions in
+both dialects, legacy workspace global functions, and pinned builtin functions,
 legacy `a:` and `l:` prefixes expose only visible arguments and locals, and
 explicit `g:`, `b:`, `w:`, `t:`, `s:` and `v:` declarations retain their
 namespace spelling. Forward variables are excluded while statically declared
@@ -224,6 +227,18 @@ argument keys, attributes, terminal color names, reset values, and the portable
 GUI color suggestions listed in `syntax.txt`. Dynamic `v:colornames`, numeric
 colors/fonts, and arbitrary terminal/font payloads are intentionally not
 enumerated.
+`:colorscheme` completes regular top-level `colors/*.vim` files from the
+configured runtimepath without executing them. Runtimepath rebuilds populate
+one bounded source-file catalog also used by runtime `import` and `autoload`
+resolution and path completion, so foreground requests do not rescan those
+directories. Names omit `.vim`; duplicate names use the first runtimepath
+entry, nested directories and non-Vim files are ignored, and the 2,000-item
+completion limit applies.
+Indexed global and autoload functions retain their definition span, parsed
+signature, and contiguous comment lines immediately above the declaration.
+Function completion uses the signature and comment, while cross-file hover
+shows both and definition navigation uses the retained span without reopening
+or searching runtimepath files.
 Completion resolve and builtin-call hover include the pinned broad return type
 when Vim's metadata provides one; builtin-function, Ex-command, option, and
 predefined-variable hover plus builtin signature help also include bounded
@@ -253,8 +268,9 @@ override indexed source. Dynamic callees remain unsupported. Rename
 covers same-file bound symbols and cross-file static import members. Legacy
 `s:` and `<SID>` function spellings share one local binding; navigation and
 highlights include both, while rename preserves each occurrence's prefix.
-Cross-file autoload navigation accepts the optional declaration/reference
-`g:` spelling, but autoload rename remains rejected because changing its name
+Cross-file autoload navigation in both dialects accepts the optional
+declaration/reference `g:` spelling and the path-derived name of an exported
+Vim9 autoload item, but autoload rename remains rejected because changing its name
 also changes the runtimepath file contract. Imported Vim9 aggregate navigation
 and rename cover statically resolved constructors, static methods, typed object
 methods, factory-return methods, and enum values across indexed files. Open

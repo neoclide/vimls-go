@@ -213,6 +213,96 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	}
 }
 
+func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
+	root, runtimePath := t.TempDir(), t.TempDir()
+	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "default.vim"), "")
+	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "desert.vim"), "")
+	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "my-dark.vim"), "")
+	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "lists", "default.vim"), "")
+	source := "\" 𐐀\r\ncolorscheme my-da\r\n"
+	main := writeWorkspaceFile(t, root, "main.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	instance.setRuntimePaths([]string{runtimePath})
+	instance.refreshWorkspaceResolver()
+	instance.scheduleWorkspaceRebuild()
+	instance.workspaceWG.Wait()
+	if err := os.Remove(filepath.Join(runtimePath, "colors", "my-dark.vim")); err != nil {
+		t.Fatal(err)
+	}
+	documentURI := uri.File(main)
+	instance.documents.Open(documentURI.String(), 1, source)
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 17},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := completionItems(t, result)
+	if len(items) != 1 || items[0].Label != "my-dark" || items[0].Kind != protocol.CompletionItemKindValue {
+		t.Fatalf("colorscheme completion = %#v", items)
+	}
+	edit, ok := items[0].TextEdit.(*protocol.TextEdit)
+	if !ok || edit.NewText != "my-dark" || edit.Range != navigationRange(1, 12, 17) {
+		t.Fatalf("colorscheme edit = %#v", items[0].TextEdit)
+	}
+}
+
+func TestRuntimeImportRequestsUseIndexedSourceTable(t *testing.T) {
+	root, runtimePath := t.TempDir(), t.TempDir()
+	target := writeWorkspaceFile(t, runtimePath, filepath.Join("import", "pkg", "api.vim"), "vim9script\nexport def Run(): void\nenddef\n")
+	autoloadTarget := writeWorkspaceFile(t, runtimePath, filepath.Join("autoload", "cached.vim"), "function cached#Run()\nendfunction\n")
+	source := "vim9script\nimport 'pkg/' as pending\nimport 'pkg/api.vim' as api\necho api.\n"
+	main := writeWorkspaceFile(t, root, "main.vim", source)
+	legacySource := "call cached#Run()\n"
+	legacy := writeWorkspaceFile(t, root, "legacy.vim", legacySource)
+	targetURI := canonicalTestURI(t, target)
+	autoloadTargetURI := canonicalTestURI(t, autoloadTarget)
+	instance := initializeWorkspaceServer(t, root)
+	instance.setRuntimePaths([]string{runtimePath})
+	instance.refreshWorkspaceResolver()
+	instance.scheduleWorkspaceRebuild()
+	instance.workspaceWG.Wait()
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(autoloadTarget); err != nil {
+		t.Fatal(err)
+	}
+	documentURI := uri.File(main)
+	instance.documents.Open(documentURI.String(), 1, source)
+	pathResult, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 12},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletionLabel(completionItems(t, pathResult), "pkg/api.vim") {
+		t.Fatalf("indexed import path completion = %#v", completionItems(t, pathResult))
+	}
+	memberResult, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 9},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletionLabel(completionItems(t, memberResult), "Run") {
+		t.Fatalf("indexed import member completion = %#v", completionItems(t, memberResult))
+	}
+	links, err := instance.DocumentLink(context.Background(), &protocol.DocumentLinkParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil || len(links) != 1 || links[0].Target == nil || *links[0].Target != targetURI {
+		t.Fatalf("indexed import document links = %#v, %v", links, err)
+	}
+	legacyURI := uri.File(legacy)
+	instance.documents.Open(legacyURI.String(), 1, legacySource)
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: legacyURI}, Position: protocol.Position{Line: 0, Character: 8},
+	}})
+	locations, ok := definition.(protocol.LocationSlice)
+	if err != nil || !ok || len(locations) != 1 || locations[0].URI != autoloadTargetURI {
+		t.Fatalf("indexed autoload definition = %#v, %v", definition, err)
+	}
+}
+
 func TestCompletionReturnsStaticImportMembers(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run()\nenddef\nexport const Value = 1\ndef Private()\nenddef\n")

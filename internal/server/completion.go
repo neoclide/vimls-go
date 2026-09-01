@@ -12,6 +12,7 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/vimdata"
+	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -58,15 +59,33 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
 		} else if contextKind == completionContextHighlightKey || contextKind == completionContextHighlightValue {
 			selection = completionHighlightSelection(snapshot.Text(), file, offset, contextKind == completionContextHighlightValue)
+		} else if contextKind == completionContextColorscheme {
+			selection = completionColorschemeSelection(snapshot.Text(), offset)
 		}
 		if contextKind == completionContextImportPath {
 			selection = completionImportPathSelection(snapshot.Text(), offset)
 			state := s.captureWorkspaceNavigationState()
 			from, ok := workspaceURIPath(uri.URI(snapshot.URI()))
-			if !ok || state.resolver == nil {
+			if !ok {
 				return s.completionList(snapshot, encoding, selection, nil), nil
 			}
-			paths, truncated := state.resolver.ImportPathCompletions(from, selection.prefix, importAutoloadAt(file, offset), maxCompletionItems)
+			var paths []workspace.PathCompletion
+			var truncated bool
+			if workspace.RuntimeImportCompletionPrefix(selection.prefix) {
+				if state.index == nil {
+					return s.completionList(snapshot, encoding, selection, nil), nil
+				}
+				directory := "import"
+				if importAutoloadAt(file, offset) {
+					directory = "autoload"
+				}
+				paths, truncated = state.index.RuntimePathCompletions(directory, selection.prefix, maxCompletionItems)
+			} else {
+				if state.resolver == nil {
+					return s.completionList(snapshot, encoding, selection, nil), nil
+				}
+				paths, truncated = state.resolver.ImportPathCompletions(from, selection.prefix, importAutoloadAt(file, offset), maxCompletionItems)
+			}
 			items := make(map[string]completionCandidate, len(paths))
 			for _, path := range paths {
 				items[path.Display] = completionCandidate{item: protocol.CompletionItem{Label: path.Display, Kind: importPathKind(path.IsDir)}, score: 8500, source: completionSourceImport}
@@ -90,6 +109,31 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			if len(result.Items) == 0 {
 				result.IsIncomplete = true
 			}
+			return result, nil
+		}
+		if contextKind == completionContextColorscheme {
+			state := s.captureWorkspaceNavigationState()
+			if state.index == nil {
+				return s.completionList(snapshot, encoding, selection, nil), nil
+			}
+			paths, truncated := state.index.ColorSchemeCompletions(selection.prefix, maxCompletionItems)
+			items := make(map[string]completionCandidate, len(paths))
+			for _, path := range paths {
+				items[path.Display] = completionCandidate{item: protocol.CompletionItem{Label: path.Display, Kind: protocol.CompletionItemKindValue}, score: 8500, source: completionSourceImport}
+			}
+			document := navigationDocument{server: s, snapshot: snapshot}
+			current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{})
+			if err != nil {
+				return nil, err
+			}
+			if !current {
+				if attempt == 1 {
+					return nil, protocol.ErrContentModified
+				}
+				continue
+			}
+			result := s.completionList(snapshot, encoding, selection, items)
+			result.IsIncomplete = result.IsIncomplete || truncated
 			return result, nil
 		}
 		if alias, member := importMemberContext(snapshot.Text(), offset); member && importAlias(file, alias) {
@@ -137,6 +181,8 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		started := s.completionNow()
 		budgetExpired := false
 		workspaceIncomplete := false
+		var completionWorkspaceState workspaceNavigationSnapshot
+		completionWorkspaceStateUsed := false
 		candidates := make(map[string]completionCandidate)
 		add := func(item protocol.CompletionItem, score int, source completionSource) bool {
 			if ctx.Err() != nil {
@@ -203,6 +249,33 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 				if !add(item, score, completionSourceLocal) {
 					break
+				}
+			}
+			completionWorkspaceState = s.captureWorkspaceNavigationState()
+			if completionWorkspaceState.index == nil {
+				workspaceIncomplete = true
+			} else {
+				completionWorkspaceStateUsed = true
+				functions, incomplete := completionWorkspaceState.index.FunctionCompletions(selection.prefix, file.Dialect == syntax.Legacy, maxCompletionItems)
+				workspaceIncomplete = workspaceIncomplete || incomplete
+				for _, function := range functions {
+					detail := function.Match.Fact.Signature
+					if detail != "" && function.Name != function.Match.Fact.Name && strings.HasPrefix(detail, function.Match.Fact.Name+"(") {
+						detail = function.Name + detail[len(function.Match.Fact.Name):]
+					}
+					item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}
+					if detail != "" {
+						item.Detail = protocol.NewOptional(detail)
+					}
+					if function.Match.Fact.Documentation != "" {
+						item.Documentation = protocol.String(function.Match.Fact.Documentation)
+					}
+					if function.Match.Fact.Deprecated {
+						item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
+					}
+					if !add(item, 7500, completionSourceImport) {
+						break
+					}
 				}
 			}
 			for _, function := range vimdata.BuiltinFunctions() {
@@ -376,6 +449,19 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		if err := s.structureCurrent(ctx, snapshot); err != nil {
 			return nil, err
 		}
+		if completionWorkspaceStateUsed {
+			document := navigationDocument{server: s, snapshot: snapshot}
+			current, err := document.workspaceNavigationCurrent(ctx, completionWorkspaceState, workspaceNavigationTarget{})
+			if err != nil {
+				return nil, err
+			}
+			if !current {
+				if attempt == 1 {
+					return nil, protocol.ErrContentModified
+				}
+				continue
+			}
+		}
 		result := s.completionList(snapshot, encoding, selection, candidates)
 		if ctx.Err() != nil {
 			return nil, protocol.ErrRequestCancelled
@@ -462,6 +548,22 @@ func completionSelectionAt(source string, cursor int) completionSelection {
 	}
 	selection.prefix = source[selection.start:cursor]
 	return selection
+}
+
+func completionColorschemeSelection(source string, cursor int) completionSelection {
+	if cursor < 0 {
+		cursor = 0
+	} else if cursor > len(source) {
+		cursor = len(source)
+	}
+	start, end := cursor, cursor
+	for start > 0 && !isCompletionSpace(source[start-1]) && source[start-1] != '|' {
+		start--
+	}
+	for end < len(source) && !isCompletionSpace(source[end]) && source[end] != '|' {
+		end++
+	}
+	return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
 }
 
 func completionMappingArgumentSelection(source string, cursor int) completionSelection {
@@ -568,7 +670,7 @@ func completionHighlightKey(file *syntax.File, source string, cursor, valueStart
 }
 
 func isCompletionIdentifierRune(r rune) bool {
-	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+	return r == '_' || r == '#' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func completionScopePrefixAt(source string, start int) string {

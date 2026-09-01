@@ -109,7 +109,7 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	writeWorkspaceFile(t, runtimeRoot, "after/plugin/local.vim", "command! LocalCommand echo 'local'\n")
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
-	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{runtimeRoot}, workspacePathResolver(nil, []string{runtimeRoot}), nil)
+	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{runtimeRoot}, []string{runtimeRoot}, workspacePathResolver(nil, []string{runtimeRoot}), nil)
 	if len(warnings) != 0 || !index.Complete() || index.FileCount() != 2 {
 		t.Fatalf("runtimepath index: files=%d complete=%v warnings=%#v", index.FileCount(), index.Complete(), warnings)
 	}
@@ -140,7 +140,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	canonicalRuntimeRoot := mustWorkspaceCanonicalPath(t, runtimeRoot)
-	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{canonicalRuntimeRoot}, workspacePathResolver(nil, []string{canonicalRuntimeRoot}), nil)
+	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{canonicalRuntimeRoot}, []string{canonicalRuntimeRoot}, workspacePathResolver(nil, []string{canonicalRuntimeRoot}), nil)
 	if len(warnings) != 0 || index.FileCount() != 2 {
 		t.Fatalf("runtimepath index: files=%d warnings=%#v", index.FileCount(), warnings)
 	}

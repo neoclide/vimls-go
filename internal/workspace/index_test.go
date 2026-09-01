@@ -351,6 +351,104 @@ func TestIndexUsesCanonicalPathIdentity(t *testing.T) {
 	}
 }
 
+func TestIndexRuntimeFileCatalogUsesPrecedenceAndUpdates(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	after := filepath.Join(first, "after")
+	index := NewIndex(20, 10000)
+	index.SetRuntimePaths([]string{first, after, second})
+	paths := []string{
+		filepath.Join(first, "colors", "shared.vim"),
+		filepath.Join(first, "colors", "my-dark.vim"),
+		filepath.Join(after, "colors", "after-dark.vim"),
+		filepath.Join(after, "import", "after-only.vim"),
+		filepath.Join(second, "colors", "shared.vim"),
+		filepath.Join(first, "import", "pkg", "api.vim"),
+		filepath.Join(first, "autoload", "pkg", "nested", "api.vim"),
+	}
+	for _, path := range paths {
+		if err := index.Replace(path, syntax.Parse("vim9script\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index.SetComplete(true)
+	colors, incomplete := index.ColorSchemeCompletions("", 10)
+	if incomplete || len(colors) != 3 || colors[0].Display != "after-dark" || colors[1].Display != "my-dark" || colors[2].Display != "shared" || colors[2].Path != mustResolverCanonical(t, paths[0]) {
+		t.Fatalf("colorscheme catalog = %#v, incomplete=%v", colors, incomplete)
+	}
+	colors, incomplete = index.ColorSchemeCompletions("my-", 1)
+	if incomplete || len(colors) != 1 || colors[0].Display != "my-dark" {
+		t.Fatalf("prefixed colorscheme catalog = %#v, incomplete=%v", colors, incomplete)
+	}
+	imports, incomplete := index.RuntimePathCompletions("import", "pkg/", 10)
+	if incomplete || len(imports) != 1 || imports[0].Display != "pkg/api.vim" || imports[0].IsDir {
+		t.Fatalf("import catalog = %#v, incomplete=%v", imports, incomplete)
+	}
+	autoloads, incomplete := index.RuntimePathCompletions("autoload", "pkg/", 10)
+	if incomplete || len(autoloads) != 1 || autoloads[0].Display != "pkg/nested/" || !autoloads[0].IsDir {
+		t.Fatalf("autoload catalog = %#v, incomplete=%v", autoloads, incomplete)
+	}
+	if path, ok := index.RuntimeFile("import/pkg/api.vim"); !ok || path != mustResolverCanonical(t, paths[5]) {
+		t.Fatalf("runtime file = %q, %v", path, ok)
+	}
+	if path, ok := index.RuntimeFile("import/after-only.vim"); ok || path != "" {
+		t.Fatalf("after import leaked into runtime lookup = %q, %v", path, ok)
+	}
+	colors, incomplete = index.ColorSchemeCompletions("", 1)
+	if !incomplete || len(colors) != 1 || colors[0].Display != "after-dark" {
+		t.Fatalf("limited colorscheme catalog = %#v, incomplete=%v", colors, incomplete)
+	}
+	index.Remove(paths[5])
+	if path, ok := index.RuntimeFile("import/pkg/api.vim"); ok || path != "" {
+		t.Fatalf("removed runtime file = %q, %v", path, ok)
+	}
+	index.SetComplete(false)
+	if _, incomplete := index.ColorSchemeCompletions("", 10); !incomplete {
+		t.Fatal("incomplete source table did not mark completion incomplete")
+	}
+}
+
+func TestIndexFunctionCompletionsRecordSignaturesCommentsAndVim9AutoloadNames(t *testing.T) {
+	root := t.TempDir()
+	index := NewIndex(10, 10000)
+	index.SetRuntimePaths([]string{root})
+	vim9Path := filepath.Join(root, "autoload", "for", "search.vim")
+	vim9 := syntax.Parse("vim9script\n# Search for matching items.\n# Uses the runtime cache.\nexport def Stuff(arg: string, count = 1): bool\n  return true\nenddef\n")
+	if err := index.Replace(vim9Path, vim9); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(root, "plugin", "legacy.vim")
+	if err := index.Replace(legacyPath, syntax.Parse("\" Run a legacy task.\nfunction GlobalRun(arg, ...)\nendfunction\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Replace(filepath.Join(root, "plugin", "vim9.vim"), syntax.Parse("vim9script\ndef ScriptLocal()\nenddef\n")); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(true)
+
+	vim9Matches, incomplete := index.FunctionCompletions("for#sea", false, 10)
+	if incomplete || len(vim9Matches) != 1 || vim9Matches[0].Name != "for#search#Stuff" {
+		t.Fatalf("Vim9 autoload completions = %#v, incomplete=%t", vim9Matches, incomplete)
+	}
+	fact := vim9Matches[0].Match.Fact
+	if fact.Name != "Stuff" || fact.Signature != "Stuff(arg: string, count = 1): bool" || fact.Documentation != "Search for matching items.\nUses the runtime cache." || !fact.Exported || fact.Dialect != syntax.Vim9 {
+		t.Fatalf("Vim9 autoload fact = %#v", fact)
+	}
+	legacyMatches, incomplete := index.FunctionCompletions("Global", true, 10)
+	if incomplete || len(legacyMatches) != 1 || legacyMatches[0].Name != "GlobalRun" || legacyMatches[0].Match.Fact.Signature != "GlobalRun(arg, ...)" || legacyMatches[0].Match.Fact.Documentation != "Run a legacy task." {
+		t.Fatalf("legacy function completions = %#v, incomplete=%t", legacyMatches, incomplete)
+	}
+	if matches, _ := index.FunctionCompletions("Global", false, 10); len(matches) != 0 {
+		t.Fatalf("legacy globals leaked into Vim9 completion = %#v", matches)
+	}
+	match, ok := index.GlobalFunction("GlobalRun")
+	if !ok || match.Fact.Path != mustResolverCanonical(t, legacyPath) {
+		t.Fatalf("global function = %#v, %t", match, ok)
+	}
+	if match, ok := index.GlobalFunction("ScriptLocal"); ok {
+		t.Fatalf("Vim9 script-local function treated as global: %#v", match)
+	}
+}
+
 func TestIndexRemoveFreesCapacity(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.vim")

@@ -275,7 +275,13 @@ func StaticImportPath(raw string) (path string, ok bool) {
 // lookup below 'runtimepath', rather than a relative or absolute path.
 func RuntimeImport(raw string) bool {
 	path, ok := decodeStaticPath(raw)
-	return ok && path != "" && !strings.HasPrefix(path, ".") && !isAbsolutePath(path)
+	return ok && path != "" && RuntimeImportCompletionPrefix(path)
+}
+
+// RuntimeImportCompletionPrefix reports whether a path prefix completes below
+// runtimepath rather than beside the importing script or from an absolute root.
+func RuntimeImportCompletionPrefix(prefix string) bool {
+	return !strings.HasPrefix(prefix, ".") && !isAbsolutePath(prefix)
 }
 
 // ResolveAutoload maps a legacy name such as foo#bar#Func to
@@ -285,17 +291,27 @@ func (r *PathResolver) ResolveAutoload(name string) PathResolution {
 	if r == nil {
 		return PathResolution{}
 	}
+	relative, ok := AutoloadPath(name)
+	if !ok {
+		return PathResolution{}
+	}
+	candidates := make([]string, 0, len(r.runtimePaths))
+	for _, runtimePath := range r.runtimePaths {
+		candidates = append(candidates, filepath.Join(runtimePath, filepath.FromSlash(relative)))
+	}
+	return r.choose(candidates)
+}
+
+// AutoloadPath maps a complete legacy autoload name to its runtime-relative
+// source path without accessing the filesystem.
+func AutoloadPath(name string) (string, bool) {
 	name = strings.TrimPrefix(name, "g:")
 	separator := strings.LastIndexByte(name, '#')
 	if separator <= 0 || separator == len(name)-1 {
-		return PathResolution{}
+		return "", false
 	}
-	prefix := strings.ReplaceAll(name[:separator], "#", string(filepath.Separator)) + ".vim"
-	candidates := make([]string, 0, len(r.runtimePaths))
-	for _, runtimePath := range r.runtimePaths {
-		candidates = append(candidates, filepath.Join(runtimePath, "autoload", prefix))
-	}
-	return r.choose(candidates)
+	prefix := strings.ReplaceAll(name[:separator], "#", "/") + ".vim"
+	return "autoload/" + prefix, true
 }
 
 // ResolveSource resolves the direct filename accepted by :source. Vim does

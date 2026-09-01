@@ -148,8 +148,11 @@ regular expressions.
 - [x] Extend the existing predefined `v:` variable and local declaration
   completion to all statically visible scoped names, respecting the active
   legacy/Vim9 scope, position, forward-visibility rules and shadowing.
-- [ ] Add legacy workspace global function/variable completion with the same
-  ambiguity and root-safety rules as navigation.
+- [x] Add legacy workspace global function completion with the same ambiguity
+  and root-safety rules as navigation; include indexed autoload functions in
+  both dialects and derive Vim9 exported autoload prefixes from their paths.
+- [ ] Add legacy workspace global variable completion with the same ambiguity
+  and root-safety rules as navigation.
 - [ ] Add `has()` feature names and `expand()` special tokens from pinned Vim
   help/source data.
 - [x] Add the pinned `:map-arguments` set before the mapping LHS, omit already
@@ -157,7 +160,7 @@ regular expressions.
 - [x] Add `:highlight` argument keys and finite help-listed values, while
   retaining local syntax/highlight group completion. Dynamic `v:colornames`
   and numeric payloads remain user input rather than enumerations.
-- [ ] Add `:colorscheme` names from safe indexed runtimepath `colors/`
+- [x] Add `:colorscheme` names from safe indexed runtimepath `colors/`
   directories, respecting runtimepath precedence and workspace limits.
 - [ ] Add command-specific completion for augroups, user-command attributes,
   `:set` operators/values and other finite enums only after their command AST

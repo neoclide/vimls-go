@@ -27,6 +27,9 @@ type SymbolFact struct {
 	Range          syntax.Span
 	SelectionRange syntax.Span
 	Detail         string
+	Signature      string
+	Documentation  string
+	Dialect        syntax.Dialect
 	Deprecated     bool
 	Exported       bool
 	TopLevel       bool
@@ -39,16 +42,24 @@ type SymbolMatch struct {
 	Source string
 }
 
+// FunctionMatch pairs a callable spelling with its indexed declaration.
+// Vim9 autoload exports derive the spelling's prefix from the file path.
+type FunctionMatch struct {
+	Name  string
+	Match SymbolMatch
+}
+
 type ExternalReferenceKind uint8
 
 const (
 	ExternalReferenceImportMember ExternalReferenceKind = iota + 1
 	ExternalReferenceAutoload
+	ExternalReferenceGlobalFunction
 )
 
 // ExternalReferenceFact is a statically provable cross-file reference. Import
 // members retain the literal import spelling needed by PathResolver. Autoload
-// names are stored without an optional g: prefix.
+// and ordinary global function names are stored without an optional g: prefix.
 type ExternalReferenceFact struct {
 	Path           string
 	Name           string
@@ -104,7 +115,41 @@ type Index struct {
 	byExternalName map[string][]ExternalReferenceFact
 	byUserCommand  map[string][]UserCommandFact
 	byGlobalName   map[string][]GlobalNameFact
+	runtimePaths   []string
+	runtimeAfter   []bool
+	runtimeFiles   []map[string]string
 	complete       bool
+}
+
+// SetRuntimePaths configures the ordered runtime roots used to classify the
+// indexed source table. Callers use the resulting catalog instead of walking
+// runtimepath during foreground requests.
+func (i *Index) SetRuntimePaths(paths []string) {
+	normalized := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		path, err := normalizeIndexPath(path)
+		if err != nil {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
+	}
+	i.mu.Lock()
+	i.runtimePaths = normalized
+	i.runtimeAfter = make([]bool, len(normalized))
+	i.runtimeFiles = make([]map[string]string, len(normalized))
+	for index := range i.runtimeFiles {
+		i.runtimeAfter[index] = filepath.Base(normalized[index]) == "after"
+		i.runtimeFiles[index] = make(map[string]string)
+	}
+	for path := range i.files {
+		i.addRuntimeFileLocked(path)
+	}
+	i.mu.Unlock()
 }
 
 // NewIndex creates a workspace symbol index with file-count and source-byte
@@ -161,6 +206,7 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 		i.removeGlobalNamesLocked(old.globals)
 	}
 	i.files[normalized] = indexed
+	i.addRuntimeFileLocked(normalized)
 	i.bytes = indexedBytes
 	for _, fact := range facts {
 		i.byName[fact.Name] = append(i.byName[fact.Name], fact)
@@ -200,9 +246,144 @@ func (i *Index) Remove(path string) {
 	i.removeExternalReferencesLocked(old.references)
 	i.removeUserCommandsLocked(old.commands)
 	i.removeGlobalNamesLocked(old.globals)
+	i.removeRuntimeFileLocked(normalized)
 	delete(i.files, normalized)
 	i.bytes -= old.bytes
 	i.revision++
+}
+
+// RuntimeFile returns the first indexed file with relativePath in configured
+// runtimepath order.
+func (i *Index) RuntimeFile(relativePath string) (string, bool) {
+	relativePath, ok := cleanRuntimeRelativePath(relativePath)
+	if !ok {
+		return "", false
+	}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	for index, files := range i.runtimeFiles {
+		if i.runtimeAfter[index] {
+			continue
+		}
+		if path := files[relativePath]; path != "" {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// RuntimePathCompletions returns direct indexed children below one runtime
+// directory. Duplicate displays keep the first runtimepath entry.
+func (i *Index) RuntimePathCompletions(directory, prefix string, limit int) ([]PathCompletion, bool) {
+	return i.runtimePathCompletions(directory, prefix, limit, true, false)
+}
+
+func (i *Index) runtimePathCompletions(directory, prefix string, limit int, includeDirectories, includeAfter bool) ([]PathCompletion, bool) {
+	if limit <= 0 || strings.ContainsAny(prefix, "\x00\r\n\\") {
+		return nil, false
+	}
+	prefix = filepath.ToSlash(prefix)
+	dirPart, namePrefix := filepath.Split(filepath.FromSlash(prefix))
+	dirPart = filepath.ToSlash(dirPart)
+	namePrefixFolded := strings.ToLower(namePrefix)
+	wantedDirectory, ok := cleanRuntimeRelativePath(filepath.ToSlash(filepath.Join(directory, filepath.FromSlash(dirPart))))
+	if !ok {
+		return nil, false
+	}
+	i.mu.RLock()
+	seen := make(map[string]PathCompletion)
+	for index, files := range i.runtimeFiles {
+		if i.runtimeAfter[index] && !includeAfter {
+			continue
+		}
+		for relative, path := range files {
+			parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(relative)))
+			if parent == wantedDirectory {
+				name := filepath.Base(filepath.FromSlash(relative))
+				if strings.HasPrefix(strings.ToLower(name), namePrefixFolded) && strings.HasSuffix(name, ".vim") {
+					display := dirPart + name
+					if _, exists := seen[display]; !exists {
+						seen[display] = PathCompletion{Display: display, Path: path}
+					}
+				}
+				continue
+			}
+			if !includeDirectories {
+				continue
+			}
+			prefixDirectory := wantedDirectory + "/"
+			if !strings.HasPrefix(parent, prefixDirectory) {
+				continue
+			}
+			child := strings.TrimPrefix(parent, prefixDirectory)
+			if slash := strings.IndexByte(child, '/'); slash >= 0 {
+				child = child[:slash]
+			}
+			if child == "" || !strings.HasPrefix(strings.ToLower(child), namePrefixFolded) {
+				continue
+			}
+			display := dirPart + child + "/"
+			if _, exists := seen[display]; !exists {
+				seen[display] = PathCompletion{Display: display, IsDir: true}
+			}
+		}
+	}
+	incomplete := !i.complete || len(seen) > limit
+	result := make([]PathCompletion, 0, min(len(seen), limit))
+	for _, completion := range seen {
+		result = append(result, completion)
+	}
+	i.mu.RUnlock()
+	sort.Slice(result, func(left, right int) bool { return result[left].Display < result[right].Display })
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, incomplete
+}
+
+// ColorSchemeCompletions returns indexed top-level colors/*.vim files.
+func (i *Index) ColorSchemeCompletions(prefix string, limit int) ([]PathCompletion, bool) {
+	files, incomplete := i.runtimePathCompletions("colors", prefix, limit, false, true)
+	result := files[:0]
+	for _, file := range files {
+		if file.IsDir {
+			continue
+		}
+		file.Display = strings.TrimSuffix(file.Display, ".vim")
+		result = append(result, file)
+	}
+	return result, incomplete
+}
+
+func (i *Index) addRuntimeFileLocked(path string) {
+	for index, root := range i.runtimePaths {
+		if !pathWithinOrEqual(root, path) {
+			continue
+		}
+		relative, err := filepath.Rel(root, path)
+		if err == nil && relative != "." {
+			i.runtimeFiles[index][filepath.ToSlash(relative)] = path
+		}
+	}
+}
+
+func (i *Index) removeRuntimeFileLocked(path string) {
+	for index, root := range i.runtimePaths {
+		if !pathWithinOrEqual(root, path) {
+			continue
+		}
+		if relative, err := filepath.Rel(root, path); err == nil {
+			delete(i.runtimeFiles[index], filepath.ToSlash(relative))
+		}
+	}
+}
+
+func cleanRuntimeRelativePath(path string) (string, bool) {
+	path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
+	if path == "." || path == ".." || strings.HasPrefix(path, "../") || filepath.IsAbs(filepath.FromSlash(path)) {
+		return "", false
+	}
+	return path, true
 }
 
 // LookupFile returns exact-name symbols from one indexed file. Results retain
@@ -408,6 +589,105 @@ func (i *Index) Lookup(name string) []SymbolFact {
 	return facts
 }
 
+// GlobalFunction returns an unambiguous top-level function declaration for
+// name. Script-local functions and autoload short names are not guessed.
+func (i *Index) GlobalFunction(name string) (SymbolMatch, bool) {
+	if name == "" {
+		return SymbolMatch{}, false
+	}
+	names := []string{name}
+	if strings.HasPrefix(name, "g:") {
+		names = append(names, strings.TrimPrefix(name, "g:"))
+	} else {
+		names = append(names, "g:"+name)
+	}
+	i.mu.RLock()
+	var match SymbolMatch
+	found := false
+	for _, candidateName := range names {
+		for _, fact := range i.byName[candidateName] {
+			if !fact.TopLevel || fact.Kind != analysis.SymbolKindFunction || strings.HasPrefix(fact.Name, "s:") || strings.Contains(strings.TrimPrefix(fact.Name, "g:"), "#") || fact.Dialect != syntax.Legacy && !strings.HasPrefix(fact.Name, "g:") {
+				continue
+			}
+			if found && (match.Fact.Path != fact.Path || match.Fact.SelectionRange != fact.SelectionRange) {
+				i.mu.RUnlock()
+				return SymbolMatch{}, false
+			}
+			file := i.files[fact.Path]
+			match = SymbolMatch{Fact: fact, Source: file.source}
+			found = true
+		}
+	}
+	i.mu.RUnlock()
+	return match, found
+}
+
+// FunctionCompletions returns indexed callable function names. Autoload
+// functions are available in both dialects. includeLegacyGlobals additionally
+// includes ordinary legacy global functions.
+func (i *Index) FunctionCompletions(prefix string, includeLegacyGlobals bool, limit int) ([]FunctionMatch, bool) {
+	prefixFolded := strings.ToLower(prefix)
+	i.mu.RLock()
+	byCallableName := make(map[string]FunctionMatch)
+	for path, file := range i.files {
+		for _, fact := range file.facts {
+			if !fact.TopLevel || fact.Kind != analysis.SymbolKindFunction {
+				continue
+			}
+			name := strings.TrimPrefix(fact.Name, "g:")
+			if strings.Contains(name, "#") {
+				// Legacy autoload declarations already contain the full name.
+			} else if fact.Exported {
+				if derived, ok := i.runtimeAutoloadNameLocked(path, name); ok {
+					name = derived
+				} else if !includeLegacyGlobals || fact.Dialect != syntax.Legacy {
+					continue
+				}
+			} else if !includeLegacyGlobals || fact.Dialect != syntax.Legacy || strings.HasPrefix(fact.Name, "s:") {
+				continue
+			}
+			if !strings.HasPrefix(strings.ToLower(name), prefixFolded) {
+				continue
+			}
+			previous, exists := byCallableName[name]
+			if !exists || factLess(fact, previous.Match.Fact) {
+				byCallableName[name] = FunctionMatch{Name: name, Match: SymbolMatch{Fact: fact, Source: file.source}}
+			}
+		}
+	}
+	complete := i.complete
+	i.mu.RUnlock()
+	matches := make([]FunctionMatch, 0, len(byCallableName))
+	for _, match := range byCallableName {
+		matches = append(matches, match)
+	}
+	sort.SliceStable(matches, func(left, right int) bool { return matches[left].Name < matches[right].Name })
+	truncated := limit > 0 && len(matches) > limit
+	if truncated {
+		matches = matches[:limit]
+	}
+	return matches, truncated || !complete
+}
+
+func (i *Index) runtimeAutoloadNameLocked(path, name string) (string, bool) {
+	for rootIndex, root := range i.runtimePaths {
+		if i.runtimeAfter[rootIndex] {
+			continue
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			continue
+		}
+		relative = filepath.ToSlash(relative)
+		if i.runtimeFiles[rootIndex][relative] != path || !strings.HasPrefix(relative, "autoload/") || !strings.HasSuffix(relative, ".vim") {
+			continue
+		}
+		prefix := strings.TrimSuffix(strings.TrimPrefix(relative, "autoload/"), ".vim")
+		return strings.ReplaceAll(prefix, "/", "#") + "#" + name, true
+	}
+	return "", false
+}
+
 // Search returns symbols whose names contain query as a case-insensitive
 // ordered subsequence. Exact matches rank before prefixes, followed by other
 // subsequence matches; ties use the index's stable fact ordering. An empty
@@ -580,17 +860,25 @@ func CollectSymbolFacts(path string, file *syntax.File) []SymbolFact {
 		return nil
 	}
 	exported := exportedSymbolSpans(file)
+	functions := functionFacts(file)
 	facts := make([]SymbolFact, 0)
-	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, true, &facts)
+	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, functions, true, &facts)
 	sortFacts(facts)
 	return facts
 }
 
-func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[syntax.Span]bool, topLevel bool, facts *[]SymbolFact) {
+type indexedFunctionFact struct {
+	signature     string
+	documentation string
+	dialect       syntax.Dialect
+}
+
+func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[syntax.Span]bool, functions map[syntax.Span]indexedFunctionFact, topLevel bool, facts *[]SymbolFact) {
 	for _, symbol := range symbols {
 		if symbol == nil || symbol.Name == "" {
 			continue
 		}
+		function := functions[symbol.SelectionRange]
 		*facts = append(*facts, SymbolFact{
 			Path:           path,
 			Name:           strings.Clone(symbol.Name),
@@ -598,12 +886,98 @@ func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[sy
 			Range:          symbol.Range,
 			SelectionRange: symbol.SelectionRange,
 			Detail:         strings.Clone(symbol.Detail),
+			Signature:      strings.Clone(function.signature),
+			Documentation:  strings.Clone(function.documentation),
+			Dialect:        function.dialect,
 			Deprecated:     symbol.Deprecated,
 			Exported:       exported[symbol.SelectionRange],
 			TopLevel:       topLevel,
 		})
-		collectSymbolFacts(path, symbol.Children, exported, false, facts)
+		collectSymbolFacts(path, symbol.Children, exported, functions, false, facts)
 	}
+}
+
+func functionFacts(file *syntax.File) map[syntax.Span]indexedFunctionFact {
+	result := make(map[syntax.Span]indexedFunctionFact)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.Function != nil {
+				name := file.Text(command.Function.Name)
+				result[command.Function.Name] = indexedFunctionFact{
+					signature:     formatIndexedFunctionSignature(file, name, command.Function),
+					documentation: leadingFunctionDocumentation(file, command),
+					dialect:       command.Dialect,
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	return result
+}
+
+func formatIndexedFunctionSignature(file *syntax.File, name string, function *syntax.Function) string {
+	parts := make([]string, 0, len(function.Parameters))
+	for _, parameter := range function.Parameters {
+		part := file.Text(parameter.Name)
+		if parameter.Type != nil {
+			part += ": " + file.Text(parameter.TypeSpan)
+		}
+		if parameter.Default != nil {
+			part += " = " + file.Text(parameter.DefaultSpan)
+		}
+		if parameter.Variadic && !strings.HasPrefix(part, "...") {
+			part = "..." + part
+		}
+		parts = append(parts, part)
+	}
+	signature := name + "(" + strings.Join(parts, ", ") + ")"
+	if function.ReturnType != nil {
+		signature += ": " + file.Text(function.ReturnTypeSpan)
+	}
+	return signature
+}
+
+func leadingFunctionDocumentation(file *syntax.File, command *syntax.Command) string {
+	if file == nil || command == nil || command.Span.Start <= 0 {
+		return ""
+	}
+	lineStart := strings.LastIndexByte(file.Source[:command.Span.Start], '\n') + 1
+	lines := make([]string, 0)
+	for lineStart > 0 {
+		lineEnd := lineStart - 1
+		if lineEnd > 0 && file.Source[lineEnd-1] == '\r' {
+			lineEnd--
+		}
+		previousStart := strings.LastIndexByte(file.Source[:lineEnd], '\n') + 1
+		first := previousStart
+		for first < lineEnd && (file.Source[first] == ' ' || file.Source[first] == '\t') {
+			first++
+		}
+		if first == lineEnd || !indexedCommentToken(file, first, lineEnd) {
+			break
+		}
+		text := strings.TrimSpace(file.Source[first+1 : lineEnd])
+		lines = append(lines, text)
+		lineStart = previousStart
+	}
+	for left, right := 0, len(lines)-1; left < right; left, right = left+1, right-1 {
+		lines[left], lines[right] = lines[right], lines[left]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func indexedCommentToken(file *syntax.File, start, end int) bool {
+	for _, token := range file.Tokens {
+		if token.Kind == syntax.TokenComment && token.Span == (syntax.Span{Start: start, End: end}) {
+			return true
+		}
+	}
+	return false
 }
 
 func exportedSymbolSpans(file *syntax.File) map[syntax.Span]bool {
@@ -648,7 +1022,7 @@ func commandHasModifier(command *syntax.Command, name string) bool {
 
 // CollectExternalReferences returns only references whose target can be
 // decided later without executing Vimscript: a direct member of a proven
-// import alias, or an unresolved legacy autoload name containing '#'.
+// import alias, an unresolved autoload call, or a legacy global function call.
 func CollectExternalReferences(path string, file *syntax.File) []ExternalReferenceFact {
 	return CollectExternalReferencesFromAnalysis(path, file, analysis.Analyze(file))
 }
@@ -680,7 +1054,11 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 
 	facts := make([]ExternalReferenceFact, 0)
 	visited := make(map[*syntax.Expression]bool)
+	directCalls := make(map[syntax.Span]bool)
 	visitIndexCommands(file.Commands, visited, func(expression *syntax.Expression) {
+		if expression != nil && expression.Kind == syntax.ExpressionCall && expression.Value == "" && len(expression.Children) > 0 && expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
+			directCalls[expression.Children[0].Span] = true
+		}
 		if expression == nil || expression.Kind != syntax.ExpressionMember || len(expression.Children) != 1 || expression.Value == "" {
 			return
 		}
@@ -751,11 +1129,19 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 		}
 		name := strings.TrimPrefix(reference.Name, "g:")
 		separator := strings.LastIndexByte(name, '#')
-		if separator <= 0 || separator == len(name)-1 || !validIndexSpan(file, reference.Span) {
+		if !validIndexSpan(file, reference.Span) {
+			continue
+		}
+		kind := ExternalReferenceAutoload
+		if separator > 0 && separator < len(name)-1 {
+			// Autoload variables and functions both resolve by their full name.
+		} else if file.Dialect == syntax.Legacy && directCalls[reference.Span] {
+			kind = ExternalReferenceGlobalFunction
+		} else {
 			continue
 		}
 		facts = append(facts, ExternalReferenceFact{
-			Path: normalized, Name: strings.Clone(name), Span: reference.Span, Kind: ExternalReferenceAutoload,
+			Path: normalized, Name: strings.Clone(name), Span: reference.Span, Kind: kind,
 		})
 	}
 	sortExternalReferences(facts)

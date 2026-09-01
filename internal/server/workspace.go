@@ -201,7 +201,7 @@ func (s *Server) workspaceIndexWorker() {
 			s.beforeWorkspaceBuildForTest(openSnapshots)
 		}
 
-		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, resolver, openSnapshots)
+		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, runtimePaths, resolver, openSnapshots)
 		s.workspaceMu.Lock()
 		if s.analysisStopped || s.analysisContext.Err() != nil {
 			s.workspaceRunning = false
@@ -261,8 +261,13 @@ func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
 	return true
 }
 
-func (s *Server) buildWorkspaceIndex(ctx context.Context, roots []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
+func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
 	index := workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes)
+	searchPaths := runtimePaths
+	if len(searchPaths) == 0 {
+		searchPaths = roots
+	}
+	index.SetRuntimePaths(searchPaths)
 	graph := workspace.NewImportGraph()
 	diskFiles := make(map[string]struct{})
 	if len(roots) == 0 || ctx.Err() != nil {

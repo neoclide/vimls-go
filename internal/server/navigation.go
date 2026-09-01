@@ -486,7 +486,7 @@ func (s *Server) DocumentHighlight(ctx context.Context, params *protocol.Documen
 			if valid {
 				highlights := make([]protocol.DocumentHighlight, 0)
 				for _, reference := range workspace.CollectExternalReferencesFromAnalysis(path, document.analysis.File, document.analysis) {
-					if workspaceReferenceMatchesTarget(state.resolver, reference, target) {
+					if workspaceReferenceMatchesTarget(state, reference, target) {
 						if rangeValue, ok := protocolRange(document.snapshot, document.encoding, reference.Span); ok {
 							highlights = append(highlights, protocol.DocumentHighlight{Range: rangeValue, Kind: protocol.DocumentHighlightKindText})
 						}
@@ -583,10 +583,23 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 			state := s.captureWorkspaceNavigationState()
 			target, ok := document.workspaceTargetInState(state)
 			if ok {
-				lines := []string{"name: " + target.match.Fact.Name, "kind: " + string(target.match.Fact.Kind)}
+				displayName := document.external.Name
+				if displayName == "" {
+					displayName = target.match.Fact.Name
+				}
+				lines := []string{"name: " + displayName, "kind: " + string(target.match.Fact.Kind)}
+				if signature := target.match.Fact.Signature; signature != "" {
+					if displayName != target.match.Fact.Name && strings.HasPrefix(signature, target.match.Fact.Name+"(") {
+						signature = displayName + signature[len(target.match.Fact.Name):]
+					}
+					lines = append(lines, "signature: "+signature)
+				}
 				_, declaration := s.analyzeWorkspaceTarget(target)
 				if declaration != nil && declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
 					lines = append(lines, "type: "+formatValueType(declaration.Type))
+				}
+				if target.match.Fact.Documentation != "" {
+					lines = append(lines, "", target.match.Fact.Documentation)
 				}
 				rangeValue, valid := protocolRange(document.snapshot, document.encoding, document.occurrence)
 				if valid {
