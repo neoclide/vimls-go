@@ -171,8 +171,11 @@ runtime import and autoload foreground requests reuse that immutable index
 instead of searching runtimepath again. The same index retains global and
 autoload function locations, signatures, and leading comments for completion,
 definition, and hover; exported Vim9 autoload short names derive their callable
-prefix from the indexed `autoload/` path. Direct
-builtin (including receiver-adjusted `->` methods), same-file user-function,
+prefix from the indexed `autoload/` path. Direct builtin string contexts
+complete pinned v9.2.1015 `has()` feature names and
+`expand()` special tokens without treating arbitrary string contents as
+expressions. Direct builtin (including receiver-adjusted `->` methods),
+same-file user-function,
 static-imported exported-function, and directly bound function-value signature
 help are implemented, as are local class/object methods, inherited methods,
 explicit/default constructors, and imported aggregate constructors, static

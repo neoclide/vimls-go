@@ -209,10 +209,11 @@ namespace spelling. Forward variables are excluded while statically declared
 functions remain callable before their declaration. A statically resolved
 import namespace exposes only exported members.
 Unknown and dynamic contexts return no inferred candidates.
-Completion advertises only `.`, `:` and `&` as trigger characters; tests bind
-them to member, command/scoped-name and option contexts respectively. Autoload,
-index, environment, mapping-token and quote triggers remain manual until their
-bounded providers can return a useful result immediately after the character.
+Completion advertises `.`, `:`, `&`, `#`, `<`, `"` and `'` as trigger
+characters; tests bind them to member, command/scoped-name, option, autoload,
+mapping-token and builtin-string contexts. Index and environment triggers
+remain manual until bounded providers can return a useful result immediately
+after the character.
 Clients that declare snippet support receive required-argument call snippets
 for direct builtins and parameter-name snippets for same-file functions. They
 also receive a legacy `function`/`endfunction` or Vim9 `def`/`enddef` block
@@ -234,6 +235,14 @@ resolution and path completion, so foreground requests do not rescan those
 directories. Names omit `.vim`; duplicate names use the first runtimepath
 entry, nested directories and non-Vim files are ignored, and the 2,000-item
 completion limit applies.
+The first static string argument to direct `has()` calls completes the 208
+fixed feature spellings and 14 runtime/version spellings recognized by Vim
+v9.2.1015. The first argument or method receiver of `expand()` completes the
+16 finite special tokens listed under `expand()` in the matching `builtin.txt`;
+modifiers such as `:p` are preserved. Both tables include completion
+documentation and do not enumerate
+dynamic environment variables, wildcard paths, arbitrary patch versions, or
+later-Vim features.
 Indexed global and autoload functions retain their definition span, parsed
 signature, and contiguous comment lines immediately above the declaration.
 Function completion uses the signature and comment, while cross-file hover

@@ -153,7 +153,7 @@ regular expressions.
   both dialects and derive Vim9 exported autoload prefixes from their paths.
 - [ ] Add legacy workspace global variable completion with the same ambiguity
   and root-safety rules as navigation.
-- [ ] Add `has()` feature names and `expand()` special tokens from pinned Vim
+- [x] Add `has()` feature names and `expand()` special tokens from pinned Vim
   help/source data.
 - [x] Add the pinned `:map-arguments` set before the mapping LHS, omit already
   used flags, and keep ordinary mapping right-hand sides outside completion.
@@ -165,10 +165,11 @@ regular expressions.
 - [ ] Add command-specific completion for augroups, user-command attributes,
   `:set` operators/values and other finite enums only after their command AST
   identifies the cursor position.
-- [x] Advertise the trigger characters actually supported by tests. `.`, `:`
-  and `&` select proven member, command/scoped-name, and option contexts. `#`,
-  `[`, `$`, `<`, `"` and `'` remain unadvertised until a bounded provider has
-  a useful result immediately after that character.
+- [x] Advertise the trigger characters actually supported by tests. `.`, `:`,
+  `&`, `#`, `<`, `"` and `'` select proven member, command/scoped-name, option,
+  autoload, mapping-token, `has()` and `expand()` contexts. `[` and `$` remain
+  unadvertised until a bounded provider has a useful result immediately after
+  that character.
 - [x] Enable direct builtin and same-file function-call snippets only when the
   client supports snippets. Legacy `function`/`endfunction` and Vim9
   `def`/`enddef` block templates are dialect-specific; plain-text clients keep

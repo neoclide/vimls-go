@@ -126,7 +126,7 @@ func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 	if capabilities.DocumentLinkProvider == nil || capabilities.CompletionProvider == nil || capabilities.SignatureHelpProvider == nil || capabilities.RenameProvider == nil || capabilities.SemanticTokensProvider == nil || capabilities.CodeActionProvider == nil || capabilities.InlayHintProvider == nil {
 		t.Fatalf("language capabilities = %#v", capabilities)
 	}
-	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&"}; !reflect.DeepEqual(got, want) {
+	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&", "#", "<", "\"", "'"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("completion trigger characters = %#v, want %#v", got, want)
 	}
 	for _, method := range []string{
@@ -156,6 +156,10 @@ func TestAdvertisedCompletionTriggersReturnContextualItems(t *testing.T) {
 		{name: "command", source: ":\n", trigger: ":", label: "echo", line: 0, character: 1, kind: protocol.CompletionItemKindKeyword},
 		{name: "scope", source: "let g:scoped = 1\necho g:\n", trigger: ":", label: "g:scoped", line: 1, character: 7, kind: protocol.CompletionItemKindVariable},
 		{name: "option", source: "echo &\n", trigger: "&", label: "&ignorecase", line: 0, character: 6, kind: protocol.CompletionItemKindProperty},
+		{name: "autoload", source: "function foo#Run()\nendfunction\necho foo#\n", trigger: "#", label: "foo#Run", line: 2, character: 9, kind: protocol.CompletionItemKindFunction},
+		{name: "expand angle", source: "echo expand('<\n", trigger: "<", label: "<cfile>", line: 0, character: 13, kind: protocol.CompletionItemKindEnumMember},
+		{name: "has single quote", source: "echo has('\n", trigger: "'", label: "vim9script", line: 0, character: 10, kind: protocol.CompletionItemKindEnumMember},
+		{name: "expand double quote", source: "echo expand(\"\n", trigger: "\"", label: "%", line: 0, character: 13, kind: protocol.CompletionItemKindEnumMember},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -210,6 +214,88 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	}
 	if detail, ok := argc.Detail.Get(); !ok || detail != "builtin function (0..1 arguments): number" {
 		t.Fatalf("resolved argc = %#v", argc)
+	}
+}
+
+func TestCompletionReturnsPinnedHasFeaturesAndExpandSpecials(t *testing.T) {
+	tests := []struct {
+		name, source, label, detail, documentation string
+		position                                   protocol.Position
+		edit                                       protocol.Range
+	}{
+		{
+			name:          "has feature in incomplete single quoted string",
+			source:        "\" 𐐀\r\necho has('gui_\r\n",
+			label:         "gui_running",
+			detail:        "has() feature",
+			documentation: "Whether the Vim GUI is running or starting.",
+			position:      protocol.Position{Line: 1, Character: 14},
+			edit:          navigationRange(1, 10, 14),
+		},
+		{
+			name:          "expand special preserves modifier",
+			source:        "echo expand(\"<cf:p\")\n",
+			label:         "<cfile>",
+			detail:        "expand() special token",
+			documentation: "File name under the cursor.",
+			position:      protocol.Position{Line: 0, Character: 16},
+			edit:          navigationRange(0, 13, 16),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range completionItems(t, result) {
+				if item.Label != test.label {
+					continue
+				}
+				detail, ok := item.Detail.Get()
+				documentation, documentationOK := item.Documentation.(protocol.String)
+				edit, editOK := item.TextEdit.(*protocol.TextEdit)
+				if !ok || detail != test.detail || !documentationOK || string(documentation) != test.documentation || !editOK || edit.Range != test.edit || edit.NewText != test.label {
+					t.Fatalf("completion item = %#v", item)
+				}
+				return
+			}
+			t.Fatalf("completion %q missing from %#v", test.label, completionItems(t, result))
+		})
+	}
+}
+
+func TestPinnedBuiltinStringCompletionIsCompleteAndDeterministic(t *testing.T) {
+	tests := []struct {
+		source    string
+		position  protocol.Position
+		itemCount int
+	}{
+		{source: "echo has('')\n", position: protocol.Position{Line: 0, Character: 10}, itemCount: 222},
+		{source: "echo expand('')\n", position: protocol.Position{Line: 0, Character: 13}, itemCount: 16},
+	}
+	for _, test := range tests {
+		instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+		complete := func() *protocol.CompletionList {
+			result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			list, ok := result.(*protocol.CompletionList)
+			if !ok {
+				t.Fatalf("completion result = %T", result)
+			}
+			return list
+		}
+		first, second := complete(), complete()
+		if first.IsIncomplete || len(first.Items) != test.itemCount || !reflect.DeepEqual(first.Items, second.Items) {
+			t.Fatalf("completion for %q: first=%d incomplete=%t deterministic=%t", test.source, len(first.Items), first.IsIncomplete, reflect.DeepEqual(first.Items, second.Items))
+		}
 	}
 }
 

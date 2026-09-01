@@ -7,8 +7,51 @@ import (
 
 func TestCompletionMetadataTables(t *testing.T) {
 	if ModifierVimTag != "v9.2.1015" || ModifierVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" ||
-		AutocmdEventVimTag != "v9.2.1015" || AutocmdEventVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" {
+		AutocmdEventVimTag != "v9.2.1015" || AutocmdEventVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" ||
+		CompletionValueVimTag != "v9.2.1015" || CompletionValueVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" {
 		t.Fatal("completion metadata provenance changed")
+	}
+
+	features := HasFeatures()
+	if len(features) != 222 {
+		t.Fatalf("has() features = %d, want 222", len(features))
+	}
+	for index, feature := range features {
+		if feature.Name == "" || feature.Documentation == "" {
+			t.Fatalf("empty has() feature metadata at %d: %#v", index, feature)
+		}
+		if index > 0 && strings.ToLower(features[index-1].Name) >= strings.ToLower(feature.Name) {
+			t.Fatalf("has() features are not uniquely sorted at %q", feature.Name)
+		}
+	}
+	wantFeatures := map[string]bool{"all_builtin_terms": false, "clipboard_working": false, "patch-9.2.1015": false, "vim9script": false, "X11": false, ":tearoff": false}
+	for _, feature := range features {
+		if _, ok := wantFeatures[feature.Name]; ok {
+			wantFeatures[feature.Name] = true
+		}
+	}
+	for name, found := range wantFeatures {
+		if !found {
+			t.Fatalf("missing has() feature %q", name)
+		}
+	}
+	features[0].Name = "changed"
+	if HasFeatures()[0].Name == "changed" {
+		t.Fatal("HasFeatures exposed its table")
+	}
+
+	specials := ExpandSpecials()
+	if len(specials) != 16 || specials[0].Name != "%" || specials[1].Name != "#" || specials[len(specials)-1].Name != "<client>" {
+		t.Fatalf("expand() special metadata = %#v", specials)
+	}
+	for _, special := range specials {
+		if special.Documentation == "" {
+			t.Fatalf("missing expand() documentation for %q", special.Name)
+		}
+	}
+	specials[0].Name = "changed"
+	if ExpandSpecials()[0].Name == "changed" {
+		t.Fatal("ExpandSpecials exposed its table")
 	}
 	options := Options()
 	variables := Variables()

@@ -189,11 +189,16 @@ const (
 	completionContextImportPath
 	completionContextMember
 	completionContextMappingArgument
+	completionContextHasFeature
+	completionContextExpandSpecial
 )
 
 func completionContextAt(file *syntax.File, offset int) completionContext {
 	if file == nil || offset < 0 || offset > len(file.Source) || spanContains(file.OpaqueTail, offset) {
 		return completionContextNone
+	}
+	if contextKind, _ := completionBuiltinStringAt(file, offset); contextKind != completionContextNone {
+		return contextKind
 	}
 	for _, token := range file.Tokens {
 		if token.Kind == syntax.TokenComment && token.Span.Start <= offset && offset <= token.Span.End {
@@ -334,6 +339,70 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		return completionContextCommand
 	}
 	return completionContextNone
+}
+
+func completionBuiltinStringAt(file *syntax.File, offset int) (completionContext, *syntax.Expression) {
+	if file == nil || offset < 0 || offset > len(file.Source) {
+		return completionContextNone, nil
+	}
+	contextKind := completionContextNone
+	var argument *syntax.Expression
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		walkCommandExpressions(command, func(expression *syntax.Expression) {
+			if expression == nil {
+				return
+			}
+			name := ""
+			var candidate *syntax.Expression
+			direct := false
+			switch {
+			case expression.Kind == syntax.ExpressionCall && expression.Value == "" && len(expression.Children) >= 2 && expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier:
+				name, candidate, direct = expression.Children[0].Value, expression.Children[1], true
+			case expression.Kind == syntax.ExpressionMember && file.Text(expression.Operator) == "->" && len(expression.Children) == 1:
+				name, candidate = expression.Value, expression.Children[0]
+			default:
+				return
+			}
+			if candidate == nil || candidate.Kind != syntax.ExpressionString {
+				return
+			}
+			content, ok := completionStringContent(file, candidate)
+			if !ok || offset < content.Start || offset > content.End {
+				return
+			}
+			switch name {
+			case "has":
+				if !direct {
+					return
+				}
+				contextKind = completionContextHasFeature
+			case "expand":
+				if colon := strings.IndexByte(file.Source[content.Start:content.End], ':'); colon >= 0 && offset > content.Start+colon {
+					return
+				}
+				contextKind = completionContextExpandSpecial
+			default:
+				return
+			}
+			argument = candidate
+		})
+	})
+	return contextKind, argument
+}
+
+func completionStringContent(file *syntax.File, expression *syntax.Expression) (syntax.Span, bool) {
+	if file == nil || expression == nil || expression.Kind != syntax.ExpressionString || expression.Span.Start >= expression.Span.End || expression.Span.End > len(file.Source) {
+		return syntax.Span{}, false
+	}
+	quote := file.Source[expression.Span.Start]
+	if quote != '\'' && quote != '"' {
+		return syntax.Span{}, false
+	}
+	content := syntax.Span{Start: expression.Span.Start + 1, End: expression.Span.End}
+	if content.End > content.Start && file.Source[content.End-1] == quote {
+		content.End--
+	}
+	return content, true
 }
 
 func completionHighlightContextAt(file *syntax.File, command *syntax.Command, offset int) (completionContext, bool) {

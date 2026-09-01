@@ -61,6 +61,8 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			selection = completionHighlightSelection(snapshot.Text(), file, offset, contextKind == completionContextHighlightValue)
 		} else if contextKind == completionContextColorscheme {
 			selection = completionColorschemeSelection(snapshot.Text(), offset)
+		} else if contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+			selection = completionBuiltinStringSelection(file, offset, contextKind)
 		}
 		if contextKind == completionContextImportPath {
 			selection = completionImportPathSelection(snapshot.Text(), offset)
@@ -200,7 +202,25 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			return true
 		}
-		if contextKind == completionContextExpression {
+		if contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+			values := vimdata.HasFeatures()
+			detail := "has() feature"
+			if contextKind == completionContextExpandSpecial {
+				values = vimdata.ExpandSpecials()
+				detail = "expand() special token"
+			}
+			for _, value := range values {
+				item := protocol.CompletionItem{
+					Label:         value.Name,
+					Kind:          protocol.CompletionItemKindEnumMember,
+					Detail:        protocol.NewOptional(detail),
+					Documentation: protocol.String(value.Documentation),
+				}
+				if !add(item, 8000, completionSourceBuiltin) {
+					break
+				}
+			}
+		} else if contextKind == completionContextExpression {
 			scopePrefix := completionScopePrefixAt(snapshot.Text(), selection.start)
 			if scopePrefix != "" {
 				selection.start -= 2
@@ -548,6 +568,28 @@ func completionSelectionAt(source string, cursor int) completionSelection {
 	}
 	selection.prefix = source[selection.start:cursor]
 	return selection
+}
+
+func completionBuiltinStringSelection(file *syntax.File, cursor int, contextKind completionContext) completionSelection {
+	selection := completionSelectionAt(file.Source, cursor)
+	foundContext, argument := completionBuiltinStringAt(file, cursor)
+	if foundContext != contextKind || argument == nil {
+		return selection
+	}
+	content, ok := completionStringContent(file, argument)
+	if !ok {
+		return selection
+	}
+	end := content.End
+	if contextKind == completionContextExpandSpecial {
+		if colon := strings.IndexByte(file.Source[content.Start:content.End], ':'); colon >= 0 {
+			end = content.Start + colon
+		}
+	}
+	if cursor > end {
+		return selection
+	}
+	return completionSelection{start: content.Start, cursor: cursor, end: end, prefix: file.Source[content.Start:cursor]}
 }
 
 func completionColorschemeSelection(source string, cursor int) completionSelection {

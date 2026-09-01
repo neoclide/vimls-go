@@ -441,7 +441,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 			SelectionRangeProvider:    protocol.Boolean(true),
 			WorkspaceSymbolProvider:   protocol.Boolean(true),
 			DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &documentLinkResolve},
-			CompletionProvider:        &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&"}},
+			CompletionProvider:        &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&", "#", "<", "\"", "'"}},
 			SignatureHelpProvider:     &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{","}},
 			RenameProvider:            renameProvider,
 			SemanticTokensProvider: &protocol.SemanticTokensOptions{

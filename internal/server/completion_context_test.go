@@ -19,6 +19,10 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		{"highlight Normal cterm = under", "under", completionContextHighlightValue},
 		{"highlight Normal ", "Normal ", completionContextHighlightKey}, {"highlight Normal guifg='salmon pink'", "pink", completionContextNone},
 		{"colorscheme ", "colorscheme ", completionContextColorscheme}, {"colorscheme def", "def", completionContextColorscheme}, {"colorscheme default extra", "extra", completionContextExpression},
+		{"echo has('gui_')", "gui_", completionContextHasFeature}, {"echo has(\"patch-9.2\")", "patch-9.2", completionContextHasFeature},
+		{"echo expand('<cf')", "<cf", completionContextExpandSpecial}, {"echo expand(\"%\")", "%", completionContextExpandSpecial},
+		{"echo '<cf'->expand()", "<cf", completionContextExpandSpecial},
+		{"echo expand('<cfile>:p')", ":p", completionContextNone}, {"echo other('<cf')", "<cf", completionContextNone}, {"echo has('gui_')", "'gui_'", completionContextExpression},
 		{"nmap lhs", "lhs", completionContextNone}, {"nmap lhs <bu", "<bu", completionContextNone},
 		{"echo 'value'", "value", completionContextNone}, {"\" echo value", "value", completionContextNone}, {"map x value", "value", completionContextNone}, {"loadkeymap\na a", "a a", completionContextNone},
 		{"let x =<< END\nvalue\nEND", "value", completionContextNone}, {"append\nvalue\n.", "value", completionContextNone}, {"finish\nvalue", "value", completionContextNone},
@@ -56,6 +60,11 @@ func TestCompletionSelectionsClampInvalidOffsets(t *testing.T) {
 		if selection.start < 0 || selection.start > selection.cursor || selection.cursor > selection.end || selection.end > 3 {
 			t.Fatalf("colorscheme selection at %d = %#v", offset, selection)
 		}
+		file := syntax.Parse("echo has('abc')")
+		selection = completionBuiltinStringSelection(file, offset, completionContextHasFeature)
+		if selection.start < 0 || selection.start > selection.cursor || selection.cursor > selection.end || selection.end > len(file.Source) {
+			t.Fatalf("builtin string selection at %d = %#v", offset, selection)
+		}
 	}
 }
 
@@ -78,6 +87,13 @@ func FuzzCompletionContext(f *testing.F) {
 		colorscheme := completionColorschemeSelection(source, offset)
 		if colorscheme.start < 0 || colorscheme.start > colorscheme.cursor || colorscheme.cursor > colorscheme.end || colorscheme.end > len(source) {
 			t.Fatalf("colorscheme selection = %#v for %d bytes at %d", colorscheme, len(source), offset)
+		}
+		contextKind := completionContextAt(file, offset)
+		if contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+			selection := completionBuiltinStringSelection(file, offset, contextKind)
+			if selection.start < 0 || selection.start > selection.cursor || selection.cursor > selection.end || selection.end > len(source) {
+				t.Fatalf("builtin string selection = %#v for %d bytes at %d", selection, len(source), offset)
+			}
 		}
 	})
 }
