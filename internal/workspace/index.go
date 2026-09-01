@@ -499,6 +499,47 @@ func (i *Index) GlobalNameFacts(name string) []GlobalNameFact {
 	return facts
 }
 
+// GlobalVariableCompletions returns active legacy global variables outside
+// excludePath that do not conflict with an indexed global function of the
+// same name. The current file is analyzed separately for position visibility.
+func (i *Index) GlobalVariableCompletions(prefix, excludePath string, limit int) ([]GlobalNameFact, bool) {
+	prefix = strings.ToLower(prefix)
+	excluded, _ := normalizeIndexPath(excludePath)
+	i.mu.RLock()
+	facts := make([]GlobalNameFact, 0)
+	for name, candidates := range i.byGlobalName {
+		if !strings.HasPrefix(strings.ToLower(name), prefix) {
+			continue
+		}
+		var variable *GlobalNameFact
+		conflict := false
+		for index := range candidates {
+			candidate := &candidates[index]
+			if candidate.Kind == analysis.NameDeclarationFunction {
+				conflict = true
+				break
+			}
+			if candidate.Path == excluded {
+				continue
+			}
+			if variable == nil || candidate.Path < variable.Path || candidate.Path == variable.Path && candidate.Span.Start < variable.Span.Start {
+				variable = candidate
+			}
+		}
+		if !conflict && variable != nil {
+			facts = append(facts, *variable)
+		}
+	}
+	complete := i.complete
+	i.mu.RUnlock()
+	sort.SliceStable(facts, func(left, right int) bool { return facts[left].Name < facts[right].Name })
+	truncated := limit > 0 && len(facts) > limit
+	if truncated {
+		facts = facts[:limit]
+	}
+	return facts, truncated || !complete
+}
+
 // GlobalNameConflictDiagnostics warns on current-file declarations that have
 // an opposite-kind declaration in another indexed file. Same-file conflicts
 // are owned by analysis.Analyze and are skipped here.

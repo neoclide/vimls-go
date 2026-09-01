@@ -171,7 +171,9 @@ runtime import and autoload foreground requests reuse that immutable index
 instead of searching runtimepath again. The same index retains global and
 autoload function locations, signatures, and leading comments for completion,
 definition, and hover; exported Vim9 autoload short names derive their callable
-prefix from the indexed `autoload/` path. Direct builtin string contexts
+prefix from the indexed `autoload/` path. Legacy completion also reuses the
+index for active global variables, requiring `g:` inside callable scopes and
+omitting function-name conflicts. Direct builtin string contexts
 complete pinned v9.2.1015 `has()` feature names and
 `expand()` special tokens without treating arbitrary string contents as
 expressions. Direct builtin (including receiver-adjusted `->` methods),

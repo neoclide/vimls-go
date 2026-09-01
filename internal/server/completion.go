@@ -274,16 +274,22 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			completionWorkspaceState = s.captureWorkspaceNavigationState()
 			if completionWorkspaceState.index == nil {
 				workspaceIncomplete = true
-			} else {
+			} else if scopePrefix == "" || scopePrefix == "g:" {
 				completionWorkspaceStateUsed = true
-				functions, incomplete := completionWorkspaceState.index.FunctionCompletions(selection.prefix, file.Dialect == syntax.Legacy, maxCompletionItems)
+				workspacePrefix := strings.TrimPrefix(selection.prefix, "g:")
+				labelPrefix := ""
+				if scopePrefix == "g:" {
+					labelPrefix = "g:"
+				}
+				functions, incomplete := completionWorkspaceState.index.FunctionCompletions(workspacePrefix, file.Dialect == syntax.Legacy, maxCompletionItems)
 				workspaceIncomplete = workspaceIncomplete || incomplete
 				for _, function := range functions {
+					label := labelPrefix + function.Name
 					detail := function.Match.Fact.Signature
-					if detail != "" && function.Name != function.Match.Fact.Name && strings.HasPrefix(detail, function.Match.Fact.Name+"(") {
-						detail = function.Name + detail[len(function.Match.Fact.Name):]
+					if detail != "" && label != function.Match.Fact.Name && strings.HasPrefix(detail, function.Match.Fact.Name+"(") {
+						detail = label + detail[len(function.Match.Fact.Name):]
 					}
-					item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}
+					item := protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindFunction}
 					if detail != "" {
 						item.Detail = protocol.NewOptional(detail)
 					}
@@ -295,6 +301,16 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 					if !add(item, 7500, completionSourceImport) {
 						break
+					}
+				}
+				if file.Dialect == syntax.Legacy && (scopePrefix == "g:" || !completionInsideCallable(analysisResult, offset)) {
+					documentPath, _ := workspaceURIPath(uri.URI(snapshot.URI()))
+					variables, variablesIncomplete := completionWorkspaceState.index.GlobalVariableCompletions(workspacePrefix, documentPath, maxCompletionItems)
+					workspaceIncomplete = workspaceIncomplete || variablesIncomplete
+					for _, variable := range variables {
+						if !add(protocol.CompletionItem{Label: labelPrefix + variable.Name, Kind: protocol.CompletionItemKindVariable, Detail: protocol.NewOptional("workspace global variable")}, 7500, completionSourceImport) {
+							break
+						}
 					}
 				}
 			}
@@ -844,6 +860,18 @@ func visibleCompletionDeclarations(result *analysis.FileAnalysis, offset int) []
 		}
 	}
 	return declarations
+}
+
+func completionInsideCallable(result *analysis.FileAnalysis, offset int) bool {
+	if result == nil {
+		return false
+	}
+	for _, scope := range result.Scopes {
+		if scope != nil && scope.Span.Start <= offset && offset <= scope.Span.End && (scope.Kind == syntax.BlockFunction || scope.Kind == syntax.BlockDef || scope.Lambda != nil) {
+			return true
+		}
+	}
+	return false
 }
 
 func completionOptionDetail(option vimdata.Option) string {

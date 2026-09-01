@@ -151,7 +151,7 @@ regular expressions.
 - [x] Add legacy workspace global function completion with the same ambiguity
   and root-safety rules as navigation; include indexed autoload functions in
   both dialects and derive Vim9 exported autoload prefixes from their paths.
-- [ ] Add legacy workspace global variable completion with the same ambiguity
+- [x] Add legacy workspace global variable completion with the same ambiguity
   and root-safety rules as navigation.
 - [x] Add `has()` feature names and `expand()` special tokens from pinned Vim
   help/source data.

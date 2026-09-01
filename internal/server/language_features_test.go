@@ -299,6 +299,54 @@ func TestPinnedBuiltinStringCompletionIsCompleteAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestLegacyWorkspaceGlobalVariableCompletionRespectsCallableScope(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "globals.vim", "let g:GlobalValue = 1\nlet BareValue = 2\nfunction GlobalFn()\nendfunction\n")
+	source := "echo GlobalV\nfunction Local()\n  echo GlobalV\n  echo g:GlobalV\n  echo g:GlobalF\nendfunction\necho FutureG\nlet g:FutureGlobal = 1\n"
+	mainPath := writeWorkspaceFile(t, root, "main.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(mainPath)
+	instance.documents.Open(documentURI.String(), 1, source)
+	complete := func(line, character uint32) protocol.CompletionItemSlice {
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: line, Character: character},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return completionItems(t, result)
+	}
+	if items := complete(0, 12); !hasCompletion(items, "GlobalValue", protocol.CompletionItemKindVariable) {
+		t.Fatalf("top-level global variable completion = %#v", items)
+	}
+	if items := complete(2, 14); hasCompletionLabel(items, "GlobalValue") {
+		t.Fatalf("bare global variable leaked into function = %#v", items)
+	}
+	items := complete(3, 16)
+	found := false
+	for _, item := range items {
+		if item.Label != "g:GlobalValue" {
+			continue
+		}
+		detail, ok := item.Detail.Get()
+		edit, editOK := item.TextEdit.(*protocol.TextEdit)
+		if !ok || detail != "workspace global variable" || !editOK || edit.Range != navigationRange(3, 7, 16) || edit.NewText != "g:GlobalValue" {
+			t.Fatalf("scoped global variable completion = %#v", item)
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("scoped global variable completion missing: %#v", items)
+	}
+	if items := complete(4, 16); !hasCompletion(items, "g:GlobalFn", protocol.CompletionItemKindFunction) {
+		t.Fatalf("scoped global function completion = %#v", items)
+	}
+	if items := complete(6, 12); hasCompletionLabel(items, "FutureGlobal") {
+		t.Fatalf("forward current-file global variable leaked from workspace index = %#v", items)
+	}
+}
+
 func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 	root, runtimePath := t.TempDir(), t.TempDir()
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "default.vim"), "")

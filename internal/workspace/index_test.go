@@ -121,6 +121,25 @@ func TestIndexGlobalNameFactsTrackLocationsAndDeletes(t *testing.T) {
 	if len(index.GlobalNameFacts("Gone")) != 0 || len(index.GlobalNameFacts("Removed")) != 0 || len(index.GlobalNameFacts("ScriptOnly")) != 0 {
 		t.Fatalf("deleted or script-local facts leaked: gone=%#v removed=%#v script=%#v", index.GlobalNameFacts("Gone"), index.GlobalNameFacts("Removed"), index.GlobalNameFacts("ScriptOnly"))
 	}
+	otherPath := filepath.Join(root, "other.vim")
+	if err := index.Replace(otherPath, syntax.Parse("let g:Another = 1\nlet g:Shared = 1\n")); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(true)
+	completions, incomplete := index.GlobalVariableCompletions("", "", 10)
+	if incomplete || len(completions) != 2 || completions[0].Name != "Another" || completions[1].Name != "Value" {
+		t.Fatalf("global variable completions = %#v, incomplete=%t", completions, incomplete)
+	}
+	if limited, incomplete := index.GlobalVariableCompletions("", "", 1); !incomplete || len(limited) != 1 || limited[0].Name != "Another" {
+		t.Fatalf("limited global variable completions = %#v, incomplete=%t", limited, incomplete)
+	}
+	index.SetComplete(false)
+	if matches, incomplete := index.GlobalVariableCompletions("Val", "", 10); !incomplete || len(matches) != 1 || matches[0].Name != "Value" {
+		t.Fatalf("incomplete global variable completions = %#v, incomplete=%t", matches, incomplete)
+	}
+	if matches, _ := index.GlobalVariableCompletions("Val", path, 10); len(matches) != 0 {
+		t.Fatalf("excluded current-file variables = %#v", matches)
+	}
 }
 
 func TestIndexGlobalNameConflictDiagnostics(t *testing.T) {

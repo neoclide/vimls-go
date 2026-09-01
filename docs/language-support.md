@@ -202,12 +202,18 @@ Static Vim9 import paths and direct `:source` filenames become document links
 only when the workspace resolver finds one safe regular file. Completion is
 contextual and bounded: command positions use the pinned Ex command table,
 expression positions use visible declarations, indexed autoload functions in
-both dialects, legacy workspace global functions, and pinned builtin functions,
+both dialects, legacy workspace global functions and variables, and pinned
+builtin functions,
 legacy `a:` and `l:` prefixes expose only visible arguments and locals, and
 explicit `g:`, `b:`, `w:`, `t:`, `s:` and `v:` declarations retain their
 namespace spelling. Forward variables are excluded while statically declared
 functions remain callable before their declaration. A statically resolved
 import namespace exposes only exported members.
+At legacy script level, unqualified workspace globals are completion candidates.
+Inside a function or lambda they require `g:` so they cannot be confused with
+the callable's default local namespace. Deleted names and names that conflict
+with an indexed global function are omitted; an incomplete workspace index
+marks the result incomplete rather than claiming a closed world.
 Unknown and dynamic contexts return no inferred candidates.
 Completion advertises `.`, `:`, `&`, `#`, `<`, `"` and `'` as trigger
 characters; tests bind them to member, command/scoped-name, option, autoload,
