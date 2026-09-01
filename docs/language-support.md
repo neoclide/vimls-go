@@ -125,6 +125,8 @@ compatibility diagnostics. It accepts `major.minor`, `major.minor.patch`, or
 `latest`; omitted patches normalize to zero. The default and `latest` both
 select `9.2.1015`, not the version of an executable found on `PATH`. Selecting
 an older target does not make that Vim release part of the support contract.
+See [Client configuration](configuration.md) for complete initialization,
+workspace-setting, watcher, and runtimepath notification examples.
 
 Configuration precedence is:
 

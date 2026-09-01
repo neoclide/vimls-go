@@ -261,7 +261,7 @@ position encoding; every code action round-trips through a reparsed document.
   without replacing more useful earlier diagnostics.
 - [ ] Test configuration changes against in-flight parsing, workspace graph
   replacement, close/reopen and target-version changes.
-- [ ] Document supported initialization options and notifications with complete
+- [x] Document supported initialization options and notifications with complete
   client configuration examples.
 
 Exit gate: configuration changes never publish results from an older document,
