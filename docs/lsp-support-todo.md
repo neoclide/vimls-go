@@ -107,7 +107,7 @@ for dynamic names.
 
 ### Vim9 syntax and binding
 
-- [ ] Complete declarations and expressions for typed variables, destructuring,
+- [x] Complete declarations and expressions for typed variables, destructuring,
   lambdas, method chains, function values and nested generic/container/tuple
   types, with byte-stable recovery for incomplete input.
 - [ ] Complete class, abstract class, interface and enum semantics: constructors,
