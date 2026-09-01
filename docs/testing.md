@@ -211,6 +211,14 @@ Each Vim lane first proves its actual version and required `+eval`/Vim9 support.
 Neovim may be used as an LSP client interoperability lane, but it is not a Vim9
 language oracle.
 
+Configuration and workspace identity changes have direct stale-result tests.
+`TestGraphRevisionRejectsStaleDiagnostics` covers in-flight document and
+configuration revisions plus index and import-graph replacement;
+`TestServerCloseReopenRejectsPausedRestore` covers a close/reopen while disk
+restoration is paused; and `TestTargetVersionCompatibilityDiagnosticsReanalyze`
+covers target changes without replacing the immutable document snapshot or
+parser cache. These tests must remain deterministic without timing sleeps.
+
 ## Performance budgets
 
 Current benchmarks cover parser hot paths, command lookup, the optional legacy

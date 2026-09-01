@@ -259,7 +259,7 @@ position encoding; every code action round-trips through a reparsed document.
   the authoritative declaration is known.
 - [x] Keep the 200-diagnostic limit deterministic and indicate truncation
   without replacing more useful earlier diagnostics.
-- [ ] Test configuration changes against in-flight parsing, workspace graph
+- [x] Test configuration changes against in-flight parsing, workspace graph
   replacement, close/reopen and target-version changes.
 - [x] Document supported initialization options and notifications with complete
   client configuration examples.
