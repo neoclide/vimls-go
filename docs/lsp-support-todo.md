@@ -178,7 +178,7 @@ regular expressions.
   client supports snippets. Legacy `function`/`endfunction` and Vim9
   `def`/`enddef` block templates are dialect-specific; plain-text clients keep
   ordinary completion edits.
-- [ ] Add documentation and deterministic truncation tests for every new source.
+- [x] Add documentation and deterministic truncation tests for every new source.
 
 Exit gate: completion tests cover prefix replacement, Unicode/CRLF positions,
 comments and strings, incomplete input, client capabilities, cancellation,

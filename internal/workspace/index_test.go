@@ -468,6 +468,23 @@ func TestIndexFunctionCompletionsRecordSignaturesCommentsAndVim9AutoloadNames(t 
 	}
 }
 
+func TestIndexFunctionCompletionsTruncateDeterministically(t *testing.T) {
+	index := NewIndex(10, 10000)
+	path := filepath.Join(t.TempDir(), "functions.vim")
+	file := syntax.Parse("function TruncateCharlie()\nendfunction\nfunction TruncateAlpha()\nendfunction\nfunction TruncateBravo()\nendfunction\n")
+	if err := index.Replace(path, file); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(true)
+
+	for range 2 {
+		matches, incomplete := index.FunctionCompletions("Truncate", true, 2)
+		if !incomplete || len(matches) != 2 || matches[0].Name != "TruncateAlpha" || matches[1].Name != "TruncateBravo" {
+			t.Fatalf("limited function completions = %#v, incomplete=%t", matches, incomplete)
+		}
+	}
+}
+
 func TestIndexRemoveFreesCapacity(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.vim")

@@ -175,6 +175,39 @@ expressions, private or ambiguous items, missing files, unsafe symlink targets,
 and paths outside initialized workspace/runtimepath roots return empty results
 without executing Vim script or guessing runtime state.
 
+## Implemented completion behavior
+
+Completion is syntax-contextual and uses one scored, deterministic result list.
+The server currently completes Ex commands and modifiers, visible scoped
+declarations, builtin functions and variables, options, autocmd events, syntax
+and highlight groups, imports and exported members, object members, user
+commands, augroups, and runtime import/autoload paths. It also provides these
+context-specific sources:
+
+- legacy workspace global variables and global functions, plus legacy and Vim9
+  autoload functions; Vim9 exported autoload declarations derive their callable
+  `foo#bar#Name` from the indexed `autoload/foo/bar.vim` path;
+- pinned v9.2.1015 `has()` feature names and `expand()` special tokens;
+- the seven official mapping arguments before the mapping left-hand side;
+- finite `:highlight`, `:command`, and `:set` keys, operators, attributes, and
+  values only where the parsed command identifies that position; and
+- `:colorscheme` names from both ordinary and `after/colors/` Vim files in the
+  immutable runtimepath source table.
+
+Runtimepath is scanned during workspace rebuild, not during a foreground
+completion request. The source table also supplies runtime imports, color
+schemes, function signatures, leading-comment documentation, and definition
+locations. Ordinary mapping right-hand sides, dynamic color names, dynamic
+option values, and arbitrary string contents do not receive speculative
+completion.
+
+Every completion response is stably ranked, deduplicated, and capped at 2,000
+items. Truncation, an incomplete workspace index, or budget expiry sets LSP
+`isIncomplete`; bounded workspace function, global-variable, colorscheme, and
+runtime-path sources apply their limit before conversion to protocol items.
+Pinned finite tables have exact-count determinism tests and remain below the
+global cap.
+
 ## Implemented import dependency analysis
 
 Statically resolved Vim9 imports form a directed workspace graph keyed by
