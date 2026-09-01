@@ -87,7 +87,7 @@ there are no unqualified claims such as "full expressions" or "full Vim9".
   as opaque arguments where semantics need them: scoped assignments,
   destructuring, function attributes/varargs, mappings, autocommands, user
   commands and nested Ex payloads.
-- [ ] Verify binding and navigation for `g:`, `b:`, `w:`, `t:`, `s:`, `l:`,
+- [x] Verify binding and navigation for `g:`, `b:`, `w:`, `t:`, `s:`, `l:`,
   `a:` and `v:` names, including `<SID>`, autoload names, function arguments,
   closures and shadowing. Leave editor-created buffer/window/tab/global state
   unknown when the current file cannot prove it.

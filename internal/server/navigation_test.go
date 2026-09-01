@@ -181,6 +181,23 @@ func TestLegacyArgumentAndLocalPrefixNavigation(t *testing.T) {
 	}
 }
 
+func TestLegacyExplicitScopeNavigation(t *testing.T) {
+	source := "let g:item = 1\nlet b:item = 2\nlet w:item = 3\nlet t:item = 4\nlet s:item = 5\necho g:item b:item w:item t:item s:item\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	for index, character := range []uint32{7, 14, 21, 28, 35} {
+		definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 5, Character: character},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		locations := definition.(protocol.LocationSlice)
+		if len(locations) != 1 || locations[0].Range != navigationRange(uint32(index), 4, 10) {
+			t.Errorf("scope %d definition = %#v", index, definition)
+		}
+	}
+}
+
 func TestLocalVim9MemberNavigation(t *testing.T) {
 	source := "vim9script\nclass Base\n  var value: number\n  def Resize(width: number)\n  enddef\nendclass\nclass Child extends Base\nendclass\nvar child = Child.new()\necho child.Resize(1)\necho child.value\necho Child.new()\nenum Color\n  Red,\n  Green\nendenum\necho Color.Red\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

@@ -397,6 +397,22 @@ echo {key: x}
 	}
 }
 
+func TestAnalyzeLegacyExplicitScopesBindOnlyProvenDeclarations(t *testing.T) {
+	source := "let g:item = 1\nlet b:item = 2\nlet w:item = 3\nlet t:item = 4\nlet s:item = 5\necho g:item b:item w:item t:item s:item b:missing\n"
+	result := Analyze(syntax.Parse(source))
+	if len(result.Declarations) != 5 || len(result.References) != 6 {
+		t.Fatalf("declarations=%#v references=%#v", result.Declarations, result.References)
+	}
+	for index, name := range []string{"g:item", "b:item", "w:item", "t:item", "s:item"} {
+		if result.Declarations[index].Name != name || result.References[index].Name != name || result.References[index].Declaration != result.Declarations[index] {
+			t.Errorf("scope %s declaration=%#v reference=%#v", name, result.Declarations[index], result.References[index])
+		}
+	}
+	if result.References[5].Name != "b:missing" || result.References[5].Declaration != nil {
+		t.Fatalf("unproven editor state = %#v", result.References[5])
+	}
+}
+
 func TestAnalyzeDoesNotDuplicateTargetsOrEnumArguments(t *testing.T) {
 	source := "vim9script\nvar input = 1\nenum E\n  One(input)\nendenum\n"
 	vim9 := Analyze(syntax.Parse(source))
