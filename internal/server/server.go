@@ -72,6 +72,19 @@ type workspaceAnalysisSnapshot struct {
 	ready             bool
 }
 
+// Server mutexes use a partial, not total, lock order. When multiple Server
+// mutexes are held, acquire them only in these directions:
+//
+//	publishMu -> mu
+//	publishMu -> workspaceMu -> analysisMu
+//	publishMu -> analysisMu
+//	watchMu   -> mu
+//	watchMu   -> workspaceMu
+//
+// No order is defined between publishMu and watchMu or between mu and
+// workspaceMu; do not hold either unordered pair together. logMu is terminal:
+// code holding logMu must not acquire another Server mutex, although logf may
+// be called while another Server mutex is held.
 type Server struct {
 	protocol.UnimplementedServer
 
