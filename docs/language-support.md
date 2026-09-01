@@ -1,5 +1,9 @@
 # Language support contract
 
+Current parse, semantic, diagnostic, recovery and official-source evidence is
+tracked separately in `syntax-coverage.md`. A syntax node is not a claim of
+complete binding or type support.
+
 ## Target
 
 vimls-go analyzes both legacy Vim script and Vim9 script through Vim v9.2.1015.

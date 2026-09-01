@@ -62,17 +62,21 @@ Primary implementation evidence:
 
 ### Coverage ledger
 
-- [ ] Create a reviewable syntax coverage table from the requirements in
+- [x] Create a reviewable syntax coverage table from the requirements in
   `docs/language-support.md`. For each construct, link an official Vim source
   or runtime-help location, the owning parser test, incomplete-input recovery
   evidence, and any version boundary.
-- [ ] Record semantic coverage separately from parse acceptance. A form that
+- [x] Record semantic coverage separately from parse acceptance. A form that
   produces an AST is not complete until its declarations, references, scopes,
   types and diagnostics are explicitly classified as implemented, unknown or
   deferred.
-- [ ] Keep the ledger bounded by parser mechanism. Do not duplicate every form
+- [x] Keep the ledger bounded by parser mechanism. Do not duplicate every form
   across legacy, Vim9, mixed-dialect and incomplete-input matrices when one
   shared recovery test proves the mechanism.
+
+The maintained ledger is `docs/syntax-coverage.md`. Its rows are parser
+mechanisms rather than syntax spellings, and its semantic column classifies
+declarations, references, scopes and types independently from diagnostics.
 
 Exit gate: every `language-support.md` requirement has an owner and evidence;
 there are no unqualified claims such as "full expressions" or "full Vim9".
