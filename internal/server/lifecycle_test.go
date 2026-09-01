@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
 )
 
@@ -132,6 +135,48 @@ func TestServerWarnsForInvalidTargetAfterInitialized(t *testing.T) {
 	}
 	if !strings.Contains(string(messages[1]["params"]), "versions before 9.1") {
 		t.Fatalf("warning = %s", messages[1]["params"])
+	}
+}
+
+func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+	var logs bytes.Buffer
+	instance := New(serverConn, serverConn, &logs)
+	done := make(chan int, 1)
+	go func() { done <- instance.Run(context.Background()) }()
+	writer := jsonrpc.NewWriter(clientConn)
+	reader := jsonrpc.NewReader(clientConn)
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"configuration":true}},"initializationOptions":{"runtimepath":[]}}}`)
+	if message := readFrame(t, reader); string(message["id"]) != "1" {
+		t.Fatalf("initialize response = %#v", message)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+	configuration := readFrame(t, reader)
+	if string(configuration["method"]) != `"workspace/configuration"` {
+		t.Fatalf("configuration request = %#v", configuration)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"result":[{"targetVersion":"9.2.4"}]}`)
+	deadline := time.Now().Add(time.Second)
+	for instance.TargetVersion().String() != "9.2.0004" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := instance.TargetVersion().String(); got != "9.2.0004" {
+		t.Fatalf("target = %s, logs = %q", got, logs.String())
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
+	if message := readFrame(t, reader); string(message["id"]) != "2" {
+		t.Fatalf("shutdown response = %#v", message)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit code = %d, logs = %q", code, logs.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not exit")
 	}
 }
 

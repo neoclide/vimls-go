@@ -628,6 +628,9 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 	if !supported || client == nil {
 		return nil
 	}
+	// Configuration is a server-to-client request. Release the connection read
+	// loop first so it can receive the client's response while this handler waits.
+	jsonrpc2.Async(ctx)
 	section := "vimls"
 	values, err := client.Configuration(ctx, &protocol.ConfigurationParams{Items: []protocol.ConfigurationItem{{Section: &section}}})
 	if err != nil {

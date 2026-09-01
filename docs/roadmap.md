@@ -223,25 +223,17 @@ Deliver:
 Exit gate: all checks in `docs/testing.md` pass; no open crash/data-corruption,
 protocol lifecycle or false-edit blockers; performance budgets
 hold on the documented runner; a clean install passes the repository's Go stdio
-harness plus pinned smoke fixtures for Vim v9.2.1015 with `vim-lsp` and Neovim with its
-built-in LSP client. Each editor fixture must initialize the server, open one
-legacy and one Vim9 file, observe the expected diagnostics, then shut down
-cleanly.
+harness plus the pinned Vim/vim-lsp smoke. Both start the built server process,
+open legacy and Vim9 inputs, observe expected diagnostics and shut down cleanly.
 
-Pinned client smoke baseline:
+The Vim smoke uses Vim v9.2.1015 and downloads the archive for vim-lsp commit
+`e10d186452743beb7b43d2b3427020832f930c2b` into the ignored `.test-tools`
+directory after verifying its pinned SHA-256. It never reads or changes user
+configuration. Run it with:
 
-- Vim `9.2.1015` with `vim-lsp` commit
-  `e10d186452743beb7b43d2b3427020832f930c2b`, checked out below
-  `.test-tools/vim-lsp` by the M7 CI setup.
-- Neovim `0.12.4` using its built-in LSP client.
-- Vim command:
-  `vim -Nu test/clients/vim-lsp/vimrc -U NONE -n -es -X -i NONE -S test/clients/vim-lsp/smoke.vim`.
-- Neovim command:
-  `nvim --headless -u test/clients/nvim/init.lua -l test/clients/nvim/smoke.lua`.
-
-M7 must add and own those fixture files plus a script that clones the pinned
-`vim-lsp` commit without modifying user configuration. Updating a pin requires
-an intentional planning change and a successful old-versus-new smoke run.
+```sh
+make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
+```
 
 ## Required 1.0 LSP surface
 

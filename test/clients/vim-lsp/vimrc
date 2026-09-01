@@ -1,0 +1,26 @@
+set nocompatible
+set nomore
+set shortmess+=I
+
+execute 'set runtimepath^=' .. fnameescape($VIMLS_VIM_LSP)
+let g:lsp_log_file = $VIMLS_CLIENT_LOG
+let g:lsp_log_verbose = 1
+let g:lsp_diagnostics_highlights_enabled = 0
+let g:lsp_diagnostics_signs_enabled = 0
+let g:lsp_diagnostics_virtual_text_enabled = 0
+let g:lsp_semantic_enabled = 0
+
+augroup vimls_smoke
+  autocmd!
+  autocmd User lsp_setup call lsp#register_server({
+        \ 'name': 'vimls',
+        \ 'cmd': {server_info -> [$VIMLS_BINARY]},
+        \ 'allowlist': ['vim'],
+        \ 'root_uri': {server_info -> lsp#utils#path_to_uri($VIMLS_CLIENT_WORKSPACE)},
+        \ 'initialization_options': {'runtimepath': []},
+        \ })
+augroup END
+
+filetype plugin on
+runtime plugin/lsp.vim
+call lsp#enable()

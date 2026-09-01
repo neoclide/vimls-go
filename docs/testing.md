@@ -20,6 +20,7 @@ testdata/legacy/                   accepted and rejected legacy scripts
 testdata/vim9/                     accepted and rejected Vim9 scripts
 testdata/official/                 pinned generated Vim corpus and metadata
 test/integration/                  subprocess JSON-RPC/LSP scenarios
+test/clients/                      clean real-Vim/vim-lsp smoke scenario
 test/oracle/                       curated behavior checks against exact Vim
 ```
 
@@ -222,6 +223,27 @@ The dedicated Ubuntu CI job checks out tag `v9.2.1015`, builds that source and
 runs the same target. Ordinary offline `go test ./...` skips execution when
 `VIM_EXECUTABLE` is absent.
 
+### Real Vim client
+
+`make client-smoke` downloads the archive for vim-lsp commit
+`e10d186452743beb7b43d2b3427020832f930c2b`, verifies SHA-256
+`32950ab381a9244e8e795ea60e8479631e438f91a788c19b39f10e5d54b32257`, and
+extracts it below the ignored `.test-tools` directory. It does not use a Git
+checkout or read user configuration.
+
+The clean Vim fixture initializes the built vimls process, opens one incomplete
+legacy file and one incomplete Vim9 file, waits for an error diagnostic from
+each, then completes the LSP shutdown/exit sequence. It also exercises a
+server-to-client `workspace/configuration` request, matching vim-lsp's default
+capabilities. Run the exact pinned lane with:
+
+```sh
+make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
+```
+
+CI builds official Vim tag `v9.2.1015` once and uses that executable for both
+the oracle and client smoke targets.
+
 ## Compatibility matrix
 
 Per change:
@@ -233,6 +255,9 @@ Per change:
 Current behavior-sensitive coverage:
 
 - A pinned clean Vim v9.2.1015 oracle lane.
+- Vim v9.2.1015 with pinned vim-lsp commit
+  `e10d186452743beb7b43d2b3427020832f930c2b` for legacy and Vim9 diagnostics
+  plus clean shutdown.
 
 Planned scheduled and release coverage:
 
@@ -240,8 +265,6 @@ Planned scheduled and release coverage:
 - Full race, fuzz, corpus, vulnerability, and benchmark lanes.
 
 Each Vim lane first proves its actual version and required `+eval`/Vim9 support.
-Neovim may be used as an LSP client interoperability lane, but it is not a Vim9
-language oracle.
 
 Configuration and workspace identity changes have direct stale-result tests.
 `TestGraphRevisionRejectsStaleDiagnostics` covers in-flight document and

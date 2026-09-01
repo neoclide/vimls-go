@@ -91,8 +91,7 @@ official compile-diagnostic cases live in self-contained range tests under
 ## Refresh pinned Vim metadata
 
 All command, builtin-function, option, variable, event, modifier, and completion
-metadata describes official Vim v9.2.1015 only. Neovim-specific tables are not
-merged into `internal/vimdata`.
+metadata describes official Vim v9.2.1015 only.
 
 Point `VIM_SOURCE` at an official Vim Git checkout. The metadata generator
 reads the pinned tag with `git show`, so the checkout's current branch may be

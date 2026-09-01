@@ -12,8 +12,7 @@ Syntax available in earlier Vim releases remains supported; syntax introduced
 after v9.2.1015 is not supported until the pinned source and data advance.
 
 The server analyzes the language used by Vim configuration and plugin files. It
-does not implement a Vim editor client and it does not treat Neovim Lua as Vim
-script.
+does not implement a Vim editor client.
 
 ## Dialect model
 

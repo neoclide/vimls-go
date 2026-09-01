@@ -131,6 +131,19 @@ func writeFrame(t *testing.T, writer *jsonrpc.Writer, body string) {
 	}
 }
 
+func readFrame(t *testing.T, reader *jsonrpc.Reader) map[string]json.RawMessage {
+	t.Helper()
+	body, err := reader.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var message map[string]json.RawMessage
+	if err := json.Unmarshal(body, &message); err != nil {
+		t.Fatal(err)
+	}
+	return message
+}
+
 func decodeFrames(t *testing.T, input io.Reader) []map[string]json.RawMessage {
 	t.Helper()
 	reader := jsonrpc.NewReader(input)

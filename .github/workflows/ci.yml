@@ -50,3 +50,4 @@ jobs:
       - run: ./configure --with-features=huge --enable-gui=no --without-x && make -j2
         working-directory: .test-tools/vim
       - run: make oracle VIM_EXECUTABLE="$GITHUB_WORKSPACE/.test-tools/vim/src/vim"
+      - run: make client-smoke VIM_EXECUTABLE="$GITHUB_WORKSPACE/.test-tools/vim/src/vim"

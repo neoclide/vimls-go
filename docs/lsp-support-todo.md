@@ -132,14 +132,13 @@ and byte range tests; incomplete or dynamic code does not create a false error.
 
 - [x] Pin the syntax/metadata ceiling and default target to Vim v9.2.1015.
   Earlier syntax stays supported; later syntax waits for a pin update.
-- [x] Separate Vim and Neovim metadata instead of reusing the old server's
-  `isNeovim` flag as a parser switch. Add a target only after its behavior and
-  data source are defined.
+- [x] Use only pinned official Vim metadata instead of reusing the old server's
+  editor-family flag as a parser switch.
 - [x] Add a documented refresh/verification command for pinned metadata and
   fail tests on duplicate names and invalid help tags.
 
 Exit gate: generated and handwritten metadata is traceable to v9.2.1015 and
-does not silently mix Vim or Neovim data.
+does not silently mix data from another editor implementation.
 
 ## P1: close high-value LSP usability gaps
 
@@ -276,8 +275,8 @@ configuration, index or import-graph revision.
 - [x] Add the pinned Vim v9.2.1015 oracle lane defined by
   `docs/testing.md`; record version and patch level for every behavior-sensitive
   fixture.
-- [ ] Add real Vim/vim-lsp and Neovim built-in LSP smoke tests without reading
-  or modifying user configuration.
+- [x] Add a real Vim/vim-lsp smoke test without reading or modifying user
+  configuration.
 - [x] Fuzz parser, framing and position/edit boundaries; retain every crash,
   hang or memory-growth input in the permanent corpus.
 - [x] Benchmark large files, runtimepath indexing, completion latency, reverse
@@ -286,8 +285,8 @@ configuration, index or import-graph revision.
   scanning, install documentation and reproducible release archives.
 
 Exit gate: `gofmt` is clean, `go test ./...`, `go test -race ./...` and
-`go vet ./...` pass, real clients complete the legacy and Vim9 smoke scenarios,
-and no advertised capability lacks a protocol-level test.
+`go vet ./...` pass, real Vim/vim-lsp and the stdio process scenarios cover
+legacy and Vim9, and no advertised capability lacks a protocol-level test.
 
 ## Explicitly do not copy from vim-language-server
 
@@ -296,7 +295,8 @@ and no advertised capability lacks a protocol-level test.
 - A child parser process with fixed 50-second request timeouts.
 - Diagnostics that collapse all parser failures to one extracted error.
 - Unbounded or load-order-dependent workspace symbol guesses.
-- The `isNeovim` boolean as a substitute for versioned syntax and builtin data.
+- An editor-family boolean as a substitute for versioned syntax and builtin
+  data.
 - Its provider registry: current completion has one real caller and should stay
   in the existing server package until another caller creates a real boundary.
 
