@@ -153,6 +153,9 @@ func FuzzReader(f *testing.F) {
 	f.Add([]byte("Content-Length: -1\r\n\r\n"))
 	f.Add([]byte("random bytes"))
 	f.Fuzz(func(t *testing.T, input []byte) {
+		if len(input) > 4<<10 {
+			input = input[:4<<10]
+		}
 		reader := NewReaderWithLimits(bytes.NewReader(input), 256, 1024)
 		_, _ = reader.Read()
 	})

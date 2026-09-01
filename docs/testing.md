@@ -174,10 +174,14 @@ on repeated scheduler luck.
 
 Current fuzz targets cover framing, position round trips, ordered incremental
 edit application, complete-file parser recovery, expressions, and Vim9 types.
-`FuzzApplyChanges` uses bounded inputs and a test-local position oracle so every
+All targets bound source size before invoking production code.
+`FuzzApplyChanges` also bounds edit count and replacement size and uses a
+test-local position oracle so every
 accepted ranged edit is compared with direct full-text replacement. Its seed
 corpus covers LF, CRLF, BOM without a final newline, combining characters,
-astral characters, and invalid UTF-8. A five-step deterministic sequence covers
+astral characters, and invalid UTF-8. The complete-file parser target checks
+ordered, in-bounds token, AST, block and diagnostic spans for both dialects. A
+five-step deterministic sequence covers
 distinct BOM, combining, astral, CRLF, and EOF edit invariants. A dedicated
 lexer fuzz target remains planned. Required properties:
 
@@ -187,8 +191,9 @@ lexer fuzz target remains planned. Required properties:
 - Applying valid incremental edits matches full-text replacement.
 - Position round trips are stable at valid character boundaries.
 
-PR checks replay the committed corpus. A future scheduled lane will run bounded
-live fuzzing; every discovered input must become a regression seed.
+PR checks replay the committed seeds and `testdata/fuzz` corpus. A future
+scheduled lane will run bounded live fuzzing; every discovered input must remain
+under the owning package's `testdata/fuzz` directory as a regression case.
 
 ### Vim oracle
 

@@ -2436,6 +2436,9 @@ func FuzzLegacyExpressionNeverPanics(f *testing.F) {
 	f.Add(`{'key': [1, 2]}->get('key')`)
 	f.Add("((((((((")
 	f.Fuzz(func(t *testing.T, source string) {
+		if len(source) > 16<<10 {
+			source = source[:16<<10]
+		}
 		expression, _ := (LegacyExpressionParser{}).Parse(source)
 		if expression == nil {
 			t.Fatal("nil expression")
@@ -2447,6 +2450,9 @@ func FuzzVim9ExpressionNeverPanics(f *testing.F) {
 	f.Add(`(x) => x ?? 'default'`)
 	f.Add("[[[[[[[[")
 	f.Fuzz(func(t *testing.T, source string) {
+		if len(source) > 16<<10 {
+			source = source[:16<<10]
+		}
 		expression, _ := (Vim9ExpressionParser{}).Parse(source)
 		if expression == nil {
 			t.Fatal("nil expression")

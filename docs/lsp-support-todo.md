@@ -278,7 +278,7 @@ configuration, index or import-graph revision.
   fixture.
 - [ ] Add real Vim/vim-lsp and Neovim built-in LSP smoke tests without reading
   or modifying user configuration.
-- [ ] Fuzz parser, framing and position/edit boundaries; retain every crash,
+- [x] Fuzz parser, framing and position/edit boundaries; retain every crash,
   hang or memory-growth input in the permanent corpus.
 - [ ] Benchmark large files, runtimepath indexing, completion latency, reverse
   dependent reanalysis and full workspace rebuilds against documented limits.

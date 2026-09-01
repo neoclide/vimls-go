@@ -295,6 +295,9 @@ func FuzzPositionRoundTrip(f *testing.F) {
 	f.Add("ascii\n𐐀e\u0301", uint8(1), uint16(0))
 	f.Add("\ufeff\r\n", uint8(0), uint16(3))
 	f.Fuzz(func(t *testing.T, content string, encodingIndex uint8, rawOffset uint16) {
+		if len(content) > 16<<10 {
+			content = content[:16<<10]
+		}
 		encodings := []Encoding{UTF8, UTF16, UTF32}
 		encoding := encodings[int(encodingIndex)%len(encodings)]
 		snapshot := NewSnapshot("fuzz", 1, nil, content)

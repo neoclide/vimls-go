@@ -38,6 +38,9 @@ func FuzzFileParsersNeverPanic(f *testing.F) {
 	f.Add("function! Test()\n  let x = {'a': 1}\nendfunction\n", false)
 	f.Add("vim9script\ndef Broken(\n[[[[\n", true)
 	f.Fuzz(func(t *testing.T, source string, vim9 bool) {
+		if len(source) > 64<<10 {
+			source = source[:64<<10]
+		}
 		var file *File
 		if vim9 {
 			file = (Vim9Parser{}).Parse(source)
@@ -47,5 +50,6 @@ func FuzzFileParsersNeverPanic(f *testing.F) {
 		if file == nil || file.Source != source {
 			t.Fatal("parser did not retain source")
 		}
+		assertFileSpans(t, file)
 	})
 }

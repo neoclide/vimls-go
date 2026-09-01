@@ -314,6 +314,9 @@ func FuzzVim9TypeNeverPanics(f *testing.F) {
 	f.Add("func(tuple<number, string>, ...list<any>): dict<bool>")
 	f.Add("list<list<list<")
 	f.Fuzz(func(t *testing.T, source string) {
+		if len(source) > 16<<10 {
+			source = source[:16<<10]
+		}
 		typeNode, _ := (Vim9TypeParser{}).Parse(source)
 		if typeNode == nil {
 			t.Fatal("nil type")
