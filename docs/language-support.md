@@ -360,6 +360,11 @@ Published diagnostics are sorted by source byte span and capped at 200 per
 document. When more diagnostics exist, the server retains the first 199 and
 uses the final slot for `vimls/diagnostics-truncated` at end-of-file. Reanalyzing
 an unchanged snapshot produces the same retained diagnostics and marker.
+When the client supports diagnostic related information, a cross-file
+not-exported or deprecated import-member diagnostic points to its unique
+authoritative declaration. Missing, ambiguous, and dynamic targets do not
+invent a related location; the same rule applies to future cross-file type
+diagnostics.
 
 For statically resolved local Vim9 members, navigation follows inherited
 methods and variables, default constructors, and enum values. When an object

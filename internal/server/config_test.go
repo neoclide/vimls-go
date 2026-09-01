@@ -31,16 +31,18 @@ func TestCompletionCapabilitiesFromClient(t *testing.T) {
 }
 
 func TestLanguageFeatureCapabilitiesRespectClientOrder(t *testing.T) {
+	enabled := true
 	capabilities := languageFeatureCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{
 		Hover: &protocol.HoverClientCapabilities{ContentFormat: []protocol.MarkupKind{protocol.MarkupKindPlainText, protocol.MarkupKindMarkdown}},
 		SignatureHelp: &protocol.SignatureHelpClientCapabilities{SignatureInformation: &protocol.ClientSignatureInformationOptions{
 			DocumentationFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
 		}},
+		PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{DiagnosticsCapabilities: protocol.DiagnosticsCapabilities{RelatedInformation: &enabled}},
 	})
-	if capabilities.hoverMarkup != protocol.MarkupKindPlainText || capabilities.signatureMarkup != protocol.MarkupKindMarkdown {
+	if capabilities.hoverMarkup != protocol.MarkupKindPlainText || capabilities.signatureMarkup != protocol.MarkupKindMarkdown || !capabilities.diagnosticRelatedInformation {
 		t.Fatalf("language feature capabilities = %#v", capabilities)
 	}
-	if capabilities := languageFeatureCapabilitiesFromClient(nil); capabilities.hoverMarkup != protocol.MarkupKindPlainText || capabilities.signatureMarkup != protocol.MarkupKindPlainText {
+	if capabilities := languageFeatureCapabilitiesFromClient(nil); capabilities.hoverMarkup != protocol.MarkupKindPlainText || capabilities.signatureMarkup != protocol.MarkupKindPlainText || capabilities.diagnosticRelatedInformation {
 		t.Fatalf("absent language feature capabilities = %#v", capabilities)
 	}
 }

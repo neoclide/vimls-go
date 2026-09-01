@@ -37,8 +37,9 @@ type completionCapabilities struct {
 }
 
 type languageFeatureCapabilities struct {
-	hoverMarkup     protocol.MarkupKind
-	signatureMarkup protocol.MarkupKind
+	hoverMarkup                  protocol.MarkupKind
+	signatureMarkup              protocol.MarkupKind
+	diagnosticRelatedInformation bool
 }
 
 func languageFeatureCapabilitiesFromClient(textDocument *protocol.TextDocumentClientCapabilities) languageFeatureCapabilities {
@@ -51,6 +52,9 @@ func languageFeatureCapabilitiesFromClient(textDocument *protocol.TextDocumentCl
 	}
 	if textDocument.SignatureHelp != nil && textDocument.SignatureHelp.SignatureInformation != nil {
 		result.signatureMarkup = preferredMarkupKind(textDocument.SignatureHelp.SignatureInformation.DocumentationFormat)
+	}
+	if textDocument.PublishDiagnostics != nil && textDocument.PublishDiagnostics.RelatedInformation != nil {
+		result.diagnosticRelatedInformation = *textDocument.PublishDiagnostics.RelatedInformation
 	}
 	return result
 }

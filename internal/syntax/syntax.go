@@ -568,6 +568,17 @@ type Diagnostic struct {
 	Code    string
 	Message string
 	Span    Span
+	Related RelatedDiagnostic
+}
+
+// RelatedDiagnostic is one authoritative source location associated with a
+// diagnostic. Source and Span remain byte-based so protocol encoding conversion
+// stays at the server boundary. The zero value means no related location.
+type RelatedDiagnostic struct {
+	URI     string
+	Source  string
+	Message string
+	Span    Span
 }
 
 type File struct {

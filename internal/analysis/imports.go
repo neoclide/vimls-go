@@ -27,6 +27,7 @@ type ImportMember struct {
 	Exists      bool
 	Exported    bool
 	Deprecated  bool
+	Related     syntax.RelatedDiagnostic
 }
 
 // AnalyzeImports returns conservative cross-file Vim9 import diagnostics.
@@ -66,14 +67,14 @@ func AnalyzeImports(loads []ImportLoad, members []ImportMember) []syntax.Diagnos
 		if member.Exported {
 			if member.Deprecated {
 				diagnostics = append(diagnostics, syntax.Diagnostic{
-					Code: "vimls/deprecated", Message: member.Name + " is deprecated", Span: member.Span,
+					Code: "vimls/deprecated", Message: member.Name + " is deprecated", Span: member.Span, Related: member.Related,
 				})
 			}
 			continue
 		}
 		if member.Exists {
 			diagnostics = append(diagnostics, syntax.Diagnostic{
-				Code: "vim/E1049", Message: "Item not exported in script: " + member.Name, Span: member.Span,
+				Code: "vim/E1049", Message: "Item not exported in script: " + member.Name, Span: member.Span, Related: member.Related,
 			})
 		} else {
 			diagnostics = append(diagnostics, syntax.Diagnostic{

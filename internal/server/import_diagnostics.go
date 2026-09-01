@@ -4,6 +4,7 @@ import (
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/workspace"
+	"go.lsp.dev/uri"
 )
 
 type importTargetSnapshot struct {
@@ -59,14 +60,24 @@ func (s *Server) workspaceImportDiagnostics(snapshot workspaceAnalysisSnapshot, 
 			targetSnapshot := targets[target]
 			if targetSnapshot.known {
 				member.TargetKnown = true
+				var declaration workspace.SymbolFact
+				declarationCount := 0
 				for _, symbol := range targetSnapshot.symbols {
 					if !symbol.TopLevel || symbol.Name != reference.Name {
 						continue
 					}
+					declaration = symbol
+					declarationCount++
 					member.Exists = true
 					if symbol.Exported {
 						member.Exported = true
 						member.Deprecated = member.Deprecated || symbol.Deprecated
+					}
+				}
+				if declarationCount == 1 {
+					member.Related = syntax.RelatedDiagnostic{
+						URI: uri.File(target).String(), Source: targetSnapshot.source,
+						Message: reference.Name + " is declared here", Span: declaration.SelectionRange,
 					}
 				}
 			}

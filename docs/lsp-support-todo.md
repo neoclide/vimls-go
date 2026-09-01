@@ -255,7 +255,7 @@ position encoding; every code action round-trips through a reparsed document.
 
 - [x] Define stable policy for parser, compatibility, unresolved, unused and
   deprecation severities, including whether each category can be disabled.
-- [ ] Publish related information for cross-file import/export/type errors when
+- [x] Publish related information for cross-file import/export/type errors when
   the authoritative declaration is known.
 - [x] Keep the 200-diagnostic limit deterministic and indicate truncation
   without replacing more useful earlier diagnostics.

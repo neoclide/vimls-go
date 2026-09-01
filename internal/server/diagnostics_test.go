@@ -444,7 +444,7 @@ func TestServerPublishesVersionedSemanticDiagnosticsAndClearsThem(t *testing.T) 
 
 func TestServerPublishesImportMemberDiagnostics(t *testing.T) {
 	root := t.TempDir()
-	writeWorkspaceFile(t, root, "lib.vim", `vim9script
+	libPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "lib.vim", `vim9script
 export var Public = 1
 # deprecated use Public
 export var Old = 0
@@ -457,7 +457,7 @@ type PrivateType = number
 def Holder()
   var Missing = 3
 enddef
-`)
+`))
 	instance, published := initializeWorkspaceDiagnosticServer(t, root)
 	importerPath := filepath.Join(root, "main.vim")
 	importerURI := uri.File(importerPath)
@@ -491,6 +491,9 @@ var typed: Lib.PrivateType
 	if len(e1048) != 1 || e1048[0].Message != protocol.String("Item not found in script: Missing") || e1048[0].Range.Start.Line != 6 {
 		t.Fatalf("E1048 diagnostics = %#v; all=%#v", e1048, params.Diagnostics)
 	}
+	if len(e1048[0].RelatedInformation) != 0 {
+		t.Fatalf("missing member has related declaration: %#v", e1048[0].RelatedInformation)
+	}
 	if len(e1049) != 3 {
 		t.Fatalf("E1049 diagnostics = %#v; all=%#v", e1049, params.Diagnostics)
 	}
@@ -502,6 +505,14 @@ var typed: Lib.PrivateType
 		message, ok := diagnostic.Message.(protocol.String)
 		if !ok {
 			t.Fatalf("E1049 message = %#v", diagnostic.Message)
+		}
+		wantLine := map[string]uint32{
+			"Item not exported in script: Private":     8,
+			"Item not exported in script: PrivateType": 9,
+		}[string(message)]
+		if len(diagnostic.RelatedInformation) != 1 || diagnostic.RelatedInformation[0].Location.URI != uri.File(libPath) ||
+			diagnostic.RelatedInformation[0].Location.Range.Start.Line != wantLine || diagnostic.RelatedInformation[0].Message == "" {
+			t.Fatalf("E1049 related information = %#v", diagnostic.RelatedInformation)
 		}
 		wantMessages[string(message)]--
 	}
@@ -515,7 +526,14 @@ var typed: Lib.PrivateType
 	}
 	for _, diagnostic := range deprecated {
 		tags := diagnostic.Tags.Slice()
-		if diagnostic.Severity != protocol.DiagnosticSeverityHint || len(tags) != 1 || tags[0] != protocol.DiagnosticTagDeprecated {
+		message, ok := diagnostic.Message.(protocol.String)
+		if !ok {
+			t.Fatalf("deprecated message = %#v", diagnostic.Message)
+		}
+		wantLine := map[string]uint32{"Old is deprecated": 3, "OldFunc is deprecated": 5}[string(message)]
+		if diagnostic.Severity != protocol.DiagnosticSeverityHint || len(tags) != 1 || tags[0] != protocol.DiagnosticTagDeprecated ||
+			len(diagnostic.RelatedInformation) != 1 || diagnostic.RelatedInformation[0].Location.URI != uri.File(libPath) ||
+			diagnostic.RelatedInformation[0].Location.Range.Start.Line != wantLine || diagnostic.RelatedInformation[0].Message == "" {
 			t.Fatalf("deprecated import diagnostic = %#v tags=%#v", diagnostic, tags)
 		}
 	}
@@ -1113,8 +1131,12 @@ func initializeWorkspaceDiagnosticServer(t *testing.T, root string) (*Server, <-
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
 	rootURI := uri.File(root)
+	relatedInformation := true
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI: &rootURI, InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
+		Capabilities: protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{
+			PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{DiagnosticsCapabilities: protocol.DiagnosticsCapabilities{RelatedInformation: &relatedInformation}},
+		}},
 	}); err != nil {
 		t.Fatal(err)
 	}

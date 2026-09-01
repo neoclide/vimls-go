@@ -1148,6 +1148,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	encoding := s.encoding
 	client := s.client
 	unresolvedSeverity := s.unresolvedSeverity
+	diagnosticRelatedInformation := s.languageFeatures.diagnosticRelatedInformation
 	s.mu.Unlock()
 
 	s.publishMu.Lock()
@@ -1164,6 +1165,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	}
 	s.workspaceMu.Unlock()
 	diagnostics := make([]protocol.Diagnostic, 0, len(file.Diagnostics))
+	var relatedSnapshots map[string]*text.Snapshot
 	for _, item := range file.Diagnostics {
 		start, startError := analysis.Snapshot.Position(item.Span.Start, encoding)
 		end, endError := analysis.Snapshot.Position(item.Span.End, encoding)
@@ -1184,6 +1186,27 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagDeprecated)
 		} else if item.Code == "vimls/unused-variable" {
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagUnnecessary)
+		}
+		if diagnosticRelatedInformation && item.Related.URI != "" {
+			if relatedSnapshots == nil {
+				relatedSnapshots = make(map[string]*text.Snapshot)
+			}
+			relatedSnapshot := relatedSnapshots[item.Related.URI]
+			if relatedSnapshot == nil {
+				relatedSnapshot = text.NewSnapshot(item.Related.URI, 0, nil, item.Related.Source)
+				relatedSnapshots[item.Related.URI] = relatedSnapshot
+			}
+			relatedStart, startError := relatedSnapshot.Position(item.Related.Span.Start, encoding)
+			relatedEnd, endError := relatedSnapshot.Position(item.Related.Span.End, encoding)
+			if startError == nil && endError == nil {
+				diagnostic.RelatedInformation = []protocol.DiagnosticRelatedInformation{{
+					Location: protocol.Location{URI: uri.URI(item.Related.URI), Range: protocol.Range{
+						Start: protocol.Position{Line: uint32(relatedStart.Line), Character: uint32(relatedStart.Character)},
+						End:   protocol.Position{Line: uint32(relatedEnd.Line), Character: uint32(relatedEnd.Character)},
+					}},
+					Message: item.Related.Message,
+				}}
+			}
 		}
 		diagnostics = append(diagnostics, diagnostic)
 	}

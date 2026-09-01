@@ -7,6 +7,8 @@ import (
 )
 
 func TestAnalyzeImportsReportsStaticLoadAndMemberErrors(t *testing.T) {
+	privateRelated := syntax.RelatedDiagnostic{URI: "file:///lib.vim", Source: "var Private\n", Message: "Private is declared here", Span: syntax.Span{Start: 4, End: 11}}
+	oldRelated := syntax.RelatedDiagnostic{URI: "file:///lib.vim", Source: "var Old\n", Message: "Old is declared here", Span: syntax.Span{Start: 4, End: 7}}
 	diagnostics := AnalyzeImports(
 		[]ImportLoad{
 			{Span: syntax.Span{Start: 1, End: 16}, Path: "missing.vim", Missing: true},
@@ -17,8 +19,8 @@ func TestAnalyzeImportsReportsStaticLoadAndMemberErrors(t *testing.T) {
 		},
 		[]ImportMember{
 			{Span: syntax.Span{Start: 40, End: 47}, Name: "Missing", TargetKnown: true},
-			{Span: syntax.Span{Start: 50, End: 57}, Name: "Private", TargetKnown: true, Exists: true},
-			{Span: syntax.Span{Start: 58, End: 61}, Name: "Old", TargetKnown: true, Exists: true, Exported: true, Deprecated: true},
+			{Span: syntax.Span{Start: 50, End: 57}, Name: "Private", TargetKnown: true, Exists: true, Related: privateRelated},
+			{Span: syntax.Span{Start: 58, End: 61}, Name: "Old", TargetKnown: true, Exists: true, Exported: true, Deprecated: true, Related: oldRelated},
 		},
 	)
 	wantCodes := []string{"vim/E1053", "vim/E1053", "vim/E1264", "vim/E1048", "vim/E1049", "vimls/deprecated", "vim/E1088", "vim/E1262"}
@@ -36,6 +38,9 @@ func TestAnalyzeImportsReportsStaticLoadAndMemberErrors(t *testing.T) {
 		if diagnostics[index].Code != wantCodes[index] || diagnostics[index].Message != wantMessages[index] {
 			t.Fatalf("diagnostic[%d] = %#v, want %s %q", index, diagnostics[index], wantCodes[index], wantMessages[index])
 		}
+	}
+	if diagnostics[4].Related != privateRelated || diagnostics[5].Related != oldRelated {
+		t.Fatalf("related diagnostics = %#v, %#v", diagnostics[4].Related, diagnostics[5].Related)
 	}
 }
 
