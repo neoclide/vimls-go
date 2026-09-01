@@ -474,23 +474,32 @@ func TestNavigationReusesCurrentParsedDocument(t *testing.T) {
 	}
 }
 
-func TestHoverOmitsUnknownType(t *testing.T) {
-	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = UnknownCall()\necho value\n")
-	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{
-		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
-			Position:     protocol.Position{Line: 2, Character: 6},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hover == nil {
-		t.Fatal("hover is nil")
-	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Value != "name: value\nkind: variable" {
-		t.Fatalf("hover = %#v", hover)
+func TestHoverShowsUnknownAndAnyVariableTypes(t *testing.T) {
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{name: "unknown", source: "vim9script\nvar value = UnknownCall()\necho value\n", want: "unknown"},
+		{name: "explicit any", source: "vim9script\nvar value: any\necho value\n", want: "any"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+					Position:     protocol.Position{Line: 2, Character: 6},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hover == nil {
+				t.Fatal("hover is nil")
+			}
+			content, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || content.Value != "name: value\nkind: variable\ntype: "+test.want {
+				t.Fatalf("hover = %#v", hover)
+			}
+		})
 	}
 }
 

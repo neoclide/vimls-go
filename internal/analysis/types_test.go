@@ -156,17 +156,33 @@ var nullValue = v:null
 
 func TestAnalyzeUnknownTypesStayConservativeAndNilSafe(t *testing.T) {
 	result := Analyze(nil)
-	if got := result.TypeOf(nil); got.Name != ValueTypeAny {
+	if got := result.TypeOf(nil); !isUnresolvedType(got) {
 		t.Fatalf("nil type = %#v", got)
 	}
 	result = Analyze(syntax.Parse("vim9script\nvar value = object.member\nvar dynamic = UnknownCall(value)\n"))
 	for _, declaration := range result.Root.Declarations {
-		if declaration.Type.Name != ValueTypeAny {
+		if !isUnresolvedType(declaration.Type) {
 			t.Fatalf("%s type = %#v", declaration.Name, declaration.Type)
 		}
 	}
-	if got := result.TypeOf(nil); got.Name != ValueTypeAny {
+	if got := result.TypeOf(nil); !isUnresolvedType(got) {
 		t.Fatalf("missing expression type = %#v", got)
+	}
+}
+
+func TestAnalyzeExplicitAnyIsDistinctFromUnknown(t *testing.T) {
+	result := Analyze(syntax.Parse("vim9script\nvar explicit: any\nvar inferred = explicit\nvar unknown = Dynamic()\n"))
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Root.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	for _, name := range []string{"explicit", "inferred"} {
+		if declarations[name] == nil || declarations[name].Type.Name != ValueTypeAny {
+			t.Fatalf("%s type = %#v, want explicit any", name, declarations[name])
+		}
+	}
+	if declarations["unknown"] == nil || !isUnresolvedType(declarations["unknown"].Type) {
+		t.Fatalf("unknown type = %#v", declarations["unknown"])
 	}
 }
 
@@ -220,7 +236,7 @@ var inferredBlock = (value: number) => {
 
 func TestAnalyzeLambdaExplicitReturnTypeRejectsIncompatibleInference(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar f = (value: number): string => value\n"))
-	if len(result.Root.Declarations) != 1 || result.Root.Declarations[0].Type.Name != "func" || result.Root.Declarations[0].Type.Return == nil || result.Root.Declarations[0].Type.Return.Name != "any" {
+	if len(result.Root.Declarations) != 1 || result.Root.Declarations[0].Type.Name != "func" || result.Root.Declarations[0].Type.Return == nil || !isUnresolvedType(*result.Root.Declarations[0].Type.Return) {
 		t.Fatalf("incompatible lambda type = %+v return=%+v", *result.Root.Declarations[0], *result.Root.Declarations[0].Type.Return)
 	}
 }

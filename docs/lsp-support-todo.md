@@ -118,7 +118,7 @@ for dynamic names.
 - [x] Complete import/export/autoload semantics for aliases, exported members,
   types, classes, cycles, diamonds, open-buffer overlays and reverse-dependent
   reanalysis. Dynamic and unsafe targets remain unknown.
-- [ ] Finish Vim9 type checking for primitive values, containers, tuples,
+- [x] Finish Vim9 type checking for primitive values, containers, tuples,
   functions, objects, interfaces, enums, generics, `any`, `void` and null
   values. Preserve `unknown` as an analyzer state, never a source type.
 - [ ] Continue the official compile-diagnostic migration one Vim error code per

@@ -671,7 +671,7 @@ func TestSignatureHelpUsesShadowingFunctionValue(t *testing.T) {
 	help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 10},
 	}})
-	if err != nil || help == nil || help.Signatures[0].Label != "get(any): any" {
+	if err != nil || help == nil || help.Signatures[0].Label != "get(?): ?" {
 		t.Fatalf("shadowed builtin signature = %#v, %v", help, err)
 	}
 }
@@ -683,6 +683,7 @@ func TestSignatureHelpForFunctionTypedValues(t *testing.T) {
 		wantActive              uint32
 	}{
 		{name: "lambda", source: "vim9script\nvar Callback = (first: number, second: string): number => first\necho Callback(1, 'x')\n", wantLabel: "Callback(number, string): number", line: 2, character: 20, wantActive: 1},
+		{name: "explicit any", source: "vim9script\nvar Callback: func(any): any\necho Callback(1)\n", wantLabel: "Callback(any): any", line: 2, character: 15},
 		{name: "optional", source: "vim9script\nvar Callback: func(number, ?string): bool\necho Callback(1, 'x')\n", wantLabel: "Callback(number, ?string): bool", line: 2, character: 20, wantActive: 1},
 		{name: "variadic", source: "vim9script\nvar Callback: func(number, ...list<any>): bool\necho Callback(1, 2, 3)\n", wantLabel: "Callback(number, ...list<any>): bool", line: 2, character: 21, wantActive: 1},
 	} {

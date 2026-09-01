@@ -8,8 +8,8 @@ import (
 )
 
 // ValueType is the small, protocol-independent type fact used by analysis.
-// any is deliberate: Vim expressions are dynamic and an unknown fact must
-// never be turned into a guessed type.  Return is set for function values.
+// The zero value is the analyzer's unknown state; Name "any" is reserved for
+// Vim9's explicit source type. Return is set for function values.
 type ValueType struct {
 	Name               string
 	Arguments          []ValueType
@@ -22,7 +22,7 @@ type ValueType struct {
 const ValueTypeAny = "any"
 
 // UnknownValueType is returned when an expression cannot be inferred safely.
-var UnknownValueType = ValueType{Name: ValueTypeAny}
+var UnknownValueType = ValueType{}
 
 // TypeOf returns the best conservative type fact for expression.  The zero
 // value and nil expressions are treated as unknown for convenient callers.
@@ -103,7 +103,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 				arguments := make([]ValueType, 0, len(command.Function.Parameters))
 				for _, parameter := range command.Function.Parameters {
 					typ := convertSyntaxType(parameter.Type)
-					if isUnknownType(typ) {
+					if isUnresolvedType(typ) {
 						typ = UnknownValueType
 					}
 					arguments = append(arguments, typ)
@@ -128,7 +128,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 				if binding.ParsedType != nil || len(command.Declaration.Bindings) == 1 && command.Declaration.ParsedType != nil {
 					state.explicitTypes[binding.Name] = true
 				}
-				if !isUnknownType(typ) {
+				if !isUnresolvedType(typ) {
 					declaration.Type = typ
 				}
 			}
@@ -137,7 +137,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 			state.collectLambdaFactsExpression(command.For.Iterable)
 			for _, binding := range command.For.Bindings {
 				if declaration := state.declarations[binding.Name]; declaration != nil {
-					if typ := convertSyntaxType(binding.ParsedType); !isUnknownType(typ) {
+					if typ := convertSyntaxType(binding.ParsedType); !isUnresolvedType(typ) {
 						declaration.Type = typ
 					}
 				}
@@ -204,7 +204,7 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 			for bindingIndex, binding := range command.Declaration.Bindings {
 				declaration := state.declarations[binding.Name]
 				explicitType := binding.ParsedType != nil || len(command.Declaration.Bindings) == 1 && command.Declaration.ParsedType != nil
-				if declaration == nil || explicitType || !isUnknownType(declaration.Type) {
+				if declaration == nil || explicitType || !isUnresolvedType(declaration.Type) {
 					continue
 				}
 				expression := initializerElement(command.Declaration.Initializer, bindingIndex, len(command.Declaration.Bindings))
@@ -214,7 +214,7 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 		if command.For != nil {
 			iterable := state.infer(command.For.Iterable, scope)
 			for _, binding := range command.For.Bindings {
-				if declaration := state.declarations[binding.Name]; declaration != nil && isUnknownType(declaration.Type) {
+				if declaration := state.declarations[binding.Name]; declaration != nil && isUnresolvedType(declaration.Type) {
 					declaration.Type = indexedType(iterable)
 				}
 			}
@@ -224,10 +224,10 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 			for parameterIndex, parameter := range command.Function.Parameters {
 				if parameter.Default != nil {
 					defaultType := state.infer(parameter.Default, scope)
-					if functionDeclaration != nil && parameterIndex < len(functionDeclaration.Type.Arguments) && isUnknownType(functionDeclaration.Type.Arguments[parameterIndex]) && !isUnknownType(defaultType) {
+					if functionDeclaration != nil && parameterIndex < len(functionDeclaration.Type.Arguments) && isUnresolvedType(functionDeclaration.Type.Arguments[parameterIndex]) && !isUnresolvedType(defaultType) {
 						functionDeclaration.Type.Arguments[parameterIndex] = defaultType
 					}
-					if parameterDeclaration := state.declarations[parameterDeclarationSpan(file, parameter)]; parameterDeclaration != nil && isUnknownType(parameterDeclaration.Type) && !isUnknownType(defaultType) {
+					if parameterDeclaration := state.declarations[parameterDeclarationSpan(file, parameter)]; parameterDeclaration != nil && isUnresolvedType(parameterDeclaration.Type) && !isUnresolvedType(defaultType) {
 						parameterDeclaration.Type = defaultType
 					}
 				}
@@ -294,7 +294,7 @@ func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) 
 		command := &commands[index]
 		if command.Function != nil && (command.Function.ReturnType == nil || command.Function.ReturnType.Kind == syntax.TypeMissing) {
 			declaration := state.declarations[command.Function.Name]
-			if declaration != nil && declaration.Type.Return != nil && isUnknownType(*declaration.Type.Return) &&
+			if declaration != nil && declaration.Type.Return != nil && isUnresolvedType(*declaration.Type.Return) &&
 				(command.Function.ReturnType == nil || !syntaxDiagnosticOverlaps(state.result.File.Diagnostics, command.Function.ReturnType.Span)) {
 				inferred := UnknownValueType
 				hasValueReturn := false
@@ -306,7 +306,7 @@ func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) 
 					if body.Canonical == "return" && len(body.Expressions) > 0 {
 						hasValueReturn = true
 						current := state.infer(body.Expressions[0], state.commandScopes[body])
-						if isUnknownType(inferred) {
+						if isUnresolvedType(inferred) {
 							inferred = current
 						} else {
 							inferred = mergeTypes(inferred, current)
@@ -329,7 +329,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	if expression == nil {
 		return UnknownValueType
 	}
-	if typ, ok := state.result.expressionTypes[expression]; ok && !isUnknownType(typ) {
+	if typ, ok := state.result.expressionTypes[expression]; ok && !isUnresolvedType(typ) {
 		return typ
 	}
 	unknown := UnknownValueType
@@ -669,7 +669,7 @@ func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) 
 	arguments := make([]ValueType, 0, len(expression.Parameters))
 	for _, parameter := range expression.Parameters {
 		typ := convertSyntaxType(parameter.Type)
-		if isUnknownType(typ) {
+		if isUnresolvedType(typ) {
 			typ = UnknownValueType
 		}
 		arguments = append(arguments, typ)
@@ -690,8 +690,8 @@ func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) 
 		returnType = state.infer(expression.Children[len(expression.Parameters)], lambdaScope)
 	}
 	explicitType := convertSyntaxType(expression.ReturnType)
-	if !isUnknownType(explicitType) {
-		if isUnknownType(returnType) || compatibleTypes(explicitType, returnType) {
+	if !isUnresolvedType(explicitType) {
+		if isUnresolvedType(returnType) || compatibleTypes(explicitType, returnType) {
 			returnType = explicitType
 		} else {
 			returnType = UnknownValueType
@@ -726,7 +726,7 @@ func (state *typeState) lambdaBodyReturnType(commands []syntax.Command, scope *S
 				continue
 			}
 			current := state.infer(command.Expressions[0], commandScope)
-			if isUnknownType(result) {
+			if isUnresolvedType(result) {
 				result = current
 			} else {
 				result = mergeTypes(result, current)
@@ -764,10 +764,10 @@ func compatibleTypes(expected, actual ValueType) bool {
 }
 
 func (state *typeState) assign(expression *syntax.Expression, typ ValueType) {
-	if expression == nil || isUnknownType(typ) {
+	if expression == nil || isUnresolvedType(typ) {
 		return
 	}
-	if declaration := state.declarations[expression.Span]; declaration != nil && !state.explicitTypes[expression.Span] && isUnknownType(declaration.Type) {
+	if declaration := state.declarations[expression.Span]; declaration != nil && !state.explicitTypes[expression.Span] && isUnresolvedType(declaration.Type) {
 		declaration.Type = typ
 	}
 }
@@ -856,11 +856,14 @@ func indexedType(typ ValueType) ValueType {
 }
 
 func mergeTypes(left, right ValueType) ValueType {
-	if isUnknownType(left) || isUnknownType(right) {
+	if isUnresolvedType(left) || isUnresolvedType(right) {
 		return UnknownValueType
 	}
+	if left.Name == ValueTypeAny || right.Name == ValueTypeAny {
+		return ValueType{Name: ValueTypeAny}
+	}
 	if left.Name != right.Name || len(left.Arguments) != len(right.Arguments) {
-		return UnknownValueType
+		return ValueType{Name: ValueTypeAny}
 	}
 	argumentCountKnown := left.ArgumentCountKnown && right.ArgumentCountKnown && left.RequiredArguments == right.RequiredArguments && left.Variadic == right.Variadic
 	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: argumentCountKnown}
@@ -884,5 +887,9 @@ func isFloatLiteral(value string) bool {
 }
 
 func isUnknownType(typ ValueType) bool {
-	return typ.Name == "" || typ.Name == ValueTypeAny
+	return isUnresolvedType(typ) || typ.Name == ValueTypeAny
+}
+
+func isUnresolvedType(typ ValueType) bool {
+	return typ.Name == ""
 }

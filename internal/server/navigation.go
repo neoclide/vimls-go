@@ -595,8 +595,8 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 					lines = append(lines, "signature: "+signature)
 				}
 				_, declaration := s.analyzeWorkspaceTarget(target)
-				if declaration != nil && declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
-					lines = append(lines, "type: "+formatValueType(declaration.Type))
+				if typeName, ok := hoverDeclarationType(declaration); ok {
+					lines = append(lines, "type: "+typeName)
 				}
 				if target.match.Fact.Documentation != "" {
 					lines = append(lines, "", target.match.Fact.Documentation)
@@ -674,8 +674,8 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 	}
 	declaration := document.declaration
 	lines := []string{"name: " + declaration.Name, "kind: " + string(declaration.Kind)}
-	if declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
-		lines = append(lines, "type: "+formatValueType(declaration.Type))
+	if typeName, ok := hoverDeclarationType(declaration); ok {
+		lines = append(lines, "type: "+typeName)
 	}
 	return s.localHoverResult(ctx, document, lines)
 }
@@ -695,7 +695,23 @@ func (s *Server) hoverContent(value string) *protocol.MarkupContent {
 	return boundedMarkupContent(s.languageFeatures.hoverMarkup, value)
 }
 
+func hoverDeclarationType(declaration *analysis.Declaration) (string, bool) {
+	if declaration == nil {
+		return "", false
+	}
+	if declaration.Type.Name == "" {
+		if declaration.Kind == analysis.SymbolKindVariable || declaration.Kind == analysis.SymbolKindConstant {
+			return "unknown", true
+		}
+		return "", false
+	}
+	return formatValueType(declaration.Type), true
+}
+
 func formatValueType(value analysis.ValueType) string {
+	if value.Name == "" {
+		return "?"
+	}
 	arguments := make([]string, 0, len(value.Arguments))
 	for _, argument := range value.Arguments {
 		arguments = append(arguments, formatValueType(argument))

@@ -400,6 +400,12 @@ local aggregate members and constructors, and exported functions or members
 reached through a static import. Dynamically resolved, ambiguous or invalidated
 call targets remain conservative `unknown`.
 
+The type analyzer stores unresolved facts as a distinct zero-value state;
+explicit Vim9 `any` remains a source type and propagates as such. LSP labels use
+`?` for an unresolved nested signature type rather than presenting it as
+`any`. Variable hover always includes a type line, using `unknown` for an
+unresolved fact and `any` only for the explicit Vim9 source type.
+
 ## File discovery
 
 Include `.vim` files and Vim configuration/plugin paths such as vimrc, gvimrc,

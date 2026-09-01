@@ -4929,11 +4929,14 @@ func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 		declarations[declaration.Name] = declaration
 	}
 	for name, want := range map[string]string{
-		"shortName": "number", "longName": "number", "boolName": "bool", "stringName": "string", "future": "any", "terminal": "string",
+		"shortName": "number", "longName": "number", "boolName": "bool", "stringName": "string", "terminal": "string",
 	} {
 		if declaration := declarations[name]; declaration == nil || declaration.Type.Name != want {
 			t.Errorf("%s type = %#v, want %s", name, declaration, want)
 		}
+	}
+	if declaration := declarations["future"]; declaration == nil || !isUnresolvedType(declaration.Type) {
+		t.Errorf("future type = %#v, want internal unknown", declaration)
 	}
 
 	var unknownSpans []string
