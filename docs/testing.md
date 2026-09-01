@@ -20,6 +20,7 @@ testdata/legacy/                   accepted and rejected legacy scripts
 testdata/vim9/                     accepted and rejected Vim9 scripts
 testdata/official/                 pinned generated Vim corpus and metadata
 test/integration/                  subprocess JSON-RPC/LSP scenarios
+test/oracle/                       curated behavior checks against exact Vim
 ```
 
 `TestLSPSubprocess` runs one clean stdio session containing both a legacy
@@ -207,6 +208,20 @@ The oracle checks acceptance/rejection and focused semantics. It does not source
 untrusted workspace files and it does not justify reproducing Vim's runtime
 inside the server.
 
+`test/oracle` contains one curated legacy fixture and one curated Vim9 fixture.
+Its Go harness generates the clean driver in a test-owned temporary directory,
+requires exactly patch v9.2.1015, and records `v:version`, the current and next
+patch probes, `v:errors`, `:messages`, stdout, stderr and exit status for every
+fixture. Run it against a pinned source build with:
+
+```sh
+make oracle VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
+```
+
+The dedicated Ubuntu CI job checks out tag `v9.2.1015`, builds that source and
+runs the same target. Ordinary offline `go test ./...` skips execution when
+`VIM_EXECUTABLE` is absent.
+
 ## Compatibility matrix
 
 Per change:
@@ -215,9 +230,12 @@ Per change:
 - Vim v9.2.1015 for relevant oracle cases.
 - Build on Linux and macOS.
 
-Planned scheduled and release coverage:
+Current behavior-sensitive coverage:
 
 - A pinned clean Vim v9.2.1015 oracle lane.
+
+Planned scheduled and release coverage:
+
 - Windows build and subprocess protocol test.
 - Full race, fuzz, corpus, vulnerability, and benchmark lanes.
 

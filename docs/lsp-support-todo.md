@@ -273,7 +273,7 @@ configuration, index or import-graph revision.
   a realistic Vim9 import/class project. Exercise initialize, sync,
   diagnostics, completion/resolve, hover, signature, navigation, symbols,
   rename and shutdown.
-- [ ] Add the pinned Vim v9.2.1015 oracle lane defined by
+- [x] Add the pinned Vim v9.2.1015 oracle lane defined by
   `docs/testing.md`; record version and patch level for every behavior-sensitive
   fixture.
 - [ ] Add real Vim/vim-lsp and Neovim built-in LSP smoke tests without reading

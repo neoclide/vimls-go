@@ -2,7 +2,7 @@ GO ?= go
 GO_MOD ?= -mod=readonly
 COVERAGE_MIN ?= 90
 
-.PHONY: build check coverage format-check metadata-check metadata-refresh race test vet
+.PHONY: build check coverage format-check metadata-check metadata-refresh oracle race test vet
 
 build:
 	mkdir -p bin
@@ -37,6 +37,10 @@ metadata-check:
 	cmp internal/vimdata/options_generated.go "$$metadata_tmp/options_generated.go"; \
 	cmp internal/vimdata/variables_generated.go "$$metadata_tmp/variables_generated.go"
 	$(GO) test $(GO_MOD) ./internal/vimdata ./tools/genmetadata ./tools/internal/vimhelp
+
+oracle:
+	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim v9.2.1015 binary" >&2; exit 1)
+	VIM_EXECUTABLE="$(VIM_EXECUTABLE)" $(GO) test $(GO_MOD) -v ./test/oracle
 
 coverage:
 	$(GO) test $(GO_MOD) -coverpkg=./internal/... -coverprofile=coverage.out ./...
