@@ -21,18 +21,32 @@ var (
 // symbol needed by workspace lookup. It contains no pointer into a syntax
 // tree and no source text.
 type SymbolFact struct {
+	Path                string
+	Name                string
+	Kind                analysis.SymbolKind
+	Range               syntax.Span
+	SelectionRange      syntax.Span
+	OwnerSelectionRange syntax.Span
+	Detail              string
+	Signature           string
+	Documentation       string
+	Dialect             syntax.Dialect
+	Deprecated          bool
+	Exported            bool
+	TopLevel            bool
+	Abstract            bool
+	Static              bool
+}
+
+// SymbolKey is the stable source identity used by relationship indexes.
+type SymbolKey struct {
 	Path           string
-	Name           string
-	Kind           analysis.SymbolKind
-	Range          syntax.Span
 	SelectionRange syntax.Span
-	Detail         string
-	Signature      string
-	Documentation  string
-	Dialect        syntax.Dialect
-	Deprecated     bool
-	Exported       bool
-	TopLevel       bool
+	Kind           analysis.SymbolKind
+}
+
+func (fact SymbolFact) Key() SymbolKey {
+	return SymbolKey{Path: fact.Path, SelectionRange: fact.SelectionRange, Kind: fact.Kind}
 }
 
 // SymbolMatch is an immutable workspace symbol match. Source is the complete
@@ -75,6 +89,49 @@ type ExternalReferenceMatch struct {
 	Source string
 }
 
+// TypeRelationFact is a direct nominal aggregate relationship. ParentName is
+// only a reverse-index key; callers must resolve ParentSpan before accepting a
+// match.
+type TypeRelationFact struct {
+	Child      SymbolKey
+	ParentName string
+	ParentSpan syntax.Span
+	Kind       analysis.TypeRelationKind
+}
+
+type TypeRelationMatch struct {
+	Fact   TypeRelationFact
+	Source string
+}
+
+// TypeAliasFact keeps the target spelling needed to discover aliases during
+// reverse hierarchy queries.
+type TypeAliasFact struct {
+	Alias      SymbolKey
+	AliasName  string
+	TargetName string
+	TargetSpan syntax.Span
+}
+
+type TypeAliasMatch struct {
+	Fact   TypeAliasFact
+	Source string
+}
+
+// CallFact is a statically named call owned by a named callable. CalleeName is
+// only a reverse-index key; callers must resolve CalleeSpan before accepting a
+// match.
+type CallFact struct {
+	Caller     SymbolKey
+	CalleeName string
+	CalleeSpan syntax.Span
+}
+
+type CallMatch struct {
+	Fact   CallFact
+	Source string
+}
+
 // UserCommandFact is a statically parsed :command definition retained by the
 // workspace index. Runtimepath order and script execution are deliberately not
 // inferred here; diagnostics use only the complete set of defined names.
@@ -101,25 +158,37 @@ type indexedFile struct {
 	references []ExternalReferenceFact
 	commands   []UserCommandFact
 	globals    []GlobalNameFact
+	types      []TypeRelationFact
+	aliases    []TypeAliasFact
+	calls      []CallFact
 }
 
 // Index stores symbols from a bounded set of syntax files. All methods are
 // safe for concurrent use. A non-positive limit means that limit is disabled.
 type Index struct {
-	mu             sync.RWMutex
-	maxFiles       int
-	maxBytes       int
-	bytes          int
-	revision       uint64
-	files          map[string]indexedFile
-	byName         map[string][]SymbolFact
-	byExternalName map[string][]ExternalReferenceFact
-	byUserCommand  map[string][]UserCommandFact
-	byGlobalName   map[string][]GlobalNameFact
-	runtimePaths   []string
-	runtimeAfter   []bool
-	runtimeFiles   []map[string]string
-	complete       bool
+	mu                  sync.RWMutex
+	maxFiles            int
+	maxBytes            int
+	maxRelationsPerFile int
+	maxRelations        int
+	bytes               int
+	relations           int
+	revision            uint64
+	files               map[string]indexedFile
+	byName              map[string][]SymbolFact
+	byExternalName      map[string][]ExternalReferenceFact
+	byUserCommand       map[string][]UserCommandFact
+	byGlobalName        map[string][]GlobalNameFact
+	typesByChild        map[SymbolKey][]TypeRelationFact
+	typesByParent       map[string][]TypeRelationFact
+	aliasesByTarget     map[string][]TypeAliasFact
+	callsByCaller       map[SymbolKey][]CallFact
+	callsByCallee       map[string][]CallFact
+	runtimePaths        []string
+	runtimeAfter        []bool
+	runtimeFiles        []map[string]string
+	complete            bool
+	relationOverflow    map[string]bool
 }
 
 // SetRuntimePaths configures the ordered runtime roots used to classify the
@@ -154,18 +223,32 @@ func (i *Index) SetRuntimePaths(paths []string) {
 }
 
 // NewIndex creates a workspace symbol index with file-count and source-byte
-// limits. The source byte count is len(file.Source), and the source is retained
-// once for each indexed file.
-func NewIndex(maxFiles, maxBytes int) *Index {
-	return &Index{
-		maxFiles:       maxFiles,
-		maxBytes:       maxBytes,
-		files:          make(map[string]indexedFile),
-		byName:         make(map[string][]SymbolFact),
-		byExternalName: make(map[string][]ExternalReferenceFact),
-		byUserCommand:  make(map[string][]UserCommandFact),
-		byGlobalName:   make(map[string][]GlobalNameFact),
+// limits. Optional relationship limits are per-file and total counts. The
+// source byte count is len(file.Source), and the source is retained once for
+// each indexed file.
+func NewIndex(maxFiles, maxBytes int, relationLimits ...int) *Index {
+	index := &Index{
+		maxFiles:         maxFiles,
+		maxBytes:         maxBytes,
+		files:            make(map[string]indexedFile),
+		byName:           make(map[string][]SymbolFact),
+		byExternalName:   make(map[string][]ExternalReferenceFact),
+		byUserCommand:    make(map[string][]UserCommandFact),
+		byGlobalName:     make(map[string][]GlobalNameFact),
+		typesByChild:     make(map[SymbolKey][]TypeRelationFact),
+		typesByParent:    make(map[string][]TypeRelationFact),
+		aliasesByTarget:  make(map[string][]TypeAliasFact),
+		callsByCaller:    make(map[SymbolKey][]CallFact),
+		callsByCallee:    make(map[string][]CallFact),
+		relationOverflow: make(map[string]bool),
 	}
+	if len(relationLimits) > 0 {
+		index.maxRelationsPerFile = relationLimits[0]
+	}
+	if len(relationLimits) > 1 {
+		index.maxRelations = relationLimits[1]
+	}
+	return index
 }
 
 // Replace atomically replaces path's symbols. If either configured limit would
@@ -178,12 +261,16 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	if err != nil {
 		return err
 	}
+	result := analysis.Analyze(file)
 	facts := CollectSymbolFacts(normalized, file)
 	sortFacts(facts)
-	references := CollectExternalReferences(normalized, file)
+	references := CollectExternalReferencesFromAnalysis(normalized, file, result)
 	commands := CollectUserCommandFacts(normalized, file)
 	globals := CollectGlobalNameFacts(normalized, file)
-	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references, commands: commands, globals: globals}
+	types := CollectTypeRelationFacts(normalized, file)
+	aliases := CollectTypeAliasFacts(normalized, file)
+	calls := CollectCallFactsFromAnalysis(normalized, file, result)
+	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references, commands: commands, globals: globals, types: types, aliases: aliases, calls: calls}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -200,15 +287,37 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	if (i.maxFiles > 0 && fileCount > i.maxFiles) || (i.maxBytes > 0 && indexedBytes > i.maxBytes) {
 		return ErrIndexLimit
 	}
+	relationCount := len(types) + len(aliases) + len(calls)
+	relationsWithoutOld := i.relations
+	if exists {
+		relationsWithoutOld -= len(old.types) + len(old.aliases) + len(old.calls)
+	}
+	relationOverflow := i.maxRelationsPerFile > 0 && relationCount > i.maxRelationsPerFile || i.maxRelations > 0 && relationsWithoutOld+relationCount > i.maxRelations
+	if relationOverflow {
+		types = nil
+		aliases = nil
+		calls = nil
+		indexed.types = nil
+		indexed.aliases = nil
+		indexed.calls = nil
+	}
 	if exists {
 		i.removeFactsLocked(old.facts)
 		i.removeExternalReferencesLocked(old.references)
 		i.removeUserCommandsLocked(old.commands)
 		i.removeGlobalNamesLocked(old.globals)
+		i.removeTypeRelationsLocked(old.types)
+		i.removeTypeAliasesLocked(old.aliases)
+		i.removeCallsLocked(old.calls)
+	}
+	delete(i.relationOverflow, normalized)
+	if relationOverflow {
+		i.relationOverflow[normalized] = true
 	}
 	i.files[normalized] = indexed
 	i.addRuntimeFileLocked(normalized)
 	i.bytes = indexedBytes
+	i.relations = relationsWithoutOld + len(types) + len(aliases) + len(calls)
 	for _, fact := range facts {
 		i.byName[fact.Name] = append(i.byName[fact.Name], fact)
 	}
@@ -226,6 +335,17 @@ func (i *Index) Replace(path string, file *syntax.File) error {
 	}
 	for _, fact := range globals {
 		i.byGlobalName[fact.Name] = append(i.byGlobalName[fact.Name], fact)
+	}
+	for _, fact := range types {
+		i.typesByChild[fact.Child] = append(i.typesByChild[fact.Child], fact)
+		i.typesByParent[fact.ParentName] = append(i.typesByParent[fact.ParentName], fact)
+	}
+	for _, fact := range aliases {
+		i.aliasesByTarget[fact.TargetName] = append(i.aliasesByTarget[fact.TargetName], fact)
+	}
+	for _, fact := range calls {
+		i.callsByCaller[fact.Caller] = append(i.callsByCaller[fact.Caller], fact)
+		i.callsByCallee[fact.CalleeName] = append(i.callsByCallee[fact.CalleeName], fact)
 	}
 	i.revision++
 	return nil
@@ -247,9 +367,14 @@ func (i *Index) Remove(path string) {
 	i.removeExternalReferencesLocked(old.references)
 	i.removeUserCommandsLocked(old.commands)
 	i.removeGlobalNamesLocked(old.globals)
+	i.removeTypeRelationsLocked(old.types)
+	i.removeTypeAliasesLocked(old.aliases)
+	i.removeCallsLocked(old.calls)
 	i.removeRuntimeFileLocked(normalized)
+	delete(i.relationOverflow, normalized)
 	delete(i.files, normalized)
 	i.bytes -= old.bytes
+	i.relations -= len(old.types) + len(old.aliases) + len(old.calls)
 	i.revision++
 }
 
@@ -466,6 +591,101 @@ func (i *Index) ExternalReferences(name string) []ExternalReferenceMatch {
 	return result
 }
 
+// TypeRelations returns direct parent facts for child in source order.
+func (i *Index) TypeRelations(child SymbolKey) []TypeRelationMatch {
+	var err error
+	child.Path, err = normalizeIndexPath(child.Path)
+	if err != nil {
+		return nil
+	}
+	i.mu.RLock()
+	facts := i.typesByChild[child]
+	result := make([]TypeRelationMatch, 0, len(facts))
+	for _, fact := range facts {
+		if file, ok := i.files[fact.Child.Path]; ok {
+			result = append(result, TypeRelationMatch{Fact: fact, Source: file.source})
+		}
+	}
+	i.mu.RUnlock()
+	return result
+}
+
+// TypeRelationCandidates returns reverse-index candidates for a parent name.
+// The caller must resolve each ParentSpan and compare the resulting SymbolKey.
+func (i *Index) TypeRelationCandidates(parentName string) []TypeRelationMatch {
+	if parentName == "" {
+		return nil
+	}
+	i.mu.RLock()
+	facts := i.typesByParent[parentName]
+	result := make([]TypeRelationMatch, 0, len(facts))
+	for _, fact := range facts {
+		if file, ok := i.files[fact.Child.Path]; ok {
+			result = append(result, TypeRelationMatch{Fact: fact, Source: file.source})
+		}
+	}
+	i.mu.RUnlock()
+	sort.SliceStable(result, func(left, right int) bool { return relationFactLess(result[left].Fact, result[right].Fact) })
+	return result
+}
+
+// TypeAliasCandidates returns aliases whose target's final source name matches
+// targetName. Callers must resolve TargetSpan before accepting a candidate.
+func (i *Index) TypeAliasCandidates(targetName string) []TypeAliasMatch {
+	if targetName == "" {
+		return nil
+	}
+	i.mu.RLock()
+	facts := i.aliasesByTarget[targetName]
+	result := make([]TypeAliasMatch, 0, len(facts))
+	for _, fact := range facts {
+		if file, ok := i.files[fact.Alias.Path]; ok {
+			result = append(result, TypeAliasMatch{Fact: fact, Source: file.source})
+		}
+	}
+	i.mu.RUnlock()
+	sort.SliceStable(result, func(left, right int) bool { return aliasFactLess(result[left].Fact, result[right].Fact) })
+	return result
+}
+
+// Calls returns direct call facts owned by caller in source order.
+func (i *Index) Calls(caller SymbolKey) []CallMatch {
+	var err error
+	caller.Path, err = normalizeIndexPath(caller.Path)
+	if err != nil {
+		return nil
+	}
+	i.mu.RLock()
+	facts := i.callsByCaller[caller]
+	result := make([]CallMatch, 0, len(facts))
+	for _, fact := range facts {
+		if file, ok := i.files[fact.Caller.Path]; ok {
+			result = append(result, CallMatch{Fact: fact, Source: file.source})
+		}
+	}
+	i.mu.RUnlock()
+	return result
+}
+
+// CallCandidates returns reverse-index candidates for a callee name. The
+// caller must resolve each CalleeSpan and compare the resulting SymbolKey.
+func (i *Index) CallCandidates(calleeName string) []CallMatch {
+	if calleeName == "" {
+		return nil
+	}
+	i.mu.RLock()
+	facts := i.callsByCallee[calleeName]
+	result := make([]CallMatch, 0, len(facts))
+	for _, fact := range facts {
+		if file, ok := i.files[fact.Caller.Path]; ok {
+			result = append(result, CallMatch{Fact: fact, Source: file.source})
+		}
+	}
+	i.mu.RUnlock()
+	sort.SliceStable(result, func(left, right int) bool { return callFactLess(result[left].Fact, result[right].Fact) })
+	return result
+}
+
 // UserCommandNames returns every distinct parsed user-command definition in
 // bytewise name order. The returned slice is independent of the index.
 func (i *Index) UserCommandNames() []string {
@@ -617,6 +837,15 @@ func (i *Index) Complete() bool {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	return i.complete
+}
+
+// RelationshipsComplete reports whether every discovered source installed all
+// type, alias and call facts. It is intentionally separate from the ordinary
+// source index completeness used by completion and diagnostics.
+func (i *Index) RelationshipsComplete() bool {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.complete && len(i.relationOverflow) == 0
 }
 
 // Lookup returns exact-name matches sorted by path and source span. The
@@ -912,8 +1141,9 @@ func CollectSymbolFacts(path string, file *syntax.File) []SymbolFact {
 	}
 	exported := exportedSymbolSpans(file)
 	functions := functionFacts(file)
+	metadata := symbolMetadata(file)
 	facts := make([]SymbolFact, 0)
-	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, functions, true, &facts)
+	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, functions, metadata, true, syntax.Span{}, &facts)
 	sortFacts(facts)
 	return facts
 }
@@ -924,28 +1154,195 @@ type indexedFunctionFact struct {
 	dialect       syntax.Dialect
 }
 
-func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[syntax.Span]bool, functions map[syntax.Span]indexedFunctionFact, topLevel bool, facts *[]SymbolFact) {
+type indexedSymbolMetadata struct {
+	abstract bool
+	static   bool
+}
+
+func collectSymbolFacts(path string, symbols []*analysis.Symbol, exported map[syntax.Span]bool, functions map[syntax.Span]indexedFunctionFact, metadata map[syntax.Span]indexedSymbolMetadata, topLevel bool, owner syntax.Span, facts *[]SymbolFact) {
 	for _, symbol := range symbols {
 		if symbol == nil || symbol.Name == "" {
 			continue
 		}
 		function := functions[symbol.SelectionRange]
+		meta := metadata[symbol.SelectionRange]
 		*facts = append(*facts, SymbolFact{
-			Path:           path,
-			Name:           strings.Clone(symbol.Name),
-			Kind:           symbol.Kind,
-			Range:          symbol.Range,
-			SelectionRange: symbol.SelectionRange,
-			Detail:         strings.Clone(symbol.Detail),
-			Signature:      strings.Clone(function.signature),
-			Documentation:  strings.Clone(function.documentation),
-			Dialect:        function.dialect,
-			Deprecated:     symbol.Deprecated,
-			Exported:       exported[symbol.SelectionRange],
-			TopLevel:       topLevel,
+			Path:                path,
+			Name:                strings.Clone(symbol.Name),
+			Kind:                symbol.Kind,
+			Range:               symbol.Range,
+			SelectionRange:      symbol.SelectionRange,
+			OwnerSelectionRange: owner,
+			Detail:              strings.Clone(symbol.Detail),
+			Signature:           strings.Clone(function.signature),
+			Documentation:       strings.Clone(function.documentation),
+			Dialect:             function.dialect,
+			Deprecated:          symbol.Deprecated,
+			Exported:            exported[symbol.SelectionRange],
+			TopLevel:            topLevel,
+			Abstract:            meta.abstract,
+			Static:              meta.static,
 		})
-		collectSymbolFacts(path, symbol.Children, exported, functions, false, facts)
+		collectSymbolFacts(path, symbol.Children, exported, functions, metadata, false, symbol.SelectionRange, facts)
 	}
+}
+
+func symbolMetadata(file *syntax.File) map[syntax.Span]indexedSymbolMetadata {
+	result := make(map[syntax.Span]indexedSymbolMetadata)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			metadata := indexedSymbolMetadata{abstract: commandHasModifier(command, "abstract"), static: commandHasModifier(command, "static")}
+			switch {
+			case command.Aggregate != nil:
+				result[command.Aggregate.Name] = metadata
+				if command.Aggregate.Kind == syntax.BlockInterface {
+					for _, memberIndex := range command.Aggregate.Members {
+						if memberIndex < 0 || memberIndex >= len(commands) {
+							continue
+						}
+						member := &commands[memberIndex]
+						memberMetadata := indexedSymbolMetadata{abstract: true, static: commandHasModifier(member, "static")}
+						if member.Function != nil {
+							result[member.Function.Name] = memberMetadata
+						}
+						if member.Declaration != nil {
+							for _, binding := range member.Declaration.Bindings {
+								result[binding.Name] = memberMetadata
+							}
+						}
+					}
+				}
+			case command.Function != nil:
+				metadata.abstract = metadata.abstract || result[command.Function.Name].abstract
+				result[command.Function.Name] = metadata
+			case command.Declaration != nil:
+				for _, binding := range command.Declaration.Bindings {
+					metadata.abstract = metadata.abstract || result[binding.Name].abstract
+					result[binding.Name] = metadata
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	return result
+}
+
+// CollectTypeRelationFacts returns immutable direct aggregate relationships.
+func CollectTypeRelationFacts(path string, file *syntax.File) []TypeRelationFact {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil {
+		return nil
+	}
+	relations := analysis.CollectTypeRelations(file)
+	facts := make([]TypeRelationFact, 0, len(relations))
+	for _, relation := range relations {
+		facts = append(facts, TypeRelationFact{
+			Child:      SymbolKey{Path: normalized, SelectionRange: relation.ChildSpan, Kind: relation.ChildKind},
+			ParentName: strings.Clone(relation.ParentName), ParentSpan: relation.ParentSpan, Kind: relation.Kind,
+		})
+	}
+	sort.SliceStable(facts, func(left, right int) bool { return relationFactLess(facts[left], facts[right]) })
+	return facts
+}
+
+// CollectTypeAliasFacts returns aliases of named types. Compound aliases are
+// deliberately absent because they cannot lead to aggregate declarations.
+func CollectTypeAliasFacts(path string, file *syntax.File) []TypeAliasFact {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil {
+		return nil
+	}
+	facts := make([]TypeAliasFact, 0)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			alias := command.TypeAlias
+			if alias != nil && alias.Type != nil && alias.Type.Kind == syntax.TypeNamed && validIndexSpan(file, alias.Name) && validIndexSpan(file, alias.Type.Span) {
+				aliasName := file.Text(alias.Name)
+				targetName := finalTypeName(alias.Type.Name)
+				if aliasName != "" && targetName != "" {
+					facts = append(facts, TypeAliasFact{
+						Alias:     SymbolKey{Path: normalized, SelectionRange: alias.Name, Kind: analysis.SymbolKindTypeAlias},
+						AliasName: strings.Clone(aliasName), TargetName: strings.Clone(targetName), TargetSpan: alias.Type.Span,
+					})
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	sort.SliceStable(facts, func(left, right int) bool { return aliasFactLess(facts[left], facts[right]) })
+	return facts
+}
+
+func finalTypeName(name string) string {
+	if separator := strings.LastIndexByte(name, '.'); separator >= 0 {
+		name = name[separator+1:]
+	}
+	return name
+}
+
+// CollectCallFactsFromAnalysis returns immutable named call relationships and
+// reuses result's semantic pass.
+func CollectCallFactsFromAnalysis(path string, file *syntax.File, result *analysis.FileAnalysis) []CallFact {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil || file == nil || result == nil || result.File != file {
+		return nil
+	}
+	relations := analysis.CollectCallRelations(result)
+	facts := make([]CallFact, 0, len(relations))
+	for _, relation := range relations {
+		facts = append(facts, CallFact{
+			Caller:     SymbolKey{Path: normalized, SelectionRange: relation.CallerSpan, Kind: relation.CallerKind},
+			CalleeName: strings.Clone(relation.CalleeName), CalleeSpan: relation.CalleeSpan,
+		})
+	}
+	sort.SliceStable(facts, func(left, right int) bool { return callFactLess(facts[left], facts[right]) })
+	return facts
+}
+
+func relationFactLess(left, right TypeRelationFact) bool {
+	if left.Child.Path != right.Child.Path {
+		return left.Child.Path < right.Child.Path
+	}
+	if left.Child.SelectionRange != right.Child.SelectionRange {
+		return left.Child.SelectionRange.Start < right.Child.SelectionRange.Start
+	}
+	if left.ParentSpan != right.ParentSpan {
+		return left.ParentSpan.Start < right.ParentSpan.Start
+	}
+	return left.Kind < right.Kind
+}
+
+func aliasFactLess(left, right TypeAliasFact) bool {
+	if left.Alias.Path != right.Alias.Path {
+		return left.Alias.Path < right.Alias.Path
+	}
+	if left.Alias.SelectionRange != right.Alias.SelectionRange {
+		return left.Alias.SelectionRange.Start < right.Alias.SelectionRange.Start
+	}
+	return left.TargetSpan.Start < right.TargetSpan.Start
+}
+
+func callFactLess(left, right CallFact) bool {
+	if left.Caller.Path != right.Caller.Path {
+		return left.Caller.Path < right.Caller.Path
+	}
+	if left.Caller.SelectionRange != right.Caller.SelectionRange {
+		return left.Caller.SelectionRange.Start < right.Caller.SelectionRange.Start
+	}
+	if left.CalleeSpan != right.CalleeSpan {
+		return left.CalleeSpan.Start < right.CalleeSpan.Start
+	}
+	return left.CalleeName < right.CalleeName
 }
 
 func functionFacts(file *syntax.File) map[syntax.Span]indexedFunctionFact {
@@ -1480,6 +1877,71 @@ func (i *Index) removeExternalReferencesLocked(facts []ExternalReferenceFact) {
 				i.byExternalName[fact.Name] = append(matches[:index], matches[index+1:]...)
 				if len(i.byExternalName[fact.Name]) == 0 {
 					delete(i.byExternalName, fact.Name)
+				}
+				break
+			}
+		}
+	}
+}
+
+func (i *Index) removeTypeRelationsLocked(facts []TypeRelationFact) {
+	for _, fact := range facts {
+		children := i.typesByChild[fact.Child]
+		for index, candidate := range children {
+			if candidate == fact {
+				i.typesByChild[fact.Child] = append(children[:index], children[index+1:]...)
+				if len(i.typesByChild[fact.Child]) == 0 {
+					delete(i.typesByChild, fact.Child)
+				}
+				break
+			}
+		}
+		parents := i.typesByParent[fact.ParentName]
+		for index, candidate := range parents {
+			if candidate == fact {
+				i.typesByParent[fact.ParentName] = append(parents[:index], parents[index+1:]...)
+				if len(i.typesByParent[fact.ParentName]) == 0 {
+					delete(i.typesByParent, fact.ParentName)
+				}
+				break
+			}
+		}
+	}
+}
+
+func (i *Index) removeTypeAliasesLocked(facts []TypeAliasFact) {
+	for _, fact := range facts {
+		aliases := i.aliasesByTarget[fact.TargetName]
+		for index, candidate := range aliases {
+			if candidate == fact {
+				i.aliasesByTarget[fact.TargetName] = append(aliases[:index], aliases[index+1:]...)
+				if len(i.aliasesByTarget[fact.TargetName]) == 0 {
+					delete(i.aliasesByTarget, fact.TargetName)
+				}
+				break
+			}
+		}
+	}
+}
+
+func (i *Index) removeCallsLocked(facts []CallFact) {
+	for _, fact := range facts {
+		callers := i.callsByCaller[fact.Caller]
+		for index, candidate := range callers {
+			if candidate == fact {
+				i.callsByCaller[fact.Caller] = append(callers[:index], callers[index+1:]...)
+				if len(i.callsByCaller[fact.Caller]) == 0 {
+					delete(i.callsByCaller, fact.Caller)
+				}
+				break
+			}
+		}
+		callees := i.callsByCallee[fact.CalleeName]
+		for index, candidate := range callees {
+			if candidate == fact {
+				i.callsByCallee[fact.CalleeName] = append(callees[:index], callees[index+1:]...)
+				if len(i.callsByCallee[fact.CalleeName]) == 0 {
+					delete(i.callsByCallee, fact.CalleeName)
 				}
 				break
 			}

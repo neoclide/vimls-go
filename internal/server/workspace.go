@@ -262,7 +262,7 @@ func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
 }
 
 func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
-	index := workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes)
+	index := newWorkspaceIndex()
 	searchPaths := runtimePaths
 	if len(searchPaths) == 0 {
 		searchPaths = roots
@@ -368,7 +368,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 	}
 	for _, path := range paths {
 		if ctx.Err() != nil {
-			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
+			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
 		source, diskFile, ok := readSource(path)
 		if !ok {
@@ -387,16 +387,16 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 	}
 	files := workspace.ParseSources(ctx, sources, 0)
 	if ctx.Err() != nil {
-		return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
+		return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 	}
 	for {
 		if ctx.Err() != nil {
-			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
+			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
 		candidates := make([]string, 0)
 		for position, file := range files {
 			if position%32 == 0 && ctx.Err() != nil {
-				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
+				return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 			}
 			if file == nil {
 				continue
@@ -421,7 +421,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		newDiskFiles := make([]bool, 0, len(candidates))
 		for _, path := range candidates {
 			if ctx.Err() != nil {
-				return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
+				return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 			}
 			if len(indexedPaths)+len(newPaths) >= maxWorkspaceFiles {
 				complete = false
@@ -448,7 +448,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		}
 		parsed := workspace.ParseSources(ctx, newSources, 0)
 		if ctx.Err() != nil {
-			return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes), workspace.NewImportGraph(), map[string]struct{}{}, nil
+			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
 		indexedPaths = append(indexedPaths, newPaths...)
 		indexedDiskFiles = append(indexedDiskFiles, newDiskFiles...)

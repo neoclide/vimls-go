@@ -17,6 +17,7 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 | Hover | Symbol kind, type, signature, source comments and pinned Vim help. Variables always show a type, including `unknown` and explicit Vim9 `any`. |
 | Signature help | Built-in functions and statically resolved user functions, imported functions, function values, methods and constructors. |
 | Navigation | Definition, declaration, references, document highlights and document links for statically resolved local, imported, global and autoload symbols. |
+| Hierarchies and implementations | Direct type supertypes/subtypes, interface and abstract-class implementations, compatible member providers, and incoming/outgoing calls for statically resolved named callables. |
 | Symbols and structure | Document symbols, workspace symbols, folding ranges and selection ranges. |
 | Safe editing | Prepare rename, rename, semantic highlighting, inferred-type inlay hints and a small set of syntax quick fixes. |
 | Formatting | Source-preserving indentation for a whole document or selected range. Only proven leading whitespace is changed. |
@@ -28,9 +29,9 @@ language rules.
 
 ## Current limitations
 
-- On-type formatting, call hierarchy, type hierarchy and implementation lookup
-  are not available. Formatting adjusts indentation only; it does not rewrite
-  expressions, spacing, wrapping or embedded languages.
+- On-type formatting is not available. Document and range formatting adjust
+  indentation only; they do not rewrite expressions, spacing, wrapping or
+  embedded languages.
 - Rename is offered only when every affected symbol can be resolved safely.
   Autoload function rename and other namespace-changing edits are rejected.
 - Code actions are limited to a few unambiguous syntax repairs; there is no
@@ -39,6 +40,9 @@ language rules.
   mutable runtimepath state and dynamically formed names cannot always be
   resolved. The server returns no result or keeps the type `unknown` instead of
   guessing.
+- Call hierarchy excludes lambdas and deferred mapping, autocommand and user
+  command bodies. Type aliases are followed only when they resolve uniquely to
+  a class, interface or enum.
 - Embedded Python, Ruby, Perl, Lua, shell and other heredoc languages are
   preserved as source ranges but are not analyzed.
 - Native `def` inside a Legacy-root file and Legacy `function` inside a

@@ -137,6 +137,8 @@ Deliver:
 - Signature help, prepare rename, rename, and syntax-backed code actions.
 - Semantic tokens after syntax classifications are stable.
 - Source-preserving document and range indentation formatting.
+- Type hierarchy, implementation lookup and call hierarchy for statically
+  resolved workspace symbols.
 
 Exit gate: completion and signature results are relevant to dialect/scope and
 bounded; rename refuses dynamic/ambiguous symbols and produces non-overlapping,
@@ -205,6 +207,16 @@ and Vim9 files. They return minimal leading-whitespace edits, preserve opaque
 and literal payloads, honor the negotiated position encoding and reject stale
 document snapshots. The pinned Vim/vim-lsp smoke applies edits in both dialects.
 
+Type Hierarchy reports direct `extends` and `implements` edges, resolving unique
+local and imported aggregate aliases. Implementation lookup traverses interface
+and abstract-class descendants and validates effective member providers. Call
+Hierarchy covers named Legacy/Vim9 functions, methods and explicit constructors
+across local, import, global and autoload navigation. Reverse queries use a
+bounded, completeness-tracked relationship index; open documents override
+indexed source, and incomplete or oversized results fail explicitly instead of
+returning partial data. All seven methods and item-data round trips are covered
+by the stdio subprocess test.
+
 ## M7: compatibility, performance, and 1.0 release
 
 Deliver:
@@ -243,11 +255,13 @@ Windows on amd64 and arm64 through `tools/release`, with SHA-256 checksums.
 - Prepare rename and rename for provably safe symbols.
 - Semantic tokens and focused code actions.
 - Source-preserving document and range Formatting.
+- Type hierarchy, implementation lookup and call hierarchy for statically
+  resolved symbols.
 
-Call hierarchy, embedded-language delegation, general pretty-printing and
-nonstandard client extensions are post-1.0 unless real client validation shows
-one is required for a usable baseline. The implemented Formatting contract is
-documented in [Formatting research](formatting-research.md).
+Embedded-language delegation, general pretty-printing and nonstandard client
+extensions are post-1.0 unless real client validation shows one is required for
+a usable baseline. The implemented Formatting contract is documented in
+[Formatting research](formatting-research.md).
 
 ## Planning gates
 

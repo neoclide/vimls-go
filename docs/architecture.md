@@ -149,6 +149,13 @@ initialized through the option or local discovery and replaced by the custom
 Generated command and builtin metadata pins its upstream Vim tag and must be
 reproducible without requiring Vim at server runtime.
 
+The same source index stores bounded direct type, named-typealias and call
+facts. Reverse hierarchy queries use names only to select candidates, then
+resolve each retained source span and compare canonical symbol identity. Open
+snapshots replace facts from their indexed path. Relationship completeness is
+tracked separately from ordinary source-index completeness so a reverse query
+never presents a partial result as complete.
+
 Every published workspace state has an identity consisting of its generation,
 index instance and revision, and import-graph revision. Cross-file source,
 symbol facts, and graph edges used by one analysis are copied under the same
@@ -185,6 +192,9 @@ that needs it.
 | `limits.maxCompletionItems` | 2,000 | Return a deterministic bounded result |
 | `limits.maxWorkspaceFiles` | 20,000 | Stop discovery and send one warning |
 | `limits.maxIndexBytes` | 256 MiB | Stop adding files and send one warning |
+| `limits.maxRelationshipFactsPerFile` | 32,768 | Keep ordinary symbols, omit that file's relationships and mark reverse queries incomplete |
+| `limits.maxRelationshipFacts` | 262,144 | Keep ordinary symbols, omit overflowing relationships and mark reverse queries incomplete |
+| `limits.maxHierarchyResults` | 1,000 | Fail the request with LSP `RequestFailed` instead of truncating |
 
 Malformed or oversized `Content-Length` closes the stream because byte framing
 cannot be safely resynchronized. JSON-RPC batch arrays are rejected; vimls-go

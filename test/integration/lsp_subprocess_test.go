@@ -41,6 +41,11 @@ func TestLSPSubprocess(t *testing.T) {
 	if err := os.WriteFile(workspaceMain, []byte(workspaceMainSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	hierarchyPath := filepath.Join(workspaceRoot, "hierarchy.vim")
+	hierarchySource := "vim9script\ninterface I\n  def Run()\nendinterface\nclass C implements I\n  def Run()\n  enddef\nendclass\ndef Target()\nenddef\ndef Caller()\n  echo '😀é' | Target()\nenddef\n"
+	if err := os.WriteFile(hierarchyPath, []byte(hierarchySource), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	runtimeRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(runtimeRoot, "plugin"), 0o700); err != nil {
 		t.Fatal(err)
@@ -63,6 +68,10 @@ function! acme#Format(value) abort
 endfunction
 `
 	if err := os.WriteFile(filepath.Join(runtimeRoot, "autoload", "acme.vim"), []byte(legacyAutoload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vim9Autoload := "vim9script\nexport def Run(): string\n  return 'ok'\nenddef\n"
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "autoload", "newapi.vim"), []byte(vim9Autoload), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(runtimeRoot, "colors"), 0o700); err != nil {
@@ -93,7 +102,7 @@ endfunction
 	reader := jsonrpc.NewReader(stdout)
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"completion":{"completionItem":{"snippetSupport":true}},"hover":{"contentFormat":["markdown"]},"signatureHelp":{"signatureInformation":{"documentationFormat":["plaintext"]}},"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232","runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) {
+	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"implementationProvider":true`) || !strings.Contains(string(initialize["result"]), `"callHierarchyProvider":true`) || !strings.Contains(string(initialize["result"]), `"typeHierarchyProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
@@ -115,6 +124,64 @@ endfunction
 		if time.Now().After(workspaceDeadline) {
 			t.Fatalf("workspace symbols = %s", workspaceSymbols)
 		}
+	}
+	hierarchyURI := canonicalFileURI(t, hierarchyPath)
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, hierarchyURI, hierarchySource))
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":20,"method":"textDocument/implementation","params":{"textDocument":{"uri":%q},"position":{"line":1,"character":10}}}`, hierarchyURI))
+	implementation := readResponse(t, reader, "20")
+	if !strings.Contains(string(implementation["result"]), `"start":{"line":4,"character":6}`) {
+		t.Fatalf("implementation = %s", implementation)
+	}
+
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":21,"method":"textDocument/prepareTypeHierarchy","params":{"textDocument":{"uri":%q},"position":{"line":1,"character":10}}}`, hierarchyURI))
+	typePrepare := readResponse(t, reader, "21")
+	typeItem := firstRawArrayItem(t, typePrepare["result"])
+	if !strings.Contains(string(typeItem), `"name":"I"`) || !strings.Contains(string(typeItem), `"data":`) {
+		t.Fatalf("type prepare = %s", typePrepare)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":22,"method":"typeHierarchy/subtypes","params":{"item":%s}}`, typeItem))
+	typeSubtypes := readResponse(t, reader, "22")
+	if !strings.Contains(string(typeSubtypes["result"]), `"name":"C"`) {
+		t.Fatalf("type subtypes = %s", typeSubtypes)
+	}
+	tamperedTypeItem := strings.Replace(string(typeItem), `"name":"I"`, `"name":"Tampered"`, 1)
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":220,"method":"typeHierarchy/subtypes","params":{"item":%s}}`, tamperedTypeItem))
+	tamperedSubtypes := readResponse(t, reader, "220")
+	if strings.TrimSpace(string(tamperedSubtypes["result"])) != "[]" {
+		t.Fatalf("tampered type item = %s", tamperedSubtypes)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":23,"method":"textDocument/prepareTypeHierarchy","params":{"textDocument":{"uri":%q},"position":{"line":4,"character":6}}}`, hierarchyURI))
+	classPrepare := readResponse(t, reader, "23")
+	classItem := firstRawArrayItem(t, classPrepare["result"])
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":24,"method":"typeHierarchy/supertypes","params":{"item":%s}}`, classItem))
+	typeSupertypes := readResponse(t, reader, "24")
+	if !strings.Contains(string(typeSupertypes["result"]), `"name":"I"`) {
+		t.Fatalf("type supertypes = %s", typeSupertypes)
+	}
+
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":25,"method":"textDocument/prepareCallHierarchy","params":{"textDocument":{"uri":%q},"position":{"line":8,"character":5}}}`, hierarchyURI))
+	callPrepare := readResponse(t, reader, "25")
+	callItem := firstRawArrayItem(t, callPrepare["result"])
+	if !strings.Contains(string(callItem), `"name":"Target"`) || !strings.Contains(string(callItem), `"data":`) {
+		t.Fatalf("call prepare = %s", callPrepare)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":26,"method":"callHierarchy/incomingCalls","params":{"item":%s}}`, callItem))
+	incomingCalls := readResponse(t, reader, "26")
+	if !strings.Contains(string(incomingCalls["result"]), `"name":"Caller"`) || !strings.Contains(string(incomingCalls["result"]), `"fromRanges":[{"start":{"line":11,"character":16}`) {
+		t.Fatalf("incoming calls = %s", incomingCalls)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":27,"method":"textDocument/prepareCallHierarchy","params":{"textDocument":{"uri":%q},"position":{"line":10,"character":5}}}`, hierarchyURI))
+	callerPrepare := readResponse(t, reader, "27")
+	callerItem := firstRawArrayItem(t, callerPrepare["result"])
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":28,"method":"callHierarchy/outgoingCalls","params":{"item":%s}}`, callerItem))
+	outgoingCalls := readResponse(t, reader, "28")
+	if !strings.Contains(string(outgoingCalls["result"]), `"name":"Target"`) || !strings.Contains(string(outgoingCalls["result"]), `"fromRanges":[{"start":{"line":11,"character":16}`) {
+		t.Fatalf("outgoing calls = %s", outgoingCalls)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":29,"method":"textDocument/implementation","params":{"textDocument":{"uri":%q},"position":{"line":4,"character":6}}}`, hierarchyURI))
+	emptyImplementation := readResponse(t, reader, "29")
+	if strings.TrimSpace(string(emptyImplementation["result"])) != "[]" {
+		t.Fatalf("concrete implementation = %s", emptyImplementation)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nvar value: number = 1\nclass Widget\n  def new()\n    if true\n      echo value\n    endif\n  enddef\nendclass\ndef Add(left: number, right: number): number\n  return left + right\nenddef\necho Add(1, 2)\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
@@ -259,6 +326,19 @@ endfunction
 	legacyHover := readResponse(t, reader, "99991")
 	if !strings.Contains(string(legacyHover["result"]), `RuntimeGlobal(value)`) || !strings.Contains(string(legacyHover["result"]), `Return the supplied value`) {
 		t.Fatalf("legacy runtime hover = %s", legacyHover)
+	}
+	autoloadCaller := "function! AutoloadCaller()\n  call newapi#Run()\nendfunction\n"
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///autoload-caller.vim","languageId":"vim","version":1,"text":%q}}}`, autoloadCaller))
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99994,"method":"textDocument/prepareCallHierarchy","params":{"textDocument":{"uri":"file:///autoload-caller.vim"},"position":{"line":1,"character":14}}}`)
+	autoloadPrepare := readResponse(t, reader, "99994")
+	autoloadItem := firstRawArrayItem(t, autoloadPrepare["result"])
+	if !strings.Contains(string(autoloadItem), `"name":"Run"`) || !strings.Contains(string(autoloadItem), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, filepath.Join(runtimeRoot, "autoload", "newapi.vim")))) {
+		t.Fatalf("Vim9 autoload call prepare = %s", autoloadPrepare)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":99995,"method":"callHierarchy/incomingCalls","params":{"item":%s}}`, autoloadItem))
+	autoloadIncoming := readResponse(t, reader, "99995")
+	if !strings.Contains(string(autoloadIncoming["result"]), `"name":"AutoloadCaller"`) {
+		t.Fatalf("Vim9 autoload incoming calls = %s", autoloadIncoming)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///legacy-completion.vim","languageId":"vim","version":1,"text":"echo RuntimeG"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99993,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///legacy-completion.vim"},"position":{"line":0,"character":13}}}`)
@@ -610,6 +690,18 @@ func readResponse(t *testing.T, reader *jsonrpc.Reader, id string) map[string]js
 			t.Fatalf("unexpected response while waiting for %s: %s", id, message)
 		}
 	}
+}
+
+func firstRawArrayItem(t *testing.T, raw json.RawMessage) json.RawMessage {
+	t.Helper()
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) == 0 {
+		t.Fatalf("empty array result: %s", raw)
+	}
+	return items[0]
 }
 
 func readPublishedDiagnostic(t *testing.T, reader *jsonrpc.Reader, documentURI, code string) {

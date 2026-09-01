@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -30,6 +32,115 @@ func TestIndexLookupIncludesNestedSymbols(t *testing.T) {
 	if len(variable) != 1 || variable[0].Kind != analysis.SymbolKindVariable {
 		t.Fatalf("nested lookup = %#v", variable)
 	}
+}
+
+func TestIndexRelationshipsTrackReplaceAndRemove(t *testing.T) {
+	index := NewIndex(10, 10000)
+	path := filepath.Join(t.TempDir(), "relations.vim")
+	source := "vim9script\nabstract class Base\nendclass\ntype Alias = Base\nclass Child extends Base\n  static def Build()\n  enddef\nendclass\ndef Target()\nenddef\ndef Caller()\n  Target()\n  Child.Build()\nenddef\n"
+	if err := index.Replace(path, syntax.Parse(source)); err != nil {
+		t.Fatal(err)
+	}
+	base := index.Lookup("Base")
+	child := index.Lookup("Child")
+	build := index.Lookup("Build")
+	caller := index.Lookup("Caller")
+	if len(base) != 1 || !base[0].Abstract || len(child) != 1 || len(build) != 1 || !build[0].Static || build[0].OwnerSelectionRange != child[0].SelectionRange || len(caller) != 1 {
+		t.Fatalf("symbol metadata: base=%#v child=%#v build=%#v caller=%#v", base, child, build, caller)
+	}
+	types := index.TypeRelations(child[0].Key())
+	if len(types) != 1 || types[0].Fact.ParentName != "Base" || types[0].Fact.Kind != analysis.TypeRelationExtends {
+		t.Fatalf("child relations = %#v", types)
+	}
+	if candidates := index.TypeRelationCandidates("Base"); len(candidates) != 1 || candidates[0].Fact != types[0].Fact {
+		t.Fatalf("type candidates = %#v", candidates)
+	}
+	aliases := index.TypeAliasCandidates("Base")
+	if len(aliases) != 1 || aliases[0].Fact.AliasName != "Alias" || aliases[0].Fact.TargetName != "Base" {
+		t.Fatalf("type alias candidates = %#v", aliases)
+	}
+	calls := index.Calls(caller[0].Key())
+	if len(calls) != 2 || calls[0].Fact.CalleeName != "Target" || calls[1].Fact.CalleeName != "Build" {
+		t.Fatalf("caller relations = %#v", calls)
+	}
+	if candidates := index.CallCandidates("Target"); len(candidates) != 1 || candidates[0].Fact.Caller != caller[0].Key() {
+		t.Fatalf("call candidates = %#v", candidates)
+	}
+
+	if err := index.Replace(path, syntax.Parse("vim9script\nclass Replacement\nendclass\n")); err != nil {
+		t.Fatal(err)
+	}
+	if len(index.TypeRelationCandidates("Base")) != 0 || len(index.TypeAliasCandidates("Base")) != 0 || len(index.CallCandidates("Target")) != 0 {
+		t.Fatalf("replace retained relationships: types=%#v aliases=%#v calls=%#v", index.TypeRelationCandidates("Base"), index.TypeAliasCandidates("Base"), index.CallCandidates("Target"))
+	}
+	if err := index.Replace(path, syntax.Parse(source)); err != nil {
+		t.Fatal(err)
+	}
+	index.Remove(path)
+	if len(index.TypeRelationCandidates("Base")) != 0 || len(index.TypeAliasCandidates("Base")) != 0 || len(index.CallCandidates("Target")) != 0 {
+		t.Fatalf("remove retained relationships: types=%#v aliases=%#v calls=%#v", index.TypeRelationCandidates("Base"), index.TypeAliasCandidates("Base"), index.CallCandidates("Target"))
+	}
+}
+
+func TestIndexRelationshipLimitsKeepOrdinaryFactsAndCompletenessSeparate(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "limited.vim")
+	index := NewIndex(10, 10000, 1, 10)
+	overflow := syntax.Parse("vim9script\ndef Target()\nenddef\ndef Caller()\n  Target()\n  Target()\nenddef\n")
+	if err := index.Replace(path, overflow); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(true)
+	if !index.Complete() || index.RelationshipsComplete() || len(index.Lookup("Caller")) != 1 || len(index.CallCandidates("Target")) != 0 {
+		t.Fatalf("overflow state: complete=%t relationships=%t caller=%#v calls=%#v", index.Complete(), index.RelationshipsComplete(), index.Lookup("Caller"), index.CallCandidates("Target"))
+	}
+	withinLimit := syntax.Parse("vim9script\ndef Target()\nenddef\ndef Caller()\n  Target()\nenddef\n")
+	if err := index.Replace(path, withinLimit); err != nil {
+		t.Fatal(err)
+	}
+	if !index.RelationshipsComplete() || len(index.CallCandidates("Target")) != 1 {
+		t.Fatalf("recovered relationship state: complete=%t calls=%#v", index.RelationshipsComplete(), index.CallCandidates("Target"))
+	}
+
+	other := filepath.Join(root, "other.vim")
+	totalLimited := NewIndex(10, 10000, 10, 1)
+	if err := totalLimited.Replace(path, withinLimit); err != nil {
+		t.Fatal(err)
+	}
+	if err := totalLimited.Replace(other, withinLimit); err != nil {
+		t.Fatal(err)
+	}
+	totalLimited.SetComplete(true)
+	if totalLimited.RelationshipsComplete() {
+		t.Fatal("total relationship overflow reported complete")
+	}
+	totalLimited.Remove(other)
+	if !totalLimited.RelationshipsComplete() {
+		t.Fatal("removing overflow file did not restore completeness")
+	}
+}
+
+func BenchmarkIndexRelationshipFacts(b *testing.B) {
+	var source strings.Builder
+	source.WriteString("vim9script\ndef Target()\nenddef\ndef Caller()\n")
+	for range 1000 {
+		source.WriteString("  Target()\n")
+	}
+	source.WriteString("enddef\n")
+	file := syntax.Parse(source.String())
+	result := analysis.Analyze(file)
+	facts := CollectCallFactsFromAnalysis(filepath.Join(b.TempDir(), "calls.vim"), file, result)
+	if len(facts) != 1000 {
+		b.Fatalf("call facts = %d", len(facts))
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		CollectCallFactsFromAnalysis(filepath.Join("bench", "calls.vim"), file, result)
+	}
+	b.ReportMetric(float64(unsafe.Sizeof(CallFact{})), "call-fact-B")
+	b.ReportMetric(float64(unsafe.Sizeof(TypeRelationFact{})), "type-fact-B")
+	b.ReportMetric(float64(unsafe.Sizeof(TypeAliasFact{})), "alias-fact-B")
 }
 
 func TestCollectSymbolFactsKeepsDeprecatedVim9Declarations(t *testing.T) {

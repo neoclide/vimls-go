@@ -21,14 +21,16 @@ import (
 )
 
 const (
-	Name                      = "vimls"
-	maxFileBytes              = 4 << 20
-	maxPendingRequests        = 128
-	maxParallelAnalysis       = 4
-	maxDiagnosticsPerDocument = 200
-	maxWorkspaceFiles         = 20000
-	maxIndexBytes             = 256 << 20
-	maxWorkspaceSymbols       = 200
+	Name                        = "vimls"
+	maxFileBytes                = 4 << 20
+	maxPendingRequests          = 128
+	maxParallelAnalysis         = 4
+	maxDiagnosticsPerDocument   = 200
+	maxWorkspaceFiles           = 20000
+	maxIndexBytes               = 256 << 20
+	maxWorkspaceSymbols         = 200
+	maxRelationshipFactsPerFile = 1 << 15
+	maxRelationshipFacts        = 1 << 18
 )
 
 var Version = "dev"
@@ -118,6 +120,7 @@ type Server struct {
 	workspaceRevision   uint64
 	workspaceRunning    bool
 	workspaceWG         sync.WaitGroup
+	hierarchyLimit      int
 
 	// The following hooks are test-only synchronization seams. They are set
 	// before use and are always called outside server locks.
@@ -158,14 +161,19 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		analysisRunning:     make(map[string]struct{}),
 		parsed:              make(map[string]parsedDocument),
 		published:           make(map[string]bool),
-		workspaceIndex:      workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes),
+		workspaceIndex:      newWorkspaceIndex(),
 		workspaceGraph:      graph,
 		workspaceGraphView:  graph.Snapshot(),
 		workspaceFiles:      make(map[string]struct{}),
 		workspacePending:    make(map[string]struct{}),
 		workspaceDependents: make(map[string]struct{}),
+		hierarchyLimit:      maxHierarchyResults,
 		completionNow:       time.Now,
 	}
+}
+
+func newWorkspaceIndex() *workspace.Index {
+	return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes, maxRelationshipFactsPerFile, maxRelationshipFacts)
 }
 
 func (s *Server) TargetVersion() TargetVersion {
@@ -365,6 +373,13 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentInlayHint,
 		protocol.MethodTextDocumentFormatting,
 		protocol.MethodTextDocumentRangeFormatting,
+		protocol.MethodTextDocumentImplementation,
+		protocol.MethodTextDocumentPrepareCallHierarchy,
+		protocol.MethodCallHierarchyIncomingCalls,
+		protocol.MethodCallHierarchyOutgoingCalls,
+		protocol.MethodTextDocumentPrepareTypeHierarchy,
+		protocol.MethodTypeHierarchySupertypes,
+		protocol.MethodTypeHierarchySubtypes,
 		protocol.MethodWorkspaceDidChangeConfiguration,
 		protocol.MethodWorkspaceDidChangeWorkspaceFolders,
 		protocol.MethodWorkspaceDidChangeWatchedFiles,
@@ -436,6 +451,9 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 			PositionEncoding:                protocolEncoding,
 			DocumentFormattingProvider:      protocol.Boolean(true),
 			DocumentRangeFormattingProvider: protocol.Boolean(true),
+			ImplementationProvider:          protocol.Boolean(true),
+			CallHierarchyProvider:           protocol.Boolean(true),
+			TypeHierarchyProvider:           protocol.Boolean(true),
 			DeclarationProvider:             protocol.Boolean(true),
 			DefinitionProvider:              protocol.Boolean(true),
 			ReferencesProvider:              protocol.Boolean(true),
