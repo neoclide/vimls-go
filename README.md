@@ -1,111 +1,183 @@
 # vimls-go
 
-vimls-go is a Go language server for legacy Vim script and Vim9 script. Its
-grammar and metadata currently support Vim syntax through v9.2.1015. Earlier
-syntax remains supported; syntax introduced after that tag is not yet covered.
+`vimls-go` is a fast, lightweight, and safe Language Server Protocol (LSP) server for **Legacy Vim script** and **Vim9 script**, written in Go.
 
-The repository is being built milestone by milestone from the contracts in
-`docs/`. The server currently provides bounded stdio and TCP transports,
-lifecycle and target-version handling, immutable document snapshots,
-incremental synchronization, background parsing, document symbols, syntax and
-target-version diagnostics, and conservative Vim9 immutable-assignment
-diagnostics. Position conversion supports UTF-8, UTF-16, and UTF-32; UTF-16 is
-the default when the client does not negotiate another encoding.
+It analyzes Vim scripts entirely through static analysis without executing user code, starting a Vim instance, or requiring Vim to be installed at runtime.
 
-## Build
+Its grammar and metadata ceiling supports Vim syntax through **v9.2.1015**, covering both modern Vim9 script language features (classes, interfaces, types, enums) and classic Legacy Vim script idioms with backwards compatibility.
 
-Go 1.26 or newer is required.
+---
+
+## Key Highlights
+
+- **Dual-Dialect Support**: Independent root parsers for Legacy Vim script and Vim9 script with contextual dialect switching (`vim9script`, `legacy`, `vim9cmd`, `scriptversion`).
+- **Safe Static Analysis**: Untrusted workspace files and scripts are analyzed safely without sourcing or evaluating code.
+- **Fast & Lightweight**: Single standalone binary with low memory footprint, incremental document synchronization, and background analysis.
+- **Runtimepath & Workspace Aware**: Discovers and indexes host Vim runtime roots, plugins, autoload scripts, imports, syntax files, and color schemes.
+
+---
+
+## Implemented Features
+
+| Feature Category | Capabilities & Supported Behaviors |
+| --- | --- |
+| **Diagnostics** | • Syntax and structural error detection with resilient error recovery.<br>• Target Vim version compatibility verification (e.g. flagging syntax newer than configured `targetVersion`).<br>• Unresolved identifier detection (`E117`, `E121`, `E1001`, `E1089`).<br>• Statically provable Vim9 type errors and immutable variable re-assignment checks.<br>• Unused Vim9 variables and deprecated reference hints (`unnecessary`, `deprecated` tags). |
+| **Code Completion** | Context-aware completion with detail and documentation for:<br>• Ex commands and user commands<br>• Built-in and user-defined functions<br>• Scope variables (`g:`, `b:`, `w:`, `t:`, `s:`, `v:`, local/Vim9 variables)<br>• Options (`:set`, `&opt`)<br>• Autocommand events and groups (`:autocmd`)<br>• Key mappings (`:map`, `<silent>`, `<expr>`, keycodes like `<CR>`, `<Leader>`)<br>• Syntax and highlight groups<br>• Imports, exported members, and object/class members<br>• Autoload functions and color schemes |
+| **Hover & Docs** | Shows symbol kinds, inferred types, signatures, doc comments, and embedded official Vim help tags and documentation. |
+| **Signature Help** | Parameter lists, active parameter highlighting, and documentation for built-in functions, user-defined functions, imported callables, methods, and class constructors. |
+| **Navigation** | • **Go to Definition** & **Declaration** across local scopes, imports, autoload functions, and workspace files.<br>• **Find References** across open buffers and indexed workspace files.<br>• **Document Highlights** (read/write occurrences within the current file).<br>• **Document Links** for imported file targets. |
+| **Type & Call Hierarchy** | • **Type Hierarchy**: Class/interface inheritance and implementation relationships (`supertypes` / `subtypes`).<br>• **Go to Implementation**: Resolves interfaces and abstract class members to concrete implementations.<br>• **Call Hierarchy**: Incoming and outgoing call hierarchies for statically resolved named callables. |
+| **Symbols & Outline** | • **Document Symbols**: File outline (functions, classes, interfaces, enums, variables, commands).<br>• **Workspace Symbols**: Fuzzy symbol search across the entire project.<br>• **Folding Ranges**: Folding blocks for functions, classes, conditionals, loops, heredocs, and comments.<br>• **Selection Ranges**: Semantic selection expansion and shrinking. |
+| **Refactoring & Editing** | • **Rename**: Safe symbol rename across references with pre-check validation (`prepareRename`).<br>• **Semantic Tokens**: Full semantic syntax highlighting for types, functions, variables, parameters, and modifiers.<br>• **Inlay Hints**: Inferred variable and return type hints for Vim9 script.<br>• **Quick Fixes**: Automated code actions for unambiguous syntax repairs. |
+| **Formatting** | Source-preserving document and range indentation formatting (only proven leading indentation whitespace is modified; expressions and bodies are never destructively mangled). |
+
+---
+
+## Installation & Releases
+
+### Option 1: Download Pre-built Binaries (Recommended)
+
+Pre-built binaries for multiple operating systems and architectures are published on the [GitHub Releases](https://github.com/neoclide/vimls-go/releases) page:
+
+| Operating System | Architecture | Archive Name |
+| --- | --- | --- |
+| **macOS** | Apple Silicon (`arm64`) | `vimls-vX.Y.Z-darwin-arm64.tar.gz` |
+| **macOS** | Intel (`amd64`) | `vimls-vX.Y.Z-darwin-amd64.tar.gz` |
+| **Linux** | 64-bit (`x86_64` / `amd64`) | `vimls-vX.Y.Z-linux-amd64.tar.gz` |
+| **Linux** | ARM64 (`aarch64` / `arm64`) | `vimls-vX.Y.Z-linux-arm64.tar.gz` |
+| **Linux** | ARMv7 (`armv7`) | `vimls-vX.Y.Z-linux-armv7.tar.gz` |
+| **Windows** | 64-bit (`x86_64` / `amd64`) | `vimls-vX.Y.Z-windows-amd64.zip` |
+| **Windows** | ARM64 (`arm64`) | `vimls-vX.Y.Z-windows-arm64.zip` |
+| **FreeBSD** | 64-bit (`amd64`) | `vimls-vX.Y.Z-freebsd-amd64.tar.gz` |
+
+#### Linux / macOS Quick Install Example:
 
 ```sh
+# Download the archive matching your platform from Releases:
+curl -fsSL -o vimls.tar.gz https://github.com/neoclide/vimls-go/releases/latest/download/vimls-v0.1.0-linux-amd64.tar.gz
+
+# Extract the binary:
+tar -xzf vimls.tar.gz
+
+# Move to a directory in your PATH (e.g., ~/.local/bin or /usr/local/bin):
+mv vimls ~/.local/bin/
+chmod +x ~/.local/bin/vimls
+```
+
+### Option 2: Install via `go install`
+
+If you have Go 1.26 or newer installed:
+
+```sh
+go install github.com/neoclide/vimls-go/cmd/vimls@latest
+```
+
+### Option 3: Build from Source
+
+```sh
+git clone https://github.com/neoclide/vimls-go.git
+cd vimls-go
 make build
-./bin/vimls --version
+# Binaries are generated in ./bin/ (./bin/vimls, ./bin/vimparse, ./bin/vim9parse)
 ```
 
-The build also creates two independent parser debugging tools.
-`bin/vimparse [file]` always parses legacy Vim script and
-`bin/vim9parse [file]` always parses Vim9 script. With no file, or with `-`,
-they read stdin. Both write a JSON syntax tree and bypass the file-level
-`vim9script` dispatcher.
+---
 
-Dependencies use Go's global module cache (`go env GOMODCACHE`), so the project
-does not keep a `vendor/` directory. Prime the cache after intentionally
-changing dependency versions with:
+## Editor Configuration
 
-```sh
-go mod download
+`vimls` uses standard **stdio** communication by default (an optional `--listen <addr>` flag is available for TCP debugging).
+
+### 1. coc.nvim
+
+Add to your `coc-settings.json` (open with `:CocConfig`):
+
+```json
+{
+  "languageserver": {
+    "vimls": {
+      "command": "vimls",
+      "filetypes": ["vim"],
+      "initializationOptions": {
+        "targetVersion": "9.2.1015",
+        "unresolvedSeverity": "warning"
+      }
+    }
+  }
+}
 ```
 
-Once the required versions are cached, prove that the local dependency set is
-sufficient by running the complete gate with module downloads disabled:
+### 2. Neovim (nvim-lspconfig / Built-in LSP)
 
-```sh
-GOPROXY=off GOSUMDB=off make check
+With Neovim's built-in LSP client:
+
+```lua
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "vim",
+  callback = function(args)
+    vim.lsp.start({
+      name = "vimls",
+      cmd = { "vimls" },
+      root_dir = vim.fs.root(args.buf, { ".git", ".vim" }) or vim.fs.dirname(vim.api.nvim_buf_get_name(args.buf)),
+      init_options = {
+        targetVersion = "9.2.1015",
+        unresolvedSeverity = "warning",
+      },
+    })
+  end,
+})
 ```
 
-Normal builds use `-mod=readonly`; `go.mod` and `go.sum` remain the reproducible
-dependency contract. Network access is only needed when a required module is
-not already present in the global cache.
+### 3. vim-lsp
 
-The server communicates over stdin/stdout. Logs use stderr so stdout remains a
-valid LSP byte stream.
+Add to your `~/.vimrc`:
 
-
-## Validate
-
-```sh
-make check
+```vim
+if executable('vimls')
+  augroup vimls_lsp
+    autocmd!
+    autocmd User lsp_setup call lsp#register_server({
+        \ 'name': 'vimls',
+        \ 'cmd': {server_info -> ['vimls']},
+        \ 'allowlist': ['vim'],
+        \ 'initialization_options': {
+        \   'targetVersion': '9.2.1015',
+        \   'unresolvedSeverity': 'warning'
+        \ },
+        \ })
+  augroup END
+endif
 ```
 
-`make check` runs formatting verification, unit and subprocess tests, the race
-detector, `go vet`, coverage enforcement, and a clean build. Coverage is measured
-across production packages below `internal/` and must remain at least 90%.
+---
 
-The normal offline test gate losslessly includes all 362 `.vim` files below
-Vim v9.2.1015's `src/testdir` (8,558,061 source bytes), plus 3,267 extracted
-official scripts and a classified inventory of all 5,733 `Check*` candidates.
-An explicit 44-file syntax-test allowlist prevents the conformance migration
-from revisiting the other 318 test files. From that boundary, 3,844 helper calls
-produce 5,261 source variants: 1,761 official parser-positive cases and 3,500
-failure cases retained with their Vim error arguments as provenance. The
-stability gate still parses every source through both independent parser entry
-points without executing it, using committed artifacts in this repository.
+## Configuration Options
 
-See [the roadmap](docs/roadmap.md), [architecture](docs/architecture.md),
-[language server features](docs/language-support.md), and
-[test strategy](docs/testing.md). Semantics derived from Vim's tests are
-recorded in the [static diagnostic reference](docs/diagnostics.md). Remaining
-version-pinned research about historical error codes used by Vim9 is retained
-in the [pre-E1000 research appendix](docs/vim9-errors-under-1000.md). Supported
-official compile-diagnostic cases live in self-contained range tests under
-`internal/analysis/official_compile_cases_e*_test.go`.
+The following settings can be passed in `initializationOptions` or dynamically via LSP `workspace/didChangeConfiguration`:
 
-## Refresh pinned Vim metadata
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `targetVersion` | `string` | `"9.2.1015"` | Minimum/target Vim version (e.g. `"9.1"`, `"9.2.1015"`). Used for version-sensitive compatibility diagnostics. |
+| `runtimepath` | `string[]` | *Auto-discovered* | Custom array of ordered runtime paths. An explicit empty array `[]` disables runtime indexing. |
+| `unresolvedSeverity` | `string` | `"warning"` | Diagnostic severity for unresolved symbols (`"error"`, `"warning"`, `"information"`, `"hint"`). |
 
-All command, builtin-function, option, variable, event, modifier, and completion
-metadata describes official Vim v9.2.1015 only.
+For complete configuration specifications and runtimepath update notifications, see [docs/configuration.md](docs/configuration.md).
 
-Point `VIM_SOURCE` at an official Vim Git checkout. The metadata generator
-reads the pinned tag with `git show`, so the checkout's current branch may be
-newer:
+---
 
-```sh
-VIM_SOURCE=/path/to/vim make metadata-check
-```
+## Documentation
 
-`metadata-check` regenerates the four generated Go tables into a temporary
-directory, compares them byte-for-byte with the repository, and runs metadata,
-duplicate-name, help-tag, and generator tests. To intentionally refresh the
-committed generated tables after advancing the pin, run:
+- [Language Server Features](docs/language-support.md)
+- [Client Configuration Guide](docs/configuration.md)
+- [Architecture & Design](docs/architecture.md)
+- [Diagnostic Reference](docs/diagnostics.md)
+- [Project Roadmap](docs/roadmap.md)
+- [Test Strategy & Oracle](docs/testing.md)
 
-```sh
-VIM_SOURCE=/path/to/vim make metadata-refresh
-VIM_SOURCE=/path/to/vim make metadata-check
-```
-
-The generator first verifies that the configured Vim tag resolves to its
-hard-coded commit. Review the generated diff and update curated completion
-metadata/provenance tests in the same pin-advance change.
+---
 
 ## LICENSE
 
-MIT
+This project is licensed under the **MIT License**. See [LICENSES/MIT.txt](LICENSES/MIT.txt) for full details.
+
+Vim syntax definitions, documentation excerpts, and test metadata derived from the official Vim codebase are subject to the **Vim License**. See [LICENSES/VIM.txt](LICENSES/VIM.txt).
+
