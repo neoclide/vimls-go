@@ -302,6 +302,33 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 			t.Fatalf("prepare=%#v checks=%d error=%v", prepared, checks, err)
 		}
 	})
+
+	t.Run("rename workspace miss is rejected after identity check", func(t *testing.T) {
+		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+		edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Execute"})
+		if edit != nil || err == nil || checks != 1 {
+			t.Fatalf("edit=%#v checks=%d error=%v", edit, checks, err)
+		}
+	})
+
+	t.Run("rename workspace miss retries after stale identity", func(t *testing.T) {
+		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			if checks == 1 {
+				instance.workspaceMu.Lock()
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			}
+		}
+		edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Execute"})
+		if edit != nil || err == nil || checks != 2 {
+			t.Fatalf("edit=%#v checks=%d error=%v", edit, checks, err)
+		}
+	})
 }
 
 func TestWorkspaceIdentityImportedMemberRename(t *testing.T) {

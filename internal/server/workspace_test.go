@@ -1146,6 +1146,30 @@ func TestServerRebuildRejectsCapturedSnapshotAfterOpenEdit(t *testing.T) {
 	}
 }
 
+func TestServerRebuildCancellationDoesNotPublishIndex(t *testing.T) {
+	root := t.TempDir()
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.setWorkspaceRoots([]string{root})
+	paused := make(chan struct{})
+	release := make(chan struct{})
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+		close(paused)
+		<-release
+	}
+	instance.scheduleWorkspaceRebuild()
+	waitForServerRace(t, paused, "workspace rebuild pause")
+	instance.cancelAnalysis()
+	close(release)
+	instance.workspaceWG.Wait()
+	instance.workspaceMu.Lock()
+	running, built, index := instance.workspaceRunning, instance.workspaceBuilt, instance.workspaceIndex
+	instance.workspaceMu.Unlock()
+	if running || built || index == nil || index.Complete() {
+		t.Fatalf("cancelled rebuild published: running=%t built=%t index=%#v", running, built, index)
+	}
+}
+
 func BenchmarkWorkspaceRebuild(b *testing.B) {
 	previousProcs := runtime.GOMAXPROCS(1)
 	b.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })

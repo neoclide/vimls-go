@@ -50,3 +50,22 @@ func TestSnapshotEncodingBoundaryMatrix(t *testing.T) {
 		t.Errorf("empty changes = %#v, %v", got, err)
 	}
 }
+
+func TestEncodedLengthAtBoundaryMatrix(t *testing.T) {
+	content := "aé𐐀"
+	for _, test := range []struct {
+		offset int
+		enc    Encoding
+		units  int
+		err    error
+	}{
+		{0, UTF8, 0, nil}, {1, UTF8, 1, nil}, {3, UTF8, 3, nil}, {7, UTF8, 7, nil},
+		{3, UTF16, 2, nil}, {7, UTF16, 4, nil}, {2, UTF8, 0, ErrInvalidPosition},
+		{-1, UTF8, 0, ErrInvalidPosition}, {8, UTF8, 0, ErrInvalidPosition}, {1, Encoding("bad"), 0, ErrInvalidEncoding},
+	} {
+		got, err := encodedLengthAt(content, test.offset, test.enc)
+		if !errors.Is(err, test.err) || err == nil && got != test.units {
+			t.Errorf("encodedLengthAt(%d, %s) = %d, %v", test.offset, test.enc, got, err)
+		}
+	}
+}

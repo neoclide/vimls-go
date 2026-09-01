@@ -40,3 +40,35 @@ func TestSubstituteScannerPrimitiveBoundaries(t *testing.T) {
 		t.Fatal("invalid block accepted")
 	}
 }
+
+func TestSubstitutePreviousAndRepeatRecoveryBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		source  string
+		dialect Dialect
+		code    string
+	}{
+		{"\\x", Legacy, "vim/E10"},
+		{"\\/replace/", Vim9, "vim/E1270"},
+		{"\\/unterminated", Legacy, ""},
+		{"\\/\\=broken(", Legacy, "vimls/missing-delimiter"},
+	} {
+		node := &Substitute{}
+		end, separator, _, boundary := scanSubstitutePrevious(test.source, 0, len(test.source), test.dialect, node, nil)
+		if end != len(test.source) || separator != (Span{}) {
+			t.Fatalf("previous %q = end:%d separator:%#v boundary:%#v", test.source, end, separator, boundary)
+		}
+		if test.code != "" && !hasDiagnostic(&File{Diagnostics: node.diagnostics}, test.code) {
+			t.Fatalf("previous %q diagnostics = %#v", test.source, node.diagnostics)
+		}
+	}
+	for _, test := range []struct {
+		source string
+		sep    bool
+	}{{"|", true}, {"gc12", false}, {"\" comment", false}} {
+		node := &Substitute{}
+		end, separator, _, boundary := scanSubstituteRepeat(test.source, 0, len(test.source), node)
+		if end < 0 || (separator != (Span{})) != test.sep {
+			t.Fatalf("repeat %q = end:%d separator:%#v boundary:%#v", test.source, end, separator, boundary)
+		}
+	}
+}

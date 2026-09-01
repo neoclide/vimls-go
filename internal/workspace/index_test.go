@@ -13,6 +13,30 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+func TestIndexReplaceWithAnalysisReusesSuppliedResultAndNilFallsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.vim")
+	file := syntax.Parse("vim9script\nimport './library.vim' as library\necho library.Public()\n")
+
+	provided := analysis.Analyze(file)
+	provided.References = nil
+	withProvided := NewIndex(10, 10000)
+	if err := withProvided.ReplaceWithAnalysis(path, file, provided); err != nil {
+		t.Fatal(err)
+	}
+	if references := withProvided.ExternalReferences("Public"); len(references) != 0 {
+		t.Fatalf("supplied analysis was not reused: external references = %#v", references)
+	}
+
+	withFallback := NewIndex(10, 10000)
+	if err := withFallback.ReplaceWithAnalysis(path, file, nil); err != nil {
+		t.Fatal(err)
+	}
+	references := withFallback.ExternalReferences("Public")
+	if len(references) != 1 || references[0].Fact.Kind != ExternalReferenceImportMember {
+		t.Fatalf("nil analysis did not fall back to analysis: external references = %#v", references)
+	}
+}
+
 func TestIndexLookupIncludesNestedSymbols(t *testing.T) {
 	index := NewIndex(10, 10000)
 	path := filepath.Join(t.TempDir(), "nested.vim")
