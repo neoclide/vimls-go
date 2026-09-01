@@ -18,6 +18,7 @@ try
     call add(v:errors, 'expected exact Vim patch v9.2.1015')
   endif
   execute 'edit ' .. fnameescape($VIMLS_CLIENT_WORKSPACE .. '/legacy.vim')
+  setfiletype vim
   call assert_equal('vim', &filetype)
   if lsp#utils#_wait(10000, {-> lsp#get_server_status('vimls') ==# 'running'}, 10) != 0
     call add(v:errors, 'vimls did not initialize: ' .. lsp#get_server_status('vimls'))
@@ -29,6 +30,7 @@ try
   let s:legacy_counts = lsp#get_buffer_diagnostics_counts()
 
   execute 'edit ' .. fnameescape($VIMLS_CLIENT_WORKSPACE .. '/vim9.vim')
+  setfiletype vim
   call assert_equal('vim', &filetype)
   if lsp#utils#_wait(10000, function('s:has_error_diagnostic'), 10) != 0
     call add(v:errors, 'Vim9 diagnostics timed out')

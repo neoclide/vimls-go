@@ -104,6 +104,18 @@ endfunction
 	}
 	assertVimWatchRegistration(t, registration["params"], []string{workspaceRoot, runtimeRoot})
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, registration["id"]))
+	workspaceDeadline := time.Now().Add(5 * time.Second)
+	var workspaceSymbols map[string]json.RawMessage
+	for requestID := 10; ; requestID++ {
+		writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"workspace/symbol","params":{"query":"workspaceName"}}`, requestID))
+		workspaceSymbols = readJSON(t, reader)
+		if strings.Contains(string(workspaceSymbols["result"]), `"name":"workspaceName"`) {
+			break
+		}
+		if time.Now().After(workspaceDeadline) {
+			t.Fatalf("workspace symbols = %s", workspaceSymbols)
+		}
+	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///symbols.vim","languageId":"vim","version":1,"text":"vim9script\nvar value: number = 1\nclass Widget\n  def new()\n    if true\n      echo value\n    endif\n  enddef\nendclass\ndef Add(left: number, right: number): number\n  return left + right\nenddef\necho Add(1, 2)\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
 	symbols := readJSON(t, reader)
@@ -231,18 +243,6 @@ endfunction
 		t.Fatalf("inlay hints = %s", inlayHints)
 	}
 
-	workspaceDeadline := time.Now().Add(5 * time.Second)
-	var workspaceSymbols map[string]json.RawMessage
-	for requestID := 10; ; requestID++ {
-		writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"workspace/symbol","params":{"query":"workspaceName"}}`, requestID))
-		workspaceSymbols = readJSON(t, reader)
-		if strings.Contains(string(workspaceSymbols["result"]), `"name":"workspaceName"`) {
-			break
-		}
-		if time.Now().After(workspaceDeadline) {
-			t.Fatalf("workspace symbols = %s", workspaceSymbols)
-		}
-	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99999,"method":"workspace/symbol","params":{"query":"RuntimeGlobal"}}`)
 	runtimeSymbols := readJSON(t, reader)
 	if string(runtimeSymbols["id"]) != "99999" || !strings.Contains(string(runtimeSymbols["result"]), `"name":"RuntimeGlobal"`) || !strings.Contains(string(runtimeSymbols["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, filepath.Join(runtimeRoot, "plugin", "runtime.vim")))) {
