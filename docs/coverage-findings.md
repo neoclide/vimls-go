@@ -9,7 +9,7 @@ go test -mod=readonly -coverpkg=./internal/... -coverprofile=coverage.out ./...
 go run -mod=readonly ./tools/covercheck -profile coverage.out -min 95
 ```
 
-reports `91.66% (23333/25455)`. The existing 90% gate therefore cannot prove
+reports `92.26% (23486/25455)`. The existing 90% gate therefore cannot prove
 the requested 95% line/statement coverage target.
 
 The largest uncovered groups are LSP hierarchy, completion, language features,

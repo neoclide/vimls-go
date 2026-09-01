@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +19,63 @@ import (
 )
 
 var benchmarkCompletionResult protocol.CompletionResult
+
+func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
+	root := t.TempDir()
+	runtimePath := filepath.Join(root, "runtime")
+	for path := range map[string]struct{}{
+		filepath.Join(runtimePath, "import", "pkg", "alpha.vim"): {},
+		filepath.Join(runtimePath, "colors", "dark.vim"):         {},
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("vim9script\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny([]byte(fmt.Sprintf(`{"runtimepath":[%q]}`, runtimePath)))}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	source := "vim9script\nimport 'pkg/al' as pkg\ncolorscheme dar\n"
+	documentURI := uri.File(filepath.Join(root, "main.vim"))
+	instance.documents.Open(documentURI.String(), 1, source)
+	for _, test := range []struct {
+		position protocol.Position
+		label    string
+	}{
+		{position: protocol.Position{Line: 1, Character: uint32(len("import 'pkg/al"))}, label: "pkg/alpha.vim"},
+		{position: protocol.Position{Line: 2, Character: uint32(len("colorscheme dar"))}, label: "dark"},
+	} {
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position}})
+		if err != nil || !hasCompletionLabel(completionItems(t, result), test.label) {
+			t.Fatalf("completion at %#v = %#v, %v", test.position, result, err)
+		}
+	}
+	builtinSource := "vim9script\necho has('gui_')\necho expand('<cf')\n"
+	builtinURI := uri.File(filepath.Join(root, "builtin.vim"))
+	instance.documents.Open(builtinURI.String(), 1, builtinSource)
+	for _, test := range []struct {
+		line   uint32
+		prefix string
+		label  string
+	}{
+		{line: 1, prefix: "echo has('gui_", label: "gui_running"},
+		{line: 2, prefix: "echo expand('<cf", label: "<cfile>"},
+	} {
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: builtinURI}, Position: protocol.Position{Line: test.line, Character: uint32(len(test.prefix))}}})
+		if err != nil || !hasCompletionLabel(completionItems(t, result), test.label) {
+			t.Fatalf("builtin completion %q = %#v, %v", test.label, result, err)
+		}
+	}
+}
 
 func BenchmarkCompletionLatency(b *testing.B) {
 	for _, size := range []struct {

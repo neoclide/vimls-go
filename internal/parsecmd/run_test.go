@@ -3,6 +3,10 @@ package parsecmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -24,6 +28,31 @@ func TestRunUsesIndependentDialectParser(t *testing.T) {
 		if bytes.Contains(stdout.Bytes(), []byte(`\u003c`)) {
 			t.Fatalf("dialect %s: syntax text was HTML-escaped", dialect)
 		}
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("read failure") }
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failure") }
+
+func TestRunReadsFilesAndReportsIOFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "input.vim")
+	if err := os.WriteFile(path, []byte("vim9script\necho 'ok'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output, diagnostics bytes.Buffer
+	if code := Run([]string{path}, nil, &output, &diagnostics, syntax.Vim9); code != 0 {
+		t.Fatalf("file code = %d: %s", code, diagnostics.String())
+	}
+	if code := Run(nil, failingReader{}, io.Discard, &diagnostics, syntax.Legacy); code != 1 {
+		t.Fatalf("read code = %d", code)
+	}
+	if code := Run(nil, bytes.NewBufferString("echo 1"), failingWriter{}, &diagnostics, syntax.Legacy); code != 1 {
+		t.Fatalf("write code = %d", code)
 	}
 }
 

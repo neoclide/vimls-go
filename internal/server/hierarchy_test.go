@@ -745,6 +745,62 @@ func TestHierarchyReverseQueriesDoNotMixSameNamesAcrossFiles(t *testing.T) {
 	}
 }
 
+func TestHierarchyItemValidationRejectsTamperingAndStaleState(t *testing.T) {
+	root := t.TempDir()
+	source := "vim9script\nclass Item\nendclass\ndef Run()\nenddef\n"
+	path := writeWorkspaceFile(t, root, "item.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := canonicalTestURI(t, path)
+	instance.documents.Open(documentURI.String(), 1, source)
+	state := instance.captureWorkspaceNavigationState()
+
+	item, ok := typeHierarchyItem(hierarchySymbol{
+		fact: workspace.CollectSymbolFacts(path, syntax.Parse(source))[0], source: source,
+	}, text.UTF16)
+	if !ok {
+		t.Fatal("could not construct hierarchy item")
+	}
+	if target, encoding, err := instance.validateTypeHierarchyItem(item, state); err != nil || encoding != text.UTF16 || target == nil || target.fact.Name != "Item" {
+		t.Fatalf("valid type hierarchy item = %#v, %v, %v", target, encoding, err)
+	}
+
+	for _, data := range []protocol.LSPAny{
+		nil,
+		protocol.LSPAny(strings.Repeat("x", maxHierarchyItemData+1)),
+		protocol.LSPAny("not-json"),
+	} {
+		bad := item
+		bad.Data = data
+		if target, _, err := instance.validateTypeHierarchyItem(bad, state); err != nil || target != nil {
+			t.Fatalf("malformed item data %q = %#v, %v", data, target, err)
+		}
+	}
+
+	encoded, err := protocol.Marshal(hierarchyItemData{Version: 1, URI: item.URI.String(), Kind: analysis.SymbolKindClass, Start: -1, End: 1, ContentID: hierarchyContentID(source)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := item
+	bad.Data = protocol.LSPAny(encoded)
+	if target, _, err := instance.validateTypeHierarchyItem(bad, state); err != nil || target != nil {
+		t.Fatalf("invalid span data = %#v, %v", target, err)
+	}
+	encoded, err = protocol.Marshal(hierarchyItemData{Version: 1, URI: item.URI.String(), Kind: analysis.SymbolKindClass, Start: 11, End: 15, ContentID: "not-a-content-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.Data = protocol.LSPAny(encoded)
+	if target, _, err := instance.validateTypeHierarchyItem(bad, state); err != nil || target != nil {
+		t.Fatalf("invalid content ID = %#v, %v", target, err)
+	}
+
+	stale := item
+	instance.documents.Open(documentURI.String(), 2, source+"\n")
+	if target, _, err := instance.validateTypeHierarchyItem(stale, instance.captureWorkspaceNavigationState()); !errors.Is(err, protocol.ErrContentModified) || target != nil {
+		t.Fatalf("stale hierarchy item = %#v, %v", target, err)
+	}
+}
+
 func TestHierarchyHelperBoundaries(t *testing.T) {
 	span := func(start, end int) syntax.Span { return syntax.Span{Start: start, End: end} }
 	for _, test := range []struct {

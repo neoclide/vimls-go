@@ -47,19 +47,29 @@ func TestOfficialVimCorpusAnalysisStability(t *testing.T) {
 	if len(corpus.Cases) != 3267 {
 		t.Fatalf("official corpus cases = %d, want 3267", len(corpus.Cases))
 	}
+	parsers := []struct {
+		name  string
+		parse func(string) *syntax.File
+	}{
+		{name: "auto", parse: syntax.Parse},
+		{name: "legacy", parse: (syntax.LegacyParser{}).Parse},
+		{name: "vim9", parse: (syntax.Vim9Parser{}).Parse},
+	}
 	for _, testCase := range corpus.Cases {
-		t.Run(testCase.Origin, func(t *testing.T) {
-			file := syntax.Parse(testCase.Source)
-			result := Analyze(file)
-			if result == nil || result.File != file {
-				t.Fatalf("analysis result = %#v", result)
-			}
-			for _, diagnostic := range CombinedDiagnostics(file, result) {
-				if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(testCase.Source) {
-					t.Fatalf("out-of-bounds diagnostic %#v", diagnostic)
+		for _, parser := range parsers {
+			t.Run(testCase.Origin+"/"+parser.name, func(t *testing.T) {
+				file := parser.parse(testCase.Source)
+				result := Analyze(file)
+				if result == nil || result.File != file {
+					t.Fatalf("analysis result = %#v", result)
 				}
-			}
-		})
+				for _, diagnostic := range CombinedDiagnostics(file, result) {
+					if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(testCase.Source) {
+						t.Fatalf("out-of-bounds diagnostic %#v", diagnostic)
+					}
+				}
+			})
+		}
 	}
 }
 

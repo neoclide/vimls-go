@@ -49,29 +49,6 @@ not already present in the global cache.
 The server communicates over stdin/stdout. Logs use stderr so stdout remains a
 valid LSP byte stream.
 
-## Install
-
-Build and install the server directly from a tagged release with:
-
-```sh
-go install github.com/neoclide/vimls-go/cmd/vimls@vX.Y.Z
-```
-
-Alternatively, download the archive for your operating system and architecture
-from the matching GitHub release, verify it against `checksums.txt`, and place
-`vimls` (or `vimls.exe` on Windows) somewhere on `PATH`. Configure the Vim LSP
-client to start that executable over stdio; vimls never reads editor
-configuration itself.
-
-For debugging, listen for one TCP session instead:
-
-```sh
-./bin/vimls --listen 127.0.0.1:4389
-```
-
-Use port `0` to let the operating system choose a free port; the selected
-address is printed to stderr. Binding beyond loopback should be an explicit
-choice because LSP has no authentication or transport encryption.
 
 ## Validate
 

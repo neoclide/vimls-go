@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -204,6 +205,22 @@ func TestDefaultRuntimePathsUseOneInstallationAndItsNewestVersion(t *testing.T) 
 	directReal, _ := filepath.EvalSymlinks(direct)
 	if got := firstInstalledVimRuntimePaths([]string{direct}); !reflect.DeepEqual(got, []string{directReal}) {
 		t.Fatalf("direct runtimepath = %#v", got)
+	}
+}
+
+func TestVimInstallCandidatesCoverPlatformConventions(t *testing.T) {
+	t.Setenv("ProgramFiles", `C:\\Program Files`)
+	t.Setenv("ProgramFiles(x86)", `C:\\Program Files (x86)`)
+	t.Setenv("SystemDrive", "D:")
+	windows := vimInstallCandidates("windows")
+	if len(windows) != 3 || !strings.Contains(windows[0], "Program Files") || !strings.Contains(windows[2], "Vim") {
+		t.Fatalf("windows candidates = %#v", windows)
+	}
+	if got := vimInstallCandidates("darwin"); len(got) != 4 {
+		t.Fatalf("darwin candidates = %#v", got)
+	}
+	if got := vimInstallCandidates("linux"); len(got) != 2 {
+		t.Fatalf("unix candidates = %#v", got)
 	}
 }
 
