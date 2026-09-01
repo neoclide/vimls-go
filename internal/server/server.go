@@ -88,6 +88,7 @@ type Server struct {
 	documents           *workspace.Documents
 	encoding            text.Encoding
 	completion          completionCapabilities
+	languageFeatures    languageFeatureCapabilities
 	exitOnce            sync.Once
 	exitCode            chan int
 	analysisMu          sync.Mutex
@@ -388,6 +389,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	prepareRename := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.Rename != nil && params.Capabilities.TextDocument.Rename.PrepareSupport != nil && *params.Capabilities.TextDocument.Rename.PrepareSupport
 	codeActionLiterals := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.CodeAction != nil && params.Capabilities.TextDocument.CodeAction.CodeActionLiteralSupport.CodeActionKind.ValueSet != nil
 	completion := completionCapabilitiesFromClient(params.Capabilities.TextDocument)
+	languageFeatures := languageFeatureCapabilitiesFromClient(params.Capabilities.TextDocument)
 	s.mu.Lock()
 	s.targetVersion = targetVersion
 	s.targetOverride = targetOverride
@@ -405,6 +407,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	}
 	s.encoding = encoding
 	s.completion = completion
+	s.languageFeatures = languageFeatures
 	s.state = stateActive
 	s.watchDynamicRegistration = watchDynamic
 	s.watchRelativePatterns = watchRelative

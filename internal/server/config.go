@@ -37,6 +37,34 @@ type completionCapabilities struct {
 	docsMarkdown  bool
 }
 
+type languageFeatureCapabilities struct {
+	hoverMarkup     protocol.MarkupKind
+	signatureMarkup protocol.MarkupKind
+}
+
+func languageFeatureCapabilitiesFromClient(textDocument *protocol.TextDocumentClientCapabilities) languageFeatureCapabilities {
+	result := languageFeatureCapabilities{hoverMarkup: protocol.MarkupKindPlainText, signatureMarkup: protocol.MarkupKindPlainText}
+	if textDocument == nil {
+		return result
+	}
+	if textDocument.Hover != nil {
+		result.hoverMarkup = preferredMarkupKind(textDocument.Hover.ContentFormat)
+	}
+	if textDocument.SignatureHelp != nil && textDocument.SignatureHelp.SignatureInformation != nil {
+		result.signatureMarkup = preferredMarkupKind(textDocument.SignatureHelp.SignatureInformation.DocumentationFormat)
+	}
+	return result
+}
+
+func preferredMarkupKind(formats []protocol.MarkupKind) protocol.MarkupKind {
+	for _, format := range formats {
+		if format == protocol.MarkupKindMarkdown || format == protocol.MarkupKindPlainText {
+			return format
+		}
+	}
+	return protocol.MarkupKindPlainText
+}
+
 func completionCapabilitiesFromClient(textDocument *protocol.TextDocumentClientCapabilities) completionCapabilities {
 	if textDocument == nil || textDocument.Completion == nil || textDocument.Completion.CompletionItem == nil {
 		return completionCapabilities{}

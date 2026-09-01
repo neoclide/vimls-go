@@ -113,6 +113,145 @@ func TestDocumentNavigation(t *testing.T) {
 	}
 }
 
+func TestLegacyScriptLocalPrefixNavigation(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "function! s:Run()\nendfunction\ncall s:Run()\ncall <SID>Run()\n")
+	position := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 3, Character: 9},
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || locations[0].Range != navigationRange(0, 10, 15) {
+		t.Fatalf("script-local definition = %#v", definition)
+	}
+	declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: position})
+	if err != nil || len(declaration.(protocol.LocationSlice)) != 1 || declaration.(protocol.LocationSlice)[0] != locations[0] {
+		t.Fatalf("script-local declaration = %#v, %v", declaration, err)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: position, Context: protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	want := []protocol.Range{navigationRange(0, 10, 15), navigationRange(2, 5, 10), navigationRange(3, 5, 13)}
+	if err != nil || len(references) != len(want) {
+		t.Fatalf("script-local references = %#v, %v", references, err)
+	}
+	for index := range want {
+		if references[index].Range != want[index] {
+			t.Errorf("reference %d = %#v, want %#v", index, references[index].Range, want[index])
+		}
+	}
+	highlights, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: position})
+	if err != nil || len(highlights) != len(want) {
+		t.Fatalf("script-local highlights = %#v, %v", highlights, err)
+	}
+	for index := range want {
+		if highlights[index].Range != want[index] {
+			t.Errorf("highlight %d = %#v, want %#v", index, highlights[index].Range, want[index])
+		}
+	}
+}
+
+func TestLocalVim9MemberNavigation(t *testing.T) {
+	source := "vim9script\nclass Base\n  var value: number\n  def Resize(width: number)\n  enddef\nendclass\nclass Child extends Base\nendclass\nvar child = Child.new()\necho child.Resize(1)\necho child.value\necho Child.new()\nenum Color\n  Red,\n  Green\nendenum\necho Color.Red\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	tests := []struct {
+		name       string
+		position   protocol.Position
+		definition protocol.Range
+		references []protocol.Range
+	}{
+		{name: "inherited method", position: protocol.Position{Line: 9, Character: 13}, definition: navigationRange(3, 6, 12), references: []protocol.Range{navigationRange(3, 6, 12), navigationRange(9, 11, 17)}},
+		{name: "inherited variable", position: protocol.Position{Line: 10, Character: 13}, definition: navigationRange(2, 6, 11), references: []protocol.Range{navigationRange(2, 6, 11), navigationRange(10, 11, 16)}},
+		{name: "default constructor", position: protocol.Position{Line: 11, Character: 12}, definition: navigationRange(6, 6, 11), references: []protocol.Range{navigationRange(6, 6, 11), navigationRange(8, 18, 21), navigationRange(11, 11, 14)}},
+		{name: "enum value", position: protocol.Position{Line: 16, Character: 13}, definition: navigationRange(13, 2, 5), references: []protocol.Range{navigationRange(13, 2, 5), navigationRange(16, 11, 14)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			params := protocol.TextDocumentPositionParams{TextDocument: textDocument, Position: test.position}
+			definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: params})
+			if err != nil {
+				t.Fatal(err)
+			}
+			locations := definition.(protocol.LocationSlice)
+			if len(locations) != 1 || locations[0].Range != test.definition {
+				t.Fatalf("definition = %#v", definition)
+			}
+			declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: params})
+			if err != nil || len(declaration.(protocol.LocationSlice)) != 1 || declaration.(protocol.LocationSlice)[0].Range != test.definition {
+				t.Fatalf("declaration = %#v, %v", declaration, err)
+			}
+			references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: params, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+			if err != nil || len(references) != len(test.references) {
+				t.Fatalf("references = %#v, %v", references, err)
+			}
+			for index, expected := range test.references {
+				if references[index].Range != expected {
+					t.Errorf("reference %d = %#v, want %#v", index, references[index].Range, expected)
+				}
+			}
+			highlights, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: params})
+			if err != nil || len(highlights) != len(test.references) {
+				t.Fatalf("highlights = %#v, %v", highlights, err)
+			}
+		})
+	}
+}
+
+func TestVim9InterfaceMemberDeclarationAndDefinition(t *testing.T) {
+	source := "vim9script\ninterface Face\n  def Run(value: number): number\nendinterface\nclass Impl implements Face\n  def new()\n  enddef\n  def Run(value: number): number\n    return value\n  enddef\nendclass\nvar face: Face = Impl.new()\necho face.Run(1)\nvar impl = Impl.new()\necho impl.Run(2)\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	for _, position := range []protocol.Position{{Line: 12, Character: 11}, {Line: 14, Character: 11}} {
+		params := protocol.TextDocumentPositionParams{TextDocument: textDocument, Position: position}
+		definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: params})
+		if err != nil || len(definition.(protocol.LocationSlice)) != 1 || definition.(protocol.LocationSlice)[0].Range != navigationRange(7, 6, 9) {
+			t.Fatalf("interface definition = %#v, %v", definition, err)
+		}
+		declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: params})
+		if err != nil || len(declaration.(protocol.LocationSlice)) != 1 || declaration.(protocol.LocationSlice)[0].Range != navigationRange(2, 6, 9) {
+			t.Fatalf("interface declaration = %#v, %v", declaration, err)
+		}
+		references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: params, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+		want := []protocol.Range{navigationRange(2, 6, 9), navigationRange(7, 6, 9), navigationRange(12, 10, 13), navigationRange(14, 10, 13)}
+		if err != nil || len(references) != len(want) {
+			t.Fatalf("interface references = %#v, %v", references, err)
+		}
+		for index := range want {
+			if references[index].Range != want[index] {
+				t.Errorf("reference %d = %#v, want %#v", index, references[index].Range, want[index])
+			}
+		}
+	}
+}
+
+func TestVim9AbstractMemberDeclarationAndDefinition(t *testing.T) {
+	source := "vim9script\nabstract class Base\n  abstract def Draw(): string\nendclass\nclass Shape extends Base\n  def Draw(): string\n    return 'shape'\n  enddef\nendclass\nvar shape = Shape.new()\necho shape.Draw()\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 10, Character: 13}}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: params})
+	if err != nil || len(definition.(protocol.LocationSlice)) != 1 || definition.(protocol.LocationSlice)[0].Range != navigationRange(5, 6, 10) {
+		t.Fatalf("abstract definition = %#v, %v", definition, err)
+	}
+	declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: params})
+	if err != nil || len(declaration.(protocol.LocationSlice)) != 1 || declaration.(protocol.LocationSlice)[0].Range != navigationRange(2, 15, 19) {
+		t.Fatalf("abstract declaration = %#v, %v", declaration, err)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: params, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	want := []protocol.Range{navigationRange(2, 15, 19), navigationRange(5, 6, 10), navigationRange(10, 11, 15)}
+	if err != nil || len(references) != len(want) {
+		t.Fatalf("abstract references = %#v, %v", references, err)
+	}
+	for index := range want {
+		if references[index].Range != want[index] {
+			t.Errorf("reference %d = %#v, want %#v", index, references[index].Range, want[index])
+		}
+	}
+}
+
 func TestNavigationUsesNegotiatedPositionEncoding(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -324,8 +463,48 @@ func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
 		t.Fatal("builtin hover is nil")
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Value != "name: argc\nkind: builtin function\ntype: number" {
+	if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, "name: argc\nkind: builtin function\ntype: number\n\nargc([{winid}])") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
 		t.Fatalf("builtin hover = %#v", hover)
+	}
+}
+
+func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho &number v:version\n")
+	for _, test := range []struct {
+		name      string
+		character uint32
+		prefix    string
+		fragment  string
+	}{
+		{name: "option", character: 7, prefix: "name: number\nkind: option\ntype: bool", fragment: "Print the line number"},
+		{name: "predefined variable", character: 15, prefix: "name: v:version\nkind: predefined variable\ntype: number", fragment: "Version number of Vim"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: test.character},
+			}})
+			if err != nil || hover == nil {
+				t.Fatalf("hover = %#v, %v", hover, err)
+			}
+			content, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+				t.Fatalf("hover content = %#v", hover.Contents)
+			}
+		})
+	}
+}
+
+func TestHoverShowsPinnedExCommandHelpForAbbreviation(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "ec 'value'\n")
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Character: 1},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, "name: echo\nkind: Ex command") || !strings.Contains(content.Value, "Echoes each {expr1}") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+		t.Fatalf("hover content = %#v", hover.Contents)
 	}
 }
 
@@ -453,11 +632,186 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 	}
 }
 
+func TestImportedVim9AggregateMemberDefinition(t *testing.T) {
+	source := "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1, 2)\necho lib.Box.new(1)\necho lib.Box.Build('x')\necho lib.Make().Resize(3, 4)\necho lib.Color.Red\n"
+	instance, documentURI, targetURI := openWorkspaceFeatureRetryDocument(t, source)
+	targetPath, ok := workspaceURIPath(targetURI)
+	if !ok {
+		t.Fatalf("workspace path for %s", targetURI)
+	}
+	targetURI = uri.File(targetPath)
+	tests := []struct {
+		name     string
+		position protocol.Position
+		want     protocol.Range
+	}{
+		{name: "typed inherited object method", position: protocol.Position{Line: 3, Character: 12}, want: navigationRange(7, 6, 12)},
+		{name: "constructor", position: protocol.Position{Line: 4, Character: 15}, want: navigationRange(5, 6, 9)},
+		{name: "static method", position: protocol.Position{Line: 5, Character: 15}, want: navigationRange(10, 13, 18)},
+		{name: "factory result method", position: protocol.Position{Line: 6, Character: 20}, want: navigationRange(7, 6, 12)},
+		{name: "enum value", position: protocol.Position{Line: 7, Character: 16}, want: navigationRange(20, 2, 5)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position}
+			definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: params})
+			if err != nil {
+				t.Fatal(err)
+			}
+			locations := definition.(protocol.LocationSlice)
+			if len(locations) != 1 || locations[0].URI != targetURI || locations[0].Range != test.want {
+				t.Fatalf("imported member definition = %#v", definition)
+			}
+			declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: params})
+			if err != nil || len(declaration.(protocol.LocationSlice)) != 1 || declaration.(protocol.LocationSlice)[0] != locations[0] {
+				t.Fatalf("imported member declaration = %#v, %v", declaration, err)
+			}
+		})
+	}
+	mainPath, ok := workspaceURIPath(documentURI)
+	if !ok {
+		t.Fatalf("workspace path for %s", documentURI)
+	}
+	otherSource := "vim9script\nimport './lib.vim' as lib\nvar other: lib.Box\necho other.Resize(5, 6)\n"
+	otherPath := writeWorkspaceFile(t, filepath.Dir(mainPath), "other.vim", otherSource)
+	if err := instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{Changes: []protocol.FileEvent{{URI: uri.File(otherPath), Type: protocol.FileChangeTypeCreated}}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: params, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	wantReferences := []protocol.Location{
+		{URI: targetURI, Range: navigationRange(7, 6, 12)},
+		{URI: uri.File(mainPath), Range: navigationRange(3, 9, 15)},
+		{URI: uri.File(mainPath), Range: navigationRange(6, 16, 22)},
+		{URI: canonicalTestURI(t, otherPath), Range: navigationRange(3, 11, 17)},
+	}
+	if err != nil || len(references) != len(wantReferences) {
+		t.Fatalf("imported member references = %#v, %v", references, err)
+	}
+	for index := range wantReferences {
+		if references[index] != wantReferences[index] {
+			t.Errorf("reference %d = %#v, want %#v", index, references[index], wantReferences[index])
+		}
+	}
+	highlights, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: params})
+	if err != nil || len(highlights) != 2 || highlights[0].Range != navigationRange(3, 9, 15) || highlights[1].Range != navigationRange(6, 16, 22) {
+		t.Fatalf("imported member highlights = %#v, %v", highlights, err)
+	}
+	edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: "Scale"})
+	if err != nil || edit == nil || len(edit.DocumentChanges) != 3 {
+		t.Fatalf("imported member rename = %#v, %v", edit, err)
+	}
+	version := int32(1)
+	wantEdits := map[uri.URI]struct {
+		version *int32
+		ranges  []protocol.Range
+	}{
+		targetURI:                      {ranges: []protocol.Range{navigationRange(7, 6, 12)}},
+		documentURI:                    {version: &version, ranges: []protocol.Range{navigationRange(3, 9, 15), navigationRange(6, 16, 22)}},
+		canonicalTestURI(t, otherPath): {ranges: []protocol.Range{navigationRange(3, 11, 17)}},
+	}
+	for _, change := range edit.DocumentChanges {
+		documentEdit := change.(*protocol.TextDocumentEdit)
+		expected, ok := wantEdits[documentEdit.TextDocument.URI]
+		if !ok || len(documentEdit.Edits) != len(expected.ranges) || (documentEdit.TextDocument.Version == nil) != (expected.version == nil) {
+			t.Fatalf("unexpected member document edit = %#v", documentEdit)
+		}
+		if expected.version != nil && *documentEdit.TextDocument.Version != *expected.version {
+			t.Errorf("edit version = %#v, want %#v", documentEdit.TextDocument.Version, expected.version)
+		}
+		for index, rangeValue := range expected.ranges {
+			textEdit := documentEdit.Edits[index].(*protocol.TextEdit)
+			if textEdit.Range != rangeValue || textEdit.NewText != "Scale" {
+				t.Errorf("member edit %d = %#v", index, textEdit)
+			}
+		}
+		delete(wantEdits, documentEdit.TextDocument.URI)
+	}
+	if len(wantEdits) != 0 {
+		t.Fatalf("missing member edits = %#v", wantEdits)
+	}
+	constructor := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 4, Character: 15}}
+	if prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: constructor}); err != nil || prepared != nil {
+		t.Fatalf("imported constructor prepare rename = %#v, %v", prepared, err)
+	}
+	if _, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: constructor, NewName: "Create"}); err == nil {
+		t.Fatal("imported constructor rename succeeded")
+	}
+}
+
+func TestImportedVim9AggregateMemberUsesOpenOverlay(t *testing.T) {
+	source := "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1)\n"
+	instance, documentURI, targetURI := openWorkspaceFeatureRetryDocument(t, source)
+	overlay := "vim9script\nexport class Box\n\n  def Resize(width: number): number\n    return width\n  enddef\nendclass\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 2, Text: overlay}}); err != nil {
+		t.Fatal(err)
+	}
+	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: params})
+	if err != nil {
+		t.Fatal(err)
+	}
+	locations := definition.(protocol.LocationSlice)
+	if len(locations) != 1 || !sameNavigationURI(locations[0].URI, targetURI) || locations[0].Range != navigationRange(3, 6, 12) {
+		t.Fatalf("overlay member definition = %#v", definition)
+	}
+}
+
+func TestWorkspaceIdentityImportedMemberNavigation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*Server, protocol.TextDocumentPositionParams) (int, error)
+	}{
+		{name: "references", run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: position, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+			return len(result), err
+		}},
+		{name: "document highlight", run: func(instance *Server, position protocol.TextDocumentPositionParams) (int, error) {
+			result, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: position})
+			return len(result), err
+		}},
+	} {
+		t.Run(test.name+" retries", func(t *testing.T) {
+			instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1)\n")
+			position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
+			checks := 0
+			instance.beforeWorkspaceIdentityCheck = func() {
+				checks++
+				if checks == 1 {
+					instance.workspaceMu.Lock()
+					instance.workspaceRevision++
+					instance.workspaceMu.Unlock()
+				}
+			}
+			count, err := test.run(instance, position)
+			if err != nil || checks != 2 || count == 0 {
+				t.Fatalf("result count=%d checks=%d error=%v", count, checks, err)
+			}
+		})
+		t.Run(test.name+" rejects second stale result", func(t *testing.T) {
+			instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1)\n")
+			position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
+			checks := 0
+			instance.beforeWorkspaceIdentityCheck = func() {
+				checks++
+				instance.workspaceMu.Lock()
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			}
+			count, err := test.run(instance, position)
+			if !errors.Is(err, protocol.ErrContentModified) || checks != 2 || count != 0 {
+				t.Fatalf("result count=%d checks=%d error=%v", count, checks, err)
+			}
+		})
+	}
+}
+
 func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 	root := t.TempDir()
-	targetPath := writeWorkspaceFile(t, root, filepath.Join("autoload", "foo", "bar.vim"), "function foo#bar#Run()\nendfunction\n")
+	targetPath := writeWorkspaceFile(t, root, filepath.Join("autoload", "foo", "bar.vim"), "function g:foo#bar#Run()\nendfunction\n")
 	mainPath := writeWorkspaceFile(t, root, "plugin.vim", "call foo#bar#Run()\n")
-	otherPath := writeWorkspaceFile(t, root, "other.vim", "let value = foo#bar#Run()\n")
+	otherPath := writeWorkspaceFile(t, root, "other.vim", "let value = g:foo#bar#Run()\n")
 	instance := initializeWorkspaceServer(t, root)
 	mainURI := uri.File(mainPath)
 	targetURI := canonicalTestURI(t, targetPath)
@@ -477,8 +831,12 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := definition.(protocol.LocationSlice)
-	if len(locations) != 1 || locations[0].URI != targetURI || locations[0].Range != navigationRange(0, 9, 20) {
+	if len(locations) != 1 || locations[0].URI != targetURI || locations[0].Range != navigationRange(0, 9, 22) {
 		t.Fatalf("autoload definition = %#v", definition)
+	}
+	declaration, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: position})
+	if err != nil || len(declaration.(protocol.LocationSlice)) != 1 || declaration.(protocol.LocationSlice)[0] != locations[0] {
+		t.Fatalf("autoload declaration = %#v, %v", declaration, err)
 	}
 	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
 		TextDocumentPositionParams: position,
@@ -488,8 +846,8 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []protocol.Location{
-		{URI: targetURI, Range: navigationRange(0, 9, 20)},
-		{URI: otherURI, Range: navigationRange(0, 12, 23)},
+		{URI: targetURI, Range: navigationRange(0, 9, 22)},
+		{URI: otherURI, Range: navigationRange(0, 12, 25)},
 		{URI: indexedMainURI, Range: navigationRange(0, 5, 16)},
 	}
 	sort.SliceStable(want, func(left, right int) bool { return want[left].URI < want[right].URI })
@@ -500,6 +858,10 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 		if references[index] != want[index] {
 			t.Errorf("reference %d = %#v, want %#v", index, references[index], want[index])
 		}
+	}
+	highlights, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: position})
+	if err != nil || len(highlights) != 1 || highlights[0].Range != navigationRange(0, 5, 16) {
+		t.Fatalf("autoload highlights = %#v, %v", highlights, err)
 	}
 }
 
@@ -933,7 +1295,7 @@ func openWorkspaceNavigationRetryDocument(t *testing.T, source string) (*Server,
 func openWorkspaceFeatureRetryDocument(t *testing.T, source string) (*Server, uri.URI, uri.URI) {
 	t.Helper()
 	root := t.TempDir()
-	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\n")
+	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\nexport class Box\n  def new(value: number)\n  enddef\n  def Resize(width: number, height: number = 1): number\n    return width * height\n  enddef\n  static def Build(name: string): Box\n    return Box.new(1)\n  enddef\n  static def _Hidden()\n  enddef\nendclass\nexport def Make(): Box\n  return Box.new(1)\nenddef\nexport enum Color\n  Red,\n  Green\nendenum\n")
 	mainPath := writeWorkspaceFile(t, root, "main.vim", source)
 	instance := initializeWorkspaceServer(t, root)
 	documentURI := uri.File(mainPath)

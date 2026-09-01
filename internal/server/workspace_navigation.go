@@ -35,7 +35,11 @@ func (document *navigationDocument) workspaceTargetInState(state workspaceNaviga
 		return workspaceNavigationTarget{}, false
 	}
 	if document.external != nil {
-		return document.server.resolveWorkspaceReference(state.resolver, state.index, *document.external)
+		target, ok := document.server.resolveWorkspaceReference(state.resolver, state.index, *document.external)
+		if !ok || document.externalMember == "" {
+			return target, ok
+		}
+		return document.server.resolveWorkspaceMemberTarget(target, document.externalMember, document.externalClass)
 	}
 	target, needsResolver, ok := document.workspaceLocalTarget()
 	if !ok || !needsResolver {
@@ -47,6 +51,38 @@ func (document *navigationDocument) workspaceTargetInState(state workspaceNaviga
 	path, _ := workspaceURIPath(uri.URI(document.snapshot.URI()))
 	resolution := state.resolver.ResolveAutoload(target.match.Fact.Name)
 	return target, resolution.Path != "" && sameWorkspacePath(resolution.Path, path)
+}
+
+func (s *Server) resolveWorkspaceMemberTarget(target workspaceNavigationTarget, name string, classReceiver bool) (workspaceNavigationTarget, bool) {
+	if name == "" || strings.HasPrefix(name, "_") {
+		return workspaceNavigationTarget{}, false
+	}
+	file := s.fileForWorkspaceTarget(target)
+	if file == nil {
+		return workspaceNavigationTarget{}, false
+	}
+	symbols := analysis.CollectSymbols(file)
+	container := symbolForWorkspaceTarget(symbols, target.match.Fact)
+	if container != nil && container.Kind == analysis.SymbolKindFunction {
+		function := functionForWorkspaceTargetFile(file, target)
+		if function == nil || function.ReturnType == nil || strings.Contains(function.ReturnType.Name, ".") {
+			return workspaceNavigationTarget{}, false
+		}
+		container = completionContainer(symbols, function.ReturnType.Name)
+	}
+	if container == nil {
+		return workspaceNavigationTarget{}, false
+	}
+	symbol, _, ok := memberSymbolInContainer(file, symbols, container, name, classReceiver)
+	if !ok {
+		return workspaceNavigationTarget{}, false
+	}
+	for _, fact := range workspace.CollectSymbolFacts(target.match.Fact.Path, file) {
+		if fact.SelectionRange == symbol.SelectionRange && fact.Name == symbol.Name && fact.Kind == symbol.Kind {
+			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: target.match.Source}, openSnapshot: target.openSnapshot}, true
+		}
+	}
+	return workspaceNavigationTarget{}, false
 }
 
 func (document *navigationDocument) workspaceLocalTarget() (workspaceNavigationTarget, bool, bool) {
@@ -197,6 +233,9 @@ func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Conte
 }
 
 func (document *navigationDocument) workspaceReferencesInState(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
+	if document.externalMember != "" {
+		return document.workspaceMemberReferencesInState(ctx, state, target, includeDeclaration)
+	}
 	if state.resolver == nil || state.index == nil {
 		return []protocol.Location{}, document.checkCurrent(ctx)
 	}
@@ -284,6 +323,131 @@ func (document *navigationDocument) workspaceReferencesInState(ctx context.Conte
 		return nil, err
 	}
 	return locations, nil
+}
+
+func (document *navigationDocument) workspaceMemberReferencesInState(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
+	if state.resolver == nil || state.index == nil || document.external == nil || document.externalMember == "" {
+		return []protocol.Location{}, document.checkCurrent(ctx)
+	}
+	sources := map[string]string{target.match.Fact.Path: target.match.Source}
+	if path, ok := workspaceURIPath(uri.URI(document.snapshot.URI())); ok {
+		sources[path] = document.snapshot.Text()
+	}
+	names := []string{document.external.Name}
+	targetFile := document.server.fileForWorkspaceTarget(target)
+	if targetFile != nil {
+		symbols := analysis.CollectSymbols(targetFile)
+		if symbol := symbolForWorkspaceTarget(symbols, target.match.Fact); symbol != nil {
+			if owner := enclosingAggregateContainer(symbols, symbol.SelectionRange); owner != nil {
+				names = append(names, owner.Name)
+			}
+		}
+	}
+	for _, name := range names {
+		for _, candidate := range state.index.ExternalReferences(name) {
+			sources[candidate.Fact.Path] = candidate.Source
+		}
+	}
+	open := make(map[string]*text.Snapshot)
+	for _, snapshot := range document.server.documents.Snapshots() {
+		if path, ok := workspaceURIPath(uri.URI(snapshot.URI())); ok {
+			open[path] = snapshot
+			sources[path] = snapshot.Text()
+		}
+	}
+	locations := make([]protocol.Location, 0)
+	if includeDeclaration {
+		if location, ok := document.server.workspaceTargetLocation(target, document.encoding); ok {
+			locations = append(locations, location)
+		}
+	}
+	paths := make([]string, 0, len(sources))
+	for path := range sources {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	scanned := make([]*text.Snapshot, 0, len(open))
+	for _, path := range paths {
+		if ctx.Err() != nil {
+			return nil, protocol.ErrRequestCancelled
+		}
+		snapshot := open[path]
+		var file *syntax.File
+		if snapshot != nil {
+			file = document.server.parseSnapshot(snapshot)
+			scanned = append(scanned, snapshot)
+		} else {
+			snapshot = text.NewSnapshot(uri.File(path).String(), 0, nil, sources[path])
+			file = syntax.Parse(sources[path])
+		}
+		if file == nil {
+			continue
+		}
+		result := analysis.Analyze(file)
+		facts := workspace.CollectExternalReferencesFromAnalysis(path, file, result)
+		walkCommands(file.Commands, func(command *syntax.Command) {
+			walkCommandExpressions(command, func(expression *syntax.Expression) {
+				if expression.Kind != syntax.ExpressionMember || expression.Value != document.externalMember || len(expression.Children) != 1 {
+					return
+				}
+				matched := false
+				if declaration, definition, ok := memberNavigationSymbols(file, result, expression); ok {
+					matched = sameWorkspaceMemberSymbol(path, declaration, target) || sameWorkspaceMemberSymbol(path, definition, target)
+				}
+				if !matched {
+					reference := importedAggregateReferenceForReceiver(path, file, result, expression.Children[0], facts)
+					if reference != nil {
+						base, ok := document.server.resolveWorkspaceReference(state.resolver, state.index, *reference)
+						if ok {
+							member, ok := document.server.resolveWorkspaceMemberTarget(base, expression.Value, importedMemberClassReceiver(file, expression.Children[0]))
+							matched = ok && sameWorkspaceMemberTarget(member, target)
+						}
+					}
+				}
+				if matched {
+					span := syntax.Span{Start: expression.Operator.End, End: expression.Span.End}
+					if rangeValue, ok := protocolRange(snapshot, document.encoding, span); ok {
+						locations = append(locations, protocol.Location{URI: uri.File(path), Range: rangeValue})
+					}
+				}
+			})
+		})
+	}
+	for index := range locations {
+		if path, ok := workspaceURIPath(locations[index].URI); ok {
+			locations[index].URI = uri.File(path)
+		}
+	}
+	sort.SliceStable(locations, func(left, right int) bool {
+		if locations[left].URI != locations[right].URI {
+			return locations[left].URI < locations[right].URI
+		}
+		if locations[left].Range.Start.Line != locations[right].Range.Start.Line {
+			return locations[left].Range.Start.Line < locations[right].Range.Start.Line
+		}
+		return locations[left].Range.Start.Character < locations[right].Range.Start.Character
+	})
+	locations = deduplicateLocations(locations)
+	current, err := document.workspaceNavigationCurrent(ctx, state, target, scanned...)
+	if err != nil {
+		return nil, err
+	}
+	if !current {
+		return nil, protocol.ErrContentModified
+	}
+	document.memberSnapshots = make(map[uri.URI]*text.Snapshot, len(open))
+	for path, snapshot := range open {
+		document.memberSnapshots[uri.File(path)] = snapshot
+	}
+	return locations, nil
+}
+
+func sameWorkspaceMemberSymbol(path string, symbol *analysis.Symbol, target workspaceNavigationTarget) bool {
+	return symbol != nil && sameWorkspacePath(path, target.match.Fact.Path) && symbol.SelectionRange == target.match.Fact.SelectionRange && symbol.Name == target.match.Fact.Name
+}
+
+func sameWorkspaceMemberTarget(left, right workspaceNavigationTarget) bool {
+	return sameWorkspacePath(left.match.Fact.Path, right.match.Fact.Path) && left.match.Fact.SelectionRange == right.match.Fact.SelectionRange && left.match.Fact.Name == right.match.Fact.Name
 }
 
 func (s *Server) analyzeWorkspaceTarget(target workspaceNavigationTarget) (*analysis.FileAnalysis, *analysis.Declaration) {

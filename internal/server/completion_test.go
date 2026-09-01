@@ -83,6 +83,84 @@ func TestCompletionBuiltinFunctionPrefixDoesNotStopAtEarlierNames(t *testing.T) 
 	}
 }
 
+func TestCompletionIncludesScopedDeclarationPrefix(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "let g:globalValue = 1\nlet s:scriptValue = 2\necho g:glo\n")
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 10},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range completionItems(t, result) {
+		if item.Label != "g:globalValue" {
+			continue
+		}
+		edit, ok := item.TextEdit.(*protocol.TextEdit)
+		if !ok || edit.Range != navigationRange(2, 5, 10) || edit.NewText != "g:globalValue" {
+			t.Fatalf("scoped completion edit = %#v", item.TextEdit)
+		}
+		return
+	}
+	t.Fatalf("scoped declaration missing from %#v", completionItems(t, result))
+}
+
+func TestCompletionIncludesLegacyArgumentAndLocalPrefixes(t *testing.T) {
+	source := "function! Test(argument)\n  let localValue = 1\n  echo a:arg\n  echo l:loc\nendfunction\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	for _, test := range []struct {
+		line  uint32
+		label string
+	}{
+		{line: 2, label: "a:argument"},
+		{line: 3, label: "l:localValue"},
+	} {
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: 12},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, item := range completionItems(t, result) {
+			if item.Label != test.label {
+				continue
+			}
+			edit, ok := item.TextEdit.(*protocol.TextEdit)
+			if !ok || edit.Range != navigationRange(test.line, 7, 12) || edit.NewText != test.label {
+				t.Fatalf("%s completion edit = %#v", test.label, item.TextEdit)
+			}
+			found = true
+			break
+		}
+		if !found {
+			t.Errorf("%s missing from %#v", test.label, completionItems(t, result))
+		}
+	}
+}
+
+func TestCompletionRespectsForwardVisibility(t *testing.T) {
+	source := "vim9script\necho fut\necho Lat\nvar future = 1\ndef Later()\nenddef\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	for _, test := range []struct {
+		line  uint32
+		label string
+		want  bool
+	}{
+		{line: 1, label: "future", want: false},
+		{line: 2, label: "Later", want: true},
+	} {
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: 8},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := hasCompletionLabel(completionItems(t, result), test.label); got != test.want {
+			t.Errorf("completion for %s = %t, want %t", test.label, got, test.want)
+		}
+	}
+}
+
 func TestCompletionLimitAndCancellationDuringCollection(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	snapshot := text.NewSnapshot("file:///limit.vim", 1, nil, "")

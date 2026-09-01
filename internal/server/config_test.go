@@ -30,6 +30,21 @@ func TestCompletionCapabilitiesFromClient(t *testing.T) {
 	}
 }
 
+func TestLanguageFeatureCapabilitiesRespectClientOrder(t *testing.T) {
+	capabilities := languageFeatureCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{
+		Hover: &protocol.HoverClientCapabilities{ContentFormat: []protocol.MarkupKind{protocol.MarkupKindPlainText, protocol.MarkupKindMarkdown}},
+		SignatureHelp: &protocol.SignatureHelpClientCapabilities{SignatureInformation: &protocol.ClientSignatureInformationOptions{
+			DocumentationFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown, protocol.MarkupKindPlainText},
+		}},
+	})
+	if capabilities.hoverMarkup != protocol.MarkupKindPlainText || capabilities.signatureMarkup != protocol.MarkupKindMarkdown {
+		t.Fatalf("language feature capabilities = %#v", capabilities)
+	}
+	if capabilities := languageFeatureCapabilitiesFromClient(nil); capabilities.hoverMarkup != protocol.MarkupKindPlainText || capabilities.signatureMarkup != protocol.MarkupKindPlainText {
+		t.Fatalf("absent language feature capabilities = %#v", capabilities)
+	}
+}
+
 func TestParseTargetVersion(t *testing.T) {
 	tests := []struct {
 		input string

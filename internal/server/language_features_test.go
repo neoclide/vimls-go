@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -315,6 +317,388 @@ func TestSignatureHelpForResolvedUserFunction(t *testing.T) {
 	}
 	if active, ok := help.Signatures[0].ActiveParameter.Get(); !ok || active != 1 {
 		t.Fatalf("active parameter = %#v", help.Signatures[0].ActiveParameter)
+	}
+}
+
+func TestSignatureHelpForBuiltinFunction(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source string
+		line   uint32
+	}{
+		{name: "legacy", source: "echo get([], 'x', )\n"},
+		{name: "vim9", source: "vim9script\necho get([], 'x', )\n", line: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			line := strings.Split(test.source, "\n")[test.line]
+			help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Position:     protocol.Position{Line: test.line, Character: uint32(strings.IndexByte(line, ')'))},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if help == nil || len(help.Signatures) != 1 || help.Signatures[0].Label != "get({list}, {idx} [, {default}]): any" || len(help.Signatures[0].Parameters) != 3 {
+				t.Fatalf("signature help = %#v", help)
+			}
+			if active, ok := help.Signatures[0].ActiveParameter.Get(); !ok || active != 2 {
+				t.Fatalf("active parameter = %#v", help.Signatures[0].ActiveParameter)
+			}
+		})
+	}
+	printf, ok := vimdata.LookupFunction("printf")
+	if !ok {
+		t.Fatal("missing printf metadata")
+	}
+	label, parameters := formatBuiltinFunctionSignature(printf)
+	if label != "printf({fmt}, {expr1} ...): string" || len(parameters) != 3 || parameters[2].Label != protocol.String("...") {
+		t.Fatalf("variadic signature = %q, %#v", label, parameters)
+	}
+	source := "vim9script\necho printf('%s%s', 'a', 'b')\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: uint32(strings.IndexByte(strings.Split(source, "\n")[1], ')'))},
+	}})
+	if err != nil || help == nil {
+		t.Fatalf("variadic signature help = %#v, %v", help, err)
+	}
+	if active, ok := help.Signatures[0].ActiveParameter.Get(); !ok || active != 2 {
+		t.Fatalf("variadic active parameter = %#v", help.Signatures[0].ActiveParameter)
+	}
+}
+
+func TestHoverAndSignatureHelpRespectDocumentationFormats(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho get([], 0)\n")
+	capabilities := protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{
+		Hover: &protocol.HoverClientCapabilities{ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown}},
+		SignatureHelp: &protocol.SignatureHelpClientCapabilities{SignatureInformation: &protocol.ClientSignatureInformationOptions{
+			DocumentationFormat: []protocol.MarkupKind{protocol.MarkupKindPlainText},
+		}},
+	}}
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: capabilities}); err != nil {
+		t.Fatal(err)
+	}
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 7},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("hover = %#v, %v", hover, err)
+	}
+	hoverContent, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || hoverContent.Kind != protocol.MarkupKindMarkdown || !strings.Contains(hoverContent.Value, "get(") || len(hoverContent.Value) > maxLanguageFeatureDocumentationBytes {
+		t.Fatalf("hover content = %#v", hover.Contents)
+	}
+	help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 14},
+	}})
+	if err != nil || help == nil || len(help.Signatures) != 1 {
+		t.Fatalf("signature help = %#v, %v", help, err)
+	}
+	documentation, ok := help.Signatures[0].Documentation.(*protocol.MarkupContent)
+	if !ok || documentation.Kind != protocol.MarkupKindPlainText || !strings.Contains(documentation.Value, "get(") || len(documentation.Value) > maxLanguageFeatureDocumentationBytes {
+		t.Fatalf("signature documentation = %#v", help.Signatures[0].Documentation)
+	}
+}
+
+func TestLanguageFeatureDocumentationIsBoundedUTF8(t *testing.T) {
+	content := boundedMarkupContent(protocol.MarkupKindMarkdown, strings.Repeat("界", maxLanguageFeatureDocumentationBytes))
+	if content.Kind != protocol.MarkupKindMarkdown || len(content.Value) > maxLanguageFeatureDocumentationBytes || !utf8.ValidString(content.Value) || !strings.HasSuffix(content.Value, "…") {
+		t.Fatalf("bounded content kind=%q bytes=%d valid=%t suffix=%q", content.Kind, len(content.Value), utf8.ValidString(content.Value), content.Value[len(content.Value)-3:])
+	}
+}
+
+func TestSignatureHelpUsesShadowingFunctionValue(t *testing.T) {
+	source := "vim9script\nvar get = (value) => value\necho get(1)\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 10},
+	}})
+	if err != nil || help == nil || help.Signatures[0].Label != "get(any): any" {
+		t.Fatalf("shadowed builtin signature = %#v, %v", help, err)
+	}
+}
+
+func TestSignatureHelpForFunctionTypedValues(t *testing.T) {
+	for _, test := range []struct {
+		name, source, wantLabel string
+		line, character         uint32
+		wantActive              uint32
+	}{
+		{name: "lambda", source: "vim9script\nvar Callback = (first: number, second: string): number => first\necho Callback(1, 'x')\n", wantLabel: "Callback(number, string): number", line: 2, character: 20, wantActive: 1},
+		{name: "optional", source: "vim9script\nvar Callback: func(number, ?string): bool\necho Callback(1, 'x')\n", wantLabel: "Callback(number, ?string): bool", line: 2, character: 20, wantActive: 1},
+		{name: "variadic", source: "vim9script\nvar Callback: func(number, ...list<any>): bool\necho Callback(1, 2, 3)\n", wantLabel: "Callback(number, ...list<any>): bool", line: 2, character: 21, wantActive: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character},
+			}})
+			if err != nil || help == nil || len(help.Signatures) != 1 || help.Signatures[0].Label != test.wantLabel {
+				t.Fatalf("signature help = %#v, %v", help, err)
+			}
+			if active, ok := help.Signatures[0].ActiveParameter.Get(); !ok || active != test.wantActive {
+				t.Fatalf("active parameter = %#v", help.Signatures[0].ActiveParameter)
+			}
+		})
+	}
+}
+
+func TestSignatureHelpForLocalClassMethodsAndConstructors(t *testing.T) {
+	source := `vim9script
+class Base
+  def Resize(width: number, height: number = 1): number
+    return width * height
+  enddef
+  static def Build(name: string): Base
+    return Base.new()
+  enddef
+endclass
+class Box extends Base
+  def new(value: number)
+  enddef
+  def Check()
+    echo this.Resize(2, 3)
+    echo super.Resize(2, 3)
+  enddef
+endclass
+class Empty
+endclass
+class Protected
+  def _new(value: number)
+  enddef
+  def _Resize(value: number)
+  enddef
+endclass
+var box = Box.new(1)
+var protected = Protected.new()
+echo box.Resize(2, 3)
+echo Base.Build('x')
+echo Empty.new()
+echo box.Build('x')
+echo Base.Resize(2, 3)
+echo protected._Resize(1)
+`
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	for _, test := range []struct {
+		name, call, wantLabel string
+		wantActive            uint32
+	}{
+		{name: "constructor", call: "Box.new(1)", wantLabel: "new(value: number)"},
+		{name: "inherited object method", call: "box.Resize(2, 3)", wantLabel: "Resize(width: number, height: number = 1): number", wantActive: 1},
+		{name: "static method", call: "Base.Build('x')", wantLabel: "Build(name: string): Base"},
+		{name: "default constructor", call: "Empty.new()", wantLabel: "new()"},
+		{name: "this method", call: "this.Resize(2, 3)", wantLabel: "Resize(width: number, height: number = 1): number", wantActive: 1},
+		{name: "super method", call: "super.Resize(2, 3)", wantLabel: "Resize(width: number, height: number = 1): number", wantActive: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			callOffset := strings.Index(source, test.call)
+			closing := callOffset + strings.LastIndex(test.call, ")")
+			prefix := source[:closing]
+			position := protocol.Position{Line: uint32(strings.Count(prefix, "\n")), Character: uint32(len(prefix) - strings.LastIndex(prefix, "\n") - 1)}
+			help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: position,
+			}})
+			if err != nil || help == nil || len(help.Signatures) != 1 || help.Signatures[0].Label != test.wantLabel {
+				t.Fatalf("signature help = %#v, %v", help, err)
+			}
+			if active, ok := help.Signatures[0].ActiveParameter.Get(); !ok || active != test.wantActive {
+				t.Fatalf("active parameter = %#v", help.Signatures[0].ActiveParameter)
+			}
+		})
+	}
+	for _, call := range []string{"box.Build('x')", "Base.Resize(2, 3)", "Protected.new()", "protected._Resize(1)"} {
+		callOffset := strings.Index(source, call)
+		closing := callOffset + strings.LastIndex(call, ")")
+		prefix := source[:closing]
+		help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: uint32(strings.Count(prefix, "\n")), Character: uint32(len(prefix) - strings.LastIndex(prefix, "\n") - 1)},
+		}})
+		if err != nil || help != nil {
+			t.Fatalf("invalid receiver call %q signature help = %#v, %v", call, help, err)
+		}
+	}
+}
+
+func TestSignatureHelpForBuiltinMethodCall(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		source     string
+		line       uint32
+		wantLabel  string
+		wantParams int
+		wantActive uint32
+	}{
+		{name: "legacy receiver first", source: "echo [1]->add(2)\n", wantLabel: "add({expr})", wantParams: 1},
+		{name: "vim9 receiver second", source: "vim9script\necho ['x']->append(1)\n", line: 1, wantLabel: "append({lnum}): number|bool", wantParams: 1},
+		{name: "nested optional", source: "vim9script\necho len([]->get(0, 1))\n", line: 1, wantLabel: "get({idx}, [{default}]): any", wantParams: 2, wantActive: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			line := strings.Split(test.source, "\n")[test.line]
+			closing := strings.IndexByte(line, ')')
+			help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Position:     protocol.Position{Line: test.line, Character: uint32(closing)},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if help == nil || len(help.Signatures) != 1 || help.Signatures[0].Label != test.wantLabel || len(help.Signatures[0].Parameters) != test.wantParams {
+				t.Fatalf("signature help = %#v", help)
+			}
+			if active, ok := help.Signatures[0].ActiveParameter.Get(); !ok || active != test.wantActive {
+				t.Fatalf("active parameter = %#v", help.Signatures[0].ActiveParameter)
+			}
+		})
+	}
+}
+
+func TestBuiltinMethodSignatureMetadataIncludesReceiver(t *testing.T) {
+	for _, function := range vimdata.BuiltinFunctions() {
+		if function.MethodArgument == 0 {
+			continue
+		}
+		label, _ := formatBuiltinMethodSignature(function)
+		if label == "" {
+			t.Fatalf("%s documentation does not identify method receiver %d", function.Name, function.MethodArgument)
+		}
+	}
+	printf, _ := vimdata.LookupFunction("printf")
+	label, _ := formatBuiltinMethodSignature(printf)
+	if label != "printf({fmt}, ...): string" {
+		t.Fatalf("printf method signature = %q", label)
+	}
+}
+
+func TestSignatureHelpForStaticImportedFunction(t *testing.T) {
+	source := "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n"
+	instance, documentURI, targetURI := openWorkspaceFeatureRetryDocument(t, source)
+	params := &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 13},
+	}}
+	help, err := instance.SignatureHelp(context.Background(), params)
+	if err != nil || help == nil || len(help.Signatures) != 1 || help.Signatures[0].Label != "Run(): number" {
+		t.Fatalf("imported signature = %#v, %v", help, err)
+	}
+
+	overlay := "vim9script\nexport def Run(value: string, fallback: bool = false): string\n  return value\nenddef\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 2, Text: overlay}}); err != nil {
+		t.Fatal(err)
+	}
+	help, err = instance.SignatureHelp(context.Background(), params)
+	if err != nil || help == nil || help.Signatures[0].Label != "Run(value: string, fallback: bool = false): string" {
+		t.Fatalf("open imported signature = %#v, %v", help, err)
+	}
+}
+
+func TestSignatureHelpForStaticImportedAggregateMembers(t *testing.T) {
+	source := "vim9script\nimport './lib.vim' as lib\nvar box = lib.Box.new(1)\necho box.Resize(2, 3)\nvar typed: lib.Box\necho typed.Resize(4, 5)\necho lib.Box.new(1).Resize(6, 7)\ntype BoxAlias = lib.Box\nvar aliased: BoxAlias\necho aliased.Resize(8, 9)\ndef Make(): lib.Box\n  return lib.Box.new(1)\nenddef\nvar returned = Make()\necho returned.Resize(10, 11)\nvar copied = typed\necho copied.Resize(12, 13)\nvar boxes: list<lib.Box> = []\necho boxes[0].Resize(14, 15)\necho lib.Make().Resize(16, 17)\nvar assigned: any\nassigned = lib.Box.new(1)\necho assigned.Resize(18, 19)\nvar invalidated: any\ninvalidated = lib.Box.new(1)\ninvalidated = Unknown()\necho invalidated.Resize(20, 21)\nvar conditional: any\nif true\n  conditional = lib.Box.new(1)\nendif\necho conditional.Resize(22, 23)\necho lib.Box.Build('x')\necho lib.Box._Hidden()\n"
+	instance, documentURI, targetURI := openWorkspaceFeatureRetryDocument(t, source)
+	for _, test := range []struct {
+		call, wantLabel string
+	}{
+		{call: "lib.Box.new(1)", wantLabel: "new(value: number)"},
+		{call: "box.Resize(2, 3)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "typed.Resize(4, 5)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "lib.Box.new(1).Resize(6, 7)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "aliased.Resize(8, 9)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "returned.Resize(10, 11)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "copied.Resize(12, 13)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "boxes[0].Resize(14, 15)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "lib.Make().Resize(16, 17)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "assigned.Resize(18, 19)", wantLabel: "Resize(width: number, height: number = 1): number"},
+		{call: "lib.Box.Build('x')", wantLabel: "Build(name: string): Box"},
+	} {
+		callOffset := strings.Index(source, test.call)
+		closing := callOffset + strings.LastIndex(test.call, ")")
+		prefix := source[:closing]
+		help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: uint32(strings.Count(prefix, "\n")), Character: uint32(len(prefix) - strings.LastIndex(prefix, "\n") - 1)},
+		}})
+		if err != nil || help == nil || len(help.Signatures) != 1 || help.Signatures[0].Label != test.wantLabel {
+			t.Fatalf("%s signature help = %#v, %v", test.call, help, err)
+		}
+	}
+	hidden := strings.Index(source, "lib.Box._Hidden()") + len("lib.Box._Hidden(")
+	hiddenPrefix := source[:hidden]
+	help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: uint32(strings.Count(hiddenPrefix, "\n")), Character: uint32(len(hiddenPrefix) - strings.LastIndex(hiddenPrefix, "\n") - 1)},
+	}})
+	if err != nil || help != nil {
+		t.Fatalf("protected imported signature help = %#v, %v", help, err)
+	}
+	for _, call := range []string{"invalidated.Resize(20, 21)", "conditional.Resize(22, 23)"} {
+		closing := strings.Index(source, call) + strings.LastIndex(call, ")")
+		prefix := source[:closing]
+		help, err = instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: uint32(strings.Count(prefix, "\n")), Character: uint32(len(prefix) - strings.LastIndex(prefix, "\n") - 1)},
+		}})
+		if err != nil || help != nil {
+			t.Fatalf("unsafe %s signature help = %#v, %v", call, help, err)
+		}
+	}
+
+	overlay := "vim9script\nexport class Box\n  def new(name: string)\n  enddef\n  def Resize(label: string): string\n    return label\n  enddef\n  static def Build(value: number): Box\n    return Box.new('x')\n  enddef\nendclass\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 2, Text: overlay}}); err != nil {
+		t.Fatal(err)
+	}
+	callOffset := strings.Index(source, "lib.Box.new(1)")
+	closing := callOffset + strings.LastIndex("lib.Box.new(1)", ")")
+	prefix := source[:closing]
+	help, err = instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: uint32(strings.Count(prefix, "\n")), Character: uint32(len(prefix) - strings.LastIndex(prefix, "\n") - 1)},
+	}})
+	if err != nil || help == nil || help.Signatures[0].Label != "new(name: string)" {
+		t.Fatalf("open imported aggregate signature = %#v, %v", help, err)
+	}
+	callOffset = strings.Index(source, "typed.Resize(4, 5)")
+	closing = callOffset + strings.LastIndex("typed.Resize(4, 5)", ")")
+	prefix = source[:closing]
+	help, err = instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: uint32(strings.Count(prefix, "\n")), Character: uint32(len(prefix) - strings.LastIndex(prefix, "\n") - 1)},
+	}})
+	if err != nil || help == nil || help.Signatures[0].Label != "Resize(label: string): string" {
+		t.Fatalf("open imported object signature = %#v, %v", help, err)
+	}
+}
+
+func TestSignatureHelpForStaticImportRetriesWorkspaceIdentity(t *testing.T) {
+	source := "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n"
+	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, source)
+	params := &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 13},
+	}}
+	checks := 0
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		if checks == 1 {
+			instance.workspaceMu.Lock()
+			instance.workspaceRevision++
+			instance.workspaceMu.Unlock()
+		}
+	}
+	help, err := instance.SignatureHelp(context.Background(), params)
+	if err != nil || help == nil || help.Signatures[0].Label != "Run(): number" || checks != 2 {
+		t.Fatalf("imported signature = %#v, checks=%d, error=%v", help, checks, err)
+	}
+
+	instance.beforeWorkspaceIdentityCheck = func() {
+		checks++
+		instance.workspaceMu.Lock()
+		instance.workspaceRevision++
+		instance.workspaceMu.Unlock()
+	}
+	checks = 0
+	help, err = instance.SignatureHelp(context.Background(), params)
+	if !errors.Is(err, protocol.ErrContentModified) || help != nil || checks != 2 {
+		t.Fatalf("stale imported signature = %#v, checks=%d, error=%v", help, checks, err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/text"
@@ -24,11 +25,25 @@ func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRena
 		if err != nil || document == nil {
 			return nil, err
 		}
+		if document.memberConstructor {
+			return nil, document.checkCurrent(ctx)
+		}
 		_, _, workspaceAttempt := document.workspaceLocalTarget()
 		workspaceAttempt = workspaceAttempt || document.external != nil
 		workspaceTargetResolved := false
 		if workspaceAttempt {
 			state := s.captureWorkspaceNavigationState()
+			if state.index == nil || !state.index.Complete() {
+				if current, currentErr := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); currentErr != nil {
+					return nil, currentErr
+				} else if !current {
+					if attempt == 0 {
+						continue
+					}
+					return nil, protocol.ErrContentModified
+				}
+				return nil, nil
+			}
 			target, ok := document.workspaceTargetInState(state)
 			if !ok {
 				current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{})
@@ -60,11 +75,17 @@ func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRena
 				}
 				locations, err := document.workspaceReferencesInState(ctx, state, target, true)
 				if err != nil {
+					if errors.Is(err, protocol.ErrContentModified) && attempt == 0 {
+						continue
+					}
 					return nil, err
 				}
 				openLocations, scannedSnapshots, err := s.openWorkspaceReferenceLocationsInState(ctx, state, target, document.encoding)
 				if err != nil {
 					return nil, err
+				}
+				for documentURI, snapshot := range document.memberSnapshots {
+					scannedSnapshots[documentURI] = snapshot
 				}
 				locations = normalizeRenameLocations(append(locations, openLocations...))
 				_, usedSnapshots, err := s.renameEdits(ctx, state, scannedSnapshots, document.encoding, target.match.Fact.Name, "", locations)
@@ -113,7 +134,7 @@ func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRena
 }
 
 func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
-	if !renameIdentifier.MatchString(params.NewName) {
+	if !validRenameIdentifier(params.NewName) {
 		return nil, jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "new name is not a statically valid Vim identifier")
 	}
 	for attempt := range 2 {
@@ -121,10 +142,24 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 		if err != nil || document == nil {
 			return nil, err
 		}
+		if document.memberConstructor {
+			return nil, unsafeRenameError()
+		}
 		_, _, workspaceAttempt := document.workspaceLocalTarget()
 		workspaceAttempt = workspaceAttempt || document.external != nil
 		if workspaceAttempt {
 			state := s.captureWorkspaceNavigationState()
+			if state.index == nil || !state.index.Complete() {
+				if current, currentErr := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); currentErr != nil {
+					return nil, currentErr
+				} else if !current {
+					if attempt == 0 {
+						continue
+					}
+					return nil, protocol.ErrContentModified
+				}
+				return nil, unsafeRenameError()
+			}
 			target, ok := document.workspaceTargetInState(state)
 			if !ok {
 				current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{})
@@ -156,11 +191,17 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 				}
 				locations, err := document.workspaceReferencesInState(ctx, state, target, true)
 				if err != nil {
+					if errors.Is(err, protocol.ErrContentModified) && attempt == 0 {
+						continue
+					}
 					return nil, err
 				}
 				openLocations, scannedSnapshots, err := s.openWorkspaceReferenceLocationsInState(ctx, state, target, document.encoding)
 				if err != nil {
 					return nil, err
+				}
+				for documentURI, snapshot := range document.memberSnapshots {
+					scannedSnapshots[documentURI] = snapshot
 				}
 				locations = normalizeRenameLocations(append(locations, openLocations...))
 				documentChanges, usedSnapshots, err := s.renameEdits(ctx, state, scannedSnapshots, document.encoding, target.match.Fact.Name, params.NewName, locations)
@@ -206,7 +247,7 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 			if !ok {
 				continue
 			}
-			edit := &protocol.TextEdit{Range: rangeValue, NewText: params.NewName}
+			edit := &protocol.TextEdit{Range: rangeValue, NewText: localRenameText(document.analysis.File.Text(span), params.NewName)}
 			edits = append(edits, edit)
 		}
 		if len(edits) == 0 {
@@ -244,17 +285,50 @@ func unsafeRenameError() error {
 }
 
 func validRenameReplacement(oldName, newName string) bool {
-	if !renameIdentifier.MatchString(oldName) || !renameIdentifier.MatchString(newName) {
+	if !validRenameIdentifier(oldName) || !validRenameIdentifier(newName) {
 		return false
 	}
 	return renameNamespace(oldName) == renameNamespace(newName)
 }
 
+func validRenameIdentifier(name string) bool {
+	if renameIdentifier.MatchString(name) {
+		return true
+	}
+	suffix, ok := serverScriptLocalName(name)
+	return ok && renameIdentifier.MatchString(suffix)
+}
+
 func renameNamespace(name string) string {
+	if _, ok := serverScriptLocalName(name); ok {
+		return "s:"
+	}
 	if len(name) >= 2 && name[1] == ':' {
 		return name[:2]
 	}
 	return ""
+}
+
+func localRenameText(oldName, newName string) string {
+	newSuffix, newScript := serverScriptLocalName(newName)
+	_, oldScript := serverScriptLocalName(oldName)
+	if !newScript || !oldScript {
+		return newName
+	}
+	if strings.HasPrefix(oldName, "s:") {
+		return "s:" + newSuffix
+	}
+	return oldName[:len("<SID>")] + newSuffix
+}
+
+func serverScriptLocalName(name string) (string, bool) {
+	if strings.HasPrefix(name, "s:") && len(name) > 2 {
+		return name[2:], true
+	}
+	if len(name) > len("<SID>") && strings.EqualFold(name[:len("<SID>")], "<SID>") {
+		return name[len("<SID>"):], true
+	}
+	return "", false
 }
 
 func (s *Server) renameEdits(ctx context.Context, workspaceState workspaceNavigationSnapshot, capturedSnapshots map[uri.URI]*text.Snapshot, encoding text.Encoding, oldName, newName string, locations []protocol.Location) ([]protocol.DocumentChange, []*text.Snapshot, error) {

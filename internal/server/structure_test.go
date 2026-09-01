@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/text"
@@ -50,6 +51,72 @@ func TestFoldingRangesUseBlocksAndBodies(t *testing.T) {
 	}
 	if len(wanted) != 0 {
 		t.Fatalf("missing folds %v in %#v", wanted, result)
+	}
+}
+
+func TestIncompleteDeclarationStructuresRetainHierarchyAndRanges(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		root       string
+		children   []string
+		position   protocol.Position
+		foldStart  uint32
+		foldEnd    uint32
+		grandchild string
+	}{
+		{name: "legacy function", source: "function! Legacy()\n  let value = 1\n", root: "Legacy", children: []string{"value"}, position: protocol.Position{Line: 1, Character: 6}, foldEnd: 1},
+		{name: "class", source: "vim9script\nclass Box\n  def Run()\n    var value = 1\n", root: "Box", children: []string{"Run"}, grandchild: "value", position: protocol.Position{Line: 3, Character: 8}, foldStart: 1, foldEnd: 3},
+		{name: "interface", source: "vim9script\ninterface Face\n  def Run()\n", root: "Face", children: []string{"Run"}, position: protocol.Position{Line: 2, Character: 7}, foldStart: 1, foldEnd: 2},
+		{name: "enum", source: "vim9script\nenum Color\n  Red,\n  Green\n", root: "Color", children: []string{"Red", "Green"}, position: protocol.Position{Line: 3, Character: 3}, foldStart: 1, foldEnd: 3},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			result, err := instance.DocumentSymbol(context.Background(), &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			symbols := result.(protocol.DocumentSymbolSlice)
+			if len(symbols) != 1 || symbols[0].Name != test.root || symbols[0].Range.End != (protocol.Position{Line: uint32(strings.Count(test.source, "\n"))}) {
+				t.Fatalf("incomplete symbols = %#v", symbols)
+			}
+			if len(symbols[0].Children) != len(test.children) {
+				t.Fatalf("incomplete children = %#v", symbols[0].Children)
+			}
+			for index, name := range test.children {
+				if symbols[0].Children[index].Name != name {
+					t.Errorf("child %d = %#v, want %q", index, symbols[0].Children[index], name)
+				}
+			}
+			if test.grandchild != "" && (len(symbols[0].Children[0].Children) != 1 || symbols[0].Children[0].Children[0].Name != test.grandchild) {
+				t.Fatalf("incomplete grandchildren = %#v", symbols[0].Children[0].Children)
+			}
+			folds, err := instance.FoldingRanges(context.Background(), &protocol.FoldingRangeParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			foundFold := false
+			for _, fold := range folds {
+				foundFold = foundFold || fold.StartLine == test.foldStart && fold.EndLine == test.foldEnd
+			}
+			if !foundFold {
+				t.Fatalf("incomplete folds = %#v", folds)
+			}
+			selections, err := instance.SelectionRange(context.Background(), &protocol.SelectionRangeParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Positions: []protocol.Position{test.position},
+			})
+			if err != nil || len(selections) != 1 {
+				t.Fatalf("incomplete selections = %#v, %v", selections, err)
+			}
+			containsRoot := false
+			for current := &selections[0]; current != nil; current = current.Parent {
+				containsRoot = containsRoot || current.Range == symbols[0].Range
+			}
+			if !containsRoot {
+				t.Fatalf("selection chain does not contain root %#v: %#v", symbols[0].Range, selections[0])
+			}
+		})
 	}
 }
 

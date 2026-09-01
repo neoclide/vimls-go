@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -13,6 +14,8 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+const maxLanguageFeatureDocumentationBytes = 16 << 10
 
 const maxCompletionItems = 2000
 
@@ -437,37 +440,468 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 		return nil, s.structureCurrent(ctx, snapshot)
 	}
 	call := callAt(file, offset)
-	if call == nil || call.Value == "->" || len(call.Children) == 0 {
+	if call == nil || len(call.Children) == 0 {
 		return nil, s.structureCurrent(ctx, snapshot)
 	}
 	callable := call.Children[0]
-	if callable.Kind != syntax.ExpressionIdentifier {
+	var label string
+	var parameters []protocol.ParameterInformation
+	var documentation string
+	switch callable.Kind {
+	case syntax.ExpressionIdentifier:
+		fileAnalysis := analysis.Analyze(file)
+		declaration := declarationForExpression(fileAnalysis, callable)
+		if declaration != nil {
+			function := functionForDeclaration(file.Commands, declaration)
+			if function != nil {
+				label, parameters = formatFunctionSignature(file, declaration.Name, function)
+			} else if declaration.Type.Name == "func" && declaration.Type.ArgumentCountKnown {
+				label, parameters = formatFunctionValueSignature(declaration.Name, declaration.Type)
+			} else {
+				return nil, s.structureCurrent(ctx, snapshot)
+			}
+		} else {
+			function, ok := vimdata.LookupFunction(file.Text(callable.Span))
+			if !ok {
+				return nil, s.structureCurrent(ctx, snapshot)
+			}
+			label, parameters = formatBuiltinFunctionSignature(function)
+			documentation = function.Documentation
+		}
+	case syntax.ExpressionMember:
+		operator := file.Text(callable.Operator)
+		if operator == "." {
+			fileAnalysis := analysis.Analyze(file)
+			if function, ok := memberFunctionForSignature(file, fileAnalysis, callable); ok {
+				if function == nil {
+					label = callable.Value + "()"
+				} else {
+					label, parameters = formatFunctionSignature(file, callable.Value, function)
+				}
+				break
+			}
+			return s.importedFunctionSignatureHelp(ctx, params)
+		}
+		if operator != "->" {
+			return nil, s.structureCurrent(ctx, snapshot)
+		}
+		function, ok := vimdata.LookupFunction(callable.Value)
+		if !ok || function.MethodArgument == 0 {
+			return nil, s.structureCurrent(ctx, snapshot)
+		}
+		label, parameters = formatBuiltinMethodSignature(function)
+		documentation = function.Documentation
+	default:
 		return nil, s.structureCurrent(ctx, snapshot)
 	}
-	fileAnalysis := analysis.Analyze(file)
-	declaration := declarationForExpression(fileAnalysis, callable)
-	if declaration == nil {
-		return nil, s.structureCurrent(ctx, snapshot)
-	}
-	function := functionForDeclaration(file.Commands, declaration)
-	if function == nil {
-		return nil, s.structureCurrent(ctx, snapshot)
-	}
-	label, parameters := formatFunctionSignature(file, declaration.Name, function)
 	active := activeCallParameter(call, offset)
 	if len(parameters) > 0 && active >= uint32(len(parameters)) {
 		active = uint32(len(parameters) - 1)
 	}
-	zero := uint32(0)
-	result := &protocol.SignatureHelp{
-		Signatures:      []protocol.SignatureInformation{{Label: label, Parameters: parameters, ActiveParameter: protocol.NewNullable(active)}},
-		ActiveSignature: &zero,
-		ActiveParameter: protocol.NewNullable(active),
-	}
 	if err := s.structureCurrent(ctx, snapshot); err != nil {
 		return nil, err
 	}
-	return result, nil
+	return s.newSignatureHelp(label, parameters, active, documentation), nil
+}
+
+func (s *Server) importedFunctionSignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+	for attempt := range 2 {
+		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+		if err != nil {
+			return nil, err
+		}
+		if snapshot == nil || file == nil {
+			return nil, nil
+		}
+		offset, err := snapshot.Offset(fromProtocolPosition(params.Position), encoding)
+		if err != nil {
+			return nil, s.structureCurrent(ctx, snapshot)
+		}
+		call := callAt(file, offset)
+		if call == nil || len(call.Children) == 0 {
+			return nil, s.structureCurrent(ctx, snapshot)
+		}
+		callable := call.Children[0]
+		if callable.Kind != syntax.ExpressionMember || file.Text(callable.Operator) != "." {
+			return nil, s.structureCurrent(ctx, snapshot)
+		}
+		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
+		if !ok {
+			return nil, s.structureCurrent(ctx, snapshot)
+		}
+		fileAnalysis := analysis.Analyze(file)
+		externalFacts := workspace.CollectExternalReferencesFromAnalysis(path, file, fileAnalysis)
+		referenceMember := callable
+		aggregateMember := false
+		aggregateClassReceiver := false
+		if len(callable.Children) == 1 && callable.Children[0] != nil && callable.Children[0].Kind == syntax.ExpressionMember && file.Text(callable.Children[0].Operator) == "." {
+			referenceMember = callable.Children[0]
+			aggregateMember = true
+			aggregateClassReceiver = true
+		}
+		memberSpan := syntax.Span{Start: referenceMember.Operator.End, End: referenceMember.Span.End}
+		var external *workspace.ExternalReferenceFact
+		for _, fact := range externalFacts {
+			if fact.Kind == workspace.ExternalReferenceImportMember && fact.Span == memberSpan && fact.Name == referenceMember.Value {
+				fact := fact
+				external = &fact
+				break
+			}
+		}
+		if external == nil && len(callable.Children) == 1 {
+			external = importedAggregateReferenceForReceiver(path, file, fileAnalysis, callable.Children[0], externalFacts)
+			aggregateMember = external != nil
+		}
+		if external == nil {
+			return nil, s.structureCurrent(ctx, snapshot)
+		}
+		document := navigationDocument{server: s, snapshot: snapshot, encoding: encoding, analysis: fileAnalysis, occurrence: external.Span, external: external}
+		state := s.captureWorkspaceNavigationState()
+		target, resolved := document.workspaceTargetInState(state)
+		if !resolved {
+			current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{})
+			if err != nil {
+				return nil, err
+			}
+			if current {
+				return nil, nil
+			}
+			if attempt == 1 {
+				return nil, protocol.ErrContentModified
+			}
+			continue
+		}
+		targetFile := s.fileForWorkspaceTarget(target)
+		current, err := document.workspaceNavigationCurrent(ctx, state, target)
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			if attempt == 1 {
+				return nil, protocol.ErrContentModified
+			}
+			continue
+		}
+		if targetFile == nil {
+			return nil, nil
+		}
+		var label string
+		var parameters []protocol.ParameterInformation
+		if aggregateMember {
+			targetSymbols := analysis.CollectSymbols(targetFile)
+			container := symbolForWorkspaceTarget(targetSymbols, target.match.Fact)
+			if container != nil && container.Kind == analysis.SymbolKindFunction {
+				function := functionForWorkspaceTargetFile(targetFile, target)
+				if function == nil || function.ReturnType == nil || strings.Contains(function.ReturnType.Name, ".") {
+					return nil, nil
+				}
+				container = completionContainer(targetSymbols, function.ReturnType.Name)
+			}
+			if container == nil || strings.HasPrefix(callable.Value, "_") {
+				return nil, nil
+			}
+			function, ok := memberFunctionInContainer(targetFile, targetSymbols, container, callable.Value, aggregateClassReceiver)
+			if !ok {
+				return nil, nil
+			}
+			if function == nil {
+				label = callable.Value + "()"
+			} else {
+				label, parameters = formatFunctionSignature(targetFile, callable.Value, function)
+			}
+		} else {
+			function := functionForWorkspaceTargetFile(targetFile, target)
+			if function == nil {
+				return nil, nil
+			}
+			label, parameters = formatFunctionSignature(targetFile, callable.Value, function)
+		}
+		active := activeCallParameter(call, offset)
+		if len(parameters) > 0 && active >= uint32(len(parameters)) {
+			active = uint32(len(parameters) - 1)
+		}
+		return s.newSignatureHelp(label, parameters, active, ""), nil
+	}
+	return nil, protocol.ErrContentModified
+}
+
+func importedAggregateReferenceForReceiver(path string, file *syntax.File, result *analysis.FileAnalysis, receiver *syntax.Expression, facts []workspace.ExternalReferenceFact) *workspace.ExternalReferenceFact {
+	if file != nil && receiver != nil && receiver.Kind == syntax.ExpressionMember && file.Text(receiver.Operator) == "." {
+		span := syntax.Span{Start: receiver.Operator.End, End: receiver.Span.End}
+		if fact := matchingExternalReference(facts, span, receiver.Value); fact != nil {
+			return fact
+		}
+	}
+	if fact := importedConstructorReference(file, receiver, facts); fact != nil {
+		return fact
+	}
+	if fact := importedCallReference(file, receiver, facts); fact != nil {
+		return fact
+	}
+	typeName := result.TypeOf(receiver).Name
+	if !strings.Contains(typeName, ".") {
+		if alias := typeAliasNode(file.Commands, result, typeName); alias != nil {
+			typeName = alias.Name
+		}
+	}
+	if fact := importedQualifiedTypeReference(path, file, typeName, receiver.Span); fact != nil {
+		return fact
+	}
+	declaration := declarationForExpression(result, receiver)
+	if declaration == nil {
+		return nil
+	}
+	typeNode, initializer := declarationSyntax(file.Commands, declaration.Span)
+	if fact := importedTypeReference(file, typeNode, facts); fact != nil {
+		return fact
+	}
+	if fact := importedConstructorReference(file, initializer, facts); fact != nil {
+		return fact
+	}
+	if fact := importedAssignmentReference(path, file, result, declaration, receiver, facts); fact != nil {
+		return fact
+	}
+	typeName = declaration.Type.Name
+	if !strings.Contains(typeName, ".") {
+		if alias := typeAliasNode(file.Commands, result, typeName); alias != nil {
+			typeName = alias.Name
+		}
+	}
+	return importedQualifiedTypeReference(path, file, typeName, receiver.Span)
+}
+
+func importedAssignmentReference(path string, file *syntax.File, result *analysis.FileAnalysis, declaration *analysis.Declaration, receiver *syntax.Expression, facts []workspace.ExternalReferenceFact) *workspace.ExternalReferenceFact {
+	if file == nil || result == nil || declaration == nil || receiver == nil {
+		return nil
+	}
+	receiverBlock := -1
+	receiverCommand := false
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Span.Start <= receiver.Span.Start && receiver.Span.End <= command.Span.End {
+			receiverBlock = command.Block
+			receiverCommand = true
+		}
+	})
+	if !receiverCommand {
+		return nil
+	}
+	var reference *workspace.ExternalReferenceFact
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Block != receiverBlock || command.Span.Start <= declaration.Span.Start || command.Span.End > receiver.Span.Start {
+			return
+		}
+		for _, expression := range command.Expressions {
+			if expression == nil || expression.Kind != syntax.ExpressionAssignment || expression.Value != "=" || len(expression.Children) != 2 || declarationForExpression(result, expression.Children[0]) != declaration {
+				continue
+			}
+			reference = nil
+			value := expression.Children[1]
+			if fact := importedConstructorReference(file, value, facts); fact != nil {
+				reference = fact
+				continue
+			}
+			if fact := importedCallReference(file, value, facts); fact != nil {
+				reference = fact
+				continue
+			}
+			typeName := result.TypeOf(value).Name
+			if !strings.Contains(typeName, ".") {
+				if alias := typeAliasNode(file.Commands, result, typeName); alias != nil {
+					typeName = alias.Name
+				}
+			}
+			reference = importedQualifiedTypeReference(path, file, typeName, value.Span)
+		}
+	})
+	return reference
+}
+
+func importedQualifiedTypeReference(path string, file *syntax.File, name string, span syntax.Span) *workspace.ExternalReferenceFact {
+	separator := strings.IndexByte(name, '.')
+	if file == nil || separator <= 0 || separator == len(name)-1 {
+		return nil
+	}
+	alias, member := name[:separator], name[separator+1:]
+	var importNode *syntax.Import
+	for index := range file.Commands {
+		candidate := file.Commands[index].Import
+		if candidate == nil || candidate.PathSpan.End > span.Start || workspace.ImportAlias(file, candidate) != alias {
+			continue
+		}
+		if importNode != nil {
+			return nil
+		}
+		importNode = candidate
+	}
+	if importNode == nil {
+		return nil
+	}
+	return &workspace.ExternalReferenceFact{Path: path, Name: member, Span: span, Kind: workspace.ExternalReferenceImportMember, ImportPath: file.Text(importNode.PathSpan), ImportAutoload: importNode.Autoload}
+}
+
+func typeAliasNode(commands []syntax.Command, result *analysis.FileAnalysis, name string) *syntax.Type {
+	var span syntax.Span
+	for _, declaration := range result.Declarations {
+		if declaration.Kind != analysis.SymbolKindTypeAlias || declaration.Name != name {
+			continue
+		}
+		if span.Start < span.End {
+			return nil
+		}
+		span = declaration.Span
+	}
+	if span.Start >= span.End {
+		return nil
+	}
+	var typeNode *syntax.Type
+	walkCommands(commands, func(command *syntax.Command) {
+		if typeNode == nil && command.TypeAlias != nil && command.TypeAlias.Name == span {
+			typeNode = command.TypeAlias.Type
+		}
+	})
+	return typeNode
+}
+
+func importedTypeReference(file *syntax.File, typeNode *syntax.Type, facts []workspace.ExternalReferenceFact) *workspace.ExternalReferenceFact {
+	if file == nil || typeNode == nil {
+		return nil
+	}
+	separator := strings.IndexByte(typeNode.Name, '.')
+	if separator <= 0 || separator == len(typeNode.Name)-1 {
+		return nil
+	}
+	span := syntax.Span{Start: typeNode.Span.Start + separator + 1, End: typeNode.Span.Start + len(typeNode.Name)}
+	return matchingExternalReference(facts, span, typeNode.Name[separator+1:])
+}
+
+func importedConstructorReference(file *syntax.File, expression *syntax.Expression, facts []workspace.ExternalReferenceFact) *workspace.ExternalReferenceFact {
+	for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	if file == nil || expression == nil || expression.Kind != syntax.ExpressionCall || len(expression.Children) == 0 {
+		return nil
+	}
+	callee := expression.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionMember || callee.Value != "new" || file.Text(callee.Operator) != "." || len(callee.Children) != 1 {
+		return nil
+	}
+	class := callee.Children[0]
+	if class == nil || class.Kind != syntax.ExpressionMember || file.Text(class.Operator) != "." {
+		return nil
+	}
+	span := syntax.Span{Start: class.Operator.End, End: class.Span.End}
+	return matchingExternalReference(facts, span, class.Value)
+}
+
+func importedCallReference(file *syntax.File, expression *syntax.Expression, facts []workspace.ExternalReferenceFact) *workspace.ExternalReferenceFact {
+	for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	if file == nil || expression == nil || expression.Kind != syntax.ExpressionCall || len(expression.Children) == 0 {
+		return nil
+	}
+	callee := expression.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionMember || file.Text(callee.Operator) != "." {
+		return nil
+	}
+	span := syntax.Span{Start: callee.Operator.End, End: callee.Span.End}
+	return matchingExternalReference(facts, span, callee.Value)
+}
+
+func matchingExternalReference(facts []workspace.ExternalReferenceFact, span syntax.Span, name string) *workspace.ExternalReferenceFact {
+	for _, fact := range facts {
+		if fact.Kind == workspace.ExternalReferenceImportMember && fact.Span == span && fact.Name == name {
+			fact := fact
+			return &fact
+		}
+	}
+	return nil
+}
+
+func declarationSyntax(commands []syntax.Command, span syntax.Span) (*syntax.Type, *syntax.Expression) {
+	var typeNode *syntax.Type
+	var initializer *syntax.Expression
+	walkCommands(commands, func(command *syntax.Command) {
+		if typeNode != nil || initializer != nil {
+			return
+		}
+		if command.Declaration != nil {
+			for _, binding := range command.Declaration.Bindings {
+				if binding.Name == span {
+					typeNode, initializer = binding.ParsedType, command.Declaration.Initializer
+					return
+				}
+			}
+		}
+		if command.For != nil {
+			for _, binding := range command.For.Bindings {
+				if binding.Name == span {
+					typeNode = binding.ParsedType
+					return
+				}
+			}
+		}
+		if command.Function != nil {
+			for _, parameter := range command.Function.Parameters {
+				if parameter.Name == span {
+					typeNode = parameter.Type
+					return
+				}
+			}
+		}
+	})
+	return typeNode, initializer
+}
+
+func (s *Server) fileForWorkspaceTarget(target workspaceNavigationTarget) *syntax.File {
+	var file *syntax.File
+	if target.openSnapshot != nil && target.openSnapshot.Text() == target.match.Source {
+		file = s.parseSnapshot(target.openSnapshot)
+	}
+	if file == nil {
+		file = syntax.Parse(target.match.Source)
+	}
+	return file
+}
+
+func functionForWorkspaceTargetFile(file *syntax.File, target workspaceNavigationTarget) *syntax.Function {
+	if file == nil {
+		return nil
+	}
+	var function *syntax.Function
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if function == nil && command.Function != nil && command.Function.Name == target.match.Fact.SelectionRange && file.Text(command.Function.Name) == target.match.Fact.Name {
+			function = command.Function
+		}
+	})
+	return function
+}
+
+func (s *Server) newSignatureHelp(label string, parameters []protocol.ParameterInformation, active uint32, documentation string) *protocol.SignatureHelp {
+	zero := uint32(0)
+	signature := protocol.SignatureInformation{Label: label, Parameters: parameters, ActiveParameter: protocol.NewNullable(active)}
+	if documentation != "" {
+		signature.Documentation = boundedMarkupContent(s.languageFeatures.signatureMarkup, documentation)
+	}
+	return &protocol.SignatureHelp{
+		Signatures:      []protocol.SignatureInformation{signature},
+		ActiveSignature: &zero,
+		ActiveParameter: protocol.NewNullable(active),
+	}
+}
+
+func boundedMarkupContent(kind protocol.MarkupKind, value string) *protocol.MarkupContent {
+	if kind != protocol.MarkupKindMarkdown {
+		kind = protocol.MarkupKindPlainText
+	}
+	if len(value) > maxLanguageFeatureDocumentationBytes {
+		end := maxLanguageFeatureDocumentationBytes - len("…")
+		for end > 0 && !utf8.ValidString(value[:end]) {
+			end--
+		}
+		value = value[:end] + "…"
+	}
+	return &protocol.MarkupContent{Kind: kind, Value: value}
 }
 
 func declarationForExpression(result *analysis.FileAnalysis, expression *syntax.Expression) *analysis.Declaration {
@@ -494,6 +928,215 @@ func functionForDeclaration(commands []syntax.Command, declaration *analysis.Dec
 	return found
 }
 
+func memberFunctionForSignature(file *syntax.File, result *analysis.FileAnalysis, member *syntax.Expression) (*syntax.Function, bool) {
+	symbol, command, ok := memberSymbolForStaticReceiver(file, result, member)
+	if !ok {
+		return nil, false
+	}
+	if command == nil && symbol.Kind == analysis.SymbolKindClass && member.Value == "new" {
+		return nil, true
+	}
+	if command == nil || command.Function == nil {
+		return nil, false
+	}
+	return command.Function, true
+}
+
+func memberSymbolForStaticReceiver(file *syntax.File, result *analysis.FileAnalysis, member *syntax.Expression) (*analysis.Symbol, *syntax.Command, bool) {
+	symbols, container, classReceiver, ok := memberContainerForStaticReceiver(file, result, member)
+	if !ok {
+		return nil, nil, false
+	}
+	return memberSymbolInContainer(file, symbols, container, member.Value, classReceiver)
+}
+
+func memberContainerForStaticReceiver(file *syntax.File, result *analysis.FileAnalysis, member *syntax.Expression) ([]*analysis.Symbol, *analysis.Symbol, bool, bool) {
+	if file == nil || result == nil || member == nil || len(member.Children) != 1 || member.Children[0] == nil {
+		return nil, nil, false, false
+	}
+	memberSpan := syntax.Span{Start: member.Operator.End, End: member.Span.End}
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Span == memberSpan {
+			return nil, nil, false, false
+		}
+	}
+	receiver := member.Children[0]
+	className := ""
+	classReceiver := false
+	symbols := analysis.CollectSymbols(file)
+	if declaration := declarationForExpression(result, receiver); declaration != nil {
+		switch declaration.Kind {
+		case analysis.SymbolKindClass, analysis.SymbolKindInterface, analysis.SymbolKindEnum, analysis.SymbolKindTypeAlias:
+			className, classReceiver = declaration.Type.Name, true
+		}
+	}
+	if receiver.Kind == syntax.ExpressionIdentifier && (receiver.Value == "this" || receiver.Value == "super") {
+		if current := enclosingAggregateContainer(symbols, member.Span); current != nil {
+			className = current.Name
+			if receiver.Value == "super" {
+				aggregate := commandForAggregateSpan(file.Commands, current.SelectionRange)
+				if aggregate == nil || aggregate.Aggregate == nil || len(aggregate.Aggregate.Extends) == 0 {
+					return nil, nil, false, false
+				}
+				className = file.Text(aggregate.Aggregate.Extends[0])
+			}
+		}
+	}
+	if className == "" {
+		className = result.TypeOf(receiver).Name
+	}
+	container := completionContainer(symbols, className)
+	if container == nil {
+		return nil, nil, false, false
+	}
+	return symbols, container, classReceiver, true
+}
+
+func memberFunctionInContainer(file *syntax.File, symbols []*analysis.Symbol, container *analysis.Symbol, name string, classReceiver bool) (*syntax.Function, bool) {
+	symbol, command, ok := memberSymbolInContainer(file, symbols, container, name, classReceiver)
+	if !ok {
+		return nil, false
+	}
+	if command == nil && symbol.Kind == analysis.SymbolKindClass && name == "new" {
+		return nil, true
+	}
+	if command == nil || command.Function == nil {
+		return nil, false
+	}
+	return command.Function, true
+}
+
+func memberSymbolInContainer(file *syntax.File, symbols []*analysis.Symbol, container *analysis.Symbol, name string, classReceiver bool) (*analysis.Symbol, *syntax.Command, bool) {
+	receiverContainer := container
+	seen := make(map[string]bool)
+	for container != nil && !seen[container.Name] {
+		seen[container.Name] = true
+		for _, child := range container.Children {
+			if child.Name != name {
+				continue
+			}
+			command := commandForSymbolSpan(file.Commands, child.SelectionRange)
+			switch child.Kind {
+			case analysis.SymbolKindMethod, analysis.SymbolKindConstructor:
+				if command == nil || classReceiver && child.Kind != analysis.SymbolKindConstructor && !hasCommandModifier(command, "static") || !classReceiver && (child.Kind == analysis.SymbolKindConstructor || hasCommandModifier(command, "static")) {
+					return nil, nil, false
+				}
+			case analysis.SymbolKindVariable, analysis.SymbolKindConstant:
+				if command == nil || classReceiver != hasCommandModifier(command, "static") {
+					return nil, nil, false
+				}
+			case analysis.SymbolKindEnumMember:
+				if !classReceiver {
+					return nil, nil, false
+				}
+			default:
+				continue
+			}
+			return child, command, true
+		}
+		if name == "new" {
+			break
+		}
+		aggregate := commandForAggregateSpan(file.Commands, container.SelectionRange)
+		if aggregate == nil || aggregate.Aggregate == nil || len(aggregate.Aggregate.Extends) == 0 {
+			break
+		}
+		container = completionContainer(symbols, file.Text(aggregate.Aggregate.Extends[0]))
+	}
+	if classReceiver && name == "new" && receiverContainer.Kind == analysis.SymbolKindClass {
+		aggregate := commandForAggregateSpan(file.Commands, receiverContainer.SelectionRange)
+		hasConstructor := false
+		for _, child := range receiverContainer.Children {
+			if child.Kind == analysis.SymbolKindConstructor && (child.Name == "new" || child.Name == "_new") {
+				hasConstructor = true
+				break
+			}
+		}
+		if aggregate != nil && !hasConstructor && !hasCommandModifier(aggregate, "abstract") {
+			return receiverContainer, nil, true
+		}
+	}
+	return nil, nil, false
+}
+
+func symbolForWorkspaceTarget(symbols []*analysis.Symbol, fact workspace.SymbolFact) *analysis.Symbol {
+	for _, symbol := range symbols {
+		if symbol != nil && symbol.SelectionRange == fact.SelectionRange && symbol.Name == fact.Name && symbol.Kind == fact.Kind {
+			return symbol
+		}
+		if symbol != nil {
+			if found := symbolForWorkspaceTarget(symbol.Children, fact); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
+func enclosingAggregateContainer(symbols []*analysis.Symbol, span syntax.Span) *analysis.Symbol {
+	var result *analysis.Symbol
+	var visit func([]*analysis.Symbol)
+	visit = func(candidates []*analysis.Symbol) {
+		for _, candidate := range candidates {
+			if candidate == nil || candidate.Range.Start > span.Start || span.End > candidate.Range.End {
+				continue
+			}
+			if candidate.Kind == analysis.SymbolKindClass || candidate.Kind == analysis.SymbolKindInterface || candidate.Kind == analysis.SymbolKindEnum {
+				if result == nil || candidate.Range.End-candidate.Range.Start < result.Range.End-result.Range.Start {
+					result = candidate
+				}
+			}
+			visit(candidate.Children)
+		}
+	}
+	visit(symbols)
+	return result
+}
+
+func commandForSymbolSpan(commands []syntax.Command, span syntax.Span) *syntax.Command {
+	var result *syntax.Command
+	walkCommands(commands, func(command *syntax.Command) {
+		if result != nil {
+			return
+		}
+		if command.Function != nil && command.Function.Name == span {
+			result = command
+			return
+		}
+		if command.Declaration != nil {
+			for _, binding := range command.Declaration.Bindings {
+				if binding.Name == span {
+					result = command
+					return
+				}
+			}
+		}
+	})
+	return result
+}
+
+func commandForAggregateSpan(commands []syntax.Command, span syntax.Span) *syntax.Command {
+	var result *syntax.Command
+	walkCommands(commands, func(command *syntax.Command) {
+		if result == nil && command.Aggregate != nil && command.Aggregate.Name == span {
+			result = command
+		}
+	})
+	return result
+}
+
+func hasCommandModifier(command *syntax.Command, name string) bool {
+	if command == nil {
+		return false
+	}
+	for _, modifier := range command.Modifiers {
+		if modifier.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func formatFunctionSignature(file *syntax.File, name string, function *syntax.Function) (string, []protocol.ParameterInformation) {
 	parts := make([]string, 0, len(function.Parameters))
 	parameters := make([]protocol.ParameterInformation, 0, len(function.Parameters))
@@ -514,6 +1157,111 @@ func formatFunctionSignature(file *syntax.File, name string, function *syntax.Fu
 	label := name + "(" + strings.Join(parts, ", ") + ")"
 	if function.ReturnType != nil {
 		label += ": " + file.Text(function.ReturnTypeSpan)
+	}
+	return label, parameters
+}
+
+func formatFunctionValueSignature(name string, typ analysis.ValueType) (string, []protocol.ParameterInformation) {
+	parts := make([]string, 0, len(typ.Arguments))
+	parameters := make([]protocol.ParameterInformation, 0, len(typ.Arguments))
+	for index, argument := range typ.Arguments {
+		part := formatValueType(argument)
+		if typ.Variadic && index == len(typ.Arguments)-1 {
+			part = "..." + part
+		} else if index >= typ.RequiredArguments {
+			part = "?" + part
+		}
+		parts = append(parts, part)
+		parameters = append(parameters, protocol.ParameterInformation{Label: protocol.String(part)})
+	}
+	label := name + "(" + strings.Join(parts, ", ") + ")"
+	if typ.Return != nil {
+		label += ": " + formatValueType(*typ.Return)
+	}
+	return label, parameters
+}
+
+func formatBuiltinFunctionSignature(function vimdata.BuiltinFunction) (string, []protocol.ParameterInformation) {
+	label := ""
+	for _, line := range strings.Split(function.Documentation, "\n") {
+		if strings.HasPrefix(line, function.Name+"(") && strings.HasSuffix(line, ")") {
+			label = line
+			continue
+		}
+		if label != "" {
+			break
+		}
+	}
+	if label == "" {
+		count := function.MaxArgs
+		if count < 0 {
+			count = len(function.ArgumentChecks)
+		}
+		if count < function.MinArgs {
+			count = function.MinArgs
+		}
+		parts := make([]string, 0, count+1)
+		for index := 0; index < count; index++ {
+			part := fmt.Sprintf("{arg%d}", index+1)
+			if index >= function.MinArgs {
+				part = "[" + part + "]"
+			}
+			parts = append(parts, part)
+		}
+		label = function.Name + "(" + strings.Join(parts, ", ") + ")"
+	}
+	if function.MaxArgs < 0 && !strings.Contains(label, "...") {
+		label = strings.TrimSuffix(label, ")") + ", ...)"
+	}
+	parameters := make([]protocol.ParameterInformation, 0, len(function.ArgumentChecks)+1)
+	for start := 0; start < len(label); {
+		open := strings.IndexByte(label[start:], '{')
+		if open < 0 {
+			break
+		}
+		open += start
+		close := strings.IndexByte(label[open+1:], '}')
+		if close < 0 {
+			break
+		}
+		close += open + 1
+		parameters = append(parameters, protocol.ParameterInformation{Label: protocol.String(label[open : close+1])})
+		start = close + 1
+	}
+	if strings.Contains(label, "...") {
+		parameters = append(parameters, protocol.ParameterInformation{Label: protocol.String("...")})
+	}
+	if returnType := function.ReturnType.DisplayName(); returnType != "" {
+		label += ": " + returnType
+	}
+	return label, parameters
+}
+
+func formatBuiltinMethodSignature(function vimdata.BuiltinFunction) (string, []protocol.ParameterInformation) {
+	_, parameters := formatBuiltinFunctionSignature(function)
+	receiver := function.MethodArgument - 1
+	if receiver < 0 || receiver >= len(parameters) {
+		return "", nil
+	}
+	parameters = append(parameters[:receiver:receiver], parameters[receiver+1:]...)
+	required := function.MinArgs - 1
+	if beforeReceiver := function.MethodArgument - 1; required < beforeReceiver {
+		required = beforeReceiver
+	}
+	parts := make([]string, 0, len(parameters))
+	for index, parameter := range parameters {
+		part, ok := parameter.Label.(protocol.String)
+		if !ok {
+			continue
+		}
+		if index >= required && part != "..." {
+			part = "[" + part + "]"
+		}
+		parts = append(parts, string(part))
+	}
+	label := function.Name + "(" + strings.Join(parts, ", ") + ")"
+	if returnType := function.ReturnType.DisplayName(); returnType != "" {
+		label += ": " + returnType
 	}
 	return label, parameters
 }

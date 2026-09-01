@@ -55,6 +55,29 @@ endfunction
 	}
 }
 
+func TestAnalyzeLegacyScriptLocalFunctionPrefixesShareBinding(t *testing.T) {
+	result := Analyze(syntax.Parse("function! s:Run()\nendfunction\ncall s:Run()\ncall <SID>Run()\n"))
+	var declaration *Declaration
+	for _, candidate := range result.Declarations {
+		if candidate.Name == "s:Run" {
+			declaration = candidate
+			break
+		}
+	}
+	if declaration == nil {
+		t.Fatal("script-local declaration is missing")
+	}
+	bound := 0
+	for _, reference := range result.References {
+		if reference.Declaration == declaration {
+			bound++
+		}
+	}
+	if bound != 2 {
+		t.Fatalf("script-local references = %#v", result.References)
+	}
+}
+
 func TestAnalyzeVariableUseBeforeDeclarationStaysUnresolved(t *testing.T) {
 	source := "echo value\nvar value = value\necho value\n"
 	result := Analyze(syntax.Parse("vim9script\n" + source))

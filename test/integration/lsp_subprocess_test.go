@@ -33,11 +33,11 @@ func TestLSPSubprocess(t *testing.T) {
 		t.Fatal(err)
 	}
 	workspaceLib := filepath.Join(workspaceRoot, "lib.vim")
-	if err := os.WriteFile(workspaceLib, []byte("vim9script\nexport def Run(): number\n  return 1\nenddef\n"), 0o600); err != nil {
+	if err := os.WriteFile(workspaceLib, []byte("vim9script\nexport def Run(): number\n  return 1\nenddef\nexport class Box\n  def new(value: number)\n  enddef\n  def Resize(width: number, height: number = 1): number\n    return width * height\n  enddef\n  static def Build(name: string): Box\n    return Box.new(1)\n  enddef\nendclass\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	workspaceMain := filepath.Join(workspaceRoot, "main.vim")
-	workspaceMainSource := "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n"
+	workspaceMainSource := "vim9script\nimport './lib.vim' as lib\necho lib.Run()\necho lib.Box.new(1)\necho lib.Box.Build('x')\nvar box: lib.Box = lib.Box.new(1)\necho box.Resize(2, 3)\n"
 	if err := os.WriteFile(workspaceMain, []byte(workspaceMainSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestLSPSubprocess(t *testing.T) {
 
 	writer := jsonrpc.NewWriter(stdin)
 	reader := jsonrpc.NewReader(stdout)
-	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232","runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"hover":{"contentFormat":["markdown"]},"signatureHelp":{"signatureInformation":{"documentationFormat":["plaintext"]}},"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"targetVersion":"9.1.1232","runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
 	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":["."]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
@@ -110,7 +110,7 @@ func TestLSPSubprocess(t *testing.T) {
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":7,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
 	hover := readJSON(t, reader)
-	if string(hover["id"]) != "7" || !strings.Contains(string(hover["result"]), `name: value`) || !strings.Contains(string(hover["result"]), `type: number`) {
+	if string(hover["id"]) != "7" || !strings.Contains(string(hover["result"]), `"kind":"markdown"`) || !strings.Contains(string(hover["result"]), `name: value`) || !strings.Contains(string(hover["result"]), `type: number`) {
 		t.Fatalf("hover = %s", hover)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":8,"method":"textDocument/foldingRange","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
@@ -139,6 +139,11 @@ func TestLSPSubprocess(t *testing.T) {
 	if string(commandCompletion["id"]) != "910" || !strings.Contains(string(commandCompletion["result"]), `"label":"echo"`) {
 		t.Fatalf("command completion = %s", commandCompletion)
 	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":912,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///completion-command.vim"},"position":{"line":0,"character":1}}}`)
+	commandHover := readJSON(t, reader)
+	if string(commandHover["id"]) != "912" || !strings.Contains(string(commandHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(commandHover["result"]), `name: echo`) || !strings.Contains(string(commandHover["result"]), `Echoes each {expr1}`) {
+		t.Fatalf("command hover = %s", commandHover)
+	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-utf16.vim","languageId":"vim","version":1,"text":"vim9script\necho \"💩\" | echo strlen('')"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":911,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///completion-utf16.vim"},"position":{"line":1,"character":21}}}`)
 	utf16Completion := readJSON(t, reader)
@@ -149,6 +154,38 @@ func TestLSPSubprocess(t *testing.T) {
 	signature := readJSON(t, reader)
 	if string(signature["id"]) != "92" || !strings.Contains(string(signature["result"]), `Add(left: number, right: number)`) || !strings.Contains(string(signature["result"]), `"activeParameter":1`) {
 		t.Fatalf("signature help = %s", signature)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///builtin-signature.vim","languageId":"vim","version":1,"text":"vim9script\necho get([], 'x', 0)\necho []->get(0, 1)\nvar Callback: func(number, ?string): bool\necho Callback(1, 'x')\necho &number v:version\n"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":920,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":1,"character":19}}}`)
+	builtinSignature := readJSON(t, reader)
+	if string(builtinSignature["id"]) != "920" || !strings.Contains(string(builtinSignature["result"]), `get({list}, {idx} [, {default}]): any`) || !strings.Contains(string(builtinSignature["result"]), `"documentation":{"kind":"plaintext"`) || !strings.Contains(string(builtinSignature["result"]), `"activeParameter":2`) {
+		t.Fatalf("builtin signature help = %s", builtinSignature)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":921,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":2,"character":18}}}`)
+	builtinMethodSignature := readJSON(t, reader)
+	if string(builtinMethodSignature["id"]) != "921" || !strings.Contains(string(builtinMethodSignature["result"]), `get({idx}, [{default}]): any`) || !strings.Contains(string(builtinMethodSignature["result"]), `"activeParameter":1`) {
+		t.Fatalf("builtin method signature help = %s", builtinMethodSignature)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":922,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":4,"character":20}}}`)
+	functionValueSignature := readJSON(t, reader)
+	if string(functionValueSignature["id"]) != "922" || !strings.Contains(string(functionValueSignature["result"]), `Callback(number, ?string): bool`) || !strings.Contains(string(functionValueSignature["result"]), `"activeParameter":1`) {
+		t.Fatalf("function value signature help = %s", functionValueSignature)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":925,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":5,"character":7}}}`)
+	optionHover := readJSON(t, reader)
+	if string(optionHover["id"]) != "925" || !strings.Contains(string(optionHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(optionHover["result"]), `name: number`) || !strings.Contains(string(optionHover["result"]), `Print the line number`) {
+		t.Fatalf("option hover = %s", optionHover)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///class-signature.vim","languageId":"vim","version":1,"text":"vim9script\nclass Box\n  def new(value: number)\n  enddef\n  def Resize(width: number, height: number = 1): number\n    return width * height\n  enddef\nendclass\nvar box = Box.new(1)\necho box.Resize(2, 3)\n"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":923,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///class-signature.vim"},"position":{"line":8,"character":19}}}`)
+	constructorSignature := readJSON(t, reader)
+	if string(constructorSignature["id"]) != "923" || !strings.Contains(string(constructorSignature["result"]), `new(value: number)`) {
+		t.Fatalf("constructor signature help = %s", constructorSignature)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":924,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///class-signature.vim"},"position":{"line":9,"character":20}}}`)
+	classMethodSignature := readJSON(t, reader)
+	if string(classMethodSignature["id"]) != "924" || !strings.Contains(string(classMethodSignature["result"]), `Resize(width: number, height: number = 1): number`) || !strings.Contains(string(classMethodSignature["result"]), `"activeParameter":1`) {
+		t.Fatalf("class method signature help = %s", classMethodSignature)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":93,"method":"textDocument/prepareRename","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
 	prepareRename := readJSON(t, reader)
@@ -208,6 +245,26 @@ func TestLSPSubprocess(t *testing.T) {
 	memberCompletion := readJSON(t, reader)
 	if string(memberCompletion["id"]) != "100003" || !strings.Contains(string(memberCompletion["result"]), `"label":"Run"`) {
 		t.Fatalf("member completion = %s", memberCompletion)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100006,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":13}}}`, uri.File(workspaceMain)))
+	importedSignature := readJSON(t, reader)
+	if string(importedSignature["id"]) != "100006" || !strings.Contains(string(importedSignature["result"]), `Run(): number`) {
+		t.Fatalf("imported signature help = %s", importedSignature)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100007,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":3,"character":18}}}`, uri.File(workspaceMain)))
+	importedConstructorSignature := readJSON(t, reader)
+	if string(importedConstructorSignature["id"]) != "100007" || !strings.Contains(string(importedConstructorSignature["result"]), `new(value: number)`) {
+		t.Fatalf("imported constructor signature help = %s", importedConstructorSignature)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100008,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":4,"character":22}}}`, uri.File(workspaceMain)))
+	importedClassMethodSignature := readJSON(t, reader)
+	if string(importedClassMethodSignature["id"]) != "100008" || !strings.Contains(string(importedClassMethodSignature["result"]), `Build(name: string): Box`) {
+		t.Fatalf("imported class method signature help = %s", importedClassMethodSignature)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100009,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":6,"character":20}}}`, uri.File(workspaceMain)))
+	importedObjectMethodSignature := readJSON(t, reader)
+	if string(importedObjectMethodSignature["id"]) != "100009" || !strings.Contains(string(importedObjectMethodSignature["result"]), `Resize(width: number, height: number = 1): number`) || !strings.Contains(string(importedObjectMethodSignature["result"]), `"activeParameter":1`) {
+		t.Fatalf("imported object method signature help = %s", importedObjectMethodSignature)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///missing-end.vim","languageId":"vim","version":1,"text":"vim9script\nif true\n  echo 'x'\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100004,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"file:///missing-end.vim"},"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"context":{"diagnostics":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"code":"vimls/missing-end","message":"block is missing its end command"}],"only":["quickfix"]}}}`)

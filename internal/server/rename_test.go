@@ -112,11 +112,96 @@ func TestRenameRejectsUnknownDynamicAndInvalidNames(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRenameRejectsIncompleteIndex(t *testing.T) {
+	instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
+	instance.workspaceIndex.SetComplete(false)
+
+	prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: position})
+	if err != nil || prepared != nil {
+		t.Fatalf("prepare with incomplete index = %#v, %v", prepared, err)
+	}
+	edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Execute"})
+	if err == nil || edit != nil {
+		t.Fatalf("rename with incomplete index = %#v, %v", edit, err)
+	}
+}
+
 func TestRenameRejectsNamespaceChanges(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "let s:value = 1\necho s:value\n")
 	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 8}}
 	if _, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: "g:value"}); err == nil {
 		t.Fatal("namespace-changing rename succeeded")
+	}
+}
+
+func TestRenameLegacyScriptLocalPrefixesPreservesSpelling(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "function! s:Run()\nendfunction\ncall s:Run()\ncall <SID>Run()\n")
+	params := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 3, Character: 9},
+	}
+	edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: "s:Execute"})
+	if err != nil || edit == nil || len(edit.DocumentChanges) != 1 {
+		t.Fatalf("script-local rename = %#v, %v", edit, err)
+	}
+	documentEdit := edit.DocumentChanges[0].(*protocol.TextDocumentEdit)
+	want := []struct {
+		rangeValue protocol.Range
+		newText    string
+	}{
+		{navigationRange(0, 10, 15), "s:Execute"},
+		{navigationRange(2, 5, 10), "s:Execute"},
+		{navigationRange(3, 5, 13), "<SID>Execute"},
+	}
+	if len(documentEdit.Edits) != len(want) {
+		t.Fatalf("script-local edits = %#v", documentEdit.Edits)
+	}
+	for index, expected := range want {
+		textEdit := documentEdit.Edits[index].(*protocol.TextEdit)
+		if textEdit.Range != expected.rangeValue || textEdit.NewText != expected.newText {
+			t.Errorf("edit %d = %#v, want %#v", index, textEdit, expected)
+		}
+	}
+}
+
+func TestRenameProvenVim9MemberAndRejectConstructor(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nclass Base\n  def Resize(width: number)\n  enddef\nendclass\nclass Child extends Base\nendclass\nvar child = Child.new()\necho child.Resize(1)\n")
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	method := protocol.TextDocumentPositionParams{TextDocument: textDocument, Position: protocol.Position{Line: 8, Character: 13}}
+	edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: method, NewName: "Scale"})
+	if err != nil || edit == nil || len(edit.DocumentChanges) != 1 {
+		t.Fatalf("member rename = %#v, %v", edit, err)
+	}
+	edits := edit.DocumentChanges[0].(*protocol.TextDocumentEdit).Edits
+	if len(edits) != 2 || edits[0].(*protocol.TextEdit).Range != navigationRange(2, 6, 12) || edits[1].(*protocol.TextEdit).Range != navigationRange(8, 11, 17) {
+		t.Fatalf("member edits = %#v", edits)
+	}
+	constructor := protocol.TextDocumentPositionParams{TextDocument: textDocument, Position: protocol.Position{Line: 7, Character: 20}}
+	if prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: constructor}); err != nil || prepared != nil {
+		t.Fatalf("constructor prepare rename = %#v, %v", prepared, err)
+	}
+	if _, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: constructor, NewName: "Create"}); err == nil {
+		t.Fatal("constructor rename succeeded")
+	}
+}
+
+func TestRenameProvenInterfaceImplementationMember(t *testing.T) {
+	source := "vim9script\ninterface Face\n  def Run(value: number): number\nendinterface\nclass Impl implements Face\n  def Run(value: number): number\n    return value\n  enddef\nendclass\nvar face: Face = Impl.new()\necho face.Run(1)\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 10, Character: 11}}
+	edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: "Execute"})
+	if err != nil || edit == nil || len(edit.DocumentChanges) != 1 {
+		t.Fatalf("interface member rename = %#v, %v", edit, err)
+	}
+	edits := edit.DocumentChanges[0].(*protocol.TextDocumentEdit).Edits
+	want := []protocol.Range{navigationRange(2, 6, 9), navigationRange(5, 6, 9), navigationRange(10, 10, 13)}
+	if len(edits) != len(want) {
+		t.Fatalf("interface member edits = %#v", edits)
+	}
+	for index := range want {
+		if edits[index].(*protocol.TextEdit).Range != want[index] {
+			t.Errorf("edit %d = %#v, want %#v", index, edits[index], want[index])
+		}
 	}
 }
 
@@ -215,6 +300,44 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 		prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: position})
 		if err != nil || prepared != nil || checks != 1 {
 			t.Fatalf("prepare=%#v checks=%d error=%v", prepared, checks, err)
+		}
+	})
+}
+
+func TestWorkspaceIdentityImportedMemberRename(t *testing.T) {
+	source := "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1)\n"
+
+	t.Run("retries", func(t *testing.T) {
+		instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, source)
+		position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			if checks == 1 {
+				instance.workspaceMu.Lock()
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			}
+		}
+		edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Scale"})
+		if err != nil || edit == nil || checks != 3 || len(edit.DocumentChanges) != 2 {
+			t.Fatalf("edit=%#v checks=%d error=%v", edit, checks, err)
+		}
+	})
+
+	t.Run("rejects second stale result", func(t *testing.T) {
+		instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, source)
+		position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
+		checks := 0
+		instance.beforeWorkspaceIdentityCheck = func() {
+			checks++
+			instance.workspaceMu.Lock()
+			instance.workspaceRevision++
+			instance.workspaceMu.Unlock()
+		}
+		edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Scale"})
+		if !errors.Is(err, protocol.ErrContentModified) || edit != nil || checks != 2 {
+			t.Fatalf("edit=%#v checks=%d error=%v", edit, checks, err)
 		}
 	})
 }

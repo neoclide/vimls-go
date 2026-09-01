@@ -10578,7 +10578,7 @@ func resolve(scope *Scope, name string, offset int, preferFunction bool, hidden 
 		var latest *Declaration
 		var forwardFunction *Declaration
 		for _, declaration := range current.Declarations {
-			if declaration.Name != name || hidden[declaration.Span] {
+			if !resolvedNameEqual(declaration.Name, name) || hidden[declaration.Span] {
 				continue
 			}
 			if preferFunction && declaration.Kind == SymbolKindFunction || preferFunction && declaration.Kind == SymbolKindMethod || preferFunction && declaration.Kind == SymbolKindConstructor {
@@ -10599,6 +10599,25 @@ func resolve(scope *Scope, name string, offset int, preferFunction bool, hidden 
 		}
 	}
 	return nil
+}
+
+func resolvedNameEqual(left, right string) bool {
+	if left == right {
+		return true
+	}
+	leftScript, leftOK := scriptLocalName(left)
+	rightScript, rightOK := scriptLocalName(right)
+	return leftOK && rightOK && leftScript == rightScript
+}
+
+func scriptLocalName(name string) (string, bool) {
+	if strings.HasPrefix(name, "s:") && len(name) > 2 {
+		return name[2:], true
+	}
+	if len(name) > len("<SID>") && strings.EqualFold(name[:len("<SID>")], "<SID>") {
+		return name[len("<SID>"):], true
+	}
+	return "", false
 }
 
 func validNameSpan(file *syntax.File, span syntax.Span) bool {

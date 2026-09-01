@@ -150,9 +150,12 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			s.mu.Lock()
 			canSnippet := s.completion.snippet && completionCompleteFunctionCalls
 			s.mu.Unlock()
-			if selection.start > 1 && snapshot.Text()[selection.start-2:selection.start] == "v:" {
+			scopePrefix := completionScopePrefixAt(snapshot.Text(), selection.start)
+			if scopePrefix != "" {
 				selection.start -= 2
 				selection.prefix = snapshot.Text()[selection.start:selection.cursor]
+			}
+			if scopePrefix == "v:" {
 				for _, variable := range vimdata.Variables() {
 					if !add(protocol.CompletionItem{Label: variable.Name, Kind: protocol.CompletionItemKindConstant, Detail: protocol.NewOptional("variable: " + variable.Type)}, 8000, completionSourceBuiltin) {
 						break
@@ -169,11 +172,15 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			for _, visible := range visibleCompletionDeclarations(analysisResult, offset) {
 				declaration := visible.declaration
-				item := protocol.CompletionItem{Label: declaration.Name, Kind: completionSymbolKind(declaration.Kind)}
-				if snippet, ok := completionUserFunctionSnippet(file, declaration.Name, canSnippet); ok {
+				label := completionDeclarationLabel(declaration, analysisResult.Root, file.Dialect, scopePrefix)
+				if label == "" {
+					continue
+				}
+				item := protocol.CompletionItem{Label: label, Kind: completionSymbolKind(declaration.Kind)}
+				if snippet, ok := completionUserFunctionSnippet(file, label, canSnippet); ok {
 					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
-					item.FilterText = protocol.NewOptional(declaration.Name)
+					item.FilterText = protocol.NewOptional(label)
 				}
 				if declaration.Deprecated {
 					item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
@@ -386,6 +393,32 @@ func isCompletionIdentifierRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
+func completionScopePrefixAt(source string, start int) string {
+	if start < 2 || source[start-1] != ':' || !strings.ContainsRune("sglabwtv", rune(source[start-2])) {
+		return ""
+	}
+	return source[start-2 : start]
+}
+
+func completionDeclarationLabel(declaration *analysis.Declaration, root *analysis.Scope, dialect syntax.Dialect, scopePrefix string) string {
+	if declaration == nil || scopePrefix == "" || strings.HasPrefix(declaration.Name, scopePrefix) {
+		if declaration == nil {
+			return ""
+		}
+		return declaration.Name
+	}
+	if dialect != syntax.Legacy || strings.Contains(declaration.Name, ":") {
+		return ""
+	}
+	if scopePrefix == "a:" && declaration.Parameter {
+		return scopePrefix + declaration.Name
+	}
+	if scopePrefix == "l:" && !declaration.Parameter && declaration.Scope != root && (declaration.Kind == analysis.SymbolKindVariable || declaration.Kind == analysis.SymbolKindConstant) {
+		return scopePrefix + declaration.Name
+	}
+	return ""
+}
+
 // completionFunctionSnippet is deliberately pure so the default-off policy can
 // be tested without adding a user-facing setting before it is enabled.
 func completionFunctionSnippet(name string, parameters []string, enabled bool) (string, bool) {
@@ -473,15 +506,6 @@ func visibleCompletionDeclarations(result *analysis.FileAnalysis, offset int) []
 }
 
 func completionOptionDetail(option vimdata.Option) string {
-	var optionType string
-	switch option.Type {
-	case vimdata.OptionBool:
-		optionType = "bool"
-	case vimdata.OptionNumber:
-		optionType = "number"
-	case vimdata.OptionString:
-		optionType = "string"
-	}
 	var scope string
 	switch option.Scope {
 	case vimdata.OptionGlobal:
@@ -493,7 +517,20 @@ func completionOptionDetail(option vimdata.Option) string {
 	case vimdata.OptionGlobalLocal:
 		scope = "global-local"
 	}
-	return "option: " + optionType + ", " + scope
+	return "option: " + optionTypeName(option) + ", " + scope
+}
+
+func optionTypeName(option vimdata.Option) string {
+	switch option.Type {
+	case vimdata.OptionBool:
+		return "bool"
+	case vimdata.OptionNumber:
+		return "number"
+	case vimdata.OptionString:
+		return "string"
+	default:
+		return analysis.ValueTypeAny
+	}
 }
 
 func completionImportPathSelection(source string, offset int) completionSelection {
