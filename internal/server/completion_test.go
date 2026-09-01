@@ -27,6 +27,68 @@ func TestCompletionFunctionSnippetEscapesAndDefaultIsPlain(t *testing.T) {
 	if got, snippet = completionUserFunctionSnippet(file, "Call", true); !snippet || got != "Call(${1:first}, ${2:second})$0" {
 		t.Fatalf("user function snippet = %q, %t", got, snippet)
 	}
+	if got, snippet = completionFunctionSnippet("Done", nil, true); !snippet || got != "Done()$0" {
+		t.Fatalf("zero-argument snippet = %q, %t", got, snippet)
+	}
+	legacy := syntax.Parse("function! Legacy(argument)\nendfunction\n")
+	if got, snippet = completionUserFunctionSnippet(legacy, "Legacy", true); !snippet || got != "Legacy(${1:argument})$0" {
+		t.Fatalf("legacy function snippet = %q, %t", got, snippet)
+	}
+}
+
+func TestCompletionSnippetsRequireClientSupportAndMatchDialect(t *testing.T) {
+	tests := []struct {
+		name, source, label, want string
+		line, character           uint32
+	}{
+		{name: "legacy block", source: "fun\n", label: "function", want: "function! ${1:Name}()\n\t$0\nendfunction", character: 3},
+		{name: "Vim9 block", source: "vim9script\nde\n", label: "def", want: "def ${1:Name}()\n\t$0\nenddef", line: 1, character: 2},
+		{name: "user function", source: "vim9script\ndef Call(value: number)\nenddef\necho Cal\n", label: "Call", want: "Call(${1:value})$0", line: 3, character: 8},
+		{name: "builtin function", source: "vim9script\necho strl\n", label: "strlen", want: `strlen(${1:{string\}})$0`, line: 1, character: 9},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, snippets := range []bool{false, true} {
+				instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+				instance.completion.snippet = snippets
+				result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character},
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				item := completionItemWithLabel(completionItems(t, result), test.label)
+				if item == nil {
+					t.Fatalf("completion %q missing", test.label)
+				}
+				edit, ok := item.TextEdit.(*protocol.TextEdit)
+				if !ok {
+					t.Fatalf("completion edit = %#v", item.TextEdit)
+				}
+				want := test.label
+				if snippets {
+					want = test.want
+					if item.InsertTextFormat != protocol.InsertTextFormatSnippet {
+						t.Fatalf("snippet format = %v", item.InsertTextFormat)
+					}
+				} else if item.InsertTextFormat == protocol.InsertTextFormatSnippet {
+					t.Fatal("snippet returned without client support")
+				}
+				if edit.NewText != want {
+					t.Fatalf("snippet support %t edit = %q, want %q", snippets, edit.NewText, want)
+				}
+			}
+		})
+	}
+}
+
+func completionItemWithLabel(items protocol.CompletionItemSlice, label string) *protocol.CompletionItem {
+	for index := range items {
+		if items[index].Label == label {
+			return &items[index]
+		}
+	}
+	return nil
 }
 
 func TestCompletionDeterministicAndBudgetIsIncomplete(t *testing.T) {

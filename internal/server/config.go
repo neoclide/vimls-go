@@ -26,7 +26,6 @@ var ErrInvalidTargetVersion = errors.New("invalid Vim target version")
 const defaultUnresolvedSeverity = syntax.DiagnosticWarning
 
 const completionBudget = 100 * time.Millisecond
-const completionCompleteFunctionCalls = false
 
 type completionCapabilities struct {
 	snippet       bool

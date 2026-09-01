@@ -169,9 +169,10 @@ regular expressions.
   and `&` select proven member, command/scoped-name, and option contexts. `#`,
   `[`, `$`, `<`, `"` and `'` remain unadvertised until a bounded provider has
   a useful result immediately after that character.
-- [ ] Enable function-call and block snippets only when the client supports
-  snippets. Provide separate legacy (`function`/`endfunction`) and Vim9
-  (`def`/`enddef`) forms and never insert a dialect-invalid template.
+- [x] Enable direct builtin and same-file function-call snippets only when the
+  client supports snippets. Legacy `function`/`endfunction` and Vim9
+  `def`/`enddef` block templates are dialect-specific; plain-text clients keep
+  ordinary completion edits.
 - [ ] Add target-version filtering, documentation and deterministic truncation
   tests for every new source.
 

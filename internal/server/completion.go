@@ -126,6 +126,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			return &protocol.CompletionList{Items: []protocol.CompletionItem{}}, s.structureCurrent(ctx, snapshot)
 		}
 		analysisResult := analysis.Analyze(file)
+		s.mu.Lock()
+		canSnippet := s.completion.snippet
+		s.mu.Unlock()
 		started := s.completionNow()
 		budgetExpired := false
 		workspaceIncomplete := false
@@ -147,9 +150,6 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			return true
 		}
 		if contextKind == completionContextExpression {
-			s.mu.Lock()
-			canSnippet := s.completion.snippet && completionCompleteFunctionCalls
-			s.mu.Unlock()
 			scopePrefix := completionScopePrefixAt(snapshot.Text(), selection.start)
 			if scopePrefix != "" {
 				selection.start -= 2
@@ -204,7 +204,13 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if !strings.HasPrefix(function.Name, selection.prefix) {
 					continue
 				}
-				if !add(protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}, 8000, completionSourceBuiltin) {
+				item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}
+				if snippet, ok := completionBuiltinFunctionSnippet(function, canSnippet); ok {
+					item.InsertText = protocol.NewOptional(snippet)
+					item.InsertTextFormat = protocol.InsertTextFormatSnippet
+					item.FilterText = protocol.NewOptional(function.Name)
+				}
+				if !add(item, 8000, completionSourceBuiltin) {
 					break
 				}
 			}
@@ -276,7 +282,15 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if !strings.HasPrefix(command.Name, selection.prefix) {
 					continue
 				}
-				if !add(protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command")}, 8000, completionSourceCommand) {
+				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command")}
+				if canSnippet && file.Dialect == syntax.Legacy && command.Name == "function" {
+					item.InsertText = protocol.NewOptional("function! ${1:Name}()\n\t$0\nendfunction")
+					item.InsertTextFormat = protocol.InsertTextFormatSnippet
+				} else if canSnippet && file.Dialect == syntax.Vim9 && command.Name == "def" {
+					item.InsertText = protocol.NewOptional("def ${1:Name}()\n\t$0\nenddef")
+					item.InsertTextFormat = protocol.InsertTextFormatSnippet
+				}
+				if !add(item, 8000, completionSourceCommand) {
 					break
 				}
 			}
@@ -419,10 +433,8 @@ func completionDeclarationLabel(declaration *analysis.Declaration, root *analysi
 	return ""
 }
 
-// completionFunctionSnippet is deliberately pure so the default-off policy can
-// be tested without adding a user-facing setting before it is enabled.
 func completionFunctionSnippet(name string, parameters []string, enabled bool) (string, bool) {
-	if !enabled || len(parameters) == 0 {
+	if !enabled {
 		return name, false
 	}
 	var builder strings.Builder
@@ -446,17 +458,38 @@ func completionUserFunctionSnippet(file *syntax.File, name string, enabled bool)
 	var parameters []string
 	found := false
 	walkCommands(file.Commands, func(command *syntax.Command) {
-		if found || command.Dialect != syntax.Vim9 || command.Function == nil || file.Text(command.Function.Name) != name {
+		if found || command.Function == nil || file.Text(command.Function.Name) != name {
 			return
 		}
 		found = true
 		for _, parameter := range command.Function.Parameters {
 			if parameter.Name.Start < parameter.Name.End {
-				parameters = append(parameters, file.Text(parameter.Name))
+				label := file.Text(parameter.Name)
+				if parameter.Variadic && !strings.HasPrefix(label, "...") {
+					label = "..." + label
+				}
+				parameters = append(parameters, label)
 			}
 		}
 	})
 	return completionFunctionSnippet(name, parameters, found)
+}
+
+func completionBuiltinFunctionSnippet(function vimdata.BuiltinFunction, enabled bool) (string, bool) {
+	_, parameters := formatBuiltinFunctionSignature(function)
+	labels := make([]string, 0, function.MinArgs)
+	for _, parameter := range parameters {
+		if len(labels) == function.MinArgs {
+			break
+		}
+		if label, ok := parameter.Label.(protocol.String); ok {
+			labels = append(labels, string(label))
+		}
+	}
+	for len(labels) < function.MinArgs {
+		labels = append(labels, fmt.Sprintf("arg%d", len(labels)+1))
+	}
+	return completionFunctionSnippet(function.Name, labels, enabled)
 }
 
 func completionCandidates(items protocol.CompletionItemSlice, score int, source completionSource) map[string]completionCandidate {
