@@ -27,6 +27,38 @@ func TestCompatibilityDiagnosticsUseOfficialFeatureBoundaries(t *testing.T) {
 	}
 }
 
+func TestCompatibilityDiagnosticsUseOfficialCommandBoundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		required Version
+	}{
+		{name: "pbuffer", source: "pbuffer 1\n", required: Version{Major: 9, Minor: 1, Patch: 934}},
+		{name: "redrawtabpanel", source: "redrawtabpanel\n", required: Version{Major: 9, Minor: 1, Patch: 1391}},
+		{name: "uniq", source: "uniq\n", required: Version{Major: 9, Minor: 1, Patch: 1477}},
+		{name: "clipreset", source: "clipreset\n", required: Version{Major: 9, Minor: 1, Patch: 1485}},
+		{name: "wlrestore", source: "wlrestore\n", required: Version{Major: 9, Minor: 1, Patch: 1485}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := (LegacyParser{}).Parse(test.source)
+			if len(file.Diagnostics) != 0 || len(file.Commands) != 1 || file.Commands[0].Canonical != test.name {
+				t.Fatalf("file = %#v", file)
+			}
+
+			before := test.required
+			before.Patch--
+			diagnostics := CompatibilityDiagnostics(file, before)
+			if len(diagnostics) != 1 || diagnostics[0].Code != "vimls/target-version" || file.Text(diagnostics[0].Span) != test.name {
+				t.Fatalf("before boundary diagnostics = %#v", diagnostics)
+			}
+			if diagnostics = CompatibilityDiagnostics(file, test.required); len(diagnostics) != 0 {
+				t.Fatalf("at boundary diagnostics = %#v", diagnostics)
+			}
+		})
+	}
+}
+
 func TestCompatibilityDiagnosticsReachLambdaBodies(t *testing.T) {
 	file := Parse("vim9script\nvar Fn = () => {\n  var value: tuple<number> = (1,)\n  return value\n}\n")
 	diagnostics := CompatibilityDiagnostics(file, Version{Major: 9, Minor: 1})
