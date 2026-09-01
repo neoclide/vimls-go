@@ -90,25 +90,14 @@ Deliver:
 - Conservative legacy inference and version-target diagnostics.
 - Stable diagnostic codes, ranges, severities, related information, and limits.
 
-Current implementation has same-file scopes, declarations, references,
-shadowing, conservative type facts, document symbols, target-version
-diagnostics, direct Vim9 `const`/`final` reassignment diagnostics, and arity
-diagnostics for direct statically named Vim built-in calls. It also has
-graph-backed Vim9 import resolution and the statically provable `E1048`,
-`E1049`, `E1053`, and import-alias `E1054` diagnostics. User-function arity,
-full Vim9 type checking, and the remaining mutation forms are still M4 work;
-unresolved or dynamic targets remain unknown.
-
 Exit gate: diagnostics match golden results and safe Vim oracle cases; unknown
 dynamic behavior does not create false undefined/type errors; stale diagnostics
 cannot publish after a newer edit or close.
 
-Current status (2026-08-30): lexical scopes, declarations, references,
-shadowing, mutability metadata, conservative type inference, bounded syntax
-diagnostics, target-version diagnostics, and graph-backed static import
-diagnostics are implemented. M4 remains open for statically provable
-user-function arity diagnostics and broader type diagnostics; unresolved
-dynamic names remain intentionally unknown.
+Current status (2026-09-01): lexical and workspace-backed symbols, mutability,
+user-function arity, Vim9 type checking, imports and the classified Vim
+v9.2.1015 compile-diagnostic inventory are implemented. Unresolved or dynamic
+behavior remains intentionally unknown.
 
 ## M5: navigation and workspace index
 
@@ -116,8 +105,8 @@ Deliver:
 
 - Document/workspace symbols, hover, definition, declaration, references,
   document highlights, folding ranges, and selection ranges.
-- Incremental index for workspace files, imports, autoload names, configured
-  runtimepath roots, and multi-target builtin metadata.
+- Incremental index for workspace files, imports, autoload names and configured
+  runtimepath roots, plus builtin metadata pinned to Vim v9.2.1015.
 
 Exit gate: cross-file legacy autoload and Vim9 import navigation works through a
 subprocess LSP test; duplicate, missing, cyclic, symlinked, and out-of-root files
@@ -136,8 +125,8 @@ instance/revision, and graph revision; stale foreground requests retry once,
 while stale background results are discarded and requeued. Rebuild and
 close/reopen publication also validate current open snapshots. The subprocess
 test covers watcher registration, runtimepath and workspace symbols, plus
-cross-file definition and references. M5 remains open for multi-target builtin
-metadata, which is currently deferred.
+cross-file definition and references. Builtin metadata is pinned to the single
+supported ceiling, Vim v9.2.1015.
 
 ## M6: completion and safe edits
 
@@ -196,8 +185,8 @@ boundaries, and reuse pinned Vim help for builtin functions, Ex commands
 (including abbreviations), options, and predefined variables. The Ex-command
 generator records matching help provenance alongside command facts. The stdio
 subprocess test exercises completion, resolve, hover, and the implemented
-signature-help wire contracts. M6 remains open for broader stable semantic
-classifications.
+signature-help wire contracts.
+
 Legacy local navigation treats `s:` and `<SID>` as one binding while preserving
 each spelling during rename; autoload navigation accepts an optional `g:`
 prefix and keeps rename disabled when the file contract cannot be updated.
