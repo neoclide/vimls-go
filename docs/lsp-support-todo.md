@@ -113,7 +113,7 @@ for dynamic names.
 - [x] Complete class, abstract class, interface and enum semantics: constructors,
   static/object members, access control, inheritance, implementation,
   overriding, generic methods, enum values and `this`/`super` binding.
-- [ ] Complete `def` scopes and closures, default/optional/variadic parameters,
+- [x] Complete `def` scopes and closures, default/optional/variadic parameters,
   return analysis, `defer`, reachable control flow and statically bound calls.
 - [ ] Complete import/export/autoload semantics for aliases, exported members,
   types, classes, cycles, diamonds, open-buffer overlays and reverse-dependent

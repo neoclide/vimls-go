@@ -5304,6 +5304,16 @@ func TestAnalyzeUserFunctionArityDiagnostics(t *testing.T) {
 			},
 		},
 		{
+			name: "Vim9 defer uses the bound signature",
+			source: "vim9script\n" +
+				"def Deferred(value: number)\nenddef\n" +
+				"def Schedule()\n  defer Deferred()\n  defer Deferred(1, 2)\nenddef\n",
+			want: []wantDiagnostic{
+				{code: "vim/E119", message: "Not enough arguments for function: Deferred", text: "Deferred"},
+				{code: "vim/E118", message: "Too many arguments for function: Deferred", text: "Deferred"},
+			},
+		},
+		{
 			name: "Vim9 lambda and method receiver",
 			source: "vim9script\n" +
 				"var Ref = (value) => value\nRef()\nRef(1, 2)\n" +
