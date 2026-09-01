@@ -100,6 +100,10 @@ func (document *navigationDocument) workspaceLocalTarget() (workspaceNavigationT
 		if fact.Exported {
 			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, false, true
 		}
+		if document.analysis.File.Dialect == syntax.Legacy && fact.TopLevel && fact.Dialect == syntax.Legacy && !strings.HasPrefix(fact.Name, "s:") &&
+			(fact.Kind == analysis.SymbolKindFunction || fact.Kind == analysis.SymbolKindVariable || fact.Kind == analysis.SymbolKindConstant) {
+			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, false, true
+		}
 		if strings.Contains(strings.TrimPrefix(fact.Name, "g:"), "#") {
 			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, true, true
 		}

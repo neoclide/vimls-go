@@ -124,6 +124,12 @@ func TestIndexGlobalNameFactsTrackLocationsAndDeletes(t *testing.T) {
 	if len(index.GlobalNameFacts("Gone")) != 0 || len(index.GlobalNameFacts("Removed")) != 0 || len(index.GlobalNameFacts("ScriptOnly")) != 0 {
 		t.Fatalf("deleted or script-local facts leaked: gone=%#v removed=%#v script=%#v", index.GlobalNameFacts("Gone"), index.GlobalNameFacts("Removed"), index.GlobalNameFacts("ScriptOnly"))
 	}
+	if match, ok := index.GlobalFunction("Gone"); ok {
+		t.Fatalf("deleted global function resolved to %#v", match)
+	}
+	if match, ok := index.GlobalVariable("Removed"); ok {
+		t.Fatalf("deleted global variable resolved to %#v", match)
+	}
 	otherPath := filepath.Join(root, "other.vim")
 	if err := index.Replace(otherPath, syntax.Parse("let g:Another = 1\nlet g:Shared = 1\n")); err != nil {
 		t.Fatal(err)

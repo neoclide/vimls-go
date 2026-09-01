@@ -911,9 +911,11 @@ func TestCrossFileLegacyAutoloadDefinitionAndReferences(t *testing.T) {
 
 func TestCrossFileLegacyGlobalFunctionCompletionDefinitionAndHover(t *testing.T) {
 	root := t.TempDir()
-	targetPath := writeWorkspaceFile(t, root, "functions.vim", "\" Run the indexed task.\nfunction GlobalRun(arg, ...)\nendfunction\n")
+	targetSource := "\" Run the indexed task.\nfunction GlobalRun(arg, ...)\nendfunction\n"
+	targetPath := writeWorkspaceFile(t, root, "functions.vim", targetSource)
 	source := "call GlobalR\ncall GlobalRun('x')\n"
 	mainPath := writeWorkspaceFile(t, root, "plugin.vim", source)
+	writeWorkspaceFile(t, root, "other.vim", "call GlobalRun('y')\n")
 	instance := initializeWorkspaceServer(t, root)
 	mainURI := uri.File(mainPath)
 	instance.documents.Open(mainURI.String(), 1, source)
@@ -946,6 +948,29 @@ func TestCrossFileLegacyGlobalFunctionCompletionDefinitionAndHover(t *testing.T)
 	if !ok || !strings.Contains(content.Value, "signature: GlobalRun(arg, ...)") || !strings.Contains(content.Value, "Run the indexed task.") {
 		t.Fatalf("legacy global function hover content = %#v", hover.Contents)
 	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: position, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil || len(references) != 3 {
+		t.Fatalf("legacy global function references = %#v, %v", references, err)
+	}
+	targetURI := uri.File(targetPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 1, Text: targetSource}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.replaceWorkspaceFile(targetURI.String(), syntax.Parse(targetSource))
+	fromDeclaration, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: targetURI}, Position: protocol.Position{Line: 1, Character: 12},
+	}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil || len(fromDeclaration) != 3 {
+		t.Fatalf("references from open global function declaration = %#v, %v", fromDeclaration, err)
+	}
+	duplicatePath := writeWorkspaceFile(t, root, "duplicate.vim", "function GlobalRun()\nendfunction\n")
+	if err := instance.workspaceIndex.Replace(duplicatePath, syntax.Parse("function GlobalRun()\nendfunction\n")); err != nil {
+		t.Fatal(err)
+	}
+	definition, err = instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	if err != nil || len(definition.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("ambiguous global function definition = %#v, %v", definition, err)
+	}
 }
 
 func TestCrossFileLegacyGlobalVariableDefinitionReferencesAndAmbiguity(t *testing.T) {
@@ -972,6 +997,18 @@ func TestCrossFileLegacyGlobalVariableDefinitionReferencesAndAmbiguity(t *testin
 		if references[index].URI != wantURIs[index] {
 			t.Errorf("reference %d = %#v, want URI %s", index, references[index], wantURIs[index])
 		}
+	}
+	targetURI := uri.File(targetPath)
+	targetSource := "let g:WorkspaceValue = 1\n"
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 1, Text: targetSource}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.replaceWorkspaceFile(targetURI.String(), syntax.Parse(targetSource))
+	fromDeclaration, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: targetURI}, Position: protocol.Position{Character: 10},
+	}, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+	if err != nil || len(fromDeclaration) != 3 {
+		t.Fatalf("references from open global declaration = %#v, %v", fromDeclaration, err)
 	}
 	duplicatePath := writeWorkspaceFile(t, root, "duplicate.vim", "let g:WorkspaceValue = 2\n")
 	duplicate := syntax.Parse("let g:WorkspaceValue = 2\n")

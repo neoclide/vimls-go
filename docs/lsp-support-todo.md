@@ -91,7 +91,7 @@ there are no unqualified claims such as "full expressions" or "full Vim9".
   `a:` and `v:` names, including `<SID>`, autoload names, function arguments,
   closures and shadowing. Leave editor-created buffer/window/tab/global state
   unknown when the current file cannot prove it.
-- [ ] Complete statically provable legacy global function/variable and autoload
+- [x] Complete statically provable legacy global function/variable and autoload
   references across workspace/runtimepath files, including duplicate and
   load-order ambiguity behavior.
 - [ ] Add conservative checks for legacy mutability, callable arity and

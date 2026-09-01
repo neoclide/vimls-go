@@ -634,38 +634,15 @@ func (i *Index) Lookup(name string) []SymbolFact {
 // GlobalFunction returns an unambiguous top-level function declaration for
 // name. Script-local functions and autoload short names are not guessed.
 func (i *Index) GlobalFunction(name string) (SymbolMatch, bool) {
-	if name == "" {
-		return SymbolMatch{}, false
-	}
-	names := []string{name}
-	if strings.HasPrefix(name, "g:") {
-		names = append(names, strings.TrimPrefix(name, "g:"))
-	} else {
-		names = append(names, "g:"+name)
-	}
-	i.mu.RLock()
-	var match SymbolMatch
-	found := false
-	for _, candidateName := range names {
-		for _, fact := range i.byName[candidateName] {
-			if !fact.TopLevel || fact.Kind != analysis.SymbolKindFunction || strings.HasPrefix(fact.Name, "s:") || strings.Contains(strings.TrimPrefix(fact.Name, "g:"), "#") || fact.Dialect != syntax.Legacy && !strings.HasPrefix(fact.Name, "g:") {
-				continue
-			}
-			if found && (match.Fact.Path != fact.Path || match.Fact.SelectionRange != fact.SelectionRange) {
-				i.mu.RUnlock()
-				return SymbolMatch{}, false
-			}
-			file := i.files[fact.Path]
-			match = SymbolMatch{Fact: fact, Source: file.source}
-			found = true
-		}
-	}
-	i.mu.RUnlock()
-	return match, found
+	return i.globalSymbol(name, analysis.NameDeclarationFunction)
 }
 
 // GlobalVariable returns one unambiguous top-level legacy global variable.
 func (i *Index) GlobalVariable(name string) (SymbolMatch, bool) {
+	return i.globalSymbol(name, analysis.NameDeclarationVariable)
+}
+
+func (i *Index) globalSymbol(name string, kind analysis.NameDeclarationKind) (SymbolMatch, bool) {
 	name = strings.TrimPrefix(name, "g:")
 	if name == "" {
 		return SymbolMatch{}, false
@@ -674,15 +651,22 @@ func (i *Index) GlobalVariable(name string) (SymbolMatch, bool) {
 	defer i.mu.RUnlock()
 	var match SymbolMatch
 	found := false
-	for _, candidateName := range []string{name, "g:" + name} {
-		for _, fact := range i.byName[candidateName] {
-			if !fact.TopLevel || fact.Dialect != syntax.Legacy || fact.Kind != analysis.SymbolKindVariable && fact.Kind != analysis.SymbolKindConstant {
+	for _, global := range i.byGlobalName[name] {
+		if global.Kind != kind {
+			continue
+		}
+		file := i.files[global.Path]
+		for _, fact := range file.facts {
+			if fact.SelectionRange != global.Span || !fact.TopLevel || fact.Dialect != syntax.Legacy {
+				continue
+			}
+			if kind == analysis.NameDeclarationFunction && fact.Kind != analysis.SymbolKindFunction || kind == analysis.NameDeclarationVariable && fact.Kind != analysis.SymbolKindVariable && fact.Kind != analysis.SymbolKindConstant {
 				continue
 			}
 			if found && (match.Fact.Path != fact.Path || match.Fact.SelectionRange != fact.SelectionRange) {
 				return SymbolMatch{}, false
 			}
-			match = SymbolMatch{Fact: fact, Source: i.files[fact.Path].source}
+			match = SymbolMatch{Fact: fact, Source: file.source}
 			found = true
 		}
 	}
