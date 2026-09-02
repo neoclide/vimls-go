@@ -24,7 +24,7 @@ const (
 	Name                        = "vimls"
 	maxFileBytes                = 4 << 20
 	maxPendingRequests          = 128
-	maxParallelAnalysis         = 4
+	maxParallelAnalysis         = 6
 	maxDiagnosticsPerDocument   = 200
 	maxWorkspaceFiles           = 20000
 	maxIndexBytes               = 256 << 20

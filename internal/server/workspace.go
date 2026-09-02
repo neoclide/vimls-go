@@ -537,7 +537,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		sources = append(sources, source)
 		indexedDiskFiles = append(indexedDiskFiles, diskFile)
 	}
-	files := workspace.ParseSources(ctx, sources, 0)
+	files := workspace.ParseAndAnalyzeSources(ctx, sources, 0)
 	if ctx.Err() != nil {
 		return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 	}
@@ -546,14 +546,14 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
 		candidates := make([]string, 0)
-		for position, file := range files {
+		for position, item := range files {
 			if position%32 == 0 && ctx.Err() != nil {
 				return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 			}
-			if file == nil {
+			if item.File == nil {
 				continue
 			}
-			for _, fact := range collectWorkspaceImportFacts(indexedPaths[position], file, resolver, openByPath) {
+			for _, fact := range collectWorkspaceImportFacts(indexedPaths[position], item.File, resolver, openByPath) {
 				if fact.Target == "" {
 					continue
 				}
@@ -598,7 +598,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		if len(newPaths) == 0 {
 			break
 		}
-		parsed := workspace.ParseSources(ctx, newSources, 0)
+		parsed := workspace.ParseAndAnalyzeSources(ctx, newSources, 0)
 		if ctx.Err() != nil {
 			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
@@ -607,12 +607,12 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		files = append(files, parsed...)
 	}
 	indexed := make(map[string]struct{}, len(files))
-	for position, file := range files {
-		if file == nil {
+	for position, item := range files {
+		if item.File == nil {
 			continue
 		}
 		path := indexedPaths[position]
-		if err := index.Replace(path, file); err != nil {
+		if err := index.ReplaceWithAnalysis(path, item.File, item.Analysis); err != nil {
 			complete = false
 			warnings = appendWarning(warnings, "vimls: workspace index byte limit reached; additional symbols were omitted")
 			break
@@ -622,15 +622,15 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			diskFiles[path] = struct{}{}
 		}
 	}
-	for position, file := range files {
-		if file == nil {
+	for position, item := range files {
+		if item.File == nil {
 			continue
 		}
 		path := indexedPaths[position]
 		if _, ok := indexed[path]; !ok {
 			continue
 		}
-		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, resolver, openByPath), func(target string) bool {
+		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, item.File, resolver, openByPath), func(target string) bool {
 			_, ok := indexed[target]
 			return ok
 		})

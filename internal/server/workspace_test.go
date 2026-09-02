@@ -1369,8 +1369,6 @@ func TestServerRebuildCancellationDoesNotPublishIndex(t *testing.T) {
 }
 
 func BenchmarkWorkspaceRebuild(b *testing.B) {
-	previousProcs := runtime.GOMAXPROCS(1)
-	b.Cleanup(func() { runtime.GOMAXPROCS(previousProcs) })
 	root := b.TempDir()
 	paths := make([]string, 0, 32)
 	totalBytes := 0

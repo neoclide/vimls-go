@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
@@ -34,6 +35,42 @@ func TestParseSourcesMatchesSequentialResultsInInputOrder(t *testing.T) {
 	}
 }
 
+func TestParseAndAnalyzeSourcesMatchesSequentialResultsInInputOrder(t *testing.T) {
+	sources := []string{
+		"let first = 1\n",
+		"vim9script\nvar second: number = 2\n",
+		"def Third(value: number): number\n  return value + 3\nenddef\n",
+	}
+	for _, workers := range []int{1, 2, 4, 0, -1, 100} {
+		got := ParseAndAnalyzeSources(context.Background(), sources, workers)
+		if len(got) != len(sources) {
+			t.Fatalf("workers=%d result length = %d, want %d", workers, len(got), len(sources))
+		}
+		for index, source := range sources {
+			wantFile := syntax.Parse(source)
+			wantAnalysis := analysis.Analyze(wantFile)
+			if !reflect.DeepEqual(got[index].File, wantFile) {
+				t.Fatalf("workers=%d result %d differs from sequential parse and analysis", workers, index)
+			}
+			if got[index].Analysis == nil || got[index].Analysis.File != got[index].File {
+				t.Fatalf("workers=%d result %d has mismatched analysis: %#v", workers, index, got[index])
+			}
+			if len(got[index].Analysis.Scopes) != len(wantAnalysis.Scopes) || len(got[index].Analysis.Declarations) != len(wantAnalysis.Declarations) || len(got[index].Analysis.References) != len(wantAnalysis.References) || !reflect.DeepEqual(got[index].Analysis.Diagnostics, wantAnalysis.Diagnostics) {
+				t.Fatalf("workers=%d result %d analysis differs from sequential analysis", workers, index)
+			}
+		}
+	}
+}
+
+func TestParseAndAnalyzeSourcesPreCanceledContextLeavesEverySlotZero(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got := ParseAndAnalyzeSources(ctx, []string{"let first = 1\n", "let second = 2\n"}, 2)
+	if len(got) != 2 || got[0].File != nil || got[0].Analysis != nil || got[1].File != nil || got[1].Analysis != nil {
+		t.Fatalf("canceled results = %#v", got)
+	}
+}
+
 func TestParseSourcesReturnsNonNilEmptyResults(t *testing.T) {
 	got := ParseSources(context.Background(), nil, 0)
 	if got == nil || len(got) != 0 {
@@ -42,7 +79,7 @@ func TestParseSourcesReturnsNonNilEmptyResults(t *testing.T) {
 }
 
 func TestParseWorkerCountCapsRequestedWorkers(t *testing.T) {
-	maximum := min(runtime.GOMAXPROCS(0), 4)
+	maximum := min(runtime.GOMAXPROCS(0), 6)
 	cases := []struct {
 		name      string
 		requested int
