@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -22,6 +23,38 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+var vimlsBinary string
+
+func TestMain(m *testing.M) {
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to get repository root: %v\n", err)
+		os.Exit(1)
+	}
+	tempDir, err := os.MkdirTemp("", "vimls-integration-bin-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create temp dir: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(tempDir)
+
+	binPath := filepath.Join(tempDir, "vimls")
+	if runtime.GOOS == "windows" {
+		binPath += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-mod=readonly", "-o", binPath, "./cmd/vimls")
+	cmd.Dir = repositoryRoot
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build vimls: %v\noutput: %s\n", err, out)
+		os.Exit(1)
+	}
+	vimlsBinary = binPath
+
+	code := m.Run()
+	_ = os.RemoveAll(tempDir)
+	os.Exit(code)
+}
 
 func TestLSPSubprocess(t *testing.T) {
 	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
@@ -82,7 +115,7 @@ endfunction
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
+	command := exec.CommandContext(ctx, vimlsBinary)
 	command.Dir = repositoryRoot
 	stdin, err := command.StdinPipe()
 	if err != nil {
@@ -98,8 +131,9 @@ endfunction
 		t.Fatal(err)
 	}
 
-	writer := jsonrpc.NewWriter(stdin)
-	reader := jsonrpc.NewReader(stdout)
+	client := newTestClient(t, stdout, stdin, &stderr)
+	writer := client
+	reader := client
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"completion":{"completionItem":{"snippetSupport":true}},"hover":{"contentFormat":["markdown"]},"signatureHelp":{"signatureInformation":{"documentationFormat":["plaintext"]}},"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
 	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"full":{"delta":true}`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"codeLensProvider":{"resolveProvider":true}`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"implementationProvider":true`) || !strings.Contains(string(initialize["result"]), `"callHierarchyProvider":true`) || !strings.Contains(string(initialize["result"]), `"typeHierarchyProvider":true`) {
@@ -511,7 +545,7 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	documentURI := canonicalFileURI(t, openPath).String()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
+	command := exec.CommandContext(ctx, vimlsBinary)
 	command.Dir = repositoryRoot
 	stdin, err := command.StdinPipe()
 	if err != nil {
@@ -527,8 +561,9 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	writer := jsonrpc.NewWriter(stdin)
-	reader := jsonrpc.NewReader(stdout)
+	client := newTestClient(t, stdout, stdin, &stderr)
+	writer := client
+	reader := client
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":%q,"capabilities":{"textDocument":{"diagnostic":{}}},"initializationOptions":{"runtimepath":[]}}}`, canonicalFileURI(t, workspaceRoot).String()))
 	initialize := readResponse(t, reader, "1")
 	if !strings.Contains(string(initialize["result"]), `"diagnosticProvider":{"interFileDependencies":true,"workspaceDiagnostics":true}`) {
@@ -667,14 +702,9 @@ func canonicalFileURI(t *testing.T, path string) uri.URI {
 }
 
 func TestVersionSubprocess(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls", "--version")
-	command.Dir = root
+	command := exec.CommandContext(ctx, vimlsBinary, "--version")
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("version failed: %v, output: %s", err, output)
@@ -685,14 +715,9 @@ func TestVersionSubprocess(t *testing.T) {
 }
 
 func TestTCPSubprocess(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls", "--listen", "127.0.0.1:0")
-	command.Dir = root
+	command := exec.CommandContext(ctx, vimlsBinary, "--listen", "127.0.0.1:0")
 	stderr, err := command.StderrPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -713,19 +738,12 @@ func TestTCPSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial %s: %v", address, err)
 	}
-	writer := jsonrpc.NewWriter(connection)
-	reader := jsonrpc.NewReader(connection)
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`)
-	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" {
-		t.Fatalf("initialize response = %s", initialize)
-	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
-	shutdown := readJSON(t, reader)
-	if string(shutdown["id"]) != "2" {
-		t.Fatalf("shutdown response = %s", shutdown)
-	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	var serverStderr strings.Builder
+	go func() {
+		_, _ = io.Copy(&serverStderr, stderr)
+	}()
+	client := newTestClient(t, connection, connection, &serverStderr)
+	runSharedEditingScenario(t, client, t.TempDir())
 	_ = connection.Close()
 	if err := command.Wait(); err != nil {
 		t.Fatalf("TCP server failed: %v", err)
@@ -735,24 +753,10 @@ func TestTCPSubprocess(t *testing.T) {
 	}
 }
 
-func TestSignalSubprocess(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("SIGTERM is not portable to Windows")
-	}
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestStdioSharedScenario(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	binary := filepath.Join(t.TempDir(), "vimls")
-	build := exec.CommandContext(ctx, "go", "build", "-mod=readonly", "-o", binary, "./cmd/vimls")
-	build.Dir = root
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build failed: %v, output: %s", err, output)
-	}
-
-	command := exec.CommandContext(ctx, binary)
+	command := exec.CommandContext(ctx, vimlsBinary)
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -766,8 +770,40 @@ func TestSignalSubprocess(t *testing.T) {
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	writer := jsonrpc.NewWriter(stdin)
-	reader := jsonrpc.NewReader(stdout)
+	client := newTestClient(t, stdout, stdin, &stderr)
+	runSharedEditingScenario(t, client, t.TempDir())
+	if err := command.Wait(); err != nil {
+		t.Fatalf("stdio server failed: %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("stdio server timed out: %v", ctx.Err())
+	}
+}
+
+func TestSignalSubprocess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGTERM is not portable to Windows")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, vimlsBinary)
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	client := newTestClient(t, stdout, stdin, &stderr)
+	writer := client
+	reader := client
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	_ = readJSON(t, reader)
 	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
@@ -788,20 +824,10 @@ func TestTCPListenerSignalSubprocess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGTERM is not portable to Windows")
 	}
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	binary := filepath.Join(t.TempDir(), "vimls")
-	build := exec.CommandContext(ctx, "go", "build", "-mod=readonly", "-o", binary, "./cmd/vimls")
-	build.Dir = root
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build failed: %v, output: %s", err, output)
-	}
 
-	command := exec.CommandContext(ctx, binary, "--listen", "127.0.0.1:0")
+	command := exec.CommandContext(ctx, vimlsBinary, "--listen", "127.0.0.1:0")
 	stderr, err := command.StderrPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -824,33 +850,189 @@ func TestTCPListenerSignalSubprocess(t *testing.T) {
 	}
 }
 
-func writeJSON(t *testing.T, writer *jsonrpc.Writer, body string) {
-	t.Helper()
-	if err := writer.Write([]byte(body)); err != nil {
-		t.Fatal(err)
-	}
+type transcriptEntry struct {
+	time time.Time
+	dir  string
+	body string
 }
 
-func readJSON(t *testing.T, reader *jsonrpc.Reader) map[string]json.RawMessage {
-	t.Helper()
-	body, err := reader.Read()
-	if err != nil {
-		if err == io.EOF {
-			t.Fatal("unexpected server EOF")
+type frameResult struct {
+	body []byte
+	err  error
+}
+
+type testHelper interface {
+	Helper()
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+}
+
+type testClient struct {
+	t              testHelper
+	writer         *jsonrpc.Writer
+	stderr         *strings.Builder
+	readChan       chan frameResult
+	transcript     []transcriptEntry
+	mu             sync.Mutex
+	defaultTimeout time.Duration
+}
+
+func newTestClient(t testHelper, r io.Reader, w io.Writer, stderr *strings.Builder) *testClient {
+	c := &testClient{
+		t:              t,
+		writer:         jsonrpc.NewWriter(w),
+		stderr:         stderr,
+		readChan:       make(chan frameResult, 128),
+		defaultTimeout: 5 * time.Second,
+	}
+	go func() {
+		reader := jsonrpc.NewReader(r)
+		for {
+			body, err := reader.Read()
+			c.readChan <- frameResult{body: body, err: err}
+			if err != nil {
+				return
+			}
 		}
-		t.Fatal(err)
-	}
-	var message map[string]json.RawMessage
-	if err := json.Unmarshal(body, &message); err != nil {
-		t.Fatal(err)
-	}
-	return message
+	}()
+	return c
 }
 
-func readResponse(t *testing.T, reader *jsonrpc.Reader, id string) map[string]json.RawMessage {
+func (c *testClient) recordTranscript(dir, body string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.transcript = append(c.transcript, transcriptEntry{
+		time: time.Now(),
+		dir:  dir,
+		body: body,
+	})
+	if len(c.transcript) > 30 {
+		c.transcript = c.transcript[len(c.transcript)-30:]
+	}
+}
+
+func (c *testClient) formatFailure(msg string) string {
+	var sb strings.Builder
+	sb.WriteString("\n=== LSP SUBPROCESS TEST FAILURE ===\n")
+	sb.WriteString(msg + "\n")
+	sb.WriteString("\n--- RECENT TRANSCRIPT (last frames) ---\n")
+	c.mu.Lock()
+	if len(c.transcript) == 0 {
+		sb.WriteString("<no frames recorded>\n")
+	} else {
+		for _, entry := range c.transcript {
+			body := entry.body
+			if len(body) > 300 {
+				body = body[:300] + "... [truncated]"
+			}
+			sb.WriteString(fmt.Sprintf("[%s] %s %s\n", entry.time.Format("15:04:05.000"), entry.dir, body))
+		}
+	}
+	c.mu.Unlock()
+	sb.WriteString("\n--- SERVER STDERR ---\n")
+	if c.stderr != nil && c.stderr.Len() > 0 {
+		sb.WriteString(c.stderr.String())
+	} else {
+		sb.WriteString("<empty>\n")
+	}
+	sb.WriteString("====================================\n")
+	return sb.String()
+}
+
+func (c *testClient) failf(format string, args ...any) {
+	c.t.Helper()
+	c.t.Fatal(c.formatFailure(fmt.Sprintf(format, args...)))
+}
+
+func (c *testClient) write(body string) {
+	c.t.Helper()
+	c.recordTranscript("->", body)
+	if err := c.writer.Write([]byte(body)); err != nil {
+		c.failf("write failed: %v", err)
+	}
+}
+
+func (c *testClient) readTimeout(d time.Duration, waitingFor string) map[string]json.RawMessage {
+	c.t.Helper()
+	select {
+	case res := <-c.readChan:
+		if res.err != nil {
+			c.failf("read failed while waiting for %s: %v", waitingFor, res.err)
+			return nil
+		}
+		c.recordTranscript("<-", string(res.body))
+		var msg map[string]json.RawMessage
+		if err := json.Unmarshal(res.body, &msg); err != nil {
+			c.failf("unmarshal frame failed while waiting for %s: %v, raw: %q", waitingFor, err, res.body)
+			return nil
+		}
+		return msg
+	case <-time.After(d):
+		c.failf("timed out after %v waiting for %s", d, waitingFor)
+		return nil
+	}
+}
+
+func writeJSON(t testHelper, target any, body string) {
 	t.Helper()
+	if c, ok := target.(*testClient); ok {
+		c.write(body)
+		return
+	}
+	if w, ok := target.(*jsonrpc.Writer); ok {
+		if err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	t.Fatalf("unexpected target for writeJSON: %T", target)
+}
+
+func readJSON(t testHelper, target any) map[string]json.RawMessage {
+	t.Helper()
+	if c, ok := target.(*testClient); ok {
+		return c.readTimeout(c.defaultTimeout, "next message")
+	}
+	if r, ok := target.(*jsonrpc.Reader); ok {
+		body, err := r.Read()
+		if err != nil {
+			if err == io.EOF {
+				t.Fatal("unexpected server EOF")
+			}
+			t.Fatal(err)
+		}
+		var message map[string]json.RawMessage
+		if err := json.Unmarshal(body, &message); err != nil {
+			t.Fatal(err)
+		}
+		return message
+	}
+	t.Fatalf("unexpected target for readJSON: %T", target)
+	return nil
+}
+
+func readResponse(t testHelper, target any, id string) map[string]json.RawMessage {
+	t.Helper()
+	if c, ok := target.(*testClient); ok {
+		deadline := time.Now().Add(c.defaultTimeout)
+		for {
+			rem := time.Until(deadline)
+			if rem <= 0 {
+				c.failf("timed out waiting for response id=%s", id)
+				return nil
+			}
+			message := c.readTimeout(rem, fmt.Sprintf("response id=%s", id))
+			if string(message["id"]) == id {
+				return message
+			}
+			if _, notification := message["method"]; !notification {
+				c.failf("unexpected response while waiting for %s: %s", id, message)
+			}
+		}
+	}
+	r := target.(*jsonrpc.Reader)
 	for {
-		message := readJSON(t, reader)
+		message := readJSON(t, r)
 		if string(message["id"]) == id {
 			return message
 		}
@@ -860,23 +1042,48 @@ func readResponse(t *testing.T, reader *jsonrpc.Reader, id string) map[string]js
 	}
 }
 
-func readPullResponse(t *testing.T, reader *jsonrpc.Reader, writer *jsonrpc.Writer, stderr *strings.Builder, id string) map[string]json.RawMessage {
+func readPullResponse(t testHelper, target any, writer any, _ *strings.Builder, id string) map[string]json.RawMessage {
 	t.Helper()
+	if c, ok := target.(*testClient); ok {
+		deadline := time.Now().Add(c.defaultTimeout)
+		for {
+			rem := time.Until(deadline)
+			if rem <= 0 {
+				c.failf("timed out waiting for pull response id=%s", id)
+				return nil
+			}
+			message := c.readTimeout(rem, fmt.Sprintf("pull response id=%s", id))
+			if string(message["id"]) == id {
+				return message
+			}
+			switch string(message["method"]) {
+			case `"workspace/diagnostic/refresh"`:
+				writeJSON(t, c, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, message["id"]))
+			case `"textDocument/publishDiagnostics"`:
+				c.failf("pull client received push diagnostics: %s", message)
+			case "":
+				c.failf("unexpected response while waiting for %s: %s", id, message)
+			}
+		}
+	}
+	r := target.(*jsonrpc.Reader)
 	for {
-		body, err := reader.Read()
+		body, err := r.Read()
 		if err != nil {
-			t.Fatalf("read response %s: %v, stderr: %s", id, err, stderr.String())
+			t.Fatalf("read response %s: %v", id, err)
 		}
 		var message map[string]json.RawMessage
 		if err := json.Unmarshal(body, &message); err != nil {
-			t.Fatalf("decode response %s: %v, body: %q, stderr: %s", id, err, body, stderr.String())
+			t.Fatalf("decode response %s: %v, body: %q", id, err, body)
 		}
 		if string(message["id"]) == id {
 			return message
 		}
 		switch string(message["method"]) {
 		case `"workspace/diagnostic/refresh"`:
-			writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, message["id"]))
+			if w, ok := writer.(*jsonrpc.Writer); ok {
+				writeJSON(t, w, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, message["id"]))
+			}
 		case `"textDocument/publishDiagnostics"`:
 			t.Fatalf("pull client received push diagnostics: %s", message)
 		case "":
@@ -885,7 +1092,7 @@ func readPullResponse(t *testing.T, reader *jsonrpc.Reader, writer *jsonrpc.Writ
 	}
 }
 
-func firstRawArrayItem(t *testing.T, raw json.RawMessage) json.RawMessage {
+func firstRawArrayItem(t testHelper, raw json.RawMessage) json.RawMessage {
 	t.Helper()
 	var items []json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
@@ -897,10 +1104,39 @@ func firstRawArrayItem(t *testing.T, raw json.RawMessage) json.RawMessage {
 	return items[0]
 }
 
-func readPublishedDiagnostic(t *testing.T, reader *jsonrpc.Reader, documentURI, code string) {
+func readPublishedDiagnostic(t testHelper, target any, documentURI, code string) {
 	t.Helper()
+	if c, ok := target.(*testClient); ok {
+		deadline := time.Now().Add(c.defaultTimeout)
+		for {
+			rem := time.Until(deadline)
+			if rem <= 0 {
+				c.failf("timed out waiting for diagnostic uri=%s code=%s", documentURI, code)
+				return
+			}
+			message := c.readTimeout(rem, fmt.Sprintf("diagnostic uri=%s code=%s", documentURI, code))
+			if string(message["method"]) != `"textDocument/publishDiagnostics"` {
+				if _, response := message["id"]; response {
+					c.failf("unexpected response while waiting for diagnostics: %s", message)
+				}
+				continue
+			}
+			payload := string(message["params"])
+			if !strings.Contains(payload, fmt.Sprintf(`"uri":%q`, documentURI)) {
+				continue
+			}
+			if code == "" {
+				if strings.Contains(payload, `"diagnostics":[]`) {
+					return
+				}
+			} else if strings.Contains(payload, fmt.Sprintf(`"code":%q`, code)) {
+				return
+			}
+		}
+	}
+	r := target.(*jsonrpc.Reader)
 	for {
-		message := readJSON(t, reader)
+		message := readJSON(t, r)
 		if string(message["method"]) != `"textDocument/publishDiagnostics"` {
 			if _, response := message["id"]; response {
 				t.Fatalf("unexpected response while waiting for diagnostics: %s", message)
@@ -911,5 +1147,92 @@ func readPublishedDiagnostic(t *testing.T, reader *jsonrpc.Reader, documentURI, 
 		if strings.Contains(payload, fmt.Sprintf(`"uri":%q`, documentURI)) && strings.Contains(payload, fmt.Sprintf(`"code":%q`, code)) {
 			return
 		}
+	}
+}
+
+func runSharedEditingScenario(t *testing.T, client *testClient, workspaceRoot string) {
+	t.Helper()
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":%q}}`, uri.File(workspaceRoot)))
+	initResp := readResponse(t, client, "1")
+	if string(initResp["id"]) != "1" {
+		t.Fatalf("initialize response = %s", initResp)
+	}
+	writeJSON(t, client, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+
+	docPath := filepath.Join(workspaceRoot, "shared.vim")
+	docURI := uri.File(docPath).String()
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":"vim9script\nvar sharedVal: number = 'err'\n"}}}`, docURI))
+	readPublishedDiagnostic(t, client, docURI, "vim/E1012")
+
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":%q,"version":2},"contentChanges":[{"text":"vim9script\nvar sharedVal: number = 42\necho sharedVal\n"}]}}`, docURI))
+	readPublishedDiagnostic(t, client, docURI, "")
+
+	writeJSON(t, client, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
+	shutdown := readResponse(t, client, "2")
+	if string(shutdown["id"]) != "2" {
+		t.Fatalf("shutdown response = %s", shutdown)
+	}
+	writeJSON(t, client, `{"jsonrpc":"2.0","method":"exit"}`)
+}
+
+type fakeT struct {
+	failed  bool
+	failMsg string
+}
+
+func (f *fakeT) Helper() {}
+
+func (f *fakeT) Fatal(args ...any) {
+	f.failed = true
+	f.failMsg = fmt.Sprint(args...)
+}
+
+func (f *fakeT) Fatalf(format string, args ...any) {
+	f.failed = true
+	f.failMsg = fmt.Sprintf(format, args...)
+}
+
+func TestSubprocessTimeoutTranscript(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, vimlsBinary)
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+	}()
+
+	mock := &fakeT{}
+	client := newTestClient(mock, stdout, stdin, &stderr)
+	client.defaultTimeout = 50 * time.Millisecond
+
+	writeJSON(mock, client, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`)
+	_ = readResponse(mock, client, "1")
+
+	// Wait for a non-existent response ID 99999
+	_ = readResponse(mock, client, "99999")
+	if !mock.failed {
+		t.Fatal("expected testClient to fail on timeout")
+	}
+	if !strings.Contains(mock.failMsg, "response id=99999") {
+		t.Fatalf("expected failure to mention response id=99999, got: %s", mock.failMsg)
+	}
+	if !strings.Contains(mock.failMsg, "RECENT TRANSCRIPT") || !strings.Contains(mock.failMsg, "initialize") {
+		t.Fatalf("expected failure to contain recent transcript, got: %s", mock.failMsg)
+	}
+	if !strings.Contains(mock.failMsg, "SERVER STDERR") {
+		t.Fatalf("expected failure to contain server stderr, got: %s", mock.failMsg)
 	}
 }

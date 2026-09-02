@@ -319,7 +319,10 @@ gopls 对每个 URI 保存诊断 hash 和 `mustPublish` 状态；相同结果通
 
 ## P1：先补测试可诊断性，再扩充测试框架
 
-### 6. 给子进程集成测试增加 per-operation timeout 和失败 transcript
+### 6. 给子进程集成测试增加 per-operation timeout 和失败 transcript [已完成]
+
+- **状态**：已完成
+- **实施改动**：在 `test/integration/lsp_subprocess_test.go` 中通过 `TestMain` 预构建 `vimls` 二进制并在所有测试用例中复用，消除重复编译开销；引入 `testClient` 封装 5s 单操作等待超时与最近 30 条收发帧 transcript 环形缓冲，失败时自动附加方法/ID、最近收发帧与 server stderr；增加 stdio/TCP 共享的最小编辑与诊断测试场景 `runSharedEditingScenario`；添加 `TestSubprocessTimeoutTranscript` 验证超时与 transcript 报错机制。
 
 **当前证据**
 
