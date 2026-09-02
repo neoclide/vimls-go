@@ -12,7 +12,7 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 
 | Feature | Support |
 | --- | --- |
-| Diagnostics | Syntax errors, unresolved names, invalid calls, imports and statically provable Vim9 type errors. |
+| Diagnostics | Syntax errors, unresolved names, invalid calls, imports and statically provable Vim9 type errors. Capable clients use document pull diagnostics; legacy clients use push diagnostics. |
 | Completion | Commands, variables, functions, options, events, mappings, highlight and syntax groups, imports, members, autoload names, color schemes and other context-specific values. |
 | Hover | Symbol kind, type, signature, source comments and pinned Vim help. Variables always show a type, including `unknown` and explicit Vim9 `any`. |
 | Signature help | Built-in functions and statically resolved user functions, imported functions, function values, methods and constructors. |

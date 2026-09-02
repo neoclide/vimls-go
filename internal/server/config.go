@@ -49,6 +49,11 @@ func languageFeatureCapabilitiesFromClient(textDocument *protocol.TextDocumentCl
 	return result
 }
 
+func languageFeatureCapabilitiesFromDiagnostic(diagnostic *protocol.DiagnosticClientCapabilities, result languageFeatureCapabilities) languageFeatureCapabilities {
+	result.diagnosticRelatedInformation = diagnostic != nil && diagnostic.RelatedInformation != nil && *diagnostic.RelatedInformation
+	return result
+}
+
 func preferredMarkupKind(formats []protocol.MarkupKind) protocol.MarkupKind {
 	for _, format := range formats {
 		if format == protocol.MarkupKindMarkdown || format == protocol.MarkupKindPlainText {

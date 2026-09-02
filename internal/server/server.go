@@ -94,49 +94,55 @@ type Server struct {
 	log    io.Writer
 	logMu  sync.Mutex
 
-	mu                  sync.Mutex
-	state               state
-	pendingWarning      string
-	client              protocol.Client
-	workspaceProgress   bool
-	workspaceProgressID uint64
-	cancellations       map[jsonrpc2.ID]context.CancelFunc
-	documents           *workspace.Documents
-	encoding            text.Encoding
-	completion          completionCapabilities
-	languageFeatures    languageFeatureCapabilities
-	exitOnce            sync.Once
-	exitCode            chan int
-	analysisMu          sync.Mutex
-	analysisContext     context.Context
-	analysisCancel      context.CancelFunc
-	analysisStopped     bool
-	analysisWG          sync.WaitGroup
-	analysisWake        chan struct{}
-	analysisPending     map[string]struct{}
-	analysisRunning     map[string]struct{}
-	analysisWorkers     int
-	publishMu           sync.Mutex
-	parsed              map[string]parsedDocument
-	published           map[string]bool
-	workspaceMu         sync.Mutex
-	workspaceRoots      []string
-	runtimePaths        []string
-	workspaceIndex      *workspace.Index
-	workspaceGraph      *workspace.ImportGraph
-	workspaceGraphView  workspace.ImportGraphSnapshot
-	workspaceResolver   *workspace.PathResolver
-	workspaceFiles      map[string]struct{}
-	workspacePending    map[string]struct{}
-	workspaceDependents map[string]struct{}
-	workspaceBuilt      bool
-	workspaceRevision   uint64
-	workspaceRunning    bool
-	workspaceChanged    chan struct{}
-	workspaceWake       chan struct{}
-	workspaceDelay      time.Duration
-	workspaceWG         sync.WaitGroup
-	hierarchyLimit      int
+	mu                          sync.Mutex
+	state                       state
+	pendingWarning              string
+	client                      protocol.Client
+	workspaceProgress           bool
+	pullDiagnostics             bool
+	diagnosticRefreshSupport    bool
+	workspaceProgressID         uint64
+	cancellations               map[jsonrpc2.ID]context.CancelFunc
+	documents                   *workspace.Documents
+	encoding                    text.Encoding
+	completion                  completionCapabilities
+	languageFeatures            languageFeatureCapabilities
+	exitOnce                    sync.Once
+	exitCode                    chan int
+	analysisMu                  sync.Mutex
+	analysisContext             context.Context
+	analysisCancel              context.CancelFunc
+	analysisStopped             bool
+	analysisWG                  sync.WaitGroup
+	analysisWake                chan struct{}
+	analysisPending             map[string]struct{}
+	analysisRunning             map[string]struct{}
+	analysisWorkers             int
+	publishMu                   sync.Mutex
+	parsed                      map[string]parsedDocument
+	published                   map[string]bool
+	pullDiagnosticResults       map[string]pullDiagnosticResult
+	nextDiagnosticResultID      uint64
+	diagnosticRefreshGeneration uint64
+	diagnosticRefreshRunning    bool
+	workspaceMu                 sync.Mutex
+	workspaceRoots              []string
+	runtimePaths                []string
+	workspaceIndex              *workspace.Index
+	workspaceGraph              *workspace.ImportGraph
+	workspaceGraphView          workspace.ImportGraphSnapshot
+	workspaceResolver           *workspace.PathResolver
+	workspaceFiles              map[string]struct{}
+	workspacePending            map[string]struct{}
+	workspaceDependents         map[string]struct{}
+	workspaceBuilt              bool
+	workspaceRevision           uint64
+	workspaceRunning            bool
+	workspaceChanged            chan struct{}
+	workspaceWake               chan struct{}
+	workspaceDelay              time.Duration
+	workspaceWG                 sync.WaitGroup
+	hierarchyLimit              int
 
 	// The following hooks are test-only synchronization seams. They are set
 	// before use and are always called outside server locks.
@@ -167,33 +173,34 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 	analysisContext, analysisCancel := context.WithCancel(context.Background())
 	graph := workspace.NewImportGraph()
 	return &Server{
-		input:               input,
-		output:              output,
-		log:                 logOutput,
-		cancellations:       make(map[jsonrpc2.ID]context.CancelFunc),
-		documents:           workspace.NewDocuments(),
-		encoding:            text.UTF16,
-		exitCode:            make(chan int, 1),
-		analysisContext:     analysisContext,
-		analysisCancel:      analysisCancel,
-		analysisWake:        make(chan struct{}, maxParallelAnalysis),
-		analysisPending:     make(map[string]struct{}),
-		analysisRunning:     make(map[string]struct{}),
-		parsed:              make(map[string]parsedDocument),
-		published:           make(map[string]bool),
-		workspaceIndex:      newWorkspaceIndex(),
-		workspaceGraph:      graph,
-		workspaceGraphView:  graph.Snapshot(),
-		workspaceFiles:      make(map[string]struct{}),
-		workspacePending:    make(map[string]struct{}),
-		workspaceDependents: make(map[string]struct{}),
-		workspaceChanged:    make(chan struct{}),
-		workspaceWake:       make(chan struct{}, 1),
-		workspaceDelay:      defaultWorkspaceRebuildDebounce,
-		disabledDiagnostics: make(map[string]struct{}),
-		overrideDiagnostics: make(map[string]protocol.DiagnosticSeverity),
-		hierarchyLimit:      maxHierarchyResults,
-		completionNow:       time.Now,
+		input:                 input,
+		output:                output,
+		log:                   logOutput,
+		cancellations:         make(map[jsonrpc2.ID]context.CancelFunc),
+		documents:             workspace.NewDocuments(),
+		encoding:              text.UTF16,
+		exitCode:              make(chan int, 1),
+		analysisContext:       analysisContext,
+		analysisCancel:        analysisCancel,
+		analysisWake:          make(chan struct{}, maxParallelAnalysis),
+		analysisPending:       make(map[string]struct{}),
+		pullDiagnosticResults: make(map[string]pullDiagnosticResult),
+		analysisRunning:       make(map[string]struct{}),
+		parsed:                make(map[string]parsedDocument),
+		published:             make(map[string]bool),
+		workspaceIndex:        newWorkspaceIndex(),
+		workspaceGraph:        graph,
+		workspaceGraphView:    graph.Snapshot(),
+		workspaceFiles:        make(map[string]struct{}),
+		workspacePending:      make(map[string]struct{}),
+		workspaceDependents:   make(map[string]struct{}),
+		workspaceChanged:      make(chan struct{}),
+		workspaceWake:         make(chan struct{}, 1),
+		workspaceDelay:        defaultWorkspaceRebuildDebounce,
+		disabledDiagnostics:   make(map[string]struct{}),
+		overrideDiagnostics:   make(map[string]protocol.DiagnosticSeverity),
+		hierarchyLimit:        maxHierarchyResults,
+		completionNow:         time.Now,
 	}
 }
 
@@ -370,6 +377,7 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentDidChange,
 		protocol.MethodTextDocumentDidSave,
 		protocol.MethodTextDocumentDidClose,
+		protocol.MethodTextDocumentDiagnostic,
 		protocol.MethodTextDocumentDeclaration,
 		protocol.MethodTextDocumentDefinition,
 		protocol.MethodTextDocumentReferences,
@@ -424,6 +432,11 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	codeActionLiterals := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.CodeAction != nil && params.Capabilities.TextDocument.CodeAction.CodeActionLiteralSupport.CodeActionKind.ValueSet != nil
 	completion := completionCapabilitiesFromClient(params.Capabilities.TextDocument)
 	languageFeatures := languageFeatureCapabilitiesFromClient(params.Capabilities.TextDocument)
+	pullDiagnostics := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.Diagnostic != nil
+	if pullDiagnostics {
+		languageFeatures = languageFeatureCapabilitiesFromDiagnostic(params.Capabilities.TextDocument.Diagnostic, languageFeatures)
+	}
+	diagnosticRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Diagnostics != nil && params.Capabilities.Workspace.Diagnostics.RefreshSupport != nil && *params.Capabilities.Workspace.Diagnostics.RefreshSupport
 	s.mu.Lock()
 	s.pendingWarning = ""
 	for _, warning := range []string{runtimepathWarning} {
@@ -444,6 +457,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.watchRelativePatterns = watchRelative
 	s.workspaceConfiguration = workspaceConfiguration
 	s.workspaceProgress = workspaceProgress
+	s.pullDiagnostics = pullDiagnostics
+	s.diagnosticRefreshSupport = diagnosticRefreshSupport
 	s.mu.Unlock()
 	s.workspaceMu.Lock()
 	s.workspaceDelay = defaultWorkspaceRebuildDebounce
@@ -463,43 +478,47 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	if codeActionLiterals {
 		codeActionProvider = &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}}
 	}
-	return &protocol.InitializeResult{
-		Capabilities: protocol.ServerCapabilities{
-			PositionEncoding:                protocolEncoding,
-			DocumentFormattingProvider:      protocol.Boolean(true),
-			DocumentRangeFormattingProvider: protocol.Boolean(true),
-			ImplementationProvider:          protocol.Boolean(true),
-			CallHierarchyProvider:           protocol.Boolean(true),
-			TypeHierarchyProvider:           protocol.Boolean(true),
-			DeclarationProvider:             protocol.Boolean(true),
-			DefinitionProvider:              protocol.Boolean(true),
-			ReferencesProvider:              protocol.Boolean(true),
-			DocumentHighlightProvider:       protocol.Boolean(true),
-			HoverProvider:                   protocol.Boolean(true),
-			DocumentSymbolProvider:          protocol.Boolean(true),
-			FoldingRangeProvider:            protocol.Boolean(true),
-			SelectionRangeProvider:          protocol.Boolean(true),
-			WorkspaceSymbolProvider:         protocol.Boolean(true),
-			DocumentLinkProvider:            &protocol.DocumentLinkOptions{ResolveProvider: &documentLinkResolve},
-			CompletionProvider:              &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&", "#", "<", "\"", "'"}},
-			SignatureHelpProvider:           &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{","}},
-			RenameProvider:                  renameProvider,
-			SemanticTokensProvider: &protocol.SemanticTokensOptions{
-				Legend: protocol.SemanticTokensLegend{TokenTypes: append([]string(nil), semanticTokenTypes...), TokenModifiers: append([]string(nil), semanticTokenModifiers...)},
-				Full:   protocol.Boolean(true),
-			},
-			CodeActionProvider: codeActionProvider,
-			InlayHintProvider:  protocol.Boolean(true),
-			Workspace: &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
-				Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
-			}},
-			TextDocumentSync: &protocol.TextDocumentSyncOptions{
-				OpenClose: &openClose,
-				Change:    &changeKind,
-				Save:      &protocol.SaveOptions{IncludeText: &includeText},
-			},
+	capabilities := protocol.ServerCapabilities{
+		PositionEncoding:                protocolEncoding,
+		DocumentFormattingProvider:      protocol.Boolean(true),
+		DocumentRangeFormattingProvider: protocol.Boolean(true),
+		ImplementationProvider:          protocol.Boolean(true),
+		CallHierarchyProvider:           protocol.Boolean(true),
+		TypeHierarchyProvider:           protocol.Boolean(true),
+		DeclarationProvider:             protocol.Boolean(true),
+		DefinitionProvider:              protocol.Boolean(true),
+		ReferencesProvider:              protocol.Boolean(true),
+		DocumentHighlightProvider:       protocol.Boolean(true),
+		HoverProvider:                   protocol.Boolean(true),
+		DocumentSymbolProvider:          protocol.Boolean(true),
+		FoldingRangeProvider:            protocol.Boolean(true),
+		SelectionRangeProvider:          protocol.Boolean(true),
+		WorkspaceSymbolProvider:         protocol.Boolean(true),
+		DocumentLinkProvider:            &protocol.DocumentLinkOptions{ResolveProvider: &documentLinkResolve},
+		CompletionProvider:              &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&", "#", "<", "\"", "'"}},
+		SignatureHelpProvider:           &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{","}},
+		RenameProvider:                  renameProvider,
+		SemanticTokensProvider: &protocol.SemanticTokensOptions{
+			Legend: protocol.SemanticTokensLegend{TokenTypes: append([]string(nil), semanticTokenTypes...), TokenModifiers: append([]string(nil), semanticTokenModifiers...)},
+			Full:   protocol.Boolean(true),
 		},
-		ServerInfo: protocol.ServerInfo{Name: Name, Version: protocol.NewOptional(Version)},
+		CodeActionProvider: codeActionProvider,
+		InlayHintProvider:  protocol.Boolean(true),
+		Workspace: &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
+			Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
+		}},
+		TextDocumentSync: &protocol.TextDocumentSyncOptions{
+			OpenClose: &openClose,
+			Change:    &changeKind,
+			Save:      &protocol.SaveOptions{IncludeText: &includeText},
+		},
+	}
+	if pullDiagnostics {
+		capabilities.DiagnosticProvider = &protocol.DiagnosticOptions{InterFileDependencies: true, WorkspaceDiagnostics: false}
+	}
+	return &protocol.InitializeResult{
+		Capabilities: capabilities,
+		ServerInfo:   protocol.ServerInfo{Name: Name, Version: protocol.NewOptional(Version)},
 	}, nil
 }
 
@@ -641,6 +660,7 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	s.publishMu.Lock()
 	closed := s.documents.Close(documentURI)
 	delete(s.parsed, documentURI)
+	delete(s.pullDiagnosticResults, documentURI)
 	clearDiagnostics := s.published[documentURI]
 	delete(s.published, documentURI)
 	s.publishMu.Unlock()
@@ -722,7 +742,12 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 		warning += next
 	}
 	if warning != "" {
-		return s.sendWarning(ctx, warning)
+		if err := s.sendWarning(ctx, warning); err != nil {
+			return err
+		}
+	}
+	if diagnosticsChanged {
+		s.scheduleDiagnosticRefresh()
 	}
 	return nil
 }
@@ -975,6 +1000,16 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if !ok || work.Context.Err() != nil {
 		return
 	}
+	file, identity, ok := s.computeDocumentDiagnostics(work)
+	if ok {
+		s.publishSyntax(work, file, identity)
+	}
+}
+
+// computeDocumentDiagnostics is the single raw diagnostic path for background
+// publication and document pull requests. It deliberately keeps protocol work
+// at the server boundary.
+func (s *Server) computeDocumentDiagnostics(work workspace.Analysis) (*syntax.File, workspaceIdentity, bool) {
 	disabledDiagnostics := s.disabledDiagnosticsSnapshot()
 	var file *syntax.File
 	var fileAnalysis *analysis.FileAnalysis
@@ -987,7 +1022,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 	} else {
 		raw := s.parseSnapshot(work.Snapshot)
 		if raw == nil {
-			return
+			return nil, workspaceIdentity{}, false
 		}
 		parsed := *raw
 		parsed.Diagnostics = append([]syntax.Diagnostic(nil), raw.Diagnostics...)
@@ -997,20 +1032,19 @@ func (s *Server) analyzeDocument(documentURI string) {
 		}
 		fileAnalysis = analysis.Analyze(file)
 		if work.Context.Err() != nil {
-			return
+			return nil, workspaceIdentity{}, false
 		}
 	}
 	if work.Context.Err() != nil {
-		return
+		return nil, workspaceIdentity{}, false
 	}
 	workspaceSnapshot, ok := s.prepareSyntax(work, file, fileAnalysis)
 	if !ok {
-		return
+		return nil, workspaceIdentity{}, false
 	}
 	if work.Snapshot.ByteLen() > maxFileBytes {
 		file.Diagnostics = filterDisabledDiagnostics(file.Diagnostics, disabledDiagnostics)
-		s.publishSyntax(work, file, workspaceSnapshot.identity)
-		return
+		return file, workspaceSnapshot.identity, true
 	}
 	versionedAnalysis := *fileAnalysis
 	autoload := false
@@ -1024,7 +1058,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 	file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
 	importDiagnostics := s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)
 	if !workspaceSnapshot.ready || work.Context.Err() != nil {
-		return
+		return nil, workspaceIdentity{}, false
 	}
 	file.Diagnostics = append(file.Diagnostics, importDiagnostics...)
 	if workspaceSnapshot.indexComplete {
@@ -1044,7 +1078,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 			Span: syntax.Span{Start: len(file.Source), End: len(file.Source)},
 		})
 	}
-	s.publishSyntax(work, file, workspaceSnapshot.identity)
+	return file, workspaceSnapshot.identity, true
 }
 
 func (s *Server) prepareSyntax(work workspace.Analysis, file *syntax.File, result *analysis.FileAnalysis) (workspaceAnalysisSnapshot, bool) {
@@ -1107,6 +1141,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	client := s.client
 	diagnosticRelatedInformation := s.languageFeatures.diagnosticRelatedInformation
 	overrides := s.overrideDiagnostics
+	pullDiagnostics := s.pullDiagnostics
 	s.mu.Unlock()
 
 	s.publishMu.Lock()
@@ -1122,11 +1157,37 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 		return
 	}
 	s.workspaceMu.Unlock()
+	diagnostics := protocolDiagnostics(analysis.Snapshot, file, encoding, diagnosticRelatedInformation, overrides)
+	if pullDiagnostics {
+		s.installPullDiagnosticResultLocked(analysis, identity, diagnostics)
+		return
+	}
+	if len(diagnostics) == 0 && !s.published[documentURI] {
+		return
+	}
+	if len(diagnostics) == 0 {
+		delete(s.published, documentURI)
+	} else {
+		s.published[documentURI] = true
+	}
+	if client == nil {
+		return
+	}
+	params := &protocol.PublishDiagnosticsParams{URI: uri.URI(documentURI), Diagnostics: diagnostics}
+	if version, ok := analysis.Snapshot.Version(); ok {
+		params.Version = protocol.NewOptional(version)
+	}
+	if err := client.PublishDiagnostics(analysis.Context, params); err != nil && analysis.Context.Err() == nil {
+		s.logf("vimls: publish diagnostics for %s: %v", documentURI, err)
+	}
+}
+
+func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding text.Encoding, diagnosticRelatedInformation bool, overrides map[string]protocol.DiagnosticSeverity) []protocol.Diagnostic {
 	diagnostics := make([]protocol.Diagnostic, 0, len(file.Diagnostics))
 	var relatedSnapshots map[string]*text.Snapshot
 	for _, item := range file.Diagnostics {
-		start, startError := analysis.Snapshot.Position(item.Span.Start, encoding)
-		end, endError := analysis.Snapshot.Position(item.Span.End, encoding)
+		start, startError := snapshot.Position(item.Span.Start, encoding)
+		end, endError := snapshot.Position(item.Span.End, encoding)
 		if startError != nil || endError != nil {
 			continue
 		}
@@ -1172,24 +1233,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 		}
 		diagnostics = append(diagnostics, diagnostic)
 	}
-	if len(diagnostics) == 0 && !s.published[documentURI] {
-		return
-	}
-	if len(diagnostics) == 0 {
-		delete(s.published, documentURI)
-	} else {
-		s.published[documentURI] = true
-	}
-	if client == nil {
-		return
-	}
-	params := &protocol.PublishDiagnosticsParams{URI: uri.URI(documentURI), Diagnostics: diagnostics}
-	if version, ok := analysis.Snapshot.Version(); ok {
-		params.Version = protocol.NewOptional(version)
-	}
-	if err := client.PublishDiagnostics(analysis.Context, params); err != nil && analysis.Context.Err() == nil {
-		s.logf("vimls: publish diagnostics for %s: %v", documentURI, err)
-	}
+	return diagnostics
 }
 
 func (s *Server) disabledDiagnosticsSnapshot() map[string]struct{} {
@@ -1246,8 +1290,9 @@ func (s *Server) clearDiagnostics(documentURI string) {
 	}
 	s.mu.Lock()
 	client := s.client
+	pullDiagnostics := s.pullDiagnostics
 	s.mu.Unlock()
-	if client != nil {
+	if client != nil && !pullDiagnostics {
 		if err := client.PublishDiagnostics(s.analysisContext, &protocol.PublishDiagnosticsParams{URI: uri.URI(documentURI), Diagnostics: []protocol.Diagnostic{}}); err != nil {
 			s.logf("vimls: clear diagnostics for %s: %v", documentURI, err)
 		}

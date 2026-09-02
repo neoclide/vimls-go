@@ -175,6 +175,11 @@ replace a reopened overlay.
 
 ## Protocol lifecycle
 
+- Diagnostics select document pull for clients advertising
+  `textDocument.diagnostic`, otherwise legacy push publication. Pull cache
+  entries bind immutable snapshot, configuration revision, and workspace
+  identity; workspace pull remains deferred.
+
 - Before `initialize`, accept only methods allowed by LSP.
 - Negotiate position encoding and advertise only implemented capabilities.
 - Apply `didOpen`, ordered `didChange`, `didSave`, and `didClose` to snapshots.

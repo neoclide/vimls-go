@@ -18,6 +18,22 @@ import (
 	"go.lsp.dev/uri"
 )
 
+type refreshDiagnosticClient struct {
+	protocol.UnimplementedClient
+	calls   chan struct{}
+	release chan struct{}
+}
+
+func (c *refreshDiagnosticClient) DiagnosticRefresh(ctx context.Context) error {
+	c.calls <- struct{}{}
+	select {
+	case <-c.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func TestProtocolDiagnosticSeverity(t *testing.T) {
 	for _, code := range []string{"vim/E171", "vim/E113", "vim/E518", "vim/E1012", "future/source"} {
 		if got := protocolDiagnosticSeverity(code); got != protocol.DiagnosticSeverityError {
@@ -1100,6 +1116,152 @@ func initializeWorkspaceDiagnosticServer(t *testing.T, root string) (*Server, <-
 	}
 	instance.workspaceWG.Wait()
 	return instance, published
+}
+
+func TestDocumentPullDiagnosticsFullAndUnchanged(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	result, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{
+		TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result.Capabilities.DiagnosticProvider.(*protocol.DiagnosticOptions); !ok {
+		t.Fatalf("diagnostic provider = %#v", result.Capabilities.DiagnosticProvider)
+	}
+	documentURI := uri.URI("file:///pull.vim")
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "vim9script\nvar value = 1\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := instance.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, ok := report.(*protocol.RelatedFullDocumentDiagnosticReport)
+	if !ok || full.ResultID == nil {
+		t.Fatalf("full report = %#v", report)
+	}
+	report, err = instance.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, PreviousResultID: full.ResultID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := report.(*protocol.RelatedUnchangedDocumentDiagnosticReport); !ok {
+		t.Fatalf("unchanged report = %#v", report)
+	}
+}
+
+func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
+	published := make(chan *protocol.PublishDiagnosticsParams, 2)
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = &diagnosticClient{published: published}
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}}}}); err != nil {
+		t.Fatal(err)
+	}
+	documentURI := uri.URI("file:///pull-cache.vim")
+	open := func(version int32) {
+		t.Helper()
+		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: version, Text: "vim9script\necho missing\n"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pull := func(previous *string) *protocol.RelatedFullDocumentDiagnosticReport {
+		t.Helper()
+		report, err := instance.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, PreviousResultID: previous})
+		if err != nil {
+			t.Fatal(err)
+		}
+		full, ok := report.(*protocol.RelatedFullDocumentDiagnosticReport)
+		if !ok || full.ResultID == nil {
+			t.Fatalf("report = %#v", report)
+		}
+		return full
+	}
+	open(1)
+	first := pull(nil)
+	if len(first.Items) == 0 {
+		t.Fatal("expected unresolved-name diagnostic")
+	}
+	wrong := "not-ours"
+	if full := pull(&wrong); full.ResultID == nil || *full.ResultID != *first.ResultID {
+		t.Fatalf("wrong-id full = %#v, want cached id %q", full, *first.ResultID)
+	}
+	select {
+	case params := <-published:
+		t.Fatalf("pull client published diagnostics: %#v", params)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	open(2)
+	second := pull(first.ResultID)
+	if *second.ResultID == *first.ResultID {
+		t.Fatalf("reopen reused result id %q", *first.ResultID)
+	}
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E121"]}`))}); err != nil {
+		t.Fatal(err)
+	}
+	third := pull(second.ResultID)
+	if *third.ResultID == *second.ResultID || len(third.Items) != 0 {
+		t.Fatalf("disabled configuration report = %#v", third)
+	}
+	if !implementedMethod(protocol.MethodTextDocumentDiagnostic) || implementedMethod(protocol.MethodWorkspaceDiagnostic) {
+		t.Fatal("diagnostic dispatch allowlist is incorrect")
+	}
+}
+
+func TestDocumentPullDiagnosticRefreshCoalesces(t *testing.T) {
+	value := true
+	t.Run("unsupported", func(t *testing.T) {
+		instance := New(nil, nil, io.Discard)
+		t.Cleanup(instance.stopAnalysis)
+		client := &refreshDiagnosticClient{calls: make(chan struct{}, 1), release: make(chan struct{}, 1)}
+		instance.client = client
+		if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{
+			TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E121"]}`))}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-client.calls:
+			t.Fatal("client without refreshSupport received diagnostic refresh")
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
+
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	client := &refreshDiagnosticClient{calls: make(chan struct{}, 2), release: make(chan struct{}, 2)}
+	instance.client = client
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{
+		Workspace:    &protocol.WorkspaceClientCapabilities{Diagnostics: &protocol.DiagnosticWorkspaceClientCapabilities{RefreshSupport: &value}},
+		TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E121"]}`))}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-client.calls:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for refresh")
+	}
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E117"]}`))}); err != nil {
+		t.Fatal(err)
+	}
+	client.release <- struct{}{}
+	select {
+	case <-client.calls:
+	case <-time.After(time.Second):
+		t.Fatal("coalesced refresh was lost")
+	}
+	client.release <- struct{}{}
 }
 
 func waitForDiagnosticsForURI(t *testing.T, published <-chan *protocol.PublishDiagnosticsParams, documentURI uri.URI) *protocol.PublishDiagnosticsParams {

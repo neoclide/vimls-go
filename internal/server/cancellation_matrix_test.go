@@ -64,4 +64,6 @@ func TestCancelledRequestMatrix(t *testing.T) {
 	mustCancelled("actions", err)
 	_, err = s.InlayHint(ctx, &protocol.InlayHintParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})
 	mustCancelled("hints", err)
+	_, err = s.Diagnostic(ctx, &protocol.DocumentDiagnosticParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})
+	mustCancelled("diagnostics", err)
 }

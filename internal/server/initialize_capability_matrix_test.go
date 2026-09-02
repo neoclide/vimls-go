@@ -47,3 +47,23 @@ func TestInitializeAdvertisesNegotiatedOptionalCapabilities(t *testing.T) {
 	}
 	s.workspaceMu.Unlock()
 }
+
+func TestInitializeDiagnosticTransportCapability(t *testing.T) {
+	for name, diagnostic := range map[string]*protocol.DiagnosticClientCapabilities{"legacy": nil, "pull": {}} {
+		t.Run(name, func(t *testing.T) {
+			s := New(nil, nil, nil)
+			t.Cleanup(s.stopAnalysis)
+			result, err := s.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: diagnostic}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			options, ok := result.Capabilities.DiagnosticProvider.(*protocol.DiagnosticOptions)
+			if diagnostic == nil && (ok || result.Capabilities.DiagnosticProvider != nil) {
+				t.Fatalf("legacy diagnostic provider = %#v", result.Capabilities.DiagnosticProvider)
+			}
+			if diagnostic != nil && (!ok || !options.InterFileDependencies || options.WorkspaceDiagnostics) {
+				t.Fatalf("pull diagnostic provider = %#v", result.Capabilities.DiagnosticProvider)
+			}
+		})
+	}
+}

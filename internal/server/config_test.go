@@ -48,6 +48,21 @@ func TestLanguageFeatureCapabilitiesRespectClientOrder(t *testing.T) {
 	}
 }
 
+func TestPullDiagnosticRelatedInformationDoesNotInheritPushCapability(t *testing.T) {
+	enabled := true
+	capabilities := languageFeatureCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{
+		PublishDiagnostics: &protocol.PublishDiagnosticsClientCapabilities{DiagnosticsCapabilities: protocol.DiagnosticsCapabilities{RelatedInformation: &enabled}},
+	})
+	capabilities = languageFeatureCapabilitiesFromDiagnostic(&protocol.DiagnosticClientCapabilities{}, capabilities)
+	if capabilities.diagnosticRelatedInformation {
+		t.Fatal("pull diagnostics inherited push-only related information support")
+	}
+	capabilities = languageFeatureCapabilitiesFromDiagnostic(&protocol.DiagnosticClientCapabilities{DiagnosticsCapabilities: protocol.DiagnosticsCapabilities{RelatedInformation: &enabled}}, capabilities)
+	if !capabilities.diagnosticRelatedInformation {
+		t.Fatal("pull diagnostics ignored related information support")
+	}
+}
+
 func TestRuntimepathFromOptions(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()

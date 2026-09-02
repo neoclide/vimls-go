@@ -82,6 +82,10 @@ runtime/source corpus produce no crashes or unbounded behavior.
 
 ## M4: semantics and diagnostics
 
+Current protocol status: document pull diagnostics are supported for capable
+clients with full/unchanged IDs and refresh after diagnostic-setting or complete
+workspace rebuild changes. Workspace pull diagnostics remain deferred.
+
 Deliver:
 
 - Scopes, declarations, imports, references, mutability, arity, and Vim9 types.

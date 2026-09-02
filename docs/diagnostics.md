@@ -8,6 +8,17 @@ values remain `unknown`.
 
 The evidence below is pinned to Vim 9.2.1015.
 
+## LSP transport
+
+Clients advertising `textDocument.diagnostic` receive document pull diagnostics
+with full/unchanged opaque result IDs. The server advertises
+`interFileDependencies: true` and `workspaceDiagnostics: false`; pull clients
+do not receive push publications. Older clients retain the existing push
+transport. This milestone does not implement workspace pull, related documents,
+partial results, or work-done progress. When supported, the server requests a
+diagnostic refresh after a diagnostic-setting or completed workspace-index
+change.
+
 ## vimls-owned diagnostic codes
 
 The default severity can be changed for publication with the workspace

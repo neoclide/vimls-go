@@ -301,6 +301,7 @@ func (s *Server) workspaceIndexWorker() {
 		s.finishWorkspaceRebuildLocked()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
+		s.scheduleDiagnosticRefresh()
 		s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
 		for _, warning := range warnings {
 			_ = s.sendWarning(s.analysisContext, warning)

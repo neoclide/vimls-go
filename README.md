@@ -148,6 +148,11 @@ endif
 
 ## Workspace Settings
 
+Clients that advertise `textDocument.diagnostic` use document pull diagnostics;
+older clients retain `textDocument/publishDiagnostics`. Pull diagnostics are
+document-only (`workspaceDiagnostics: false`): workspace pull, related
+documents, partial results, and progress are not implemented.
+
 User settings are supplied through LSP `workspace/configuration`.
 
 | Setting | Type | Default | Description |

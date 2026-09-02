@@ -451,6 +451,92 @@ endfunction
 	}
 }
 
+func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
+	command.Dir = repositoryRoot
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	writer := jsonrpc.NewWriter(stdin)
+	reader := jsonrpc.NewReader(stdout)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"textDocument":{"diagnostic":{}}},"initializationOptions":{"runtimepath":[]}}}`)
+	initialize := readResponse(t, reader, "1")
+	if !strings.Contains(string(initialize["result"]), `"diagnosticProvider":{"interFileDependencies":true,"workspaceDiagnostics":false}`) {
+		t.Fatalf("initialize response = %s", initialize)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+	documentURI := "file:///pull-diagnostics.vim"
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":"if true\n"}}}`, documentURI))
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":%q}}}`, documentURI))
+	first := readPullResponse(t, reader, writer, &stderr, "2")
+	var full struct {
+		Kind     string `json:"kind"`
+		ResultID string `json:"resultId"`
+	}
+	if err := json.Unmarshal(first["result"], &full); err != nil {
+		t.Fatalf("decode first diagnostic response: %v, response: %s", err, first)
+	}
+	if full.Kind != "full" || full.ResultID == "" {
+		t.Fatalf("first diagnostic response = %s", first)
+	}
+
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":%q},"previousResultId":%q}}`, documentURI, full.ResultID))
+	unchanged := readPullResponse(t, reader, writer, &stderr, "3")
+	if !strings.Contains(string(unchanged["result"]), `"kind":"unchanged"`) || !strings.Contains(string(unchanged["result"]), fmt.Sprintf(`"resultId":%q`, full.ResultID)) {
+		t.Fatalf("unchanged diagnostic response = %s", unchanged)
+	}
+
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":%q,"version":2},"contentChanges":[{"text":"if true\nendif\n"}]}}`, documentURI))
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":4,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":%q},"previousResultId":%q}}`, documentURI, full.ResultID))
+	changed := readPullResponse(t, reader, writer, &stderr, "4")
+	var changedFull struct {
+		Kind     string `json:"kind"`
+		ResultID string `json:"resultId"`
+	}
+	if err := json.Unmarshal(changed["result"], &changedFull); err != nil {
+		t.Fatal(err)
+	}
+	if changedFull.Kind != "full" || changedFull.ResultID == "" || changedFull.ResultID == full.ResultID {
+		t.Fatalf("changed diagnostic response = %s", changed)
+	}
+
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":5,"method":"shutdown"}`)
+	shutdown := readPullResponse(t, reader, writer, &stderr, "5")
+	if string(shutdown["result"]) != "null" {
+		t.Fatalf("shutdown response = %s", shutdown)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("server failed: %v, stderr: %s", err, stderr.String())
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("server timed out: %v", ctx.Err())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+}
+
 func assertVimWatchRegistration(t *testing.T, raw json.RawMessage, roots []string) {
 	t.Helper()
 	var params protocol.RegistrationParams
@@ -687,6 +773,31 @@ func readResponse(t *testing.T, reader *jsonrpc.Reader, id string) map[string]js
 			return message
 		}
 		if _, notification := message["method"]; !notification {
+			t.Fatalf("unexpected response while waiting for %s: %s", id, message)
+		}
+	}
+}
+
+func readPullResponse(t *testing.T, reader *jsonrpc.Reader, writer *jsonrpc.Writer, stderr *strings.Builder, id string) map[string]json.RawMessage {
+	t.Helper()
+	for {
+		body, err := reader.Read()
+		if err != nil {
+			t.Fatalf("read response %s: %v, stderr: %s", id, err, stderr.String())
+		}
+		var message map[string]json.RawMessage
+		if err := json.Unmarshal(body, &message); err != nil {
+			t.Fatalf("decode response %s: %v, body: %q, stderr: %s", id, err, body, stderr.String())
+		}
+		if string(message["id"]) == id {
+			return message
+		}
+		switch string(message["method"]) {
+		case `"workspace/diagnostic/refresh"`:
+			writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, message["id"]))
+		case `"textDocument/publishDiagnostics"`:
+			t.Fatalf("pull client received push diagnostics: %s", message)
+		case "":
 			t.Fatalf("unexpected response while waiting for %s: %s", id, message)
 		}
 	}
