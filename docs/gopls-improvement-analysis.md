@@ -144,7 +144,10 @@ ID，第二个请求会覆盖第一个请求的 cancel function；随后 `$/canc
 - `internal/server/server.go`
 - `internal/server/lifecycle_test.go` 或 `internal/server/cancellation_matrix_test.go`
 
-### 2. 让 `shutdown` 等待已取消的后台工作退出
+### 2. 让 `shutdown` 等待已取消的后台工作退出 [已完成]
+
+- **状态**：已完成
+- **实施改动**：在 `Server` 结构中引入 `stopOnce sync.Once` 确保停止逻辑幂等；`Shutdown` 响应前调用 `stopAnalysis()`，等待 analysis、workspace rebuild 和 file watch 后台 goroutine 全部退出后再同步 `publishMu`；在 `internal/server/lifecycle_test.go` 中添加 `TestServerShutdownWaitsForBackgroundWork` 回归测试。
 
 **当前证据**
 

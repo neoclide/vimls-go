@@ -3,12 +3,14 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/jsonrpc"
+	"github.com/neoclide/vimls-go/internal/text"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
@@ -271,5 +273,81 @@ func TestServerRejectsDuplicateRequestID(t *testing.T) {
 	instance.mu.Unlock()
 	if remaining != 0 {
 		t.Fatalf("cancellations map len = %d, want 0", remaining)
+	}
+}
+
+func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+	instance := New(serverConn, serverConn, io.Discard)
+	instance.workspaceDelay = 0
+
+	workerBlocked := make(chan struct{})
+	releaseWorker := make(chan struct{})
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+		select {
+		case <-workerBlocked:
+		default:
+			close(workerBlocked)
+		}
+		<-releaseWorker
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- instance.Run(context.Background()) }()
+	writer := jsonrpc.NewWriter(clientConn)
+	reader := jsonrpc.NewReader(clientConn)
+
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if message := readFrame(t, reader); idNumber(t, message) != 1 {
+		t.Fatalf("initialize response = %#v", message)
+	}
+
+	// Trigger background workspace rebuild
+	instance.scheduleWorkspaceRebuild()
+
+	select {
+	case <-workerBlocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not start")
+	}
+
+	// Send shutdown while worker is blocked
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
+
+	// Verify that shutdown response does not arrive before worker is released
+	responseChan := make(chan map[string]json.RawMessage, 1)
+	go func() {
+		responseChan <- readFrame(t, reader)
+	}()
+
+	select {
+	case msg := <-responseChan:
+		t.Fatalf("shutdown returned before background worker finished: %#v", msg)
+	case <-time.After(50 * time.Millisecond):
+		// Expected: shutdown is still waiting for background work
+	}
+
+	// Release the worker
+	close(releaseWorker)
+
+	select {
+	case msg := <-responseChan:
+		if idNumber(t, msg) != 2 || string(msg["result"]) != "null" {
+			t.Fatalf("shutdown response = %#v", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not complete after worker release")
+	}
+
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit code = %d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not exit")
 	}
 }

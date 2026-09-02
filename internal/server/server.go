@@ -128,6 +128,7 @@ type Server struct {
 	completion                  completionCapabilities
 	languageFeatures            languageFeatureCapabilities
 	exitOnce                    sync.Once
+	stopOnce                    sync.Once
 	exitCode                    chan int
 	analysisMu                  sync.Mutex
 	analysisContext             context.Context
@@ -610,9 +611,7 @@ func (s *Server) Shutdown(context.Context) error {
 	s.mu.Lock()
 	s.state = stateShutdown
 	s.mu.Unlock()
-	s.cancelAnalysis()
-	// Wait only for a publication already holding this lock. Parsing and
-	// workspace I/O remain outside it, and reject their later installations.
+	s.stopAnalysis()
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
 	return nil
@@ -1377,14 +1376,16 @@ func (s *Server) cancelAnalysis() {
 }
 
 func (s *Server) stopAnalysis() {
-	s.cancelAnalysis()
-	s.analysisWG.Wait()
-	// Synchronize with a rebuild that may have checked analysisContext just
-	// before cancellation, so its WaitGroup.Add completes before Wait starts.
-	waitGroupAddBarrier(&s.workspaceMu)
-	s.workspaceWG.Wait()
-	waitGroupAddBarrier(&s.watchMu)
-	s.watchWG.Wait()
+	s.stopOnce.Do(func() {
+		s.cancelAnalysis()
+		s.analysisWG.Wait()
+		// Synchronize with a rebuild that may have checked analysisContext just
+		// before cancellation, so its WaitGroup.Add completes before Wait starts.
+		waitGroupAddBarrier(&s.workspaceMu)
+		s.workspaceWG.Wait()
+		waitGroupAddBarrier(&s.watchMu)
+		s.watchWG.Wait()
+	})
 }
 
 func waitGroupAddBarrier(mu *sync.Mutex) {
