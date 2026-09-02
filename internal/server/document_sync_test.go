@@ -664,8 +664,12 @@ func BenchmarkParseCacheChangedFile(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.SetBytes(int64(changedSnapshot.ByteLen()))
+	iteration := int32(2)
 	for b.Loop() {
-		instance.parseSnapshot(changedSnapshot)
+		iteration++
+		uniqueSource := strings.Replace(baseSource, "111111", fmt.Sprintf("%06d", iteration%1000000), 1)
+		uniqueSnapshot := text.NewSnapshot(baseSnapshot.URI(), uint64(iteration), &iteration, uniqueSource)
+		instance.parseSnapshot(uniqueSnapshot)
 	}
 	instance.publishMu.Lock()
 	cached = instance.parsed[baseSnapshot.URI()]

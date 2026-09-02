@@ -264,9 +264,9 @@ Current behavior-sensitive coverage:
 - Windows builds all packages and runs the compiled stdio integration scenario.
 - Linux runs `govulncheck` v1.1.4 against all packages.
 
-Planned scheduled and release coverage:
+Scheduled and release coverage:
 
-- Bounded live-fuzz and benchmark-regression lanes.
+- Bounded live-fuzz and benchmark-regression lanes via `.github/workflows/scheduled.yml` (daily schedule and workflow_dispatch), running 30s per fuzz target with crash artifacts, and executing fixed benchmark suites with 5 raw samples plus median/p95 summary via `tools/benchreport`.
 
 Each Vim lane first proves its actual version and required `+eval`/Vim9 support.
 
@@ -350,8 +350,8 @@ go run -mod=readonly ./tools/covercheck -profile coverage.out -min 90
 go test -mod=readonly -run TestLSPSubprocess ./test/integration
 ```
 
-Planned scheduled/release gates add bounded live fuzzing and benchmark
-regression checks.
+Scheduled lanes add bounded live fuzzing and benchmark regression checks via
+`.github/workflows/scheduled.yml`.
 
 ## Release evidence
 

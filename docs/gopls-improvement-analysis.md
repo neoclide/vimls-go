@@ -369,7 +369,10 @@ goroutine dump，见
 - `test/integration/lsp_subprocess_test.go`
 - 如确有重复，可在 `test/integration` 内增加一个小 helper 文件
 
-### 7. 落实定时 bounded fuzz 和 benchmark regression lane
+### 7. 落实定时 bounded fuzz 和 benchmark regression lane [已完成]
+
+- **状态**：已完成
+- **实施改动**：创建独立且单一职责的定时与按需工作流 `.github/workflows/scheduled.yml`（每日 02:00 UTC 定时及 workflow_dispatch 手动触发）；fuzz 任务通过 strategy matrix 分别运行现有 8 个 fuzz 目标（30s 独立 bounded fuzz），遇 crash 自动上传 `**/testdata/fuzz/**` 工件供离线重放；benchmark 任务固定运行核心 end-to-end 工作负载 5 次，收集系统环境（Go 版本、OS/arch、GOMAXPROCS）、命令与原始样本；开发 `tools/benchreport/main.go` 工具自动聚合 5 次样本并计算 median 和 p95 数据，生成工件报表；在 `internal/server/document_sync_test.go` 中修复 `BenchmarkParseCacheChangedFile` 确保循环每轮生成唯一 edit 内容并测量实际解析开销；同步更新 `docs/testing.md` 契约文档。
 
 **当前证据**
 

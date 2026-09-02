@@ -1,0 +1,78 @@
+name: Scheduled Fuzz & Benchmark
+
+env:
+  GOFLAGS: -mod=readonly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkg: ./internal/jsonrpc
+            target: FuzzReader
+          - pkg: ./internal/text
+            target: FuzzPositionRoundTrip
+          - pkg: ./internal/text
+            target: FuzzApplyChanges
+          - pkg: ./internal/syntax
+            target: FuzzFileParsersNeverPanic
+          - pkg: ./internal/syntax
+            target: FuzzLegacyExpressionNeverPanics
+          - pkg: ./internal/syntax
+            target: FuzzVim9ExpressionNeverPanics
+          - pkg: ./internal/syntax
+            target: FuzzVim9TypeNeverPanics
+          - pkg: ./internal/server
+            target: FuzzCompletionContext
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+      - name: Run bounded fuzz (${{ matrix.target }})
+        run: |
+          go test -mod=readonly ${{ matrix.pkg }} -run '^$' -fuzz '^${{ matrix.target }}$' -fuzztime 30s
+      - name: Upload crash corpus if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: |
+            **/testdata/fuzz/**
+
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+      - name: Run benchmark regression lane (count=5)
+        run: |
+          mkdir -p artifacts
+          echo "=== Environment ===" > artifacts/benchmark_report.txt
+          go version >> artifacts/benchmark_report.txt
+          uname -a >> artifacts/benchmark_report.txt
+          echo "GOMAXPROCS=${GOMAXPROCS:-$(nproc)}" >> artifacts/benchmark_report.txt
+          echo "" >> artifacts/benchmark_report.txt
+          echo "=== Raw Benchmark Output (count=5) ===" >> artifacts/benchmark_report.txt
+          go test -mod=readonly ./internal/syntax ./internal/server -run '^$' \
+            -bench '^(BenchmarkParseLargeFile|BenchmarkCompletionLatency|BenchmarkRuntimepathIndexing|BenchmarkReverseDependentReanalysis|BenchmarkWorkspaceRebuild)$' \
+            -benchmem -benchtime=10x -count=5 | tee -a artifacts/benchmark_report.txt
+          echo "" >> artifacts/benchmark_report.txt
+          go run ./tools/benchreport -input artifacts/benchmark_report.txt | tee -a artifacts/benchmark_report.txt
+      - name: Upload benchmark report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: artifacts/benchmark_report.txt
