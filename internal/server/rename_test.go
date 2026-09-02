@@ -57,10 +57,12 @@ func TestRenameStaticImportAcrossClosedAndOpenDocuments(t *testing.T) {
 	instance := initializeWorkspaceServer(t, root)
 	mainURI := uri.File(mainPath)
 	otherURI := uri.File(otherPath)
-	instance.documents.Open(mainURI.String(), 3, mainSource)
-	instance.removeWorkspaceURI(mainURI.String())
-	instance.documents.Open(otherURI.String(), 7, otherSource)
-	instance.removeWorkspaceURI(otherURI.String())
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: mainURI, Version: 3, Text: mainSource}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: otherURI, Version: 7, Text: otherSource}}); err != nil {
+		t.Fatal(err)
+	}
 	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 2, Character: 10}}
 	prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: params})
 	if err != nil || prepared == nil {

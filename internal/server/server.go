@@ -132,6 +132,9 @@ type Server struct {
 	workspaceBuilt      bool
 	workspaceRevision   uint64
 	workspaceRunning    bool
+	workspaceChanged    chan struct{}
+	workspaceWake       chan struct{}
+	workspaceDelay      time.Duration
 	workspaceWG         sync.WaitGroup
 	hierarchyLimit      int
 
@@ -140,6 +143,8 @@ type Server struct {
 	beforeParseSnapshotCacheMissForTest func(*text.Snapshot)
 	beforeAnalyzeForTest                func(*syntax.File)
 	beforeWorkspaceRestoreReadForTest   func(workspaceRestore)
+	beforeWorkspaceRebuildDelayForTest  func()
+	beforeWorkspaceIndexWaitForTest     func()
 	beforeWorkspaceBuildForTest         func([]*text.Snapshot)
 
 	watchMu                  sync.Mutex
@@ -181,6 +186,9 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		workspaceFiles:      make(map[string]struct{}),
 		workspacePending:    make(map[string]struct{}),
 		workspaceDependents: make(map[string]struct{}),
+		workspaceChanged:    make(chan struct{}),
+		workspaceWake:       make(chan struct{}, 1),
+		workspaceDelay:      defaultWorkspaceRebuildDebounce,
 		hierarchyLimit:      maxHierarchyResults,
 		completionNow:       time.Now,
 	}
@@ -413,6 +421,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	targetVersion, targetOverride, targetWarning := targetVersionFromOptions([]byte(params.InitializationOptions))
 	runtimePaths, runtimepathConfigured, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
 	unresolvedSeverity, unresolvedWarning := unresolvedSeverityFromOptions([]byte(params.InitializationOptions))
+	workspaceDelay, workspaceDelayWarning := workspaceRebuildDebounceFromOptions([]byte(params.InitializationOptions))
 	if !runtimepathConfigured {
 		runtimePaths = defaultRuntimePaths()
 	}
@@ -427,7 +436,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.targetOverride = targetOverride
 	s.unresolvedSeverity = unresolvedSeverity
 	s.pendingWarning = targetWarning
-	for _, warning := range []string{runtimepathWarning, unresolvedWarning} {
+	for _, warning := range []string{runtimepathWarning, unresolvedWarning, workspaceDelayWarning} {
 		if warning == "" {
 			continue
 		}
@@ -445,6 +454,9 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.watchRelativePatterns = watchRelative
 	s.workspaceConfiguration = workspaceConfiguration
 	s.mu.Unlock()
+	s.workspaceMu.Lock()
+	s.workspaceDelay = workspaceDelay
+	s.workspaceMu.Unlock()
 	s.setWorkspaceRoots(workspaceRootsFromInitialize(params))
 	s.setRuntimePaths(runtimePaths)
 	s.refreshWorkspaceResolver()
@@ -688,25 +700,44 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 	var unresolvedWarning string
 	s.unresolvedSeverity, unresolvedWarning = unresolvedSeverityFromSettings(settings, s.unresolvedSeverity)
 	s.mu.Unlock()
+	s.workspaceMu.Lock()
+	workspaceDelay, workspaceDelayWarning := workspaceRebuildDebounceFromSettings(settings, s.workspaceDelay)
+	if workspaceDelay != s.workspaceDelay {
+		s.workspaceDelay = workspaceDelay
+		if s.workspaceRunning {
+			select {
+			case s.workspaceWake <- struct{}{}:
+			default:
+			}
+		}
+	}
+	s.workspaceMu.Unlock()
 	s.publishMu.Lock()
 	snapshots := s.documents.ConfigurationChanged()
 	s.publishMu.Unlock()
 	for _, snapshot := range snapshots {
 		s.startAnalysis(snapshot.URI())
 	}
-	if targetWarning != "" && unresolvedWarning != "" {
-		return s.sendWarning(ctx, targetWarning+"; "+unresolvedWarning)
+	warning := targetWarning
+	for _, next := range []string{unresolvedWarning, workspaceDelayWarning} {
+		if next == "" {
+			continue
+		}
+		if warning != "" {
+			warning += "; "
+		}
+		warning += next
 	}
-	if targetWarning != "" {
-		return s.sendWarning(ctx, targetWarning)
-	}
-	if unresolvedWarning != "" {
-		return s.sendWarning(ctx, unresolvedWarning)
+	if warning != "" {
+		return s.sendWarning(ctx, warning)
 	}
 	return nil
 }
 
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (protocol.DocumentSymbolResult, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	documentURI := params.TextDocument.URI.String()
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)

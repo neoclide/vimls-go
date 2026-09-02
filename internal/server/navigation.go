@@ -33,6 +33,9 @@ type navigationDocument struct {
 }
 
 func (s *Server) navigationAt(ctx context.Context, documentURI string, position protocol.Position) (*navigationDocument, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)
 	s.publishMu.Unlock()

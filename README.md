@@ -99,7 +99,8 @@ Add to your `coc-settings.json` (open with `:CocConfig`):
       "filetypes": ["vim"],
       "initializationOptions": {
         "targetVersion": "9.2.1015",
-        "unresolvedSeverity": "warning"
+        "unresolvedSeverity": "warning",
+        "workspaceRebuildDebounce": 100
       }
     }
   }
@@ -121,6 +122,7 @@ vim.api.nvim_create_autocmd("FileType", {
       init_options = {
         targetVersion = "9.2.1015",
         unresolvedSeverity = "warning",
+        workspaceRebuildDebounce = 100,
       },
     })
   end,
@@ -141,7 +143,8 @@ if executable('vimls')
         \ 'allowlist': ['vim'],
         \ 'initialization_options': {
         \   'targetVersion': '9.2.1015',
-        \   'unresolvedSeverity': 'warning'
+        \   'unresolvedSeverity': 'warning',
+        \   'workspaceRebuildDebounce': 100
         \ },
         \ })
   augroup END
@@ -159,6 +162,7 @@ The following settings can be passed in `initializationOptions` or dynamically v
 | `targetVersion` | `string` | `"9.2.1015"` | Minimum/target Vim version (e.g. `"9.1"`, `"9.2.1015"`). Used for version-sensitive compatibility diagnostics. |
 | `runtimepath` | `string[]` | *Auto-discovered* | Custom array of ordered runtime paths. An explicit empty array `[]` disables runtime indexing. |
 | `unresolvedSeverity` | `string` | `"warning"` | Diagnostic severity for unresolved symbols (`"error"`, `"warning"`, `"information"`, `"hint"`). |
+| `workspaceRebuildDebounce` | `number` | `100` | Milliseconds to wait after the latest workspace rebuild trigger; `0` rebuilds immediately. |
 
 For complete configuration specifications and runtimepath update notifications, see [docs/configuration.md](docs/configuration.md).
 
@@ -180,4 +184,3 @@ For complete configuration specifications and runtimepath update notifications, 
 This project is licensed under the **MIT License**. See [LICENSES/MIT.txt](LICENSES/MIT.txt) for full details.
 
 Vim syntax definitions, documentation excerpts, and test metadata derived from the official Vim codebase are subject to the **Vim License**. See [LICENSES/VIM.txt](LICENSES/VIM.txt).
-

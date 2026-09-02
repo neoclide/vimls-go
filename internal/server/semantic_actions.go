@@ -59,6 +59,9 @@ type syntaxQuickFix struct {
 }
 
 func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
+	if s.workspaceIndexRebuilding() {
+		return nil, protocol.ErrContentModified
+	}
 	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
@@ -695,6 +698,9 @@ func lineIndent(source string, offset int) string {
 }
 
 func (s *Server) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
+	if s.workspaceIndexRebuilding() {
+		return nil, protocol.ErrContentModified
+	}
 	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err

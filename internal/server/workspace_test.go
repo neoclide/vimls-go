@@ -18,6 +18,7 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
+	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -1143,6 +1144,109 @@ func TestServerRebuildRejectsCapturedSnapshotAfterOpenEdit(t *testing.T) {
 	instance.workspaceMu.Unlock()
 	if hookCalls != 2 || !built || !indexed || source != currentSource || !graph.Has(path) {
 		t.Fatalf("stale rebuild published: hooks=%d built=%t indexed=%t source=%q graphHas=%t", hookCalls, built, indexed, source, graph.Has(path))
+	}
+}
+
+func TestWorkspaceRebuildDebouncesBurst(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	delayStarted := make(chan struct{})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseWorker := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	t.Cleanup(func() {
+		releaseWorker()
+		instance.workspaceWG.Wait()
+	})
+	instance.beforeWorkspaceRebuildDelayForTest = func() { close(delayStarted) }
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+		close(started)
+		<-release
+	}
+	instance.scheduleWorkspaceRebuild()
+	waitForServerRace(t, delayStarted, "workspace rebuild debounce timer")
+	time.Sleep(80 * time.Millisecond)
+	instance.scheduleWorkspaceRebuild()
+	select {
+	case <-started:
+		t.Fatal("workspace rebuild ignored the debounce window")
+	case <-time.After(40 * time.Millisecond):
+	}
+	waitForServerRace(t, started, "debounced workspace rebuild")
+	releaseWorker()
+}
+
+func TestWaitForWorkspaceIndex(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseWorker := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+	t.Cleanup(func() {
+		releaseWorker()
+		instance.workspaceWG.Wait()
+	})
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+		close(started)
+		<-release
+	}
+	instance.scheduleWorkspaceRebuild()
+	result := make(chan error, 1)
+	go func() { result <- instance.waitForWorkspaceIndex(context.Background()) }()
+	waitForServerRace(t, started, "workspace rebuild start")
+	select {
+	case err := <-result:
+		t.Fatalf("wait returned before rebuild completed: %v", err)
+	default:
+	}
+	releaseWorker()
+	if err := <-result; err != nil {
+		t.Fatalf("wait result: %v", err)
+	}
+}
+
+func TestWaitForWorkspaceIndexPending(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	waiting := make(chan struct{})
+	instance.beforeWorkspaceIndexWaitForTest = func() { close(waiting) }
+	instance.workspaceMu.Lock()
+	instance.workspacePending["file.vim"] = struct{}{}
+	instance.notifyWorkspaceIndexChangedLocked()
+	instance.workspaceMu.Unlock()
+	result := make(chan error, 1)
+	go func() { result <- instance.waitForWorkspaceIndex(context.Background()) }()
+	waitForServerRace(t, waiting, "workspace pending wait")
+	select {
+	case err := <-result:
+		t.Fatalf("wait returned while index update was pending: %v", err)
+	default:
+	}
+	instance.workspaceMu.Lock()
+	delete(instance.workspacePending, "file.vim")
+	instance.notifyWorkspaceIndexChangedLocked()
+	instance.workspaceMu.Unlock()
+	if err := <-result; err != nil {
+		t.Fatalf("wait result: %v", err)
+	}
+}
+
+func TestWaitForWorkspaceIndexTimesOut(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.workspaceMu.Lock()
+	instance.workspaceRunning = true
+	instance.workspaceMu.Unlock()
+	err := instance.waitForWorkspaceIndex(context.Background())
+	var rpcError *jsonrpc2.Error
+	if !errors.As(err, &rpcError) || rpcError.Code != jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed) || rpcError.Message != "workspace index did not become ready within 1s" {
+		t.Fatalf("timeout error = %#v", err)
 	}
 }
 

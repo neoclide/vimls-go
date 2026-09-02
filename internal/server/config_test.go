@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"go.lsp.dev/protocol"
@@ -272,6 +273,51 @@ func TestTargetVersionFromSettings(t *testing.T) {
 			}
 			if (warning != "") != test.wantWarning {
 				t.Fatalf("warning = %q", warning)
+			}
+		})
+	}
+}
+
+func TestWorkspaceRebuildDebounceFromOptions(t *testing.T) {
+	tests := []struct {
+		name        string
+		raw         any
+		want        time.Duration
+		wantWarning bool
+	}{
+		{name: "absent", raw: map[string]any{}, want: defaultWorkspaceRebuildDebounce},
+		{name: "milliseconds", raw: []byte(`{"workspaceRebuildDebounce":250}`), want: 250 * time.Millisecond},
+		{name: "disabled", raw: map[string]any{"workspaceRebuildDebounce": float64(0)}, want: 0},
+		{name: "invalid", raw: map[string]any{"workspaceRebuildDebounce": "fast"}, want: defaultWorkspaceRebuildDebounce, wantWarning: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			delay, warning := workspaceRebuildDebounceFromOptions(test.raw)
+			if delay != test.want || (warning != "") != test.wantWarning {
+				t.Fatalf("delay=%s warning=%q", delay, warning)
+			}
+		})
+	}
+}
+
+func TestWorkspaceRebuildDebounceFromSettings(t *testing.T) {
+	previous := 250 * time.Millisecond
+	tests := []struct {
+		name        string
+		settings    string
+		want        time.Duration
+		wantWarning bool
+	}{
+		{name: "empty", settings: `{}`, want: previous},
+		{name: "direct", settings: `{"workspaceRebuildDebounce":50}`, want: 50 * time.Millisecond},
+		{name: "nested", settings: `{"vimls":{"workspaceRebuildDebounce":0}}`, want: 0},
+		{name: "invalid", settings: `{"workspaceRebuildDebounce":-1}`, want: previous, wantWarning: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			delay, warning := workspaceRebuildDebounceFromSettings([]byte(test.settings), previous)
+			if delay != test.want || (warning != "") != test.wantWarning {
+				t.Fatalf("delay=%s warning=%q", delay, warning)
 			}
 		})
 	}

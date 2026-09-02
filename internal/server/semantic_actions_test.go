@@ -34,6 +34,28 @@ func TestSemanticTokensFullClassifiesSyntaxAndBoundSymbols(t *testing.T) {
 	}
 }
 
+func TestSemanticTokensAndInlayHintRejectDuringWorkspaceIndexWork(t *testing.T) {
+	for _, name := range []string{"rebuild", "pending"} {
+		t.Run(name, func(t *testing.T) {
+			instance := New(nil, nil, nil)
+			t.Cleanup(instance.stopAnalysis)
+			instance.workspaceMu.Lock()
+			if name == "rebuild" {
+				instance.workspaceRunning = true
+			} else {
+				instance.workspacePending["file.vim"] = struct{}{}
+			}
+			instance.workspaceMu.Unlock()
+			if _, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{}); !errors.Is(err, protocol.ErrContentModified) {
+				t.Fatalf("semantic tokens error = %v", err)
+			}
+			if _, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{}); !errors.Is(err, protocol.ErrContentModified) {
+				t.Fatalf("inlay hints error = %v", err)
+			}
+		})
+	}
+}
+
 func TestSemanticTokensClassifyLegacyNamesAndPinnedBuiltins(t *testing.T) {
 	source := "let g:value = &ignorecase\necho g:value @a $HOME v:version len([])\ncommand! Build echo 1\nBuild\nfunction! s:Run(arg)\n  echo a:arg\n  call <SID>Run(1)\nendfunction\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

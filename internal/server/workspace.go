@@ -9,14 +9,19 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
+	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+const defaultWorkspaceRebuildDebounce = 100 * time.Millisecond
+const workspaceIndexWaitTimeout = time.Second
 
 type DidChangeRuntimepathParams struct {
 	Runtimepath []string `json:"runtimepath"`
@@ -151,6 +156,7 @@ func (s *Server) resetWorkspaceGraphLocked() {
 	s.workspacePending = make(map[string]struct{})
 	s.workspaceDependents = make(map[string]struct{})
 	s.workspaceBuilt = false
+	s.notifyWorkspaceIndexChangedLocked()
 }
 
 func workspaceIndexRoots(workspaceRoots, runtimePaths []string) []string {
@@ -174,11 +180,20 @@ func (s *Server) refreshWorkspaceResolver() {
 func (s *Server) scheduleWorkspaceRebuild() {
 	s.workspaceMu.Lock()
 	s.workspaceRevision++
-	if s.workspaceRunning || s.analysisStopped || s.analysisContext.Err() != nil {
+	if s.analysisStopped || s.analysisContext.Err() != nil {
+		s.workspaceMu.Unlock()
+		return
+	}
+	if s.workspaceRunning {
+		select {
+		case s.workspaceWake <- struct{}{}:
+		default:
+		}
 		s.workspaceMu.Unlock()
 		return
 	}
 	s.workspaceRunning = true
+	s.notifyWorkspaceIndexChangedLocked()
 	s.workspaceWG.Add(1)
 	s.workspaceMu.Unlock()
 	go s.workspaceIndexWorker()
@@ -186,7 +201,23 @@ func (s *Server) scheduleWorkspaceRebuild() {
 
 func (s *Server) workspaceIndexWorker() {
 	defer s.workspaceWG.Done()
+	timer := time.NewTimer(s.workspaceRebuildDelay())
+	defer timer.Stop()
+	if s.beforeWorkspaceRebuildDelayForTest != nil {
+		s.beforeWorkspaceRebuildDelayForTest()
+	}
 	for {
+		select {
+		case <-s.analysisContext.Done():
+			s.workspaceMu.Lock()
+			s.finishWorkspaceRebuildLocked()
+			s.workspaceMu.Unlock()
+			return
+		case <-s.workspaceWake:
+			s.resetWorkspaceRebuildTimer(timer)
+			continue
+		case <-timer.C:
+		}
 		s.workspaceMu.Lock()
 		revision := s.workspaceRevision
 		workspaceRoots := append([]string(nil), s.workspaceRoots...)
@@ -205,7 +236,7 @@ func (s *Server) workspaceIndexWorker() {
 		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, runtimePaths, resolver, openSnapshots)
 		s.workspaceMu.Lock()
 		if s.analysisStopped || s.analysisContext.Err() != nil {
-			s.workspaceRunning = false
+			s.finishWorkspaceRebuildLocked()
 			s.workspaceMu.Unlock()
 			return
 		}
@@ -214,11 +245,12 @@ func (s *Server) workspaceIndexWorker() {
 		s.publishMu.Lock()
 		if !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
 			s.publishMu.Unlock()
+			s.resetWorkspaceRebuildTimer(timer)
 			continue
 		}
 		s.workspaceMu.Lock()
 		if s.analysisStopped || s.analysisContext.Err() != nil {
-			s.workspaceRunning = false
+			s.finishWorkspaceRebuildLocked()
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
 			return
@@ -226,6 +258,7 @@ func (s *Server) workspaceIndexWorker() {
 		if revision != s.workspaceRevision {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
+			s.resetWorkspaceRebuildTimer(timer)
 			continue
 		}
 		graph.AdvanceRevision(s.workspaceGraphView.Revision())
@@ -237,7 +270,7 @@ func (s *Server) workspaceIndexWorker() {
 		s.workspacePending = make(map[string]struct{})
 		s.workspaceDependents = make(map[string]struct{})
 		s.workspaceBuilt = true
-		s.workspaceRunning = false
+		s.finishWorkspaceRebuildLocked()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
 		for _, warning := range warnings {
@@ -248,6 +281,72 @@ func (s *Server) workspaceIndexWorker() {
 		}
 		return
 	}
+}
+
+func (s *Server) finishWorkspaceRebuildLocked() {
+	if !s.workspaceRunning {
+		return
+	}
+	s.workspaceRunning = false
+	s.notifyWorkspaceIndexChangedLocked()
+}
+
+func (s *Server) workspaceIndexBusyLocked() bool {
+	return s.workspaceRunning || len(s.workspacePending) > 0
+}
+
+func (s *Server) notifyWorkspaceIndexChangedLocked() {
+	close(s.workspaceChanged)
+	s.workspaceChanged = make(chan struct{})
+}
+
+// waitForWorkspaceIndex blocks while workspace index work is active.
+func (s *Server) waitForWorkspaceIndex(ctx context.Context) error {
+	timer := time.NewTimer(workspaceIndexWaitTimeout)
+	defer timer.Stop()
+	for {
+		s.workspaceMu.Lock()
+		busy := s.workspaceIndexBusyLocked()
+		changed := s.workspaceChanged
+		s.workspaceMu.Unlock()
+		if !busy {
+			return nil
+		}
+		if s.beforeWorkspaceIndexWaitForTest != nil {
+			s.beforeWorkspaceIndexWaitForTest()
+		}
+		select {
+		case <-ctx.Done():
+			return protocol.ErrRequestCancelled
+		case <-s.analysisContext.Done():
+			return protocol.ErrRequestCancelled
+		case <-timer.C:
+			return jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "workspace index did not become ready within 1s")
+		case <-changed:
+		}
+	}
+}
+
+func (s *Server) workspaceIndexRebuilding() bool {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	return s.workspaceIndexBusyLocked()
+}
+
+func (s *Server) workspaceRebuildDelay() time.Duration {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	return s.workspaceDelay
+}
+
+func (s *Server) resetWorkspaceRebuildTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(s.workspaceRebuildDelay())
 }
 
 func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
@@ -619,6 +718,7 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 		s.workspaceGraphView = s.workspaceGraph.Snapshot()
 		snapshot := s.workspaceAnalysisSnapshotLocked(path, nil)
 		dependents := s.readyWorkspaceDependentsLocked()
+		s.notifyWorkspaceIndexChangedLocked()
 		s.workspaceMu.Unlock()
 		return snapshot, dependents
 	}
@@ -667,6 +767,7 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 	s.workspaceGraphView = s.workspaceGraph.Snapshot()
 	snapshot := s.workspaceAnalysisSnapshotLocked(path, file)
 	dependents := s.readyWorkspaceDependentsLocked()
+	s.notifyWorkspaceIndexChangedLocked()
 	s.workspaceMu.Unlock()
 	return snapshot, dependents
 }
@@ -683,6 +784,13 @@ func (s *Server) workspaceIdentityCurrentLocked(identity workspaceIdentity) bool
 	return identity == s.workspaceIdentityLocked()
 }
 
+// workspaceIndexReadyLocked reports whether workspaceIndex can be queried.
+// It may still be incomplete, so callers that require a complete index must
+// additionally check workspaceIndex.Complete().
+func (s *Server) workspaceIndexReadyLocked() bool {
+	return s.workspaceBuilt && len(s.workspacePending) == 0 && s.workspaceIndex != nil
+}
+
 func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File) workspaceAnalysisSnapshot {
 	snapshot := workspaceAnalysisSnapshot{
 		identity: s.workspaceIdentityLocked(), path: path, graph: s.workspaceGraphView,
@@ -696,7 +804,7 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File)
 		snapshot.ready = false
 		return snapshot
 	}
-	if s.workspaceBuilt && len(s.workspacePending) == 0 && s.workspaceIndex != nil {
+	if s.workspaceIndexReadyLocked() {
 		snapshot.globalDiagnostics = s.workspaceIndex.GlobalNameConflictDiagnostics(path, file)
 		if s.workspaceIndex.Complete() {
 			snapshot.indexComplete = true
@@ -744,6 +852,7 @@ func (s *Server) removeWorkspaceURI(documentURI string) {
 		s.workspaceGraphView = s.workspaceGraph.Snapshot()
 		s.workspacePending[path] = struct{}{}
 		s.workspaceRevision++
+		s.notifyWorkspaceIndexChangedLocked()
 	}
 	s.workspaceMu.Unlock()
 }
@@ -865,6 +974,7 @@ func (s *Server) installWorkspaceRestore(restore workspaceRestore, file *syntax.
 	s.workspaceGraphView = s.workspaceGraph.Snapshot()
 	s.workspaceRevision++
 	dependents := s.readyWorkspaceDependentsLocked()
+	s.notifyWorkspaceIndexChangedLocked()
 	s.workspaceMu.Unlock()
 	s.publishMu.Unlock()
 	return dependents

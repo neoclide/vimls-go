@@ -541,7 +541,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 			s.workspaceMu.Lock()
-			if s.workspaceBuilt && len(s.workspacePending) == 0 && s.workspaceIndex != nil && s.workspaceIndex.Complete() {
+			if s.workspaceIndexReadyLocked() && s.workspaceIndex.Complete() {
 				for _, name := range s.workspaceIndex.UserCommandNames() {
 					if !strings.HasPrefix(name, selection.prefix) {
 						continue

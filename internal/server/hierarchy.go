@@ -36,6 +36,9 @@ type hierarchyItemData struct {
 }
 
 func (s *Server) PrepareTypeHierarchy(ctx context.Context, params *protocol.TypeHierarchyPrepareParams) ([]protocol.TypeHierarchyItem, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil || snapshot == nil || file == nil {
@@ -83,6 +86,9 @@ func (s *Server) PrepareTypeHierarchy(ctx context.Context, params *protocol.Type
 }
 
 func (s *Server) Supertypes(ctx context.Context, params *protocol.TypeHierarchySupertypesParams) ([]protocol.TypeHierarchyItem, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		state := s.captureWorkspaceNavigationState()
 		target, encoding, err := s.validateTypeHierarchyItem(params.Item, state)
@@ -129,6 +135,9 @@ func (s *Server) Supertypes(ctx context.Context, params *protocol.TypeHierarchyS
 }
 
 func (s *Server) Subtypes(ctx context.Context, params *protocol.TypeHierarchySubtypesParams) ([]protocol.TypeHierarchyItem, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		state := s.captureWorkspaceNavigationState()
 		target, encoding, err := s.validateTypeHierarchyItem(params.Item, state)
@@ -185,6 +194,9 @@ func (s *Server) Subtypes(ctx context.Context, params *protocol.TypeHierarchySub
 }
 
 func (s *Server) Implementation(ctx context.Context, params *protocol.ImplementationParams) (protocol.DefinitionResult, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil || snapshot == nil || file == nil {
@@ -414,7 +426,7 @@ func (s *Server) descendantsOf(ctx context.Context, state workspaceNavigationSna
 	return result, used, nil
 }
 
-func (s *Server) memberOwner(state workspaceNavigationSnapshot, member hierarchySymbol) (hierarchySymbol, bool) {
+func (s *Server) memberOwner(_ workspaceNavigationSnapshot, member hierarchySymbol) (hierarchySymbol, bool) {
 	if member.fact.OwnerSelectionRange.Start >= member.fact.OwnerSelectionRange.End {
 		return hierarchySymbol{}, false
 	}
@@ -580,6 +592,9 @@ func equalValueType(left, right analysis.ValueType) bool {
 }
 
 func (s *Server) PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) ([]protocol.CallHierarchyItem, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil || snapshot == nil || file == nil {
@@ -627,6 +642,9 @@ func (s *Server) PrepareCallHierarchy(ctx context.Context, params *protocol.Call
 }
 
 func (s *Server) OutgoingCalls(ctx context.Context, params *protocol.CallHierarchyOutgoingCallsParams) ([]protocol.CallHierarchyOutgoingCall, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		state := s.captureWorkspaceNavigationState()
 		target, encoding, err := s.validateCallHierarchyItem(params.Item, state)
@@ -696,6 +714,9 @@ func (s *Server) OutgoingCalls(ctx context.Context, params *protocol.CallHierarc
 }
 
 func (s *Server) IncomingCalls(ctx context.Context, params *protocol.CallHierarchyIncomingCallsParams) ([]protocol.CallHierarchyIncomingCall, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		state := s.captureWorkspaceNavigationState()
 		target, encoding, err := s.validateCallHierarchyItem(params.Item, state)

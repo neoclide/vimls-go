@@ -393,6 +393,67 @@ func targetVersionFromSettings(raw []byte, previous TargetVersion) (TargetVersio
 	return version, ""
 }
 
+func workspaceRebuildDebounceFromOptions(raw any) (time.Duration, string) {
+	if raw == nil {
+		return defaultWorkspaceRebuildDebounce, ""
+	}
+	var options map[string]any
+	switch value := raw.(type) {
+	case map[string]any:
+		options = value
+	case []byte:
+		if len(value) == 0 || string(value) == "null" {
+			return defaultWorkspaceRebuildDebounce, ""
+		}
+		if err := json.Unmarshal(value, &options); err != nil {
+			return defaultWorkspaceRebuildDebounce, "vimls: initializationOptions must be an object; using workspaceRebuildDebounce 100ms"
+		}
+	default:
+		return defaultWorkspaceRebuildDebounce, "vimls: initializationOptions must be an object; using workspaceRebuildDebounce 100ms"
+	}
+	value, exists := options["workspaceRebuildDebounce"]
+	if !exists {
+		return defaultWorkspaceRebuildDebounce, ""
+	}
+	delay, ok := workspaceRebuildDebounce(value)
+	if !ok {
+		return defaultWorkspaceRebuildDebounce, "vimls: workspaceRebuildDebounce must be a non-negative integer in milliseconds; using 100ms"
+	}
+	return delay, ""
+}
+
+func workspaceRebuildDebounceFromSettings(raw []byte, previous time.Duration) (time.Duration, string) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return previous, ""
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return previous, "vimls: workspace settings must be an object; retaining workspaceRebuildDebounce"
+	}
+	value, exists := settings["workspaceRebuildDebounce"]
+	if nested, ok := settings["vimls"].(map[string]any); ok {
+		if nestedValue, nestedExists := nested["workspaceRebuildDebounce"]; nestedExists {
+			value, exists = nestedValue, true
+		}
+	}
+	if !exists {
+		return previous, ""
+	}
+	delay, ok := workspaceRebuildDebounce(value)
+	if !ok {
+		return previous, "vimls: workspaceRebuildDebounce must be a non-negative integer in milliseconds; retaining previous value"
+	}
+	return delay, ""
+}
+
+func workspaceRebuildDebounce(value any) (time.Duration, bool) {
+	milliseconds, ok := value.(float64)
+	if !ok || milliseconds < 0 || milliseconds > float64((1<<63-1)/int64(time.Millisecond)) || milliseconds != float64(int64(milliseconds)) {
+		return 0, false
+	}
+	return time.Duration(milliseconds) * time.Millisecond, true
+}
+
 func unresolvedSeverityFromSettings(raw []byte, previous syntax.DiagnosticSeverity) (syntax.DiagnosticSeverity, string) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return previous, ""
