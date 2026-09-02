@@ -18,6 +18,7 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 | Signature help | Built-in functions and statically resolved user functions, imported functions, function values, methods and constructors. |
 | Navigation | Definition, declaration, references, document highlights and document links for statically resolved local, imported, global and autoload symbols. |
 | Hierarchies and implementations | Direct type supertypes/subtypes, interface and abstract-class implementations, compatible member providers, and incoming/outgoing calls for statically resolved named callables. |
+| Code Lens | Reference counts for named Legacy and Vim9 functions, methods and constructors. Implementation counts are limited to Vim9 abstract-class and interface methods. Clickable navigation depends on client support for `editor.action.showReferences`. |
 | Symbols and structure | Document symbols, workspace symbols, folding ranges and selection ranges. |
 | Safe editing | Prepare rename, rename, semantic highlighting, inferred-type inlay hints and a small set of syntax quick fixes. |
 | Formatting | Source-preserving indentation for a whole document or selected range. Only proven leading whitespace is changed. |

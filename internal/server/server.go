@@ -117,6 +117,10 @@ type Server struct {
 	inlayHintRefreshGeneration uint64
 	inlayHintRefreshRunning    bool
 
+	codeLensRefreshSupport    bool
+	codeLensRefreshGeneration uint64
+	codeLensRefreshRunning    bool
+
 	workspaceProgressID         uint64
 	cancellations               map[jsonrpc2.ID]context.CancelFunc
 	documents                   *workspace.Documents
@@ -421,6 +425,8 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentRename,
 		protocol.MethodTextDocumentSemanticTokensFull,
 		protocol.MethodTextDocumentSemanticTokensFullDelta,
+		protocol.MethodTextDocumentCodeLens,
+		protocol.MethodCodeLensResolve,
 		protocol.MethodTextDocumentCodeAction,
 		protocol.MethodTextDocumentInlayHint,
 		protocol.MethodTextDocumentFormatting,
@@ -467,6 +473,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	diagnosticRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Diagnostics != nil && params.Capabilities.Workspace.Diagnostics.RefreshSupport != nil && *params.Capabilities.Workspace.Diagnostics.RefreshSupport
 	semanticTokensRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.SemanticTokens != nil && params.Capabilities.Workspace.SemanticTokens.RefreshSupport != nil && *params.Capabilities.Workspace.SemanticTokens.RefreshSupport
 	inlayHintRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.InlayHint != nil && params.Capabilities.Workspace.InlayHint.RefreshSupport != nil && *params.Capabilities.Workspace.InlayHint.RefreshSupport
+	codeLensRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.CodeLens != nil && params.Capabilities.Workspace.CodeLens.RefreshSupport != nil && *params.Capabilities.Workspace.CodeLens.RefreshSupport
 	s.mu.Lock()
 	s.pendingWarning = ""
 	for _, warning := range []string{runtimepathWarning} {
@@ -491,6 +498,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.diagnosticRefreshSupport = diagnosticRefreshSupport
 	s.semanticTokensRefreshSupport = semanticTokensRefreshSupport
 	s.inlayHintRefreshSupport = inlayHintRefreshSupport
+	s.codeLensRefreshSupport = codeLensRefreshSupport
 	s.mu.Unlock()
 	s.workspaceMu.Lock()
 	s.workspaceDelay = defaultWorkspaceRebuildDebounce
@@ -502,6 +510,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	completionResolve := true
 	documentLinkResolve := false
 	semanticTokensDelta := true
+	codeLensResolve := true
 	renamePrepare := true
 	var renameProvider protocol.RenameProvider = protocol.Boolean(true)
 	if prepareRename {
@@ -535,6 +544,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 			Legend: protocol.SemanticTokensLegend{TokenTypes: append([]string(nil), semanticTokenTypes...), TokenModifiers: append([]string(nil), semanticTokenModifiers...)},
 			Full:   &protocol.SemanticTokensFullDelta{Delta: &semanticTokensDelta},
 		},
+		CodeLensProvider:   &protocol.CodeLensOptions{ResolveProvider: &codeLensResolve},
 		CodeActionProvider: codeActionProvider,
 		InlayHintProvider:  protocol.Boolean(true),
 		Workspace: &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
@@ -1041,6 +1051,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if ok && s.publishSyntax(work, file, identity) {
 		s.scheduleSemanticTokensRefresh()
 		s.scheduleInlayHintRefresh()
+		s.scheduleCodeLensRefresh()
 	}
 }
 

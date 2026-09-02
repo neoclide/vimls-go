@@ -82,4 +82,7 @@ func TestMissingDocumentRequestMatrix(t *testing.T) {
 	if got, err := s.InlayHint(ctx, &protocol.InlayHintParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || len(got) != 0 {
 		t.Errorf("hints = %#v, %v", got, err)
 	}
+	if got, err := s.CodeLens(ctx, &protocol.CodeLensParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || len(got) != 0 {
+		t.Errorf("code lens = %#v, %v", got, err)
+	}
 }

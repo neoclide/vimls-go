@@ -21,6 +21,8 @@ type refreshClient struct {
 	semanticTokensRelease chan struct{}
 	inlayHintCalls        chan struct{}
 	inlayHintRelease      chan struct{}
+	codeLensCalls         chan struct{}
+	codeLensRelease       chan struct{}
 }
 
 func newRefreshClient() *refreshClient {
@@ -29,6 +31,8 @@ func newRefreshClient() *refreshClient {
 		semanticTokensRelease: make(chan struct{}, 2),
 		inlayHintCalls:        make(chan struct{}, 2),
 		inlayHintRelease:      make(chan struct{}, 2),
+		codeLensCalls:         make(chan struct{}, 2),
+		codeLensRelease:       make(chan struct{}, 2),
 	}
 }
 
@@ -60,12 +64,27 @@ func (c *refreshClient) InlayHintRefresh(ctx context.Context) error {
 	}
 }
 
-func initializeRefreshServer(t *testing.T, instance *Server, semanticTokensSupport, inlayHintSupport *bool) {
+func (c *refreshClient) CodeLensRefresh(ctx context.Context) error {
+	select {
+	case c.codeLensCalls <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-c.codeLensRelease:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func initializeRefreshServer(t *testing.T, instance *Server, semanticTokensSupport, inlayHintSupport, codeLensSupport *bool) {
 	t.Helper()
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{
 		Workspace: &protocol.WorkspaceClientCapabilities{
 			SemanticTokens: &protocol.SemanticTokensWorkspaceClientCapabilities{RefreshSupport: semanticTokensSupport},
 			InlayHint:      &protocol.InlayHintWorkspaceClientCapabilities{RefreshSupport: inlayHintSupport},
+			CodeLens:       &protocol.CodeLensWorkspaceClientCapabilities{RefreshSupport: codeLensSupport},
 		},
 	}}); err != nil {
 		t.Fatal(err)
@@ -94,33 +113,36 @@ func TestRefreshCapabilityGuard(t *testing.T) {
 	falseValue := false
 	trueValue := true
 	for _, test := range []struct {
-		name                                string
-		semanticTokensSupport, inlaySupport *bool
-		wantSemanticTokens, wantInlayHints  bool
+		name                                                 string
+		semanticTokensSupport, inlaySupport, codeLensSupport *bool
+		wantSemanticTokens, wantInlayHints, wantCodeLenses   bool
 	}{
 		{name: "nil"},
 		{name: "false", semanticTokensSupport: &falseValue, inlaySupport: &falseValue},
-		{name: "semantic tokens only", semanticTokensSupport: &trueValue, inlaySupport: &falseValue, wantSemanticTokens: true},
-		{name: "inlay hints only", semanticTokensSupport: &falseValue, inlaySupport: &trueValue, wantInlayHints: true},
-		{name: "true", semanticTokensSupport: &trueValue, inlaySupport: &trueValue, wantSemanticTokens: true, wantInlayHints: true},
+		{name: "semantic tokens only", semanticTokensSupport: &trueValue, inlaySupport: &falseValue, codeLensSupport: &falseValue, wantSemanticTokens: true},
+		{name: "inlay hints only", semanticTokensSupport: &falseValue, inlaySupport: &trueValue, codeLensSupport: &falseValue, wantInlayHints: true},
+		{name: "code lens only", semanticTokensSupport: &falseValue, inlaySupport: &falseValue, codeLensSupport: &trueValue, wantCodeLenses: true},
+		{name: "true", semanticTokensSupport: &trueValue, inlaySupport: &trueValue, codeLensSupport: &trueValue, wantSemanticTokens: true, wantInlayHints: true, wantCodeLenses: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			instance := New(nil, nil, io.Discard)
 			t.Cleanup(instance.stopAnalysis)
 			client := newRefreshClient()
 			instance.client = client
-			initializeRefreshServer(t, instance, test.semanticTokensSupport, test.inlaySupport)
+			initializeRefreshServer(t, instance, test.semanticTokensSupport, test.inlaySupport, test.codeLensSupport)
 
 			instance.mu.Lock()
 			semanticTokensSupported := instance.semanticTokensRefreshSupport
 			inlayHintsSupported := instance.inlayHintRefreshSupport
+			codeLensesSupported := instance.codeLensRefreshSupport
 			instance.mu.Unlock()
-			if semanticTokensSupported != test.wantSemanticTokens || inlayHintsSupported != test.wantInlayHints {
-				t.Fatalf("refresh support = semantic tokens %t, inlay hints %t; want semantic tokens %t, inlay hints %t", semanticTokensSupported, inlayHintsSupported, test.wantSemanticTokens, test.wantInlayHints)
+			if semanticTokensSupported != test.wantSemanticTokens || inlayHintsSupported != test.wantInlayHints || codeLensesSupported != test.wantCodeLenses {
+				t.Fatalf("refresh support = semantic tokens %t, inlay hints %t, code lenses %t; want semantic tokens %t, inlay hints %t, code lenses %t", semanticTokensSupported, inlayHintsSupported, codeLensesSupported, test.wantSemanticTokens, test.wantInlayHints, test.wantCodeLenses)
 			}
 
 			instance.scheduleSemanticTokensRefresh()
 			instance.scheduleInlayHintRefresh()
+			instance.scheduleCodeLensRefresh()
 			if test.wantSemanticTokens {
 				waitForRefresh(t, client.semanticTokensCalls)
 				client.semanticTokensRelease <- struct{}{}
@@ -133,6 +155,12 @@ func TestRefreshCapabilityGuard(t *testing.T) {
 			} else {
 				assertNoRefresh(t, client.inlayHintCalls)
 			}
+			if test.wantCodeLenses {
+				waitForRefresh(t, client.codeLensCalls)
+				client.codeLensRelease <- struct{}{}
+			} else {
+				assertNoRefresh(t, client.codeLensCalls)
+			}
 		})
 	}
 }
@@ -143,24 +171,31 @@ func TestRefreshCoalescesRequests(t *testing.T) {
 	t.Cleanup(instance.stopAnalysis)
 	client := newRefreshClient()
 	instance.client = client
-	initializeRefreshServer(t, instance, &value, &value)
+	initializeRefreshServer(t, instance, &value, &value, &value)
 
 	instance.scheduleSemanticTokensRefresh()
 	instance.scheduleInlayHintRefresh()
+	instance.scheduleCodeLensRefresh()
 	waitForRefresh(t, client.semanticTokensCalls)
 	waitForRefresh(t, client.inlayHintCalls)
+	waitForRefresh(t, client.codeLensCalls)
 	for range 3 {
 		instance.scheduleSemanticTokensRefresh()
 		instance.scheduleInlayHintRefresh()
+		instance.scheduleCodeLensRefresh()
 	}
 	client.semanticTokensRelease <- struct{}{}
 	client.inlayHintRelease <- struct{}{}
+	client.codeLensRelease <- struct{}{}
 	waitForRefresh(t, client.semanticTokensCalls)
 	waitForRefresh(t, client.inlayHintCalls)
+	waitForRefresh(t, client.codeLensCalls)
 	client.semanticTokensRelease <- struct{}{}
 	client.inlayHintRelease <- struct{}{}
+	client.codeLensRelease <- struct{}{}
 	assertNoRefresh(t, client.semanticTokensCalls)
 	assertNoRefresh(t, client.inlayHintCalls)
+	assertNoRefresh(t, client.codeLensCalls)
 }
 
 func TestRefreshDoesNotSendAfterShutdown(t *testing.T) {
@@ -169,15 +204,17 @@ func TestRefreshDoesNotSendAfterShutdown(t *testing.T) {
 	t.Cleanup(instance.stopAnalysis)
 	client := newRefreshClient()
 	instance.client = client
-	initializeRefreshServer(t, instance, &value, &value)
+	initializeRefreshServer(t, instance, &value, &value, &value)
 	if err := instance.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
 	instance.scheduleSemanticTokensRefresh()
 	instance.scheduleInlayHintRefresh()
+	instance.scheduleCodeLensRefresh()
 	assertNoRefresh(t, client.semanticTokensCalls)
 	assertNoRefresh(t, client.inlayHintCalls)
+	assertNoRefresh(t, client.codeLensCalls)
 }
 
 func TestDidOpenSchedulesInitialRefreshAfterParsing(t *testing.T) {
@@ -186,7 +223,7 @@ func TestDidOpenSchedulesInitialRefreshAfterParsing(t *testing.T) {
 	t.Cleanup(instance.stopAnalysis)
 	client := newRefreshClient()
 	instance.client = client
-	initializeRefreshServer(t, instance, &value, &value)
+	initializeRefreshServer(t, instance, &value, &value, &value)
 	documentURI := uri.File(filepath.Join(t.TempDir(), "main.vim"))
 	parsing := make(chan struct{})
 	continueParsing := make(chan struct{})
@@ -203,9 +240,11 @@ func TestDidOpenSchedulesInitialRefreshAfterParsing(t *testing.T) {
 	<-parsing
 	assertNoRefresh(t, client.semanticTokensCalls)
 	assertNoRefresh(t, client.inlayHintCalls)
+	assertNoRefresh(t, client.codeLensCalls)
 	close(continueParsing)
 	waitForRefresh(t, client.semanticTokensCalls)
 	waitForRefresh(t, client.inlayHintCalls)
+	waitForRefresh(t, client.codeLensCalls)
 	instance.publishMu.Lock()
 	parsed := instance.parsed[documentURI.String()]
 	instance.publishMu.Unlock()
@@ -214,6 +253,7 @@ func TestDidOpenSchedulesInitialRefreshAfterParsing(t *testing.T) {
 	}
 	client.semanticTokensRelease <- struct{}{}
 	client.inlayHintRelease <- struct{}{}
+	client.codeLensRelease <- struct{}{}
 }
 
 func TestSingleDocumentAnalysisDoesNotScheduleRefresh(t *testing.T) {
@@ -224,7 +264,7 @@ func TestSingleDocumentAnalysisDoesNotScheduleRefresh(t *testing.T) {
 	t.Cleanup(instance.stopAnalysis)
 	client := newRefreshClient()
 	instance.client = client
-	initializeRefreshServer(t, instance, &value, &value)
+	initializeRefreshServer(t, instance, &value, &value, &value)
 	instance.setWorkspaceRoots([]string{root})
 	instance.workspaceMu.Lock()
 	instance.workspaceBuilt = true
@@ -246,6 +286,7 @@ func TestSingleDocumentAnalysisDoesNotScheduleRefresh(t *testing.T) {
 	}
 	assertNoRefresh(t, client.semanticTokensCalls)
 	assertNoRefresh(t, client.inlayHintCalls)
+	assertNoRefresh(t, client.codeLensCalls)
 }
 
 func TestDependentAnalysisDoesNotScheduleRefresh(t *testing.T) {
@@ -256,7 +297,7 @@ func TestDependentAnalysisDoesNotScheduleRefresh(t *testing.T) {
 	t.Cleanup(instance.stopAnalysis)
 	client := newRefreshClient()
 	instance.client = client
-	initializeRefreshServer(t, instance, &value, &value)
+	initializeRefreshServer(t, instance, &value, &value, &value)
 	documentURI := uri.File(path)
 	instance.documents.Open(documentURI.String(), 1, "vim9script\nvar Value = 1\n")
 	instance.analysisMu.Lock()
@@ -272,6 +313,7 @@ func TestDependentAnalysisDoesNotScheduleRefresh(t *testing.T) {
 	}
 	assertNoRefresh(t, client.semanticTokensCalls)
 	assertNoRefresh(t, client.inlayHintCalls)
+	assertNoRefresh(t, client.codeLensCalls)
 }
 
 func TestWorkspaceIndexSchedulesRefresh(t *testing.T) {
@@ -291,6 +333,7 @@ func TestWorkspaceIndexSchedulesRefresh(t *testing.T) {
 		Capabilities: protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{
 			SemanticTokens: &protocol.SemanticTokensWorkspaceClientCapabilities{RefreshSupport: &value},
 			InlayHint:      &protocol.InlayHintWorkspaceClientCapabilities{RefreshSupport: &value},
+			CodeLens:       &protocol.CodeLensWorkspaceClientCapabilities{RefreshSupport: &value},
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -300,6 +343,8 @@ func TestWorkspaceIndexSchedulesRefresh(t *testing.T) {
 	}
 	waitForRefresh(t, client.semanticTokensCalls)
 	waitForRefresh(t, client.inlayHintCalls)
+	waitForRefresh(t, client.codeLensCalls)
 	client.semanticTokensRelease <- struct{}{}
 	client.inlayHintRelease <- struct{}{}
+	client.codeLensRelease <- struct{}{}
 }

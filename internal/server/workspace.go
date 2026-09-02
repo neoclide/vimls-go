@@ -298,12 +298,16 @@ func (s *Server) workspaceIndexWorker() {
 		s.workspacePending = make(map[string]struct{})
 		s.workspaceDependents = make(map[string]struct{})
 		s.workspaceBuilt = true
+		indexComplete := index.Complete()
 		s.finishWorkspaceRebuildLocked()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
 		s.scheduleDiagnosticRefresh()
 		s.scheduleSemanticTokensRefresh()
 		s.scheduleInlayHintRefresh()
+		if indexComplete {
+			s.scheduleCodeLensRefresh()
+		}
 		s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
 		for _, warning := range warnings {
 			_ = s.sendWarning(s.analysisContext, warning)

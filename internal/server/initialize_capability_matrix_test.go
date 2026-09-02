@@ -36,6 +36,9 @@ func TestInitializeAdvertisesNegotiatedOptionalCapabilities(t *testing.T) {
 	if result.Capabilities.PositionEncoding == "" || result.Capabilities.Workspace == nil {
 		t.Fatalf("capabilities = %#v", result.Capabilities)
 	}
+	if result.Capabilities.CodeLensProvider == nil || result.Capabilities.CodeLensProvider.ResolveProvider == nil || !*result.Capabilities.CodeLensProvider.ResolveProvider {
+		t.Fatalf("code lens provider = %#v", result.Capabilities.CodeLensProvider)
+	}
 	s.mu.Lock()
 	if !s.watchDynamicRegistration || !s.watchRelativePatterns || !s.workspaceConfiguration || s.pendingWarning == "" {
 		t.Fatalf("server state = %#v", s)

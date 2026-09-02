@@ -222,6 +222,12 @@ indexed source, and incomplete or oversized results fail explicitly instead of
 returning partial data. All seven methods and item-data round trips are covered
 by the stdio subprocess test.
 
+Code Lens reports reference counts for named Legacy and Vim9 functions,
+methods and constructors, and implementation counts for Vim9 abstract-class
+and interface methods. Lenses resolve lazily against the current document and
+complete workspace index. Clickable navigation depends on client support for
+`editor.action.showReferences`.
+
 ## M7: compatibility, performance, and 1.0 release
 
 Deliver:
@@ -262,6 +268,8 @@ Windows on amd64 and arm64 through `tools/release`, with SHA-256 checksums.
 - Source-preserving document and range Formatting.
 - Type hierarchy, implementation lookup and call hierarchy for statically
   resolved symbols.
+- Reference Code Lens for named callables and implementation Code Lens for
+  Vim9 abstract-class and interface methods.
 
 Embedded-language delegation, general pretty-printing and nonstandard client
 extensions are post-1.0 unless real client validation shows one is required for

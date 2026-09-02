@@ -81,3 +81,44 @@ func (s *Server) runInlayHintRefresh() {
 		s.mu.Unlock()
 	}
 }
+
+// scheduleCodeLensRefresh merges changes occurring while the client request is
+// in flight; all client calls are deliberately outside server locks.
+func (s *Server) scheduleCodeLensRefresh() {
+	s.mu.Lock()
+	if !s.codeLensRefreshSupport || s.state == stateShutdown || s.client == nil {
+		s.mu.Unlock()
+		return
+	}
+	s.codeLensRefreshGeneration++
+	if s.codeLensRefreshRunning {
+		s.mu.Unlock()
+		return
+	}
+	s.codeLensRefreshRunning = true
+	s.mu.Unlock()
+	go s.runCodeLensRefresh()
+}
+
+func (s *Server) runCodeLensRefresh() {
+	for {
+		s.mu.Lock()
+		if s.state == stateShutdown || !s.codeLensRefreshSupport || s.client == nil {
+			s.codeLensRefreshRunning = false
+			s.mu.Unlock()
+			return
+		}
+		client, generation := s.client, s.codeLensRefreshGeneration
+		s.mu.Unlock()
+		if err := client.CodeLensRefresh(s.analysisContext); err != nil && s.analysisContext.Err() == nil {
+			s.logf("vimls: refresh code lenses: %v", err)
+		}
+		s.mu.Lock()
+		if s.codeLensRefreshGeneration == generation {
+			s.codeLensRefreshRunning = false
+			s.mu.Unlock()
+			return
+		}
+		s.mu.Unlock()
+	}
+}

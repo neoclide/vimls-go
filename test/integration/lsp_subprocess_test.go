@@ -102,7 +102,7 @@ endfunction
 	reader := jsonrpc.NewReader(stdout)
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"completion":{"completionItem":{"snippetSupport":true}},"hover":{"contentFormat":["markdown"]},"signatureHelp":{"signatureInformation":{"documentationFormat":["plaintext"]}},"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"full":{"delta":true}`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"implementationProvider":true`) || !strings.Contains(string(initialize["result"]), `"callHierarchyProvider":true`) || !strings.Contains(string(initialize["result"]), `"typeHierarchyProvider":true`) {
+	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"full":{"delta":true}`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"codeLensProvider":{"resolveProvider":true}`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"implementationProvider":true`) || !strings.Contains(string(initialize["result"]), `"callHierarchyProvider":true`) || !strings.Contains(string(initialize["result"]), `"typeHierarchyProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
@@ -204,6 +204,28 @@ endfunction
 	references := readJSON(t, reader)
 	if string(references["id"]) != "5" || !strings.Contains(string(references["result"]), `"line":1,"character":4`) || !strings.Contains(string(references["result"]), `"line":5,"character":11`) {
 		t.Fatalf("references = %s", references)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":50,"method":"textDocument/codeLens","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
+	codeLenses := readResponse(t, reader, "50")
+	var unresolvedCodeLenses []json.RawMessage
+	if err := json.Unmarshal(codeLenses["result"], &unresolvedCodeLenses); err != nil {
+		t.Fatalf("decode code lenses: %v; response = %s", err, codeLenses)
+	}
+	var addCodeLens json.RawMessage
+	for _, lens := range unresolvedCodeLenses {
+		if strings.Contains(string(lens), `"start":{"line":9,"character":4}`) {
+			addCodeLens = lens
+			break
+		}
+	}
+	if len(addCodeLens) == 0 || strings.Contains(string(addCodeLens), `"command":`) || !strings.Contains(string(addCodeLens), `"data":`) {
+		t.Fatalf("unresolved Add code lens = %s", codeLenses)
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":51,"method":"codeLens/resolve","params":%s}`, addCodeLens))
+	resolvedCodeLens := readResponse(t, reader, "51")
+	resolvedCodeLensResult := string(resolvedCodeLens["result"])
+	if !strings.Contains(resolvedCodeLensResult, `"title":"1 reference"`) || !strings.Contains(resolvedCodeLensResult, `"command":"editor.action.showReferences"`) || !strings.Contains(resolvedCodeLensResult, `"arguments":["file:///symbols.vim",{"line":9,"character":4},[{"uri":"file:///symbols.vim","range":{"start":{"line":12,"character":5}`) {
+		t.Fatalf("resolved Add code lens = %s", resolvedCodeLens)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":6,"method":"textDocument/documentHighlight","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
 	highlights := readJSON(t, reader)
