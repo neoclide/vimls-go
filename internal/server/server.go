@@ -332,6 +332,7 @@ func (s *Server) registerCancellation(id jsonrpc2.ID, cancel context.CancelFunc)
 
 func (s *Server) lifecycleHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 	return func(ctx context.Context, request *jsonrpc2.Request) (any, error) {
+		ctx = valueContext{Context: jsonrpc2.DetachContext(ctx), values: ctx}
 		method := request.Method()
 		if method == protocol.MethodExit {
 			if request.IsCall() {
