@@ -450,27 +450,8 @@ commands:
 				}
 				recoveryBlocks[blockIndex] = true
 				stack = stack[:match+1]
-			} else {
-				code := "vimls/unexpected-branch"
-				message := "branch command has no matching block"
-				standalone := len(stack) == 0
-				if len(stack) > 0 {
-					top := file.Blocks[stack[len(stack)-1]].Kind
-					standalone = top == BlockDef || top == BlockFunction
-				}
-				if command.Dialect == Vim9 && standalone {
-					switch command.Canonical {
-					case "catch":
-						code, message = "vim/E603", ":catch without :try"
-					case "finally":
-						code, message = "vim/E606", ":finally without :try"
-					case "elseif":
-						code, message = "vim/E582", ":elseif without :if"
-					case "else":
-						code, message = "vim/E581", ":else without :if"
-					}
-				}
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
+			} else if diagnostic, ok := unmatchedBranchDiagnostic(command); ok {
+				file.Diagnostics = append(file.Diagnostics, diagnostic)
 			}
 			continue
 		}
@@ -492,7 +473,9 @@ commands:
 					file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1025", Message: "closing } without opening {", Span: command.Name})
 					continue
 				}
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/unexpected-end", Message: "end command has no matching block", Span: command.Name})
+				if diagnostic, ok := unmatchedEndDiagnostic(command); ok {
+					file.Diagnostics = append(file.Diagnostics, diagnostic)
+				}
 				continue
 			}
 		}
@@ -529,7 +512,7 @@ commands:
 				}
 				if command.Dialect == Vim9 && command.Canonical == "endtry" && len(stack) > 0 {
 					blockIndex := stack[len(stack)-1]
-					if diagnostic, ok := vim9MissingBlockEndDiagnostic(file.Blocks[blockIndex].Kind, command.Name); ok {
+					if diagnostic, ok := missingBlockEndDiagnostic(file.Blocks[blockIndex].Kind, command.Name); ok {
 						file.Diagnostics = append(file.Diagnostics, diagnostic)
 						command.Block = blockIndex
 						recoveryBlocks[blockIndex] = true
@@ -555,26 +538,9 @@ commands:
 						continue
 					}
 				}
-				code := "vimls/unexpected-end"
-				message := "end command has no matching block"
-				standalone := len(stack) == 0
-				if len(stack) > 0 {
-					top := file.Blocks[stack[len(stack)-1]].Kind
-					standalone = top == BlockDef || top == BlockFunction
+				if diagnostic, ok := unmatchedEndDiagnostic(command); ok {
+					file.Diagnostics = append(file.Diagnostics, diagnostic)
 				}
-				if command.Dialect == Vim9 && standalone {
-					switch command.Canonical {
-					case "endif":
-						code, message = "vim/E580", ":endif without :if"
-					case "endfor":
-						code, message = "vim/E588", ":endfor without :for"
-					case "endwhile":
-						code, message = "vim/E588", ":endwhile without :while"
-					case "endtry":
-						code, message = "vim/E602", ":endtry without :try"
-					}
-				}
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: code, Message: message, Span: command.Name})
 				continue
 			}
 			blockIndex := stack[match]
@@ -609,12 +575,14 @@ commands:
 				}
 				span := file.Commands[block.Header].Name
 				if command.Dialect == Vim9 && (closeKind == BlockDef || command.Canonical == "endtry") {
-					if diagnostic, ok := vim9MissingBlockEndDiagnostic(block.Kind, span); ok {
+					if diagnostic, ok := missingBlockEndDiagnostic(block.Kind, span); ok {
 						file.Diagnostics = append(file.Diagnostics, diagnostic)
 						continue
 					}
 				}
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-end", Message: "block is missing its end command", Span: span})
+				if diagnostic, ok := missingBlockEndDiagnostic(block.Kind, span); ok {
+					file.Diagnostics = append(file.Diagnostics, diagnostic)
+				}
 			}
 			file.Blocks[blockIndex].Span.End = command.Span.End
 			file.Blocks[blockIndex].End = commandIndex
@@ -713,9 +681,9 @@ commands:
 			})
 			continue
 		}
-		file.Diagnostics = append(file.Diagnostics, Diagnostic{
-			Code: "vimls/missing-end", Message: "block is missing its end command", Span: file.Commands[block.Header].Name,
-		})
+		if diagnostic, ok := missingBlockEndDiagnostic(block.Kind, file.Commands[block.Header].Name); ok {
+			file.Diagnostics = append(file.Diagnostics, diagnostic)
+		}
 	}
 }
 
@@ -920,7 +888,7 @@ func suppressInvalidBlockMissingEnds(file *File) {
 	for _, diagnostic := range file.Diagnostics {
 		if invalid[diagnostic.Span] {
 			switch diagnostic.Code {
-			case "vimls/missing-end", "vim/E126", "vim/E170", "vim/E171", "vim/E600", "vim/E1057", "vim/E1420":
+			case "vim/E126", "vim/E170", "vim/E171", "vim/E600", "vim/E1057", "vim/E1420":
 				continue
 			}
 		}
@@ -1041,7 +1009,7 @@ func implicitlyClosedByFunction(kind BlockKind) bool {
 	}
 }
 
-func vim9MissingBlockEndDiagnostic(kind BlockKind, span Span) (Diagnostic, bool) {
+func missingBlockEndDiagnostic(kind BlockKind, span Span) (Diagnostic, bool) {
 	switch kind {
 	case BlockIf:
 		return Diagnostic{Code: "vim/E171", Message: "missing :endif", Span: span}, true
@@ -1053,6 +1021,38 @@ func vim9MissingBlockEndDiagnostic(kind BlockKind, span Span) (Diagnostic, bool)
 		return Diagnostic{Code: "vim/E600", Message: "missing :endtry", Span: span}, true
 	case BlockScope:
 		return Diagnostic{Code: "vim/E1026", Message: "missing }", Span: span}, true
+	default:
+		return Diagnostic{}, false
+	}
+}
+
+func unmatchedBranchDiagnostic(command *Command) (Diagnostic, bool) {
+	switch command.Canonical {
+	case "catch":
+		return Diagnostic{Code: "vim/E603", Message: ":catch without :try", Span: command.Name}, true
+	case "finally":
+		return Diagnostic{Code: "vim/E606", Message: ":finally without :try", Span: command.Name}, true
+	case "elseif":
+		return Diagnostic{Code: "vim/E582", Message: ":elseif without :if", Span: command.Name}, true
+	case "else":
+		return Diagnostic{Code: "vim/E581", Message: ":else without :if", Span: command.Name}, true
+	default:
+		return Diagnostic{}, false
+	}
+}
+
+func unmatchedEndDiagnostic(command *Command) (Diagnostic, bool) {
+	switch command.Canonical {
+	case "endif":
+		return Diagnostic{Code: "vim/E580", Message: ":endif without :if", Span: command.Name}, true
+	case "endfor", "endwhile":
+		return Diagnostic{Code: "vim/E588", Message: ":" + command.Canonical + " without :" + command.Canonical[3:], Span: command.Name}, true
+	case "endtry":
+		return Diagnostic{Code: "vim/E602", Message: ":endtry without :try", Span: command.Name}, true
+	case "endfunction", "enddef":
+		return Diagnostic{Code: "vim/E193", Message: ":" + command.Canonical + " not inside a function", Span: command.Name}, true
+	case "endclass", "endinterface", "endenum":
+		return Diagnostic{Code: "vim/E476", Message: "Invalid command: " + command.Canonical + ": " + command.Canonical, Span: command.Name}, true
 	default:
 		return Diagnostic{}, false
 	}

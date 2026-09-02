@@ -332,7 +332,7 @@ func TestTopLevelEndfunctionBangRetainsBothRecoveryDiagnostics(t *testing.T) {
 	for _, diagnostic := range file.Diagnostics {
 		codes[diagnostic.Code]++
 	}
-	if codes["vim/E477"] != 1 || codes["vimls/unexpected-end"] != 1 {
+	if codes["vim/E477"] != 1 || codes["vim/E193"] != 1 {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 	if len(file.Commands) != 2 || file.Text(file.Commands[0].Bang) != "!" || file.Commands[1].Declaration == nil {
@@ -437,7 +437,7 @@ func TestBlockRecoveryKeepsLaterCommands(t *testing.T) {
 	for _, diagnostic := range file.Diagnostics {
 		codes[diagnostic.Code]++
 	}
-	if codes["vimls/missing-end"] != 1 || codes["vim/E588"] != 1 {
+	if codes["vim/E170"] != 1 || codes["vim/E588"] != 1 {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 }
@@ -529,7 +529,7 @@ func TestVim9E1033CatchAfterCatchAllSurvivesRecovery(t *testing.T) {
 		switch diagnostic.Code {
 		case "vim/E1033":
 			unreachable = diagnostic.Message == "Catch unreachable after catch-all" && diagnostic.Span == wantSpan
-		case "vimls/missing-end":
+		case "vim/E600":
 			missingEnd = true
 		}
 	}
@@ -753,7 +753,7 @@ func TestVim9LegacyFlowControlDiagnostic(t *testing.T) {
 					got = append(got, diagnostic)
 				}
 				switch diagnostic.Code {
-				case "vimls/missing-end", "vimls/unexpected-branch", "vimls/unexpected-end", "vim/E580", "vim/E581", "vim/E582", "vim/E586", "vim/E587", "vim/E588", "vim/E602", "vim/E603", "vim/E606":
+				case "vim/E170", "vim/E171", "vim/E600", "vim/E580", "vim/E581", "vim/E582", "vim/E586", "vim/E587", "vim/E588", "vim/E602", "vim/E603", "vim/E606":
 					t.Fatalf("legacy %s retained structural cascade %s: %#v", test.command, diagnostic.Code, file.Diagnostics)
 				}
 			}

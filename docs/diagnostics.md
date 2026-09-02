@@ -8,6 +8,65 @@ values remain `unknown`.
 
 The evidence below is pinned to Vim 9.2.1015.
 
+## vimls-owned diagnostic codes
+
+Vim's own diagnostics retain their native `vim/E<number>` identifiers and are
+listed in [Vim error code support](vim-error-code-support.md). vimls uses them
+whenever Vim 9.2.1015 reports an error for the same source. The following
+complete, lexically sorted table is reserved for non-Vim outcomes: analysis
+limits, target compatibility, incomplete-input recovery, and conservative
+style checks. These are never published as LSP errors; an occurrence can make
+the default message more specific without changing its code.
+
+| Code | Default severity | Default message |
+| --- | --- | --- |
+| `vimls/autocmd-group-not-cleared` | Warning | augroup does not clear existing autocommands |
+| `vimls/autocmd-outside-augroup` | Warning | autocommand is not contained in an augroup |
+| `vimls/catch-error-message` | Warning | catching human-readable error text is fragile |
+| `vimls/complex-autocmd` | Hint | complex autocommand body; consider delegating to a function |
+| `vimls/complex-command` | Hint | complex user command body; consider delegating to a function |
+| `vimls/configuration-overwrite` | Warning | unconditional configuration assignment may overwrite a user value |
+| `vimls/deprecated` | Hint | symbol is deprecated |
+| `vimls/diagnostics-truncated` | Warning | additional diagnostics were omitted |
+| `vimls/direct-user-keymap` | Hint | user key mapping reduces configurability; consider exposing a `<Plug>` mapping |
+| `vimls/echoerr` | Hint | echoerr always raises an error; use it only for intended failures |
+| `vimls/embedded-command-depth` | Information | embedded command nesting exceeds parser limit |
+| `vimls/explicit-local-scope` | Hint | use an explicit local scope for this variable |
+| `vimls/expression-too-deep` | Information | expression nesting exceeds parser limit |
+| `vimls/file-too-large` | Warning | file exceeds the 4 MiB analysis limit |
+| `vimls/function-without-abort` | Warning | function does not use abort |
+| `vimls/global-internal-state` | Hint | global variable appears to be plugin-internal state |
+| `vimls/implicit-pattern-case` | Hint | pattern match depends on 'ignorecase' |
+| `vimls/implicit-regex-magic` | Hint | pattern relies on Vim's magic setting |
+| `vimls/implicit-string-case` | Hint | string comparison depends on 'ignorecase' |
+| `vimls/invalid-atom` | Information | invalid atom |
+| `vimls/invalid-member-tail` | Information | member name has trailing characters |
+| `vimls/invalid-parenthesized-expression` | Information | parenthesized expression requires one value |
+| `vimls/mapping-script-local-reference` | Warning | mapping references a script-local name that may not be available |
+| `vimls/mapping-without-unique` | Hint | mapping may overwrite an existing mapping; consider `<unique>` |
+| `vimls/match-command` | Hint | :match uses shared match slots; prefer matchadd() in plugin code |
+| `vimls/missing-call-comma` | Information | missing comma before call argument |
+| `vimls/missing-delimiter` | Information | expected a closing delimiter |
+| `vimls/missing-expression` | Information | expected expression |
+| `vimls/missing-interpolation-end` | Information | expected } in interpolated string |
+| `vimls/missing-list-end` | Information | missing end of list |
+| `vimls/missing-member` | Information | expected member name |
+| `vimls/missing-method-call` | Information | expected argument list after callable |
+| `vimls/missing-ternary-colon` | Information | expected : in ternary expression |
+| `vimls/missing-type` | Information | expected Vim9 type |
+| `vimls/normal-without-bang` | Warning | :normal may invoke user-defined mappings; prefer :normal! |
+| `vimls/recursive-map` | Warning | mapping may recursively expand user mappings |
+| `vimls/set-vs-setlocal` | Warning | :set may modify a global option; consider :setlocal |
+| `vimls/target-version` | Warning | feature requires a newer Vim target version |
+| `vimls/trailing-expression` | Information | unexpected text after expression |
+| `vimls/trailing-type` | Information | unexpected text after type |
+| `vimls/type-too-deep` | Information | type nesting exceeds parser limit |
+| `vimls/unexpected-token` | Information | unexpected token in expression |
+| `vimls/unused-variable` | Hint | variable is declared but never used |
+
+The source-of-truth table is `internal/syntax/vimls_diagnostics.go`. New
+vimls-owned diagnostics must be added there before they are emitted.
+
 ## Read-only variables: E46
 
 E46 is Vim's historical read-only-binding error. The analyzer reports

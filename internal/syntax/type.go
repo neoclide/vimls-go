@@ -361,8 +361,8 @@ func (p *typeParser) consumeTypeClosing(expected byte) {
 		return
 	}
 	span := p.span(p.offset, p.offset)
-	code := "vimls/missing-type-delimiter"
-	message := "expected " + string(expected)
+	code := "vim/E1010"
+	message := "Type not recognized"
 	if expected == ')' {
 		code = "vim/E110"
 		message = "missing ')'"

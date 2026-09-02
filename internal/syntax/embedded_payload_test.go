@@ -70,7 +70,7 @@ func TestFoldDoEmbeddedVim9CommentNestedGlobalAndRecovery(t *testing.T) {
 		t.Fatalf("after bar = %#v", afterBar)
 	}
 	missing := &file.Commands[4]
-	if missing.Embedded == nil || len(missing.Embedded.Commands) != 0 || !hasDiagnostic(file, "vimls/missing-argument") {
+	if missing.Embedded == nil || len(missing.Embedded.Commands) != 0 || !hasDiagnostic(file, "vim/E471") {
 		t.Fatalf("missing = %#v, diagnostics = %#v", missing, file.Diagnostics)
 	}
 	if file.Commands[5].Declaration == nil || file.Text(file.Commands[5].Declaration.Name) != "after" {
@@ -126,7 +126,7 @@ func TestEmbeddedDoCommandBlockAndAbsoluteSpans(t *testing.T) {
 
 func TestEmbeddedDoCommandRecoveryAndDepthLimit(t *testing.T) {
 	incomplete := (Vim9Parser{}).Parse("windo if cond | echo value\n")
-	if incomplete.Commands[0].Embedded == nil || len(incomplete.Commands[0].Embedded.Commands) != 2 || len(incomplete.Commands[0].Embedded.Blocks) != 1 || !hasDiagnostic(incomplete, "vimls/missing-end") {
+	if incomplete.Commands[0].Embedded == nil || len(incomplete.Commands[0].Embedded.Commands) != 2 || len(incomplete.Commands[0].Embedded.Blocks) != 1 || !hasDiagnostic(incomplete, "vim/E171") {
 		t.Fatalf("incomplete = %#v, diagnostics = %#v", incomplete.Commands[0].Embedded, incomplete.Diagnostics)
 	}
 

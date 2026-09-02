@@ -423,7 +423,7 @@ func TestNestedUserCommandBlockBody(t *testing.T) {
 
 func TestVim9UserCommandBlockDoesNotDuplicateDiagnostics(t *testing.T) {
 	file := Parse("vim9script\ncommand Foo {\n  if true\n    echo 'missing end'\n}\n")
-	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vimls/missing-end" {
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E171" {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 	if file.Commands[1].Embedded != nil || len(file.Blocks) != 2 || file.Blocks[0].Kind != BlockCommand || file.Blocks[1].Kind != BlockIf || file.Blocks[1].End != -1 {

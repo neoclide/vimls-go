@@ -44,7 +44,7 @@ func TestDelfunctionTargets(t *testing.T) {
 
 func TestDelfunctionBangAndEmptyArgumentRecovery(t *testing.T) {
 	file := (LegacyParser{}).Parse("delfunction! Foo\ndelfunction\nlet g:after = 1\n")
-	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vimls/missing-argument" || len(file.Commands) != 3 {
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E471" || len(file.Commands) != 3 {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}
 	if file.Commands[0].Bang != (Span{Start: 11, End: 12}) || len(file.Commands[0].Targets) != 1 {

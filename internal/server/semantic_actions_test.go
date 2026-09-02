@@ -141,7 +141,7 @@ func semanticTokenAt(data []uint32, wantLine, wantCharacter uint32) (uint32, uin
 
 func TestCodeActionInsertsKnownMissingEnd(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nif true\n  echo 'x'\n")
-	diagnostic := protocol.Diagnostic{Range: navigationRange(1, 0, 2), Code: protocol.String("vimls/missing-end")}
+	diagnostic := protocol.Diagnostic{Range: navigationRange(1, 0, 2), Code: protocol.String("vim/E171")}
 	actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
 		Range:        navigationRange(1, 0, 2),
@@ -178,7 +178,7 @@ func TestCodeActionRepairsOnlyUniqueSyntaxBackedEdit(t *testing.T) {
 		{
 			name:       "function parameter terminator",
 			source:     "vim9script\ndef F(arg: number\nenddef\n",
-			code:       "vimls/missing-parameter-end",
+			code:       "vim/E475",
 			diagnostic: navigationRange(1, 5, 17),
 			title:      "Insert missing )",
 			edit:       navigationRange(1, 17, 17),
@@ -226,6 +226,70 @@ func TestCodeActionRepairsOnlyUniqueSyntaxBackedEdit(t *testing.T) {
 			}
 			if parsed := syntax.Parse(test.fixed); len(parsed.Diagnostics) != 0 {
 				t.Fatalf("fixed source diagnostics = %#v", parsed.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestCodeActionRepairsStyleDiagnostics(t *testing.T) {
+	tests := []struct {
+		name        string
+		source      string
+		code        string
+		diagnostic  protocol.Range
+		wantTitles  []string
+		wantNewText []string
+	}{
+		{
+			name:        "normal bang",
+			source:      "normal gg\n",
+			code:        "vimls/normal-without-bang",
+			diagnostic:  navigationRange(0, 0, 6),
+			wantTitles:  []string{"Use :normal!"},
+			wantNewText: []string{"!"},
+		},
+		{
+			name:        "function abort",
+			source:      "function! s:Run()\nendfunction\n",
+			code:        "vimls/function-without-abort",
+			diagnostic:  navigationRange(0, 0, 8),
+			wantTitles:  []string{"Add abort"},
+			wantNewText: []string{" abort"},
+		},
+		{
+			name:        "explicit string case",
+			source:      "let name = 'Foo'\nif name == 'foo'\nendif\n",
+			code:        "vimls/implicit-string-case",
+			diagnostic:  navigationRange(1, 8, 10),
+			wantTitles:  []string{"Use case-sensitive comparison", "Use case-insensitive comparison"},
+			wantNewText: []string{"==#", "==?"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			diagnostic := protocol.Diagnostic{Range: test.diagnostic, Code: protocol.String(test.code)}
+			actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Range:        test.diagnostic,
+				Context:      protocol.CodeActionContext{Diagnostics: []protocol.Diagnostic{diagnostic}, Only: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(actions) != len(test.wantTitles) {
+				t.Fatalf("actions = %#v", actions)
+			}
+			for index, item := range actions {
+				action, ok := item.(*protocol.CodeAction)
+				if !ok || action.Edit == nil || action.Title != test.wantTitles[index] || len(action.Edit.DocumentChanges) != 1 {
+					t.Fatalf("action[%d] = %#v", index, item)
+				}
+				documentEdit := action.Edit.DocumentChanges[0].(*protocol.TextDocumentEdit)
+				textEdit := documentEdit.Edits[0].(*protocol.TextEdit)
+				if textEdit.NewText != test.wantNewText[index] {
+					t.Fatalf("action[%d] text edit = %#v", index, textEdit)
+				}
 			}
 		})
 	}
@@ -325,7 +389,7 @@ func TestCodeActionUsesNegotiatedEncodingAtEndOfFile(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			instance, documentURI := openNavigationDocument(t, test.encoding, "vim9script\nif true\n  echo '𐐀'")
-			diagnostic := protocol.Diagnostic{Range: navigationRange(1, 0, 2), Code: protocol.String("vimls/missing-end")}
+			diagnostic := protocol.Diagnostic{Range: navigationRange(1, 0, 2), Code: protocol.String("vim/E171")}
 			actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
 				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
 				Range:        diagnostic.Range,

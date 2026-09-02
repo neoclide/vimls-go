@@ -294,7 +294,7 @@ func TestSameContentDidChangeRepublishesNewVersionWithCachedAST(t *testing.T) {
 	}
 	for label, result := range map[string]*protocol.PublishDiagnosticsParams{"first": first, "second": second} {
 		got, ok := result.Version.Get()
-		if !ok || got != map[string]int32{"first": 1, "second": 2}[label] || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vimls/missing-end") {
+		if !ok || got != map[string]int32{"first": 1, "second": 2}[label] || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vim/E171") {
 			t.Fatalf("%s diagnostics = %#v", label, result)
 		}
 	}
@@ -802,7 +802,7 @@ func TestAnalysisQueueCoalescesRapidDocumentChanges(t *testing.T) {
 		}
 	}
 	result := waitForDiagnostics(t, client.published)
-	if version, ok := result.Version.Get(); !ok || version != 1001 || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vimls/missing-end") {
+	if version, ok := result.Version.Get(); !ok || version != 1001 || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vim/E171") {
 		t.Fatalf("diagnostics = %#v", result)
 	}
 	instance.analysisMu.Lock()

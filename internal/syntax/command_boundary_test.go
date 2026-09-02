@@ -1019,7 +1019,7 @@ func TestLegacySyntaxErrorStopsCurrentLineAndRecoversNextLine(t *testing.T) {
 	for _, diagnostic := range file.Diagnostics {
 		counts[diagnostic.Code]++
 	}
-	for _, code := range []string{"vimls/missing-end", "vimls/missing-delimiter", "vimls/trailing-expression"} {
+	for _, code := range []string{"vim/E171", "vimls/missing-delimiter", "vimls/trailing-expression"} {
 		if counts[code] != 1 {
 			t.Fatalf("diagnostic %q count = %d, diagnostics = %#v", code, counts[code], file.Diagnostics)
 		}

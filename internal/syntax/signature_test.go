@@ -1103,7 +1103,7 @@ func TestIncompleteFunctionSignatureRecovers(t *testing.T) {
 	file := (Vim9Parser{}).Parse("def Broken<T(value: list<number>\nvar after = 1\n")
 	found := false
 	for _, diagnostic := range file.Diagnostics {
-		found = found || diagnostic.Code == "vimls/missing-generic-end"
+		found = found || diagnostic.Code == "vim/E1553"
 	}
 	if len(file.Commands) < 1 || file.Commands[0].Function == nil || !found {
 		t.Fatalf("file = %#v", file)

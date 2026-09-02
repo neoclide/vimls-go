@@ -9,7 +9,7 @@ This inventory covers the native `vim/E…` diagnostics referenced by production
 - **Audit scope**: `Full` describes the implemented document-analysis rule. It does not claim parity with every Vim runtime path or patch level.
 - **Unsupported**: the ledger explicitly excludes the diagnostic because its trigger depends on execution context or mutable Vim runtime state that document analysis cannot prove.
 
-Inventory: **460 supported** (250 full and 210 partial) and **7 explicitly unsupported**. All codes are sorted numerically. The 388 entries previously marked `Implemented; audit pending` were reviewed in four numeric ranges against their emitters, local tests, and Vim 9.2.1015 source/help/test evidence. Every audited code has a real production emitter; E10 is the only supported row without a direct local error-code assertion and is therefore partial.
+Inventory: **462 supported** (252 full and 210 partial) and **7 explicitly unsupported**. All codes are sorted numerically. The 388 entries previously marked `Implemented; audit pending` were reviewed in four numeric ranges against their emitters, local tests, and Vim 9.2.1015 source/help/test evidence. Every audited code has a real production emitter; E10 is the only supported row without a direct local error-code assertion and is therefore partial.
 
 ## Supported error codes
 
@@ -237,6 +237,13 @@ Inventory: **460 supported** (250 full and 210 partial) and **7 explicitly unsup
 - **Implementation and tests**: `internal/syntax/command_body_test.go:156`
 - **Static-analysis boundary**: No material static-analysis boundary recorded.
 
+### E193: not inside a function
+
+- **Completeness**: Full
+- **Overview**: Unmatched `:endfunction` or `:enddef`
+- **Implementation and tests**: `internal/syntax/blocks.go`; `blocks_test.go:330`
+- **Static-analysis boundary**: Reported only for the two function terminators; other unmatched aggregate terminators keep their own Vim codes.
+
 ### E221: Marker cannot start with lower case letter
 
 - **Completeness**: Full
@@ -411,6 +418,13 @@ Inventory: **460 supported** (250 full and 210 partial) and **7 explicitly unsup
 - **Overview**: 用户命令前缀歧义
 - **Implementation and tests**: `internal/analysis/diagnostics_test.go:10684`; `internal/server/diagnostics_test.go:37`
 - **Static-analysis boundary**: 服务器先解析完整的 workspace/runtimepath Vim 文件快照并建立用户命令全称索引；只有索引未被文件数、字节数或读取失败截断时，才对命令调用做区分大小写的前缀判断。调用名是已知全称的真前缀时报告 E464 warning，提示使用命令全称避免混淆；精确全名、内置命令和无法由显式 `:command` 定义确认的外部命令不提示。
+
+### E471: Argument required
+
+- **Completeness**: Full
+- **Overview**: Recognized Ex command lacks a required argument
+- **Implementation and tests**: `internal/syntax/scanner.go`; `delfunction_test.go:45`
+- **Static-analysis boundary**: Applies only to commands marked as requiring an argument in the pinned command metadata; command-specific Vim codes such as E1143 and E179 retain precedence.
 
 ### E474: Invalid argument
 

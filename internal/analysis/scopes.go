@@ -215,6 +215,7 @@ func Analyze(file *syntax.File) *FileAnalysis {
 	collectAssignmentDiagnostics(result, file.Commands, root)
 	collectNameOnlyExpressionDiagnostics(result, file.Commands, root)
 	collectUnusedVariableDiagnostics(result)
+	collectStyleDiagnostics(result)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})

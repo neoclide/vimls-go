@@ -182,7 +182,7 @@ func parseFunctionSignature(file *File, command *Command) {
 				break
 			}
 			if recovered < 0 {
-				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-generic-end", Message: "expected > after generic type parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
+				file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1553", Message: "Missing comma after type in generic function: " + strings.TrimSpace(source[offset+1:]), Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
 				command.Function = function
 				return
 			}
@@ -257,7 +257,7 @@ func parseFunctionSignature(file *File, command *Command) {
 			command.Function = function
 			return
 		}
-		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vimls/missing-parameter-end", Message: "expected ) after function parameters", Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
+		file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E475", Message: "Invalid argument: " + strings.TrimSpace(source[offset+1:]), Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End}})
 		close = len(source)
 	}
 	seenDefault := false

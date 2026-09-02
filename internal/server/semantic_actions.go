@@ -55,6 +55,7 @@ type syntaxQuickFix struct {
 	span             syntax.Span
 	newText          string
 	title            string
+	preferred        bool
 }
 
 func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
@@ -390,60 +391,73 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 	if !allowsQuickFix(params.Context.Only) {
 		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
 	}
-	fixes := make([]syntaxQuickFix, 0, 1)
-	for _, diagnostic := range file.Diagnostics {
+	diagnostics := append([]syntax.Diagnostic(nil), file.Diagnostics...)
+	diagnostics = append(diagnostics, analysis.Analyze(file).Diagnostics...)
+	fixes := make([]syntaxQuickFix, 0, 2)
+	for _, diagnostic := range diagnostics {
 		diagnosticRange, validDiagnosticRange := protocolRange(snapshot, encoding, diagnostic.Span)
 		clientDiagnostic, matched := matchingClientDiagnostic(params.Context.Diagnostics, diagnostic.Code, diagnosticRange)
 		if !validDiagnosticRange || !matched || !rangesOverlapOrTouch(params.Range, diagnosticRange) {
 			continue
 		}
-		if fix, ok := syntaxQuickFixFor(file, diagnostic); ok && syntaxQuickFixReparses(file, fix) {
+		if fix, ok := syntaxQuickFixFor(file, diagnostic); ok && syntaxQuickFixReparses(file, fix, true) {
+			fix.clientDiagnostic = clientDiagnostic
+			fixes = append(fixes, fix)
+		}
+		for _, fix := range styleQuickFixesFor(file, diagnostic) {
+			if !syntaxQuickFixReparses(file, fix, false) {
+				continue
+			}
 			fix.clientDiagnostic = clientDiagnostic
 			fixes = append(fixes, fix)
 		}
 	}
-	if len(fixes) != 1 {
+	if len(fixes) == 0 {
 		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
 	}
-	fix := fixes[0]
-	editRange, validEditRange := protocolRange(snapshot, encoding, fix.span)
-	if !validEditRange {
-		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
-	}
-	preferred := true
 	kind := protocol.CodeActionKindQuickFix
 	version, versioned := snapshot.Version()
 	var versionPointer *int32
 	if versioned {
 		versionPointer = &version
 	}
-	edit := &protocol.TextEdit{Range: editRange, NewText: fix.newText}
-	action := &protocol.CodeAction{
-		Title:       fix.title,
-		Kind:        &kind,
-		Diagnostics: []protocol.Diagnostic{fix.clientDiagnostic},
-		IsPreferred: &preferred,
-		Edit: &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{&protocol.TextDocumentEdit{
-			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: params.TextDocument,
-				Version:                versionPointer,
+	actions := make([]protocol.CommandOrCodeAction, 0, len(fixes))
+	for _, fix := range fixes {
+		editRange, validEditRange := protocolRange(snapshot, encoding, fix.span)
+		if !validEditRange {
+			continue
+		}
+		preferred := fix.preferred
+		edit := &protocol.TextEdit{Range: editRange, NewText: fix.newText}
+		action := &protocol.CodeAction{
+			Title:       fix.title,
+			Kind:        &kind,
+			Diagnostics: []protocol.Diagnostic{fix.clientDiagnostic},
+			IsPreferred: &preferred,
+			Edit: &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{&protocol.TextDocumentEdit{
+				TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
+					TextDocumentIdentifier: params.TextDocument,
+					Version:                versionPointer,
+				},
+				Edits: []protocol.TextDocumentEditElement{edit},
 			},
-			Edits: []protocol.TextDocumentEditElement{edit},
-		}}},
+			}},
+		}
+		actions = append(actions, action)
 	}
 	if err := s.structureCurrent(ctx, snapshot); err != nil {
 		return nil, err
 	}
-	return []protocol.CommandOrCodeAction{action}, nil
+	return actions, nil
 }
 
 func syntaxQuickFixFor(file *syntax.File, diagnostic syntax.Diagnostic) (syntaxQuickFix, bool) {
 	if diagnostic.Span.Start < 0 || diagnostic.Span.End < diagnostic.Span.Start || diagnostic.Span.End > len(file.Source) {
 		return syntaxQuickFix{}, false
 	}
-	fix := syntaxQuickFix{diagnostic: diagnostic}
+	fix := syntaxQuickFix{diagnostic: diagnostic, preferred: true}
 	switch diagnostic.Code {
-	case "vimls/missing-end":
+	case "vim/E170", "vim/E171", "vim/E600":
 		block, endCommand, ok := missingEndBlock(file, diagnostic)
 		if !ok {
 			return syntaxQuickFix{}, false
@@ -455,7 +469,10 @@ func syntaxQuickFixFor(file *syntax.File, diagnostic syntax.Diagnostic) (syntaxQ
 			fix.newText = "\n" + fix.newText
 		}
 		fix.title = "Insert :" + endCommand
-	case "vimls/missing-parameter-end":
+	case "vim/E475":
+		if !missingFunctionParameterEnd(file, diagnostic) {
+			return syntaxQuickFix{}, false
+		}
 		fix.span = syntax.Span{Start: diagnostic.Span.End, End: diagnostic.Span.End}
 		fix.newText = ")"
 		fix.title = "Insert missing )"
@@ -486,18 +503,94 @@ func syntaxQuickFixFor(file *syntax.File, diagnostic syntax.Diagnostic) (syntaxQ
 	return fix, true
 }
 
-func syntaxQuickFixReparses(file *syntax.File, fix syntaxQuickFix) bool {
+func styleQuickFixesFor(file *syntax.File, diagnostic syntax.Diagnostic) []syntaxQuickFix {
+	fix := syntaxQuickFix{diagnostic: diagnostic, preferred: true}
+	switch diagnostic.Code {
+	case "vimls/normal-without-bang":
+		for index := range file.Commands {
+			command := &file.Commands[index]
+			if command.Canonical == "normal" && command.Name == diagnostic.Span && command.Bang.Start == command.Bang.End {
+				fix.span = syntax.Span{Start: command.Name.End, End: command.Name.End}
+				fix.newText = "!"
+				fix.title = "Use :normal!"
+				return []syntaxQuickFix{fix}
+			}
+		}
+	case "vimls/function-without-abort":
+		for index := range file.Commands {
+			command := &file.Commands[index]
+			if command.Canonical == "function" && command.Function != nil && command.Name == diagnostic.Span && !strings.Contains(file.Text(command.Argument), "abort") {
+				fix.span = syntax.Span{Start: command.Argument.End, End: command.Argument.End}
+				fix.newText = " abort"
+				fix.title = "Add abort"
+				return []syntaxQuickFix{fix}
+			}
+		}
+	case "vimls/implicit-string-case", "vimls/implicit-pattern-case":
+		operator := file.Text(diagnostic.Span)
+		caseSensitive, caseInsensitive, ok := explicitCaseOperators(operator)
+		if !ok {
+			return nil
+		}
+		fix.span = diagnostic.Span
+		fix.newText = caseSensitive
+		fix.title = "Use case-sensitive comparison"
+		fix.preferred = false
+		alternative := fix
+		alternative.newText = caseInsensitive
+		alternative.title = "Use case-insensitive comparison"
+		return []syntaxQuickFix{fix, alternative}
+	}
+	return nil
+}
+
+func explicitCaseOperators(operator string) (string, string, bool) {
+	switch operator {
+	case "==":
+		return "==#", "==?", true
+	case "!=":
+		return "!=#", "!=?", true
+	case "is":
+		return "is#", "is?", true
+	case "isnot":
+		return "isnot#", "isnot?", true
+	case "=~":
+		return "=~#", "=~?", true
+	case "!~":
+		return "!~#", "!~?", true
+	default:
+		return "", "", false
+	}
+}
+
+func missingFunctionParameterEnd(file *syntax.File, diagnostic syntax.Diagnostic) bool {
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Function == nil || diagnostic.Span.End != command.Argument.End || diagnostic.Span.Start < command.Function.Name.End {
+			continue
+		}
+		return !strings.Contains(file.Text(command.Argument), ")")
+	}
+	return false
+}
+
+func syntaxQuickFixReparses(file *syntax.File, fix syntaxQuickFix, resolvesDiagnostic bool) bool {
 	if fix.span.Start < 0 || fix.span.End < fix.span.Start || fix.span.End > len(file.Source) {
 		return false
 	}
 	source := file.Source[:fix.span.Start] + fix.newText + file.Source[fix.span.End:]
 	reparsed := syntax.Parse(source)
-	if len(reparsed.Diagnostics) >= len(file.Diagnostics) {
+	if resolvesDiagnostic && len(reparsed.Diagnostics) >= len(file.Diagnostics) {
 		return false
 	}
-	for _, diagnostic := range reparsed.Diagnostics {
-		if diagnostic.Code == fix.diagnostic.Code && diagnostic.Message == fix.diagnostic.Message {
-			return false
+	if !resolvesDiagnostic && len(reparsed.Diagnostics) != len(file.Diagnostics) {
+		return false
+	}
+	if resolvesDiagnostic {
+		for _, diagnostic := range reparsed.Diagnostics {
+			if diagnostic.Code == fix.diagnostic.Code && diagnostic.Message == fix.diagnostic.Message {
+				return false
+			}
 		}
 	}
 	return true

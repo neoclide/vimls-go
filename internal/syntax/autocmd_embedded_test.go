@@ -345,7 +345,7 @@ func TestVim9AutocmdCommandListContinuation(t *testing.T) {
 func TestAutocmdEmbeddedBlockRecoveryAndAbsoluteSpans(t *testing.T) {
 	source := "autocmd BufEnter * if condition | echo value\nedit next.txt\n"
 	file := (LegacyParser{}).Parse(source)
-	if !hasDiagnostic(file, "vimls/missing-end") || len(file.Commands) != 2 || file.Commands[1].Canonical != "edit" {
+	if !hasDiagnostic(file, "vim/E171") || len(file.Commands) != 2 || file.Commands[1].Canonical != "edit" {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}
 	outer := &file.Commands[0]

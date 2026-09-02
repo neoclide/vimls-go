@@ -575,7 +575,7 @@ func diagnoseVim9ScriptNamespaces(file *File) {
 func normalizeVim9CallDiagnostics(file *File) {
 	for diagnosticIndex := range file.Diagnostics {
 		diagnostic := &file.Diagnostics[diagnosticIndex]
-		if diagnostic.Code == "vimls/missing-argument" {
+		if diagnostic.Code == "vim/E471" {
 			commandIndex := sort.Search(len(file.Commands), func(index int) bool {
 				return file.Commands[index].Name.Start >= diagnostic.Span.Start
 			})
@@ -1649,8 +1649,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		}
 		file.Commands = append(file.Commands, parsedCommand)
 		if builtIn && metadata.Flags&vimdata.NeedArgument != 0 && argumentStart == argumentEnd && !invalidNonWhite {
-			code := "vimls/missing-argument"
-			message := "command requires an argument"
+			code := "vim/E471"
+			message := "Argument required: " + parsedCommand.Canonical
 			if parsedCommand.Dialect == Vim9 && parsedCommand.Canonical == "throw" {
 				code = "vim/E1143"
 				message = "argument required for throw"
@@ -2837,14 +2837,14 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) {
 				for diagnosticIndex := diagnosticsStart; diagnosticIndex < len(file.Diagnostics); diagnosticIndex++ {
 					diagnostic := &file.Diagnostics[diagnosticIndex]
-					if diagnostic.Code != "vimls/missing-end" {
+					if diagnostic.Code != "vim/E170" && diagnostic.Code != "vim/E171" && diagnostic.Code != "vim/E600" {
 						continue
 					}
 					for _, block := range command.Embedded.Blocks {
 						if block.Header < 0 || block.Header >= len(command.Embedded.Commands) || command.Embedded.Commands[block.Header].Name != diagnostic.Span {
 							continue
 						}
-						if mapped, ok := vim9MissingBlockEndDiagnostic(block.Kind, diagnostic.Span); ok {
+						if mapped, ok := missingBlockEndDiagnostic(block.Kind, diagnostic.Span); ok {
 							*diagnostic = mapped
 						}
 						break

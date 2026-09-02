@@ -205,9 +205,9 @@ func TestOfficialVimRecoveryMatrix(t *testing.T) {
 	}{
 		{"shortened enum", "v9.2.1015 src/testdir/test_vim9_script.vim Test_command_is_not_shortened", "vim9script\nenu E\nendenum\nvar after = 1\n", "vim/E1065"},
 		{"misplaced vim9script", "v9.2.1015 src/testdir/test_vim9_script.vim Test_vim9script_not_first", "let before = 1\nvim9script\nlet after = 2\n", "vim/E1039"},
-		{"incomplete generic declaration", "v9.2.1015 src/testdir/test_vim9_generics.vim Test_generic_func_definition", "vim9script\ndef Fn<T(value: T)\nenddef\nvar after = 1\n", "vimls/missing-generic-end"},
-		{"incomplete tuple type", "v9.2.1015 src/testdir/test_tuple.vim Test_tuple_type", "vim9script\nvar value: tuple<number, string = (1, 'x')\nvar after = 1\n", "vimls/missing-type-delimiter"},
-		{"unmatched block", "v9.2.1015 src/testdir/test_vim9_script.vim Test_missing_endif", "vim9script\nif true\n  echo 'x'\nvar after = 1\n", "vimls/missing-end"},
+		{"incomplete generic declaration", "v9.2.1015 src/testdir/test_vim9_generics.vim Test_generic_func_definition (Vim: E1553)", "vim9script\ndef Fn<T(value: T)\nenddef\nvar after = 1\n", "vim/E1553"},
+		{"incomplete tuple type", "v9.2.1015 src/testdir/test_tuple.vim Test_tuple_type (Vim: E1010)", "vim9script\nvar value: tuple<number, string = (1, 'x')\nvar after = 1\n", "vim/E1010"},
+		{"unmatched block", "v9.2.1015 src/testdir/test_vim9_script.vim Test_missing_endif (Vim: E171)", "vim9script\nif true\n  echo 'x'\nvar after = 1\n", "vim/E171"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

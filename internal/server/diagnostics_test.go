@@ -18,7 +18,7 @@ import (
 )
 
 func TestProtocolDiagnosticSeverity(t *testing.T) {
-	for _, code := range []string{"vimls/missing-end", "vim/E113", "vim/E518", "vim/E1012", "future/source"} {
+	for _, code := range []string{"vim/E171", "vim/E113", "vim/E518", "vim/E1012", "future/source"} {
 		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticWarning); got != protocol.DiagnosticSeverityError {
 			t.Errorf("%s severity = %v, want error", code, got)
 		}
@@ -50,6 +50,11 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 	}
 	if got := protocolDiagnosticSeverity("vimls/unused-variable", syntax.DiagnosticError); got != protocol.DiagnosticSeverityHint {
 		t.Errorf("vimls/unused-variable severity = %v, want hint", got)
+	}
+	for _, definition := range syntax.VimlsDiagnosticDefinitions {
+		if got := protocolDiagnosticSeverity(definition.Code, syntax.DiagnosticError); got == protocol.DiagnosticSeverityError {
+			t.Errorf("%s severity = %v, vimls-owned diagnostics must not be errors", definition.Code, got)
+		}
 	}
 }
 
@@ -345,7 +350,7 @@ func TestServerPublishesVersionedSyntaxDiagnosticsAndClearsThem(t *testing.T) {
 		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "if true\n"},
 	})
 	first := waitForDiagnostics(t, client.published)
-	if version, ok := first.Version.Get(); !ok || version != 1 || len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vimls/missing-end") {
+	if version, ok := first.Version.Get(); !ok || version != 1 || len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vim/E171") {
 		t.Fatalf("first diagnostics = %#v", first)
 	}
 	_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
@@ -932,7 +937,7 @@ func TestServerPublishesDiagnosticsForNonFileURIWithWorkspaceGraph(t *testing.T)
 		t.Fatal(err)
 	}
 	params := waitForDiagnosticsForURI(t, published, documentURI)
-	if len(params.Diagnostics) != 1 || params.Diagnostics[0].Code != protocol.String("vimls/missing-end") {
+	if len(params.Diagnostics) != 1 || params.Diagnostics[0].Code != protocol.String("vim/E171") {
 		t.Fatalf("non-file diagnostics = %#v", params.Diagnostics)
 	}
 }
