@@ -1591,10 +1591,135 @@ func resolveRuntimepathImportFacts(importer string, facts []workspace.ImportFact
 // DidChangeWatchedFiles consumes file events produced by the language client.
 // The server deliberately does not create filesystem watchers or poll roots.
 func (s *Server) DidChangeWatchedFiles(_ context.Context, params *protocol.DidChangeWatchedFilesParams) error {
-	if len(params.Changes) > 0 {
+	if params == nil || len(params.Changes) == 0 {
+		return nil
+	}
+	if !s.applyWatchedFileChanges(params.Changes) {
 		s.scheduleWorkspaceRebuild()
 	}
 	return nil
+}
+
+func (s *Server) applyWatchedFileChanges(changes []protocol.FileEvent) bool {
+	s.workspaceMu.Lock()
+	built := s.workspaceBuilt
+	index := s.workspaceIndex
+	complete := index != nil && index.Complete()
+	pendingCount := len(s.workspacePending)
+	rebuilding := s.workspaceRunning
+	roots := workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)
+	s.workspaceMu.Unlock()
+
+	if !built || index == nil || !complete || pendingCount > 0 || rebuilding {
+		return false
+	}
+
+	actions := make(map[string]protocol.FileChangeType)
+	var paths []string
+
+	for _, event := range changes {
+		path, ok := workspaceURIPath(event.URI)
+		if !ok {
+			return false
+		}
+		if !workspacePathInRoots(path, roots) {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if event.Type != protocol.FileChangeTypeDeleted {
+			info, err := os.Stat(path)
+			if err == nil && info.IsDir() {
+				return false
+			}
+			if ext != ".vim" {
+				continue
+			}
+		} else {
+			if ext != ".vim" {
+				return false
+			}
+		}
+
+		if _, exists := actions[path]; !exists {
+			paths = append(paths, path)
+		}
+		actions[path] = event.Type
+	}
+
+	if len(paths) == 0 {
+		return true
+	}
+	sort.Strings(paths)
+
+	var allDependents []string
+	for _, path := range paths {
+		s.publishMu.Lock()
+		_, _, open := s.openWorkspaceSnapshotLocked(path)
+		s.publishMu.Unlock()
+		if open {
+			continue
+		}
+
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), nil, nil)
+				s.workspaceMu.Lock()
+				delete(s.workspaceFiles, path)
+				s.workspaceMu.Unlock()
+				allDependents = append(allDependents, deps...)
+				continue
+			}
+			return false
+		}
+
+		if info.IsDir() {
+			return false
+		}
+
+		if info.Size() > maxFileBytes {
+			_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), nil, nil)
+			s.workspaceMu.Lock()
+			s.workspaceFiles[path] = struct{}{}
+			s.workspaceMu.Unlock()
+			allDependents = append(allDependents, deps...)
+			continue
+		}
+
+		contentBytes, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		content := string(contentBytes)
+
+		s.workspaceMu.Lock()
+		existingSource, indexed := s.workspaceIndex.Source(path)
+		s.workspaceMu.Unlock()
+		if indexed && existingSource == content {
+			continue
+		}
+
+		file := syntax.Parse(content)
+		fileAnalysis := analysis.Analyze(file)
+
+		_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), file, fileAnalysis)
+		s.workspaceMu.Lock()
+		s.workspaceFiles[path] = struct{}{}
+		s.workspaceMu.Unlock()
+		allDependents = append(allDependents, deps...)
+	}
+
+	s.workspaceMu.Lock()
+	stillComplete := s.workspaceIndex != nil && s.workspaceIndex.Complete()
+	s.workspaceMu.Unlock()
+	if !stillComplete {
+		return false
+	}
+
+	if len(allDependents) > 0 {
+		s.startWorkspaceDependents(allDependents)
+	}
+	return true
 }
 
 func (s *Server) scheduleFileWatchRegistration() {

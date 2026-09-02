@@ -236,7 +236,10 @@ URI 一个完成结果加一个 in-flight 结果足够；只有长期 profile �
 - `internal/server/document_sync_test.go`
 - `internal/syntax/benchmark_test.go` 或现有 server benchmark 文件
 
-### 4. watched-file 事件优先做逐路径增量更新
+### 4. watched-file 事件优先做逐路径增量更新 [已完成]
+
+- **状态**：已完成
+- **实施改动**：在 `internal/server/workspace.go` 中实现 `applyWatchedFileChanges`，对客户端推送的 `DidChangeWatchedFiles` 事件进行规范化过滤、去重与批次合并：仅针对工作区根或 runtimepath 根下的 `.vim` 文件做增量处理；对 Create/Change 在无 overlay 时读取磁盘并原子更新 `workspaceIndex` 与 `workspaceGraph`，若已有打开 overlay 则严格保护不被磁盘事件覆盖；对 Delete 移除索引与图边；对 atomic save 产生的 delete/create 批次做合并；若遇到目录变更、非 `.vim` 文件删除、I/O 读取失败、超限或工作区未就绪/正在全量构建等任何不确定状态，均安全回退至现有的 `scheduleWorkspaceRebuild` 全量重建流程；在 `workspace_build_edge_test.go` 中新增单文件 Change 增量更新且 0 discovery 验证（256 文件场景下禁止 discovery 钩子）、Create 与 Delete 增量验证、atomic save burst 批次合并验证、目录/异常回退全量重建验证、打开 overlay 保护验证，以及增量更新与全新构建的结果等价性差分测试。
 
 **当前证据**
 
