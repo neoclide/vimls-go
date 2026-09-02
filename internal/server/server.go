@@ -100,6 +100,8 @@ type Server struct {
 	unresolvedSeverity  syntax.DiagnosticSeverity
 	pendingWarning      string
 	client              protocol.Client
+	workspaceProgress   bool
+	workspaceProgressID uint64
 	cancellations       map[jsonrpc2.ID]context.CancelFunc
 	documents           *workspace.Documents
 	encoding            text.Encoding
@@ -427,6 +429,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	}
 	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
+	workspaceProgress := params.Capabilities.Window != nil && params.Capabilities.Window.WorkDoneProgress != nil && *params.Capabilities.Window.WorkDoneProgress
 	prepareRename := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.Rename != nil && params.Capabilities.TextDocument.Rename.PrepareSupport != nil && *params.Capabilities.TextDocument.Rename.PrepareSupport
 	codeActionLiterals := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.CodeAction != nil && params.Capabilities.TextDocument.CodeAction.CodeActionLiteralSupport.CodeActionKind.ValueSet != nil
 	completion := completionCapabilitiesFromClient(params.Capabilities.TextDocument)
@@ -453,6 +456,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.watchDynamicRegistration = watchDynamic
 	s.watchRelativePatterns = watchRelative
 	s.workspaceConfiguration = workspaceConfiguration
+	s.workspaceProgress = workspaceProgress
 	s.mu.Unlock()
 	s.workspaceMu.Lock()
 	s.workspaceDelay = workspaceDelay

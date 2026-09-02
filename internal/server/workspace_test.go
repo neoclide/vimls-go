@@ -1179,6 +1179,100 @@ func TestWorkspaceRebuildDebouncesBurst(t *testing.T) {
 	releaseWorker()
 }
 
+func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
+	root := t.TempDir()
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	endedAfterPublish := false
+	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 1), updates: make(chan *protocol.ProgressParams, 2)}
+	progress.onProgress = func(params *protocol.ProgressParams) {
+		var end protocol.WorkDoneProgressEnd
+		if protocol.Unmarshal(params.Value, &end) != nil || end.Kind != "end" {
+			return
+		}
+		instance.workspaceMu.Lock()
+		endedAfterPublish = instance.workspaceBuilt && !instance.workspaceRunning
+		instance.workspaceMu.Unlock()
+	}
+	instance.client = progress
+	instance.workspaceDelay = 0
+	supported := true
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
+		Capabilities:          protocol.ClientCapabilities{Window: &protocol.WindowClientCapabilities{WorkDoneProgress: &supported}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	var token protocol.ProgressToken
+	select {
+	case token = <-progress.creates:
+	case <-time.After(time.Second):
+		t.Fatal("workspace index did not create a progress token")
+	}
+	begin := waitForWorkspaceProgress(t, progress.updates)
+	var beginValue protocol.WorkDoneProgressBegin
+	if err := protocol.Unmarshal(begin.Value, &beginValue); err != nil {
+		t.Fatal(err)
+	}
+	if begin.Token != token || beginValue.Kind != "begin" || beginValue.Title != "Indexing workspace" {
+		t.Fatalf("progress begin = %#v, value = %#v", begin, beginValue)
+	}
+	instance.workspaceWG.Wait()
+	end := waitForWorkspaceProgress(t, progress.updates)
+	var endValue protocol.WorkDoneProgressEnd
+	if err := protocol.Unmarshal(end.Value, &endValue); err != nil {
+		t.Fatal(err)
+	}
+	if end.Token != token || endValue.Kind != "end" {
+		t.Fatalf("progress end = %#v, value = %#v", end, endValue)
+	}
+	if !endedAfterPublish {
+		t.Fatal("workspace progress ended before the index was published")
+	}
+}
+
+func TestWorkspaceIndexProgressCreateTimesOut(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = &workspaceProgressClient{create: func(ctx context.Context, _ *protocol.WorkDoneProgressCreateParams) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	instance.workspaceProgress = true
+	instance.workspaceDelay = 0
+	instance.scheduleWorkspaceRebuild()
+	done := make(chan struct{})
+	go func() {
+		instance.workspaceWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("workspace rebuild waited indefinitely for progress creation")
+	}
+}
+
+func TestWorkspaceIndexProgressTokensAreUnique(t *testing.T) {
+	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 2), updates: make(chan *protocol.ProgressParams, 4)}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = progress
+	instance.workspaceProgress = true
+	firstClient, firstToken, firstStarted := instance.startWorkspaceIndexProgress()
+	secondClient, secondToken, secondStarted := instance.startWorkspaceIndexProgress()
+	instance.finishWorkspaceIndexProgress(firstClient, firstToken, firstStarted)
+	instance.finishWorkspaceIndexProgress(secondClient, secondToken, secondStarted)
+	if firstToken == secondToken {
+		t.Fatalf("workspace progress tokens reused: %v", firstToken)
+	}
+}
+
 func TestWaitForWorkspaceIndex(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
@@ -1527,6 +1621,41 @@ type watchRegistrationClient struct {
 	protocol.UnimplementedClient
 	registrations   []*protocol.RegistrationParams
 	unregistrations []*protocol.UnregistrationParams
+}
+
+type workspaceProgressClient struct {
+	protocol.UnimplementedClient
+	creates    chan protocol.ProgressToken
+	updates    chan *protocol.ProgressParams
+	create     func(context.Context, *protocol.WorkDoneProgressCreateParams) error
+	onProgress func(*protocol.ProgressParams)
+}
+
+func (c *workspaceProgressClient) WorkDoneProgressCreate(ctx context.Context, params *protocol.WorkDoneProgressCreateParams) error {
+	if c.create != nil {
+		return c.create(ctx, params)
+	}
+	c.creates <- params.Token
+	return nil
+}
+
+func (c *workspaceProgressClient) Progress(_ context.Context, params *protocol.ProgressParams) error {
+	if c.onProgress != nil {
+		c.onProgress(params)
+	}
+	c.updates <- params
+	return nil
+}
+
+func waitForWorkspaceProgress(t *testing.T, updates <-chan *protocol.ProgressParams) *protocol.ProgressParams {
+	t.Helper()
+	select {
+	case params := <-updates:
+		return params
+	case <-time.After(time.Second):
+		t.Fatal("workspace progress notification not received")
+		return nil
+	}
 }
 
 func (c *watchRegistrationClient) RegisterCapability(_ context.Context, params *protocol.RegistrationParams) error {

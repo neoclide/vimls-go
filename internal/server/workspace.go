@@ -22,6 +22,7 @@ import (
 
 const defaultWorkspaceRebuildDebounce = 100 * time.Millisecond
 const workspaceIndexWaitTimeout = time.Second
+const workspaceProgressCreateTimeout = 100 * time.Millisecond
 
 type DidChangeRuntimepathParams struct {
 	Runtimepath []string `json:"runtimepath"`
@@ -233,11 +234,13 @@ func (s *Server) workspaceIndexWorker() {
 			s.beforeWorkspaceBuildForTest(openSnapshots)
 		}
 
+		progressClient, progressToken, progressStarted := s.startWorkspaceIndexProgress()
 		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, runtimePaths, resolver, openSnapshots)
 		s.workspaceMu.Lock()
 		if s.analysisStopped || s.analysisContext.Err() != nil {
 			s.finishWorkspaceRebuildLocked()
 			s.workspaceMu.Unlock()
+			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
 			return
 		}
 		s.workspaceMu.Unlock()
@@ -245,6 +248,7 @@ func (s *Server) workspaceIndexWorker() {
 		s.publishMu.Lock()
 		if !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
 			s.publishMu.Unlock()
+			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
 			s.resetWorkspaceRebuildTimer(timer)
 			continue
 		}
@@ -253,11 +257,13 @@ func (s *Server) workspaceIndexWorker() {
 			s.finishWorkspaceRebuildLocked()
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
+			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
 			return
 		}
 		if revision != s.workspaceRevision {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
+			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
 			s.resetWorkspaceRebuildTimer(timer)
 			continue
 		}
@@ -273,6 +279,7 @@ func (s *Server) workspaceIndexWorker() {
 		s.finishWorkspaceRebuildLocked()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
+		s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
 		for _, warning := range warnings {
 			_ = s.sendWarning(s.analysisContext, warning)
 		}
@@ -280,6 +287,51 @@ func (s *Server) workspaceIndexWorker() {
 			s.startAnalysis(snapshot.URI())
 		}
 		return
+	}
+}
+
+// startWorkspaceIndexProgress creates a token before a workspace scan. The
+// bounded request avoids holding rebuild completion on an unresponsive client.
+func (s *Server) startWorkspaceIndexProgress() (protocol.Client, protocol.ProgressToken, bool) {
+	s.mu.Lock()
+	client := s.client
+	supported := s.workspaceProgress
+	s.workspaceProgressID++
+	identifier := s.workspaceProgressID
+	s.mu.Unlock()
+	if client == nil || !supported {
+		return nil, nil, false
+	}
+	token := protocol.String(fmt.Sprintf("vimls-workspace-index-%d", identifier))
+	ctx, cancel := context.WithTimeout(s.analysisContext, workspaceProgressCreateTimeout)
+	defer cancel()
+	if err := client.WorkDoneProgressCreate(ctx, &protocol.WorkDoneProgressCreateParams{Token: token}); err != nil {
+		if s.analysisContext.Err() == nil && ctx.Err() == nil {
+			s.logf("vimls: create workspace index progress: %v", err)
+		}
+		return nil, nil, false
+	}
+	value, err := protocol.Marshal(&protocol.WorkDoneProgressBegin{Kind: "begin", Title: "Indexing workspace"})
+	if err != nil {
+		s.logf("vimls: encode workspace index progress: %v", err)
+		return nil, nil, false
+	}
+	if err := client.Progress(s.analysisContext, &protocol.ProgressParams{Token: token, Value: protocol.LSPAny(value)}); err != nil {
+		if s.analysisContext.Err() == nil {
+			s.logf("vimls: send workspace index progress: %v", err)
+		}
+		return nil, nil, false
+	}
+	return client, token, true
+}
+
+func (s *Server) finishWorkspaceIndexProgress(client protocol.Client, token protocol.ProgressToken, started bool) {
+	if !started {
+		return
+	}
+	value, err := protocol.Marshal(&protocol.WorkDoneProgressEnd{Kind: "end"})
+	if err == nil {
+		_ = client.Progress(s.analysisContext, &protocol.ProgressParams{Token: token, Value: protocol.LSPAny(value)})
 	}
 }
 

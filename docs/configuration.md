@@ -52,6 +52,15 @@ When file-watch dynamic registration is advertised, the server registers
 owns those watchers and sends `workspace/didChangeWatchedFiles`; vimls-go does
 not poll or install an operating-system watcher itself.
 
+## Workspace indexing progress
+
+If the client advertises `window.workDoneProgress`, vimls-go creates a standard
+work-done token and sends `$/progress` `begin` and `end` notifications for each
+full workspace index rebuild. The progress begins when the debounced scan
+actually starts, not while changes are still being coalesced. Incremental
+open-document indexing does not create progress. Clients that do not advertise
+the capability receive no progress traffic.
+
 ## Workspace settings
 
 If the client advertises `workspace.configuration`, vimls-go requests the
