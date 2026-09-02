@@ -388,8 +388,8 @@ endfunction
 		t.Fatalf("imported object method signature help = %s", importedObjectMethodSignature)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///missing-end.vim","languageId":"vim","version":1,"text":"vim9script\nif true\n  echo 'x'\n"}}}`)
-	readPublishedDiagnostic(t, reader, "file:///missing-end.vim", "vimls/missing-end")
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100004,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"file:///missing-end.vim"},"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"context":{"diagnostics":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"code":"vimls/missing-end","message":"block is missing its end command"}],"only":["quickfix"]}}}`)
+	readPublishedDiagnostic(t, reader, "file:///missing-end.vim", "vim/E171")
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":100004,"method":"textDocument/codeAction","params":{"textDocument":{"uri":"file:///missing-end.vim"},"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"context":{"diagnostics":[{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}},"code":"vim/E171","message":"missing :endif"}],"only":["quickfix"]}}}`)
 	codeActions := readResponse(t, reader, "100004")
 	if !strings.Contains(string(codeActions["result"]), `"title":"Insert :endif"`) || !strings.Contains(string(codeActions["result"]), `"newText":"endif\n"`) {
 		t.Fatalf("code actions = %s", codeActions)
