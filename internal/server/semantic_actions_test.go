@@ -3,12 +3,150 @@ package server
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
+
+func TestSemanticTokensFullDeltaCachesLatestResultAndAppliesEdits(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
+	first, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil || first.ResultID == nil || *first.ResultID == "" {
+		t.Fatalf("first full result = %#v, error = %v", first, err)
+	}
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{Text: "vim9script\nvar changed = 1\necho changed\n"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deltaResult, err := instance.SemanticTokensFullDelta(context.Background(), &protocol.SemanticTokensDeltaParams{
+		TextDocument:     protocol.TextDocumentIdentifier{URI: documentURI},
+		PreviousResultID: *first.ResultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta, ok := deltaResult.(*protocol.SemanticTokensDelta)
+	if !ok || delta.ResultID == nil || *delta.ResultID == *first.ResultID || len(delta.Edits) != 1 {
+		t.Fatalf("delta result = %#v", deltaResult)
+	}
+	current, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applySemanticTokenEdits(t, first.Data, delta.Edits); !reflect.DeepEqual(got, current.Data) {
+		t.Fatalf("applied delta = %#v, current = %#v", got, current.Data)
+	}
+
+	equalResult, err := instance.SemanticTokensFullDelta(context.Background(), &protocol.SemanticTokensDeltaParams{
+		TextDocument:     protocol.TextDocumentIdentifier{URI: documentURI},
+		PreviousResultID: *current.ResultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal, ok := equalResult.(*protocol.SemanticTokensDelta)
+	if !ok || equal.ResultID == nil || len(equal.Edits) != 0 || equal.Edits == nil {
+		t.Fatalf("equal delta result = %#v", equalResult)
+	}
+}
+
+func TestSemanticTokensFullDeltaFallsBackForNonLatestAndLifecycleResults(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "echo 1\n")
+	params := &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}
+	first, err := instance.SemanticTokensFull(context.Background(), params)
+	if err != nil || first.ResultID == nil {
+		t.Fatalf("first result = %#v, error = %v", first, err)
+	}
+	second, err := instance.SemanticTokensFull(context.Background(), params)
+	if err != nil || second.ResultID == nil {
+		t.Fatalf("second result = %#v, error = %v", second, err)
+	}
+	fallback := func(document uri.URI, previous string) *protocol.SemanticTokens {
+		t.Helper()
+		result, err := instance.SemanticTokensFullDelta(context.Background(), &protocol.SemanticTokensDeltaParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: document}, PreviousResultID: previous,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		full, ok := result.(*protocol.SemanticTokens)
+		if !ok || full.ResultID == nil {
+			t.Fatalf("fallback result = %#v", result)
+		}
+		return full
+	}
+	fallback(documentURI, *first.ResultID) // Replaced by a concurrent full result.
+	fallback(documentURI, "unknown")
+
+	otherURI := uri.MustParse("file:///other.vim")
+	instance.documents.Open(otherURI.String(), 1, "echo 2\n")
+	fallback(otherURI, *second.ResultID) // A valid ID for another URI.
+	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 3, Text: "echo 3\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	fallback(documentURI, *second.ResultID) // Close/reopen evicted the old lifecycle result.
+}
+
+func applySemanticTokenEdits(t *testing.T, data []uint32, edits []protocol.SemanticTokensEdit) []uint32 {
+	t.Helper()
+	result := append([]uint32(nil), data...)
+	for _, edit := range edits {
+		start := int(edit.Start)
+		end := start + int(edit.DeleteCount)
+		if start < 0 || end < start || end > len(result) {
+			t.Fatalf("invalid edit %#v for %#v", edit, result)
+		}
+		next := make([]uint32, 0, len(result)-int(edit.DeleteCount)+len(edit.Data))
+		next = append(next, result[:start]...)
+		next = append(next, edit.Data...)
+		next = append(next, result[end:]...)
+		result = next
+	}
+	return result
+}
+
+func TestSemanticTokensFullDoesNotInstallStaleSnapshot(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "echo before\n")
+	started := make(chan struct{})
+	continueParse := make(chan struct{})
+	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+		close(started)
+		<-continueParse
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+		result <- err
+	}()
+	<-started
+	instance.publishMu.Lock()
+	_, _, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: "echo after\n"}})
+	instance.publishMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(continueParse)
+	if err := <-result; !errors.Is(err, protocol.ErrContentModified) {
+		t.Fatalf("stale full error = %v", err)
+	}
+	instance.publishMu.Lock()
+	_, cached := instance.semanticTokenResults[documentURI.String()]
+	instance.publishMu.Unlock()
+	if cached {
+		t.Fatal("stale semantic token result was cached")
+	}
+}
 
 func TestSemanticTokensFullClassifiesSyntaxAndBoundSymbols(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nconst value = 1\n# comment\necho value\n")

@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/vimdata"
 	"go.lsp.dev/protocol"
 )
@@ -62,19 +64,69 @@ func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.Semant
 	if s.workspaceIndexRebuilding() {
 		return nil, nil
 	}
-	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+	snapshot, data, err := s.semanticTokensData(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
 	}
-	if snapshot == nil || file == nil {
+	if snapshot == nil {
 		return &protocol.SemanticTokens{Data: []uint32{}}, nil
+	}
+	result, err := s.installSemanticTokenResult(ctx, snapshot, data)
+	if err != nil {
+		return nil, err
+	}
+	return semanticTokensFullResult(result), nil
+}
+
+// SemanticTokensFullDelta returns an edit only when the supplied result is
+// still this URI's latest result. In every other case a full result safely
+// resets the client base.
+func (s *Server) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (protocol.SemanticTokensDeltaResult, error) {
+	if s.workspaceIndexRebuilding() {
+		return nil, nil
+	}
+	snapshot, data, err := s.semanticTokensData(ctx, params.TextDocument.URI.String())
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil {
+		return &protocol.SemanticTokens{Data: []uint32{}}, nil
+	}
+
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, protocol.ErrRequestCancelled
+	}
+	current, ok := s.documents.Snapshot(snapshot.URI())
+	if !ok || current != snapshot {
+		return nil, protocol.ErrContentModified
+	}
+	previous, delta := s.semanticTokenResults[snapshot.URI()]
+	result := s.installSemanticTokenResultLocked(snapshot, data)
+	if !delta || previous.resultID != params.PreviousResultID {
+		return semanticTokensFullResult(result), nil
+	}
+	return &protocol.SemanticTokensDelta{
+		ResultID: new(result.resultID),
+		Edits:    semanticTokenEdits(previous.data, result.data),
+	}, nil
+}
+
+func (s *Server) semanticTokensData(ctx context.Context, documentURI string) (*text.Snapshot, []uint32, error) {
+	snapshot, file, encoding, err := s.structureDocument(ctx, documentURI)
+	if err != nil {
+		return nil, nil, err
+	}
+	if snapshot == nil || file == nil {
+		return nil, nil, nil
 	}
 	facts := collectSemanticFacts(file)
 	data := make([]uint32, 0, len(facts)*5)
 	var previousLine, previousCharacter uint32
 	for index, fact := range facts {
 		if index%64 == 0 && ctx.Err() != nil {
-			return nil, protocol.ErrRequestCancelled
+			return nil, nil, protocol.ErrRequestCancelled
 		}
 		start, startErr := snapshot.Position(fact.span.Start, encoding)
 		end, endErr := snapshot.Position(fact.span.End, encoding)
@@ -90,10 +142,60 @@ func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.Semant
 		data = append(data, deltaLine, deltaCharacter, uint32(end.Character-start.Character), fact.tokenType, fact.modifiers)
 		previousLine, previousCharacter = line, character
 	}
-	if err := s.structureCurrent(ctx, snapshot); err != nil {
-		return nil, err
+	return snapshot, data, nil
+}
+
+func (s *Server) installSemanticTokenResult(ctx context.Context, snapshot *text.Snapshot, data []uint32) (semanticTokenResult, error) {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return semanticTokenResult{}, protocol.ErrRequestCancelled
 	}
-	return &protocol.SemanticTokens{Data: data}, nil
+	current, ok := s.documents.Snapshot(snapshot.URI())
+	if !ok || current != snapshot {
+		return semanticTokenResult{}, protocol.ErrContentModified
+	}
+	return s.installSemanticTokenResultLocked(snapshot, data), nil
+}
+
+func (s *Server) installSemanticTokenResultLocked(snapshot *text.Snapshot, data []uint32) semanticTokenResult {
+	s.nextSemanticTokenResultID++
+	result := semanticTokenResult{
+		data:     data,
+		resultID: strconv.FormatUint(s.nextSemanticTokenResultID, 10),
+	}
+	s.semanticTokenResults[snapshot.URI()] = result
+	return result
+}
+
+func semanticTokensFullResult(result semanticTokenResult) *protocol.SemanticTokens {
+	return &protocol.SemanticTokens{
+		ResultID: new(result.resultID),
+		Data:     append([]uint32(nil), result.data...),
+	}
+}
+
+// semanticTokenEdits returns the single linear replacement between shared
+// prefix and suffixes. It operates on flattened semantic-token data, as the
+// protocol requires, rather than token groups.
+func semanticTokenEdits(previous, current []uint32) []protocol.SemanticTokensEdit {
+	prefix := 0
+	for prefix < len(previous) && prefix < len(current) && previous[prefix] == current[prefix] {
+		prefix++
+	}
+	previousEnd, currentEnd := len(previous), len(current)
+	for previousEnd > prefix && currentEnd > prefix && previous[previousEnd-1] == current[currentEnd-1] {
+		previousEnd--
+		currentEnd--
+	}
+	if prefix == previousEnd && prefix == currentEnd {
+		return []protocol.SemanticTokensEdit{}
+	}
+	return []protocol.SemanticTokensEdit{{
+		Start:       uint32(prefix),
+		DeleteCount: uint32(previousEnd - prefix),
+		Data:        append([]uint32(nil), current[prefix:currentEnd]...),
+	}}
 }
 
 func collectSemanticFacts(file *syntax.File) []semanticFact {

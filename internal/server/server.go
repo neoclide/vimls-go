@@ -52,6 +52,13 @@ type parsedDocument struct {
 	file      *syntax.File
 }
 
+// semanticTokenResult is immutable after installation. The latest result for
+// each URI is retained only as the base for a subsequent delta request.
+type semanticTokenResult struct {
+	data     []uint32
+	resultID string
+}
+
 // workspaceIdentity names the post-install workspace state consumed by one
 // document analysis. It is captured and checked only while workspaceMu is held.
 type workspaceIdentity struct {
@@ -132,6 +139,8 @@ type Server struct {
 	published                   map[string]bool
 	pullDiagnosticResults       map[string]pullDiagnosticResult
 	nextDiagnosticResultID      uint64
+	semanticTokenResults        map[string]semanticTokenResult
+	nextSemanticTokenResultID   uint64
 	diagnosticRefreshGeneration uint64
 	diagnosticRefreshRunning    bool
 	workspaceMu                 sync.Mutex
@@ -194,6 +203,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		analysisWake:          make(chan struct{}, maxParallelAnalysis),
 		analysisPending:       make(map[string]struct{}),
 		pullDiagnosticResults: make(map[string]pullDiagnosticResult),
+		semanticTokenResults:  make(map[string]semanticTokenResult),
 		analysisRunning:       make(map[string]struct{}),
 		parsed:                make(map[string]parsedDocument),
 		published:             make(map[string]bool),
@@ -408,6 +418,7 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentPrepareRename,
 		protocol.MethodTextDocumentRename,
 		protocol.MethodTextDocumentSemanticTokensFull,
+		protocol.MethodTextDocumentSemanticTokensFullDelta,
 		protocol.MethodTextDocumentCodeAction,
 		protocol.MethodTextDocumentInlayHint,
 		protocol.MethodTextDocumentFormatting,
@@ -488,6 +499,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	workspaceFoldersSupported := true
 	completionResolve := true
 	documentLinkResolve := false
+	semanticTokensDelta := true
 	renamePrepare := true
 	var renameProvider protocol.RenameProvider = protocol.Boolean(true)
 	if prepareRename {
@@ -519,7 +531,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 		RenameProvider:                  renameProvider,
 		SemanticTokensProvider: &protocol.SemanticTokensOptions{
 			Legend: protocol.SemanticTokensLegend{TokenTypes: append([]string(nil), semanticTokenTypes...), TokenModifiers: append([]string(nil), semanticTokenModifiers...)},
-			Full:   protocol.Boolean(true),
+			Full:   &protocol.SemanticTokensFullDelta{Delta: &semanticTokensDelta},
 		},
 		CodeActionProvider: codeActionProvider,
 		InlayHintProvider:  protocol.Boolean(true),
@@ -600,6 +612,7 @@ func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 		s.removeWorkspaceURI(snapshot.URI())
 	}
 	delete(s.parsed, snapshot.URI())
+	delete(s.semanticTokenResults, snapshot.URI())
 	s.publishMu.Unlock()
 	s.startAnalysis(document.URI.String())
 	s.startWorkspaceDependents(dependents)
@@ -682,6 +695,7 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	closed := s.documents.Close(documentURI)
 	delete(s.parsed, documentURI)
 	delete(s.pullDiagnosticResults, documentURI)
+	delete(s.semanticTokenResults, documentURI)
 	clearDiagnostics := s.published[documentURI]
 	delete(s.published, documentURI)
 	s.publishMu.Unlock()

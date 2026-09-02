@@ -129,6 +129,14 @@ func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&", "#", "<", "\"", "'"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("completion trigger characters = %#v, want %#v", got, want)
 	}
+	semanticOptions, ok := capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions)
+	if !ok {
+		t.Fatalf("semantic token capability = %#v", capabilities.SemanticTokensProvider)
+	}
+	full, ok := semanticOptions.Full.(*protocol.SemanticTokensFullDelta)
+	if !ok || full.Delta == nil || !*full.Delta {
+		t.Fatalf("semantic token full capability = %#v", semanticOptions.Full)
+	}
 	for _, method := range []string{
 		protocol.MethodTextDocumentDocumentLink,
 		protocol.MethodTextDocumentCompletion,
@@ -137,6 +145,7 @@ func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 		protocol.MethodTextDocumentPrepareRename,
 		protocol.MethodTextDocumentRename,
 		protocol.MethodTextDocumentSemanticTokensFull,
+		protocol.MethodTextDocumentSemanticTokensFullDelta,
 		protocol.MethodTextDocumentCodeAction,
 		protocol.MethodTextDocumentInlayHint,
 	} {

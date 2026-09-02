@@ -60,6 +60,8 @@ func TestCancelledRequestMatrix(t *testing.T) {
 	mustCancelled("range format", err)
 	_, err = s.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})
 	mustCancelled("tokens", err)
+	_, err = s.SemanticTokensFullDelta(ctx, &protocol.SemanticTokensDeltaParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})
+	mustCancelled("token delta", err)
 	_, err = s.CodeAction(ctx, &protocol.CodeActionParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})
 	mustCancelled("actions", err)
 	_, err = s.InlayHint(ctx, &protocol.InlayHintParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})

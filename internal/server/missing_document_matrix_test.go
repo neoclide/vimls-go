@@ -68,8 +68,13 @@ func TestMissingDocumentRequestMatrix(t *testing.T) {
 	if got, err := s.RangeFormatting(ctx, &protocol.DocumentRangeFormattingParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}, Options: options}); err != nil || len(got) != 0 {
 		t.Errorf("range format = %#v, %v", got, err)
 	}
-	if got, err := s.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || got == nil || len(got.Data) != 0 {
+	if got, err := s.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || got == nil || got.ResultID != nil || len(got.Data) != 0 {
 		t.Errorf("tokens = %#v, %v", got, err)
+	}
+	if got, err := s.SemanticTokensFullDelta(ctx, &protocol.SemanticTokensDeltaParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}, PreviousResultID: "unknown"}); err != nil {
+		t.Errorf("token delta error = %v", err)
+	} else if full, ok := got.(*protocol.SemanticTokens); !ok || full.ResultID != nil || len(full.Data) != 0 {
+		t.Errorf("token delta = %#v", got)
 	}
 	if got, err := s.CodeAction(ctx, &protocol.CodeActionParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || len(got) != 0 {
 		t.Errorf("actions = %#v, %v", got, err)
