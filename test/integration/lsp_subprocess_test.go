@@ -456,6 +456,13 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	workspaceRoot := t.TempDir()
+	closedPath := filepath.Join(workspaceRoot, "closed.vim")
+	if err := os.WriteFile(closedPath, []byte("vim9script\necho missingClosed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	openPath := filepath.Join(workspaceRoot, "open.vim")
+	documentURI := canonicalFileURI(t, openPath).String()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "run", "-mod=readonly", "./cmd/vimls")
@@ -476,13 +483,12 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 
 	writer := jsonrpc.NewWriter(stdin)
 	reader := jsonrpc.NewReader(stdout)
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"textDocument":{"diagnostic":{}}},"initializationOptions":{"runtimepath":[]}}}`)
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":%q,"capabilities":{"textDocument":{"diagnostic":{}}},"initializationOptions":{"runtimepath":[]}}}`, canonicalFileURI(t, workspaceRoot).String()))
 	initialize := readResponse(t, reader, "1")
-	if !strings.Contains(string(initialize["result"]), `"diagnosticProvider":{"interFileDependencies":true,"workspaceDiagnostics":false}`) {
+	if !strings.Contains(string(initialize["result"]), `"diagnosticProvider":{"interFileDependencies":true,"workspaceDiagnostics":true}`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
-	documentURI := "file:///pull-diagnostics.vim"
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":"if true\n"}}}`, documentURI))
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"textDocument/diagnostic","params":{"textDocument":{"uri":%q}}}`, documentURI))
 	first := readPullResponse(t, reader, writer, &stderr, "2")
@@ -517,8 +523,38 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 		t.Fatalf("changed diagnostic response = %s", changed)
 	}
 
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":5,"method":"shutdown"}`)
-	shutdown := readPullResponse(t, reader, writer, &stderr, "5")
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":5,"method":"workspace/diagnostic","params":{"previousResultIds":[]}}`)
+	workspaceReport := readPullResponse(t, reader, writer, &stderr, "5")
+	var workspaceResult struct {
+		Items []struct {
+			URI      string                `json:"uri"`
+			Version  *int32                `json:"version"`
+			Kind     string                `json:"kind"`
+			ResultID string                `json:"resultId"`
+			Items    []protocol.Diagnostic `json:"items"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(workspaceReport["result"], &workspaceResult); err != nil {
+		t.Fatalf("decode workspace diagnostic response: %v, response: %s", err, workspaceReport)
+	}
+	if len(workspaceResult.Items) != 2 {
+		t.Fatalf("workspace diagnostic response = %s", workspaceReport)
+	}
+	closedURI := canonicalFileURI(t, closedPath).String()
+	if workspaceResult.Items[0].URI != closedURI || workspaceResult.Items[0].Version != nil || workspaceResult.Items[0].Kind != "full" || workspaceResult.Items[0].ResultID == "" || len(workspaceResult.Items[0].Items) == 0 {
+		t.Fatalf("closed workspace diagnostic = %#v", workspaceResult.Items[0])
+	}
+	if workspaceResult.Items[1].URI != documentURI || workspaceResult.Items[1].Version == nil || *workspaceResult.Items[1].Version != 2 || workspaceResult.Items[1].Kind != "full" || workspaceResult.Items[1].ResultID == "" {
+		t.Fatalf("open workspace diagnostic = %#v", workspaceResult.Items[1])
+	}
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":6,"method":"workspace/diagnostic","params":{"previousResultIds":[{"uri":%q,"value":%q},{"uri":%q,"value":%q}]}}`, closedURI, workspaceResult.Items[0].ResultID, documentURI, workspaceResult.Items[1].ResultID))
+	unchangedWorkspace := readPullResponse(t, reader, writer, &stderr, "6")
+	if strings.Count(string(unchangedWorkspace["result"]), `"kind":"unchanged"`) != 2 {
+		t.Fatalf("unchanged workspace diagnostic response = %s", unchangedWorkspace)
+	}
+
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":7,"method":"shutdown"}`)
+	shutdown := readPullResponse(t, reader, writer, &stderr, "7")
 	if string(shutdown["result"]) != "null" {
 		t.Fatalf("shutdown response = %s", shutdown)
 	}

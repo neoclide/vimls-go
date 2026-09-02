@@ -378,6 +378,7 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentDidSave,
 		protocol.MethodTextDocumentDidClose,
 		protocol.MethodTextDocumentDiagnostic,
+		protocol.MethodWorkspaceDiagnostic,
 		protocol.MethodTextDocumentDeclaration,
 		protocol.MethodTextDocumentDefinition,
 		protocol.MethodTextDocumentReferences,
@@ -514,7 +515,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 		},
 	}
 	if pullDiagnostics {
-		capabilities.DiagnosticProvider = &protocol.DiagnosticOptions{InterFileDependencies: true, WorkspaceDiagnostics: false}
+		capabilities.DiagnosticProvider = &protocol.DiagnosticOptions{InterFileDependencies: true, WorkspaceDiagnostics: true}
 	}
 	return &protocol.InitializeResult{
 		Capabilities: capabilities,
@@ -1042,7 +1043,14 @@ func (s *Server) computeDocumentDiagnostics(work workspace.Analysis) (*syntax.Fi
 	if !ok {
 		return nil, workspaceIdentity{}, false
 	}
-	if work.Snapshot.ByteLen() > maxFileBytes {
+	return s.composeDocumentDiagnostics(work.Context, work.Snapshot, file, fileAnalysis, workspaceSnapshot, disabledDiagnostics)
+}
+
+func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.Snapshot, file *syntax.File, fileAnalysis *analysis.FileAnalysis, workspaceSnapshot workspaceAnalysisSnapshot, disabledDiagnostics map[string]struct{}) (*syntax.File, workspaceIdentity, bool) {
+	if !workspaceSnapshot.ready || ctx.Err() != nil {
+		return nil, workspaceIdentity{}, false
+	}
+	if snapshot.ByteLen() > maxFileBytes {
 		file.Diagnostics = filterDisabledDiagnostics(file.Diagnostics, disabledDiagnostics)
 		return file, workspaceSnapshot.identity, true
 	}
@@ -1056,11 +1064,7 @@ func (s *Server) computeDocumentDiagnostics(work workspace.Analysis) (*syntax.Fi
 	}
 	versionedAnalysis.Diagnostics = analysis.AutoloadExportedDefDiagnostics(file, fileAnalysis, autoload, versionedAnalysis.Diagnostics)
 	file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
-	importDiagnostics := s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)
-	if !workspaceSnapshot.ready || work.Context.Err() != nil {
-		return nil, workspaceIdentity{}, false
-	}
-	file.Diagnostics = append(file.Diagnostics, importDiagnostics...)
+	file.Diagnostics = append(file.Diagnostics, s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)...)
 	if workspaceSnapshot.indexComplete {
 		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandAbbreviationDiagnostics(file, workspaceSnapshot.userCommandNames)...)
 	}

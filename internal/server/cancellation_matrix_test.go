@@ -66,4 +66,6 @@ func TestCancelledRequestMatrix(t *testing.T) {
 	mustCancelled("hints", err)
 	_, err = s.Diagnostic(ctx, &protocol.DocumentDiagnosticParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}})
 	mustCancelled("diagnostics", err)
+	_, err = s.DiagnosticWorkspace(ctx, &protocol.WorkspaceDiagnosticParams{})
+	mustCancelled("workspace diagnostics", err)
 }

@@ -84,7 +84,9 @@ runtime/source corpus produce no crashes or unbounded behavior.
 
 Current protocol status: document pull diagnostics are supported for capable
 clients with full/unchanged IDs and refresh after diagnostic-setting or complete
-workspace rebuild changes. Workspace pull diagnostics remain deferred.
+workspace rebuild changes. Workspace pull covers open and closed workspace-root
+Vim files, supports per-document previous result IDs and partial-result progress,
+and waits for active indexing before using the installed complete index.
 
 Deliver:
 

@@ -1207,7 +1207,7 @@ func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 	if *third.ResultID == *second.ResultID || len(third.Items) != 0 {
 		t.Fatalf("disabled configuration report = %#v", third)
 	}
-	if !implementedMethod(protocol.MethodTextDocumentDiagnostic) || implementedMethod(protocol.MethodWorkspaceDiagnostic) {
+	if !implementedMethod(protocol.MethodTextDocumentDiagnostic) || !implementedMethod(protocol.MethodWorkspaceDiagnostic) {
 		t.Fatal("diagnostic dispatch allowlist is incorrect")
 	}
 }

@@ -150,8 +150,9 @@ endif
 
 Clients that advertise `textDocument.diagnostic` use document pull diagnostics;
 older clients retain `textDocument/publishDiagnostics`. Pull diagnostics are
-document-only (`workspaceDiagnostics: false`): workspace pull, related
-documents, partial results, and progress are not implemented.
+advertised with `workspaceDiagnostics: true`: workspace pull covers open and
+closed Vim files below workspace roots, supports previous result IDs and
+partial-result progress, and excludes external runtimepath-only files.
 
 User settings are supplied through LSP `workspace/configuration`.
 

@@ -12,11 +12,16 @@ The evidence below is pinned to Vim 9.2.1015.
 
 Clients advertising `textDocument.diagnostic` receive document pull diagnostics
 with full/unchanged opaque result IDs. The server advertises
-`interFileDependencies: true` and `workspaceDiagnostics: false`; pull clients
+`interFileDependencies: true` and `workspaceDiagnostics: true`; pull clients
 do not receive push publications. Older clients retain the existing push
-transport. This milestone does not implement workspace pull, related documents,
-partial results, or work-done progress. When supported, the server requests a
-diagnostic refresh after a diagnostic-setting or completed workspace-index
+transport. `workspace/diagnostic` reports open and closed Vim files below
+workspace roots, uses `version: null` for closed files, accepts per-URI previous
+result IDs, and streams deterministic partial-result batches when requested.
+External runtimepath-only files are not workspace diagnostic targets. Both pull
+requests wait up to one second for active workspace indexing; an incomplete
+bounded index is rejected rather than reported as complete. Related documents
+and work-done progress are not implemented. When supported, the server requests
+a diagnostic refresh after a diagnostic-setting or completed workspace-index
 change.
 
 ## vimls-owned diagnostic codes

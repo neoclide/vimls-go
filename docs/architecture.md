@@ -178,7 +178,10 @@ replace a reopened overlay.
 - Diagnostics select document pull for clients advertising
   `textDocument.diagnostic`, otherwise legacy push publication. Pull cache
   entries bind immutable snapshot, configuration revision, and workspace
-  identity; workspace pull remains deferred.
+  identity. Workspace pull enumerates only workspace-root files, prefers open
+  snapshots, reports closed files with a null version, reuses per-document
+  result IDs, and can stream deterministic partial-result batches. It waits for
+  active indexing and rejects an incomplete bounded index.
 
 - Before `initialize`, accept only methods allowed by LSP.
 - Negotiate position encoding and advertise only implemented capabilities.

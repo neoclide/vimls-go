@@ -61,7 +61,7 @@ func TestInitializeDiagnosticTransportCapability(t *testing.T) {
 			if diagnostic == nil && (ok || result.Capabilities.DiagnosticProvider != nil) {
 				t.Fatalf("legacy diagnostic provider = %#v", result.Capabilities.DiagnosticProvider)
 			}
-			if diagnostic != nil && (!ok || !options.InterFileDependencies || options.WorkspaceDiagnostics) {
+			if diagnostic != nil && (!ok || !options.InterFileDependencies || !options.WorkspaceDiagnostics) {
 				t.Fatalf("pull diagnostic provider = %#v", result.Capabilities.DiagnosticProvider)
 			}
 		})

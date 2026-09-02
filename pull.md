@@ -1,4 +1,4 @@
-# Document Pull Diagnostics Plan
+# Pull Diagnostics Plan and Contract
 
 ## Goal
 
@@ -7,7 +7,8 @@ contracts. Clients that advertise `textDocument.diagnostic` use
 `textDocument/diagnostic`; older clients keep the existing
 `textDocument/publishDiagnostics` behavior.
 
-The first milestone deliberately excludes `workspace/diagnostic`.
+The first milestone added document pull. The second milestone adds
+`workspace/diagnostic` for Vim files below workspace roots.
 
 ## Protocol contract
 
@@ -23,14 +24,15 @@ When the client provides `textDocument.diagnostic`, advertise:
 {
   "diagnosticProvider": {
     "interFileDependencies": true,
-    "workspaceDiagnostics": false
+    "workspaceDiagnostics": true
   }
 }
 ```
 
 Use static `DiagnosticOptions`; do not dynamically register the capability.
-Do not advertise work-done progress and do not emit partial results. A request
-containing progress tokens still receives one final response.
+Do not advertise work-done progress. Document pulls return one final response;
+workspace pulls use partial-result progress only when the client supplies a
+partial result token.
 
 The document response is one of:
 
@@ -71,8 +73,8 @@ Background analysis still runs for pull clients because open-document overlays,
 the workspace index, the import graph, and dependent reanalysis require it.
 Only the push notification is suppressed.
 
-Do not add `workspace/diagnostic` to the implemented-method allowlist. An
-unexpected workspace pull therefore continues to return MethodNotFound.
+Add both `textDocument/diagnostic` and `workspace/diagnostic` to the implemented
+method allowlist.
 
 ## Package boundaries
 
@@ -82,8 +84,9 @@ The implementation belongs in `internal/server`:
   shared analysis pipeline, push/pull transport selection, and server state.
 - `internal/server/config.go`: select pull or push diagnostic client
   capabilities for related information.
-- `internal/server/diagnostics_pull.go`: the document diagnostic handler,
-  result cache, full/unchanged construction, and refresh coalescing.
+- `internal/server/diagnostics_pull.go`: document and workspace diagnostic
+  handlers, their shared result cache, full/unchanged construction, partial
+  result streaming, and refresh coalescing.
 - `internal/server/workspace.go`: request a diagnostic refresh only at existing
   workspace rebuild completion boundaries.
 
@@ -255,7 +258,7 @@ Refresh failures are logged and do not fail document pulls.
 
 ### Phase 5: documentation and validation
 
-- Document pull/push selection and the deferred workspace pull scope.
+- Document/workspace pull and legacy push selection.
 - Update architecture, diagnostics, roadmap, language support, and README only
   after the behavior is implemented.
 
@@ -264,11 +267,11 @@ Refresh failures are logged and do not fail document pulls.
 ### Capabilities and routing
 
 - Pull capability present: advertise `diagnosticProvider` with
-  `interFileDependencies=true` and `workspaceDiagnostics=false`.
+  `interFileDependencies=true` and `workspaceDiagnostics=true`.
 - Pull capability absent: omit it and preserve push.
 - Pull client receives no `publishDiagnostics` after open/change/close.
 - `textDocument/diagnostic` dispatches to the handler.
-- `workspace/diagnostic` remains MethodNotFound.
+- `workspace/diagnostic` dispatches to the workspace pull handler.
 - Invalid or missing document URI returns InvalidParams.
 
 ### Reports and cache
@@ -281,6 +284,20 @@ Refresh failures are logged and do not fail document pulls.
 - didChange, diagnostic configuration change, workspace index replacement, or
   graph revision change produces a new full result and result ID.
 - close/reopen cannot reuse the old result ID.
+
+### Workspace reports
+
+- Workspace files are returned in URI lexical order; external runtimepath-only
+  files are excluded.
+- Open snapshots override disk contents and include their document version;
+  closed files use `version: null`.
+- Per-URI previous result IDs produce unchanged items, including IDs previously
+  returned by a document pull.
+- Active rebuild and pending index work block the request for at most one
+  second; the installed replacement index is used after the wait.
+- An incomplete bounded index returns RequestFailed.
+- Partial result tokens receive deterministic non-empty batches and an empty
+  final item list; progress-send failures fail the request.
 
 ### Correctness and stale state
 
@@ -328,9 +345,19 @@ git diff --check
 Request gopls diagnostics for every modified Go file. Do not run race tests or
 collect coverage unless separately requested.
 
-## Deferred workspace pull milestone
+## Workspace pull milestone
 
-`workspace/diagnostic` requires a separate design for closed-file diagnostic
-storage, `version: null`, workspace URI enumeration, `previousResultIds`,
-partial streaming, cancellation, and document-pull precedence. Do not advertise
-`workspaceDiagnostics: true` until those behaviors and integration tests exist.
+`workspace/diagnostic` enumerates the deterministic union of indexed disk files
+and open snapshots below active workspace roots. It excludes files belonging
+only to external runtimepath roots, prefers open snapshots, and reports closed
+files with `version: null`. Per-URI `previousResultIds` select unchanged reports;
+document and workspace pulls share cache entries so a newer document result has
+precedence. Closed entries use source content, configuration revision, and
+workspace identity as their stable cache key.
+
+The request waits for active rebuild and pending index work through the shared
+one-second readiness gate. It uses only the newly installed index, rejects an
+incomplete bounded index with RequestFailed, retries the complete operation once
+when state is replaced, and then returns ContentModified. With a partial result
+token it sends deterministic non-empty batches through `$/progress` and returns
+an empty final item list; without a token it returns all items in the response.
