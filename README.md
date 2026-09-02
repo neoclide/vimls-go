@@ -96,11 +96,7 @@ Add to your `coc-settings.json` (open with `:CocConfig`):
   "languageserver": {
     "vimls": {
       "command": "vimls",
-      "filetypes": ["vim"],
-      "initializationOptions": {
-        "unresolvedSeverity": "warning",
-        "workspaceRebuildDebounce": 100
-      }
+      "filetypes": ["vim"]
     }
   }
 }
@@ -118,10 +114,6 @@ vim.api.nvim_create_autocmd("FileType", {
       name = "vimls",
       cmd = { "vimls" },
       root_dir = vim.fs.root(args.buf, { ".git", ".vim" }) or vim.fs.dirname(vim.api.nvim_buf_get_name(args.buf)),
-      init_options = {
-        unresolvedSeverity = "warning",
-        workspaceRebuildDebounce = 100,
-      },
     })
   end,
 })
@@ -139,10 +131,6 @@ if executable('vimls')
         \ 'name': 'vimls',
         \ 'cmd': {server_info -> ['vimls']},
         \ 'allowlist': ['vim'],
-        \ 'initialization_options': {
-        \   'unresolvedSeverity': 'warning',
-        \   'workspaceRebuildDebounce': 100
-        \ },
         \ })
   augroup END
 endif
@@ -150,17 +138,31 @@ endif
 
 ---
 
-## Configuration Options
+## Initialization Options
 
-The following settings can be passed in `initializationOptions` or dynamically via LSP `workspace/didChangeConfiguration`:
+`runtimepath` is the only supported `initializationOptions` field.
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `runtimepath` | `string[]` | *Auto-discovered* | Custom array of ordered runtime paths. An explicit empty array `[]` disables runtime indexing. |
-| `unresolvedSeverity` | `string` | `"warning"` | Diagnostic severity for unresolved symbols (`"error"`, `"warning"`, `"information"`, `"hint"`). |
+
+## Workspace Settings
+
+User settings are supplied through LSP `workspace/configuration`.
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
 | `workspaceRebuildDebounce` | `number` | `100` | Milliseconds to wait after the latest workspace rebuild trigger; `0` rebuilds immediately. |
 
-For complete configuration specifications and runtimepath update notifications, see [docs/configuration.md](docs/configuration.md).
+Clients dynamically replace runtimepath with this custom request:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"vimls/didChangeRuntimepath","params":{"runtimepath":["/path/to/vim/runtime"]}}
+```
+
+It returns JSON `null`; the notification form remains compatible. See
+[Client configuration](docs/configuration.md#custom-request-vimlsdidchangeruntimepath)
+for its delta-indexing and error-handling contract.
 
 ---
 

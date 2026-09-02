@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neoclide/vimls-go/internal/syntax"
 	"go.lsp.dev/protocol"
 )
 
@@ -44,33 +43,6 @@ func TestLanguageFeatureCapabilitiesRespectClientOrder(t *testing.T) {
 	}
 	if capabilities := languageFeatureCapabilitiesFromClient(nil); capabilities.hoverMarkup != protocol.MarkupKindPlainText || capabilities.signatureMarkup != protocol.MarkupKindPlainText || capabilities.diagnosticRelatedInformation {
 		t.Fatalf("absent language feature capabilities = %#v", capabilities)
-	}
-}
-
-func TestUnresolvedSeverityFromOptions(t *testing.T) {
-	tests := []struct {
-		name        string
-		raw         any
-		want        syntax.DiagnosticSeverity
-		wantWarning bool
-	}{
-		{name: "absent", want: syntax.DiagnosticWarning},
-		{name: "empty object", raw: map[string]any{}, want: syntax.DiagnosticWarning},
-		{name: "error", raw: map[string]any{"unresolvedSeverity": "error"}, want: syntax.DiagnosticError},
-		{name: "warning", raw: map[string]any{"unresolvedSeverity": "warning"}, want: syntax.DiagnosticWarning},
-		{name: "information", raw: map[string]any{"unresolvedSeverity": "information"}, want: syntax.DiagnosticInformation},
-		{name: "hint", raw: []byte(`{"unresolvedSeverity":"hint"}`), want: syntax.DiagnosticHint},
-		{name: "invalid shape", raw: []any{}, want: syntax.DiagnosticWarning, wantWarning: true},
-		{name: "invalid type", raw: map[string]any{"unresolvedSeverity": 2}, want: syntax.DiagnosticWarning, wantWarning: true},
-		{name: "invalid value", raw: map[string]any{"unresolvedSeverity": "off"}, want: syntax.DiagnosticWarning, wantWarning: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			severity, warning := unresolvedSeverityFromOptions(test.raw)
-			if severity != test.want || (warning != "") != test.wantWarning {
-				t.Fatalf("severity = %v, warning = %q, want %v, warning=%t", severity, warning, test.want, test.wantWarning)
-			}
-		})
 	}
 }
 
@@ -172,28 +144,6 @@ func TestDefaultRuntimePathsSkipUnreadableCandidate(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRebuildDebounceFromOptions(t *testing.T) {
-	tests := []struct {
-		name        string
-		raw         any
-		want        time.Duration
-		wantWarning bool
-	}{
-		{name: "absent", raw: map[string]any{}, want: defaultWorkspaceRebuildDebounce},
-		{name: "milliseconds", raw: []byte(`{"workspaceRebuildDebounce":250}`), want: 250 * time.Millisecond},
-		{name: "disabled", raw: map[string]any{"workspaceRebuildDebounce": float64(0)}, want: 0},
-		{name: "invalid", raw: map[string]any{"workspaceRebuildDebounce": "fast"}, want: defaultWorkspaceRebuildDebounce, wantWarning: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			delay, warning := workspaceRebuildDebounceFromOptions(test.raw)
-			if delay != test.want || (warning != "") != test.wantWarning {
-				t.Fatalf("delay=%s warning=%q", delay, warning)
-			}
-		})
-	}
-}
-
 func TestWorkspaceRebuildDebounceFromSettings(t *testing.T) {
 	previous := 250 * time.Millisecond
 	tests := []struct {
@@ -204,7 +154,7 @@ func TestWorkspaceRebuildDebounceFromSettings(t *testing.T) {
 	}{
 		{name: "empty", settings: `{}`, want: previous},
 		{name: "direct", settings: `{"workspaceRebuildDebounce":50}`, want: 50 * time.Millisecond},
-		{name: "nested", settings: `{"vimls":{"workspaceRebuildDebounce":0}}`, want: 0},
+		{name: "nested", settings: `{"vim":{"workspaceRebuildDebounce":0}}`, want: 0},
 		{name: "invalid", settings: `{"workspaceRebuildDebounce":-1}`, want: previous, wantWarning: true},
 	}
 	for _, test := range tests {
@@ -212,31 +162,6 @@ func TestWorkspaceRebuildDebounceFromSettings(t *testing.T) {
 			delay, warning := workspaceRebuildDebounceFromSettings([]byte(test.settings), previous)
 			if delay != test.want || (warning != "") != test.wantWarning {
 				t.Fatalf("delay=%s warning=%q", delay, warning)
-			}
-		})
-	}
-}
-
-func TestUnresolvedSeverityFromSettings(t *testing.T) {
-	previous := syntax.DiagnosticInformation
-	tests := []struct {
-		name        string
-		settings    string
-		want        syntax.DiagnosticSeverity
-		wantWarning bool
-	}{
-		{name: "empty object", settings: `{}`, want: previous},
-		{name: "direct", settings: `{"unresolvedSeverity":"error"}`, want: syntax.DiagnosticError},
-		{name: "nested", settings: `{"vimls":{"unresolvedSeverity":"hint"}}`, want: syntax.DiagnosticHint},
-		{name: "invalid shape", settings: `[]`, want: previous, wantWarning: true},
-		{name: "invalid type", settings: `{"unresolvedSeverity":2}`, want: previous, wantWarning: true},
-		{name: "invalid value", settings: `{"unresolvedSeverity":"off"}`, want: previous, wantWarning: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			severity, warning := unresolvedSeverityFromSettings([]byte(test.settings), previous)
-			if severity != test.want || (warning != "") != test.wantWarning {
-				t.Fatalf("severity = %v, warning = %q, want %v, warning=%t", severity, warning, test.want, test.wantWarning)
 			}
 		})
 	}

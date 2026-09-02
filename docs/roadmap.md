@@ -115,10 +115,11 @@ index, open-document overlay, client-driven watched-file refresh, static Vim9
 import navigation, and legacy/Vim9 autoload navigation are implemented. A
 directed import graph is published as immutable, revisioned snapshots alongside
 the index; it uses canonical identity, open-buffer overlays, and transitive
-reverse invalidation. The server dynamically registers Vim file watchers when
-the client supports it; client-provided or locally discovered runtimepath roots
-and later custom notification replacements are included in the canonical,
-bounded index. Cross-file analysis and requests bind generation, index
+reverse invalidation. The server dynamically registers Vim file watchers below
+workspace roots when the client supports it; runtimepath roots are never
+watched. Client-provided or locally discovered runtimepath roots and later
+custom request replacements are included in the canonical, bounded index.
+Cross-file analysis and requests bind generation, index
 instance/revision, and graph revision; stale foreground requests retry once,
 while stale background results are discarded and requeued. Rebuild and
 close/reopen publication also validate current open snapshots. The subprocess

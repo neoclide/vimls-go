@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -19,40 +20,37 @@ import (
 
 func TestProtocolDiagnosticSeverity(t *testing.T) {
 	for _, code := range []string{"vim/E171", "vim/E113", "vim/E518", "vim/E1012", "future/source"} {
-		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticWarning); got != protocol.DiagnosticSeverityError {
+		if got := protocolDiagnosticSeverity(code); got != protocol.DiagnosticSeverityError {
 			t.Errorf("%s severity = %v, want error", code, got)
 		}
 	}
 	for _, code := range []string{"vim/E117", "vim/E121", "vim/E1001", "vim/E1089"} {
-		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticWarning); got != protocol.DiagnosticSeverityWarning {
+		if got := protocolDiagnosticSeverity(code); got != protocol.DiagnosticSeverityWarning {
 			t.Errorf("%s severity = %v, want warning", code, got)
 		}
-		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticHint); got != protocol.DiagnosticSeverityHint {
-			t.Errorf("%s configured severity = %v, want hint", code, got)
-		}
 	}
-	if got := protocolDiagnosticSeverity("vim/E122", syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
+	if got := protocolDiagnosticSeverity("vim/E122"); got != protocol.DiagnosticSeverityWarning {
 		t.Errorf("vim/E122 severity = %v, want warning", got)
 	}
-	if got := protocolDiagnosticSeverity("vim/E174", syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
+	if got := protocolDiagnosticSeverity("vim/E174"); got != protocol.DiagnosticSeverityWarning {
 		t.Errorf("vim/E174 severity = %v, want warning", got)
 	}
-	if got := protocolDiagnosticSeverity("vim/E464", syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
+	if got := protocolDiagnosticSeverity("vim/E464"); got != protocol.DiagnosticSeverityWarning {
 		t.Errorf("vim/E464 severity = %v, want warning", got)
 	}
 	for _, code := range []string{"vim/E705", "vim/E707"} {
-		if got := protocolDiagnosticSeverity(code, syntax.DiagnosticError); got != protocol.DiagnosticSeverityWarning {
+		if got := protocolDiagnosticSeverity(code); got != protocol.DiagnosticSeverityWarning {
 			t.Errorf("%s severity = %v, want warning", code, got)
 		}
 	}
-	if got := protocolDiagnosticSeverity("vimls/deprecated", syntax.DiagnosticError); got != protocol.DiagnosticSeverityHint {
+	if got := protocolDiagnosticSeverity("vimls/deprecated"); got != protocol.DiagnosticSeverityHint {
 		t.Errorf("vimls/deprecated severity = %v, want hint", got)
 	}
-	if got := protocolDiagnosticSeverity("vimls/unused-variable", syntax.DiagnosticError); got != protocol.DiagnosticSeverityHint {
+	if got := protocolDiagnosticSeverity("vimls/unused-variable"); got != protocol.DiagnosticSeverityHint {
 		t.Errorf("vimls/unused-variable severity = %v, want hint", got)
 	}
 	for _, definition := range syntax.VimlsDiagnosticDefinitions {
-		if got := protocolDiagnosticSeverity(definition.Code, syntax.DiagnosticError); got == protocol.DiagnosticSeverityError {
+		if got := protocolDiagnosticSeverity(definition.Code); got == protocol.DiagnosticSeverityError {
 			t.Errorf("%s severity = %v, vimls-owned diagnostics must not be errors", definition.Code, got)
 		}
 	}
@@ -202,7 +200,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	}
 }
 
-func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {
+func TestServerPublishesUnresolvedDiagnosticsAsWarnings(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
@@ -233,36 +231,6 @@ func TestServerPublishesConfigurableUnresolvedSeverity(t *testing.T) {
 		}
 	}
 
-	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{
-		Settings: protocol.LSPAny([]byte(`{"vimls":{"unresolvedSeverity":"error"}}`)),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	updated := waitForDiagnostics(t, client.published)
-	if len(updated.Diagnostics) != 3 {
-		t.Fatalf("configured unresolved diagnostics = %#v", updated.Diagnostics)
-	}
-	for _, diagnostic := range updated.Diagnostics {
-		if diagnostic.Severity != protocol.DiagnosticSeverityError {
-			t.Fatalf("configured unresolved severity = %v, want error; diagnostics = %#v", diagnostic.Severity, updated.Diagnostics)
-		}
-	}
-}
-
-func TestInitializationUnresolvedSeverity(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	t.Cleanup(instance.stopAnalysis)
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
-		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[],"unresolvedSeverity":"hint"}`)),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	instance.mu.Lock()
-	severity := instance.unresolvedSeverity
-	instance.mu.Unlock()
-	if severity != syntax.DiagnosticHint {
-		t.Fatalf("initial unresolved severity = %v, want hint", severity)
-	}
 }
 
 func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
@@ -306,8 +274,8 @@ func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
 	}
 }
 
-func TestInitializationConfigurationAppliesUnresolvedSeverity(t *testing.T) {
-	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"unresolvedSeverity":"hint"}`))}
+func TestInitializationConfigurationAppliesWorkspaceSettings(t *testing.T) {
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"workspaceRebuildDebounce":250}`))}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
@@ -321,11 +289,11 @@ func TestInitializationConfigurationAppliesUnresolvedSeverity(t *testing.T) {
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
-	instance.mu.Lock()
-	severity := instance.unresolvedSeverity
-	instance.mu.Unlock()
-	if client.calls != 1 || severity != syntax.DiagnosticHint {
-		t.Fatalf("configuration calls = %d, unresolved severity = %v", client.calls, severity)
+	instance.workspaceMu.Lock()
+	delay := instance.workspaceDelay
+	instance.workspaceMu.Unlock()
+	if client.calls != 1 || delay != 250*time.Millisecond {
+		t.Fatalf("configuration calls = %d, workspace delay = %s", client.calls, delay)
 	}
 	if revision := instance.documents.ConfigRevision(); revision != 2 {
 		t.Fatalf("config revision = %d, want 2", revision)
@@ -1017,7 +985,7 @@ func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
 }
 
 func TestWorkspaceConfigurationRequestOnInitializedAndNullChange(t *testing.T) {
-	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"unresolvedSeverity":"hint"}`))}
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"workspaceRebuildDebounce":250}`))}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
@@ -1031,21 +999,21 @@ func TestWorkspaceConfigurationRequestOnInitializedAndNullChange(t *testing.T) {
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
-	instance.mu.Lock()
-	severity := instance.unresolvedSeverity
-	instance.mu.Unlock()
-	if client.calls != 1 || severity != syntax.DiagnosticHint {
-		t.Fatalf("initialized configuration calls=%d severity=%v", client.calls, severity)
+	instance.workspaceMu.Lock()
+	delay := instance.workspaceDelay
+	instance.workspaceMu.Unlock()
+	if client.calls != 1 || delay != 250*time.Millisecond {
+		t.Fatalf("initialized configuration calls=%d delay=%s", client.calls, delay)
 	}
-	client.settings = protocol.LSPAny([]byte(`{"unresolvedSeverity":"information"}`))
+	client.settings = protocol.LSPAny([]byte(`{"workspaceRebuildDebounce":0}`))
 	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte("null"))}); err != nil {
 		t.Fatal(err)
 	}
-	instance.mu.Lock()
-	severity = instance.unresolvedSeverity
-	instance.mu.Unlock()
-	if client.calls != 2 || severity != syntax.DiagnosticInformation {
-		t.Fatalf("changed configuration calls=%d severity=%v", client.calls, severity)
+	instance.workspaceMu.Lock()
+	delay = instance.workspaceDelay
+	instance.workspaceMu.Unlock()
+	if client.calls != 2 || delay != 0 {
+		t.Fatalf("changed configuration calls=%d delay=%s", client.calls, delay)
 	}
 }
 

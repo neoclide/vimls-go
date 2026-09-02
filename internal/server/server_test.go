@@ -213,7 +213,7 @@ type configurationClient struct {
 
 func (c *configurationClient) Configuration(_ context.Context, params *protocol.ConfigurationParams) ([]protocol.LSPAny, error) {
 	c.calls++
-	if len(params.Items) != 1 || params.Items[0].Section == nil || *params.Items[0].Section != "vimls" {
+	if len(params.Items) != 1 || params.Items[0].Section == nil || *params.Items[0].Section != "vim" {
 		return nil, errors.New("unexpected configuration section")
 	}
 	return []protocol.LSPAny{c.settings}, nil

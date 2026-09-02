@@ -95,7 +95,6 @@ type Server struct {
 
 	mu                  sync.Mutex
 	state               state
-	unresolvedSeverity  syntax.DiagnosticSeverity
 	pendingWarning      string
 	client              protocol.Client
 	workspaceProgress   bool
@@ -166,7 +165,6 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		input:               input,
 		output:              output,
 		log:                 logOutput,
-		unresolvedSeverity:  defaultUnresolvedSeverity,
 		cancellations:       make(map[jsonrpc2.ID]context.CancelFunc),
 		documents:           workspace.NewDocuments(),
 		encoding:            text.UTF16,
@@ -334,14 +332,11 @@ func (s *Server) lifecycleHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 			return nil, s.Initialized(ctx, &protocol.InitializedParams{})
 		}
 		if method == MethodDidChangeRuntimepath {
-			if request.IsCall() {
-				return nil, jsonrpc2.NewError(jsonrpc2.InvalidRequest, "runtimepath changes must be notifications")
-			}
-			var params DidChangeRuntimepathParams
+			var params *DidChangeRuntimepathParams
 			if err := protocol.Unmarshal(request.Params(), &params); err != nil {
 				return nil, jsonrpc2.ErrInvalidParams
 			}
-			return nil, s.DidChangeRuntimepath(ctx, &params)
+			return nil, s.DidChangeRuntimepath(ctx, params)
 		}
 		if !implementedMethod(method) {
 			if request.IsCall() {
@@ -411,11 +406,10 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	includeText := true
 	changeKind := protocol.TextDocumentSyncKindIncremental
 	runtimePaths, runtimepathConfigured, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
-	unresolvedSeverity, unresolvedWarning := unresolvedSeverityFromOptions([]byte(params.InitializationOptions))
-	workspaceDelay, workspaceDelayWarning := workspaceRebuildDebounceFromOptions([]byte(params.InitializationOptions))
 	if !runtimepathConfigured {
 		runtimePaths = defaultRuntimePaths()
 	}
+	runtimePaths = usableRuntimePaths(runtimePaths)
 	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 	workspaceProgress := params.Capabilities.Window != nil && params.Capabilities.Window.WorkDoneProgress != nil && *params.Capabilities.Window.WorkDoneProgress
@@ -424,9 +418,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	completion := completionCapabilitiesFromClient(params.Capabilities.TextDocument)
 	languageFeatures := languageFeatureCapabilitiesFromClient(params.Capabilities.TextDocument)
 	s.mu.Lock()
-	s.unresolvedSeverity = unresolvedSeverity
 	s.pendingWarning = ""
-	for _, warning := range []string{runtimepathWarning, unresolvedWarning, workspaceDelayWarning} {
+	for _, warning := range []string{runtimepathWarning} {
 		if warning == "" {
 			continue
 		}
@@ -446,7 +439,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.workspaceProgress = workspaceProgress
 	s.mu.Unlock()
 	s.workspaceMu.Lock()
-	s.workspaceDelay = workspaceDelay
+	s.workspaceDelay = defaultWorkspaceRebuildDebounce
 	s.workspaceMu.Unlock()
 	s.setWorkspaceRoots(workspaceRootsFromInitialize(params))
 	s.setRuntimePaths(runtimePaths)
@@ -671,7 +664,7 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 	// Configuration is a server-to-client request. Release the connection read
 	// loop first so it can receive the client's response while this handler waits.
 	jsonrpc2.Async(ctx)
-	section := "vimls"
+	section := "vim"
 	values, err := client.Configuration(ctx, &protocol.ConfigurationParams{Items: []protocol.ConfigurationItem{{Section: &section}}})
 	if err != nil {
 		return err
@@ -683,10 +676,6 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 }
 
 func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
-	s.mu.Lock()
-	var unresolvedWarning string
-	s.unresolvedSeverity, unresolvedWarning = unresolvedSeverityFromSettings(settings, s.unresolvedSeverity)
-	s.mu.Unlock()
 	s.workspaceMu.Lock()
 	workspaceDelay, workspaceDelayWarning := workspaceRebuildDebounceFromSettings(settings, s.workspaceDelay)
 	if workspaceDelay != s.workspaceDelay {
@@ -706,7 +695,7 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 		s.startAnalysis(snapshot.URI())
 	}
 	warning := ""
-	for _, next := range []string{unresolvedWarning, workspaceDelayWarning} {
+	for _, next := range []string{workspaceDelayWarning} {
 		if next == "" {
 			continue
 		}
@@ -1096,7 +1085,6 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	s.mu.Lock()
 	encoding := s.encoding
 	client := s.client
-	unresolvedSeverity := s.unresolvedSeverity
 	diagnosticRelatedInformation := s.languageFeatures.diagnosticRelatedInformation
 	s.mu.Unlock()
 
@@ -1126,7 +1114,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 				Start: protocol.Position{Line: uint32(start.Line), Character: uint32(start.Character)},
 				End:   protocol.Position{Line: uint32(end.Line), Character: uint32(end.Character)},
 			},
-			Severity: protocolDiagnosticSeverity(item.Code, unresolvedSeverity),
+			Severity: protocolDiagnosticSeverity(item.Code),
 			Code:     protocol.String(item.Code),
 			Source:   protocol.NewOptional(Name),
 			Message:  protocol.String(item.Message),
@@ -1180,12 +1168,12 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	}
 }
 
-func protocolDiagnosticSeverity(code string, unresolvedSeverity syntax.DiagnosticSeverity) protocol.DiagnosticSeverity {
+func protocolDiagnosticSeverity(code string) protocol.DiagnosticSeverity {
 	switch code {
 	case "vim/E122", "vim/E174", "vim/E464", "vim/E705", "vim/E707":
 		return protocol.DiagnosticSeverityWarning
 	case "vim/E117", "vim/E121", "vim/E1001", "vim/E1089":
-		return protocolSeverity(unresolvedSeverity)
+		return protocol.DiagnosticSeverityWarning
 	}
 	definition, ok := syntax.LookupVimlsDiagnostic(code)
 	if !ok {

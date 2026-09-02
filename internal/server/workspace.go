@@ -3,7 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -124,6 +126,26 @@ func normalizeWorkspaceRoots(roots []string) []string {
 		result = append(result, absolute)
 	}
 	sort.Strings(result)
+	return result
+}
+
+// usableRuntimePaths keeps only roots that can be read. Runtimepath is an
+// optional client input, so unusable entries deliberately have no warning.
+func usableRuntimePaths(paths []string) []string {
+	paths = normalizeRuntimePaths(paths)
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		directory, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		_, readErr := directory.ReadDir(1)
+		closeErr := directory.Close()
+		if readErr != nil && !errors.Is(readErr, io.EOF) || closeErr != nil {
+			continue
+		}
+		result = append(result, path)
+	}
 	return result
 }
 
@@ -436,6 +458,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 	discoveredRecoverable := make(map[string]struct{})
 	var warnings []string
 	for _, root := range roots {
+		runtimeRoot := slices.Contains(runtimePaths, root)
 		remaining := maxWorkspaceFiles - len(paths)
 		if remaining <= 0 {
 			complete = false
@@ -444,14 +467,18 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		}
 		files, truncated, err := workspace.DiscoverFiles(root, remaining)
 		if err != nil {
-			complete = false
-			warnings = appendWarning(warnings, fmt.Sprintf("vimls: workspace discovery failed for %s: %v", root, err))
+			if !runtimeRoot {
+				complete = false
+				warnings = appendWarning(warnings, fmt.Sprintf("vimls: workspace discovery failed for %s: %v", root, err))
+			}
 			continue
 		}
 		for _, path := range files {
 			canonical, err := workspace.CanonicalPath(path)
 			if err != nil {
-				complete = false
+				if !runtimeRoot {
+					complete = false
+				}
 				continue
 			}
 			if _, ok := seen[canonical]; ok {
@@ -513,7 +540,9 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
-			s.logf("vimls: read workspace file %s: %v", path, err)
+			if !workspacePathInRoots(path, runtimePaths) {
+				s.logf("vimls: read workspace file %s: %v", path, err)
+			}
 			return "", false, false
 		}
 		return string(content), true, true
@@ -524,7 +553,9 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 		}
 		source, diskFile, ok := readSource(path)
 		if !ok {
-			complete = false
+			if !workspacePathInRoots(path, runtimePaths) {
+				complete = false
+			}
 			continue
 		}
 		if len(source) > maxIndexBytes-indexedBytes {
@@ -582,7 +613,9 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			}
 			source, diskFile, ok := readSource(path)
 			if !ok {
-				complete = false
+				if !workspacePathInRoots(path, runtimePaths) {
+					complete = false
+				}
 				continue
 			}
 			if len(source) > maxIndexBytes-indexedBytes {
@@ -1102,11 +1135,221 @@ func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRunt
 	if params == nil {
 		return nil
 	}
-	s.setRuntimePaths(normalizeWorkspaceRoots(params.Runtimepath))
-	s.refreshWorkspaceResolver()
-	s.scheduleFileWatchRegistration()
-	s.scheduleWorkspaceRebuild()
+	paths := usableRuntimePaths(params.Runtimepath)
+	s.publishMu.Lock()
+	s.workspaceMu.Lock()
+	oldPaths := append([]string(nil), s.runtimePaths...)
+	if slices.Equal(oldPaths, paths) {
+		s.workspaceMu.Unlock()
+		s.publishMu.Unlock()
+		return nil
+	}
+	workspaceRoots := append([]string(nil), s.workspaceRoots...)
+	resolver := workspacePathResolver(workspaceRoots, paths)
+	openSnapshots := s.documents.Snapshots()
+	s.applyRuntimepathDeltaLocked(ctx, oldPaths, paths, resolver, openSnapshots)
+	s.workspaceMu.Unlock()
+	s.publishMu.Unlock()
+	for _, snapshot := range openSnapshots {
+		s.startAnalysis(snapshot.URI())
+	}
 	return nil
+}
+
+// applyRuntimepathDeltaLocked updates the existing index rather than starting
+// another complete workspace scan. The caller holds publishMu and workspaceMu.
+func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newPaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) {
+	oldGraph := s.workspaceGraphView
+	activeRoots := workspaceIndexRoots(s.workspaceRoots, newPaths)
+	allOpenByPath := make(map[string]*text.Snapshot, len(openSnapshots))
+	openByPath := make(map[string]*text.Snapshot, len(openSnapshots))
+	for _, snapshot := range openSnapshots {
+		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
+		if !ok || snapshot.ByteLen() > maxFileBytes {
+			continue
+		}
+		allOpenByPath[path] = snapshot
+		if workspacePathInRoots(path, activeRoots) {
+			openByPath[path] = snapshot
+		}
+	}
+
+	s.runtimePaths = append([]string(nil), newPaths...)
+	s.workspaceResolver = resolver
+	s.workspaceIndex.SetRuntimePaths(newPaths)
+	complete := s.workspaceIndex.Complete()
+	for path := range s.workspaceFiles {
+		if workspacePathInRoots(path, activeRoots) {
+			continue
+		}
+		s.workspaceIndex.Remove(path)
+		delete(s.workspaceFiles, path)
+	}
+	// Open snapshots with no disk backing are not in workspaceFiles. They must
+	// disappear with a removed root just like ordinary indexed files.
+	for path := range allOpenByPath {
+		if workspacePathInRoots(path, activeRoots) {
+			continue
+		}
+		s.workspaceIndex.Remove(path)
+	}
+
+	oldSet := make(map[string]struct{}, len(oldPaths))
+	for _, path := range oldPaths {
+		oldSet[path] = struct{}{}
+	}
+	discovered := make(map[string]struct{})
+	indexedAdded := make(map[string]struct{})
+	newPathsToIndex := make([]string, 0)
+	newSources := make([]string, 0)
+	newDiskFiles := make([]bool, 0)
+	remainingBytes := maxIndexBytes - s.workspaceIndex.IndexedBytes()
+	for _, root := range newPaths {
+		if _, retained := oldSet[root]; retained {
+			continue
+		}
+		if remainingBytes <= 0 {
+			complete = false
+			break
+		}
+		remaining := maxWorkspaceFiles - s.workspaceIndex.FileCount() - len(newPathsToIndex)
+		if remaining <= 0 {
+			complete = false
+			break
+		}
+		files, truncated, err := workspace.DiscoverFiles(root, remaining)
+		if err != nil {
+			// Runtimepath roots are client-owned optional inputs. Treat a root
+			// that disappears or becomes unreadable as absent without a warning.
+			continue
+		}
+		if truncated {
+			complete = false
+		}
+		for _, path := range files {
+			if _, seen := discovered[path]; seen {
+				continue
+			}
+			discovered[path] = struct{}{}
+			if _, indexed := s.workspaceIndex.Source(path); indexed {
+				continue
+			}
+			var source string
+			diskFile := false
+			if snapshot := openByPath[path]; snapshot != nil {
+				source = snapshot.Text()
+				if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
+					diskFile = true
+				}
+			} else {
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					continue
+				}
+				source = string(content)
+				diskFile = true
+			}
+			if len(source) > maxFileBytes {
+				complete = false
+				continue
+			}
+			if len(source) > remainingBytes {
+				complete = false
+				remainingBytes = 0
+				break
+			}
+			remainingBytes -= len(source)
+			newPathsToIndex = append(newPathsToIndex, path)
+			newSources = append(newSources, source)
+			newDiskFiles = append(newDiskFiles, diskFile)
+		}
+	}
+	if ctx.Err() == nil && len(newSources) > 0 {
+		parsed := workspace.ParseAndAnalyzeSources(ctx, newSources, 0)
+		for position, item := range parsed {
+			if item.File == nil || s.workspaceIndex.ReplaceWithAnalysis(newPathsToIndex[position], item.File, item.Analysis) != nil {
+				complete = false
+				continue
+			}
+			indexedAdded[newPathsToIndex[position]] = struct{}{}
+			if newDiskFiles[position] {
+				s.workspaceFiles[newPathsToIndex[position]] = struct{}{}
+			}
+		}
+	} else if ctx.Err() != nil {
+		complete = false
+	}
+
+	retained := make(map[string]struct{}, len(s.workspaceFiles)+len(openByPath))
+	for path := range s.workspaceFiles {
+		if _, ok := s.workspaceIndex.Source(path); ok {
+			retained[path] = struct{}{}
+		}
+	}
+	for path := range openByPath {
+		if _, ok := s.workspaceIndex.Source(path); ok {
+			retained[path] = struct{}{}
+		}
+	}
+	graph := workspace.NewImportGraph()
+	pathsToGraph := make([]string, 0, len(retained))
+	for path := range retained {
+		pathsToGraph = append(pathsToGraph, path)
+	}
+	sort.Strings(pathsToGraph)
+	for _, path := range pathsToGraph {
+		facts := oldGraph.Imports(path)
+		if _, newlyIndexed := indexedAdded[path]; newlyIndexed {
+			if source, ok := s.workspaceIndex.Source(path); ok {
+				facts = collectWorkspaceImportFacts(path, syntax.Parse(source), resolver, openByPath)
+			}
+		}
+		facts = resolveRuntimepathImportFacts(path, facts, resolver, openByPath, s.workspaceIndex)
+		if err := graph.Replace(path, facts); err != nil {
+			complete = false
+			s.workspaceIndex.Remove(path)
+			delete(s.workspaceFiles, path)
+		}
+	}
+	graph.SetReady(true)
+	graph.AdvanceRevision(oldGraph.Revision())
+	s.workspaceIndex.SetComplete(complete)
+	s.workspaceGraph = graph
+	s.workspaceGraphView = graph.Snapshot()
+	s.workspacePending = make(map[string]struct{})
+	s.workspaceDependents = make(map[string]struct{})
+	s.workspaceBuilt = true
+	s.workspaceRevision++
+	s.notifyWorkspaceIndexChangedLocked()
+}
+
+func resolveRuntimepathImportFacts(importer string, facts []workspace.ImportFact, resolver *workspace.PathResolver, openByPath map[string]*text.Snapshot, index *workspace.Index) []workspace.ImportFact {
+	for position := range facts {
+		fact := &facts[position]
+		resolution := workspace.PathResolution{Dynamic: true}
+		if resolver != nil {
+			resolution = resolver.ResolveImportPath(importer, fact.ImportPath, fact.Autoload)
+		}
+		fact.Dynamic = resolution.Dynamic
+		fact.Target = resolution.Path
+		fact.Missing = !resolution.Dynamic && fact.Target == "" && len(resolution.Candidates) > 0
+		if fact.Target == "" && !resolution.Dynamic {
+			for _, candidate := range resolution.Candidates {
+				if openByPath[candidate] != nil {
+					fact.Target = candidate
+					fact.Missing = false
+					break
+				}
+			}
+		}
+	}
+	return retainWorkspaceImportTargets(facts, func(target string) bool {
+		if openByPath[target] != nil {
+			return true
+		}
+		_, ok := index.Source(target)
+		return ok
+	})
 }
 
 // DidChangeWatchedFiles consumes file events produced by the language client.
@@ -1134,9 +1377,6 @@ func (s *Server) scheduleFileWatchRegistration() {
 		if err := s.refreshFileWatchRegistration(s.analysisContext); err != nil && s.analysisContext.Err() == nil {
 			s.logf("vimls: refresh Vim file watchers: %v", err)
 		}
-		// Scan once more after the registration request completes so a file
-		// change during the unregister/register window cannot leave the index
-		// permanently stale even if the client could not report that event.
 		if registrationEnabled && s.analysisContext.Err() == nil {
 			s.scheduleWorkspaceRebuild()
 		}
@@ -1165,9 +1405,12 @@ func (s *Server) refreshFileWatchRegistration(ctx context.Context) error {
 		s.watchRegistered = false
 	}
 	s.workspaceMu.Lock()
-	roots := workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)
+	roots := append([]string(nil), s.workspaceRoots...)
 	s.workspaceMu.Unlock()
 	watchers := vimFileWatchers(roots, relative)
+	if len(watchers) == 0 {
+		return nil
+	}
 	options, err := protocol.Marshal(protocol.DidChangeWatchedFilesRegistrationOptions{Watchers: watchers})
 	if err != nil {
 		return err
@@ -1185,7 +1428,7 @@ func (s *Server) refreshFileWatchRegistration(ctx context.Context) error {
 func vimFileWatchers(roots []string, relative bool) []protocol.FileSystemWatcher {
 	kind := protocol.WatchKindCreate | protocol.WatchKindChange | protocol.WatchKindDelete
 	if len(roots) == 0 {
-		return []protocol.FileSystemWatcher{{GlobPattern: protocol.Pattern("**/*.vim"), Kind: kind}}
+		return nil
 	}
 	watchers := make([]protocol.FileSystemWatcher, 0, len(roots))
 	for _, root := range roots {

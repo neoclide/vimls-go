@@ -96,7 +96,7 @@ func TestRuntimepathInitializationAndNotificationReplaceIndex(t *testing.T) {
 	}
 }
 
-func TestInitializedRegistersVimWatchersAndRuntimepathRefreshesRegistration(t *testing.T) {
+func TestInitializedRegistersOnlyWorkspaceWatchers(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	firstRuntime := t.TempDir()
 	secondRuntime := t.TempDir()
@@ -124,22 +124,20 @@ func TestInitializedRegistersVimWatchersAndRuntimepathRefreshesRegistration(t *t
 		t.Fatal(err)
 	}
 	instance.watchWG.Wait()
+	instance.workspaceWG.Wait()
 	if len(client.registrations) != 1 || len(client.registrations[0].Registrations) != 1 {
 		t.Fatalf("registrations = %#v", client.registrations)
 	}
-	assertWatchRegistration(t, client.registrations[0], []string{workspaceRoot, firstRuntime})
+	assertWatchRegistration(t, client.registrations[0], []string{workspaceRoot})
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) { t.Fatal("watch refresh started a complete workspace build") }
 	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{secondRuntime}}); err != nil {
 		t.Fatal(err)
 	}
 	instance.watchWG.Wait()
-	if len(client.unregistrations) != 1 || len(client.registrations) != 2 {
+	instance.workspaceWG.Wait()
+	if len(client.unregistrations) != 0 || len(client.registrations) != 1 {
 		t.Fatalf("registrations = %d, unregistrations = %d", len(client.registrations), len(client.unregistrations))
 	}
-	unregistration := client.unregistrations[0].Unregisterations
-	if len(unregistration) != 1 || unregistration[0].ID != fileWatchRegistrationID || unregistration[0].Method != protocol.MethodWorkspaceDidChangeWatchedFiles {
-		t.Fatalf("unregistration = %#v", unregistration)
-	}
-	assertWatchRegistration(t, client.registrations[1], []string{workspaceRoot, secondRuntime})
 }
 
 func TestVimWatcherRegistrationHonorsClientCapabilities(t *testing.T) {
@@ -168,6 +166,9 @@ func TestVimWatcherRegistrationHonorsClientCapabilities(t *testing.T) {
 	if len(watchers) != 1 || watchers[0].GlobPattern != wantPattern {
 		t.Fatalf("absolute watcher = %#v, want %q", watchers, wantPattern)
 	}
+	if watchers := vimFileWatchers(nil, false); len(watchers) != 0 {
+		t.Fatalf("watchers without workspace roots = %#v", watchers)
+	}
 }
 
 func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
@@ -190,6 +191,195 @@ func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
 	runtimeRootReal, _ := filepath.EvalSymlinks(runtimeRoot)
 	if len(paths) != 1 || paths[0] != runtimeRootReal {
 		t.Fatalf("runtimepath = %#v", paths)
+	}
+}
+
+func TestRuntimepathCustomRequestDispatchesNullResult(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	input := encodeFrames(t,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"initializationOptions":{"runtimepath":[]}}}`,
+		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
+		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot),
+		`{"jsonrpc":"2.0","id":3,"method":"shutdown"}`,
+		`{"jsonrpc":"2.0","method":"exit"}`,
+	)
+	var output bytes.Buffer
+	if code := New(&input, &output, io.Discard).Run(context.Background()); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	messages := decodeFrames(t, &output)
+	if len(messages) != 3 || idNumber(t, messages[1]) != 2 || string(messages[1]["result"]) != "null" {
+		t.Fatalf("request response = %#v", messages)
+	}
+}
+
+func TestRuntimepathCustomRequestRejectsInvalidParams(t *testing.T) {
+	input := encodeFrames(t,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"initializationOptions":{"runtimepath":[]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"vimls/didChangeRuntimepath","params":"not-an-object"}`,
+		`{"jsonrpc":"2.0","id":3,"method":"shutdown"}`,
+		`{"jsonrpc":"2.0","method":"exit"}`,
+	)
+	var output bytes.Buffer
+	if code := New(&input, &output, io.Discard).Run(context.Background()); code != 0 {
+		t.Fatalf("exit code = %d", code)
+	}
+	messages := decodeFrames(t, &output)
+	if len(messages) != 3 || errorCode(t, messages[1]) != int(jsonrpc2.InvalidParams) {
+		t.Fatalf("invalid params response = %#v", messages)
+	}
+}
+
+func TestRuntimepathDeltaNoopAndReorder(t *testing.T) {
+	root := t.TempDir()
+	first := t.TempDir()
+	second := t.TempDir()
+	writeWorkspaceFile(t, first, "autoload/choice.vim", "vim9script\nexport def First()\nenddef\n")
+	writeWorkspaceFile(t, second, "autoload/choice.vim", "vim9script\nexport def Second()\nenddef\n")
+	instance := initializeWorkspaceServer(t, root)
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{first, second}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	revision := instance.workspaceRevision
+	index := instance.workspaceIndex
+	instance.workspaceMu.Unlock()
+	firstFile := mustWorkspaceCanonicalPath(t, filepath.Join(first, "autoload", "choice.vim"))
+	if got, ok := index.RuntimeFile("autoload/choice.vim"); !ok || got != firstFile {
+		t.Fatalf("first runtime file = %q, %t", got, ok)
+	}
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) { t.Fatal("runtimepath delta started a complete workspace build") }
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{first, second}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	if instance.workspaceRevision != revision {
+		t.Fatalf("no-op revision = %d, want %d", instance.workspaceRevision, revision)
+	}
+	instance.workspaceMu.Unlock()
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{second, first}}); err != nil {
+		t.Fatal(err)
+	}
+	secondFile := mustWorkspaceCanonicalPath(t, filepath.Join(second, "autoload", "choice.vim"))
+	if got, ok := index.RuntimeFile("autoload/choice.vim"); !ok || got != secondFile {
+		t.Fatalf("reordered runtime file = %q, %t", got, ok)
+	}
+	instance.workspaceWG.Wait()
+}
+
+func TestRuntimepathDeltaDoesNotDiscardConcurrentWorkspaceRebuild(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	runtimeRoot := t.TempDir()
+	writeWorkspaceFile(t, workspaceRoot, "workspace.vim", "vim9script\nvar Workspace = 1\n")
+	writeWorkspaceFile(t, runtimeRoot, "plugin/runtime.vim", "vim9script\nvar Runtime = 1\n")
+	instance := initializeWorkspaceServer(t, workspaceRoot)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	builds := 0
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+		builds++
+		if builds == 1 {
+			close(started)
+			<-release
+		}
+	}
+	instance.scheduleWorkspaceRebuild()
+	<-started
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	instance.workspaceWG.Wait()
+	if builds < 2 {
+		t.Fatalf("workspace rebuilds = %d, want retry after concurrent runtimepath delta", builds)
+	}
+	if symbols := workspaceSymbols(t, instance, "Workspace"); len(symbols) != 1 {
+		t.Fatalf("workspace symbols after retry = %#v", symbols)
+	}
+	if symbols := workspaceSymbols(t, instance, "Runtime"); len(symbols) != 1 {
+		t.Fatalf("runtime symbols after retry = %#v", symbols)
+	}
+}
+
+func TestRuntimepathDeltaAddRemoveAndNestedRoots(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	runtimeRoot := t.TempDir()
+	nested := filepath.Join(runtimeRoot, "pack", "bundle")
+	writeWorkspaceFile(t, runtimeRoot, "plugin/outer.vim", "vim9script\nvar OuterRuntime = 1\n")
+	writeWorkspaceFile(t, nested, "plugin/nested.vim", "vim9script\nvar NestedRuntime = 1\n")
+	instance := initializeWorkspaceServer(t, workspaceRoot)
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot, nested}}); err != nil {
+		t.Fatal(err)
+	}
+	if symbols := workspaceSymbols(t, instance, "OuterRuntime"); len(symbols) != 1 {
+		t.Fatalf("added outer runtime symbols = %#v", symbols)
+	}
+	if symbols := workspaceSymbols(t, instance, "NestedRuntime"); len(symbols) != 1 {
+		t.Fatalf("added nested runtime symbols = %#v", symbols)
+	}
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{nested}}); err != nil {
+		t.Fatal(err)
+	}
+	if symbols := workspaceSymbols(t, instance, "OuterRuntime"); len(symbols) != 0 {
+		t.Fatalf("removed outer runtime symbols = %#v", symbols)
+	}
+	if symbols := workspaceSymbols(t, instance, "NestedRuntime"); len(symbols) != 1 {
+		t.Fatalf("retained nested runtime symbols = %#v", symbols)
+	}
+}
+
+func TestRuntimepathDeltaSilentlyDropsInvalidRoots(t *testing.T) {
+	root := t.TempDir()
+	notDirectory := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(notDirectory, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	instance := initializeWorkspaceServer(t, root)
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{filepath.Join(root, "missing"), notDirectory}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	paths := append([]string(nil), instance.runtimePaths...)
+	complete := instance.workspaceIndex.Complete()
+	instance.workspaceMu.Unlock()
+	if len(paths) != 0 || !complete {
+		t.Fatalf("runtimepath=%#v complete=%t, want empty complete index", paths, complete)
+	}
+}
+
+func TestRuntimepathDeltaSilentlyDropsUnreadableRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix directory permissions are not portable to Windows")
+	}
+	root := t.TempDir()
+	unreadable := t.TempDir()
+	if err := os.Chmod(unreadable, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
+	if _, err := os.ReadDir(unreadable); err == nil {
+		t.Skip("current user can still read chmod 000 directory")
+	}
+	var logs bytes.Buffer
+	instance := New(nil, nil, &logs)
+	t.Cleanup(instance.stopAnalysis)
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`))}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{unreadable}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	paths := append([]string(nil), instance.runtimePaths...)
+	complete := instance.workspaceIndex.Complete()
+	instance.workspaceMu.Unlock()
+	if len(paths) != 0 || !complete || logs.Len() != 0 {
+		t.Fatalf("runtimepath=%#v complete=%t logs=%q", paths, complete, logs.String())
 	}
 }
 

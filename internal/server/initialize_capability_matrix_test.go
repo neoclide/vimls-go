@@ -15,7 +15,7 @@ func TestInitializeAdvertisesNegotiatedOptionalCapabilities(t *testing.T) {
 	t.Cleanup(s.stopAnalysis)
 	result, err := s.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI:               &root,
-		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":1,"unresolvedSeverity":"bad"}`)),
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":1,"workspaceRebuildDebounce":0}`)),
 		Capabilities: protocol.ClientCapabilities{
 			Workspace: &protocol.WorkspaceClientCapabilities{Configuration: &value, DidChangeWatchedFiles: &protocol.DidChangeWatchedFilesClientCapabilities{DynamicRegistration: &value, RelativePatternSupport: &value}},
 			TextDocument: &protocol.TextDocumentClientCapabilities{
@@ -41,4 +41,9 @@ func TestInitializeAdvertisesNegotiatedOptionalCapabilities(t *testing.T) {
 		t.Fatalf("server state = %#v", s)
 	}
 	s.mu.Unlock()
+	s.workspaceMu.Lock()
+	if s.workspaceDelay != defaultWorkspaceRebuildDebounce {
+		t.Fatalf("initial workspace delay = %s, want %s", s.workspaceDelay, defaultWorkspaceRebuildDebounce)
+	}
+	s.workspaceMu.Unlock()
 }

@@ -142,10 +142,18 @@ also disables this lookup. Canonical realpath keys deduplicate aliased roots and
 files without changing runtime lookup precedence. The server never scans the
 entire machine.
 The language client owns filesystem watching: after initialization the server
-dynamically registers `**/*.vim` watchers when supported, and consumes the
-resulting `workspace/didChangeWatchedFiles` notifications. Runtimepath is
+dynamically registers `**/*.vim` watchers below workspace roots when supported,
+and consumes the resulting `workspace/didChangeWatchedFiles` notifications.
+Runtimepath roots are never watched. Runtimepath is
 initialized through the option or local discovery and replaced by the custom
-`vimls/didChangeRuntimepath` notification.
+`vimls/didChangeRuntimepath` request (the notification form remains accepted).
+The request returns `null`; its directory delta reuses retained index analysis,
+discovers only newly added roots, removes files no longer covered by any active
+root, and rebuilds import facts from retained sources. A pure reorder changes
+runtime lookup precedence without rediscovery or parsing. Invalid or unreadable
+runtime roots and their discovery/read failures are silently skipped as absent.
+Runtimepath changes use their custom delta request and do not refresh watcher
+registration.
 Generated command and builtin metadata pins its upstream Vim tag and must be
 reproducible without requiring Vim at server runtime.
 

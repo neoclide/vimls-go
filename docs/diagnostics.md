@@ -239,14 +239,8 @@ Legacy Vim script and externally scoped Vim9 names such as `g:`, `s:`, `b:`,
 editor can create them dynamically. For a member or index expression, only an
 unresolved unscoped root or index expression is diagnosed.
 
-Unresolved-symbol diagnostics are warnings by default. Clients can set
-`vimls.unresolvedSeverity` to `error`, `warning`, `information`, or `hint`.
-The same value applies to E117 and the unknown-variable codes E121, E1001, and
-E1089. It changes only the LSP severity; the native Vim code and message stay
-unchanged. The workspace setting can be returned as
-`{"unresolvedSeverity":"error"}` for the requested `vimls` section, or nested
-under `vimls` in `workspace/didChangeConfiguration`. The same field is accepted
-in `initializationOptions` as the initial value.
+Unresolved-symbol diagnostics E117, E121, E1001, and E1089 are always reported
+as LSP warnings. Their native Vim codes and messages stay unchanged.
 
 Representative source evidence:
 

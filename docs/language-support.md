@@ -21,7 +21,7 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 | Symbols and structure | Document symbols, workspace symbols, folding ranges and selection ranges. |
 | Safe editing | Prepare rename, rename, semantic highlighting, inferred-type inlay hints and a small set of syntax quick fixes. |
 | Formatting | Source-preserving indentation for a whole document or selected range. Only proven leading whitespace is changed. |
-| Workspace updates | Incremental document synchronization, workspace folders, watched Vim files and runtimepath refreshes. |
+| Workspace updates | Incremental document synchronization, workspace folders, watched Vim files and delta runtimepath refreshes through `vimls/didChangeRuntimepath` (request or compatible notification). |
 
 Legacy and Vim9 files may use the same workspace. The server understands
 `vim9script`, `scriptversion`, `vim9cmd` and `legacy` when choosing the relevant
@@ -52,7 +52,7 @@ language rules.
 
 ## Configuration
 
-Runtime roots and diagnostic severity can be configured.
+Runtime roots can be configured and changed dynamically.
 
 See [Client configuration](configuration.md) for the supported settings and
-runtimepath notification.
+runtimepath request.

@@ -111,7 +111,7 @@ endfunction
 	if string(registration["method"]) != `"client/registerCapability"` {
 		t.Fatalf("watch registration = %s", registration)
 	}
-	assertVimWatchRegistration(t, registration["params"], []string{workspaceRoot, runtimeRoot})
+	assertVimWatchRegistration(t, registration["params"], []string{workspaceRoot})
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, registration["id"]))
 	workspaceDeadline := time.Now().Add(5 * time.Second)
 	var workspaceSymbols map[string]json.RawMessage
