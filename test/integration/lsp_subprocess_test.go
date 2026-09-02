@@ -573,11 +573,11 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	workspaceReport := readPullResponse(t, reader, writer, &stderr, "5")
 	var workspaceResult struct {
 		Items []struct {
-			URI      string                `json:"uri"`
-			Version  *int32                `json:"version"`
-			Kind     string                `json:"kind"`
-			ResultID string                `json:"resultId"`
-			Items    []protocol.Diagnostic `json:"items"`
+			URI      string            `json:"uri"`
+			Version  *int32            `json:"version"`
+			Kind     string            `json:"kind"`
+			ResultID string            `json:"resultId"`
+			Items    []json.RawMessage `json:"items"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(workspaceReport["result"], &workspaceResult); err != nil {

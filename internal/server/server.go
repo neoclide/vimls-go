@@ -295,7 +295,7 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 			return nil, nil
 		}
 		if !request.IsCall() {
-			return next(ctx, request)
+			return next(valueContext{Context: jsonrpc2.DetachContext(ctx), values: ctx}, request)
 		}
 
 		base, cancel := context.WithCancel(jsonrpc2.DetachContext(ctx))
