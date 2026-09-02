@@ -798,3 +798,14 @@ func TestVim9LegacyFlowControlDiagnostic(t *testing.T) {
 	}
 	assertFileSpans(t, recovered)
 }
+
+func TestUnmatchedAggregateEndDiagnostics(t *testing.T) {
+	for _, command := range []string{"endclass", "endinterface", "endenum"} {
+		t.Run(command, func(t *testing.T) {
+			file := Parse("vim9script\n" + command + "\n")
+			if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E476" || file.Diagnostics[0].Message != "Invalid command: "+command {
+				t.Fatalf("diagnostics = %#v", file.Diagnostics)
+			}
+		})
+	}
+}

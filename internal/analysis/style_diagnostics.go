@@ -52,7 +52,7 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 		if command.Canonical == "function" && command.Function != nil && !hasWord(file.Text(command.Argument), "abort") {
 			appendStyleDiagnostic(result, "vimls/function-without-abort", "function does not use abort", command.Name)
 		}
-		if command.Canonical == "catch" && !hasVimErrorCode(file.Text(command.Argument)) {
+		if command.Canonical == "catch" && strings.TrimSpace(file.Text(command.Argument)) != "" && !hasVimErrorCode(file.Text(command.Argument)) {
 			appendStyleDiagnostic(result, "vimls/catch-error-message", "catching human-readable error text is fragile; prefer a Vim error code", command.Argument)
 		}
 		if command.Canonical == "echoerr" {

@@ -393,6 +393,17 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 	}
 	diagnostics := append([]syntax.Diagnostic(nil), file.Diagnostics...)
 	diagnostics = append(diagnostics, analysis.Analyze(file).Diagnostics...)
+	for _, clientDiagnostic := range params.Context.Diagnostics {
+		code, ok := clientDiagnosticCode(clientDiagnostic)
+		if !ok || !quickFixDiagnosticCode(code) || !rangesOverlapOrTouch(params.Range, clientDiagnostic.Range) {
+			continue
+		}
+		start, startErr := snapshot.Offset(fromProtocolPosition(clientDiagnostic.Range.Start), encoding)
+		end, endErr := snapshot.Offset(fromProtocolPosition(clientDiagnostic.Range.End), encoding)
+		if startErr != nil || endErr != nil || end < start || !hasDiagnostic(diagnostics, code, syntax.Span{Start: start, End: end}) {
+			return nil, protocol.ErrContentModified
+		}
+	}
 	fixes := make([]syntaxQuickFix, 0, 2)
 	for _, diagnostic := range diagnostics {
 		diagnosticRange, validDiagnosticRange := protocolRange(snapshot, encoding, diagnostic.Span)
@@ -610,11 +621,34 @@ func allowsQuickFix(only []protocol.CodeActionKind) bool {
 
 func matchingClientDiagnostic(diagnostics []protocol.Diagnostic, code string, rangeValue protocol.Range) (protocol.Diagnostic, bool) {
 	for _, diagnostic := range diagnostics {
-		if value, ok := diagnostic.Code.(protocol.String); ok && string(value) == code && diagnostic.Range == rangeValue {
+		if value, ok := clientDiagnosticCode(diagnostic); ok && value == code && diagnostic.Range == rangeValue {
 			return diagnostic, true
 		}
 	}
 	return protocol.Diagnostic{}, false
+}
+
+func clientDiagnosticCode(diagnostic protocol.Diagnostic) (string, bool) {
+	value, ok := diagnostic.Code.(protocol.String)
+	return string(value), ok
+}
+
+func quickFixDiagnosticCode(code string) bool {
+	switch code {
+	case "vim/E170", "vim/E171", "vim/E475", "vim/E600", "vim/E1123", "vimls/missing-method-call", "vimls/normal-without-bang", "vimls/function-without-abort", "vimls/implicit-string-case", "vimls/implicit-pattern-case":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasDiagnostic(diagnostics []syntax.Diagnostic, code string, span syntax.Span) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == code && diagnostic.Span == span {
+			return true
+		}
+	}
+	return false
 }
 
 func rangesOverlapOrTouch(left, right protocol.Range) bool {

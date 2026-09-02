@@ -1019,7 +1019,7 @@ func missingBlockEndDiagnostic(kind BlockKind, span Span) (Diagnostic, bool) {
 		return Diagnostic{Code: "vim/E170", Message: "missing :endwhile", Span: span}, true
 	case BlockTry:
 		return Diagnostic{Code: "vim/E600", Message: "missing :endtry", Span: span}, true
-	case BlockScope:
+	case BlockScope, BlockCommand:
 		return Diagnostic{Code: "vim/E1026", Message: "missing }", Span: span}, true
 	default:
 		return Diagnostic{}, false
@@ -1052,7 +1052,7 @@ func unmatchedEndDiagnostic(command *Command) (Diagnostic, bool) {
 	case "endfunction", "enddef":
 		return Diagnostic{Code: "vim/E193", Message: ":" + command.Canonical + " not inside a function", Span: command.Name}, true
 	case "endclass", "endinterface", "endenum":
-		return Diagnostic{Code: "vim/E476", Message: "Invalid command: " + command.Canonical + ": " + command.Canonical, Span: command.Name}, true
+		return Diagnostic{Code: "vim/E476", Message: "Invalid command: " + command.Canonical, Span: command.Name}, true
 	default:
 		return Diagnostic{}, false
 	}

@@ -295,6 +295,42 @@ func TestCodeActionRepairsStyleDiagnostics(t *testing.T) {
 	}
 }
 
+func TestCodeActionRejectsStaleDiagnostics(t *testing.T) {
+	tests := []struct {
+		name, source, code string
+		diagnostic         protocol.Range
+	}{
+		{
+			name:       "syntax diagnostic",
+			source:     "echo 1\n",
+			code:       "vim/E171",
+			diagnostic: navigationRange(0, 0, 4),
+		},
+		{
+			name:       "style diagnostic",
+			source:     "if 1 == 2\nendif\n",
+			code:       "vimls/implicit-string-case",
+			diagnostic: navigationRange(0, 5, 7),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			_, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Range:        test.diagnostic,
+				Context: protocol.CodeActionContext{Diagnostics: []protocol.Diagnostic{{
+					Range: test.diagnostic,
+					Code:  protocol.String(test.code),
+				}}},
+			})
+			if !errors.Is(err, protocol.ErrContentModified) {
+				t.Fatalf("error = %v, want %v", err, protocol.ErrContentModified)
+			}
+		})
+	}
+}
+
 func TestCodeActionRejectsMultipleValidEdits(t *testing.T) {
 	source := "vim9script\nvar x = 123->(One)\nvar y = 456->(Two)\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

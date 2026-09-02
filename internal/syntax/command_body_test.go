@@ -447,6 +447,17 @@ func TestUserCommandMissingBlockEnd(t *testing.T) {
 	assertFileSpans(t, file)
 }
 
+func TestVim9UserCommandMissingBlockEnd(t *testing.T) {
+	file := Parse("vim9script\ncommand DoesNotEnd {\n  echo 'hello'\n")
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E1026" || file.Text(file.Diagnostics[0].Span) != "command" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Blocks) != 1 || file.Blocks[0].Kind != BlockCommand || file.Blocks[0].End != -1 {
+		t.Fatalf("blocks = %#v", file.Blocks)
+	}
+	assertFileSpans(t, file)
+}
+
 func TestUserCommandStrayBlockEnd(t *testing.T) {
 	source := "command BadCommand {\n" +
 		"   echo  {\n" +

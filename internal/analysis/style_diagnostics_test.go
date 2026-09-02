@@ -58,6 +58,9 @@ endfunction
 try
 catch /E117/
 endtry
+try
+catch
+endtry
 nnoremap <unique> <Plug>(run) :call <SID>Run()<CR>
 augroup StyleDiagnosticsTest
   autocmd!
