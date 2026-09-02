@@ -94,13 +94,22 @@ type Server struct {
 	log    io.Writer
 	logMu  sync.Mutex
 
-	mu                          sync.Mutex
-	state                       state
-	pendingWarning              string
-	client                      protocol.Client
-	workspaceProgress           bool
-	pullDiagnostics             bool
-	diagnosticRefreshSupport    bool
+	mu                       sync.Mutex
+	state                    state
+	pendingWarning           string
+	client                   protocol.Client
+	workspaceProgress        bool
+	pullDiagnostics          bool
+	diagnosticRefreshSupport bool
+
+	semanticTokensRefreshSupport    bool
+	semanticTokensRefreshGeneration uint64
+	semanticTokensRefreshRunning    bool
+
+	inlayHintRefreshSupport    bool
+	inlayHintRefreshGeneration uint64
+	inlayHintRefreshRunning    bool
+
 	workspaceProgressID         uint64
 	cancellations               map[jsonrpc2.ID]context.CancelFunc
 	documents                   *workspace.Documents
@@ -438,6 +447,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 		languageFeatures = languageFeatureCapabilitiesFromDiagnostic(params.Capabilities.TextDocument.Diagnostic, languageFeatures)
 	}
 	diagnosticRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Diagnostics != nil && params.Capabilities.Workspace.Diagnostics.RefreshSupport != nil && *params.Capabilities.Workspace.Diagnostics.RefreshSupport
+	semanticTokensRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.SemanticTokens != nil && params.Capabilities.Workspace.SemanticTokens.RefreshSupport != nil && *params.Capabilities.Workspace.SemanticTokens.RefreshSupport
+	inlayHintRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.InlayHint != nil && params.Capabilities.Workspace.InlayHint.RefreshSupport != nil && *params.Capabilities.Workspace.InlayHint.RefreshSupport
 	s.mu.Lock()
 	s.pendingWarning = ""
 	for _, warning := range []string{runtimepathWarning} {
@@ -460,6 +471,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.workspaceProgress = workspaceProgress
 	s.pullDiagnostics = pullDiagnostics
 	s.diagnosticRefreshSupport = diagnosticRefreshSupport
+	s.semanticTokensRefreshSupport = semanticTokensRefreshSupport
+	s.inlayHintRefreshSupport = inlayHintRefreshSupport
 	s.mu.Unlock()
 	s.workspaceMu.Lock()
 	s.workspaceDelay = defaultWorkspaceRebuildDebounce
@@ -585,6 +598,8 @@ func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 	s.publishMu.Unlock()
 	s.startAnalysis(document.URI.String())
 	s.startWorkspaceDependents(dependents)
+	s.scheduleSemanticTokensRefresh()
+	s.scheduleInlayHintRefresh()
 	return nil
 }
 

@@ -34,7 +34,7 @@ func TestSemanticTokensFullClassifiesSyntaxAndBoundSymbols(t *testing.T) {
 	}
 }
 
-func TestSemanticTokensAndInlayHintRejectDuringWorkspaceIndexWork(t *testing.T) {
+func TestSemanticTokensAndInlayHintReturnNullDuringWorkspaceIndexWork(t *testing.T) {
 	for _, name := range []string{"rebuild", "pending"} {
 		t.Run(name, func(t *testing.T) {
 			instance := New(nil, nil, nil)
@@ -46,11 +46,11 @@ func TestSemanticTokensAndInlayHintRejectDuringWorkspaceIndexWork(t *testing.T) 
 				instance.workspacePending["file.vim"] = struct{}{}
 			}
 			instance.workspaceMu.Unlock()
-			if _, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{}); !errors.Is(err, protocol.ErrContentModified) {
-				t.Fatalf("semantic tokens error = %v", err)
+			if tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{}); err != nil || tokens != nil {
+				t.Fatalf("semantic tokens = %#v, error = %v", tokens, err)
 			}
-			if _, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{}); !errors.Is(err, protocol.ErrContentModified) {
-				t.Fatalf("inlay hints error = %v", err)
+			if hints, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{}); err != nil || hints != nil {
+				t.Fatalf("inlay hints = %#v, error = %v", hints, err)
 			}
 		})
 	}

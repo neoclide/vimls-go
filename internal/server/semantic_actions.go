@@ -60,7 +60,7 @@ type syntaxQuickFix struct {
 
 func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	if s.workspaceIndexRebuilding() {
-		return nil, protocol.ErrContentModified
+		return nil, nil
 	}
 	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 	if err != nil {
@@ -699,7 +699,7 @@ func lineIndent(source string, offset int) string {
 
 func (s *Server) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
 	if s.workspaceIndexRebuilding() {
-		return nil, protocol.ErrContentModified
+		return nil, nil
 	}
 	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 	if err != nil {
