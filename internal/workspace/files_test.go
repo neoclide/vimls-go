@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDiscoverFilesFindsVimConventionsAndOrdersResults(t *testing.T) {
@@ -123,6 +126,17 @@ func TestDiscoverFilesSkipsHomeAndSystemTempRoots(t *testing.T) {
 		if err != nil || truncated || len(files) != 0 {
 			t.Fatalf("DiscoverFiles(%q) = %#v, truncated = %v, error = %v", root, files, truncated, err)
 		}
+	}
+}
+
+func TestDiscoverFilesContextHonorsCancelledDeadline(t *testing.T) {
+	root := t.TempDir()
+	writeDiscoveryFile(t, filepath.Join(root, "plugin", "cancel.vim"), "echo 'cancel'\n")
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	files, truncated, err := DiscoverFilesContext(ctx, root, 0)
+	if !errors.Is(err, context.DeadlineExceeded) || files != nil || truncated {
+		t.Fatalf("DiscoverFilesContext cancelled result = %#v, %t, %v", files, truncated, err)
 	}
 }
 

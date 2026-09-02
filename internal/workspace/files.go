@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -58,6 +59,16 @@ var vimConfigNames = map[string]struct{}{
 // below root. Permission-denied entries are skipped; other walk errors return
 // no files.
 func DiscoverFiles(root string, limit int) (files []string, truncated bool, err error) {
+	return DiscoverFilesContext(context.Background(), root, limit)
+}
+
+// DiscoverFilesContext is DiscoverFiles with cancellation checks before and
+// during filesystem traversal. It cannot interrupt a filesystem syscall that
+// is already blocked, but stops ordinary WalkDir traversal promptly.
+func DiscoverFilesContext(ctx context.Context, root string, limit int) (files []string, truncated bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve workspace root %q: %w", root, err)
@@ -97,6 +108,9 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 
 	seenFiles := make(map[string]struct{})
 	walkErr := filepath.WalkDir(absoluteRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			if errors.Is(walkErr, os.ErrPermission) {
 				if entry != nil && entry.IsDir() {
@@ -198,6 +212,9 @@ func DiscoverFiles(root string, limit int) (files []string, truncated bool, err 
 		return nil
 	})
 	if walkErr != nil && !errors.Is(walkErr, errDiscoveryLimit) {
+		if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
+			return nil, false, walkErr
+		}
 		return nil, false, fmt.Errorf("walk workspace root %q: %w", absoluteRoot, walkErr)
 	}
 	files = uniqueSorted(files)

@@ -25,12 +25,23 @@ import (
 const defaultWorkspaceRebuildDebounce = 100 * time.Millisecond
 const workspaceIndexWaitTimeout = time.Second
 const workspaceProgressCreateTimeout = 100 * time.Millisecond
+const workspaceProgressNotificationTimeout = 100 * time.Millisecond
+const workspaceProgressEndTimeout = workspaceProgressNotificationTimeout
+const workspaceProgressReportLimit = 64
 
 type DidChangeRuntimepathParams struct {
 	Runtimepath []string `json:"runtimepath"`
 }
 
 var workspaceGraphReplaceForTest func(*workspace.ImportGraph, string, []workspace.ImportFact) error
+var workspaceDiscoverFilesContextForTest func(context.Context, string, int) ([]string, bool, error)
+
+func discoverWorkspaceFilesContext(ctx context.Context, root string, limit int) ([]string, bool, error) {
+	if workspaceDiscoverFilesContextForTest != nil {
+		return workspaceDiscoverFilesContextForTest(ctx, root, limit)
+	}
+	return workspace.DiscoverFilesContext(ctx, root, limit)
+}
 
 func workspaceRootsFromInitialize(params *protocol.InitializeParams) []string {
 	if params == nil {
@@ -256,13 +267,16 @@ func (s *Server) workspaceIndexWorker() {
 			s.beforeWorkspaceBuildForTest(openSnapshots)
 		}
 
-		progressClient, progressToken, progressStarted := s.startWorkspaceIndexProgress()
-		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, runtimePaths, resolver, openSnapshots)
+		progress := s.startWorkspaceIndexProgress()
+		progressReporting := progress != nil
+		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, runtimePaths, resolver, openSnapshots, func(root string) {
+			progressReporting = s.reportWorkspaceIndexProgress(progress, progressReporting, root)
+		})
 		s.workspaceMu.Lock()
 		if s.analysisStopped || s.analysisContext.Err() != nil {
 			s.finishWorkspaceRebuildLocked()
 			s.workspaceMu.Unlock()
-			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
+			s.finishWorkspaceIndexProgress(progress)
 			return
 		}
 		s.workspaceMu.Unlock()
@@ -270,7 +284,7 @@ func (s *Server) workspaceIndexWorker() {
 		s.publishMu.Lock()
 		if !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
 			s.publishMu.Unlock()
-			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
+			s.finishWorkspaceIndexProgress(progress)
 			s.resetWorkspaceRebuildTimer(timer)
 			continue
 		}
@@ -279,13 +293,13 @@ func (s *Server) workspaceIndexWorker() {
 			s.finishWorkspaceRebuildLocked()
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
-			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
+			s.finishWorkspaceIndexProgress(progress)
 			return
 		}
 		if revision != s.workspaceRevision {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
-			s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
+			s.finishWorkspaceIndexProgress(progress)
 			s.resetWorkspaceRebuildTimer(timer)
 			continue
 		}
@@ -308,7 +322,7 @@ func (s *Server) workspaceIndexWorker() {
 		if indexComplete {
 			s.scheduleCodeLensRefresh()
 		}
-		s.finishWorkspaceIndexProgress(progressClient, progressToken, progressStarted)
+		s.finishWorkspaceIndexProgress(progress)
 		for _, warning := range warnings {
 			_ = s.sendWarning(s.analysisContext, warning)
 		}
@@ -319,9 +333,26 @@ func (s *Server) workspaceIndexWorker() {
 	}
 }
 
-// startWorkspaceIndexProgress creates a token before a workspace scan. The
-// bounded request avoids holding rebuild completion on an unresponsive client.
-func (s *Server) startWorkspaceIndexProgress() (protocol.Client, protocol.ProgressToken, bool) {
+type workspaceProgressSession struct {
+	client protocol.Client
+	token  protocol.ProgressToken
+	queue  chan workspaceProgressNotification
+
+	// created is owned by the serial worker. A delayed create can therefore
+	// only be followed by begin and end in that worker's order.
+	created bool
+}
+
+type workspaceProgressNotification struct {
+	run      func() error
+	done     chan error
+	terminal bool
+}
+
+// startWorkspaceIndexProgress creates a token before a workspace scan. A
+// session owns one serial notification worker, so a blocked notification can
+// never be overtaken by a terminal end for the same token.
+func (s *Server) startWorkspaceIndexProgress() *workspaceProgressSession {
 	s.mu.Lock()
 	client := s.client
 	supported := s.workspaceProgress
@@ -329,39 +360,142 @@ func (s *Server) startWorkspaceIndexProgress() (protocol.Client, protocol.Progre
 	identifier := s.workspaceProgressID
 	s.mu.Unlock()
 	if client == nil || !supported {
-		return nil, nil, false
+		return nil
 	}
 	token := protocol.String(fmt.Sprintf("vimls-workspace-index-%d", identifier))
+	session := &workspaceProgressSession{
+		client: client,
+		token:  token,
+		queue:  make(chan workspaceProgressNotification, workspaceProgressReportLimit+1),
+	}
+	go session.run()
 	ctx, cancel := context.WithTimeout(s.analysisContext, workspaceProgressCreateTimeout)
 	defer cancel()
-	if err := client.WorkDoneProgressCreate(ctx, &protocol.WorkDoneProgressCreateParams{Token: token}); err != nil {
-		if s.analysisContext.Err() == nil && ctx.Err() == nil {
+	if err := s.sendWorkspaceProgressCall(session, ctx, workspaceProgressCreateTimeout, false, func(ctx context.Context) error {
+		err := client.WorkDoneProgressCreate(ctx, &protocol.WorkDoneProgressCreateParams{Token: token})
+		session.created = err == nil
+		return err
+	}); err != nil {
+		if ctx.Err() == nil {
 			s.logf("vimls: create workspace index progress: %v", err)
+			close(session.queue)
+			return nil
 		}
-		return nil, nil, false
+		s.disableWorkspaceProgress()
 	}
 	value, err := protocol.Marshal(&protocol.WorkDoneProgressBegin{Kind: "begin", Title: "Indexing workspace"})
 	if err != nil {
 		s.logf("vimls: encode workspace index progress: %v", err)
-		return nil, nil, false
+		close(session.queue)
+		return nil
 	}
-	if err := client.Progress(s.analysisContext, &protocol.ProgressParams{Token: token, Value: protocol.LSPAny(value)}); err != nil {
+	if err := s.sendWorkspaceProgress(session, s.analysisContext, workspaceProgressNotificationTimeout, &protocol.ProgressParams{Token: token, Value: protocol.LSPAny(value)}, false); err != nil {
+		s.disableWorkspaceProgress()
 		if s.analysisContext.Err() == nil {
 			s.logf("vimls: send workspace index progress: %v", err)
 		}
-		return nil, nil, false
 	}
-	return client, token, true
+	// A create that succeeded may have reached the client even if begin blocks.
+	// Keep the session so finishWorkspaceIndexProgress can queue its end behind
+	// that begin.
+	return session
 }
 
-func (s *Server) finishWorkspaceIndexProgress(client protocol.Client, token protocol.ProgressToken, started bool) {
-	if !started {
+func (session *workspaceProgressSession) run() {
+	for notification := range session.queue {
+		err := notification.run()
+		notification.done <- err
+		if notification.terminal {
+			return
+		}
+	}
+}
+
+// sendWorkspaceProgress bounds waiting for a progress notification without
+// abandoning it: timed-out notifications remain queued in token order, ahead
+// of the terminal end. Each actual client call gets its deadline when the
+// serial worker reaches it.
+func (s *Server) sendWorkspaceProgress(session *workspaceProgressSession, parent context.Context, timeout time.Duration, params *protocol.ProgressParams, terminal bool) error {
+	return s.sendWorkspaceProgressCall(session, parent, timeout, terminal, func(ctx context.Context) error {
+		if !session.created {
+			return nil
+		}
+		return session.client.Progress(ctx, params)
+	})
+}
+
+func (s *Server) sendWorkspaceProgressCall(session *workspaceProgressSession, parent context.Context, timeout time.Duration, terminal bool, call func(context.Context) error) error {
+	if session == nil {
+		return nil
+	}
+	wait, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	notification := workspaceProgressNotification{
+		done:     make(chan error, 1),
+		terminal: terminal,
+		run: func() error {
+			callCtx, callCancel := context.WithTimeout(parent, timeout)
+			defer callCancel()
+			return call(callCtx)
+		},
+	}
+	select {
+	case session.queue <- notification:
+	case <-wait.Done():
+		return wait.Err()
+	}
+	select {
+	case err := <-notification.done:
+		return err
+	case <-wait.Done():
+		return wait.Err()
+	}
+}
+
+func (s *Server) disableWorkspaceProgress() {
+	s.mu.Lock()
+	s.workspaceProgress = false
+	s.mu.Unlock()
+}
+
+func (s *Server) workspaceProgressEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.workspaceProgress
+}
+
+// reportWorkspaceIndexProgress identifies a runtime root at the discovery
+// boundary. It is called outside workspace mutexes and does not affect index
+// completion when a client cannot receive a notification.
+func (s *Server) reportWorkspaceIndexProgress(session *workspaceProgressSession, started bool, root string) bool {
+	if !started || !s.workspaceProgressEnabled() {
+		return false
+	}
+	message := fmt.Sprintf("Discovering runtime path %s", root)
+	value, err := protocol.Marshal(&protocol.WorkDoneProgressReport{Kind: "report", Message: &message})
+	if err != nil {
+		s.logf("vimls: encode workspace index progress report: %v", err)
+		return false
+	}
+	if err := s.sendWorkspaceProgress(session, s.analysisContext, workspaceProgressNotificationTimeout, &protocol.ProgressParams{Token: session.token, Value: protocol.LSPAny(value)}, false); err != nil {
+		s.disableWorkspaceProgress()
+		if s.analysisContext.Err() == nil {
+			s.logf("vimls: send workspace index progress report: %v", err)
+		}
+		return false
+	}
+	return true
+}
+
+func (s *Server) finishWorkspaceIndexProgress(session *workspaceProgressSession) {
+	if session == nil {
 		return
 	}
 	value, err := protocol.Marshal(&protocol.WorkDoneProgressEnd{Kind: "end"})
-	if err == nil {
-		_ = client.Progress(s.analysisContext, &protocol.ProgressParams{Token: token, Value: protocol.LSPAny(value)})
+	if err != nil {
+		return
 	}
+	_ = s.sendWorkspaceProgress(session, context.Background(), workspaceProgressEndTimeout, &protocol.ProgressParams{Token: session.token, Value: protocol.LSPAny(value)}, true)
 }
 
 func (s *Server) finishWorkspaceRebuildLocked() {
@@ -442,7 +576,15 @@ func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
 	return true
 }
 
-func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
+// buildWorkspaceIndex reports up to workspaceProgressReportLimit configured
+// runtime roots immediately before discovering their files. Parsing remains
+// batched after discovery, so reports identify discovery roots rather than
+// individual files.
+func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot, progress ...func(string)) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
+	var reportRuntimeRoot func(string)
+	if len(progress) > 0 {
+		reportRuntimeRoot = progress[0]
+	}
 	index := newWorkspaceIndex()
 	searchPaths := runtimePaths
 	if len(searchPaths) == 0 {
@@ -464,7 +606,11 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 	oversizedOpen := make(map[string]struct{})
 	discoveredRecoverable := make(map[string]struct{})
 	var warnings []string
+	reportedRuntimeRoots := 0
 	for _, root := range roots {
+		if ctx.Err() != nil {
+			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
+		}
 		runtimeRoot := slices.Contains(runtimePaths, root)
 		remaining := maxWorkspaceFiles - len(paths)
 		if remaining <= 0 {
@@ -472,7 +618,14 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
 			break
 		}
-		files, truncated, err := workspace.DiscoverFiles(root, remaining)
+		if runtimeRoot && reportRuntimeRoot != nil && reportedRuntimeRoots < workspaceProgressReportLimit {
+			reportRuntimeRoot(root)
+			reportedRuntimeRoots++
+		}
+		files, truncated, err := discoverWorkspaceFilesContext(ctx, root, remaining)
+		if ctx.Err() != nil {
+			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
+		}
 		if err != nil {
 			if !runtimeRoot {
 				complete = false
@@ -1154,19 +1307,64 @@ func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRunt
 	workspaceRoots := append([]string(nil), s.workspaceRoots...)
 	resolver := workspacePathResolver(workspaceRoots, paths)
 	openSnapshots := s.documents.Snapshots()
-	s.applyRuntimepathDeltaLocked(ctx, oldPaths, paths, resolver, openSnapshots)
+	applied := s.applyRuntimepathDeltaLocked(ctx, oldPaths, paths, resolver, openSnapshots)
 	s.workspaceMu.Unlock()
 	s.publishMu.Unlock()
-	for _, snapshot := range openSnapshots {
-		s.startAnalysis(snapshot.URI())
+	if applied {
+		for _, snapshot := range openSnapshots {
+			s.startAnalysis(snapshot.URI())
+		}
 	}
 	return nil
 }
 
+// workspaceOperationContext is canceled when either the caller abandons its
+// request or the server lifecycle stops.
+func (s *Server) workspaceOperationContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	combined, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.analysisContext, cancel)
+	if s.analysisContext.Err() != nil {
+		cancel()
+	}
+	return combined, func() {
+		stop()
+		cancel()
+	}
+}
+
+func remainingWorkspaceIndexCapacity(index *workspace.Index, workspaceFiles map[string]struct{}, openByPath map[string]*text.Snapshot, activeRoots []string, maxFiles, maxBytes int) (files, bytes int) {
+	removed := make(map[string]struct{}, len(workspaceFiles)+len(openByPath))
+	for path := range workspaceFiles {
+		if !workspacePathInRoots(path, activeRoots) {
+			removed[path] = struct{}{}
+		}
+	}
+	for path := range openByPath {
+		if !workspacePathInRoots(path, activeRoots) {
+			removed[path] = struct{}{}
+		}
+	}
+	removedFiles := 0
+	removedBytes := 0
+	for path := range removed {
+		if source, ok := index.Source(path); ok {
+			removedFiles++
+			removedBytes += len(source)
+		}
+	}
+	return max(0, maxFiles-index.FileCount()+removedFiles), max(0, maxBytes-index.IndexedBytes()+removedBytes)
+}
+
 // applyRuntimepathDeltaLocked updates the existing index rather than starting
 // another complete workspace scan. The caller holds publishMu and workspaceMu.
-func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newPaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) {
+func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newPaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) bool {
+	ctx, cancel := s.workspaceOperationContext(ctx)
+	defer cancel()
+	if ctx.Err() != nil || s.analysisStopped || s.analysisContext.Err() != nil {
+		return false
+	}
 	oldGraph := s.workspaceGraphView
+	index := s.workspaceIndex
 	activeRoots := workspaceIndexRoots(s.workspaceRoots, newPaths)
 	allOpenByPath := make(map[string]*text.Snapshot, len(openSnapshots))
 	openByPath := make(map[string]*text.Snapshot, len(openSnapshots))
@@ -1181,26 +1379,24 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 		}
 	}
 
-	s.runtimePaths = append([]string(nil), newPaths...)
-	s.workspaceResolver = resolver
-	s.workspaceIndex.SetRuntimePaths(newPaths)
-	complete := s.workspaceIndex.Complete()
-	for path := range s.workspaceFiles {
-		if workspacePathInRoots(path, activeRoots) {
-			continue
-		}
-		s.workspaceIndex.Remove(path)
-		delete(s.workspaceFiles, path)
-	}
-	// Open snapshots with no disk backing are not in workspaceFiles. They must
-	// disappear with a removed root just like ordinary indexed files.
-	for path := range allOpenByPath {
-		if workspacePathInRoots(path, activeRoots) {
-			continue
-		}
-		s.workspaceIndex.Remove(path)
-	}
+	// Calculate how many bytes and files will be freed by removing files
+	// belonging to deleted runtime paths. This ensures the capacity budget
+	// accurately credits freed space when swapping runtime paths.
+	remainingFiles, remainingBytes := remainingWorkspaceIndexCapacity(index, s.workspaceFiles, allOpenByPath, activeRoots, maxWorkspaceFiles, maxIndexBytes)
 
+	// Filesystem traversal and batch analysis can block. Release workspaceMu
+	// while they run so lifecycle cancellation can acquire it and cancel this
+	// operation. publishMu remains held, preserving the document snapshot used
+	// to construct this delta.
+	s.workspaceMu.Unlock()
+	locked := false
+	defer func() {
+		if !locked {
+			s.workspaceMu.Lock()
+		}
+	}()
+
+	complete := index.Complete()
 	oldSet := make(map[string]struct{}, len(oldPaths))
 	for _, path := range oldPaths {
 		oldSet[path] = struct{}{}
@@ -1210,7 +1406,6 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	newPathsToIndex := make([]string, 0)
 	newSources := make([]string, 0)
 	newDiskFiles := make([]bool, 0)
-	remainingBytes := maxIndexBytes - s.workspaceIndex.IndexedBytes()
 	for _, root := range newPaths {
 		if _, retained := oldSet[root]; retained {
 			continue
@@ -1219,12 +1414,15 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 			complete = false
 			break
 		}
-		remaining := maxWorkspaceFiles - s.workspaceIndex.FileCount() - len(newPathsToIndex)
+		remaining := remainingFiles - len(newPathsToIndex)
 		if remaining <= 0 {
 			complete = false
 			break
 		}
-		files, truncated, err := workspace.DiscoverFiles(root, remaining)
+		files, truncated, err := discoverWorkspaceFilesContext(ctx, root, remaining)
+		if ctx.Err() != nil {
+			return false
+		}
 		if err != nil {
 			// Runtimepath roots are client-owned optional inputs. Treat a root
 			// that disappears or becomes unreadable as absent without a warning.
@@ -1238,7 +1436,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 				continue
 			}
 			discovered[path] = struct{}{}
-			if _, indexed := s.workspaceIndex.Source(path); indexed {
+			if _, indexed := index.Source(path); indexed {
 				continue
 			}
 			var source string
@@ -1271,20 +1469,50 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 			newDiskFiles = append(newDiskFiles, diskFile)
 		}
 	}
-	if ctx.Err() == nil && len(newSources) > 0 {
-		parsed := workspace.ParseAndAnalyzeSources(ctx, newSources, 0)
-		for position, item := range parsed {
-			if item.File == nil || s.workspaceIndex.ReplaceWithAnalysis(newPathsToIndex[position], item.File, item.Analysis) != nil {
-				complete = false
-				continue
-			}
-			indexedAdded[newPathsToIndex[position]] = struct{}{}
-			if newDiskFiles[position] {
-				s.workspaceFiles[newPathsToIndex[position]] = struct{}{}
-			}
+	if ctx.Err() != nil {
+		return false
+	}
+	var parsed []workspace.AnalyzedSource
+	if len(newSources) > 0 {
+		parsed = workspace.ParseAndAnalyzeSources(ctx, newSources, 0)
+		if ctx.Err() != nil {
+			return false
 		}
-	} else if ctx.Err() != nil {
-		complete = false
+	}
+	// Discovery and analysis must both complete before any workspace state is
+	// changed, so a canceled runtimepath request leaves the current index live.
+	s.workspaceMu.Lock()
+	locked = true
+	if ctx.Err() != nil || s.analysisStopped || s.analysisContext.Err() != nil || s.workspaceIndex != index {
+		return false
+	}
+	s.runtimePaths = append([]string(nil), newPaths...)
+	s.workspaceResolver = resolver
+	s.workspaceIndex.SetRuntimePaths(newPaths)
+	for path := range s.workspaceFiles {
+		if workspacePathInRoots(path, activeRoots) {
+			continue
+		}
+		s.workspaceIndex.Remove(path)
+		delete(s.workspaceFiles, path)
+	}
+	// Open snapshots with no disk backing are not in workspaceFiles. They must
+	// disappear with a removed root just like ordinary indexed files.
+	for path := range allOpenByPath {
+		if workspacePathInRoots(path, activeRoots) {
+			continue
+		}
+		s.workspaceIndex.Remove(path)
+	}
+	for position, item := range parsed {
+		if item.File == nil || s.workspaceIndex.ReplaceWithAnalysis(newPathsToIndex[position], item.File, item.Analysis) != nil {
+			complete = false
+			continue
+		}
+		indexedAdded[newPathsToIndex[position]] = struct{}{}
+		if newDiskFiles[position] {
+			s.workspaceFiles[newPathsToIndex[position]] = struct{}{}
+		}
 	}
 
 	retained := make(map[string]struct{}, len(s.workspaceFiles)+len(openByPath))
@@ -1328,6 +1556,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	s.workspaceBuilt = true
 	s.workspaceRevision++
 	s.notifyWorkspaceIndexChangedLocked()
+	return true
 }
 
 func resolveRuntimepathImportFacts(importer string, facts []workspace.ImportFact, resolver *workspace.PathResolver, openByPath map[string]*text.Snapshot, index *workspace.Index) []workspace.ImportFact {

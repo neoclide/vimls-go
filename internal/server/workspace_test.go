@@ -386,6 +386,144 @@ func TestRuntimepathDeltaSilentlyDropsInvalidRoots(t *testing.T) {
 	}
 }
 
+func TestRuntimepathDeltaCancellationLeavesExistingIndex(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	oldRuntime := t.TempDir()
+	newRuntime := t.TempDir()
+	oldFile := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, oldRuntime, "plugin/old.vim", "vim9script\nvar OldRuntime = 1\n"))
+	newFile := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, newRuntime, "plugin/new.vim", "vim9script\nvar NewRuntime = 1\n"))
+	instance := initializeWorkspaceServer(t, workspaceRoot)
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{oldRuntime}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	revision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := instance.DidChangeRuntimepath(ctx, &DidChangeRuntimepathParams{Runtimepath: []string{newRuntime}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	paths := append([]string(nil), instance.runtimePaths...)
+	gotRevision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	if len(paths) != 1 || paths[0] != mustWorkspaceCanonicalPath(t, oldRuntime) || gotRevision != revision {
+		t.Fatalf("cancelled runtimepath delta paths=%#v revision=%d, want old path and revision %d", paths, gotRevision, revision)
+	}
+	instance.workspaceMu.Lock()
+	_, oldIndexed := instance.workspaceIndex.Source(oldFile)
+	_, newIndexed := instance.workspaceIndex.Source(newFile)
+	instance.workspaceMu.Unlock()
+	if !oldIndexed || newIndexed {
+		t.Fatalf("cancelled runtimepath delta indexed old=%t new=%t, want true, false", oldIndexed, newIndexed)
+	}
+}
+
+func TestRuntimepathDeltaAfterLifecycleCancellationLeavesExistingIndex(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	oldRuntime := t.TempDir()
+	newRuntime := t.TempDir()
+	oldFile := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, oldRuntime, "plugin/old.vim", "vim9script\nvar OldRuntime = 1\n"))
+	newFile := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, newRuntime, "plugin/new.vim", "vim9script\nvar NewRuntime = 1\n"))
+	instance := initializeWorkspaceServer(t, workspaceRoot)
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{oldRuntime}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	revision := instance.workspaceRevision
+	instance.workspaceMu.Unlock()
+	instance.cancelAnalysis()
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{newRuntime}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	paths := append([]string(nil), instance.runtimePaths...)
+	gotRevision := instance.workspaceRevision
+	_, oldIndexed := instance.workspaceIndex.Source(oldFile)
+	_, newIndexed := instance.workspaceIndex.Source(newFile)
+	instance.workspaceMu.Unlock()
+	if len(paths) != 1 || paths[0] != mustWorkspaceCanonicalPath(t, oldRuntime) || gotRevision != revision || !oldIndexed || newIndexed {
+		t.Fatalf("stopped runtimepath delta paths=%#v revision=%d indexed old=%t new=%t, want old path, revision %d, true, false", paths, gotRevision, oldIndexed, newIndexed, revision)
+	}
+}
+
+func TestRuntimepathDeltaCancelsInFlightDiscoveryWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		cancel func(*Server, context.CancelFunc)
+	}{
+		{
+			name: "request",
+			cancel: func(_ *Server, cancel context.CancelFunc) {
+				cancel()
+			},
+		},
+		{
+			name: "lifecycle",
+			cancel: func(instance *Server, _ context.CancelFunc) {
+				instance.cancelAnalysis()
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			workspaceRoot := t.TempDir()
+			oldRuntime := t.TempDir()
+			newRuntime := t.TempDir()
+			writeWorkspaceFile(t, oldRuntime, "plugin/old.vim", "vim9script\nvar OldRuntime = 1\n")
+			instance := initializeWorkspaceServer(t, workspaceRoot)
+			if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{oldRuntime}}); err != nil {
+				t.Fatal(err)
+			}
+			instance.workspaceMu.Lock()
+			revision := instance.workspaceRevision
+			instance.workspaceMu.Unlock()
+
+			previousDiscover := workspaceDiscoverFilesContextForTest
+			newRuntime = mustWorkspaceCanonicalPath(t, newRuntime)
+			started := make(chan struct{})
+			requestValue := make(chan any, 1)
+			workspaceDiscoverFilesContextForTest = func(ctx context.Context, root string, limit int) ([]string, bool, error) {
+				if root != newRuntime {
+					return nil, false, fmt.Errorf("discovery root = %q, want %q", root, newRuntime)
+				}
+				requestValue <- ctx.Value("request-context")
+				close(started)
+				<-ctx.Done()
+				return nil, false, ctx.Err()
+			}
+			t.Cleanup(func() { workspaceDiscoverFilesContextForTest = previousDiscover })
+
+			requestCtx, requestCancel := context.WithCancel(context.WithValue(context.Background(), "request-context", test.name))
+			defer requestCancel()
+			result := make(chan error, 1)
+			go func() {
+				result <- instance.DidChangeRuntimepath(requestCtx, &DidChangeRuntimepathParams{Runtimepath: []string{newRuntime}})
+			}()
+			waitForServerRace(t, started, "runtimepath delta discovery")
+			if got := <-requestValue; got != test.name {
+				t.Fatalf("discovery request context value = %v, want %q", got, test.name)
+			}
+			test.cancel(instance, requestCancel)
+			select {
+			case err := <-result:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("cancelled runtimepath delta did not return")
+			}
+			instance.workspaceMu.Lock()
+			paths := append([]string(nil), instance.runtimePaths...)
+			gotRevision := instance.workspaceRevision
+			instance.workspaceMu.Unlock()
+			if len(paths) != 1 || paths[0] != mustWorkspaceCanonicalPath(t, oldRuntime) || gotRevision != revision {
+				t.Fatalf("cancelled runtimepath delta paths=%#v revision=%d, want old path and revision %d", paths, gotRevision, revision)
+			}
+		})
+	}
+}
+
 func TestRuntimepathDeltaSilentlyDropsUnreadableRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix directory permissions are not portable to Windows")
@@ -1410,10 +1548,11 @@ func TestWorkspaceRebuildDebouncesBurst(t *testing.T) {
 
 func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 	root := t.TempDir()
+	runtimeRoot := mustWorkspaceCanonicalPath(t, root)
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	endedAfterPublish := false
-	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 1), updates: make(chan *protocol.ProgressParams, 2)}
+	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 1), updates: make(chan *protocol.ProgressParams, 3)}
 	progress.onProgress = func(params *protocol.ProgressParams) {
 		var end protocol.WorkDoneProgressEnd
 		if protocol.Unmarshal(params.Value, &end) != nil || end.Kind != "end" {
@@ -1429,7 +1568,7 @@ func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 	rootURI := uri.File(root)
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI:               &rootURI,
-		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":["` + root + `"]}`)),
 		Capabilities:          protocol.ClientCapabilities{Window: &protocol.WindowClientCapabilities{WorkDoneProgress: &supported}},
 	}); err != nil {
 		t.Fatal(err)
@@ -1451,6 +1590,14 @@ func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 	if begin.Token != token || beginValue.Kind != "begin" || beginValue.Title != "Indexing workspace" {
 		t.Fatalf("progress begin = %#v, value = %#v", begin, beginValue)
 	}
+	report := waitForWorkspaceProgress(t, progress.updates)
+	var reportValue protocol.WorkDoneProgressReport
+	if err := protocol.Unmarshal(report.Value, &reportValue); err != nil {
+		t.Fatal(err)
+	}
+	if report.Token != token || reportValue.Kind != "report" || reportValue.Message == nil || !strings.Contains(*reportValue.Message, runtimeRoot) || reportValue.Percentage != nil {
+		t.Fatalf("progress report = %#v, value = %#v", report, reportValue)
+	}
 	instance.workspaceWG.Wait()
 	end := waitForWorkspaceProgress(t, progress.updates)
 	var endValue protocol.WorkDoneProgressEnd
@@ -1462,6 +1609,95 @@ func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 	}
 	if !endedAfterPublish {
 		t.Fatal("workspace progress ended before the index was published")
+	}
+}
+
+func TestWorkspaceIndexProgressIsCapabilityGated(t *testing.T) {
+	root := t.TempDir()
+	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 1), updates: make(chan *protocol.ProgressParams, 3)}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = progress
+	instance.workspaceDelay = 0
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":["` + root + `"]}`)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	select {
+	case created := <-progress.creates:
+		t.Fatalf("progress token created without capability: %v", created)
+	default:
+	}
+	select {
+	case update := <-progress.updates:
+		t.Fatalf("progress notification sent without capability: %#v", update)
+	default:
+	}
+}
+
+func TestWorkspaceIndexProgressReportFailureStillEnds(t *testing.T) {
+	root := t.TempDir()
+	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 1), updates: make(chan *protocol.ProgressParams, 3)}
+	progress.progress = func(_ context.Context, params *protocol.ProgressParams) error {
+		var report protocol.WorkDoneProgressReport
+		if protocol.Unmarshal(params.Value, &report) == nil && report.Kind == "report" {
+			return errors.New("report unavailable")
+		}
+		return nil
+	}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = progress
+	instance.workspaceDelay = 0
+	supported := true
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":["` + root + `"]}`)),
+		Capabilities:          protocol.ClientCapabilities{Window: &protocol.WindowClientCapabilities{WorkDoneProgress: &supported}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	begin := waitForWorkspaceProgress(t, progress.updates)
+	report := waitForWorkspaceProgress(t, progress.updates)
+	end := waitForWorkspaceProgress(t, progress.updates)
+	var beginValue protocol.WorkDoneProgressBegin
+	var reportValue protocol.WorkDoneProgressReport
+	var endValue protocol.WorkDoneProgressEnd
+	if protocol.Unmarshal(begin.Value, &beginValue) != nil || beginValue.Kind != "begin" || protocol.Unmarshal(report.Value, &reportValue) != nil || reportValue.Kind != "report" || protocol.Unmarshal(end.Value, &endValue) != nil || endValue.Kind != "end" || begin.Token != report.Token || report.Token != end.Token {
+		t.Fatalf("progress after report failure = %#v, %#v, %#v", begin, report, end)
+	}
+}
+
+func TestWorkspaceIndexProgressReportsBoundedRuntimeRoots(t *testing.T) {
+	roots := make([]string, workspaceProgressReportLimit+1)
+	for index := range roots {
+		roots[index] = t.TempDir()
+	}
+	reported := make([]string, 0, workspaceProgressReportLimit)
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.buildWorkspaceIndex(context.Background(), roots, roots, nil, nil, func(root string) {
+		reported = append(reported, root)
+	})
+	if len(reported) != workspaceProgressReportLimit {
+		t.Fatalf("runtime root reports = %d, want %d", len(reported), workspaceProgressReportLimit)
+	}
+	for index, root := range reported {
+		if root != roots[index] {
+			t.Fatalf("runtime root report %d = %q, want %q", index, root, roots[index])
+		}
 	}
 }
 
@@ -1487,18 +1723,142 @@ func TestWorkspaceIndexProgressCreateTimesOut(t *testing.T) {
 	}
 }
 
+func TestWorkspaceIndexProgressDoesNotBlockOnUncooperativeClient(t *testing.T) {
+	root := t.TempDir()
+	progress := &blockingWorkspaceProgressClient{
+		beginStarted: make(chan struct{}),
+		endStarted:   make(chan struct{}),
+		releaseBegin: make(chan struct{}),
+		events:       make(chan string, 2),
+	}
+	instance := New(nil, nil, io.Discard)
+	instance.setWorkspaceRoots([]string{root})
+	instance.setRuntimePaths([]string{root})
+	instance.client = progress
+	instance.workspaceProgress = true
+	instance.workspaceDelay = 0
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(progress.releaseBegin) }) }
+	t.Cleanup(func() {
+		release()
+		instance.stopAnalysis()
+	})
+
+	instance.scheduleWorkspaceRebuild()
+	waitForServerRace(t, progress.beginStarted, "blocking workspace progress begin")
+	done := make(chan struct{})
+	go func() {
+		instance.workspaceWG.Wait()
+		close(done)
+	}()
+	waitForServerRace(t, done, "workspace rebuild after blocking progress")
+	select {
+	case event := <-progress.events:
+		t.Fatalf("timed-out notification escaped before release: %q", event)
+	default:
+	}
+	// The queued end cannot overtake the blocked begin. Releasing the begin
+	// must deliver the token's notifications in protocol order.
+	release()
+	if event := <-progress.events; event != "begin" {
+		t.Fatalf("first progress event = %q, want begin", event)
+	}
+	waitForServerRace(t, progress.endStarted, "best-effort workspace progress end")
+	if event := <-progress.events; event != "end" {
+		t.Fatalf("second progress event = %q, want end", event)
+	}
+	if !progress.endHasDeadline {
+		t.Fatal("best-effort progress end had no deadline")
+	}
+	if progress.reports != 0 {
+		t.Fatalf("reports sent after begin timeout: %d", progress.reports)
+	}
+	instance.workspaceMu.Lock()
+	built, running := instance.workspaceBuilt, instance.workspaceRunning
+	instance.workspaceMu.Unlock()
+	if !built || running {
+		t.Fatalf("blocking progress stalled workspace: built=%t running=%t", built, running)
+	}
+	if instance.workspaceProgressEnabled() {
+		t.Fatal("progress remained enabled after a timed-out client call")
+	}
+}
+
+func TestWorkspaceIndexProgressReportDoesNotArriveAfterEnd(t *testing.T) {
+	root := mustWorkspaceCanonicalPath(t, t.TempDir())
+	reportStarted := make(chan struct{})
+	releaseReport := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseReport) }) }
+	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 1), updates: make(chan *protocol.ProgressParams, 3)}
+	progress.onProgress = func(params *protocol.ProgressParams) {
+		var report protocol.WorkDoneProgressReport
+		if protocol.Unmarshal(params.Value, &report) == nil && report.Kind == "report" {
+			close(reportStarted)
+			<-releaseReport
+		}
+	}
+	instance := New(nil, nil, io.Discard)
+	instance.setWorkspaceRoots([]string{root})
+	instance.setRuntimePaths([]string{root})
+	instance.client = progress
+	instance.workspaceProgress = true
+	instance.workspaceDelay = 0
+	t.Cleanup(func() {
+		release()
+		instance.stopAnalysis()
+	})
+
+	instance.scheduleWorkspaceRebuild()
+	begin := waitForWorkspaceProgress(t, progress.updates)
+	var beginValue protocol.WorkDoneProgressBegin
+	if protocol.Unmarshal(begin.Value, &beginValue) != nil || beginValue.Kind != "begin" {
+		t.Fatalf("progress begin = %#v", begin)
+	}
+	waitForServerRace(t, reportStarted, "blocking workspace progress report")
+	instance.workspaceWG.Wait()
+	select {
+	case update := <-progress.updates:
+		t.Fatalf("terminal progress overtook blocked report: %#v", update)
+	default:
+	}
+
+	release()
+	report := waitForWorkspaceProgress(t, progress.updates)
+	end := waitForWorkspaceProgress(t, progress.updates)
+	var reportValue protocol.WorkDoneProgressReport
+	var endValue protocol.WorkDoneProgressEnd
+	if protocol.Unmarshal(report.Value, &reportValue) != nil || reportValue.Kind != "report" || protocol.Unmarshal(end.Value, &endValue) != nil || endValue.Kind != "end" || begin.Token != report.Token || report.Token != end.Token {
+		t.Fatalf("late progress ordering = %#v, %#v, %#v", begin, report, end)
+	}
+}
+
+func TestWorkspaceIndexDiscoveryHonorsCancellationBeforeRuntimeRoot(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "plugin/cancel.vim", "vim9script\nvar Cancelled = 1\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	instance := New(nil, nil, io.Discard)
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(ctx, []string{root}, []string{root}, nil, nil, func(string) {
+		cancel()
+	})
+	if index.FileCount() != 0 || graph.Snapshot().Ready() || len(diskFiles) != 0 || len(warnings) != 0 {
+		t.Fatalf("cancelled discovery indexed files=%d graph-ready=%t disk=%#v warnings=%#v", index.FileCount(), graph.Snapshot().Ready(), diskFiles, warnings)
+	}
+}
+
 func TestWorkspaceIndexProgressTokensAreUnique(t *testing.T) {
 	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 2), updates: make(chan *protocol.ProgressParams, 4)}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = progress
 	instance.workspaceProgress = true
-	firstClient, firstToken, firstStarted := instance.startWorkspaceIndexProgress()
-	secondClient, secondToken, secondStarted := instance.startWorkspaceIndexProgress()
-	instance.finishWorkspaceIndexProgress(firstClient, firstToken, firstStarted)
-	instance.finishWorkspaceIndexProgress(secondClient, secondToken, secondStarted)
-	if firstToken == secondToken {
-		t.Fatalf("workspace progress tokens reused: %v", firstToken)
+	first := instance.startWorkspaceIndexProgress()
+	second := instance.startWorkspaceIndexProgress()
+	instance.finishWorkspaceIndexProgress(first)
+	instance.finishWorkspaceIndexProgress(second)
+	if first == nil || second == nil || first.token == second.token {
+		t.Fatalf("workspace progress tokens reused: %v, %v", first, second)
 	}
 }
 
@@ -1578,17 +1938,43 @@ func TestServerRebuildCancellationDoesNotPublishIndex(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.setWorkspaceRoots([]string{root})
-	paused := make(chan struct{})
-	release := make(chan struct{})
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
-		close(paused)
-		<-release
+	beginSent := make(chan struct{})
+	releaseBegin := make(chan struct{})
+	endDeadline := make(chan bool, 1)
+	progress := &workspaceProgressClient{creates: make(chan protocol.ProgressToken, 1), updates: make(chan *protocol.ProgressParams, 2)}
+	progress.progress = func(ctx context.Context, params *protocol.ProgressParams) error {
+		var end protocol.WorkDoneProgressEnd
+		if protocol.Unmarshal(params.Value, &end) == nil && end.Kind == "end" {
+			_, hasDeadline := ctx.Deadline()
+			endDeadline <- hasDeadline
+		}
+		return nil
 	}
+	progress.onProgress = func(params *protocol.ProgressParams) {
+		var begin protocol.WorkDoneProgressBegin
+		if protocol.Unmarshal(params.Value, &begin) == nil && begin.Kind == "begin" {
+			close(beginSent)
+			<-releaseBegin
+		}
+	}
+	instance.client = progress
+	instance.workspaceProgress = true
+	instance.workspaceDelay = 0
 	instance.scheduleWorkspaceRebuild()
-	waitForServerRace(t, paused, "workspace rebuild pause")
+	waitForServerRace(t, beginSent, "workspace progress begin")
 	instance.cancelAnalysis()
-	close(release)
+	close(releaseBegin)
 	instance.workspaceWG.Wait()
+	begin := waitForWorkspaceProgress(t, progress.updates)
+	end := waitForWorkspaceProgress(t, progress.updates)
+	var beginValue protocol.WorkDoneProgressBegin
+	var endValue protocol.WorkDoneProgressEnd
+	if protocol.Unmarshal(begin.Value, &beginValue) != nil || beginValue.Kind != "begin" || protocol.Unmarshal(end.Value, &endValue) != nil || endValue.Kind != "end" || begin.Token != end.Token {
+		t.Fatalf("cancelled progress updates = %#v, %#v", begin, end)
+	}
+	if !<-endDeadline {
+		t.Fatal("cancelled progress end had no deadline")
+	}
 	instance.workspaceMu.Lock()
 	running, built, index := instance.workspaceRunning, instance.workspaceBuilt, instance.workspaceIndex
 	instance.workspaceMu.Unlock()
@@ -1850,11 +2236,48 @@ type watchRegistrationClient struct {
 	unregistrations []*protocol.UnregistrationParams
 }
 
+type blockingWorkspaceProgressClient struct {
+	protocol.UnimplementedClient
+	beginStarted   chan struct{}
+	endStarted     chan struct{}
+	releaseBegin   chan struct{}
+	endHasDeadline bool
+	reports        int
+	events         chan string
+}
+
+func (c *blockingWorkspaceProgressClient) WorkDoneProgressCreate(_ context.Context, _ *protocol.WorkDoneProgressCreateParams) error {
+	return nil
+}
+
+func (c *blockingWorkspaceProgressClient) Progress(ctx context.Context, params *protocol.ProgressParams) error {
+	var begin protocol.WorkDoneProgressBegin
+	if protocol.Unmarshal(params.Value, &begin) == nil && begin.Kind == "begin" {
+		close(c.beginStarted)
+		<-c.releaseBegin
+		c.events <- "begin"
+		return nil
+	}
+	var end protocol.WorkDoneProgressEnd
+	if protocol.Unmarshal(params.Value, &end) == nil && end.Kind == "end" {
+		_, c.endHasDeadline = ctx.Deadline()
+		c.events <- "end"
+		close(c.endStarted)
+		return nil
+	}
+	var report protocol.WorkDoneProgressReport
+	if protocol.Unmarshal(params.Value, &report) == nil && report.Kind == "report" {
+		c.reports++
+	}
+	return nil
+}
+
 type workspaceProgressClient struct {
 	protocol.UnimplementedClient
 	creates    chan protocol.ProgressToken
 	updates    chan *protocol.ProgressParams
 	create     func(context.Context, *protocol.WorkDoneProgressCreateParams) error
+	progress   func(context.Context, *protocol.ProgressParams) error
 	onProgress func(*protocol.ProgressParams)
 }
 
@@ -1866,11 +2289,17 @@ func (c *workspaceProgressClient) WorkDoneProgressCreate(ctx context.Context, pa
 	return nil
 }
 
-func (c *workspaceProgressClient) Progress(_ context.Context, params *protocol.ProgressParams) error {
+func (c *workspaceProgressClient) Progress(ctx context.Context, params *protocol.ProgressParams) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.onProgress != nil {
 		c.onProgress(params)
 	}
 	c.updates <- params
+	if c.progress != nil {
+		return c.progress(ctx, params)
+	}
 	return nil
 }
 
@@ -1915,5 +2344,27 @@ func assertWatchRegistration(t *testing.T, params *protocol.RegistrationParams, 
 		if !ok || pattern.BaseURI != protocol.URI(uri.File(root)) || pattern.Pattern != protocol.Pattern("**/*.vim") || options.Watchers[index].Kind != kind {
 			t.Fatalf("watcher %d = %#v", index, options.Watchers[index])
 		}
+	}
+}
+
+func TestRemainingWorkspaceIndexCapacityCreditsRemovedOpenFileAtLimit(t *testing.T) {
+	activeRoot := mustWorkspaceCanonicalPath(t, t.TempDir())
+	removedRoot := mustWorkspaceCanonicalPath(t, t.TempDir())
+	diskSource := "vim9script\nvar Disk = 1\n"
+	openSource := "vim9script\nvar Open = 1\n"
+	diskPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, activeRoot, "plugin/disk.vim", diskSource))
+	openPath := mustWorkspaceCanonicalPath(t, filepath.Join(removedRoot, "plugin", "open.vim"))
+	index := workspace.NewIndex(2, len(diskSource)+len(openSource))
+	if err := index.Replace(diskPath, syntax.Parse(diskSource)); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Replace(openPath, syntax.Parse(openSource)); err != nil {
+		t.Fatal(err)
+	}
+	workspaceFiles := map[string]struct{}{diskPath: {}}
+	openByPath := map[string]*text.Snapshot{diskPath: nil, openPath: nil}
+	files, bytes := remainingWorkspaceIndexCapacity(index, workspaceFiles, openByPath, []string{activeRoot}, 2, len(diskSource)+len(openSource))
+	if files != 1 || bytes != len(openSource) {
+		t.Fatalf("remaining capacity = %d files, %d bytes, want 1 file, %d bytes", files, bytes, len(openSource))
 	}
 }
