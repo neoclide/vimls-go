@@ -301,9 +301,9 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 		base, cancel := context.WithCancel(jsonrpc2.DetachContext(ctx))
 		requestCtx := valueContext{Context: base, values: ctx}
 		id := request.ID()
-		if !s.registerCancellation(id, cancel) {
+		if err := s.registerCancellation(id, cancel); err != nil {
 			cancel()
-			return nil, jsonrpc2.NewError(jsonrpc2.JSONRPCReservedErrorRangeEnd, "too many pending requests")
+			return nil, err
 		}
 		// Register first so a following $/cancelRequest cannot be handled before this request.
 		// Keep lifecycle calls ordered: later input may depend on initialize or shutdown completing.
@@ -320,14 +320,17 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 	}
 }
 
-func (s *Server) registerCancellation(id jsonrpc2.ID, cancel context.CancelFunc) bool {
+func (s *Server) registerCancellation(id jsonrpc2.ID, cancel context.CancelFunc) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.cancellations[id]; exists {
+		return jsonrpc2.NewError(jsonrpc2.InvalidRequest, fmt.Sprintf("duplicate request ID: %v", id))
+	}
 	if len(s.cancellations) >= maxPendingRequests {
-		return false
+		return jsonrpc2.NewError(jsonrpc2.JSONRPCReservedErrorRangeEnd, "too many pending requests")
 	}
 	s.cancellations[id] = cancel
-	return true
+	return nil
 }
 
 func (s *Server) lifecycleHandler(next jsonrpc2.Handler) jsonrpc2.Handler {

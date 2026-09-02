@@ -73,13 +73,13 @@ func TestServerLimitsPendingRequests(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	for index := range maxPendingRequests {
 		_, cancel := context.WithCancel(context.Background())
-		if !instance.registerCancellation(jsonrpc2.NewNumberID(int64(index)), cancel) {
-			t.Fatalf("request %d was rejected before the limit", index)
+		if err := instance.registerCancellation(jsonrpc2.NewNumberID(int64(index)), cancel); err != nil {
+			t.Fatalf("request %d was rejected before the limit: %v", index, err)
 		}
 	}
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if instance.registerCancellation(jsonrpc2.NewNumberID(maxPendingRequests), cancel) {
+	if err := instance.registerCancellation(jsonrpc2.NewNumberID(maxPendingRequests), cancel); err == nil {
 		t.Fatal("request above the pending limit was accepted")
 	}
 }
@@ -208,5 +208,68 @@ func TestServerExitBeforeShutdownFails(t *testing.T) {
 	input := encodeFrames(t, `{"jsonrpc":"2.0","method":"exit"}`)
 	if code := New(&input, io.Discard, io.Discard).Run(context.Background()); code != 1 {
 		t.Fatalf("exit code = %d", code)
+	}
+}
+
+func TestServerRejectsDuplicateRequestID(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+	instance := New(serverConn, serverConn, io.Discard)
+	waiting := make(chan struct{})
+	instance.beforeWorkspaceIndexWaitForTest = func() {
+		select {
+		case <-waiting:
+		default:
+			close(waiting)
+		}
+	}
+	done := make(chan int, 1)
+	go func() { done <- instance.Run(context.Background()) }()
+	writer := jsonrpc.NewWriter(clientConn)
+	reader := jsonrpc.NewReader(clientConn)
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if message := readFrame(t, reader); idNumber(t, message) != 1 {
+		t.Fatalf("initialize response = %#v", message)
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceRunning = true
+	instance.workspaceMu.Unlock()
+
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///duplicate.vim"}}}`)
+	waitForServerRace(t, waiting, "document symbol request")
+
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///duplicate.vim"},"position":{"line":0,"character":0}}}`)
+
+	dupMsg := readFrame(t, reader)
+	if idNumber(t, dupMsg) != 2 || errorCode(t, dupMsg) != int(jsonrpc2.InvalidRequest) {
+		t.Fatalf("duplicate request response = %#v, want InvalidRequest error", dupMsg)
+	}
+
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":2}}`)
+	cancelMsg := readFrame(t, reader)
+	if idNumber(t, cancelMsg) != 2 || errorCode(t, cancelMsg) != int(protocol.LSPErrorCodesRequestCancelled) {
+		t.Fatalf("cancelled response = %#v, want RequestCancelled error", cancelMsg)
+	}
+
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":3,"method":"shutdown"}`)
+	if message := readFrame(t, reader); idNumber(t, message) != 3 {
+		t.Fatalf("shutdown response = %#v", message)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit code = %d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not exit")
+	}
+
+	instance.mu.Lock()
+	remaining := len(instance.cancellations)
+	instance.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("cancellations map len = %d, want 0", remaining)
 	}
 }
