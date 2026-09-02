@@ -10,6 +10,7 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
+	"go.lsp.dev/protocol"
 )
 
 func TestServerLifecycle(t *testing.T) {
@@ -139,6 +140,64 @@ func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 	case code := <-done:
 		if code != 0 {
 			t.Fatalf("exit code = %d, logs = %q", code, logs.String())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server did not exit")
+	}
+}
+
+func TestServerCancelsInFlightRequest(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+	instance := New(serverConn, serverConn, io.Discard)
+	waiting := make(chan struct{})
+	instance.beforeWorkspaceIndexWaitForTest = func() {
+		select {
+		case <-waiting:
+		default:
+			close(waiting)
+		}
+	}
+	done := make(chan int, 1)
+	go func() { done <- instance.Run(context.Background()) }()
+	writer := jsonrpc.NewWriter(clientConn)
+	reader := jsonrpc.NewReader(clientConn)
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if message := readFrame(t, reader); idNumber(t, message) != 1 {
+		t.Fatalf("initialize response = %#v", message)
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceRunning = true
+	instance.workspaceMu.Unlock()
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///cancel.vim"}}}`)
+	waitForServerRace(t, waiting, "document symbol request")
+	if err := clientConn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":2}}`)
+	if err := clientConn.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	message := readFrame(t, reader)
+	if err := clientConn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if idNumber(t, message) != 2 || errorCode(t, message) != int(protocol.LSPErrorCodesRequestCancelled) {
+		t.Fatalf("cancelled response = %#v", message)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":3,"method":"shutdown"}`)
+	if message := readFrame(t, reader); idNumber(t, message) != 3 {
+		t.Fatalf("shutdown response = %#v", message)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit code = %d", code)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("server did not exit")

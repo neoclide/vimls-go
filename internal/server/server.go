@@ -288,6 +288,11 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 			cancel()
 			return nil, jsonrpc2.NewError(jsonrpc2.JSONRPCReservedErrorRangeEnd, "too many pending requests")
 		}
+		// Register first so a following $/cancelRequest cannot be handled before this request.
+		// Keep lifecycle calls ordered: later input may depend on initialize or shutdown completing.
+		if request.Method() != protocol.MethodInitialize && request.Method() != protocol.MethodShutdown {
+			jsonrpc2.Async(ctx)
+		}
 		defer func() {
 			s.mu.Lock()
 			delete(s.cancellations, id)
