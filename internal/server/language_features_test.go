@@ -226,6 +226,24 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	}
 }
 
+func TestCompletionResolveAddsExCommandDocumentation(t *testing.T) {
+	instance, _ := openNavigationDocument(t, text.UTF16, "echo write\n")
+	for _, label := range []string{"echo", "qall", "set"} {
+		resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindKeyword})
+		if err != nil {
+			t.Fatal(err)
+		}
+		detail, ok := resolved.Detail.Get()
+		if !ok || detail != "Ex command" {
+			t.Fatalf("resolve %q detail = %q, %t; item=%#v", label, detail, ok, resolved)
+		}
+		documentation, ok := resolved.Documentation.(protocol.String)
+		if !ok || strings.TrimSpace(string(documentation)) == "" {
+			t.Fatalf("resolve %q documentation = %#v", label, resolved.Documentation)
+		}
+	}
+}
+
 func TestCompletionReturnsPinnedHasFeaturesAndExpandSpecials(t *testing.T) {
 	tests := []struct {
 		name, source, label, detail, documentation string
@@ -500,10 +518,10 @@ func TestCompletionStaticMembersAndUnknown(t *testing.T) {
 	source := "vim9script\nclass Box\n  var value: number\n  def Run()\n  enddef\nendclass\nvar obj: Box = Box.new()\necho obj.\necho Box.\necho unknown.\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
 	for _, test := range []struct {
-		line uint32
-		want string
-	}{{7, "value"}, {8, "Run"}, {9, ""}} {
-		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: 9}}})
+		line, character uint32
+		want            string
+	}{{7, 9, "value"}, {8, 9, "Run"}, {9, 13, ""}} {
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character}}})
 		if err != nil {
 			t.Fatal(err)
 		}

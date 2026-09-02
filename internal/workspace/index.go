@@ -768,11 +768,18 @@ func (i *Index) GlobalNameFacts(name string) []GlobalNameFact {
 // same name. The current file is analyzed separately for position visibility.
 func (i *Index) GlobalVariableCompletions(prefix, excludePath string, limit int, acceptPath ...func(string) bool) ([]GlobalNameFact, bool) {
 	prefix = strings.ToLower(prefix)
+	return i.GlobalVariableCompletionsMatching(func(name string) bool {
+		return strings.HasPrefix(strings.ToLower(name), prefix)
+	}, excludePath, limit, acceptPath...)
+}
+
+// GlobalVariableCompletionsMatching applies matches before sorting and limiting.
+func (i *Index) GlobalVariableCompletionsMatching(matches func(string) bool, excludePath string, limit int, acceptPath ...func(string) bool) ([]GlobalNameFact, bool) {
 	excluded, _ := normalizeIndexPath(excludePath)
 	i.mu.RLock()
 	facts := make([]GlobalNameFact, 0)
 	for name, candidates := range i.byGlobalName {
-		if !strings.HasPrefix(strings.ToLower(name), prefix) {
+		if matches != nil && !matches(name) {
 			continue
 		}
 		var variable *GlobalNameFact
@@ -952,7 +959,14 @@ func (i *Index) globalSymbol(name string, kind analysis.NameDeclarationKind) (Sy
 // functions are available in both dialects. includeLegacyGlobals additionally
 // includes ordinary legacy global functions.
 func (i *Index) FunctionCompletions(prefix string, includeLegacyGlobals bool, limit int, acceptPath ...func(string) bool) ([]FunctionMatch, bool) {
-	prefixFolded := strings.ToLower(prefix)
+	prefix = strings.ToLower(prefix)
+	return i.FunctionCompletionsMatching(func(name string) bool {
+		return strings.HasPrefix(strings.ToLower(name), prefix)
+	}, includeLegacyGlobals, limit, acceptPath...)
+}
+
+// FunctionCompletionsMatching applies matches before sorting and limiting.
+func (i *Index) FunctionCompletionsMatching(matchName func(string) bool, includeLegacyGlobals bool, limit int, acceptPath ...func(string) bool) ([]FunctionMatch, bool) {
 	i.mu.RLock()
 	byCallableName := make(map[string]FunctionMatch)
 	for path, file := range i.files {
@@ -975,7 +989,7 @@ func (i *Index) FunctionCompletions(prefix string, includeLegacyGlobals bool, li
 			} else if !includeLegacyGlobals || fact.Dialect != syntax.Legacy || strings.HasPrefix(fact.Name, "s:") {
 				continue
 			}
-			if !strings.HasPrefix(strings.ToLower(name), prefixFolded) {
+			if matchName != nil && !matchName(name) {
 				continue
 			}
 			previous, exists := byCallableName[name]

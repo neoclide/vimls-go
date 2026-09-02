@@ -276,6 +276,231 @@ func TestCompletionSnippetsRequireClientSupportAndMatchDialect(t *testing.T) {
 	}
 }
 
+func TestCompletionPortableSnippetsAndVim9Blocks(t *testing.T) {
+	tests := []struct {
+		name, source, label, want string
+		line, character           uint32
+		command                   bool // command items stay available without snippet support
+	}{
+		{
+			name:      "legacy function template",
+			source:    "func\n",
+			label:     "func",
+			want:      "function ${1:Name}(${2}) ${3:abort}\n\t$0\nendfunction",
+			character: 4,
+		},
+		{
+			name:      "legacy try/catch template",
+			source:    "tryc\n",
+			label:     "tryc",
+			want:      "try\n\t${1}\ncatch /.*/\n\t$0\nendtry",
+			character: 4,
+		},
+		{name: "legacy try/finally template", source: "tryf\n", label: "tryf", want: "try\n\t${1}\nfinally\n\t$0\nendtry", character: 4},
+		{name: "legacy try/catch/finally template", source: "trycf\n", label: "trycf", want: "try\n\t${1}\ncatch /.*/\n\t${2}\nfinally\n\t$0\nendtry", character: 5},
+		{name: "legacy augroup template", source: "au\n", label: "aug", want: "augroup ${1:Start}\n\tautocmd!\n\t$0\naugroup END", character: 2},
+		{name: "legacy autocmd template", source: "aut\n", label: "aut", want: "autocmd ${1:group-event} ${2:pat} ${3:once} ${4:nested} ${5:cmd}", character: 3},
+		{name: "legacy command template", source: "cmd\n", label: "cmd", want: "command! ${1:attr} ${2:cmd} ${3:rep} $0", character: 3},
+		{name: "legacy highlight template", source: "hi\n", label: "hi", want: "highlight ${1:default} ${2:group-name} ${3:args} $0", character: 2},
+		{name: "if command", source: "if\n", label: "if", want: "if ${1:condition}\n\t$0\nendif", character: 2, command: true},
+		{name: "for command", source: "for\n", label: "for", want: "for ${1:item} in ${2:list}\n\t$0\nendfor", character: 3, command: true},
+		{name: "while command", source: "while\n", label: "while", want: "while ${1:condition}\n\t$0\nendwhile", character: 5, command: true},
+		{name: "try command", source: "try\n", label: "try", want: "try\n\t$1\ncatch /.*/\n\t$0\nendtry", character: 3, command: true},
+		{name: "legacy function command", source: "function\n", label: "function", want: "function! ${1:Name}()\n\t$0\nendfunction", character: 8, command: true},
+		{name: "Vim9 def command", source: "vim9script\ndef\n", label: "def", want: "def ${1:Name}()\n\t$0\nenddef", line: 1, character: 3, command: true},
+		{
+			name:      "Vim9 class template",
+			source:    "vim9script\nclass\n",
+			label:     "class",
+			want:      "class ${1:Name}\n\t$0\nendclass",
+			line:      1,
+			character: 5,
+			command:   true,
+		},
+		{
+			name:      "Vim9 interface template",
+			source:    "vim9script\ninterface\n",
+			label:     "interface",
+			want:      "interface ${1:Name}\n\t$0\nendinterface",
+			line:      1,
+			character: 9,
+			command:   true,
+		},
+		{
+			name:      "Vim9 enum template",
+			source:    "vim9script\nenum\n",
+			label:     "enum",
+			want:      "enum ${1:Name}\n${2:Value}\nendenum",
+			line:      1,
+			character: 4,
+			command:   true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, snippets := range []bool{false, true} {
+				instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+				instance.completion.snippet = snippets
+				result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character},
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				items := completionItems(t, result)
+				if !snippets && !test.command {
+					if hasCompletionLabel(items, test.label) {
+						t.Fatalf("non-command snippet %q present without snippet support", test.label)
+					}
+					continue
+				}
+				item := completionItemWithLabel(items, test.label)
+				if item == nil {
+					t.Fatalf("completion %q missing", test.label)
+				}
+				if !test.command {
+					documentation, ok := item.Documentation.(*protocol.MarkupContent)
+					if !ok || documentation.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(documentation.Value, "```vim\n") || !strings.HasSuffix(documentation.Value, "\n```") {
+						t.Fatalf("snippet %q documentation = %#v", test.label, item.Documentation)
+					}
+				}
+				edit, ok := item.TextEdit.(*protocol.TextEdit)
+				if !ok {
+					t.Fatalf("completion edit = %#v", item.TextEdit)
+				}
+				want := test.label
+				if snippets {
+					want = test.want
+					if item.InsertTextFormat != protocol.InsertTextFormatSnippet {
+						t.Fatalf("snippet format = %v", item.InsertTextFormat)
+					}
+				} else if item.InsertTextFormat == protocol.InsertTextFormatSnippet {
+					t.Fatal("snippet returned without client support")
+				}
+				if edit.NewText != want {
+					t.Fatalf("snippet support %t edit = %q, want %q", snippets, edit.NewText, want)
+				}
+			}
+		})
+	}
+}
+
+func TestCompletionFuzzyMatchesOrderedSubsequence(t *testing.T) {
+	for _, test := range []struct {
+		prefix, label string
+		want          bool
+	}{
+		{prefix: "&hada", label: "&shada", want: false},
+		{prefix: "g:rp", label: "g:groupValue", want: false},
+		{prefix: "aé", label: "aéclair", want: true},
+		{prefix: "g:rp", label: "g:other", want: false},
+		{prefix: "<f", label: "<cfile>", want: false},
+		{prefix: "<cf", label: "<cfile>", want: true},
+	} {
+		if got := completionTextMatches(test.prefix, test.label); got != test.want {
+			t.Fatalf("completionTextMatches(%q, %q) = %t, want %t", test.prefix, test.label, got, test.want)
+		}
+	}
+	tests := []struct {
+		name, source, label, prefix string
+		line, character             uint32
+	}{
+		{
+			name:      "fuzzy variable",
+			source:    "vim9script\nvar groupValue = 1\nvar other = 2\necho grp\n",
+			label:     "groupValue",
+			prefix:    "grp",
+			line:      3,
+			character: 8,
+		},
+		{
+			name:      "fuzzy builtin",
+			source:    "vim9script\necho srn\n",
+			label:     "strlen",
+			prefix:    "srn",
+			line:      1,
+			character: 8,
+		},
+		{
+			name:      "case insensitive first letter",
+			source:    "vim9script\nvar groupValue = 1\necho GRP\n",
+			label:     "groupValue",
+			prefix:    "GRP",
+			line:      2,
+			character: 8,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := completionItems(t, result)
+			if !hasCompletionLabel(items, test.label) {
+				t.Fatalf("completion %q for prefix %q missing from %#v", test.label, test.prefix, items)
+			}
+		})
+	}
+
+	// A non-matching subsequence must stay out.
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar groupValue = 1\necho zqx\n")
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 8},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range completionItems(t, result) {
+		if item.Label == "groupValue" {
+			t.Fatalf("non-matching fuzzy candidate returned: %#v", item)
+		}
+	}
+
+	// The first typed character must match the candidate's first character.
+	// "len" is a valid prefix of the builtin len(), but must not fuzzy-match
+	// strlen() because strlen starts with 's'.
+	instance, documentURI = openNavigationDocument(t, text.UTF16, "vim9script\necho len\n")
+	result, err = instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 8},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range completionItems(t, result) {
+		if item.Label == "strlen" {
+			t.Fatalf("fuzzy candidate with mismatched first letter returned: %#v", item)
+		}
+	}
+
+	for _, test := range []struct {
+		source, label string
+		character     uint32
+	}{
+		{source: "vim9script\necho &g:sh\n", label: "&g:shell", character: 10},
+		{source: "vim9script\necho &l:sh\n", label: "&l:shell", character: 10},
+	} {
+		instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: test.character},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		item := completionItemWithLabel(completionItems(t, result), test.label)
+		if item == nil {
+			t.Fatalf("scoped option completion %q missing from %#v", test.label, completionItems(t, result))
+		}
+		edit, ok := item.TextEdit.(*protocol.TextEdit)
+		if !ok || edit.NewText != test.label {
+			t.Fatalf("scoped option completion %q edit = %#v", test.label, item.TextEdit)
+		}
+	}
+}
+
 func completionItemWithLabel(items protocol.CompletionItemSlice, label string) *protocol.CompletionItem {
 	for index := range items {
 		if items[index].Label == label {
@@ -732,7 +957,7 @@ func TestCompletionResolveIsStatelessAndPreservesFields(t *testing.T) {
 		if !ok || detail == "" {
 			t.Fatalf("resolve %s detail = %q, %t", label, detail, ok)
 		}
-		if label != "echo" && resolved.Documentation == nil {
+		if resolved.Documentation == nil {
 			t.Fatalf("resolve %s documentation is missing", label)
 		}
 	}

@@ -61,5 +61,5 @@ func Lookup(name string) (Command, bool) {
 			return command, true
 		}
 	}
-	return Command{}, false
+	return lookupNeovimCompatCommand(name)
 }

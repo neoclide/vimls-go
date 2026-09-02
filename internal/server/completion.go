@@ -214,7 +214,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				budgetExpired = true
 				return false
 			}
-			if item.Label == "" || !strings.HasPrefix(strings.ToLower(item.Label), strings.ToLower(selection.prefix)) {
+			if item.Label == "" || !completionTextMatches(selection.prefix, item.Label) {
 				return true
 			}
 			if previous, ok := candidates[item.Label]; !ok || score > previous.score || score == previous.score && source < previous.source {
@@ -256,7 +256,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				selection.start--
 				selection.prefix = snapshot.Text()[selection.start:selection.cursor]
 				for _, option := range vimdata.Options() {
-					if !add(protocol.CompletionItem{Label: "&" + option.Name, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option))}, 8000, completionSourceBuiltin) {
+					if !add(protocol.CompletionItem{Label: "&" + scopePrefix + option.Name, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option))}, 8000, completionSourceBuiltin) {
 						break
 					}
 				}
@@ -301,7 +301,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if scopePrefix == "g:" {
 					labelPrefix = "g:"
 				}
-				functions, incomplete := completionWorkspaceState.index.FunctionCompletions(workspacePrefix, file.Dialect == syntax.Legacy, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
+				functions, incomplete := completionWorkspaceState.index.FunctionCompletionsMatching(func(name string) bool {
+					return completionTextMatches(workspacePrefix, name)
+				}, file.Dialect == syntax.Legacy, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
 				workspaceIncomplete = workspaceIncomplete || incomplete
 				for _, function := range functions {
 					label := labelPrefix + function.Name
@@ -325,7 +327,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 				if file.Dialect == syntax.Legacy && (scopePrefix == "g:" || !completionInsideCallable(analysisResult, offset)) {
 					documentPath, _ := workspaceURIPath(uri.URI(snapshot.URI()))
-					variables, variablesIncomplete := completionWorkspaceState.index.GlobalVariableCompletions(workspacePrefix, documentPath, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
+					variables, variablesIncomplete := completionWorkspaceState.index.GlobalVariableCompletionsMatching(func(name string) bool {
+						return completionTextMatches(workspacePrefix, name)
+					}, documentPath, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
 					workspaceIncomplete = workspaceIncomplete || variablesIncomplete
 					for _, variable := range variables {
 						if !add(protocol.CompletionItem{Label: labelPrefix + variable.Name, Kind: protocol.CompletionItemKindVariable, Detail: protocol.NewOptional("workspace global variable")}, 7500, completionSourceImport) {
@@ -335,7 +339,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 			for _, function := range vimdata.BuiltinFunctions() {
-				if !strings.HasPrefix(function.Name, selection.prefix) {
+				if !completionTextMatches(selection.prefix, function.Name) {
 					continue
 				}
 				item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}
@@ -350,7 +354,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 		} else if contextKind == completionContextModifier {
 			for _, modifier := range vimdata.Modifiers() {
-				if (!modifier.Vim9Member || completionAggregateAt(file, offset)) && len(selection.prefix) >= modifier.MinLen && strings.HasPrefix(modifier.Name, selection.prefix) {
+				if (!modifier.Vim9Member || completionAggregateAt(file, offset)) && len(selection.prefix) >= modifier.MinLen && completionTextMatches(selection.prefix, modifier.Name) {
 					if !add(protocol.CompletionItem{Label: modifier.Name, Kind: protocol.CompletionItemKindKeyword}, 8000, completionSourceCommand) {
 						break
 					}
@@ -541,18 +545,20 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 		} else {
 			for _, command := range vimdata.Commands() {
-				if !strings.HasPrefix(command.Name, selection.prefix) {
+				if !completionTextMatches(selection.prefix, command.Name) {
 					continue
 				}
 				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command")}
-				if canSnippet && file.Dialect == syntax.Legacy && command.Name == "function" {
-					item.InsertText = protocol.NewOptional("function! ${1:Name}()\n\t$0\nendfunction")
-					item.InsertTextFormat = protocol.InsertTextFormatSnippet
-				} else if canSnippet && file.Dialect == syntax.Vim9 && command.Name == "def" {
-					item.InsertText = protocol.NewOptional("def ${1:Name}()\n\t$0\nenddef")
+				if snippet, ok := commandBlockSnippet(command.Name, file.Dialect, canSnippet); ok {
+					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
 				}
 				if !add(item, 8000, completionSourceCommand) {
+					break
+				}
+			}
+			for _, item := range completionSnippetItems(file.Dialect, canSnippet) {
+				if !add(item, 7500, completionSourceCommand) {
 					break
 				}
 			}
@@ -560,7 +566,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			s.workspaceMu.Lock()
 			if s.workspaceIndexReadyLocked() && s.workspaceIndex.Complete() {
 				for _, name := range s.workspaceIndex.UserCommandCompletionNames(completionPathPredicate(userCommandState, excludeRuntimePath)) {
-					if !strings.HasPrefix(name, selection.prefix) {
+					if !completionTextMatches(selection.prefix, name) {
 						continue
 					}
 					if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindFunction, Detail: protocol.NewOptional("user command")}, 7500, completionSourceCommand) {
@@ -1217,10 +1223,61 @@ func completionMemberAt(file *syntax.File, offset int) *syntax.Expression {
 	return result
 }
 
+func completionTextMatches(prefix, label string) bool {
+	prefix, label = completionComparableText(prefix, label)
+	if prefix == "" {
+		return true
+	}
+	if label == "" {
+		return false
+	}
+	prefixRunes := []rune(prefix)
+	labelRunes := []rune(label)
+	// The first typed character must match the candidate's first character,
+	// ignoring case. Remaining typed characters may match later as an ordered
+	// subsequence.
+	if unicode.ToLower(prefixRunes[0]) != unicode.ToLower(labelRunes[0]) {
+		return false
+	}
+	if strings.EqualFold(label, prefix) || strings.HasPrefix(strings.ToLower(label), strings.ToLower(prefix)) {
+		return true
+	}
+	prefixIndex := 1
+	for labelIndex := 1; labelIndex < len(labelRunes) && prefixIndex < len(prefixRunes); labelIndex++ {
+		if unicode.ToLower(prefixRunes[prefixIndex]) == unicode.ToLower(labelRunes[labelIndex]) {
+			prefixIndex++
+		}
+	}
+	return prefixIndex == len(prefixRunes)
+}
+
+func completionComparableText(prefix, label string) (string, string) {
+	for {
+		strippedScope := false
+		for _, scope := range []string{"g:", "l:", "s:", "v:", "&"} {
+			if strings.HasPrefix(prefix, scope) && strings.HasPrefix(label, scope) {
+				prefix, label = strings.TrimPrefix(prefix, scope), strings.TrimPrefix(label, scope)
+				strippedScope = true
+				break
+			}
+		}
+		if strippedScope {
+			continue
+		}
+		prefixRune, prefixSize := utf8.DecodeRuneInString(prefix)
+		labelRune, labelSize := utf8.DecodeRuneInString(label)
+		if prefixRune == labelRune && prefixSize > 0 && !isCompletionIdentifierRune(prefixRune) {
+			prefix, label = prefix[prefixSize:], label[labelSize:]
+			continue
+		}
+		return prefix, label
+	}
+}
+
 func (s *Server) completionList(snapshot *text.Snapshot, encoding text.Encoding, selection completionSelection, candidates map[string]completionCandidate) *protocol.CompletionList {
 	items := make([]completionCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if strings.HasPrefix(strings.ToLower(candidate.item.Label), strings.ToLower(selection.prefix)) {
+		if completionTextMatches(selection.prefix, candidate.item.Label) {
 			items = append(items, candidate)
 		}
 	}

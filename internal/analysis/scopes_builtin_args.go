@@ -1129,7 +1129,7 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1011", Message: "Name too long: " + callee.Value, Span: callee.Span})
 			return
 		}
-		if unresolvedDirectFunction(scope, callee) {
+		if unresolvedDirectFunction(scope, callee) && !vimdata.IsNeovimCompatFunction(callee.Value) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E117", Message: "Unknown function: " + callee.Value, Span: callee.Span})
 			return
 		}

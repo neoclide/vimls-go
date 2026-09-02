@@ -627,6 +627,10 @@ func TestIndexFunctionCompletionsTruncateDeterministically(t *testing.T) {
 			t.Fatalf("limited function completions = %#v, incomplete=%t", matches, incomplete)
 		}
 	}
+	matches, incomplete := index.FunctionCompletionsMatching(func(name string) bool { return name == "TruncateCharlie" }, true, 1)
+	if incomplete || len(matches) != 1 || matches[0].Name != "TruncateCharlie" {
+		t.Fatalf("filtered completion before limit = %#v, incomplete=%t", matches, incomplete)
+	}
 }
 
 func TestIndexRemoveFreesCapacity(t *testing.T) {

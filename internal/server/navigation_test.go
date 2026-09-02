@@ -562,6 +562,33 @@ func TestHoverShowsPinnedExCommandHelpForAbbreviation(t *testing.T) {
 	}
 }
 
+func TestHoverShowsHasFeatureAndExpandSpecialDocs(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho has('gui_running')\necho expand('<cfile>')\n")
+	for _, test := range []struct {
+		name      string
+		line      uint32
+		character uint32
+		prefix    string
+		fragment  string
+	}{
+		{name: "has feature", line: 1, character: 15, prefix: "name: gui_running\nkind: has() feature", fragment: "Whether the Vim GUI is running"},
+		{name: "expand special", line: 2, character: 16, prefix: "name: <cfile>\nkind: expand() special", fragment: "File name under the cursor"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character},
+			}})
+			if err != nil || hover == nil {
+				t.Fatalf("hover = %#v, %v", hover, err)
+			}
+			content, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+				t.Fatalf("hover content = %#v", hover.Contents)
+			}
+		})
+	}
+}
+
 func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 	root := t.TempDir()
 	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\ndef Private()\nenddef\nexport class Box\nendclass\n")

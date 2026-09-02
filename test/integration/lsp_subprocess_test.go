@@ -263,10 +263,26 @@ endfunction
 	if string(commandCompletion["id"]) != "910" || !strings.Contains(string(commandCompletion["result"]), `"label":"echo"`) {
 		t.Fatalf("command completion = %s", commandCompletion)
 	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":913,"method":"completionItem/resolve","params":{"label":"echo","kind":14}}`)
+	commandResolve := readJSON(t, reader)
+	if string(commandResolve["id"]) != "913" || !strings.Contains(string(commandResolve["result"]), `"detail":"Ex command"`) || !strings.Contains(string(commandResolve["result"]), `Echoes each {expr1}`) {
+		t.Fatalf("command resolve = %s", commandResolve)
+	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":912,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///completion-command.vim"},"position":{"line":0,"character":1}}}`)
 	commandHover := readJSON(t, reader)
 	if string(commandHover["id"]) != "912" || !strings.Contains(string(commandHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(commandHover["result"]), `name: echo`) || !strings.Contains(string(commandHover["result"]), `Echoes each {expr1}`) {
 		t.Fatalf("command hover = %s", commandHover)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-string-hover.vim","languageId":"vim","version":1,"text":"vim9script\necho has('gui_running')\necho expand('<cfile>')\n"}}}`)
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":914,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///completion-string-hover.vim"},"position":{"line":1,"character":11}}}`)
+	hasHover := readJSON(t, reader)
+	if string(hasHover["id"]) != "914" || !strings.Contains(string(hasHover["result"]), `has() feature`) || !strings.Contains(string(hasHover["result"]), `gui_running`) {
+		t.Fatalf("has() hover = %s", hasHover)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":915,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///completion-string-hover.vim"},"position":{"line":2,"character":14}}}`)
+	expandHover := readJSON(t, reader)
+	if string(expandHover["id"]) != "915" || !strings.Contains(string(expandHover["result"]), `expand() special`) || !strings.Contains(string(expandHover["result"]), `<cfile>`) {
+		t.Fatalf("expand() hover = %s", expandHover)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-utf16.vim","languageId":"vim","version":1,"text":"vim9script\necho \"💩\" | echo strlen('')"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":911,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///completion-utf16.vim"},"position":{"line":1,"character":21}}}`)

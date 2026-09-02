@@ -135,6 +135,13 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 			}
 		})
 	}
+	if document.occurrence.Start >= document.occurrence.End {
+		if contextKind, argument := completionBuiltinStringAt(file, offset); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+			if span, ok := completionBuiltinStringValueSpan(file, argument, contextKind); ok && spanContains(span, offset) {
+				document.occurrence = span
+			}
+		}
+	}
 	return document, document.checkCurrent(ctx)
 }
 
@@ -638,6 +645,26 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 func (s *Server) localHover(ctx context.Context, document *navigationDocument) (*protocol.Hover, error) {
 	if document.declaration == nil {
 		name := document.analysis.File.Text(document.occurrence)
+		if contextKind, _ := completionBuiltinStringAt(document.analysis.File, document.occurrence.Start); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+			var values []vimdata.CompletionValue
+			kind := "has() feature"
+			if contextKind == completionContextHasFeature {
+				values = vimdata.HasFeatures()
+			} else {
+				values = vimdata.ExpandSpecials()
+				kind = "expand() special"
+			}
+			for _, value := range values {
+				if value.Name == name {
+					lines := []string{"name: " + value.Name, "kind: " + kind}
+					if value.Documentation != "" {
+						lines = append(lines, "", value.Documentation)
+					}
+					return s.localHoverResult(ctx, document, lines)
+				}
+			}
+			return nil, nil
+		}
 		if option, ok := vimdata.LookupOption(name); ok {
 			lines := []string{"name: " + option.Name, "kind: option", "type: " + optionTypeName(option)}
 			if option.Documentation != "" {
@@ -652,7 +679,7 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			}
 			return s.localHoverResult(ctx, document, lines)
 		}
-		if command, ok := vimdata.Lookup(name); ok {
+		if command, ok := vimdata.Lookup(name); ok && !vimdata.IsNeovimCompatCommand(command.Name) {
 			lines := []string{"name: " + command.Name, "kind: Ex command"}
 			if command.Documentation != "" {
 				lines = append(lines, "", command.Documentation)

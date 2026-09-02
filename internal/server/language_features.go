@@ -434,6 +434,23 @@ func completionStringContent(file *syntax.File, expression *syntax.Expression) (
 	return content, true
 }
 
+// completionBuiltinStringValueSpan returns the hover span for a value inside
+// has() or expand(). For expand("<cfile>:p") the span excludes the modifier so
+// hover can still describe the base special token.
+func completionBuiltinStringValueSpan(file *syntax.File, expression *syntax.Expression, contextKind completionContext) (syntax.Span, bool) {
+	content, ok := completionStringContent(file, expression)
+	if !ok || content.Start >= content.End {
+		return syntax.Span{}, false
+	}
+	span := content
+	if contextKind == completionContextExpandSpecial {
+		if colon := strings.IndexByte(file.Source[content.Start:content.End], ':'); colon >= 0 {
+			span.End = content.Start + colon
+		}
+	}
+	return span, span.Start < span.End
+}
+
 func completionHighlightContextAt(file *syntax.File, command *syntax.Command, offset int) (completionContext, bool) {
 	if file == nil || command == nil || command.Highlight == nil || command.Highlight.Group.Start == command.Highlight.Group.End ||
 		offset <= command.Highlight.Group.End {
@@ -615,8 +632,8 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 		applyMetadata("variable: "+variable.Type, variable.Documentation)
 		return &result, nil
 	}
-	if command, ok := vimdata.Lookup(item.Label); ok && command.Name == item.Label {
-		applyMetadata("Ex command", "")
+	if command, ok := vimdata.Lookup(item.Label); ok && command.Name == item.Label && !vimdata.IsNeovimCompatCommand(command.Name) {
+		applyMetadata("Ex command", command.Documentation)
 	}
 	return &result, nil
 }

@@ -1386,14 +1386,14 @@ func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []synta
 				optionName = "&" + optionName[3:]
 			}
 			_, ok := vimdata.LookupOption(optionName)
-			return ok
+			return ok || vimdata.IsNeovimCompatOption(optionName)
 		}
 		if isLiteralIdentifier(name) {
 			return true
 		}
 		if strings.HasPrefix(name, "v:") {
 			_, ok := vimdata.LookupVariable(name)
-			return ok
+			return ok || vimdata.IsNeovimCompatVariable(name)
 		}
 		declaration := resolve(scope, name, expression.Span.Start, false, nil)
 		return declaration != nil && (declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant || declaration.Parameter)
@@ -6959,7 +6959,7 @@ func appendNonGenericFunctionDiagnostic(result *FileAnalysis, expression *syntax
 	if declaration == nil {
 		if result.File.Dialect == syntax.Vim9 && validScopeVariableName(callee.Value) && !strings.Contains(callee.Value, "#") &&
 			!syntaxDiagnosticOverlaps(result.File.Diagnostics, callee.Span) {
-			if _, builtin := vimdata.LookupFunction(callee.Value); !builtin {
+			if _, builtin := vimdata.LookupFunction(callee.Value); !builtin && !vimdata.IsNeovimCompatFunction(callee.Value) {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1558", Message: "Unknown generic function: " + callee.Value, Span: callee.Span,
 				})
@@ -7199,7 +7199,7 @@ func isUnknownVimVariable(name string) bool {
 		return false
 	}
 	_, known := vimdata.LookupVariable(name)
-	return !known
+	return !known && !vimdata.IsNeovimCompatVariable(name)
 }
 
 func vim9UnsupportedNamespace(name string) bool {
@@ -7230,7 +7230,7 @@ func unknownOptionDisplay(result *FileAnalysis, name string, span syntax.Span) (
 	if result == nil || name == "" || span.End <= span.Start || result.unknownOptions[span] {
 		return "", false
 	}
-	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsTerminalOptionName(name) {
+	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsNeovimCompatOption(name) || vimdata.IsTerminalOptionName(name) {
 		return "", false
 	}
 	display := name
