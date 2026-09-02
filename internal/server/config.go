@@ -360,3 +360,38 @@ func diagnosticSettingsObject(raw []byte) (map[string]json.RawMessage, string) {
 	}
 	return settings, ""
 }
+
+func excludeRuntimePathFromSettings(raw []byte, previous bool) (bool, string) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return false, ""
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &settings); err != nil || settings == nil {
+		return previous, "vimls: workspace settings must be an object; retaining previous excludeRuntimePath"
+	}
+	if nested, exists := settings["vim"]; exists {
+		var vimSettings map[string]json.RawMessage
+		if err := json.Unmarshal(nested, &vimSettings); err != nil || vimSettings == nil {
+			return previous, "vimls: vim workspace settings must be an object; retaining previous excludeRuntimePath"
+		}
+		settings = vimSettings
+	}
+	suggest, exists := settings["suggest"]
+	if !exists || string(suggest) == "null" {
+		return false, ""
+	}
+	var suggestSettings map[string]json.RawMessage
+	if err := json.Unmarshal(suggest, &suggestSettings); err != nil || suggestSettings == nil {
+		return previous, "vimls: suggest workspace settings must be an object; retaining previous excludeRuntimePath"
+	}
+	value, exists := suggestSettings["excludeRuntimePath"]
+	if !exists || string(value) == "null" {
+		return false, ""
+	}
+	var exclude bool
+	if err := json.Unmarshal(value, &exclude); err != nil {
+		return previous, "vimls: suggest.excludeRuntimePath must be a boolean; retaining previous value"
+	}
+	return exclude, ""
+}

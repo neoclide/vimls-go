@@ -1459,7 +1459,7 @@ func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolPa
 		state := s.captureWorkspaceNavigationState()
 		var matches []workspace.SymbolMatch
 		if state.index != nil {
-			matches = state.index.Search(params.Query, maxWorkspaceSymbols)
+			matches = state.index.SearchInRoots(params.Query, state.workspaceRoots, maxWorkspaceSymbols)
 		}
 		result := make(protocol.WorkspaceSymbolSlice, 0, len(matches))
 		snapshots := make(map[string]*text.Snapshot)

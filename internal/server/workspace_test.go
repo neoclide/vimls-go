@@ -81,8 +81,8 @@ func TestRuntimepathInitializationAndNotificationReplaceIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	instance.workspaceWG.Wait()
-	if symbols := workspaceSymbols(t, instance, "firstRuntimeName"); len(symbols) != 1 {
-		t.Fatalf("initialized runtimepath symbols = %#v", symbols)
+	if symbols := workspaceSymbols(t, instance, "firstRuntimeName"); len(symbols) != 0 {
+		t.Fatalf("runtimepath-only symbols leaked = %#v", symbols)
 	}
 	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{secondRuntime}}); err != nil {
 		t.Fatal(err)
@@ -91,8 +91,47 @@ func TestRuntimepathInitializationAndNotificationReplaceIndex(t *testing.T) {
 	if symbols := workspaceSymbols(t, instance, "firstRuntimeName"); len(symbols) != 0 {
 		t.Fatalf("old runtimepath symbols = %#v", symbols)
 	}
-	if symbols := workspaceSymbols(t, instance, "secondRuntimeName"); len(symbols) != 1 {
-		t.Fatalf("updated runtimepath symbols = %#v", symbols)
+	if symbols := workspaceSymbols(t, instance, "secondRuntimeName"); len(symbols) != 0 {
+		t.Fatalf("updated runtimepath-only symbols leaked = %#v", symbols)
+	}
+}
+
+func TestWorkspaceSymbolsExcludeRuntimepathOnlyFiles(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	workspaceRoot := filepath.Join(runtimeRoot, "project")
+	runtimePath := writeWorkspaceFile(t, runtimeRoot, "plugin/runtime.vim", "vim9script\nvar RuntimeOnly = 1\n")
+	workspacePath := writeWorkspaceFile(t, workspaceRoot, "plugin/workspace.vim", "vim9script\nvar WorkspaceOnly = 1\n")
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	rootURI := uri.File(workspaceRoot)
+	runtimeOptions, err := json.Marshal(map[string]any{"runtimepath": []string{runtimeRoot}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := protocol.LSPAny(runtimeOptions)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: options}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	if symbols := workspaceSymbols(t, instance, "RuntimeOnly"); len(symbols) != 0 {
+		t.Fatalf("runtimepath-only workspace symbols = %#v", symbols)
+	}
+	symbols := workspaceSymbols(t, instance, "WorkspaceOnly")
+	if len(symbols) != 1 {
+		t.Fatalf("workspace symbols = %#v", symbols)
+	}
+	location, ok := symbols[0].Location.(*protocol.Location)
+	if !ok || location.URI != uri.File(mustWorkspaceCanonicalPath(t, workspacePath)) {
+		t.Fatalf("workspace symbol location = %#v", symbols[0].Location)
+	}
+	instance.workspaceMu.Lock()
+	_, runtimeIndexed := instance.workspaceIndex.Source(runtimePath)
+	instance.workspaceMu.Unlock()
+	if !runtimeIndexed {
+		t.Fatal("runtimepath file was removed instead of being query-filtered")
 	}
 }
 
@@ -296,8 +335,8 @@ func TestRuntimepathDeltaDoesNotDiscardConcurrentWorkspaceRebuild(t *testing.T) 
 	if symbols := workspaceSymbols(t, instance, "Workspace"); len(symbols) != 1 {
 		t.Fatalf("workspace symbols after retry = %#v", symbols)
 	}
-	if symbols := workspaceSymbols(t, instance, "Runtime"); len(symbols) != 1 {
-		t.Fatalf("runtime symbols after retry = %#v", symbols)
+	if symbols := workspaceSymbols(t, instance, "Runtime"); len(symbols) != 0 {
+		t.Fatalf("runtime symbols after retry leaked = %#v", symbols)
 	}
 }
 
@@ -311,11 +350,11 @@ func TestRuntimepathDeltaAddRemoveAndNestedRoots(t *testing.T) {
 	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot, nested}}); err != nil {
 		t.Fatal(err)
 	}
-	if symbols := workspaceSymbols(t, instance, "OuterRuntime"); len(symbols) != 1 {
-		t.Fatalf("added outer runtime symbols = %#v", symbols)
+	if symbols := workspaceSymbols(t, instance, "OuterRuntime"); len(symbols) != 0 {
+		t.Fatalf("added outer runtime symbols leaked = %#v", symbols)
 	}
-	if symbols := workspaceSymbols(t, instance, "NestedRuntime"); len(symbols) != 1 {
-		t.Fatalf("added nested runtime symbols = %#v", symbols)
+	if symbols := workspaceSymbols(t, instance, "NestedRuntime"); len(symbols) != 0 {
+		t.Fatalf("added nested runtime symbols leaked = %#v", symbols)
 	}
 	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{nested}}); err != nil {
 		t.Fatal(err)
@@ -323,8 +362,8 @@ func TestRuntimepathDeltaAddRemoveAndNestedRoots(t *testing.T) {
 	if symbols := workspaceSymbols(t, instance, "OuterRuntime"); len(symbols) != 0 {
 		t.Fatalf("removed outer runtime symbols = %#v", symbols)
 	}
-	if symbols := workspaceSymbols(t, instance, "NestedRuntime"); len(symbols) != 1 {
-		t.Fatalf("retained nested runtime symbols = %#v", symbols)
+	if symbols := workspaceSymbols(t, instance, "NestedRuntime"); len(symbols) != 0 {
+		t.Fatalf("retained nested runtime symbols leaked = %#v", symbols)
 	}
 }
 

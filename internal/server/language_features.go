@@ -133,7 +133,7 @@ func (s *Server) importMemberCompletionsInState(documentURI string, file *syntax
 		return protocol.CompletionItemSlice{}, workspaceNavigationTarget{}
 	}
 	var facts []workspace.SymbolFact
-	var target workspaceNavigationTarget
+	target := workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: workspace.SymbolFact{Path: targetPath}}}
 	s.publishMu.Lock()
 	snapshot, _, open := s.openWorkspaceSnapshotLocked(targetPath)
 	s.publishMu.Unlock()

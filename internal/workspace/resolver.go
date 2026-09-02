@@ -33,7 +33,7 @@ type PathCompletion struct {
 // ImportPathCompletions returns direct children for a literal import path.
 // It deliberately does not recurse: completion must not turn an edit into a
 // workspace walk. The bool reports that a caller-visible limit was reached.
-func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool, limit int) ([]PathCompletion, bool) {
+func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool, limit int, acceptPath ...func(string) bool) ([]PathCompletion, bool) {
 	if r == nil || limit <= 0 || !safeImportCompletionPrefix(prefix) {
 		return nil, false
 	}
@@ -93,6 +93,9 @@ func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool,
 			}
 			pathCanonical, _ := r.Canonical(path)
 			if fromCanonical != "" && pathCanonical == fromCanonical {
+				continue
+			}
+			if len(acceptPath) > 0 && acceptPath[0] != nil && !acceptPath[0](pathCanonical) {
 				continue
 			}
 			value := filepath.ToSlash(filepath.Join(dirPart, entry.Name()))

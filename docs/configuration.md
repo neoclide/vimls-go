@@ -61,11 +61,14 @@ the capability receive no progress traffic.
 If the client advertises `workspace.configuration`, vimls-go requests the
 `vim` section after `initialized` and after a
 `workspace/didChangeConfiguration` notification with null settings. The
-section supports `workspaceRebuildDebounce`:
+section supports `workspaceRebuildDebounce` and `suggest.excludeRuntimePath`:
 
 ```json
 {
-  "workspaceRebuildDebounce": 100
+  "workspaceRebuildDebounce": 100,
+  "suggest": {
+    "excludeRuntimePath": true
+  }
 }
 ```
 
@@ -88,6 +91,13 @@ form directly:
 
 `workspaceRebuildDebounce` is dynamically configurable. Invalid updates retain
 the previous valid value and produce a visible warning.
+
+`suggest.excludeRuntimePath` is a boolean workspace setting, defaulting to
+`false`. When enabled, completion omits candidates sourced from runtimepath
+files outside the current workspace roots; files under a workspace root remain
+eligible. Empty, missing, or `null` settings mean `false`. This setting does
+not affect diagnostics or navigation. `workspace/symbol` always omits symbols
+from files outside the current workspace roots, regardless of this setting.
 
 Diagnostic visibility and protocol severity are configured in the same `vim`
 section:

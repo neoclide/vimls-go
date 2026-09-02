@@ -184,6 +184,34 @@ func TestWorkspaceRebuildDebounceFromSettings(t *testing.T) {
 	}
 }
 
+func TestExcludeRuntimePathFromSettings(t *testing.T) {
+	previous := true
+	tests := []struct {
+		name, settings string
+		want           bool
+		warning        bool
+	}{
+		{name: "direct", settings: `{"suggest":{"excludeRuntimePath":true}}`, want: true},
+		{name: "nested", settings: `{"vim":{"suggest":{"excludeRuntimePath":true}}}`, want: true},
+		{name: "false", settings: `{"suggest":{"excludeRuntimePath":false}}`},
+		{name: "empty", settings: `{}`},
+		{name: "null", settings: `null`},
+		{name: "missing suggest", settings: `{"workspaceRebuildDebounce":100}`},
+		{name: "null suggest", settings: `{"suggest":null}`},
+		{name: "missing value", settings: `{"suggest":{}}`},
+		{name: "invalid value", settings: `{"suggest":{"excludeRuntimePath":"yes"}}`, want: previous, warning: true},
+		{name: "invalid suggest", settings: `{"suggest":[]}`, want: previous, warning: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, warning := excludeRuntimePathFromSettings([]byte(test.settings), previous)
+			if got != test.want || (warning != "") != test.warning {
+				t.Fatalf("setting = %t, warning = %q", got, warning)
+			}
+		})
+	}
+}
+
 func TestDiagnosticSettingsFromSettings(t *testing.T) {
 	previousDisabled := map[string]struct{}{"vim/E117": {}}
 	previousOverrides := map[string]protocol.DiagnosticSeverity{"vim/E121": protocol.DiagnosticSeverityHint}

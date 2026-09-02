@@ -411,11 +411,18 @@ func (i *Index) RuntimeFile(relativePath string) (string, bool) {
 
 // RuntimePathCompletions returns direct indexed children below one runtime
 // directory. Duplicate displays keep the first runtimepath entry.
-func (i *Index) RuntimePathCompletions(directory, prefix string, limit int) ([]PathCompletion, bool) {
-	return i.runtimePathCompletions(directory, prefix, limit, true, false)
+func (i *Index) RuntimePathCompletions(directory, prefix string, limit int, acceptPath ...func(string) bool) ([]PathCompletion, bool) {
+	return i.runtimePathCompletions(directory, prefix, limit, true, false, firstPathPredicate(acceptPath))
 }
 
-func (i *Index) runtimePathCompletions(directory, prefix string, limit int, includeDirectories, includeAfter bool) ([]PathCompletion, bool) {
+func firstPathPredicate(predicates []func(string) bool) func(string) bool {
+	if len(predicates) == 0 {
+		return nil
+	}
+	return predicates[0]
+}
+
+func (i *Index) runtimePathCompletions(directory, prefix string, limit int, includeDirectories, includeAfter bool, acceptPath func(string) bool) ([]PathCompletion, bool) {
 	if limit <= 0 || strings.ContainsAny(prefix, "\x00\r\n\\") {
 		return nil, false
 	}
@@ -438,6 +445,9 @@ func (i *Index) runtimePathCompletions(directory, prefix string, limit int, incl
 			if parent == wantedDirectory {
 				name := filepath.Base(filepath.FromSlash(relative))
 				if strings.HasPrefix(strings.ToLower(name), namePrefixFolded) && strings.HasSuffix(name, ".vim") {
+					if acceptPath != nil && !acceptPath(path) {
+						continue
+					}
 					display := dirPart + name
 					if _, exists := seen[display]; !exists {
 						seen[display] = PathCompletion{Display: display, Path: path}
@@ -479,8 +489,8 @@ func (i *Index) runtimePathCompletions(directory, prefix string, limit int, incl
 }
 
 // ColorSchemeCompletions returns indexed top-level colors/*.vim files.
-func (i *Index) ColorSchemeCompletions(prefix string, limit int) ([]PathCompletion, bool) {
-	files, incomplete := i.runtimePathCompletions("colors", prefix, limit, false, true)
+func (i *Index) ColorSchemeCompletions(prefix string, limit int, acceptPath ...func(string) bool) ([]PathCompletion, bool) {
+	files, incomplete := i.runtimePathCompletions("colors", prefix, limit, false, true, firstPathPredicate(acceptPath))
 	result := files[:0]
 	for _, file := range files {
 		if file.IsDir {
@@ -710,6 +720,28 @@ func (i *Index) UserCommandNames() []string {
 	return names
 }
 
+// UserCommandCompletionNames returns user commands from accepted source
+// files. The predicate is applied before names are deduplicated.
+func (i *Index) UserCommandCompletionNames(acceptPath func(string) bool) []string {
+	i.mu.RLock()
+	names := make(map[string]struct{})
+	for name, facts := range i.byUserCommand {
+		for _, fact := range facts {
+			if acceptPath == nil || acceptPath(fact.Path) {
+				names[name] = struct{}{}
+				break
+			}
+		}
+	}
+	i.mu.RUnlock()
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
 // GlobalNameFacts returns the active global declarations with name. Results
 // are independent of the index and retain their declaration locations.
 func (i *Index) GlobalNameFacts(name string) []GlobalNameFact {
@@ -734,7 +766,7 @@ func (i *Index) GlobalNameFacts(name string) []GlobalNameFact {
 // GlobalVariableCompletions returns active legacy global variables outside
 // excludePath that do not conflict with an indexed global function of the
 // same name. The current file is analyzed separately for position visibility.
-func (i *Index) GlobalVariableCompletions(prefix, excludePath string, limit int) ([]GlobalNameFact, bool) {
+func (i *Index) GlobalVariableCompletions(prefix, excludePath string, limit int, acceptPath ...func(string) bool) ([]GlobalNameFact, bool) {
 	prefix = strings.ToLower(prefix)
 	excluded, _ := normalizeIndexPath(excludePath)
 	i.mu.RLock()
@@ -747,6 +779,9 @@ func (i *Index) GlobalVariableCompletions(prefix, excludePath string, limit int)
 		conflict := false
 		for index := range candidates {
 			candidate := &candidates[index]
+			if len(acceptPath) > 0 && acceptPath[0] != nil && !acceptPath[0](candidate.Path) {
+				continue
+			}
 			if candidate.Kind == analysis.NameDeclarationFunction {
 				conflict = true
 				break
@@ -916,11 +951,14 @@ func (i *Index) globalSymbol(name string, kind analysis.NameDeclarationKind) (Sy
 // FunctionCompletions returns indexed callable function names. Autoload
 // functions are available in both dialects. includeLegacyGlobals additionally
 // includes ordinary legacy global functions.
-func (i *Index) FunctionCompletions(prefix string, includeLegacyGlobals bool, limit int) ([]FunctionMatch, bool) {
+func (i *Index) FunctionCompletions(prefix string, includeLegacyGlobals bool, limit int, acceptPath ...func(string) bool) ([]FunctionMatch, bool) {
 	prefixFolded := strings.ToLower(prefix)
 	i.mu.RLock()
 	byCallableName := make(map[string]FunctionMatch)
 	for path, file := range i.files {
+		if len(acceptPath) > 0 && acceptPath[0] != nil && !acceptPath[0](path) {
+			continue
+		}
 		for _, fact := range file.facts {
 			if !fact.TopLevel || fact.Kind != analysis.SymbolKindFunction {
 				continue
@@ -984,6 +1022,24 @@ func (i *Index) runtimeAutoloadNameLocked(path, name string) (string, bool) {
 // subsequence matches; ties use the index's stable fact ordering. An empty
 // query matches every symbol. A positive limit caps the result count.
 func (i *Index) Search(query string, limit int) []SymbolMatch {
+	return i.search(query, limit, nil)
+}
+
+// SearchInRoots returns symbols whose source files are below one of roots.
+// Filtering happens before ranking and limiting so external files cannot hide
+// workspace results.
+func (i *Index) SearchInRoots(query string, roots []string, limit int) []SymbolMatch {
+	return i.search(query, limit, func(path string) bool {
+		for _, root := range roots {
+			if pathWithinOrEqual(root, path) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func (i *Index) search(query string, limit int, acceptPath func(string) bool) []SymbolMatch {
 	type rankedMatch struct {
 		match SymbolMatch
 		rank  int
@@ -991,7 +1047,10 @@ func (i *Index) Search(query string, limit int) []SymbolMatch {
 	queryFolded := strings.ToLower(query)
 	i.mu.RLock()
 	ranked := make([]rankedMatch, 0)
-	for _, file := range i.files {
+	for path, file := range i.files {
+		if acceptPath != nil && !acceptPath(path) {
+			continue
+		}
 		for _, fact := range file.facts {
 			rank, ok := searchRank(query, queryFolded, fact.Name)
 			if !ok {

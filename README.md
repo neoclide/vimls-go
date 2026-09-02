@@ -160,12 +160,19 @@ User settings are supplied through LSP `workspace/configuration`.
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `workspaceRebuildDebounce` | `number` | `100` | Milliseconds to wait after the latest workspace rebuild trigger; `0` rebuilds immediately. |
+| `suggest.excludeRuntimePath` | `boolean` | `false` | Omit completion items sourced from runtimepath files outside current workspace roots. |
 | `disabledDiagnostics` | `string[]` | `[]` | Exact diagnostic codes to omit from published LSP diagnostics; accepts native, `vimls/`, and future codes. |
 | `overrideDiagnostics` | `object` | `{}` | Exact diagnostic code to LSP severity (`error`, `warning`, `information`, or `hint`); disabled codes take precedence. |
 
 Both diagnostic settings are read under the `vim` workspace configuration
 section and are dynamic; changed values reanalyze open documents. They do not
 belong in `initializationOptions`.
+
+`suggest.excludeRuntimePath` is also read under the `vim` workspace
+configuration section. Empty, missing, or `null` values mean `false`; when
+enabled, workspace-root files remain eligible even if they are inside a
+runtimepath root. `workspace/symbol` independently excludes files outside
+workspace roots at all times.
 
 Clients dynamically replace runtimepath with this custom request:
 

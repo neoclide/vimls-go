@@ -342,7 +342,7 @@ endfunction
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99999,"method":"workspace/symbol","params":{"query":"RuntimeGlobal"}}`)
 	runtimeSymbols := readJSON(t, reader)
-	if string(runtimeSymbols["id"]) != "99999" || !strings.Contains(string(runtimeSymbols["result"]), `"name":"RuntimeGlobal"`) || !strings.Contains(string(runtimeSymbols["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, filepath.Join(runtimeRoot, "plugin", "runtime.vim")))) {
+	if string(runtimeSymbols["id"]) != "99999" || string(runtimeSymbols["result"]) != "[]" {
 		t.Fatalf("runtimepath symbols = %s", runtimeSymbols)
 	}
 	legacyMain := "let g:result = RuntimeGlobal(1)\necho acme#Format('x')\n"

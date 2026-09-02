@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +23,7 @@ var benchmarkCompletionResult protocol.CompletionResult
 
 func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 	root := t.TempDir()
-	runtimePath := filepath.Join(root, "runtime")
+	runtimePath := filepath.Join(t.TempDir(), "runtime")
 	for path := range map[string]struct{}{
 		filepath.Join(runtimePath, "import", "pkg", "alpha.vim"): {},
 		filepath.Join(runtimePath, "colors", "dark.vim"):         {},
@@ -30,14 +31,22 @@ func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte("vim9script\n"), 0o600); err != nil {
+		content := []byte("vim9script\n")
+		if strings.HasSuffix(path, "alpha.vim") {
+			content = []byte("vim9script\nexport var RuntimeMember = 1\n")
+		}
+		if err := os.WriteFile(path, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	rootURI := uri.File(root)
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny([]byte(fmt.Sprintf(`{"runtimepath":[%q]}`, runtimePath)))}); err != nil {
+	options, err := json.Marshal(map[string]any{"runtimepath": []string{runtimePath}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny(options)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
@@ -74,6 +83,91 @@ func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 		if err != nil || !hasCompletionLabel(completionItems(t, result), test.label) {
 			t.Fatalf("builtin completion %q = %#v, %v", test.label, result, err)
 		}
+	}
+	memberSource := "vim9script\nimport 'pkg/alpha.vim' as pkg\necho pkg.\n"
+	memberURI := uri.File(filepath.Join(root, "member.vim"))
+	instance.documents.Open(memberURI.String(), 1, memberSource)
+	memberParams := &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: memberURI}, Position: protocol.Position{Line: 2, Character: 9}}}
+	memberResult, err := instance.Completion(context.Background(), memberParams)
+	if err != nil || !hasCompletionLabel(completionItems(t, memberResult), "RuntimeMember") {
+		t.Fatalf("runtime member completion = %#v, %v", memberResult, err)
+	}
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"suggest":{"excludeRuntimePath":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		position protocol.Position
+		label    string
+	}{
+		{position: protocol.Position{Line: 1, Character: uint32(len("import 'pkg/al"))}, label: "pkg/alpha.vim"},
+		{position: protocol.Position{Line: 2, Character: uint32(len("colorscheme dar"))}, label: "dark"},
+	} {
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hasCompletionLabel(completionItems(t, result), test.label) {
+			t.Fatalf("excluded runtime completion %q = %#v", test.label, completionItems(t, result))
+		}
+	}
+	memberResult, err = instance.Completion(context.Background(), memberParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasCompletionLabel(completionItems(t, memberResult), "RuntimeMember") {
+		t.Fatalf("excluded runtime member completion = %#v", memberResult)
+	}
+}
+
+func TestCompletionExcludesRuntimePathOnlyItemsButKeepsWorkspaceItems(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	workspaceRoot := filepath.Join(runtimeRoot, "project")
+	writeWorkspaceFile(t, runtimeRoot, "plugin/runtime.vim", "function! RuntimeOnly()\nendfunction\nlet g:RuntimeValue = 1\ncommand RuntimeCommand echo 'runtime'\n")
+	writeWorkspaceFile(t, workspaceRoot, "plugin/workspace.vim", "function! WorkspaceOnly()\nendfunction\nlet g:WorkspaceValue = 1\ncommand WorkspaceCommand echo 'workspace'\n")
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	rootURI := uri.File(workspaceRoot)
+	options := protocol.LSPAny(fmt.Appendf(nil, `{"runtimepath":[%q]}`, runtimeRoot))
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: options}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	documentURI := uri.File(filepath.Join(workspaceRoot, "main.vim"))
+	instance.documents.Open(documentURI.String(), 1, "echo Runtime\n")
+	complete := func(source string, position protocol.Position) protocol.CompletionItemSlice {
+		instance.documents.Open(documentURI.String(), 1, source)
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: position}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return completionItems(t, result)
+	}
+	if items := complete("echo Runtime\n", protocol.Position{Line: 0, Character: 12}); !hasCompletionLabel(items, "RuntimeOnly") {
+		t.Fatalf("default runtime completion = %#v", items)
+	}
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"suggest":{"excludeRuntimePath":true}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if items := complete("echo Runtime\n", protocol.Position{Line: 0, Character: 12}); hasCompletionLabel(items, "RuntimeOnly") {
+		t.Fatalf("runtime-only function leaked = %#v", items)
+	}
+	if items := complete("echo Workspace\n", protocol.Position{Line: 0, Character: 14}); !hasCompletionLabel(items, "WorkspaceOnly") {
+		t.Fatalf("workspace function missing = %#v", items)
+	}
+	if items := complete("Runtime\n", protocol.Position{Line: 0, Character: 7}); hasCompletionLabel(items, "RuntimeCommand") {
+		t.Fatalf("runtime-only command leaked = %#v", items)
+	}
+	if items := complete("Workspace\n", protocol.Position{Line: 0, Character: 9}); !hasCompletionLabel(items, "WorkspaceCommand") {
+		t.Fatalf("workspace command missing = %#v", items)
+	}
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if items := complete("echo Runtime\n", protocol.Position{Line: 0, Character: 12}); !hasCompletionLabel(items, "RuntimeOnly") {
+		t.Fatalf("empty settings did not restore runtime completion = %#v", items)
 	}
 }
 

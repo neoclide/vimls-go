@@ -176,13 +176,14 @@ type Server struct {
 	beforeWorkspaceIndexWaitForTest     func()
 	beforeWorkspaceBuildForTest         func([]*text.Snapshot)
 
-	watchMu                  sync.Mutex
-	watchDynamicRegistration bool
-	watchRelativePatterns    bool
-	watchRegistered          bool
-	initialized              bool
-	watchWG                  sync.WaitGroup
-	workspaceConfiguration   bool
+	watchMu                       sync.Mutex
+	watchDynamicRegistration      bool
+	watchRelativePatterns         bool
+	watchRegistered               bool
+	initialized                   bool
+	watchWG                       sync.WaitGroup
+	workspaceConfiguration        bool
+	excludeRuntimePathCompletions bool
 	// Diagnostic maps are replaced, never mutated, while mu is held. Analysis
 	// and publication may therefore snapshot their immutable map references.
 	disabledDiagnostics map[string]struct{}
@@ -750,6 +751,10 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 }
 
 func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
+	s.mu.Lock()
+	excludeRuntimePath, excludeRuntimePathWarning := excludeRuntimePathFromSettings(settings, s.excludeRuntimePathCompletions)
+	s.excludeRuntimePathCompletions = excludeRuntimePath
+	s.mu.Unlock()
 	s.workspaceMu.Lock()
 	workspaceDelay, workspaceDelayWarning := workspaceRebuildDebounceFromSettings(settings, s.workspaceDelay)
 	workspaceDelayChanged := workspaceDelay != s.workspaceDelay
@@ -779,7 +784,7 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 		s.startAnalysis(snapshot.URI())
 	}
 	warning := ""
-	for _, next := range []string{workspaceDelayWarning, diagnosticsWarning} {
+	for _, next := range []string{workspaceDelayWarning, diagnosticsWarning, excludeRuntimePathWarning} {
 		if next == "" {
 			continue
 		}

@@ -38,10 +38,22 @@ const (
 	completionSourceCommand
 )
 
+func completionPathPredicate(state workspaceNavigationSnapshot, excludeRuntimePath bool) func(string) bool {
+	if !excludeRuntimePath {
+		return nil
+	}
+	return func(path string) bool {
+		return !workspacePathInRoots(path, state.runtimePaths) || workspacePathInRoots(path, state.workspaceRoots)
+	}
+}
+
 func (s *Server) Completion(ctx context.Context, params *protocol.CompletionParams) (protocol.CompletionResult, error) {
 	if ctx.Err() != nil {
 		return nil, protocol.ErrRequestCancelled
 	}
+	s.mu.Lock()
+	excludeRuntimePath := s.excludeRuntimePathCompletions
+	s.mu.Unlock()
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil {
@@ -77,6 +89,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			var paths []workspace.PathCompletion
 			var truncated bool
+			acceptPath := completionPathPredicate(state, excludeRuntimePath)
 			if workspace.RuntimeImportCompletionPrefix(selection.prefix) {
 				if state.index == nil {
 					return s.completionList(snapshot, encoding, selection, nil), nil
@@ -85,12 +98,12 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if importAutoloadAt(file, offset) {
 					directory = "autoload"
 				}
-				paths, truncated = state.index.RuntimePathCompletions(directory, selection.prefix, maxCompletionItems)
+				paths, truncated = state.index.RuntimePathCompletions(directory, selection.prefix, maxCompletionItems, acceptPath)
 			} else {
 				if state.resolver == nil {
 					return s.completionList(snapshot, encoding, selection, nil), nil
 				}
-				paths, truncated = state.resolver.ImportPathCompletions(from, selection.prefix, importAutoloadAt(file, offset), maxCompletionItems)
+				paths, truncated = state.resolver.ImportPathCompletions(from, selection.prefix, importAutoloadAt(file, offset), maxCompletionItems, acceptPath)
 			}
 			items := make(map[string]completionCandidate, len(paths))
 			for _, path := range paths {
@@ -122,7 +135,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			if state.index == nil {
 				return s.completionList(snapshot, encoding, selection, nil), nil
 			}
-			paths, truncated := state.index.ColorSchemeCompletions(selection.prefix, maxCompletionItems)
+			paths, truncated := state.index.ColorSchemeCompletions(selection.prefix, maxCompletionItems, completionPathPredicate(state, excludeRuntimePath))
 			items := make(map[string]completionCandidate, len(paths))
 			for _, path := range paths {
 				items[path.Display] = completionCandidate{item: protocol.CompletionItem{Label: path.Display, Kind: protocol.CompletionItemKindValue}, score: 8500, source: completionSourceImport}
@@ -145,6 +158,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		if alias, member := importMemberContext(snapshot.Text(), offset); member && importAlias(file, alias) {
 			state := s.captureWorkspaceNavigationState()
 			items, target := s.importMemberCompletionsInState(snapshot.URI(), file, alias, state)
+			if acceptPath := completionPathPredicate(state, excludeRuntimePath); acceptPath != nil && !acceptPath(target.match.Fact.Path) {
+				items = nil
+			}
 			document := navigationDocument{server: s, snapshot: snapshot}
 			current, err := document.workspaceNavigationCurrent(ctx, state, target)
 			if err != nil {
@@ -285,7 +301,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if scopePrefix == "g:" {
 					labelPrefix = "g:"
 				}
-				functions, incomplete := completionWorkspaceState.index.FunctionCompletions(workspacePrefix, file.Dialect == syntax.Legacy, maxCompletionItems)
+				functions, incomplete := completionWorkspaceState.index.FunctionCompletions(workspacePrefix, file.Dialect == syntax.Legacy, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
 				workspaceIncomplete = workspaceIncomplete || incomplete
 				for _, function := range functions {
 					label := labelPrefix + function.Name
@@ -309,7 +325,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 				if file.Dialect == syntax.Legacy && (scopePrefix == "g:" || !completionInsideCallable(analysisResult, offset)) {
 					documentPath, _ := workspaceURIPath(uri.URI(snapshot.URI()))
-					variables, variablesIncomplete := completionWorkspaceState.index.GlobalVariableCompletions(workspacePrefix, documentPath, maxCompletionItems)
+					variables, variablesIncomplete := completionWorkspaceState.index.GlobalVariableCompletions(workspacePrefix, documentPath, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
 					workspaceIncomplete = workspaceIncomplete || variablesIncomplete
 					for _, variable := range variables {
 						if !add(protocol.CompletionItem{Label: labelPrefix + variable.Name, Kind: protocol.CompletionItemKindVariable, Detail: protocol.NewOptional("workspace global variable")}, 7500, completionSourceImport) {
@@ -540,9 +556,10 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
+			userCommandState := s.captureWorkspaceNavigationState()
 			s.workspaceMu.Lock()
 			if s.workspaceIndexReadyLocked() && s.workspaceIndex.Complete() {
-				for _, name := range s.workspaceIndex.UserCommandNames() {
+				for _, name := range s.workspaceIndex.UserCommandCompletionNames(completionPathPredicate(userCommandState, excludeRuntimePath)) {
 					if !strings.HasPrefix(name, selection.prefix) {
 						continue
 					}

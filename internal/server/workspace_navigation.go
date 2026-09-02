@@ -20,10 +20,12 @@ type workspaceNavigationTarget struct {
 }
 
 type workspaceNavigationSnapshot struct {
-	identity workspaceIdentity
-	resolver *workspace.PathResolver
-	index    *workspace.Index
-	roots    []string
+	identity       workspaceIdentity
+	resolver       *workspace.PathResolver
+	index          *workspace.Index
+	roots          []string
+	workspaceRoots []string
+	runtimePaths   []string
 }
 
 func (document *navigationDocument) workspaceTargetInState(state workspaceNavigationSnapshot) (workspaceNavigationTarget, bool) {
@@ -109,15 +111,19 @@ func (document *navigationDocument) workspaceLocalTarget() (workspaceNavigationT
 
 func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
 	s.workspaceMu.Lock()
-	roots := append([]string(nil), s.runtimePaths...)
+	workspaceRoots := append([]string(nil), s.workspaceRoots...)
+	runtimePaths := append([]string(nil), s.runtimePaths...)
+	roots := append([]string(nil), runtimePaths...)
 	if len(roots) == 0 {
-		roots = append([]string(nil), s.workspaceRoots...)
+		roots = append([]string(nil), workspaceRoots...)
 	}
 	state := workspaceNavigationSnapshot{
-		identity: s.workspaceIdentityLocked(),
-		resolver: s.workspaceResolver,
-		index:    s.workspaceIndex,
-		roots:    roots,
+		identity:       s.workspaceIdentityLocked(),
+		resolver:       s.workspaceResolver,
+		index:          s.workspaceIndex,
+		roots:          roots,
+		workspaceRoots: workspaceRoots,
+		runtimePaths:   runtimePaths,
 	}
 	s.workspaceMu.Unlock()
 	return state
