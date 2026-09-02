@@ -114,14 +114,14 @@ func (s *Server) SemanticTokensFullDelta(ctx context.Context, params *protocol.S
 }
 
 func (s *Server) semanticTokensData(ctx context.Context, documentURI string) (*text.Snapshot, []uint32, error) {
-	snapshot, file, encoding, err := s.structureDocument(ctx, documentURI)
+	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, documentURI)
 	if err != nil {
 		return nil, nil, err
 	}
 	if snapshot == nil || file == nil {
 		return nil, nil, nil
 	}
-	facts := collectSemanticFacts(file)
+	facts := collectSemanticFacts(file, fileAnalysis)
 	data := make([]uint32, 0, len(facts)*5)
 	var previousLine, previousCharacter uint32
 	for index, fact := range facts {
@@ -198,7 +198,7 @@ func semanticTokenEdits(previous, current []uint32) []protocol.SemanticTokensEdi
 	}}
 }
 
-func collectSemanticFacts(file *syntax.File) []semanticFact {
+func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis) []semanticFact {
 	facts := make([]semanticFact, 0, len(file.Tokens))
 	commandKinds := make(map[syntax.Span]syntax.CommandKind)
 	staticDeclarations := make(map[syntax.Span]bool)
@@ -288,7 +288,10 @@ func collectSemanticFacts(file *syntax.File) []semanticFact {
 		}
 		facts = append(facts, semanticFact{span: token.Span, tokenType: tokenType, modifiers: modifiers, priority: 1})
 	}
-	result := analysis.Analyze(file)
+	result := fileAnalysis
+	if result == nil {
+		result = analysis.Analyze(file)
+	}
 	for _, declaration := range result.Declarations {
 		modifiers := semanticDeclaration
 		if !declaration.Mutable {
@@ -486,7 +489,7 @@ func collectTypeSemanticFacts(typeNode *syntax.Type, facts *[]semanticFact) {
 }
 
 func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CommandOrCodeAction, error) {
-	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
 	}
@@ -496,8 +499,11 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 	if !allowsQuickFix(params.Context.Only) {
 		return []protocol.CommandOrCodeAction{}, s.structureCurrent(ctx, snapshot)
 	}
+	if fileAnalysis == nil {
+		fileAnalysis = analysis.Analyze(file)
+	}
 	diagnostics := append([]syntax.Diagnostic(nil), file.Diagnostics...)
-	diagnostics = append(diagnostics, analysis.Analyze(file).Diagnostics...)
+	diagnostics = append(diagnostics, fileAnalysis.Diagnostics...)
 	for _, clientDiagnostic := range params.Context.Diagnostics {
 		code, ok := clientDiagnosticCode(clientDiagnostic)
 		if !ok || !quickFixDiagnosticCode(code) || !rangesOverlapOrTouch(params.Range, clientDiagnostic.Range) {
@@ -803,7 +809,7 @@ func (s *Server) InlayHint(ctx context.Context, params *protocol.InlayHintParams
 	if s.workspaceIndexRebuilding() {
 		return nil, nil
 	}
-	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
 	}
@@ -815,8 +821,10 @@ func (s *Server) InlayHint(ctx context.Context, params *protocol.InlayHintParams
 	if startErr != nil || endErr != nil || end < start {
 		return []protocol.InlayHint{}, s.structureCurrent(ctx, snapshot)
 	}
+	if fileAnalysis == nil {
+		fileAnalysis = analysis.Analyze(file)
+	}
 	explicit := explicitTypeDeclarations(file)
-	fileAnalysis := analysis.Analyze(file)
 	hints := make([]protocol.InlayHint, 0)
 	for _, declaration := range fileAnalysis.Declarations {
 		if declaration.Span.Start < start || declaration.Span.End > end || explicit[declaration.Span] || declaration.Type.Name == "" || declaration.Type.Name == analysis.ValueTypeAny {

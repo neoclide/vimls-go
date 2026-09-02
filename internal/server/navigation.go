@@ -53,13 +53,12 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 	if err != nil {
 		return nil, nil
 	}
-	file := s.parseSnapshot(snapshot)
-	if file == nil {
+	file, result := s.analyzeSnapshotContext(ctx, snapshot)
+	if file == nil || result == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, protocol.ErrRequestCancelled
+		}
 		return nil, nil
-	}
-	result := analysis.Analyze(file)
-	if err := ctx.Err(); err != nil {
-		return nil, protocol.ErrRequestCancelled
 	}
 
 	document := &navigationDocument{server: s, snapshot: snapshot, encoding: encoding, analysis: result}

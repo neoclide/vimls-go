@@ -50,6 +50,15 @@ const (
 type parsedDocument struct {
 	contentID text.ContentID
 	file      *syntax.File
+	analysis  *analysis.FileAnalysis
+}
+
+type inFlightParse struct {
+	contentID text.ContentID
+	source    string
+	done      chan struct{}
+	file      *syntax.File
+	analysis  *analysis.FileAnalysis
 }
 
 // semanticTokenResult is immutable after installation. The latest result for
@@ -141,6 +150,7 @@ type Server struct {
 	analysisWorkers             int
 	publishMu                   sync.Mutex
 	parsed                      map[string]parsedDocument
+	parseInFlight               map[string]*inFlightParse
 	published                   map[string]bool
 	pullDiagnosticResults       map[string]pullDiagnosticResult
 	nextDiagnosticResultID      uint64
@@ -214,6 +224,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		initialRefreshPending: make(map[string]struct{}),
 		analysisRunning:       make(map[string]struct{}),
 		parsed:                make(map[string]parsedDocument),
+		parseInFlight:         make(map[string]*inFlightParse),
 		published:             make(map[string]bool),
 		workspaceIndex:        newWorkspaceIndex(),
 		workspaceGraph:        graph,
@@ -543,7 +554,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 		SelectionRangeProvider:          protocol.Boolean(true),
 		WorkspaceSymbolProvider:         protocol.Boolean(true),
 		DocumentLinkProvider:            &protocol.DocumentLinkOptions{ResolveProvider: &documentLinkResolve},
-		CompletionProvider:              &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&", "#", "<", "\"", "'"}},
+		CompletionProvider:              &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&", "#", "<", "+", "\"", "'"}},
 		SignatureHelpProvider:           &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{","}},
 		RenameProvider:                  renameProvider,
 		SemanticTokensProvider: &protocol.SemanticTokensOptions{
@@ -1077,17 +1088,16 @@ func (s *Server) computeDocumentDiagnostics(work workspace.Analysis) (*syntax.Fi
 			}},
 		}
 	} else {
-		raw := s.parseSnapshot(work.Snapshot)
-		if raw == nil {
+		raw, rawAnalysis := s.analyzeSnapshotContext(work.Context, work.Snapshot)
+		if raw == nil || rawAnalysis == nil {
 			return nil, workspaceIdentity{}, false
 		}
 		parsed := *raw
 		parsed.Diagnostics = append([]syntax.Diagnostic(nil), raw.Diagnostics...)
 		file = &parsed
-		if s.beforeAnalyzeForTest != nil {
-			s.beforeAnalyzeForTest(file)
-		}
-		fileAnalysis = analysis.Analyze(file)
+		clonedAnalysis := *rawAnalysis
+		clonedAnalysis.File = file
+		fileAnalysis = &clonedAnalysis
 		if work.Context.Err() != nil {
 			return nil, workspaceIdentity{}, false
 		}
@@ -1161,38 +1171,131 @@ func (s *Server) prepareSyntax(work workspace.Analysis, file *syntax.File, resul
 // cache contains parser output only; callers that add diagnostics must work on
 // a separate File header and diagnostics slice.
 func (s *Server) parseSnapshot(snapshot *text.Snapshot) *syntax.File {
+	file, _ := s.analyzeSnapshot(snapshot)
+	return file
+}
+
+// analyzeSnapshot returns the cached or parsed syntax tree and pure file analysis
+// for an open snapshot.
+func (s *Server) analyzeSnapshot(snapshot *text.Snapshot) (*syntax.File, *analysis.FileAnalysis) {
+	return s.analyzeSnapshotContext(context.Background(), snapshot)
+}
+
+// analyzeSnapshotContext returns the syntax tree and pure file analysis for snapshot,
+// waiting for in-flight calculations or initiating a single parse+analysis pass.
+// If ctx is cancelled while waiting on an in-flight calculation, it yields without
+// disturbing the in-flight work.
+func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snapshot) (*syntax.File, *analysis.FileAnalysis) {
 	if snapshot == nil || snapshot.ByteLen() > maxFileBytes {
-		return nil
+		return nil, nil
 	}
 	documentURI := snapshot.URI()
 	contentID := snapshot.ContentID()
 	source := snapshot.Text()
+
 	s.publishMu.Lock()
 	parsed := s.parsed[documentURI]
-	s.publishMu.Unlock()
 	if parsed.file != nil && parsed.contentID == contentID && parsed.file.Source == source {
-		return parsed.file
-	}
-	if s.beforeParseSnapshotCacheMissForTest != nil {
-		s.beforeParseSnapshotCacheMissForTest(snapshot)
+		if parsed.analysis != nil {
+			s.publishMu.Unlock()
+			return parsed.file, parsed.analysis
+		}
+		file := parsed.file
+		s.publishMu.Unlock()
+		if s.beforeAnalyzeForTest != nil {
+			s.beforeAnalyzeForTest(file)
+		}
+		fileAnalysis := analysis.Analyze(file)
+		s.publishMu.Lock()
+		if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID {
+			cur.analysis = fileAnalysis
+			s.parsed[documentURI] = cur
+		}
+		s.publishMu.Unlock()
+		return file, fileAnalysis
 	}
 
-	file := syntax.Parse(source)
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
-	if s.analysisContext.Err() != nil {
-		return file
+	for {
+		if ctx.Err() != nil {
+			s.publishMu.Unlock()
+			return nil, nil
+		}
+		inFlight := s.parseInFlight[documentURI]
+		if inFlight != nil && inFlight.contentID == contentID && inFlight.source == source {
+			done := inFlight.done
+			s.publishMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, nil
+			case <-done:
+			}
+			s.publishMu.Lock()
+			parsed = s.parsed[documentURI]
+			if parsed.file != nil && parsed.contentID == contentID && parsed.file.Source == source {
+				if parsed.analysis != nil {
+					s.publishMu.Unlock()
+					return parsed.file, parsed.analysis
+				}
+				file := parsed.file
+				s.publishMu.Unlock()
+				if s.beforeAnalyzeForTest != nil {
+					s.beforeAnalyzeForTest(file)
+				}
+				fileAnalysis := analysis.Analyze(file)
+				s.publishMu.Lock()
+				if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID {
+					cur.analysis = fileAnalysis
+					s.parsed[documentURI] = cur
+				}
+				s.publishMu.Unlock()
+				return file, fileAnalysis
+			}
+			if inFlight.file != nil && inFlight.analysis != nil {
+				s.publishMu.Unlock()
+				return inFlight.file, inFlight.analysis
+			}
+			continue
+		}
+
+		entry := &inFlightParse{
+			contentID: contentID,
+			source:    source,
+			done:      make(chan struct{}),
+		}
+		s.parseInFlight[documentURI] = entry
+		s.publishMu.Unlock()
+
+		if s.beforeParseSnapshotCacheMissForTest != nil {
+			s.beforeParseSnapshotCacheMissForTest(snapshot)
+		}
+		file := syntax.Parse(source)
+		if s.beforeAnalyzeForTest != nil {
+			s.beforeAnalyzeForTest(file)
+		}
+		fileAnalysis := analysis.Analyze(file)
+
+		entry.file = file
+		entry.analysis = fileAnalysis
+
+		s.publishMu.Lock()
+		if s.parseInFlight[documentURI] == entry {
+			delete(s.parseInFlight, documentURI)
+		}
+		close(entry.done)
+
+		if s.analysisContext.Err() == nil {
+			current, ok := s.documents.Snapshot(documentURI)
+			if ok && current == snapshot {
+				s.parsed[documentURI] = parsedDocument{
+					contentID: contentID,
+					file:      file,
+					analysis:  fileAnalysis,
+				}
+			}
+		}
+		s.publishMu.Unlock()
+		return file, fileAnalysis
 	}
-	current, ok := s.documents.Snapshot(documentURI)
-	if !ok || current != snapshot {
-		return file
-	}
-	parsed = s.parsed[documentURI]
-	if parsed.file != nil && parsed.contentID == contentID && parsed.file.Source == source {
-		return parsed.file
-	}
-	s.parsed[documentURI] = parsedDocument{contentID: contentID, file: file}
-	return file
 }
 
 func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, identity workspaceIdentity) bool {

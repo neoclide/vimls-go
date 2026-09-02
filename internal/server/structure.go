@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
@@ -14,8 +15,13 @@ import (
 // The analysis worker normally populates parsed, but requests also parse a
 // current snapshot when the worker has not caught up yet.
 func (s *Server) structureDocument(ctx context.Context, documentURI string) (*text.Snapshot, *syntax.File, text.Encoding, error) {
+	snapshot, file, _, encoding, err := s.structureDocumentWithAnalysis(ctx, documentURI)
+	return snapshot, file, encoding, err
+}
+
+func (s *Server) structureDocumentWithAnalysis(ctx context.Context, documentURI string) (*text.Snapshot, *syntax.File, *analysis.FileAnalysis, text.Encoding, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, text.UTF16, protocol.ErrRequestCancelled
+		return nil, nil, nil, text.UTF16, protocol.ErrRequestCancelled
 	}
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)
@@ -24,13 +30,13 @@ func (s *Server) structureDocument(ctx context.Context, documentURI string) (*te
 	encoding := s.encoding
 	s.mu.Unlock()
 	if !ok || snapshot.ByteLen() > maxFileBytes {
-		return nil, nil, encoding, nil
+		return nil, nil, nil, encoding, nil
 	}
-	file := s.parseSnapshot(snapshot)
+	file, fileAnalysis := s.analyzeSnapshotContext(ctx, snapshot)
 	if err := ctx.Err(); err != nil {
-		return nil, nil, encoding, protocol.ErrRequestCancelled
+		return nil, nil, nil, encoding, protocol.ErrRequestCancelled
 	}
-	return snapshot, file, encoding, nil
+	return snapshot, file, fileAnalysis, encoding, nil
 }
 
 func (s *Server) structureCurrent(ctx context.Context, snapshot *text.Snapshot) error {

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
@@ -416,11 +415,10 @@ func (s *Server) openWorkspaceReferenceLocationsInState(ctx context.Context, wor
 		if !ok || filepath.Clean(path) == filepath.Clean(target.match.Fact.Path) {
 			continue
 		}
-		file := s.parseSnapshot(snapshot)
-		if file == nil {
+		file, fileAnalysis := s.analyzeSnapshotContext(ctx, snapshot)
+		if file == nil || fileAnalysis == nil {
 			continue
 		}
-		fileAnalysis := analysis.Analyze(file)
 		for _, reference := range workspace.CollectExternalReferencesFromAnalysis(path, file, fileAnalysis) {
 			if !workspaceReferenceMatchesTarget(workspaceState, reference, target) {
 				continue

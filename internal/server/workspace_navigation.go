@@ -435,8 +435,9 @@ func (document *navigationDocument) workspaceMemberReferencesInState(ctx context
 		}
 		snapshot := open[path]
 		var file *syntax.File
+		var result *analysis.FileAnalysis
 		if snapshot != nil {
-			file = document.server.parseSnapshot(snapshot)
+			file, result = document.server.analyzeSnapshotContext(ctx, snapshot)
 			scanned = append(scanned, snapshot)
 		} else {
 			snapshot = text.NewSnapshot(uri.File(path).String(), 0, nil, sources[path])
@@ -445,7 +446,9 @@ func (document *navigationDocument) workspaceMemberReferencesInState(ctx context
 		if file == nil {
 			continue
 		}
-		result := analysis.Analyze(file)
+		if result == nil {
+			result = analysis.Analyze(file)
+		}
 		facts := workspace.CollectExternalReferencesFromAnalysis(path, file, result)
 		walkCommands(file.Commands, func(command *syntax.Command) {
 			walkCommandExpressions(command, func(expression *syntax.Expression) {
@@ -514,13 +517,16 @@ func sameWorkspaceMemberTarget(left, right workspaceNavigationTarget) bool {
 
 func (s *Server) analyzeWorkspaceTarget(target workspaceNavigationTarget) (*analysis.FileAnalysis, *analysis.Declaration) {
 	var file *syntax.File
+	var result *analysis.FileAnalysis
 	if target.openSnapshot != nil && target.openSnapshot.Text() == target.match.Source {
-		file = s.parseSnapshot(target.openSnapshot)
+		file, result = s.analyzeSnapshot(target.openSnapshot)
 	}
 	if file == nil {
 		file = syntax.Parse(target.match.Source)
 	}
-	result := analysis.Analyze(file)
+	if result == nil {
+		result = analysis.Analyze(file)
+	}
 	for _, declaration := range result.Declarations {
 		if declaration.Span == target.match.Fact.SelectionRange && declaration.Name == target.match.Fact.Name {
 			return result, declaration

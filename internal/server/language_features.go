@@ -185,6 +185,8 @@ const (
 	completionContextHighlightValue
 	completionContextAutocmdHead
 	completionContextAutocmdEvent
+	completionContextAutocmdPattern
+	completionContextAutocmdModifier
 	completionContextAugroup
 	completionContextUserCommandAttribute
 	completionContextUserCommandAttributeValue
@@ -319,6 +321,14 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 					result = completionContextAutocmdEvent
 					return
 				}
+			}
+			if spanContains(command.Autocmd.Pattern, offset) || offset == command.Autocmd.Pattern.End {
+				result = completionContextAutocmdPattern
+				return
+			}
+			if command.Bang.Start == command.Bang.End && autocmdModifierPrefixAt(file.Source, command.Autocmd, offset) {
+				result = completionContextAutocmdModifier
+				return
 			}
 		}
 		if command.Canonical == "colorscheme" && offset > command.Name.End &&
@@ -671,7 +681,7 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 	if err := s.waitForWorkspaceIndex(ctx); err != nil {
 		return nil, err
 	}
-	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +702,9 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 	var documentation string
 	switch callable.Kind {
 	case syntax.ExpressionIdentifier:
-		fileAnalysis := analysis.Analyze(file)
+		if fileAnalysis == nil {
+			fileAnalysis = analysis.Analyze(file)
+		}
 		declaration := declarationForExpression(fileAnalysis, callable)
 		if declaration != nil {
 			function := functionForDeclaration(file.Commands, declaration)
@@ -714,7 +726,9 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 	case syntax.ExpressionMember:
 		operator := file.Text(callable.Operator)
 		if operator == "." {
-			fileAnalysis := analysis.Analyze(file)
+			if fileAnalysis == nil {
+				fileAnalysis = analysis.Analyze(file)
+			}
 			if function, ok := memberFunctionForSignature(file, fileAnalysis, callable); ok {
 				if function == nil {
 					label = callable.Value + "()"
@@ -749,7 +763,7 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 
 func (s *Server) importedFunctionSignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
 	for attempt := range 2 {
-		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+		snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 		if err != nil {
 			return nil, err
 		}
@@ -772,7 +786,9 @@ func (s *Server) importedFunctionSignatureHelp(ctx context.Context, params *prot
 		if !ok {
 			return nil, s.structureCurrent(ctx, snapshot)
 		}
-		fileAnalysis := analysis.Analyze(file)
+		if fileAnalysis == nil {
+			fileAnalysis = analysis.Analyze(file)
+		}
 		externalFacts := workspace.CollectExternalReferencesFromAnalysis(path, file, fileAnalysis)
 		referenceMember := callable
 		aggregateMember := false

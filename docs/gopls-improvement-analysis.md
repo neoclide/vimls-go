@@ -183,7 +183,10 @@ gopls 在 shutdown 中关闭 file watcher、等待诊断任务、关闭 session 
 
 ## P1：经过测量的缓存、失效和发布改进
 
-### 3. 合并同一快照的并发解析，并复用纯文件分析
+### 3. 合并同一快照的并发解析，并复用纯文件分析 [已完成]
+
+- **状态**：已完成
+- **实施改动**：在 `internal/server/server.go` 中扩展 `parsedDocument` 缓存纯 `*analysis.FileAnalysis`，并增加 `parseInFlight` 映射记录当前正在执行的 parse+analyze 工作；后续对同一快照的并发首次请求自动合并等待该结果，单个等待者 context 取消安全退出而不中断主任务；解析完成后纯语法树和纯语义分析一同缓存，并在 `navigation`、`completion`、`rename`、`semantic_actions`、`language_features`、`workspace_navigation`、`diagnostics` 中统一复用；新增 `structureDocumentWithAnalysis` 辅助函数；在 `document_sync_test.go` 中添加并发首次解析单一执行验证 `TestServerConcurrentColdMissSingleParseAndAnalyze`、等待取消隔离验证 `TestServerConcurrentWaitCancellationDoesNotDisruptOthers`、同内容新版本纯状态复用验证 `TestServerSameContentDifferentVersionReusesPureState` 以及 `BenchmarkConcurrentColdMiss` / `BenchmarkParseAndAnalyzeHotHit` 基准测试（hot hit 达到 ~31ns/op，0 B/op，0 allocs/op）。
 
 **当前证据**
 

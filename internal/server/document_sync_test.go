@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
@@ -875,5 +878,181 @@ func TestDocumentSymbolsUseCurrentSnapshotAndUTF16Ranges(t *testing.T) {
 	cancel()
 	if _, err := instance.DocumentSymbol(canceled, &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); !errors.Is(err, protocol.ErrRequestCancelled) {
 		t.Fatalf("canceled error = %v", err)
+	}
+}
+
+func TestServerConcurrentColdMissSingleParseAndAnalyze(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	source := "vim9script\nvar x = 1\ndef Foo(): number\n  return x + 41\nenddef\n"
+	documentURI := uri.MustParse("file:///concurrent-miss.vim")
+	snapshot := instance.documents.Open(documentURI.String(), 1, source)
+
+	var parseCalls int32
+	var analyzeCalls int32
+	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+		atomic.AddInt32(&parseCalls, 1)
+	}
+	instance.beforeAnalyzeForTest = func(*syntax.File) {
+		atomic.AddInt32(&analyzeCalls, 1)
+	}
+
+	const concurrency = 10
+	var wg sync.WaitGroup
+	files := make([]*syntax.File, concurrency)
+	analyses := make([]*analysis.FileAnalysis, concurrency)
+	start := make(chan struct{})
+
+	for i := 0; i < concurrency; i++ {
+		idx := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			files[idx], analyses[idx] = instance.analyzeSnapshot(snapshot)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&parseCalls); got != 1 {
+		t.Fatalf("expected 1 parse call for %d concurrent requests, got %d", concurrency, got)
+	}
+	if got := atomic.LoadInt32(&analyzeCalls); got != 1 {
+		t.Fatalf("expected 1 analyze call for %d concurrent requests, got %d", concurrency, got)
+	}
+
+	for i := 0; i < concurrency; i++ {
+		if files[i] == nil || analyses[i] == nil {
+			t.Fatalf("goroutine %d got nil file or analysis", i)
+		}
+		if files[i] != files[0] {
+			t.Fatalf("goroutine %d got different file pointer: %p vs %p", i, files[i], files[0])
+		}
+		if analyses[i] != analyses[0] {
+			t.Fatalf("goroutine %d got different analysis pointer: %p vs %p", i, analyses[i], analyses[0])
+		}
+	}
+}
+
+func TestServerConcurrentWaitCancellationDoesNotDisruptOthers(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	source := "vim9script\nvar value = 42\n"
+	documentURI := uri.MustParse("file:///cancel-wait.vim")
+	snapshot := instance.documents.Open(documentURI.String(), 1, source)
+
+	pauseParse := make(chan struct{})
+	releaseParse := make(chan struct{})
+	var releaseOnce sync.Once
+	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+		close(pauseParse)
+		<-releaseParse
+	}
+
+	// Leader
+	var leaderFile *syntax.File
+	var leaderAnalysis *analysis.FileAnalysis
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		leaderFile, leaderAnalysis = instance.analyzeSnapshot(snapshot)
+	}()
+
+	<-pauseParse
+
+	// Follower 1: cancels while waiting
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	cancel1()
+	f1File, f1Analysis := instance.analyzeSnapshotContext(ctx1, snapshot)
+	if f1File != nil || f1Analysis != nil {
+		t.Fatalf("cancelled follower should return nil, got %p, %p", f1File, f1Analysis)
+	}
+
+	// Follower 2: waits normally
+	var f2File *syntax.File
+	var f2Analysis *analysis.FileAnalysis
+	f2Done := make(chan struct{})
+	go func() {
+		defer close(f2Done)
+		f2File, f2Analysis = instance.analyzeSnapshot(snapshot)
+	}()
+
+	releaseOnce.Do(func() { close(releaseParse) })
+	<-leaderDone
+	<-f2Done
+
+	if leaderFile == nil || leaderAnalysis == nil {
+		t.Fatal("leader failed")
+	}
+	if f2File != leaderFile || f2Analysis != leaderAnalysis {
+		t.Fatalf("follower 2 did not receive leader results: file=%p/%p analysis=%p/%p", f2File, leaderFile, f2Analysis, leaderAnalysis)
+	}
+}
+
+func TestServerSameContentDifferentVersionReusesPureState(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	source := "vim9script\nvar count = 10\n"
+	documentURI := uri.MustParse("file:///same-content.vim")
+	s1 := instance.documents.Open(documentURI.String(), 1, source)
+
+	var parseCalls int32
+	var analyzeCalls int32
+	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+		atomic.AddInt32(&parseCalls, 1)
+	}
+	instance.beforeAnalyzeForTest = func(*syntax.File) {
+		atomic.AddInt32(&analyzeCalls, 1)
+	}
+
+	f1, a1 := instance.analyzeSnapshot(s1)
+	if f1 == nil || a1 == nil {
+		t.Fatal("v1 analyze failed")
+	}
+
+	version2 := int32(2)
+	s2 := text.NewSnapshot(documentURI.String(), 2, &version2, source)
+	f2, a2 := instance.analyzeSnapshot(s2)
+	if f2 != f1 || a2 != a1 {
+		t.Fatalf("same content should reuse pure file and analysis: f1=%p f2=%p a1=%p a2=%p", f1, f2, a1, a2)
+	}
+	if atomic.LoadInt32(&parseCalls) != 1 || atomic.LoadInt32(&analyzeCalls) != 1 {
+		t.Fatalf("same content should not trigger second parse/analyze: parses=%d analyzes=%d", parseCalls, analyzeCalls)
+	}
+}
+
+func BenchmarkConcurrentColdMiss(b *testing.B) {
+	source := "vim9script\nvar x = 1\nvar y = 2\ndef Sum(): number\n  return x + y\nenddef\n"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		instance := New(nil, nil, io.Discard)
+		docURI := fmt.Sprintf("file:///bench-%d.vim", i)
+		snapshot := instance.documents.Open(docURI, 1, source)
+		var wg sync.WaitGroup
+		for g := 0; g < 8; g++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _ = instance.analyzeSnapshot(snapshot)
+			}()
+		}
+		wg.Wait()
+		instance.stopAnalysis()
+	}
+}
+
+func BenchmarkParseAndAnalyzeHotHit(b *testing.B) {
+	instance := New(nil, nil, io.Discard)
+	b.Cleanup(instance.stopAnalysis)
+	source := "vim9script\nvar x = 1\nvar y = 2\ndef Sum(): number\n  return x + y\nenddef\n"
+	snapshot := instance.documents.Open("file:///bench-hot.vim", 1, source)
+	_, _ = instance.analyzeSnapshot(snapshot)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = instance.analyzeSnapshot(snapshot)
 	}
 }

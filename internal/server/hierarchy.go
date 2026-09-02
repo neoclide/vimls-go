@@ -894,8 +894,10 @@ func deferredCallHierarchyOffset(file *syntax.File, offset int) bool {
 
 func (s *Server) callFactsForSymbol(state workspaceNavigationSnapshot, target hierarchySymbol) []workspace.CallMatch {
 	if target.snapshot != nil {
-		file := s.parseSnapshot(target.snapshot)
-		analysisResult := analysis.Analyze(file)
+		file, analysisResult := s.analyzeSnapshot(target.snapshot)
+		if file == nil || analysisResult == nil {
+			return nil
+		}
 		facts := workspace.CollectCallFactsFromAnalysis(target.fact.Path, file, analysisResult)
 		result := make([]workspace.CallMatch, 0, len(facts))
 		for _, fact := range facts {
@@ -925,8 +927,11 @@ func (s *Server) callCandidates(state workspaceNavigationSnapshot, name string) 
 		if snapshot.ByteLen() > maxFileBytes {
 			continue
 		}
-		file := s.parseSnapshot(snapshot)
-		for _, fact := range workspace.CollectCallFactsFromAnalysis(path, file, analysis.Analyze(file)) {
+		file, fileAnalysis := s.analyzeSnapshot(snapshot)
+		if file == nil || fileAnalysis == nil {
+			continue
+		}
+		for _, fact := range workspace.CollectCallFactsFromAnalysis(path, file, fileAnalysis) {
 			if fact.CalleeName == name {
 				result = append(result, workspace.CallMatch{Fact: fact, Source: snapshot.Text()})
 			}
