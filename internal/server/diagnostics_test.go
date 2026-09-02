@@ -56,6 +56,67 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 	}
 }
 
+func TestServerPublishesConfiguredDiagnosticSeverities(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+	instance.mu.Lock()
+	instance.client = client
+	instance.overrideDiagnostics = map[string]protocol.DiagnosticSeverity{
+		"vim/E121":         protocol.DiagnosticSeverityError,
+		"vimls/deprecated": protocol.DiagnosticSeverityInformation,
+		"vim/E117":         protocol.DiagnosticSeverityError,
+	}
+	instance.mu.Unlock()
+	documentURI := uri.MustParse("file:///configured.vim")
+	snapshot := instance.documents.Open(documentURI.String(), 1, "x\n")
+	work, ok := instance.documents.BeginAnalysis(instance.analysisContext, documentURI.String())
+	if !ok {
+		t.Fatal("analysis did not start")
+	}
+	instance.workspaceMu.Lock()
+	identity := instance.workspaceIdentityLocked()
+	instance.workspaceMu.Unlock()
+	instance.publishSyntax(work, &syntax.File{Source: snapshot.Text(), Diagnostics: []syntax.Diagnostic{
+		{Code: "vim/E117", Message: "unresolved", Span: syntax.Span{Start: 0, End: 1}},
+		{Code: "vim/E121", Message: "unknown variable", Span: syntax.Span{Start: 0, End: 1}},
+		{Code: "vimls/deprecated", Message: "deprecated", Span: syntax.Span{Start: 0, End: 1}},
+	}}, identity)
+	params := waitForDiagnostics(t, client.published)
+	if len(params.Diagnostics) != 3 {
+		t.Fatalf("configured diagnostics = %#v", params.Diagnostics)
+	}
+	if params.Diagnostics[0].Code != protocol.String("vim/E117") || params.Diagnostics[0].Severity != protocol.DiagnosticSeverityError ||
+		params.Diagnostics[1].Code != protocol.String("vim/E121") || params.Diagnostics[1].Severity != protocol.DiagnosticSeverityError ||
+		params.Diagnostics[2].Code != protocol.String("vimls/deprecated") || params.Diagnostics[2].Severity != protocol.DiagnosticSeverityInformation {
+		t.Fatalf("configured diagnostics = %#v", params.Diagnostics)
+	}
+}
+
+func TestDisabledDiagnosticsAreFilteredBeforeTruncationAndRepublished(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+	instance.mu.Lock()
+	instance.client = client
+	instance.mu.Unlock()
+	documentURI := uri.MustParse("file:///filtered.vim")
+	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: strings.Repeat("if true\n", maxDiagnosticsPerDocument+25),
+	}})
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) != maxDiagnosticsPerDocument {
+		t.Fatalf("initial diagnostics = %d, want cap", len(first.Diagnostics))
+	}
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"disabledDiagnostics":["vim/E171"],"overrideDiagnostics":{"vim/E171":"error"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	filtered := waitForDiagnostics(t, client.published)
+	if len(filtered.Diagnostics) != 0 {
+		t.Fatalf("disabled diagnostics consumed cap: %#v", filtered.Diagnostics)
+	}
+}
+
 func TestServerPublishesDeprecatedReferenceHint(t *testing.T) {
 	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
 	instance := New(nil, nil, io.Discard)

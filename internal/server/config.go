@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -264,4 +265,93 @@ func workspaceRebuildDebounce(value any) (time.Duration, bool) {
 		return 0, false
 	}
 	return time.Duration(milliseconds) * time.Millisecond, true
+}
+
+func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]struct{}, previousOverrides map[string]protocol.DiagnosticSeverity) (map[string]struct{}, map[string]protocol.DiagnosticSeverity, string) {
+	settings, warning := diagnosticSettingsObject(raw)
+	if warning != "" {
+		return previousDisabled, previousOverrides, warning
+	}
+	disabled := make(map[string]struct{})
+	overrides := make(map[string]protocol.DiagnosticSeverity)
+	warnings := make([]string, 0, 2)
+	if value, exists := settings["disabledDiagnostics"]; exists {
+		var values []json.RawMessage
+		if err := json.Unmarshal(value, &values); err != nil || values == nil {
+			warnings = append(warnings, "vimls: disabledDiagnostics must be an array of non-empty strings; retaining previous value")
+			disabled = maps.Clone(previousDisabled)
+		} else {
+			valid := true
+			for _, item := range values {
+				var code string
+				if json.Unmarshal(item, &code) != nil || code == "" {
+					valid = false
+					break
+				}
+				disabled[code] = struct{}{}
+			}
+			if !valid {
+				warnings = append(warnings, "vimls: disabledDiagnostics must be an array of non-empty strings; retaining previous value")
+				disabled = maps.Clone(previousDisabled)
+			}
+		}
+	}
+	if value, exists := settings["overrideDiagnostics"]; exists {
+		var values map[string]json.RawMessage
+		if err := json.Unmarshal(value, &values); err != nil || values == nil {
+			warnings = append(warnings, "vimls: overrideDiagnostics must be an object of diagnostic codes to severity strings; retaining previous value")
+			overrides = maps.Clone(previousOverrides)
+		} else {
+			valid := true
+			for code, item := range values {
+				if code == "" {
+					valid = false
+					break
+				}
+				var severity string
+				if json.Unmarshal(item, &severity) != nil {
+					valid = false
+					break
+				}
+				switch severity {
+				case "error":
+					overrides[code] = protocol.DiagnosticSeverityError
+				case "warning":
+					overrides[code] = protocol.DiagnosticSeverityWarning
+				case "information":
+					overrides[code] = protocol.DiagnosticSeverityInformation
+				case "hint":
+					overrides[code] = protocol.DiagnosticSeverityHint
+				default:
+					valid = false
+				}
+				if !valid {
+					break
+				}
+			}
+			if !valid {
+				warnings = append(warnings, "vimls: overrideDiagnostics severity must be error, warning, information, or hint; retaining previous value")
+				overrides = maps.Clone(previousOverrides)
+			}
+		}
+	}
+	return disabled, overrides, strings.Join(warnings, "; ")
+}
+
+func diagnosticSettingsObject(raw []byte) (map[string]json.RawMessage, string) {
+	if len(strings.TrimSpace(string(raw))) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return map[string]json.RawMessage{}, ""
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &settings); err != nil || settings == nil {
+		return nil, "vimls: workspace settings must be an object; retaining previous diagnostic settings"
+	}
+	if nested, exists := settings["vim"]; exists {
+		var section map[string]json.RawMessage
+		if err := json.Unmarshal(nested, &section); err != nil || section == nil {
+			return nil, "vimls: vim workspace settings must be an object; retaining previous diagnostic settings"
+		}
+		settings = section
+	}
+	return settings, ""
 }

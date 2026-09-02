@@ -153,6 +153,12 @@ User settings are supplied through LSP `workspace/configuration`.
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `workspaceRebuildDebounce` | `number` | `100` | Milliseconds to wait after the latest workspace rebuild trigger; `0` rebuilds immediately. |
+| `disabledDiagnostics` | `string[]` | `[]` | Exact diagnostic codes to omit from published LSP diagnostics; accepts native, `vimls/`, and future codes. |
+| `overrideDiagnostics` | `object` | `{}` | Exact diagnostic code to LSP severity (`error`, `warning`, `information`, or `hint`); disabled codes take precedence. |
+
+Both diagnostic settings are read under the `vim` workspace configuration
+section and are dynamic; changed values reanalyze open documents. They do not
+belong in `initializationOptions`.
 
 Clients dynamically replace runtimepath with this custom request:
 

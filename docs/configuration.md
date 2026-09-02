@@ -89,17 +89,47 @@ form directly:
 `workspaceRebuildDebounce` is dynamically configurable. Invalid updates retain
 the previous valid value and produce a visible warning.
 
+Diagnostic visibility and protocol severity are configured in the same `vim`
+section:
+
+```json
+{
+  "vim": {
+    "disabledDiagnostics": ["vim/E117", "vimls/deprecated"],
+    "overrideDiagnostics": {
+      "vim/E121": "information",
+      "vimls/unused-variable": "warning"
+    }
+  }
+}
+```
+
+`disabledDiagnostics` contains exact, non-empty diagnostic-code strings. Codes
+may be native `vim/E...`, `vimls/...`, or a future code; disabling takes
+precedence over an entry in `overrideDiagnostics`. Override values are exactly
+`error`, `warning`, `information`, or `hint` (lowercase); `off` is not a
+severity. Overrides affect only published LSP diagnostics and do not change
+the syntax or analysis result. Disabled diagnostics are removed before the
+per-document diagnostic limit is applied.
+
+Both diagnostic settings are dynamic. A changed valid value reanalyzes open
+documents and republishes their diagnostics. An unchanged value does not
+invalidate diagnostics. A missing field in a complete configuration snapshot
+resets that field to empty. Invalid field values retain that field's previous
+value and produce a visible warning, while the other field can still update.
+The settings are read from workspace configuration, not `initializationOptions`.
+
 ## Diagnostic policy
 
 Diagnostic categories have stable default severities:
 
 | Category | LSP severity | Configurable or disabled |
 | --- | --- | --- |
-| Parser and structural errors | error | fixed; cannot be disabled |
-| Unresolved function, variable, import alias, or autoload name (`E117`, `E121`, `E1001`, `E1089`) | warning | fixed; cannot be disabled |
-| Runtime-dependent or cross-file conflict warnings (`E122`, `E174`, `E464`, `E705`, `E707`) | warning | fixed; cannot be disabled |
-| Unused Vim9 variables | hint with the LSP `unnecessary` tag | fixed; cannot be disabled |
-| Deprecated Vim9 references | hint with the LSP `deprecated` tag | fixed; cannot be disabled |
+| Parser and structural errors | error | configurable by exact code |
+| Unresolved function, variable, import alias, or autoload name (`E117`, `E121`, `E1001`, `E1089`) | warning | configurable by exact code |
+| Runtime-dependent or cross-file conflict warnings (`E122`, `E174`, `E464`, `E705`, `E707`) | warning | configurable by exact code |
+| Unused Vim9 variables | hint with the LSP `unnecessary` tag | configurable by exact code |
+| Deprecated Vim9 references | hint with the LSP `deprecated` tag | configurable by exact code |
 
 Unknown diagnostics default to error.
 

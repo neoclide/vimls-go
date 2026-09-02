@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"runtime"
 	"sort"
 	"sync"
@@ -153,6 +154,10 @@ type Server struct {
 	initialized              bool
 	watchWG                  sync.WaitGroup
 	workspaceConfiguration   bool
+	// Diagnostic maps are replaced, never mutated, while mu is held. Analysis
+	// and publication may therefore snapshot their immutable map references.
+	disabledDiagnostics map[string]struct{}
+	overrideDiagnostics map[string]protocol.DiagnosticSeverity
 
 	beforeWorkspaceIdentityCheck func()
 	completionNow                func() time.Time
@@ -185,6 +190,8 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		workspaceChanged:    make(chan struct{}),
 		workspaceWake:       make(chan struct{}, 1),
 		workspaceDelay:      defaultWorkspaceRebuildDebounce,
+		disabledDiagnostics: make(map[string]struct{}),
+		overrideDiagnostics: make(map[string]protocol.DiagnosticSeverity),
 		hierarchyLimit:      maxHierarchyResults,
 		completionNow:       time.Now,
 	}
@@ -678,7 +685,8 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
 	s.workspaceMu.Lock()
 	workspaceDelay, workspaceDelayWarning := workspaceRebuildDebounceFromSettings(settings, s.workspaceDelay)
-	if workspaceDelay != s.workspaceDelay {
+	workspaceDelayChanged := workspaceDelay != s.workspaceDelay
+	if workspaceDelayChanged {
 		s.workspaceDelay = workspaceDelay
 		if s.workspaceRunning {
 			select {
@@ -689,13 +697,22 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 	}
 	s.workspaceMu.Unlock()
 	s.publishMu.Lock()
-	snapshots := s.documents.ConfigurationChanged()
+	s.mu.Lock()
+	disabled, overrides, diagnosticsWarning := diagnosticSettingsFromSettings(settings, s.disabledDiagnostics, s.overrideDiagnostics)
+	diagnosticsChanged := !maps.Equal(disabled, s.disabledDiagnostics) || !maps.Equal(overrides, s.overrideDiagnostics)
+	s.disabledDiagnostics = disabled
+	s.overrideDiagnostics = overrides
+	s.mu.Unlock()
+	var snapshots []*text.Snapshot
+	if workspaceDelayChanged || diagnosticsChanged {
+		snapshots = s.documents.ConfigurationChanged()
+	}
 	s.publishMu.Unlock()
 	for _, snapshot := range snapshots {
 		s.startAnalysis(snapshot.URI())
 	}
 	warning := ""
-	for _, next := range []string{workspaceDelayWarning} {
+	for _, next := range []string{workspaceDelayWarning, diagnosticsWarning} {
 		if next == "" {
 			continue
 		}
@@ -958,6 +975,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if !ok || work.Context.Err() != nil {
 		return
 	}
+	disabledDiagnostics := s.disabledDiagnosticsSnapshot()
 	var file *syntax.File
 	var fileAnalysis *analysis.FileAnalysis
 	if work.Snapshot.ByteLen() > maxFileBytes {
@@ -990,6 +1008,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		return
 	}
 	if work.Snapshot.ByteLen() > maxFileBytes {
+		file.Diagnostics = filterDisabledDiagnostics(file.Diagnostics, disabledDiagnostics)
 		s.publishSyntax(work, file, workspaceSnapshot.identity)
 		return
 	}
@@ -1012,6 +1031,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandAbbreviationDiagnostics(file, workspaceSnapshot.userCommandNames)...)
 	}
 	file.Diagnostics = append(file.Diagnostics, workspaceSnapshot.globalDiagnostics...)
+	file.Diagnostics = filterDisabledDiagnostics(file.Diagnostics, disabledDiagnostics)
 	sort.SliceStable(file.Diagnostics, func(left, right int) bool {
 		if file.Diagnostics[left].Span.Start != file.Diagnostics[right].Span.Start {
 			return file.Diagnostics[left].Span.Start < file.Diagnostics[right].Span.Start
@@ -1086,6 +1106,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	encoding := s.encoding
 	client := s.client
 	diagnosticRelatedInformation := s.languageFeatures.diagnosticRelatedInformation
+	overrides := s.overrideDiagnostics
 	s.mu.Unlock()
 
 	s.publishMu.Lock()
@@ -1118,6 +1139,9 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 			Code:     protocol.String(item.Code),
 			Source:   protocol.NewOptional(Name),
 			Message:  protocol.String(item.Message),
+		}
+		if severity, ok := overrides[item.Code]; ok {
+			diagnostic.Severity = severity
 		}
 		switch item.Code {
 		case "vimls/deprecated":
@@ -1166,6 +1190,25 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	if err := client.PublishDiagnostics(analysis.Context, params); err != nil && analysis.Context.Err() == nil {
 		s.logf("vimls: publish diagnostics for %s: %v", documentURI, err)
 	}
+}
+
+func (s *Server) disabledDiagnosticsSnapshot() map[string]struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.disabledDiagnostics
+}
+
+func filterDisabledDiagnostics(diagnostics []syntax.Diagnostic, disabled map[string]struct{}) []syntax.Diagnostic {
+	if len(disabled) == 0 {
+		return diagnostics
+	}
+	filtered := diagnostics[:0]
+	for _, diagnostic := range diagnostics {
+		if _, ok := disabled[diagnostic.Code]; !ok {
+			filtered = append(filtered, diagnostic)
+		}
+	}
+	return filtered
 }
 
 func protocolDiagnosticSeverity(code string) protocol.DiagnosticSeverity {

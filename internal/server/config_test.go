@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -164,5 +166,91 @@ func TestWorkspaceRebuildDebounceFromSettings(t *testing.T) {
 				t.Fatalf("delay=%s warning=%q", delay, warning)
 			}
 		})
+	}
+}
+
+func TestDiagnosticSettingsFromSettings(t *testing.T) {
+	previousDisabled := map[string]struct{}{"vim/E117": {}}
+	previousOverrides := map[string]protocol.DiagnosticSeverity{"vim/E121": protocol.DiagnosticSeverityHint}
+	for _, raw := range []string{
+		`{"disabledDiagnostics":["vim/E117","vimls/deprecated","future/code"],"overrideDiagnostics":{"vim/E121":"warning","vimls/deprecated":"information"}}`,
+		`{"vim":{"disabledDiagnostics":["vim/E117","vimls/deprecated","future/code"],"overrideDiagnostics":{"vim/E121":"warning","vimls/deprecated":"information"}}}`,
+	} {
+		disabled, overrides, warning := diagnosticSettingsFromSettings([]byte(raw), previousDisabled, previousOverrides)
+		if warning != "" || len(disabled) != 3 || len(overrides) != 2 || overrides["vim/E121"] != protocol.DiagnosticSeverityWarning || overrides["vimls/deprecated"] != protocol.DiagnosticSeverityInformation {
+			t.Fatalf("settings %s = disabled=%#v overrides=%#v warning=%q", raw, disabled, overrides, warning)
+		}
+	}
+	disabled, overrides, warning := diagnosticSettingsFromSettings([]byte(`{}`), previousDisabled, previousOverrides)
+	if warning != "" || len(disabled) != 0 || len(overrides) != 0 {
+		t.Fatalf("missing fields did not reset: disabled=%#v overrides=%#v warning=%q", disabled, overrides, warning)
+	}
+	disabled, overrides, warning = diagnosticSettingsFromSettings([]byte(`{"disabledDiagnostics":["vim/E117",1],"overrideDiagnostics":{"vim/E121":"off"}}`), previousDisabled, previousOverrides)
+	if warning == "" || len(disabled) != 1 || len(overrides) != 1 || overrides["vim/E121"] != protocol.DiagnosticSeverityHint {
+		t.Fatalf("invalid fields did not retain independently: disabled=%#v overrides=%#v warning=%q", disabled, overrides, warning)
+	}
+	disabled, overrides, warning = diagnosticSettingsFromSettings([]byte(`{"disabledDiagnostics":[]}`), previousDisabled, previousOverrides)
+	if warning != "" || len(disabled) != 0 || len(overrides) != 0 {
+		t.Fatalf("empty settings = disabled=%#v overrides=%#v warning=%q", disabled, overrides, warning)
+	}
+}
+
+type diagnosticConfigWarningClient struct {
+	protocol.UnimplementedClient
+	warnings chan string
+}
+
+func (c *diagnosticConfigWarningClient) LogMessage(_ context.Context, params *protocol.LogMessageParams) error {
+	c.warnings <- params.Message
+	return nil
+}
+
+func TestApplyDiagnosticSettingsRetainsMalformedFieldAndUpdatesOtherField(t *testing.T) {
+	client := &diagnosticConfigWarningClient{warnings: make(chan string, 1)}
+	instance := New(nil, nil, nil)
+	t.Cleanup(instance.stopAnalysis)
+	instance.client = client
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"disabledDiagnostics":["vim/E117"],"overrideDiagnostics":{"vim/E121":"hint"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"disabledDiagnostics":[1],"overrideDiagnostics":{"vim/E121":"information"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case warning := <-client.warnings:
+		if !strings.Contains(warning, "disabledDiagnostics") {
+			t.Fatalf("warning = %q", warning)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for configuration warning")
+	}
+	instance.mu.Lock()
+	disabled := maps.Clone(instance.disabledDiagnostics)
+	overrides := maps.Clone(instance.overrideDiagnostics)
+	instance.mu.Unlock()
+	if len(disabled) != 1 || len(overrides) != 1 || overrides["vim/E121"] != protocol.DiagnosticSeverityInformation {
+		t.Fatalf("configuration state = disabled=%#v overrides=%#v", disabled, overrides)
+	}
+	revision := instance.documents.ConfigRevision()
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"disabledDiagnostics":["vim/E117"],"overrideDiagnostics":{"vim/E121":"information"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := instance.documents.ConfigRevision(); got != revision {
+		t.Fatalf("unchanged diagnostics changed config revision from %d to %d", revision, got)
+	}
+}
+
+func TestInitializeDoesNotReadDiagnosticInitializationOptions(t *testing.T) {
+	instance := New(nil, nil, nil)
+	t.Cleanup(instance.stopAnalysis)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		InitializationOptions: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E117"],"overrideDiagnostics":{"vim/E121":"hint"}}`)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	instance.mu.Lock()
+	defer instance.mu.Unlock()
+	if len(instance.disabledDiagnostics) != 0 || len(instance.overrideDiagnostics) != 0 {
+		t.Fatalf("initializationOptions changed diagnostic settings: disabled=%#v overrides=%#v", instance.disabledDiagnostics, instance.overrideDiagnostics)
 	}
 }
