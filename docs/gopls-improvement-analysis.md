@@ -287,7 +287,10 @@ URI 一个完成结果加一个 in-flight 结果足够；只有长期 profile �
 - `internal/server/workspace_build_edge_test.go`
 - `internal/workspace/index_test.go`、`import_graph_test.go` 仅在需要补原语测试时修改
 
-### 5. push diagnostics 按内容去重，同时在编辑后强制重发
+### 5. push diagnostics 按内容去重，同时在编辑后强制重发 [已完成]
+
+- **状态**：已完成
+- **实施改动**：在 `internal/server/server.go` 中将 `published map[string]bool` 扩展为 `published map[string]publishedDiagnosticsState`，记录 `{hasDiagnostics, hash, hasHash, mustPublish, lastVersion, hasLastVersion}`；实现 `hashProtocolDiagnostics` 对稳定排序后的 LSP diagnostics 计算确定性 SHA-256 哈希（覆盖 range、severity、code、source、message、tags 以及 relatedInformation）；在 `DidOpen`、`DidChange`、`DidSave` 和配置诊断变更时标记 `mustPublish`；在发布阶段，若诊断非空且内容哈希与版本均无变化且未标记强制发布则安全跳过，防止无效重复推送；当诊断由非空变为空时发布一次空诊断完成清除，后续纯重复空结果不再发送；在 `diagnostics_test.go` 中新增 `TestPushDiagnosticsDeduplicationAndResendOnEdit`（验证同一快照重复分析不重复发送、新版本携带新 version 强制重发、非空变空清理与后续空结果不重复发送）以及 `TestPushDiagnosticsHashChangesOnConfiguration`（验证配置修改诊断严重级别导致 hash 变化并及时触发推送）。
 
 **当前证据**
 

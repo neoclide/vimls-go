@@ -1273,3 +1273,114 @@ func waitForDiagnosticsForURI(t *testing.T, published <-chan *protocol.PublishDi
 		}
 	}
 }
+
+func openDiagnosticsServer(t *testing.T) (*Server, *diagnosticClient) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 10)}
+	instance.mu.Lock()
+	instance.client = client
+	instance.mu.Unlock()
+	return instance, client
+}
+
+func TestPushDiagnosticsDeduplicationAndResendOnEdit(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-dedup.vim")
+	source := "vim9script\necho unknownVar\n"
+
+	// 1. Open document at version 1 (has 1 diagnostic)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) != 1 {
+		t.Fatalf("first diagnostics = %#v", first)
+	}
+	if v, ok := first.Version.Get(); !ok || v != 1 {
+		t.Fatalf("first version = %v, want 1", v)
+	}
+
+	// 2. Pure repeated analysis on unchanged snapshot must NOT publish duplicate
+	instance.startAnalysis(documentURI.String())
+	select {
+	case duplicate := <-client.published:
+		t.Fatalf("unexpected duplicate publication for identical snapshot: %#v", duplicate)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	// 3. Edit to version 2 (same diagnostic content, but must publish due to new version)
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	second := waitForDiagnostics(t, client.published)
+	if len(second.Diagnostics) != 1 {
+		t.Fatalf("second diagnostics = %#v", second)
+	}
+	if v, ok := second.Version.Get(); !ok || v != 2 {
+		t.Fatalf("second version = %v, want 2", v)
+	}
+
+	// 4. Edit to version 3 fixing the error (transition from non-empty to empty)
+	cleanSource := "vim9script\nvar unknownVar = 42\necho unknownVar\n"
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 3},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: cleanSource}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	third := waitForDiagnostics(t, client.published)
+	if len(third.Diagnostics) != 0 {
+		t.Fatalf("third diagnostics should be empty to clear, got %#v", third)
+	}
+	if v, ok := third.Version.Get(); !ok || v != 3 {
+		t.Fatalf("third version = %v, want 3", v)
+	}
+
+	// 5. Subsequent repeated analysis on clean snapshot must NOT publish
+	instance.startAnalysis(documentURI.String())
+	select {
+	case duplicate := <-client.published:
+		t.Fatalf("unexpected duplicate publication for clean snapshot: %#v", duplicate)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestPushDiagnosticsHashChangesOnConfiguration(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-config-hash.vim")
+	source := "vim9script\necho unknownVar\n"
+
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) != 1 {
+		t.Fatalf("first diagnostics = %#v", first)
+	}
+	initialSeverity := first.Diagnostics[0].Severity
+
+	// Override severity in configuration
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"diagnostic":{"override":{"vim/E121":"information"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := waitForDiagnostics(t, client.published)
+	if len(updated.Diagnostics) != 1 {
+		t.Fatalf("updated diagnostics = %#v", updated)
+	}
+	if updated.Diagnostics[0].Severity == initialSeverity {
+		t.Fatalf("expected severity to change, got %v", updated.Diagnostics[0].Severity)
+	}
+}

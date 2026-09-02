@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -59,6 +61,15 @@ type inFlightParse struct {
 	done      chan struct{}
 	file      *syntax.File
 	analysis  *analysis.FileAnalysis
+}
+
+type publishedDiagnosticsState struct {
+	hasDiagnostics bool
+	hash           [32]byte
+	hasHash        bool
+	mustPublish    bool
+	lastVersion    int32
+	hasLastVersion bool
 }
 
 // semanticTokenResult is immutable after installation. The latest result for
@@ -151,7 +162,7 @@ type Server struct {
 	publishMu                   sync.Mutex
 	parsed                      map[string]parsedDocument
 	parseInFlight               map[string]*inFlightParse
-	published                   map[string]bool
+	published                   map[string]publishedDiagnosticsState
 	pullDiagnosticResults       map[string]pullDiagnosticResult
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult
@@ -225,7 +236,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		analysisRunning:       make(map[string]struct{}),
 		parsed:                make(map[string]parsedDocument),
 		parseInFlight:         make(map[string]*inFlightParse),
-		published:             make(map[string]bool),
+		published:             make(map[string]publishedDiagnosticsState),
 		workspaceIndex:        newWorkspaceIndex(),
 		workspaceGraph:        graph,
 		workspaceGraphView:    graph.Snapshot(),
@@ -632,6 +643,9 @@ func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 	document := params.TextDocument
 	s.publishMu.Lock()
 	snapshot := s.documents.Open(document.URI.String(), document.Version, document.Text)
+	st := s.published[snapshot.URI()]
+	st.mustPublish = true
+	s.published[snapshot.URI()] = st
 	var dependents []string
 	if snapshot.ByteLen() > maxFileBytes {
 		dependents = s.replaceWorkspaceFile(snapshot.URI(), nil)
@@ -672,6 +686,11 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 	s.publishMu.Lock()
 	snapshot, changed, err := s.documents.Change(params.TextDocument.URI.String(), params.TextDocument.Version, encoding, changes)
 	var dependents []string
+	if err == nil {
+		st := s.published[params.TextDocument.URI.String()]
+		st.mustPublish = true
+		s.published[params.TextDocument.URI.String()] = st
+	}
 	if err == nil && changed {
 		if snapshot.ByteLen() > maxFileBytes {
 			dependents = s.replaceWorkspaceFile(snapshot.URI(), nil)
@@ -694,6 +713,11 @@ func (s *Server) DidSave(_ context.Context, params *protocol.DidSaveTextDocument
 	s.publishMu.Lock()
 	snapshot, changed, err := s.documents.Save(params.TextDocument.URI.String(), params.Text)
 	var dependents []string
+	if err == nil {
+		st := s.published[params.TextDocument.URI.String()]
+		st.mustPublish = true
+		s.published[params.TextDocument.URI.String()] = st
+	}
 	if err == nil && changed {
 		if snapshot.ByteLen() > maxFileBytes {
 			dependents = s.replaceWorkspaceFile(snapshot.URI(), nil)
@@ -723,7 +747,7 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	delete(s.pullDiagnosticResults, documentURI)
 	delete(s.semanticTokenResults, documentURI)
 	delete(s.initialRefreshPending, documentURI)
-	clearDiagnostics := s.published[documentURI]
+	clearDiagnostics := s.published[documentURI].hasDiagnostics
 	delete(s.published, documentURI)
 	s.publishMu.Unlock()
 	if closed {
@@ -791,6 +815,12 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 	s.mu.Unlock()
 	var snapshots []*text.Snapshot
 	if workspaceDelayChanged || diagnosticsChanged {
+		if diagnosticsChanged {
+			for uriKey, st := range s.published {
+				st.mustPublish = true
+				s.published[uriKey] = st
+			}
+		}
 		snapshots = s.documents.ConfigurationChanged()
 	}
 	s.publishMu.Unlock()
@@ -1328,13 +1358,39 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 		s.installPullDiagnosticResultLocked(analysis, identity, diagnostics)
 		return initialRefresh
 	}
-	if len(diagnostics) == 0 && !s.published[documentURI] {
-		return initialRefresh
-	}
+	pubState := s.published[documentURI]
+	curVersion, hasVersion := analysis.Snapshot.Version()
+	diagHash := hashProtocolDiagnostics(diagnostics)
+
 	if len(diagnostics) == 0 {
-		delete(s.published, documentURI)
+		if !pubState.hasDiagnostics {
+			return initialRefresh
+		}
+		pubState = publishedDiagnosticsState{
+			hasDiagnostics: false,
+			mustPublish:    false,
+			hasLastVersion: hasVersion,
+			lastVersion:    curVersion,
+		}
+		s.published[documentURI] = pubState
 	} else {
-		s.published[documentURI] = true
+		unchanged := pubState.hasDiagnostics &&
+			!pubState.mustPublish &&
+			pubState.hasHash &&
+			pubState.hash == diagHash &&
+			(!hasVersion || (pubState.hasLastVersion && pubState.lastVersion == curVersion))
+		if unchanged {
+			return initialRefresh
+		}
+		pubState = publishedDiagnosticsState{
+			hasDiagnostics: true,
+			hasHash:        true,
+			hash:           diagHash,
+			mustPublish:    false,
+			hasLastVersion: hasVersion,
+			lastVersion:    curVersion,
+		}
+		s.published[documentURI] = pubState
 	}
 	if client == nil {
 		return initialRefresh
@@ -1401,6 +1457,47 @@ func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding te
 		diagnostics = append(diagnostics, diagnostic)
 	}
 	return diagnostics
+}
+
+func hashProtocolDiagnostics(diagnostics []protocol.Diagnostic) [32]byte {
+	h := sha256.New()
+	for _, d := range diagnostics {
+		binary.Write(h, binary.LittleEndian, d.Range.Start.Line)
+		binary.Write(h, binary.LittleEndian, d.Range.Start.Character)
+		binary.Write(h, binary.LittleEndian, d.Range.End.Line)
+		binary.Write(h, binary.LittleEndian, d.Range.End.Character)
+		binary.Write(h, binary.LittleEndian, int32(d.Severity))
+		if d.Code != nil {
+			fmt.Fprintf(h, "%v", d.Code)
+		}
+		h.Write([]byte{0})
+		if src, ok := d.Source.Get(); ok {
+			h.Write([]byte(src))
+		}
+		h.Write([]byte{0})
+		if d.Message != nil {
+			fmt.Fprintf(h, "%v", d.Message)
+		}
+		h.Write([]byte{0})
+		if tags := d.Tags.Slice(); len(tags) > 0 {
+			for _, tag := range tags {
+				binary.Write(h, binary.LittleEndian, int32(tag))
+			}
+		}
+		for _, rel := range d.RelatedInformation {
+			h.Write([]byte(rel.Location.URI))
+			h.Write([]byte{0})
+			binary.Write(h, binary.LittleEndian, rel.Location.Range.Start.Line)
+			binary.Write(h, binary.LittleEndian, rel.Location.Range.Start.Character)
+			binary.Write(h, binary.LittleEndian, rel.Location.Range.End.Line)
+			binary.Write(h, binary.LittleEndian, rel.Location.Range.End.Character)
+			h.Write([]byte(rel.Message))
+			h.Write([]byte{0})
+		}
+	}
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
 }
 
 func (s *Server) disabledDiagnosticsSnapshot() map[string]struct{} {
