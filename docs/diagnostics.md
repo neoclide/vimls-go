@@ -57,7 +57,6 @@ the default message more specific without changing its code.
 | `vimls/normal-without-bang` | Warning | :normal may invoke user-defined mappings; prefer :normal! |
 | `vimls/recursive-map` | Warning | mapping may recursively expand user mappings |
 | `vimls/set-vs-setlocal` | Warning | :set may modify a global option; consider :setlocal |
-| `vimls/target-version` | Warning | feature requires a newer Vim target version |
 | `vimls/trailing-expression` | Information | unexpected text after expression |
 | `vimls/trailing-type` | Information | unexpected text after type |
 | `vimls/type-too-deep` | Information | type nesting exceeds parser limit |

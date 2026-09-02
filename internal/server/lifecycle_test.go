@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 
 func TestServerLifecycle(t *testing.T) {
 	input := encodeFrames(t,
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"initializationOptions":{"targetVersion":"9.1.1232"}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`,
 		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
 		`{"jsonrpc":"2.0","method":"custom/notification"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`,
@@ -25,9 +24,6 @@ func TestServerLifecycle(t *testing.T) {
 	instance := New(&input, &output, &logs)
 	if code := instance.Run(context.Background()); code != 0 {
 		t.Fatalf("exit code = %d, output = %q, logs = %s", code, output.String(), logs.String())
-	}
-	if got := instance.TargetVersion().String(); got != "9.1.1232" {
-		t.Fatalf("target version = %s", got)
 	}
 	messages := decodeFrames(t, &output)
 	if len(messages) != 2 {
@@ -114,30 +110,6 @@ func TestServerRejectsInvalidLifecycleShapes(t *testing.T) {
 	}
 }
 
-func TestServerWarnsForInvalidTargetAfterInitialized(t *testing.T) {
-	input := encodeFrames(t,
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"initializationOptions":{"targetVersion":"9.0"}}}`,
-		`{"jsonrpc":"2.0","method":"initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`,
-		`{"jsonrpc":"2.0","method":"exit"}`,
-	)
-	var output, logs bytes.Buffer
-	instance := New(&input, &output, &logs)
-	if code := instance.Run(context.Background()); code != 0 {
-		t.Fatalf("exit code = %d, output = %q, logs = %q", code, output.String(), logs.String())
-	}
-	if got := instance.TargetVersion().String(); got != DefaultTargetVersion {
-		t.Fatalf("target = %s", got)
-	}
-	messages := decodeFrames(t, &output)
-	if len(messages) != 3 || string(messages[1]["method"]) != `"window/logMessage"` {
-		t.Fatalf("messages = %#v", messages)
-	}
-	if !strings.Contains(string(messages[1]["params"]), "versions before 9.1") {
-		t.Fatalf("warning = %s", messages[1]["params"])
-	}
-}
-
 func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	t.Cleanup(func() { _ = serverConn.Close() })
@@ -157,14 +129,7 @@ func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 	if string(configuration["method"]) != `"workspace/configuration"` {
 		t.Fatalf("configuration request = %#v", configuration)
 	}
-	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"result":[{"targetVersion":"9.2.4"}]}`)
-	deadline := time.Now().Add(time.Second)
-	for instance.TargetVersion().String() != "9.2.0004" && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if got := instance.TargetVersion().String(); got != "9.2.0004" {
-		t.Fatalf("target = %s, logs = %q", got, logs.String())
-	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"result":[{"unresolvedSeverity":"hint"}]}`)
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
 	if message := readFrame(t, reader); string(message["id"]) != "2" {
 		t.Fatalf("shutdown response = %#v", message)

@@ -306,23 +306,20 @@ func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
 	}
 }
 
-func TestInitializationTargetOverrideHasPrecedence(t *testing.T) {
-	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"targetVersion":"9.2.4","unresolvedSeverity":"hint"}`))}
+func TestInitializationConfigurationAppliesUnresolvedSeverity(t *testing.T) {
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"unresolvedSeverity":"hint"}`))}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
 	supported := true
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
-		InitializationOptions: []byte(`{"targetVersion":"9.1.1232"}`),
+		InitializationOptions: []byte(`{}`),
 		Capabilities:          protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{Configuration: &supported}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
-	}
-	if got := instance.TargetVersion().String(); got != "9.1.1232" {
-		t.Fatalf("target version = %q", got)
 	}
 	instance.mu.Lock()
 	severity := instance.unresolvedSeverity
@@ -371,14 +368,14 @@ func TestServerPublishesVersionedSyntaxDiagnosticsAndClearsThem(t *testing.T) {
 	}
 }
 
-func TestServerPublishesVersionedSemanticDiagnosticsAndClearsThem(t *testing.T) {
+func TestServerPublishesSemanticDiagnosticsAndClearsThem(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	defer instance.stopAnalysis()
 	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
 	instance.mu.Lock()
 	instance.client = client
 	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{InitializationOptions: []byte(`{"targetVersion":"9.1.0000"}`)}); err != nil {
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
 		t.Fatal(err)
 	}
 	documentURI := uri.MustParse("file:///semantic-diagnostics.vim")
@@ -1019,38 +1016,8 @@ func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
 	assertCached("import diagnostics open target", targetSnapshot, targetFile, targetDiagnostics)
 }
 
-func TestTargetVersionCompatibilityDiagnosticsReanalyze(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
-	instance.mu.Lock()
-	instance.client = client
-	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	documentURI := uri.MustParse("file:///versioned-syntax.vim")
-	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "vim9script\nenum Color\n  Red\nendenum\n"},
-	})
-	snapshot, ok := instance.documents.Snapshot(documentURI.String())
-	if !ok {
-		t.Fatal("snapshot is missing")
-	}
-	raw := instance.parseSnapshot(snapshot)
-	_ = instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: []byte(`{"targetVersion":"9.1.0000"}`)})
-	updated := waitForDiagnostics(t, client.published)
-	if len(updated.Diagnostics) != 1 || updated.Diagnostics[0].Code != protocol.String("vimls/target-version") {
-		t.Fatalf("historical-target diagnostics = %#v", updated)
-	}
-	current, ok := instance.documents.Snapshot(documentURI.String())
-	if !ok || current != snapshot || instance.parseSnapshot(current) != raw {
-		t.Fatalf("configuration changed snapshot/cache = %p/%p, want %p/%p", current, instance.parseSnapshot(current), snapshot, raw)
-	}
-}
-
 func TestWorkspaceConfigurationRequestOnInitializedAndNullChange(t *testing.T) {
-	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"targetVersion":"9.2.4"}`))}
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"unresolvedSeverity":"hint"}`))}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
@@ -1064,15 +1031,21 @@ func TestWorkspaceConfigurationRequestOnInitializedAndNullChange(t *testing.T) {
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if client.calls != 1 || instance.TargetVersion().String() != "9.2.0004" {
-		t.Fatalf("initialized configuration calls=%d target=%s", client.calls, instance.TargetVersion().String())
+	instance.mu.Lock()
+	severity := instance.unresolvedSeverity
+	instance.mu.Unlock()
+	if client.calls != 1 || severity != syntax.DiagnosticHint {
+		t.Fatalf("initialized configuration calls=%d severity=%v", client.calls, severity)
 	}
-	client.settings = protocol.LSPAny([]byte(`{"targetVersion":"latest"}`))
+	client.settings = protocol.LSPAny([]byte(`{"unresolvedSeverity":"information"}`))
 	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte("null"))}); err != nil {
 		t.Fatal(err)
 	}
-	if client.calls != 2 || instance.TargetVersion().String() != "latest" {
-		t.Fatalf("changed configuration calls=%d target=%s", client.calls, instance.TargetVersion().String())
+	instance.mu.Lock()
+	severity = instance.unresolvedSeverity
+	instance.mu.Unlock()
+	if client.calls != 2 || severity != syntax.DiagnosticInformation {
+		t.Fatalf("changed configuration calls=%d severity=%v", client.calls, severity)
 	}
 }
 

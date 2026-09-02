@@ -274,9 +274,8 @@ Configuration and workspace identity changes have direct stale-result tests.
 `TestGraphRevisionRejectsStaleDiagnostics` covers in-flight document and
 configuration revisions plus index and import-graph replacement;
 `TestServerCloseReopenRejectsPausedRestore` covers a close/reopen while disk
-restoration is paused; and `TestTargetVersionCompatibilityDiagnosticsReanalyze`
-covers target changes without replacing the immutable document snapshot or
-parser cache. These tests must remain deterministic without timing sleeps.
+restoration is paused. These tests must remain deterministic without timing
+sleeps.
 
 ## Performance budgets
 

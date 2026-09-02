@@ -15,7 +15,7 @@ func TestInitializeAdvertisesNegotiatedOptionalCapabilities(t *testing.T) {
 	t.Cleanup(s.stopAnalysis)
 	result, err := s.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI:               &root,
-		InitializationOptions: protocol.LSPAny([]byte(`{"targetVersion":"9.0","runtimepath":1,"unresolvedSeverity":"bad"}`)),
+		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":1,"unresolvedSeverity":"bad"}`)),
 		Capabilities: protocol.ClientCapabilities{
 			Workspace: &protocol.WorkspaceClientCapabilities{Configuration: &value, DidChangeWatchedFiles: &protocol.DidChangeWatchedFilesClientCapabilities{DynamicRegistration: &value, RelativePatternSupport: &value}},
 			TextDocument: &protocol.TextDocumentClientCapabilities{

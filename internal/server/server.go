@@ -95,8 +95,6 @@ type Server struct {
 
 	mu                  sync.Mutex
 	state               state
-	targetVersion       TargetVersion
-	targetOverride      bool
 	unresolvedSeverity  syntax.DiagnosticSeverity
 	pendingWarning      string
 	client              protocol.Client
@@ -162,14 +160,12 @@ type Server struct {
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {
-	target, _ := ParseTargetVersion(DefaultTargetVersion)
 	analysisContext, analysisCancel := context.WithCancel(context.Background())
 	graph := workspace.NewImportGraph()
 	return &Server{
 		input:               input,
 		output:              output,
 		log:                 logOutput,
-		targetVersion:       target,
 		unresolvedSeverity:  defaultUnresolvedSeverity,
 		cancellations:       make(map[jsonrpc2.ID]context.CancelFunc),
 		documents:           workspace.NewDocuments(),
@@ -198,12 +194,6 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 
 func newWorkspaceIndex() *workspace.Index {
 	return workspace.NewIndex(maxWorkspaceFiles, maxIndexBytes, maxRelationshipFactsPerFile, maxRelationshipFacts)
-}
-
-func (s *Server) TargetVersion() TargetVersion {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.targetVersion
 }
 
 // Run serves one LSP session until exit, EOF, cancellation, or a transport error.
@@ -420,7 +410,6 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	openClose := true
 	includeText := true
 	changeKind := protocol.TextDocumentSyncKindIncremental
-	targetVersion, targetOverride, targetWarning := targetVersionFromOptions([]byte(params.InitializationOptions))
 	runtimePaths, runtimepathConfigured, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
 	unresolvedSeverity, unresolvedWarning := unresolvedSeverityFromOptions([]byte(params.InitializationOptions))
 	workspaceDelay, workspaceDelayWarning := workspaceRebuildDebounceFromOptions([]byte(params.InitializationOptions))
@@ -435,10 +424,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	completion := completionCapabilitiesFromClient(params.Capabilities.TextDocument)
 	languageFeatures := languageFeatureCapabilitiesFromClient(params.Capabilities.TextDocument)
 	s.mu.Lock()
-	s.targetVersion = targetVersion
-	s.targetOverride = targetOverride
 	s.unresolvedSeverity = unresolvedSeverity
-	s.pendingWarning = targetWarning
+	s.pendingWarning = ""
 	for _, warning := range []string{runtimepathWarning, unresolvedWarning, workspaceDelayWarning} {
 		if warning == "" {
 			continue
@@ -697,10 +684,6 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 
 func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
 	s.mu.Lock()
-	var targetWarning string
-	if !s.targetOverride {
-		s.targetVersion, targetWarning = targetVersionFromSettings(settings, s.targetVersion)
-	}
 	var unresolvedWarning string
 	s.unresolvedSeverity, unresolvedWarning = unresolvedSeverityFromSettings(settings, s.unresolvedSeverity)
 	s.mu.Unlock()
@@ -722,7 +705,7 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 	for _, snapshot := range snapshots {
 		s.startAnalysis(snapshot.URI())
 	}
-	warning := targetWarning
+	warning := ""
 	for _, next := range []string{unresolvedWarning, workspaceDelayWarning} {
 		if next == "" {
 			continue
@@ -986,10 +969,6 @@ func (s *Server) analyzeDocument(documentURI string) {
 	if !ok || work.Context.Err() != nil {
 		return
 	}
-	target := s.TargetVersion()
-	if target.Latest {
-		target, _ = ParseTargetVersion(MaximumTargetVersion)
-	}
 	var file *syntax.File
 	var fileAnalysis *analysis.FileAnalysis
 	if work.Snapshot.ByteLen() > maxFileBytes {
@@ -1006,7 +985,6 @@ func (s *Server) analyzeDocument(documentURI string) {
 		parsed := *raw
 		parsed.Diagnostics = append([]syntax.Diagnostic(nil), raw.Diagnostics...)
 		file = &parsed
-		file.Diagnostics = append(file.Diagnostics, syntax.CompatibilityDiagnostics(file, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})...)
 		if s.beforeAnalyzeForTest != nil {
 			s.beforeAnalyzeForTest(file)
 		}
@@ -1027,7 +1005,6 @@ func (s *Server) analyzeDocument(documentURI string) {
 		return
 	}
 	versionedAnalysis := *fileAnalysis
-	versionedAnalysis.Diagnostics = analysis.DiagnosticsForVersion(file, fileAnalysis.Diagnostics, syntax.Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch})
 	autoload := false
 	for _, root := range workspaceSnapshot.roots {
 		if _, ok := workspaceAutoloadPath(workspaceSnapshot.path, root); ok {

@@ -21,7 +21,7 @@ Its grammar and metadata ceiling supports Vim syntax through **v9.2.1015**, cove
 
 | Feature Category | Capabilities & Supported Behaviors |
 | --- | --- |
-| **Diagnostics** | • Syntax and structural error detection with resilient error recovery.<br>• Target Vim version compatibility verification (e.g. flagging syntax newer than configured `targetVersion`).<br>• Unresolved identifier detection (`E117`, `E121`, `E1001`, `E1089`).<br>• Statically provable Vim9 type errors and immutable variable re-assignment checks.<br>• Unused Vim9 variables and deprecated reference hints (`unnecessary`, `deprecated` tags). |
+| **Diagnostics** | • Syntax and structural error detection with resilient error recovery.<br>• Unresolved identifier detection (`E117`, `E121`, `E1001`, `E1089`).<br>• Statically provable Vim9 type errors and immutable variable re-assignment checks.<br>• Unused Vim9 variables and deprecated reference hints (`unnecessary`, `deprecated` tags). |
 | **Code Completion** | Context-aware completion with detail and documentation for:<br>• Ex commands and user commands<br>• Built-in and user-defined functions<br>• Scope variables (`g:`, `b:`, `w:`, `t:`, `s:`, `v:`, local/Vim9 variables)<br>• Options (`:set`, `&opt`)<br>• Autocommand events and groups (`:autocmd`)<br>• Key mappings (`:map`, `<silent>`, `<expr>`, keycodes like `<CR>`, `<Leader>`)<br>• Syntax and highlight groups<br>• Imports, exported members, and object/class members<br>• Autoload functions and color schemes |
 | **Hover & Docs** | Shows symbol kinds, inferred types, signatures, doc comments, and embedded official Vim help tags and documentation. |
 | **Signature Help** | Parameter lists, active parameter highlighting, and documentation for built-in functions, user-defined functions, imported callables, methods, and class constructors. |
@@ -98,7 +98,6 @@ Add to your `coc-settings.json` (open with `:CocConfig`):
       "command": "vimls",
       "filetypes": ["vim"],
       "initializationOptions": {
-        "targetVersion": "9.2.1015",
         "unresolvedSeverity": "warning",
         "workspaceRebuildDebounce": 100
       }
@@ -120,7 +119,6 @@ vim.api.nvim_create_autocmd("FileType", {
       cmd = { "vimls" },
       root_dir = vim.fs.root(args.buf, { ".git", ".vim" }) or vim.fs.dirname(vim.api.nvim_buf_get_name(args.buf)),
       init_options = {
-        targetVersion = "9.2.1015",
         unresolvedSeverity = "warning",
         workspaceRebuildDebounce = 100,
       },
@@ -142,7 +140,6 @@ if executable('vimls')
         \ 'cmd': {server_info -> ['vimls']},
         \ 'allowlist': ['vim'],
         \ 'initialization_options': {
-        \   'targetVersion': '9.2.1015',
         \   'unresolvedSeverity': 'warning',
         \   'workspaceRebuildDebounce': 100
         \ },
@@ -159,7 +156,6 @@ The following settings can be passed in `initializationOptions` or dynamically v
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
-| `targetVersion` | `string` | `"9.2.1015"` | Minimum/target Vim version (e.g. `"9.1"`, `"9.2.1015"`). Used for version-sensitive compatibility diagnostics. |
 | `runtimepath` | `string[]` | *Auto-discovered* | Custom array of ordered runtime paths. An explicit empty array `[]` disables runtime indexing. |
 | `unresolvedSeverity` | `string` | `"warning"` | Diagnostic severity for unresolved symbols (`"error"`, `"warning"`, `"information"`, `"hint"`). |
 | `workspaceRebuildDebounce` | `number` | `100` | Milliseconds to wait after the latest workspace rebuild trigger; `0` rebuilds immediately. |

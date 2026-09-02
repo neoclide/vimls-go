@@ -34,7 +34,7 @@ func TestServerDocumentSynchronization(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///sync.vim","languageId":"vim","version":1,"text":"a𐐀b\n"}}}`,
 		`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///sync.vim","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":5}},"text":"X"}]}}`,
 		`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"file:///sync.vim"},"text":"saved\n"}}`,
-		`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"vimls":{"targetVersion":"9.2.4"}}}}`,
+		`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"vimls":{"unresolvedSeverity":"hint"}}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`,
 		`{"jsonrpc":"2.0","method":"exit"}`,
 	)
@@ -56,9 +56,6 @@ func TestServerDocumentSynchronization(t *testing.T) {
 	}
 	if revision := instance.documents.ConfigRevision(); revision != 2 {
 		t.Fatalf("config revision = %d, want 2", revision)
-	}
-	if got := instance.TargetVersion().String(); got != "9.2.0004" {
-		t.Fatalf("target version = %q", got)
 	}
 	messages := decodeFrames(t, &output)
 	responses := make([]map[string]json.RawMessage, 0, 2)

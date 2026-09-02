@@ -64,7 +64,7 @@ remain dialect-specific.
 The parser follows these rules:
 
 - Derive production grammar from the pinned Vim `v9.2.1015` source, tests, and
-  runtime help. Target-version checks run later over the latest syntax tree.
+  runtime help.
 - Let each known command own both its argument boundary and detailed AST.
   A generic pass must not split a payload before regexp, mapping, substitute,
   `:syntax`, `:set`, heredoc, or embedded-command rules are known.
@@ -170,7 +170,6 @@ replace a reopened overlay.
 - Before `initialize`, accept only methods allowed by LSP.
 - Negotiate position encoding and advertise only implemented capabilities.
 - Apply `didOpen`, ordered `didChange`, `didSave`, and `didClose` to snapshots.
-- Include target-version configuration revisions in stale-result checks.
 - Associate cancellation with request context; canceled work cannot publish.
 - After `shutdown`, reject ordinary requests and wait for `exit`.
 - Stdio and TCP share framing, lifecycle, bounds, and shutdown behavior.

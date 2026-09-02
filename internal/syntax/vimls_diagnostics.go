@@ -23,7 +23,7 @@ type DiagnosticDefinition struct {
 
 // VimlsDiagnosticDefinitions is the complete, code-sorted list of diagnostics
 // owned by vimls-go. Keep entries here even when their messages are refined at
-// the emission site for a specific delimiter, command, or target version.
+// the emission site for a specific delimiter or command.
 var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/autocmd-group-not-cleared", Message: "augroup does not clear existing autocommands", Severity: DiagnosticWarning},
 	{Code: "vimls/autocmd-outside-augroup", Message: "autocommand is not contained in an augroup", Severity: DiagnosticWarning},
@@ -62,7 +62,6 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/normal-without-bang", Message: ":normal may invoke user-defined mappings; prefer :normal!", Severity: DiagnosticWarning},
 	{Code: "vimls/recursive-map", Message: "mapping may recursively expand user mappings", Severity: DiagnosticWarning},
 	{Code: "vimls/set-vs-setlocal", Message: ":set may modify a global option; consider :setlocal", Severity: DiagnosticWarning},
-	{Code: "vimls/target-version", Message: "feature requires a newer Vim target version", Severity: DiagnosticWarning},
 	{Code: "vimls/trailing-expression", Message: "unexpected text after expression", Severity: DiagnosticInformation},
 	{Code: "vimls/trailing-type", Message: "unexpected text after type", Severity: DiagnosticInformation},
 	{Code: "vimls/type-too-deep", Message: "type nesting exceeds parser limit", Severity: DiagnosticInformation},

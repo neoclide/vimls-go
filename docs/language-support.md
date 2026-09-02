@@ -12,7 +12,7 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 
 | Feature | Support |
 | --- | --- |
-| Diagnostics | Syntax errors, version compatibility, unresolved names, invalid calls, imports and statically provable Vim9 type errors. |
+| Diagnostics | Syntax errors, unresolved names, invalid calls, imports and statically provable Vim9 type errors. |
 | Completion | Commands, variables, functions, options, events, mappings, highlight and syntax groups, imports, members, autoload names, color schemes and other context-specific values. |
 | Hover | Symbol kind, type, signature, source comments and pinned Vim help. Variables always show a type, including `unknown` and explicit Vim9 `any`. |
 | Signature help | Built-in functions and statically resolved user functions, imported functions, function values, methods and constructors. |
@@ -52,9 +52,7 @@ language rules.
 
 ## Configuration
 
-The default target is Vim v9.2.1015. `vimls.targetVersion` may select an older
-Vim 9.1 or 9.2 patch for compatibility diagnostics. Runtime roots and
-diagnostic severity can also be configured.
+Runtime roots and diagnostic severity can be configured.
 
 See [Client configuration](configuration.md) for the supported settings and
 runtimepath notification.

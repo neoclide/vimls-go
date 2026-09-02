@@ -2,6 +2,18 @@ package syntax
 
 import "strings"
 
+func commandInsideBlock(command *Command, blocks []Block, kind BlockKind) bool {
+	if command == nil {
+		return false
+	}
+	for blockIndex := command.Block; blockIndex >= 0 && blockIndex < len(blocks); blockIndex = blocks[blockIndex].Parent {
+		if blocks[blockIndex].Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 func parseImport(file *File, command *Command) {
 	diagnosticStart := len(file.Diagnostics)
 	misplaced := commandInsideBlock(command, file.Blocks, BlockDef) || commandInsideBlock(command, file.Blocks, BlockFunction)

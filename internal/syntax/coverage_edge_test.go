@@ -361,26 +361,6 @@ func TestKnownNonListAndBuiltinTypeNameBoundaries(t *testing.T) {
 	}
 }
 
-func TestVersionFormattingAndOrderingBoundaries(t *testing.T) {
-	version := Version{Major: 9, Minor: 1, Patch: 30}
-	if version.String() != "9.1.0030" {
-		t.Fatalf("version string = %q", version.String())
-	}
-	for _, test := range []struct {
-		left, right Version
-		want        bool
-	}{
-		{Version{Major: 8}, Version{Major: 9}, true}, {Version{Major: 9, Minor: 0}, Version{Major: 9, Minor: 1}, true}, {Version{Major: 9, Minor: 1, Patch: 29}, version, true}, {version, version, false}, {Version{Major: 10}, version, false},
-	} {
-		if got := test.left.before(test.right); got != test.want {
-			t.Errorf("%s before %s = %t", test.left, test.right, got)
-		}
-	}
-	if CompatibilityDiagnostics(nil, version) != nil {
-		t.Fatal("nil compatibility file produced diagnostics")
-	}
-}
-
 func TestScannerRegexpAndHeredocPrimitiveBoundaries(t *testing.T) {
 	for _, test := range []struct {
 		pattern string

@@ -15,8 +15,6 @@ Deliver:
 - Bounded LSP `Content-Length` framing and JSON-RPC request/notification/error
   handling.
 - `initialize`, `initialized`, `shutdown`, and `exit` lifecycle.
-- Parse and validate `vimls.targetVersion` from initialization/workspace
-  configuration using `docs/configuration.md`.
 - Logging to stderr and no non-protocol stdout output.
 
 Exit gate: fragmented and coalesced frames, malformed JSON, unknown methods,
