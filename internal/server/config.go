@@ -240,50 +240,90 @@ func isDirectory(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// workspaceSettingsObject decodes a workspace-settings payload. Clients either
+// push the bare vimls settings object through workspace/didChangeConfiguration
+// or wrap them in a "vim" section inside their full configuration. When the
+// "vim" section is present it is the effective vimls settings object; a null
+// or missing "vim" section keeps the top level. Empty, null, and missing
+// payloads decode to an empty object without a warning, so an unset setting is
+// never an error.
+func workspaceSettingsObject(raw []byte, retain string) (map[string]json.RawMessage, string) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return map[string]json.RawMessage{}, ""
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &settings); err != nil || settings == nil {
+		return nil, "vimls: workspace settings must be an object; retaining " + retain
+	}
+	if rawVim, exists := settings["vim"]; exists {
+		if string(rawVim) == "null" {
+			return settings, ""
+		}
+		var vimSettings map[string]json.RawMessage
+		if err := json.Unmarshal(rawVim, &vimSettings); err != nil || vimSettings == nil {
+			return nil, "vimls: vim workspace settings must be an object; retaining " + retain
+		}
+		return vimSettings, ""
+	}
+	return settings, ""
+}
+
 func workspaceRebuildDebounceFromSettings(raw []byte, previous time.Duration) (time.Duration, string) {
-	if len(raw) == 0 || string(raw) == "null" {
+	settings, warning := workspaceSettingsObject(raw, "workspace.rebuildDebounce")
+	if warning != "" {
+		return previous, warning
+	}
+	rawWorkspace, exists := settings["workspace"]
+	if !exists || string(rawWorkspace) == "null" {
 		return previous, ""
 	}
-	var settings map[string]any
-	if err := json.Unmarshal(raw, &settings); err != nil {
-		return previous, "vimls: workspace settings must be an object; retaining workspaceRebuildDebounce"
+	var workspaceSettings map[string]json.RawMessage
+	if err := json.Unmarshal(rawWorkspace, &workspaceSettings); err != nil || workspaceSettings == nil {
+		return previous, "vimls: workspace settings must be an object; retaining workspace.rebuildDebounce"
 	}
-	value, exists := settings["workspaceRebuildDebounce"]
-	if nested, ok := settings["vim"].(map[string]any); ok {
-		if nestedValue, nestedExists := nested["workspaceRebuildDebounce"]; nestedExists {
-			value, exists = nestedValue, true
-		}
-	}
-	if !exists {
+	value, exists := workspaceSettings["rebuildDebounce"]
+	if !exists || string(value) == "null" {
 		return previous, ""
 	}
 	delay, ok := workspaceRebuildDebounce(value)
 	if !ok {
-		return previous, "vimls: workspaceRebuildDebounce must be a non-negative integer in milliseconds; retaining previous value"
+		return previous, "vimls: workspace.rebuildDebounce must be a non-negative integer in milliseconds; retaining previous value"
 	}
 	return delay, ""
 }
 
-func workspaceRebuildDebounce(value any) (time.Duration, bool) {
-	milliseconds, ok := value.(float64)
-	if !ok || milliseconds < 0 || milliseconds > float64((1<<63-1)/int64(time.Millisecond)) || milliseconds != float64(int64(milliseconds)) {
+func workspaceRebuildDebounce(value json.RawMessage) (time.Duration, bool) {
+	var milliseconds float64
+	if err := json.Unmarshal(value, &milliseconds); err != nil {
+		return 0, false
+	}
+	if milliseconds < 0 || milliseconds > float64((1<<63-1)/int64(time.Millisecond)) || milliseconds != float64(int64(milliseconds)) {
 		return 0, false
 	}
 	return time.Duration(milliseconds) * time.Millisecond, true
 }
 
 func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]struct{}, previousOverrides map[string]protocol.DiagnosticSeverity) (map[string]struct{}, map[string]protocol.DiagnosticSeverity, string) {
-	settings, warning := diagnosticSettingsObject(raw)
+	settings, warning := workspaceSettingsObject(raw, "previous diagnostic settings")
 	if warning != "" {
 		return previousDisabled, previousOverrides, warning
 	}
 	disabled := make(map[string]struct{})
 	overrides := make(map[string]protocol.DiagnosticSeverity)
+	rawDiagnostic, exists := settings["diagnostic"]
+	if !exists || string(rawDiagnostic) == "null" {
+		return disabled, overrides, ""
+	}
+	var diagnosticSettings map[string]json.RawMessage
+	if err := json.Unmarshal(rawDiagnostic, &diagnosticSettings); err != nil || diagnosticSettings == nil {
+		return previousDisabled, previousOverrides, "vimls: diagnostic workspace settings must be an object; retaining previous diagnostic settings"
+	}
 	warnings := make([]string, 0, 2)
-	if value, exists := settings["disabledDiagnostics"]; exists {
+	if value, exists := diagnosticSettings["disabled"]; exists && string(value) != "null" {
 		var values []json.RawMessage
 		if err := json.Unmarshal(value, &values); err != nil || values == nil {
-			warnings = append(warnings, "vimls: disabledDiagnostics must be an array of non-empty strings; retaining previous value")
+			warnings = append(warnings, "vimls: diagnostic.disabled must be an array of non-empty strings; retaining previous value")
 			disabled = maps.Clone(previousDisabled)
 		} else {
 			valid := true
@@ -296,15 +336,15 @@ func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]stru
 				disabled[code] = struct{}{}
 			}
 			if !valid {
-				warnings = append(warnings, "vimls: disabledDiagnostics must be an array of non-empty strings; retaining previous value")
+				warnings = append(warnings, "vimls: diagnostic.disabled must be an array of non-empty strings; retaining previous value")
 				disabled = maps.Clone(previousDisabled)
 			}
 		}
 	}
-	if value, exists := settings["overrideDiagnostics"]; exists {
+	if value, exists := diagnosticSettings["override"]; exists && string(value) != "null" {
 		var values map[string]json.RawMessage
 		if err := json.Unmarshal(value, &values); err != nil || values == nil {
-			warnings = append(warnings, "vimls: overrideDiagnostics must be an object of diagnostic codes to severity strings; retaining previous value")
+			warnings = append(warnings, "vimls: diagnostic.override must be an object of diagnostic codes to severity strings; retaining previous value")
 			overrides = maps.Clone(previousOverrides)
 		} else {
 			valid := true
@@ -335,7 +375,7 @@ func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]stru
 				}
 			}
 			if !valid {
-				warnings = append(warnings, "vimls: overrideDiagnostics severity must be error, warning, information, or hint; retaining previous value")
+				warnings = append(warnings, "vimls: diagnostic.override severity must be error, warning, information, or hint; retaining previous value")
 				overrides = maps.Clone(previousOverrides)
 			}
 		}
@@ -343,46 +383,17 @@ func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]stru
 	return disabled, overrides, strings.Join(warnings, "; ")
 }
 
-func diagnosticSettingsObject(raw []byte) (map[string]json.RawMessage, string) {
-	if len(strings.TrimSpace(string(raw))) == 0 || strings.TrimSpace(string(raw)) == "null" {
-		return map[string]json.RawMessage{}, ""
-	}
-	var settings map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &settings); err != nil || settings == nil {
-		return nil, "vimls: workspace settings must be an object; retaining previous diagnostic settings"
-	}
-	if nested, exists := settings["vim"]; exists {
-		var section map[string]json.RawMessage
-		if err := json.Unmarshal(nested, &section); err != nil || section == nil {
-			return nil, "vimls: vim workspace settings must be an object; retaining previous diagnostic settings"
-		}
-		settings = section
-	}
-	return settings, ""
-}
-
 func excludeRuntimePathFromSettings(raw []byte, previous bool) (bool, string) {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" || trimmed == "null" {
-		return false, ""
+	settings, warning := workspaceSettingsObject(raw, "previous excludeRuntimePath")
+	if warning != "" {
+		return previous, warning
 	}
-	var settings map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &settings); err != nil || settings == nil {
-		return previous, "vimls: workspace settings must be an object; retaining previous excludeRuntimePath"
-	}
-	if nested, exists := settings["vim"]; exists {
-		var vimSettings map[string]json.RawMessage
-		if err := json.Unmarshal(nested, &vimSettings); err != nil || vimSettings == nil {
-			return previous, "vimls: vim workspace settings must be an object; retaining previous excludeRuntimePath"
-		}
-		settings = vimSettings
-	}
-	suggest, exists := settings["suggest"]
-	if !exists || string(suggest) == "null" {
+	rawSuggest, exists := settings["suggest"]
+	if !exists || string(rawSuggest) == "null" {
 		return false, ""
 	}
 	var suggestSettings map[string]json.RawMessage
-	if err := json.Unmarshal(suggest, &suggestSettings); err != nil || suggestSettings == nil {
+	if err := json.Unmarshal(rawSuggest, &suggestSettings); err != nil || suggestSettings == nil {
 		return previous, "vimls: suggest workspace settings must be an object; retaining previous excludeRuntimePath"
 	}
 	value, exists := suggestSettings["excludeRuntimePath"]

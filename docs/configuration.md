@@ -61,16 +61,31 @@ the capability receive no progress traffic.
 If the client advertises `workspace.configuration`, vimls-go requests the
 `vim` section after `initialized` and after a
 `workspace/didChangeConfiguration` notification with null settings. The
-section supports `workspaceRebuildDebounce` and `suggest.excludeRuntimePath`:
+section's value is an object carrying the optional settings
+`workspace.rebuildDebounce`, `diagnostic.disabled`, `diagnostic.override`, and
+`suggest.excludeRuntimePath`:
 
 ```json
 {
-  "workspaceRebuildDebounce": 100,
+  "workspace": {
+    "rebuildDebounce": 100
+  },
+  "diagnostic": {
+    "disabled": ["vim/E117", "vimls/deprecated"],
+    "override": {
+      "vim/E121": "warning",
+      "vimls/deprecated": "information"
+    }
+  },
   "suggest": {
     "excludeRuntimePath": true
   }
 }
 ```
+
+Every setting is optional. A missing, empty, or `null` setting is never an
+error: it falls back to the documented default or keeps the previous value,
+and produces no warning.
 
 Clients that include settings in the notification can send the namespaced
 form directly:
@@ -82,15 +97,18 @@ form directly:
   "params": {
     "settings": {
       "vim": {
-        "workspaceRebuildDebounce": 100
+        "workspace": {
+          "rebuildDebounce": 100
+        }
       }
     }
   }
 }
 ```
 
-`workspaceRebuildDebounce` is dynamically configurable. Invalid updates retain
-the previous valid value and produce a visible warning.
+`workspace.rebuildDebounce` is dynamically configurable. When omitted, null,
+or empty the previous value is kept; invalid updates retain the previous valid
+value and produce a visible warning.
 
 `suggest.excludeRuntimePath` is a boolean workspace setting, defaulting to
 `false`. When enabled, completion omits candidates sourced from runtimepath
@@ -105,18 +123,20 @@ section:
 ```json
 {
   "vim": {
-    "disabledDiagnostics": ["vim/E117", "vimls/deprecated"],
-    "overrideDiagnostics": {
-      "vim/E121": "information",
-      "vimls/unused-variable": "warning"
+    "diagnostic": {
+      "disabled": ["vim/E117", "vimls/deprecated"],
+      "override": {
+        "vim/E121": "information",
+        "vimls/unused-variable": "warning"
+      }
     }
   }
 }
 ```
 
-`disabledDiagnostics` contains exact, non-empty diagnostic-code strings. Codes
+`diagnostic.disabled` contains exact, non-empty diagnostic-code strings. Codes
 may be native `vim/E...`, `vimls/...`, or a future code; disabling takes
-precedence over an entry in `overrideDiagnostics`. Override values are exactly
+precedence over an entry in `diagnostic.override`. Override values are exactly
 `error`, `warning`, `information`, or `hint` (lowercase); `off` is not a
 severity. Overrides affect only published LSP diagnostics and do not change
 the syntax or analysis result. Disabled diagnostics are removed before the

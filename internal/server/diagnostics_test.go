@@ -124,7 +124,7 @@ func TestDisabledDiagnosticsAreFilteredBeforeTruncationAndRepublished(t *testing
 	if len(first.Diagnostics) != maxDiagnosticsPerDocument {
 		t.Fatalf("initial diagnostics = %d, want cap", len(first.Diagnostics))
 	}
-	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"disabledDiagnostics":["vim/E171"],"overrideDiagnostics":{"vim/E171":"error"}}}`)); err != nil {
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"diagnostic":{"disabled":["vim/E171"],"override":{"vim/E171":"error"}}}}`)); err != nil {
 		t.Fatal(err)
 	}
 	filtered := waitForDiagnostics(t, client.published)
@@ -352,7 +352,7 @@ func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
 }
 
 func TestInitializationConfigurationAppliesWorkspaceSettings(t *testing.T) {
-	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"workspaceRebuildDebounce":250}`))}
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"workspace":{"rebuildDebounce":250}}`))}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
@@ -1062,7 +1062,7 @@ func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
 }
 
 func TestWorkspaceConfigurationRequestOnInitializedAndNullChange(t *testing.T) {
-	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"workspaceRebuildDebounce":250}`))}
+	client := &configurationClient{settings: protocol.LSPAny([]byte(`{"workspace":{"rebuildDebounce":250}}`))}
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = client
@@ -1082,7 +1082,7 @@ func TestWorkspaceConfigurationRequestOnInitializedAndNullChange(t *testing.T) {
 	if client.calls != 1 || delay != 250*time.Millisecond {
 		t.Fatalf("initialized configuration calls=%d delay=%s", client.calls, delay)
 	}
-	client.settings = protocol.LSPAny([]byte(`{"workspaceRebuildDebounce":0}`))
+	client.settings = protocol.LSPAny([]byte(`{"workspace":{"rebuildDebounce":0}}`))
 	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte("null"))}); err != nil {
 		t.Fatal(err)
 	}
@@ -1200,7 +1200,7 @@ func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 	if *second.ResultID == *first.ResultID {
 		t.Fatalf("reopen reused result id %q", *first.ResultID)
 	}
-	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E121"]}`))}); err != nil {
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E121"]}}`))}); err != nil {
 		t.Fatal(err)
 	}
 	third := pull(second.ResultID)
@@ -1224,7 +1224,7 @@ func TestDocumentPullDiagnosticRefreshCoalesces(t *testing.T) {
 		}}); err != nil {
 			t.Fatal(err)
 		}
-		if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E121"]}`))}); err != nil {
+		if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E121"]}}`))}); err != nil {
 			t.Fatal(err)
 		}
 		select {
@@ -1244,7 +1244,7 @@ func TestDocumentPullDiagnosticRefreshCoalesces(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E121"]}`))}); err != nil {
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E121"]}}`))}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -1252,7 +1252,7 @@ func TestDocumentPullDiagnosticRefreshCoalesces(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for refresh")
 	}
-	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"disabledDiagnostics":["vim/E117"]}`))}); err != nil {
+	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E117"]}}`))}); err != nil {
 		t.Fatal(err)
 	}
 	client.release <- struct{}{}

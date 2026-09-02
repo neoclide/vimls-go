@@ -34,7 +34,7 @@ func TestServerDocumentSynchronization(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///sync.vim","languageId":"vim","version":1,"text":"a𐐀b\n"}}}`,
 		`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///sync.vim","version":2},"contentChanges":[{"range":{"start":{"line":0,"character":1},"end":{"line":0,"character":5}},"text":"X"}]}}`,
 		`{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"file:///sync.vim"},"text":"saved\n"}}`,
-		`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"vim":{"workspaceRebuildDebounce":0}}}}`,
+		`{"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{"settings":{"vim":{"workspace":{"rebuildDebounce":0}}}}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`,
 		`{"jsonrpc":"2.0","method":"exit"}`,
 	)

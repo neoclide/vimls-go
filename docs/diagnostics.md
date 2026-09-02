@@ -27,8 +27,8 @@ change.
 ## vimls-owned diagnostic codes
 
 The default severity can be changed for publication with the workspace
-setting `vim.overrideDiagnostics`, whose exact-code values are `error`,
-`warning`, `information`, or `hint`. `vim.disabledDiagnostics` suppresses
+setting `vim.diagnostic.override`, whose exact-code values are `error`,
+`warning`, `information`, or `hint`. `vim.diagnostic.disabled` suppresses
 exact matching codes, and takes precedence over any severity override. These
 settings affect only LSP output; parser and analysis diagnostics retain their
 original definitions and severities. For example:
@@ -36,15 +36,19 @@ original definitions and severities. For example:
 ```json
 {
   "vim": {
-    "disabledDiagnostics": ["vim/E117"],
-    "overrideDiagnostics": {"vimls/deprecated": "warning"}
+    "diagnostic": {
+      "disabled": ["vim/E117"],
+      "override": {"vimls/deprecated": "warning"}
+    }
   }
 }
 ```
 
 Both settings are dynamic workspace configuration. Valid changes reanalyze
 open documents; omitted fields in a complete snapshot reset to defaults, and
-malformed fields retain their previous values with a client warning.
+malformed fields retain their previous values with a client warning. A
+missing or null `diagnostic` section is not an error and leaves the settings
+at their defaults.
 
 Vim's own diagnostics retain their native `vim/E<number>` identifiers and are
 listed in [Vim error code support](vim-error-code-support.md). vimls uses them

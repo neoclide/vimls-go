@@ -130,7 +130,7 @@ func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 	if string(configuration["method"]) != `"workspace/configuration"` {
 		t.Fatalf("configuration request = %#v", configuration)
 	}
-	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"result":[{"workspaceRebuildDebounce":0}]}`)
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"result":[{"workspace":{"rebuildDebounce":0}}]}`)
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
 	if message := readFrame(t, reader); string(message["id"]) != "2" {
 		t.Fatalf("shutdown response = %#v", message)
