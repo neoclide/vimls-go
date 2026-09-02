@@ -10,6 +10,7 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -179,7 +180,7 @@ func TestRefreshDoesNotSendAfterShutdown(t *testing.T) {
 	assertNoRefresh(t, client.inlayHintCalls)
 }
 
-func TestDidOpenSchedulesInitialRefresh(t *testing.T) {
+func TestDidOpenSchedulesInitialRefreshAfterParsing(t *testing.T) {
 	value := true
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
@@ -187,14 +188,30 @@ func TestDidOpenSchedulesInitialRefresh(t *testing.T) {
 	instance.client = client
 	initializeRefreshServer(t, instance, &value, &value)
 	documentURI := uri.File(filepath.Join(t.TempDir(), "main.vim"))
+	parsing := make(chan struct{})
+	continueParsing := make(chan struct{})
+	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+		close(parsing)
+		<-continueParsing
+	}
 
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
 		URI: documentURI, Version: 1, Text: "vim9script\nvar Value = 1\n",
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	<-parsing
+	assertNoRefresh(t, client.semanticTokensCalls)
+	assertNoRefresh(t, client.inlayHintCalls)
+	close(continueParsing)
 	waitForRefresh(t, client.semanticTokensCalls)
 	waitForRefresh(t, client.inlayHintCalls)
+	instance.publishMu.Lock()
+	parsed := instance.parsed[documentURI.String()]
+	instance.publishMu.Unlock()
+	if parsed.file == nil {
+		t.Fatal("refresh sent before AST was installed")
+	}
 	client.semanticTokensRelease <- struct{}{}
 	client.inlayHintRelease <- struct{}{}
 }

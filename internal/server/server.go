@@ -141,6 +141,7 @@ type Server struct {
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult
 	nextSemanticTokenResultID   uint64
+	initialRefreshPending       map[string]struct{}
 	diagnosticRefreshGeneration uint64
 	diagnosticRefreshRunning    bool
 	workspaceMu                 sync.Mutex
@@ -204,6 +205,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		analysisPending:       make(map[string]struct{}),
 		pullDiagnosticResults: make(map[string]pullDiagnosticResult),
 		semanticTokenResults:  make(map[string]semanticTokenResult),
+		initialRefreshPending: make(map[string]struct{}),
 		analysisRunning:       make(map[string]struct{}),
 		parsed:                make(map[string]parsedDocument),
 		published:             make(map[string]bool),
@@ -610,14 +612,13 @@ func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 		dependents = s.replaceWorkspaceFile(snapshot.URI(), nil)
 	} else {
 		s.removeWorkspaceURI(snapshot.URI())
+		s.initialRefreshPending[snapshot.URI()] = struct{}{}
 	}
 	delete(s.parsed, snapshot.URI())
 	delete(s.semanticTokenResults, snapshot.URI())
 	s.publishMu.Unlock()
 	s.startAnalysis(document.URI.String())
 	s.startWorkspaceDependents(dependents)
-	s.scheduleSemanticTokensRefresh()
-	s.scheduleInlayHintRefresh()
 	return nil
 }
 
@@ -696,6 +697,7 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	delete(s.parsed, documentURI)
 	delete(s.pullDiagnosticResults, documentURI)
 	delete(s.semanticTokenResults, documentURI)
+	delete(s.initialRefreshPending, documentURI)
 	clearDiagnostics := s.published[documentURI]
 	delete(s.published, documentURI)
 	s.publishMu.Unlock()
@@ -1036,8 +1038,9 @@ func (s *Server) analyzeDocument(documentURI string) {
 		return
 	}
 	file, identity, ok := s.computeDocumentDiagnostics(work)
-	if ok {
-		s.publishSyntax(work, file, identity)
+	if ok && s.publishSyntax(work, file, identity) {
+		s.scheduleSemanticTokensRefresh()
+		s.scheduleInlayHintRefresh()
 	}
 }
 
@@ -1173,7 +1176,7 @@ func (s *Server) parseSnapshot(snapshot *text.Snapshot) *syntax.File {
 	return file
 }
 
-func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, identity workspaceIdentity) {
+func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, identity workspaceIdentity) bool {
 	s.mu.Lock()
 	encoding := s.encoding
 	client := s.client
@@ -1185,23 +1188,26 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
 	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
-		return
+		return false
 	}
 	documentURI := analysis.Snapshot.URI()
 	s.workspaceMu.Lock()
 	if !s.workspaceIdentityCurrentLocked(identity) {
 		s.workspaceMu.Unlock()
 		s.startAnalysis(documentURI)
-		return
+		return false
 	}
 	s.workspaceMu.Unlock()
+	_, initialRefresh := s.initialRefreshPending[documentURI]
+	delete(s.initialRefreshPending, documentURI)
+	initialRefresh = initialRefresh && analysis.Snapshot.ByteLen() <= maxFileBytes
 	diagnostics := protocolDiagnostics(analysis.Snapshot, file, encoding, diagnosticRelatedInformation, overrides)
 	if pullDiagnostics {
 		s.installPullDiagnosticResultLocked(analysis, identity, diagnostics)
-		return
+		return initialRefresh
 	}
 	if len(diagnostics) == 0 && !s.published[documentURI] {
-		return
+		return initialRefresh
 	}
 	if len(diagnostics) == 0 {
 		delete(s.published, documentURI)
@@ -1209,7 +1215,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 		s.published[documentURI] = true
 	}
 	if client == nil {
-		return
+		return initialRefresh
 	}
 	params := &protocol.PublishDiagnosticsParams{URI: uri.URI(documentURI), Diagnostics: diagnostics}
 	if version, ok := analysis.Snapshot.Version(); ok {
@@ -1218,6 +1224,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	if err := client.PublishDiagnostics(analysis.Context, params); err != nil && analysis.Context.Err() == nil {
 		s.logf("vimls: publish diagnostics for %s: %v", documentURI, err)
 	}
+	return initialRefresh
 }
 
 func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding text.Encoding, diagnosticRelatedInformation bool, overrides map[string]protocol.DiagnosticSeverity) []protocol.Diagnostic {
