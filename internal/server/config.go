@@ -406,3 +406,55 @@ func excludeRuntimePathFromSettings(raw []byte, previous bool) (bool, string) {
 	}
 	return exclude, ""
 }
+
+func configFilesFromOptions(raw any) ([]string, bool, string) {
+	if raw == nil {
+		return nil, false, ""
+	}
+	var options map[string]any
+	switch value := raw.(type) {
+	case map[string]any:
+		options = value
+	case []byte:
+		if len(value) == 0 || string(value) == "null" {
+			return nil, false, ""
+		}
+		if err := json.Unmarshal(value, &options); err != nil {
+			return nil, false, "vimls: initializationOptions must be an object; ignoring configFiles"
+		}
+	default:
+		return nil, false, "vimls: initializationOptions must be an object; ignoring configFiles"
+	}
+	rawFiles, exists := options["configFiles"]
+	if !exists || rawFiles == nil {
+		return nil, false, ""
+	}
+	var patterns []string
+	switch values := rawFiles.(type) {
+	case []string:
+		patterns = append(patterns, values...)
+	case []any:
+		patterns = make([]string, 0, len(values))
+		for _, rawPattern := range values {
+			pattern, ok := rawPattern.(string)
+			if !ok {
+				return nil, true, "vimls: configFiles must be an array of strings; ignoring configFiles"
+			}
+			patterns = append(patterns, pattern)
+		}
+	default:
+		return nil, true, "vimls: configFiles must be an array of strings; ignoring configFiles"
+	}
+	return cleanConfigFilePatterns(patterns), true, ""
+}
+
+func cleanConfigFilePatterns(patterns []string) []string {
+	result := make([]string, 0, len(patterns))
+	for _, p := range patterns {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}

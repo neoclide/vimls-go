@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 func TestCompletionCapabilitiesFromClient(t *testing.T) {
@@ -327,5 +328,159 @@ func TestInitializeDoesNotReadDiagnosticInitializationOptions(t *testing.T) {
 	defer instance.mu.Unlock()
 	if len(instance.disabledDiagnostics) != 0 || len(instance.overrideDiagnostics) != 0 {
 		t.Fatalf("initializationOptions changed diagnostic settings: disabled=%#v overrides=%#v", instance.disabledDiagnostics, instance.overrideDiagnostics)
+	}
+}
+
+func TestConfigFilesFromOptions(t *testing.T) {
+	files, configured, warning := configFilesFromOptions([]byte(`{"configFiles":["rc/*.vim","~/.vimrc","  "]}`))
+	if !configured || warning != "" || !reflect.DeepEqual(files, []string{"rc/*.vim", "~/.vimrc"}) {
+		t.Fatalf("configFilesFromOptions valid = %#v configured=%v warning=%q", files, configured, warning)
+	}
+	files, configured, warning = configFilesFromOptions([]byte(`{"configFiles":123}`))
+	if !configured || !strings.Contains(warning, "array of strings") || len(files) != 0 {
+		t.Fatalf("configFilesFromOptions invalid type = %#v configured=%v warning=%q", files, configured, warning)
+	}
+	files, configured, warning = configFilesFromOptions(nil)
+	if configured || warning != "" || len(files) != 0 {
+		t.Fatalf("configFilesFromOptions nil = %#v configured=%v warning=%q", files, configured, warning)
+	}
+}
+
+func TestServerIsConfigFile(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootURI := uri.File(root)
+	instance := New(nil, nil, nil)
+	t.Cleanup(instance.stopAnalysis)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI: &rootURI,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	vimrcPath := filepath.Join(root, ".vimrc")
+	pluginPath := filepath.Join(root, "plugin", "foo.vim")
+	rcPath := filepath.Join(root, "rc", "bar.vim")
+
+	if !instance.IsConfigFile(vimrcPath) {
+		t.Fatalf("expected %s to be config file", vimrcPath)
+	}
+	if instance.IsConfigFile(pluginPath) {
+		t.Fatalf("expected %s NOT to be config file by default", pluginPath)
+	}
+	if !instance.IsConfigFile(rcPath) {
+		t.Fatalf("expected %s to be config file", rcPath)
+	}
+
+	// Instance with relative configFiles pattern - must be ignored
+	relativeInstance := New(nil, nil, nil)
+	t.Cleanup(relativeInstance.stopAnalysis)
+	if _, err := relativeInstance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny([]byte(`{"configFiles":["plugin/*.vim"]}`)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if relativeInstance.IsConfigFile(pluginPath) {
+		t.Fatalf("expected relative configFiles pattern to be ignored for %s", pluginPath)
+	}
+
+	// Instance with absolute configFiles configured in InitializationOptions
+	configuredInstance := New(nil, nil, nil)
+	t.Cleanup(configuredInstance.stopAnalysis)
+	patternJSON, err := json.Marshal(map[string]any{
+		"configFiles": []string{filepath.Join(root, "plugin", "*.vim")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configuredInstance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny(patternJSON),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !configuredInstance.IsConfigFile(pluginPath) {
+		t.Fatalf("expected %s to be config file after initializationOptions", pluginPath)
+	}
+
+	// Instance with runtimePaths: runtime files default to non-config, ancestor path segments not misjudged
+	runtimeDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtpOptions, err := json.Marshal(map[string]any{
+		"runtimepath": []string{runtimeDir},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtpInstance := New(nil, nil, nil)
+	t.Cleanup(rtpInstance.stopAnalysis)
+	if _, err := rtpInstance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny(rtpOptions),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defaultsPath := filepath.Join(runtimeDir, "defaults.vim")
+	if rtpInstance.IsConfigFile(defaultsPath) {
+		t.Fatalf("expected runtimepath file %s NOT to be config file", defaultsPath)
+	}
+	ancestorTmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ancestorPluginDir := filepath.Join(ancestorTmp, "plugin")
+	ancestorFilePath := filepath.Join(ancestorPluginDir, "my_custom.vim")
+	if !rtpInstance.IsConfigFile(ancestorFilePath) {
+		t.Fatalf("expected file with ancestor named plugin outside roots %s to be config file", ancestorFilePath)
+	}
+}
+
+func TestServerIsConfigFileSymlink(t *testing.T) {
+	tempDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dotfiles := filepath.Join(tempDir, "dotfiles", "nvim")
+	if err := os.MkdirAll(filepath.Join(dotfiles, "plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realFile := filepath.Join(dotfiles, "plugin", "settings.vim")
+	if err := os.WriteFile(realFile, []byte("echo 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := filepath.Join(tempDir, "config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkNvim := filepath.Join(configDir, "nvim")
+	if err := os.Symlink(dotfiles, symlinkNvim); err != nil {
+		t.Skip("symlinks not supported")
+	}
+	symlinkFile := filepath.Join(symlinkNvim, "plugin", "settings.vim")
+
+	server := New(nil, nil, nil)
+	t.Cleanup(server.stopAnalysis)
+	patternJSON, err := json.Marshal(map[string]any{
+		"configFiles": []string{filepath.Join(symlinkNvim, "**", "*.vim")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootURI := uri.File(tempDir)
+	if _, err := server.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny(patternJSON),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !server.IsConfigFile(symlinkFile) {
+		t.Fatalf("expected symlinked file %s to match configFiles pattern", symlinkFile)
 	}
 }

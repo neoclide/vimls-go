@@ -232,6 +232,7 @@ type Server struct {
 	watchedFilesDirty             bool
 	workspaceConfiguration        bool
 	excludeRuntimePathCompletions bool
+	configFiles                   []string
 	// Diagnostic maps are replaced, never mutated, while mu is held. Analysis
 	// and publication may therefore snapshot their immutable map references.
 	disabledDiagnostics map[string]struct{}
@@ -518,6 +519,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 		runtimePaths = defaultRuntimePaths()
 	}
 	runtimePaths = usableRuntimePaths(runtimePaths)
+	configFiles, _, configFilesWarning := configFilesFromOptions([]byte(params.InitializationOptions))
 	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 	workspaceProgress := params.Capabilities.Window != nil && params.Capabilities.Window.WorkDoneProgress != nil && *params.Capabilities.Window.WorkDoneProgress
@@ -535,7 +537,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	codeLensRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.CodeLens != nil && params.Capabilities.Workspace.CodeLens.RefreshSupport != nil && *params.Capabilities.Workspace.CodeLens.RefreshSupport
 	s.mu.Lock()
 	s.pendingWarning = ""
-	for _, warning := range []string{runtimepathWarning} {
+	for _, warning := range []string{runtimepathWarning, configFilesWarning} {
 		if warning == "" {
 			continue
 		}
@@ -548,6 +550,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.encoding = encoding
 	s.completion = completion
 	s.languageFeatures = languageFeatures
+	s.configFiles = configFiles
 	s.state = stateActive
 	s.watchDynamicRegistration = watchDynamic
 	s.watchRelativePatterns = watchRelative
@@ -888,6 +891,18 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 		s.scheduleDiagnosticRefresh()
 	}
 	return nil
+}
+
+// IsConfigFile reports whether path represents a Vim configuration file.
+func (s *Server) IsConfigFile(path string) bool {
+	s.mu.Lock()
+	patterns := append([]string(nil), s.configFiles...)
+	s.mu.Unlock()
+	s.workspaceMu.Lock()
+	roots := append([]string(nil), s.workspaceRoots...)
+	runtimeRoots := append([]string(nil), s.runtimePaths...)
+	s.workspaceMu.Unlock()
+	return workspace.IsConfigFile(path, patterns, roots, runtimeRoots)
 }
 
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (protocol.DocumentSymbolResult, error) {

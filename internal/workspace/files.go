@@ -7,9 +7,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
+
+var caseInsensitiveFS = runtime.GOOS == "windows"
 
 var errDiscoveryLimit = errors.New("workspace file discovery limit reached")
 
@@ -39,15 +42,17 @@ var vcsMetadataNames = map[string]struct{}{
 }
 
 var vimConfigNames = map[string]struct{}{
-	".exrc":   {},
-	".gvimrc": {},
-	".vimrc":  {},
-	"_exrc":   {},
-	"_gvimrc": {},
-	"_vimrc":  {},
-	"exrc":    {},
-	"gvimrc":  {},
-	"vimrc":   {},
+	".exrc":     {},
+	".gvimrc":   {},
+	".vimrc":    {},
+	"_exrc":     {},
+	"_gvimrc":   {},
+	"_vimrc":    {},
+	"exrc":      {},
+	"ginit.vim": {},
+	"gvimrc":    {},
+	"init.vim":  {},
+	"vimrc":     {},
 }
 
 // DiscoverFiles returns Vim script files below root in deterministic lexical
@@ -253,9 +258,22 @@ func uniqueSorted(files []string) []string {
 	return out
 }
 
+func isVimConfigName(name string) bool {
+	lookup := name
+	if caseInsensitiveFS {
+		lookup = strings.ToLower(name)
+	}
+	_, ok := vimConfigNames[lookup]
+	return ok
+}
+
 func hasVimRuntimeDirectory(relative string) bool {
 	for part := range strings.SplitSeq(relative, string(filepath.Separator)) {
-		if _, ok := vimRuntimeDirectories[part]; ok {
+		lookup := part
+		if caseInsensitiveFS {
+			lookup = strings.ToLower(part)
+		}
+		if _, ok := vimRuntimeDirectories[lookup]; ok {
 			return true
 		}
 	}
@@ -268,9 +286,12 @@ func isVimFile(relative, name string, underRuntimeDirectory bool) bool {
 		return extension == "" || extension == ".vim"
 	}
 	if filepath.Dir(relative) == "." {
-		if _, ok := vimConfigNames[name]; ok {
+		if isVimConfigName(name) {
 			return true
 		}
+	}
+	if caseInsensitiveFS {
+		return strings.EqualFold(filepath.Ext(name), ".vim")
 	}
 	return strings.HasSuffix(name, ".vim")
 }

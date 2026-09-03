@@ -11,6 +11,7 @@ The supported `initializationOptions` object is:
 | Option | Type | Default | Behavior |
 | --- | --- | --- | --- |
 | `runtimepath` | string array | host Vim runtime discovery | Ordered runtime roots. An explicit empty array disables runtime indexing. Invalid, missing, unreadable, and duplicate realpaths are omitted. |
+| `configFiles` | string array | `[]` | Absolute glob patterns or paths for files treated as user configuration files (e.g. `["~/.vimrc", "~/.config/nvim/**/*.vim"]`). Supports `*`, `**`, and `~/`. Non-absolute patterns are ignored. Files outside runtime directories (`plugin/`, `autoload/`, etc.) or named `vimrc`/`init.vim` are treated as config files by default. |
 
 A complete initialization fragment is:
 
@@ -23,6 +24,10 @@ A complete initialization fragment is:
     "runtimepath": [
       "/usr/local/share/vim/vim92",
       "/project/.vim"
+    ],
+    "configFiles": [
+      "~/.vimrc",
+      "~/.config/nvim/**/*.vim"
     ]
   },
   "capabilities": {
@@ -40,6 +45,12 @@ A complete initialization fragment is:
 Use URI-encoded absolute `file:` URIs for workspace folders and absolute
 filesystem paths for runtimepath. `workspaceFolders` takes precedence over the
 deprecated `rootUri` and `rootPath` initialize fields.
+
+`configFiles` specifies absolute patterns for files treated as user configuration
+files rather than plugin scripts. Patterns must be absolute (or start with `~/`);
+non-absolute patterns are ignored. Patterns support `*`, `**`, and `~/`. By
+default, files not under a standard runtime directory (like `plugin/` or
+`autoload/`) are automatically treated as configuration files.
 
 When file-watch dynamic registration is advertised, the server registers
 `**/*.vim` watchers below active workspace roots only. Runtimepath roots are
