@@ -209,7 +209,20 @@ The oracle checks acceptance/rejection and focused semantics. It does not source
 untrusted workspace files and it does not justify reproducing Vim's runtime
 inside the server.
 
-`test/oracle` contains one curated legacy fixture and one curated Vim9 fixture.
+`test/oracle` contains one curated legacy fixture, one curated Vim9 fixture, and
+the readable `internal/vimdata/options_set_generated.vim` fixture. The metadata
+generator emits one `:set` command for every pinned option; the oracle executes
+all of them in one clean process and reports failures with their `optiondefs.h`
+source lines. It also compares every generated static `CompletionValues` list
+with Vim's real `getcompletion('set option=', 'cmdline')` result in source order.
+The curated `option_validation.vim` fixture checks one representative of each
+migrated callback rule shape (exact value, comma list, flag list, and numeric
+range), including Vim's native E474, E487, and E539 failures through `:set`,
+Legacy option assignment, and Vim9 option assignment. Focused Go analysis tests
+cover the corresponding diagnostics and ensure dynamic or not-yet-decoded
+values remain unchecked.
+Unavailable options are collected with `exists('+option')`; their ignored
+`:set` commands are not mistaken for evidence that the current build supports them.
 Its Go harness generates the clean driver in a test-owned temporary directory,
 requires exactly patch v9.2.1015, and records `v:version`, the current and next
 patch probes, `v:errors`, `:messages`, stdout, stderr and exit status for every

@@ -2,15 +2,19 @@ package oracle_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
+
+const vimOracleTimeout = 5 * time.Second
 
 const oracleDriver = `set nomore
 let v:errors = []
@@ -32,8 +36,10 @@ call writefile([
       \ 'v:version=' .. v:version,
       \ 'patch-9.2.1015=' .. has('patch-9.2.1015'),
       \ 'patch-9.2.1016=' .. has('patch-9.2.1016'),
-      \ 'v:errors=' .. string(v:errors),
-      \ 'messages=' .. s:messages,
+	      \ 'v:errors=' .. string(v:errors),
+	      \ 'unsupported_options=' .. string(get(g:, 'vimls_unsupported_options', [])),
+	      \ 'missing_features=' .. string(get(g:, 'vimls_missing_features', [])),
+	      \ 'messages=' .. s:messages,
       \ ], $VIMLS_ORACLE_OUTPUT)
 if !empty(v:errors)
   cquit 1
@@ -87,6 +93,7 @@ func TestPinnedVimOracle(t *testing.T) {
 	if err != nil || len(fixtures) == 0 {
 		t.Fatalf("oracle fixtures: %v, count=%d", err, len(fixtures))
 	}
+	fixtures = append(fixtures, filepath.Join("..", "..", "internal", "vimdata", "options_set_generated.vim"))
 	for _, fixture := range fixtures {
 		t.Run(strings.TrimSuffix(filepath.Base(fixture), ".vim"), func(t *testing.T) {
 			fixturePath, err := filepath.Abs(fixture)
@@ -99,12 +106,17 @@ func TestPinnedVimOracle(t *testing.T) {
 			if err := os.WriteFile(driver, []byte(oracleDriver), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			command := exec.Command(vim, "-Nu", "NONE", "-U", "NONE", "-n", "-es", "-X", "-i", "NONE", "-S", driver)
+			ctx, cancel := context.WithTimeout(t.Context(), vimOracleTimeout)
+			defer cancel()
+			command := exec.CommandContext(ctx, vim, "-Nu", "NONE", "-U", "NONE", "-n", "-es", "-X", "-i", "NONE", "-S", driver)
 			command.Dir = temporary
 			command.Env = append(os.Environ(), "VIMLS_ORACLE_FIXTURE="+fixturePath, "VIMLS_ORACLE_OUTPUT="+recordPath)
 			var stdout, stderr bytes.Buffer
 			command.Stdout, command.Stderr = &stdout, &stderr
 			runErr := command.Run()
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatalf("Vim oracle fixture %s timed out after %s; stdout=%q stderr=%q", filepath.Base(fixturePath), vimOracleTimeout, stdout.String(), stderr.String())
+			}
 			exitStatus := 0
 			if runErr != nil {
 				var exitError *exec.ExitError
@@ -217,12 +229,17 @@ func runFormattingOracle(t *testing.T, vim, source string) string {
 	if err := os.WriteFile(driver, []byte(formattingOracleDriver), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(vim, "-Nu", "NONE", "-U", "NONE", "-n", "-es", "-X", "-i", "NONE", "-S", driver)
+	ctx, cancel := context.WithTimeout(t.Context(), vimOracleTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, vim, "-Nu", "NONE", "-U", "NONE", "-n", "-es", "-X", "-i", "NONE", "-S", driver)
 	command.Dir = temporary
 	command.Env = append(os.Environ(), "VIMLS_FORMAT_INPUT="+input, "VIMLS_FORMAT_OUTPUT="+output, "VIMLS_ORACLE_OUTPUT="+recordPath)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	runErr := command.Run()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("Vim formatting oracle timed out after %s; stdout=%q stderr=%q", vimOracleTimeout, stdout.String(), stderr.String())
+	}
 	record, recordErr := os.ReadFile(recordPath)
 	if recordErr != nil {
 		t.Fatalf("read formatting oracle record: %v; run=%v stdout=%q stderr=%q", recordErr, runErr, stdout.String(), stderr.String())
