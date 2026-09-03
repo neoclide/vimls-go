@@ -38,8 +38,9 @@ func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool,
 	if r == nil || limit <= 0 || !safeImportCompletionPrefix(prefix) {
 		return nil, false
 	}
+	absolute := isAbsolutePath(prefix)
 	var roots []string
-	if isAbsolutePath(prefix) {
+	if absolute {
 		roots = []string{filepath.VolumeName(prefix) + string(filepath.Separator)}
 	} else if strings.HasPrefix(prefix, ".") {
 		base := r.root
@@ -64,7 +65,10 @@ func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool,
 	truncated := false
 	for _, root := range roots {
 		dirPart, name := filepath.Split(filepath.FromSlash(prefix))
-		directory := filepath.Join(root, dirPart)
+		directory := dirPart
+		if !absolute {
+			directory = filepath.Join(root, dirPart)
+		}
 		canonical, ok := r.Canonical(directory)
 		if !ok {
 			continue
@@ -122,7 +126,7 @@ func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool,
 }
 
 func safeImportCompletionPrefix(prefix string) bool {
-	if strings.ContainsAny(prefix, "\x00\r\n") || (runtime.GOOS != "windows" && strings.Contains(prefix, "\\")) {
+	if strings.ContainsAny(prefix, "\x00\r\n") || (strings.Contains(prefix, "\\") && (runtime.GOOS != "windows" || !isAbsolutePath(prefix))) {
 		return false
 	}
 	return true

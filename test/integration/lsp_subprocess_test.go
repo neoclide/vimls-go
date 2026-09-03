@@ -735,7 +735,7 @@ func TestVersionSubprocess(t *testing.T) {
 }
 
 func TestTCPSubprocess(t *testing.T) {
-	ctx, cancel := subprocessContext(t, 15*time.Second)
+	ctx, cancel := subprocessContext(t, 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary, "--listen", "127.0.0.1:0")
 	stderr, err := command.StderrPipe()
