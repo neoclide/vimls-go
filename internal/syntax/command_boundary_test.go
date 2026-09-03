@@ -544,6 +544,85 @@ func TestVim9CommandStartCallBoundaryPreservesPublicAST(t *testing.T) {
 	assertFileSpans(t, file)
 }
 
+func TestVim9CommandStartAutoloadCallIsExpression(t *testing.T) {
+	source := `vim9script
+def Set_lines(bufnr: number, change_list: list<any>, maxEditCount: number,
+    start_row: number, end_row: number, replace: list<string>)
+  if !empty(change_list) && len(change_list) <= maxEditCount
+    Apply_changes(bufnr, change_list)
+  else
+    coc#api#SetBufferLines(bufnr, start_row + 1, end_row, replace)
+  endif
+enddef
+`
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	callStart := strings.Index(source, "coc#api#SetBufferLines")
+	var call *Command
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Argument.Start == callStart {
+			call = command
+			break
+		}
+	}
+	if call == nil {
+		t.Fatalf("autoload call command not found: %#v", file.Commands)
+	}
+	if call.Kind != CommandExpression || call.Name != (Span{}) || call.TypedName != "" || call.Canonical != "" ||
+		len(call.Expressions) != 1 || call.Expressions[0].Kind != ExpressionCall || len(call.Expressions[0].Children) == 0 ||
+		call.Expressions[0].Children[0].Value != "coc#api#SetBufferLines" {
+		t.Fatalf("autoload call = %#v", call)
+	}
+	for _, token := range file.Tokens {
+		if token.Kind == TokenCommand && token.Span.Start == callStart {
+			t.Fatalf("autoload call starts with command token: %#v", token)
+		}
+	}
+	assertFileSpans(t, file)
+}
+
+func TestVim9BuiltinFunctionCallIsNotCommand(t *testing.T) {
+	source := `vim9script
+def AddProp(lnum: number, colStart: number, bufnr: number, type: string, propId: number, colEnd: number)
+  try
+    prop_add(lnum + 1, colStart + 1, {'bufnr': bufnr, 'type': type, 'id': propId, 'end_col': colEnd + 1})
+  catch /^Vim\%((\a\+)\)\=:\(E967\|E964\)/
+    # ignore 967
+  endtry
+enddef
+`
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	callStart := strings.Index(source, "prop_add")
+	var call *Command
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Argument.Start == callStart {
+			call = command
+			break
+		}
+	}
+	if call == nil {
+		t.Fatalf("prop_add call command not found: %#v", file.Commands)
+	}
+	if call.Kind != CommandExpression || call.Name != (Span{}) || call.TypedName != "" || call.Canonical != "" ||
+		len(call.Expressions) != 1 || call.Expressions[0].Kind != ExpressionCall || len(call.Expressions[0].Children) == 0 ||
+		call.Expressions[0].Children[0].Value != "prop_add" {
+		t.Fatalf("prop_add call = %#v", call)
+	}
+	for _, token := range file.Tokens {
+		if token.Kind == TokenCommand && token.Span.Start == callStart {
+			t.Fatalf("prop_add call starts with command token: %#v", token)
+		}
+	}
+	assertFileSpans(t, file)
+}
+
 func TestVim9CommandStartCallTrailingCommentIsOpaque(t *testing.T) {
 	file := Parse("vim9script\nResult(1) # comment | not a command\necho 2\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 3 || countTokens(file, TokenComment) != 1 || countTokens(file, TokenSeparator) != 0 {

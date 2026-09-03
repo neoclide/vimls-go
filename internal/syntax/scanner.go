@@ -453,10 +453,33 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 	suppressDeferredDefDiagnosticsBeforeLegacyPoundError(file)
 	normalizeLambdaBodySources(file)
 	diagnoseVim9ScriptNamespaces(file)
+	normalizeVim9CommandStartCalls(file)
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
 		return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start
 	})
 	return file
+}
+
+func normalizeVim9CommandStartCalls(file *File) {
+	var normalizeCommands func([]Command)
+	normalizeCommands = func(commands []Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.Dialect == Vim9 && command.Kind == CommandExpression && len(command.Expressions) == 1 &&
+				command.Expressions[0].Kind == ExpressionCall && command.Expressions[0].Span.Start == command.Argument.Start {
+				command.Name = Span{}
+				command.TypedName = ""
+				if command.logical != nil {
+					command.logical.command.Name = Span{}
+					command.logical.command.TypedName = ""
+				}
+			}
+			if command.Embedded != nil {
+				normalizeCommands(command.Embedded.Commands)
+			}
+		}
+	}
+	normalizeCommands(file.Commands)
 }
 
 func diagnoseVim9ScriptNamespaces(file *File) {
@@ -1451,7 +1474,9 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{Code: "vim/E1065", Message: "command cannot be shortened in Vim9 script", Span: Span{Start: nameStart, End: nameEnd}})
 		}
 		nameSpan := Span{Start: nameStart, End: nameEnd}
-		file.Tokens = append(file.Tokens, Token{Kind: TokenCommand, Span: nameSpan})
+		if !expressionAtCommandStart {
+			file.Tokens = append(file.Tokens, Token{Kind: TokenCommand, Span: nameSpan})
+		}
 		start = nameEnd
 		bang := Span{}
 		if start < end && file.Source[start] == '!' && !(builtIn && substitutePatternCommand(canonical)) {

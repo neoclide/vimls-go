@@ -230,6 +230,58 @@ func TestCompletionFunctionSnippetEscapesAndDefaultIsPlain(t *testing.T) {
 	}
 }
 
+func TestCompletionIndexedFunctionSnippets(t *testing.T) {
+	root := t.TempDir()
+	runtimePath := t.TempDir()
+	writeWorkspaceFile(t, runtimePath, filepath.Join("autoload", "acme", "tool.vim"), "function! acme#tool#Run(first, second)\nendfunction\n")
+	writeWorkspaceFile(t, runtimePath, filepath.Join("autoload", "pkg", "search.vim"), "vim9script\nexport def Find(query: string, count = 1): bool\n  return true\nenddef\n")
+	options, err := json.Marshal(map[string]any{"runtimepath": []string{runtimePath}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snippets := true
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+		RootURI:               &rootURI,
+		InitializationOptions: protocol.LSPAny(options),
+		Capabilities: protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{
+			Completion: &protocol.CompletionClientCapabilities{CompletionItem: &protocol.ClientCompletionItemOptions{SnippetSupport: &snippets}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceDelay = 0
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+
+	for _, test := range []struct {
+		name, source, label, want string
+		line, character           uint32
+	}{
+		{name: "legacy autoload", source: "echo acme#tool#R\n", label: "acme#tool#Run", want: "acme#tool#Run(${1:first}, ${2:second})$0", character: uint32(len("echo acme#tool#R"))},
+		{name: "Vim9 autoload", source: "vim9script\necho pkg#search#F\n", label: "pkg#search#Find", want: "pkg#search#Find(${1:query}, ${2:count})$0", line: 1, character: uint32(len("echo pkg#search#F"))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			documentURI := uri.File(filepath.Join(root, strings.ReplaceAll(test.name, " ", "-")+".vim"))
+			instance.documents.Open(documentURI.String(), 1, test.source)
+			result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			item := completionItemWithLabel(completionItems(t, result), test.label)
+			if item == nil || item.InsertTextFormat != protocol.InsertTextFormatSnippet || completionMainEditFromItem(*item).text != test.want {
+				t.Fatalf("indexed function completion %q = %#v", test.label, item)
+			}
+		})
+	}
+}
+
 func TestCompletionSnippetsRequireClientSupportAndMatchDialect(t *testing.T) {
 	tests := []struct {
 		name, source, label, want string

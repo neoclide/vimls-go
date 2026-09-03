@@ -324,6 +324,11 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						detail = label + detail[len(function.Match.Fact.Name):]
 					}
 					item := protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindFunction}
+					if snippet, ok := completionFunctionSnippet(label, function.Parameters, canSnippet); ok {
+						item.InsertText = protocol.NewOptional(snippet)
+						item.InsertTextFormat = protocol.InsertTextFormatSnippet
+						item.FilterText = protocol.NewOptional(label)
+					}
 					if detail != "" {
 						item.Detail = protocol.NewOptional(detail)
 					}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -589,7 +590,7 @@ func TestIndexFunctionCompletionsRecordSignaturesCommentsAndVim9AutoloadNames(t 
 	index.SetComplete(true)
 
 	vim9Matches, incomplete := index.FunctionCompletions("for#sea", false, 10)
-	if incomplete || len(vim9Matches) != 1 || vim9Matches[0].Name != "for#search#Stuff" {
+	if incomplete || len(vim9Matches) != 1 || vim9Matches[0].Name != "for#search#Stuff" || !reflect.DeepEqual(vim9Matches[0].Parameters, []string{"arg", "count"}) {
 		t.Fatalf("Vim9 autoload completions = %#v, incomplete=%t", vim9Matches, incomplete)
 	}
 	fact := vim9Matches[0].Match.Fact
@@ -597,7 +598,7 @@ func TestIndexFunctionCompletionsRecordSignaturesCommentsAndVim9AutoloadNames(t 
 		t.Fatalf("Vim9 autoload fact = %#v", fact)
 	}
 	legacyMatches, incomplete := index.FunctionCompletions("Global", true, 10)
-	if incomplete || len(legacyMatches) != 1 || legacyMatches[0].Name != "GlobalRun" || legacyMatches[0].Match.Fact.Signature != "GlobalRun(arg, ...)" || legacyMatches[0].Match.Fact.Documentation != "Run a legacy task." {
+	if incomplete || len(legacyMatches) != 1 || legacyMatches[0].Name != "GlobalRun" || !reflect.DeepEqual(legacyMatches[0].Parameters, []string{"arg"}) || legacyMatches[0].Match.Fact.Signature != "GlobalRun(arg, ...)" || legacyMatches[0].Match.Fact.Documentation != "Run a legacy task." {
 		t.Fatalf("legacy function completions = %#v, incomplete=%t", legacyMatches, incomplete)
 	}
 	if matches, _ := index.FunctionCompletions("Global", false, 10); len(matches) != 0 {

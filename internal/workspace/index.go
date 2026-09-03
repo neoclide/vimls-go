@@ -59,8 +59,9 @@ type SymbolMatch struct {
 // FunctionMatch pairs a callable spelling with its indexed declaration.
 // Vim9 autoload exports derive the spelling's prefix from the file path.
 type FunctionMatch struct {
-	Name  string
-	Match SymbolMatch
+	Name       string
+	Parameters []string
+	Match      SymbolMatch
 }
 
 type ExternalReferenceKind uint8
@@ -152,15 +153,16 @@ type GlobalNameFact struct {
 }
 
 type indexedFile struct {
-	bytes      int
-	source     string
-	facts      []SymbolFact
-	references []ExternalReferenceFact
-	commands   []UserCommandFact
-	globals    []GlobalNameFact
-	types      []TypeRelationFact
-	aliases    []TypeAliasFact
-	calls      []CallFact
+	bytes              int
+	source             string
+	facts              []SymbolFact
+	functionParameters map[syntax.Span][]string
+	references         []ExternalReferenceFact
+	commands           []UserCommandFact
+	globals            []GlobalNameFact
+	types              []TypeRelationFact
+	aliases            []TypeAliasFact
+	calls              []CallFact
 }
 
 // Index stores symbols from a bounded set of syntax files. All methods are
@@ -273,7 +275,12 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	if result == nil || result.File != file {
 		result = analysis.Analyze(file)
 	}
-	facts := CollectSymbolFacts(normalized, file)
+	functions := functionFacts(file)
+	facts := collectFileSymbolFacts(normalized, file, functions)
+	functionParameters := make(map[syntax.Span][]string, len(functions))
+	for span, function := range functions {
+		functionParameters[span] = function.parameters
+	}
 	sortFacts(facts)
 	references := CollectExternalReferencesFromAnalysis(normalized, file, result)
 	commands := CollectUserCommandFacts(normalized, file)
@@ -281,7 +288,7 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	types := CollectTypeRelationFacts(normalized, file)
 	aliases := CollectTypeAliasFacts(normalized, file)
 	calls := CollectCallFactsFromAnalysis(normalized, file, result)
-	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, references: references, commands: commands, globals: globals, types: types, aliases: aliases, calls: calls}
+	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, globals: globals, types: types, aliases: aliases, calls: calls}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -994,7 +1001,8 @@ func (i *Index) FunctionCompletionsMatching(matchName func(string) bool, include
 			}
 			previous, exists := byCallableName[name]
 			if !exists || factLess(fact, previous.Match.Fact) {
-				byCallableName[name] = FunctionMatch{Name: name, Match: SymbolMatch{Fact: fact, Source: file.source}}
+				parameters := append([]string(nil), file.functionParameters[fact.SelectionRange]...)
+				byCallableName[name] = FunctionMatch{Name: name, Parameters: parameters, Match: SymbolMatch{Fact: fact, Source: file.source}}
 			}
 		}
 	}
@@ -1223,8 +1231,12 @@ func CollectSymbolFacts(path string, file *syntax.File) []SymbolFact {
 	if err != nil || file == nil {
 		return nil
 	}
-	exported := exportedSymbolSpans(file)
 	functions := functionFacts(file)
+	return collectFileSymbolFacts(normalized, file, functions)
+}
+
+func collectFileSymbolFacts(normalized string, file *syntax.File, functions map[syntax.Span]indexedFunctionFact) []SymbolFact {
+	exported := exportedSymbolSpans(file)
 	metadata := symbolMetadata(file)
 	facts := make([]SymbolFact, 0)
 	collectSymbolFacts(normalized, analysis.CollectSymbols(file), exported, functions, metadata, true, syntax.Span{}, &facts)
@@ -1236,6 +1248,7 @@ type indexedFunctionFact struct {
 	signature     string
 	documentation string
 	dialect       syntax.Dialect
+	parameters    []string
 }
 
 type indexedSymbolMetadata struct {
@@ -1437,10 +1450,22 @@ func functionFacts(file *syntax.File) map[syntax.Span]indexedFunctionFact {
 			command := &commands[index]
 			if command.Function != nil {
 				name := file.Text(command.Function.Name)
+				parameters := make([]string, 0, len(command.Function.Parameters))
+				for _, parameter := range command.Function.Parameters {
+					if parameter.Name.Start >= parameter.Name.End {
+						continue
+					}
+					label := file.Text(parameter.Name)
+					if parameter.Variadic && !strings.HasPrefix(label, "...") {
+						label = "..." + label
+					}
+					parameters = append(parameters, strings.Clone(label))
+				}
 				result[command.Function.Name] = indexedFunctionFact{
 					signature:     formatIndexedFunctionSignature(file, name, command.Function),
 					documentation: leadingFunctionDocumentation(file, command),
 					dialect:       command.Dialect,
+					parameters:    parameters,
 				}
 			}
 			if command.Embedded != nil {
