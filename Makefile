@@ -10,7 +10,6 @@ build:
 	mkdir -p bin
 	$(GO) build $(GO_MOD) -o bin/vimls ./cmd/vimls
 	$(GO) build $(GO_MOD) -o bin/vimparse ./cmd/vimparse
-	$(GO) build $(GO_MOD) -o bin/vim9parse ./cmd/vim9parse
 
 clean:
 	$(GO) clean -cache -testcache -fuzzcache

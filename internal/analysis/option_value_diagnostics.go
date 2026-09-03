@@ -17,7 +17,7 @@ func appendSetOptionValueDiagnostic(result *FileAnalysis, file *syntax.File, com
 		return
 	}
 	option, ok := vimdata.LookupOption(file.Text(item.Name))
-	if !ok || option.AvailableWhen != "1" || option.Validation.Kind == vimdata.ValidationNone {
+	if !ok || option.AvailableWhen != "1" {
 		return
 	}
 	if command != nil && command.Canonical == "setglobal" && optionHasFlag(option, "P_NOGLOB") {
@@ -29,19 +29,39 @@ func appendSetOptionValueDiagnostic(result *FileAnalysis, file *syntax.File, com
 	if strings.ContainsRune(raw, '\\') || strings.ContainsRune(raw, '\x16') {
 		return
 	}
-	value := raw
-	if option.Validation.Kind == vimdata.ValidationNumberRange {
-		number, ok := staticSetOptionNumber(raw)
-		if !ok {
-			return
-		}
-		value = strconv.FormatInt(number, 10)
-	}
 	valueSpan := item.Value
 	if valueSpan.Start == valueSpan.End {
 		valueSpan = item.Span
 	}
+	value := raw
+	if option.Type == vimdata.OptionNumber {
+		number, ok := staticSetOptionNumber(raw)
+		if !ok {
+			if setNumberOptionMayUseKeyNotation(option.Name, raw) {
+				return
+			}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+				Code: "vim/E521", Message: "Number required after =", Span: valueSpan,
+			})
+			return
+		}
+		if option.Validation.Kind == vimdata.ValidationNone {
+			return
+		}
+		value = strconv.FormatInt(number, 10)
+	} else if option.Validation.Kind == vimdata.ValidationNone {
+		return
+	}
 	appendOptionValueDiagnostic(result, option.Validation, value, valueSpan)
+}
+
+func setNumberOptionMayUseKeyNotation(name, value string) bool {
+	// Vim treats these as number options but also accepts a single character,
+	// caret form, or key notation through :set.
+	if name != "wildchar" && name != "wildcharm" {
+		return false
+	}
+	return strings.HasPrefix(value, "<") || strings.HasPrefix(value, "^") || len(value) == 1
 }
 
 func appendOptionAssignmentValueDiagnostic(result *FileAnalysis, file *syntax.File, assignment *syntax.Expression, dialect syntax.Dialect) {

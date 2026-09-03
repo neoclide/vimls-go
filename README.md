@@ -79,8 +79,12 @@ go install github.com/neoclide/vimls-go/cmd/vimls@latest
 git clone https://github.com/neoclide/vimls-go.git
 cd vimls-go
 make build
-# Binaries are generated in ./bin/ (./bin/vimls, ./bin/vimparse, ./bin/vim9parse)
+# Binaries are generated in ./bin/ (./bin/vimls and ./bin/vimparse)
 ```
+
+`vimparse <file>` prints the parsed syntax tree as JSON. It selects the Vim9
+root parser when the file's first effective command is `vim9script`; otherwise
+it uses the legacy root parser.
 
 ---
 

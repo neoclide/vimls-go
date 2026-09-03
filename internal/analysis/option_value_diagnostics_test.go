@@ -24,6 +24,11 @@ func TestOptionValueDiagnostics(t *testing.T) {
 		{name: "set number maximum", source: "set msc=10000\n", code: "vim/E474", message: "Invalid argument", span: "10000"},
 		{name: "set leading zero decimal fallback", source: "set msc=099999\n", code: "vim/E474", message: "Invalid argument", span: "099999"},
 		{name: "set number hex", source: "set msc=0x10000\n", code: "vim/E474", message: "Invalid argument", span: "0x10000"},
+		{name: "set number requires number", source: "set history=abc\n", code: "vim/E521", message: "Number required after =", span: "abc"},
+		{name: "set number without range requires number", source: "set pumheight=def\n", code: "vim/E521", message: "Number required after =", span: "def"},
+		{name: "set number rejects leading plus", source: "set history=+0\n", code: "vim/E521", message: "Number required after =", span: "+0"},
+		{name: "set number rejects digit separator", source: "set history=0'0\n", code: "vim/E521", message: "Number required after =", span: "0'0"},
+		{name: "set wildchar rejects string", source: "set wildchar=abc\n", code: "vim/E521", message: "Number required after =", span: "abc"},
 		{name: "legacy option assignment", source: "let &bh = 'bogus'\n", code: "vim/E474", message: "Invalid argument", span: "bogus"},
 		{name: "legacy leading zero decimal fallback", source: "let &msc = 099999\n", code: "vim/E474", message: "Invalid argument", span: "099999"},
 		{name: "global option assignment", source: "let &g:bg = 'bogus'\n", code: "vim/E474", message: "Invalid argument", span: "bogus"},
@@ -47,7 +52,7 @@ func TestOptionValueDiagnostics(t *testing.T) {
 			analysis := Analyze(file)
 			var got []syntax.Diagnostic
 			for _, diagnostic := range analysis.Diagnostics {
-				if diagnostic.Code == "vim/E474" || diagnostic.Code == "vim/E487" || diagnostic.Code == "vim/E539" || diagnostic.Code == "vim/E1511" || diagnostic.Code == "vim/E1572" {
+				if diagnostic.Code == "vim/E474" || diagnostic.Code == "vim/E487" || diagnostic.Code == "vim/E521" || diagnostic.Code == "vim/E539" || diagnostic.Code == "vim/E1511" || diagnostic.Code == "vim/E1572" {
 					got = append(got, diagnostic)
 				}
 			}
@@ -58,11 +63,10 @@ func TestOptionValueDiagnostics(t *testing.T) {
 	}
 }
 
-func TestOptionValueDiagnosticsSkipNoGlobalAndInvalidNumberSyntax(t *testing.T) {
+func TestOptionValueDiagnosticsSkipNoGlobal(t *testing.T) {
 	source := "setglobal bh=bogus bt=bogus\n" +
 		"let &g:bh = 'bogus'\n" +
 		"let &g:bt = 'bogus'\n" +
-		"set msc=+0 msc=0'0\n" +
 		"let &msc = 010000\n"
 	file := syntax.Parse(source)
 	for _, diagnostic := range Analyze(file).Diagnostics {
@@ -73,7 +77,7 @@ func TestOptionValueDiagnosticsSkipNoGlobalAndInvalidNumberSyntax(t *testing.T) 
 }
 
 func TestOptionValueDiagnosticsSkipValidAndDynamicValues(t *testing.T) {
-	source := "set bh=hide belloff=all,error cpo=aA msc=1 msc=010 emoji=single\n" +
+	source := "set bh=hide belloff=all,error cpo=aA msc=1 msc=010 emoji=single wildchar=X wildcharm=^R\n" +
 		"set bh+=bogus bh=bo\\gus\n" +
 		"let &listchars = 'eol:\\x24'\n" +
 		"let &fillchars = 'stl:\\u002d'\n" +
