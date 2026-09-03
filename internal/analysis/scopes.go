@@ -6403,6 +6403,10 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	}
 	if command.Mapping != nil {
 		walkExpression(result, file, command.Mapping.RHSExpression, scope, nil, false, command.Dialect)
+		appendMappingCmdReferences(result, file, scope, command.Mapping)
+	}
+	if command.Set != nil || command.Declaration != nil {
+		appendCallbackOptionReferences(result, file, scope, command)
 	}
 	if command.Canonical != "++" && command.Canonical != "--" {
 		for _, target := range command.Targets {

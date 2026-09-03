@@ -387,7 +387,12 @@ let g:loaded_my_vimrc = 1
     配置模式下 `:function` 块不再默认带 `!`（与 §4.2 的重新 source 语义一致，plugin 角色保持 `!`）；
     配置模式新增 `<Leader>` mapping 骨架 snippet（含 `<Cmd>call ...` 占位、无 `<unique>`），
     仅在 LHS 空位与 snippet-capable 客户端提供。
-- [ ] autocmd、`<expr>`/`<Cmd>` mapping、回调选项中的静态导航。
+- [x] autocmd、`<expr>`/`<Cmd>` mapping、回调选项中的静态导航。
+  - autocmd body 与 `<expr>` mapping RHS 的引用导航沿用既有表达式管道（有测试固定）；
+    新增 `<Cmd>...<CR>` RHS 的静态 `call Func(...)` 载荷解析与回调选项（`completefunc`/
+    `omnifunc`/`operatorfunc`/`tagfunc` 的 `:set opt=Func` 与 `:let &opt = 'Func'`）
+    的函数名引用与同名解析，definition/references/hover 均可达定义；动态载荷与拼接值保持
+    opaque。
 
 ### P2（§9 P2 需要完整索引证据）
 
