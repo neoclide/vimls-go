@@ -259,6 +259,21 @@ func (s ImportGraphSnapshot) ReverseDependents(path string) []string {
 	return result
 }
 
+// HasMissingImports reports whether the graph contains any unresolved import facts.
+func (g *ImportGraph) HasMissingImports() bool {
+	if g == nil {
+		return false
+	}
+	for _, facts := range g.imports {
+		for _, fact := range facts {
+			if fact.Missing {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (g *ImportGraph) removeIncoming(importer, target string) {
 	facts := g.incoming[target]
 	kept := facts[:0]

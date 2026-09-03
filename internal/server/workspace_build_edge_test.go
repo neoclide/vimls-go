@@ -4,12 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
@@ -343,5 +349,453 @@ func TestWatchedFilesIncrementalEquivalenceWithFullRebuild(t *testing.T) {
 	slices.Sort(names2)
 	if !slices.Equal(names1, names2) {
 		t.Fatalf("symbols mismatch: %v vs %v", names1, names2)
+	}
+}
+
+func TestWatchedFilesCreatedResolvesMissingImportEquivalence(t *testing.T) {
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+
+	setup := func(root string) (string, string) {
+		mainFile := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport 'later.vim' as Later\necho Later.exportedVal\n")
+		laterDir := filepath.Join(root, "import")
+		_ = os.MkdirAll(laterDir, 0755)
+		laterFile := filepath.Join(laterDir, "later.vim")
+		return mainFile, laterFile
+	}
+	main1, later1 := setup(root1)
+	main2, later2 := setup(root2)
+
+	// Server 1: initialized before later.vim exists
+	s1 := initializeWorkspaceServer(t, root1)
+	s1.workspaceWG.Wait()
+
+	// Initial state in s1: main.vim has Missing: true, Target: ""
+	s1.workspaceMu.Lock()
+	facts1 := s1.workspaceGraphView.Imports(main1)
+	s1.workspaceMu.Unlock()
+	if len(facts1) != 1 || !facts1[0].Missing || facts1[0].Target != "" {
+		t.Fatalf("expected initial missing import fact, got %#v", facts1)
+	}
+
+	// Create later.vim on disk in both roots
+	writeWorkspaceFile(t, filepath.Dir(later1), "later.vim", "vim9script\nexport var exportedVal = 42\n")
+	writeWorkspaceFile(t, filepath.Dir(later2), "later.vim", "vim9script\nexport var exportedVal = 42\n")
+
+	// Server 1 receives Created watched event
+	err := s1.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+		Changes: []protocol.FileEvent{
+			{URI: uri.File(later1), Type: protocol.FileChangeTypeCreated},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1.workspaceWG.Wait()
+
+	// Server 2: initialized fresh (full rebuild) from root2
+	s2 := initializeWorkspaceServer(t, root2)
+	s2.workspaceWG.Wait()
+
+	// 1. Compare ImportGraph facts between s1 and s2
+	s1.workspaceMu.Lock()
+	after1 := s1.workspaceGraphView.Imports(main1)
+	s1.workspaceMu.Unlock()
+
+	s2.workspaceMu.Lock()
+	after2 := s2.workspaceGraphView.Imports(main2)
+	s2.workspaceMu.Unlock()
+
+	if len(after1) != 1 || after1[0].Missing || after1[0].Target == "" {
+		t.Fatalf("s1 after create: expected resolved import, got %#v", after1)
+	}
+	if len(after2) != 1 || after2[0].Missing || after2[0].Target == "" {
+		t.Fatalf("s2 after create: expected resolved import, got %#v", after2)
+	}
+	if filepath.Base(after1[0].Target) != filepath.Base(after2[0].Target) {
+		t.Fatalf("target mismatch: %s vs %s", after1[0].Target, after2[0].Target)
+	}
+
+	// 2. Compare diagnostics between s1 and s2 for main.vim
+	rep1, err := s1.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(main1)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep2, err := s2.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.File(main2)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full1, ok1 := rep1.(*protocol.RelatedFullDocumentDiagnosticReport)
+	full2, ok2 := rep2.(*protocol.RelatedFullDocumentDiagnosticReport)
+	if !ok1 || !ok2 {
+		t.Fatalf("expected full reports, got %T, %T", rep1, rep2)
+	}
+	if len(full1.Items) != len(full2.Items) {
+		t.Fatalf("diagnostics count mismatch: %d vs %d", len(full1.Items), len(full2.Items))
+	}
+}
+
+func TestWatchedFilesReadLoopNotBlocked(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+
+	instance := New(serverConn, serverConn, io.Discard)
+	instance.workspaceMu.Lock()
+	instance.workspaceDelay = 0
+	instance.workspaceMu.Unlock()
+	root := t.TempDir()
+	filePath := writeWorkspaceFile(t, root, "test.vim", "vim9script\nvar a = 1\n")
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	instance.beforeWatchedFileProcessForTest = func(p string) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+	}
+
+	done := make(chan int, 1)
+	go func() { done <- instance.Run(context.Background()) }()
+
+	writer := jsonrpc.NewWriter(clientConn)
+	reader := jsonrpc.NewReader(clientConn)
+
+	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"workspaceFolders":[{"uri":%q,"name":"root"}]}}`, uri.File(root)))
+	if msg := readFrame(t, reader); idNumber(t, msg) != 1 {
+		t.Fatalf("initialize response = %#v", msg)
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+	waitForWorkspaceSymbols(t, instance, "a", 1)
+
+	// Send didChangeWatchedFiles notification
+	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":%q,"type":2}]}}`, uri.File(filePath)))
+
+	// Wait until watched-file processing has blocked at the hook
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for watched file processing to start")
+	}
+
+	// While watched-file processing is still paused at the hook, send a shutdown request.
+	// Because workspace/didChangeWatchedFiles is async, the read loop must process shutdown!
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- writer.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`))
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write shutdown failed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out writing shutdown request (read loop blocked)")
+	}
+
+	// Unblock watched-file processing so shutdown can complete waiting for background work
+	close(release)
+
+	msg := readFrame(t, reader)
+	if idNumber(t, msg) != 2 {
+		t.Fatalf("expected shutdown response id=2, got %#v", msg)
+	}
+
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit code = %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not exit")
+	}
+}
+
+func TestDidChangeWatchedFilesContextCancellation(t *testing.T) {
+	root := t.TempDir()
+	p1 := writeWorkspaceFile(t, root, "f1.vim", "vim9script\nvar x = 1\n")
+	p2 := writeWorkspaceFile(t, root, "f2.vim", "vim9script\nvar y = 2\n")
+
+	instance := initializeWorkspaceServer(t, root)
+	instance.workspaceWG.Wait()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	instance.beforeWatchedFileProcessForTest = func(p string) {
+		if filepath.Base(p) == "f1.vim" {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			<-release
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- instance.DidChangeWatchedFiles(ctx, &protocol.DidChangeWatchedFilesParams{
+			Changes: []protocol.FileEvent{
+				{URI: uri.File(p1), Type: protocol.FileChangeTypeChanged},
+				{URI: uri.File(p2), Type: protocol.FileChangeTypeChanged},
+			},
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for f1.vim")
+	}
+
+	// Cancel context while blocked
+	cancel()
+	close(release)
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DidChangeWatchedFiles did not return after cancellation")
+	}
+}
+
+func TestWatchedFilesOverlayCheckPreservedAfterDidOpen(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "overlay_race.vim", "vim9script\nvar diskVal = 1\n")
+	instance := initializeWorkspaceServer(t, root)
+	instance.workspaceWG.Wait()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	instance.beforeWatchedFileInstallForTest = func(p string) {
+		if filepath.Base(p) == "overlay_race.vim" {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			<-release
+		}
+	}
+
+	// Update disk file
+	writeWorkspaceFile(t, root, "overlay_race.vim", "vim9script\nvar diskVal = 2\n")
+
+	// Trigger watched files notification (runs asynchronously)
+	go func() {
+		_ = instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+			Changes: []protocol.FileEvent{
+				{URI: uri.File(path), Type: protocol.FileChangeTypeChanged},
+			},
+		})
+	}()
+
+	// Wait until watched-file processing has passed initial checks and blocked at install hook
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for watched file processing to reach install hook")
+	}
+
+	// In the meantime, user opens an overlay for the file
+	docURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: docURI, Version: 1, Text: "vim9script\nvar overlayVal = 42\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(waitForWorkspaceSymbols(t, instance, "overlayVal", 1)) != 1 {
+		t.Fatal("overlayVal not indexed")
+	}
+
+	// Release watched handler to proceed with its disk install check
+	close(release)
+	instance.watchWG.Wait()
+
+	// Assert overlay was NOT overwritten by disk result
+	if len(workspaceSymbols(t, instance, "overlayVal")) != 1 {
+		t.Fatal("overlayVal was overwritten by disk result")
+	}
+	if len(workspaceSymbols(t, instance, "diskVal")) != 0 {
+		t.Fatal("diskVal should not be indexed while overlay is open")
+	}
+}
+
+func TestWatchedFilesOverlayCheckPreservedOnDeleteEvent(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "overlay_del.vim", "vim9script\nvar initVal = 1\n")
+	instance := initializeWorkspaceServer(t, root)
+	instance.workspaceWG.Wait()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	instance.beforeWatchedFileInstallForTest = func(p string) {
+		if filepath.Base(p) == "overlay_del.vim" {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			<-release
+		}
+	}
+
+	// Remove file on disk
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	// Trigger delete event
+	go func() {
+		_ = instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+			Changes: []protocol.FileEvent{
+				{URI: uri.File(path), Type: protocol.FileChangeTypeDeleted},
+			},
+		})
+	}()
+
+	// Wait until delete handler has blocked at the install hook (os.Stat confirmed nonexistence)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for delete handler to reach install hook")
+	}
+
+	// User opens an overlay for the deleted file while delete handler is blocked
+	docURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: docURI, Version: 1, Text: "vim9script\nvar overlayDelVal = 99\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(waitForWorkspaceSymbols(t, instance, "overlayDelVal", 1)) != 1 {
+		t.Fatal("overlayDelVal not indexed")
+	}
+
+	// Unblock delete handler to attempt removing facts
+	close(release)
+	instance.watchWG.Wait()
+
+	// Overlay must NOT be deleted by the stale delete event
+	if len(workspaceSymbols(t, instance, "overlayDelVal")) != 1 {
+		t.Fatal("overlay facts were cleared by stale delete event")
+	}
+}
+
+func TestDidChangeWatchedFilesBurstMergesToSingleRebuild(t *testing.T) {
+	root := t.TempDir()
+	p := writeWorkspaceFile(t, root, "burst.vim", "vim9script\nvar burstVal = 1\n")
+	instance := initializeWorkspaceServer(t, root)
+	instance.workspaceWG.Wait()
+
+	var rebuildCount atomic.Int32
+	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+		rebuildCount.Add(1)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	instance.beforeWatchedFileProcessForTest = func(p string) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+	}
+
+	// 1. First event becomes active and blocks
+	go func() {
+		_ = instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+			Changes: []protocol.FileEvent{
+				{URI: uri.File(p), Type: protocol.FileChangeTypeChanged},
+			},
+		})
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for active handler")
+	}
+
+	// 2. Send 20 concurrent burst notifications; all must return immediately without blocking!
+	burstDone := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for i := 0; i < 20; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_ = instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+					Changes: []protocol.FileEvent{
+						{URI: uri.File(p), Type: protocol.FileChangeTypeChanged},
+					},
+				})
+			}()
+		}
+		wg.Wait()
+		close(burstDone)
+	}()
+
+	select {
+	case <-burstDone:
+		// Succeeded: all 20 returned immediately without blocking on the active handler
+	case <-time.After(2 * time.Second):
+		t.Fatal("burst notifications blocked on active handler")
+	}
+
+	// 3. Release active handler
+	close(release)
+	instance.watchWG.Wait()
+	instance.workspaceWG.Wait()
+
+	if count := rebuildCount.Load(); count != 1 {
+		t.Fatalf("expected exactly 1 workspace rebuild for burst notifications, got %d", count)
+	}
+}
+
+func TestDidChangeWatchedFilesTOCTOUFileGrowth(t *testing.T) {
+	root := t.TempDir()
+	filePath := writeWorkspaceFile(t, root, "grow.vim", "vim9script\nvar initial = 1\n")
+	instance := initializeWorkspaceServer(t, root)
+	instance.workspaceWG.Wait()
+
+	// In the hook before processing, write oversized content
+	instance.beforeWatchedFileProcessForTest = func(p string) {
+		if filepath.Base(p) == "grow.vim" {
+			_ = os.WriteFile(p, []byte(strings.Repeat("x", maxFileBytes+1)), 0644)
+		}
+	}
+
+	err := instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+		Changes: []protocol.FileEvent{
+			{URI: uri.File(filePath), Type: protocol.FileChangeTypeChanged},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The file should NOT be indexed with symbols because it exceeded maxFileBytes
+	syms := workspaceSymbols(t, instance, "initial")
+	if len(syms) != 0 {
+		t.Fatalf("oversized file symbols should be cleared, got %#v", syms)
 	}
 }

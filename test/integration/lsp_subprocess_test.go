@@ -113,7 +113,7 @@ endfunction
 	if err := os.WriteFile(filepath.Join(runtimeRoot, "colors", "default.vim"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
 	command.Dir = repositoryRoot
@@ -125,13 +125,13 @@ endfunction
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr strings.Builder
+	var stderr safeBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
 
-	client := newTestClient(t, stdout, stdin, &stderr)
+	client := newTestClient(t, stdout, stdin, &stderr, ctx)
 	writer := client
 	reader := client
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"completion":{"completionItem":{"snippetSupport":true}},"hover":{"contentFormat":["markdown"]},"signatureHelp":{"signatureInformation":{"documentationFormat":["plaintext"]}},"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
@@ -520,9 +520,7 @@ endfunction
 	if err := stdin.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := command.Wait(); err != nil {
-		t.Fatalf("server failed: %v, stderr: %s", err, stderr.String())
-	}
+	waitCommand(t, ctx, command, 5*time.Second, &stderr)
 	if ctx.Err() != nil {
 		t.Fatalf("server timed out: %v", ctx.Err())
 	}
@@ -543,7 +541,7 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	}
 	openPath := filepath.Join(workspaceRoot, "open.vim")
 	documentURI := canonicalFileURI(t, openPath).String()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
 	command.Dir = repositoryRoot
@@ -555,13 +553,13 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr strings.Builder
+	var stderr safeBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
 
-	client := newTestClient(t, stdout, stdin, &stderr)
+	client := newTestClient(t, stdout, stdin, &stderr, ctx)
 	writer := client
 	reader := client
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":%q,"capabilities":{"textDocument":{"diagnostic":{}}},"initializationOptions":{"runtimepath":[]}}}`, canonicalFileURI(t, workspaceRoot).String()))
@@ -643,9 +641,7 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	if err := stdin.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := command.Wait(); err != nil {
-		t.Fatalf("server failed: %v, stderr: %s", err, stderr.String())
-	}
+	waitCommand(t, ctx, command, 5*time.Second, &stderr)
 	if ctx.Err() != nil {
 		t.Fatalf("server timed out: %v", ctx.Err())
 	}
@@ -702,7 +698,7 @@ func canonicalFileURI(t *testing.T, path string) uri.URI {
 }
 
 func TestVersionSubprocess(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary, "--version")
 	output, err := command.CombinedOutput()
@@ -715,7 +711,7 @@ func TestVersionSubprocess(t *testing.T) {
 }
 
 func TestTCPSubprocess(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary, "--listen", "127.0.0.1:0")
 	stderr, err := command.StderrPipe()
@@ -738,23 +734,21 @@ func TestTCPSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial %s: %v", address, err)
 	}
-	var serverStderr strings.Builder
+	var serverStderr safeBuffer
 	go func() {
 		_, _ = io.Copy(&serverStderr, stderr)
 	}()
-	client := newTestClient(t, connection, connection, &serverStderr)
+	client := newTestClient(t, connection, connection, &serverStderr, ctx)
 	runSharedEditingScenario(t, client, t.TempDir())
 	_ = connection.Close()
-	if err := command.Wait(); err != nil {
-		t.Fatalf("TCP server failed: %v", err)
-	}
+	waitCommand(t, ctx, command, 5*time.Second, &serverStderr)
 	if ctx.Err() != nil {
 		t.Fatalf("TCP server timed out: %v", ctx.Err())
 	}
 }
 
 func TestStdioSharedScenario(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
 	stdin, err := command.StdinPipe()
@@ -765,16 +759,14 @@ func TestStdioSharedScenario(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr strings.Builder
+	var stderr safeBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	client := newTestClient(t, stdout, stdin, &stderr)
+	client := newTestClient(t, stdout, stdin, &stderr, ctx)
 	runSharedEditingScenario(t, client, t.TempDir())
-	if err := command.Wait(); err != nil {
-		t.Fatalf("stdio server failed: %v", err)
-	}
+	waitCommand(t, ctx, command, 5*time.Second, &stderr)
 	if ctx.Err() != nil {
 		t.Fatalf("stdio server timed out: %v", ctx.Err())
 	}
@@ -784,7 +776,7 @@ func TestSignalSubprocess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGTERM is not portable to Windows")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 15*time.Second)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, vimlsBinary)
@@ -796,12 +788,12 @@ func TestSignalSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr strings.Builder
+	var stderr safeBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	client := newTestClient(t, stdout, stdin, &stderr)
+	client := newTestClient(t, stdout, stdin, &stderr, ctx)
 	writer := client
 	reader := client
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
@@ -809,9 +801,7 @@ func TestSignalSubprocess(t *testing.T) {
 	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
-	if err := command.Wait(); err != nil {
-		t.Fatalf("signal shutdown failed: %v, stderr: %s", err, stderr.String())
-	}
+	waitCommand(t, ctx, command, 5*time.Second, &stderr)
 	if ctx.Err() != nil {
 		t.Fatalf("signal shutdown timed out: %v", ctx.Err())
 	}
@@ -824,7 +814,7 @@ func TestTCPListenerSignalSubprocess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGTERM is not portable to Windows")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 15*time.Second)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, vimlsBinary, "--listen", "127.0.0.1:0")
@@ -850,6 +840,75 @@ func TestTCPListenerSignalSubprocess(t *testing.T) {
 	}
 }
 
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *safeBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Len()
+}
+
+func subprocessContext(t *testing.T, budget time.Duration) (context.Context, context.CancelFunc) {
+	t.Helper()
+	parent := t.Context()
+	if deadline, ok := t.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 500*time.Millisecond {
+			remaining -= 500 * time.Millisecond
+		}
+		if remaining < budget {
+			budget = remaining
+		}
+	}
+	return context.WithTimeout(parent, budget)
+}
+
+func waitCommand(t *testing.T, ctx context.Context, cmd *exec.Cmd, timeout time.Duration, stderr *safeBuffer) {
+	t.Helper()
+	if ctx != nil {
+		if d, ok := ctx.Deadline(); ok {
+			rem := time.Until(d)
+			const killReserve = 500 * time.Millisecond
+			if rem <= killReserve {
+				t.Fatalf("lifetime context exhausted before waitCommand: remaining %v <= %v, stderr: %s", rem, killReserve, stderr.String())
+				return
+			}
+			available := rem - killReserve
+			if timeout <= 0 || available < timeout {
+				timeout = available
+			}
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("server failed: %v, stderr: %s", err, stderr.String())
+		}
+	case <-time.After(timeout):
+		_ = cmd.Process.Kill()
+		t.Fatalf("timed out waiting %v for server exit, stderr: %s", timeout, stderr.String())
+	}
+}
+
 type transcriptEntry struct {
 	time time.Time
 	dir  string
@@ -870,20 +929,40 @@ type testHelper interface {
 type testClient struct {
 	t              testHelper
 	writer         *jsonrpc.Writer
-	stderr         *strings.Builder
+	stderr         *safeBuffer
+	lifetimeCtx    context.Context
 	readChan       chan frameResult
 	transcript     []transcriptEntry
 	mu             sync.Mutex
 	defaultTimeout time.Duration
 }
 
-func newTestClient(t testHelper, r io.Reader, w io.Writer, stderr *strings.Builder) *testClient {
+func newTestClient(t testHelper, r io.Reader, w io.Writer, stderr *safeBuffer, lifetimeCtx ...context.Context) *testClient {
+	var lCtx context.Context
+	if len(lifetimeCtx) > 0 {
+		lCtx = lifetimeCtx[0]
+	}
+	opTimeout := 5 * time.Second
+	if lCtx != nil {
+		if d, ok := lCtx.Deadline(); ok {
+			remaining := time.Until(d)
+			const cleanupReserve = 3 * time.Second
+			if remaining <= cleanupReserve {
+				t.Fatalf("subprocess lifetime budget %v insufficient for cleanup reserve %v", remaining, cleanupReserve)
+			}
+			available := remaining - cleanupReserve
+			if available < opTimeout {
+				opTimeout = available
+			}
+		}
+	}
 	c := &testClient{
 		t:              t,
 		writer:         jsonrpc.NewWriter(w),
 		stderr:         stderr,
+		lifetimeCtx:    lCtx,
 		readChan:       make(chan frameResult, 128),
-		defaultTimeout: 10 * time.Second,
+		defaultTimeout: opTimeout,
 	}
 	go func() {
 		reader := jsonrpc.NewReader(r)
@@ -954,6 +1033,31 @@ func (c *testClient) write(body string) {
 
 func (c *testClient) readTimeout(d time.Duration, waitingFor string) map[string]json.RawMessage {
 	c.t.Helper()
+	if c.lifetimeCtx != nil {
+		if deadline, ok := c.lifetimeCtx.Deadline(); ok {
+			rem := time.Until(deadline)
+			const cleanupReserve = 3 * time.Second
+			if rem <= cleanupReserve {
+				c.failf("subprocess lifetime context exhausted while waiting for %s (remaining %v <= cleanup reserve %v)", waitingFor, rem, cleanupReserve)
+				return nil
+			}
+			available := rem - cleanupReserve
+			if d <= 0 || available < d {
+				d = available
+			}
+		}
+	}
+	var timer <-chan time.Time
+	if d > 0 {
+		timerObj := time.NewTimer(d)
+		defer timerObj.Stop()
+		timer = timerObj.C
+	}
+	var ctxDone <-chan struct{}
+	if c.lifetimeCtx != nil {
+		ctxDone = c.lifetimeCtx.Done()
+	}
+
 	select {
 	case res := <-c.readChan:
 		if res.err != nil {
@@ -967,8 +1071,11 @@ func (c *testClient) readTimeout(d time.Duration, waitingFor string) map[string]
 			return nil
 		}
 		return msg
-	case <-time.After(d):
+	case <-timer:
 		c.failf("timed out after %v waiting for %s", d, waitingFor)
+		return nil
+	case <-ctxDone:
+		c.failf("subprocess lifetime context canceled while waiting for %s: %v", waitingFor, c.lifetimeCtx.Err())
 		return nil
 	}
 }
@@ -1042,7 +1149,7 @@ func readResponse(t testHelper, target any, id string) map[string]json.RawMessag
 	}
 }
 
-func readPullResponse(t testHelper, target any, writer any, _ *strings.Builder, id string) map[string]json.RawMessage {
+func readPullResponse(t testHelper, target any, writer any, _ *safeBuffer, id string) map[string]json.RawMessage {
 	t.Helper()
 	if c, ok := target.(*testClient); ok {
 		deadline := time.Now().Add(c.defaultTimeout)
@@ -1193,7 +1300,7 @@ func (f *fakeT) Fatalf(format string, args ...any) {
 }
 
 func TestSubprocessTimeoutTranscript(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := subprocessContext(t, 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
 	stdin, err := command.StdinPipe()
@@ -1204,7 +1311,7 @@ func TestSubprocessTimeoutTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr strings.Builder
+	var stderr safeBuffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
@@ -1215,11 +1322,23 @@ func TestSubprocessTimeoutTranscript(t *testing.T) {
 	}()
 
 	mock := &fakeT{}
-	client := newTestClient(mock, stdout, stdin, &stderr)
+	client := newTestClient(mock, stdout, stdin, &stderr, ctx)
 	client.defaultTimeout = 50 * time.Millisecond
 
 	writeJSON(mock, client, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`)
 	_ = readResponse(mock, client, "1")
+
+	// Trigger real subprocess stderr output by sending a didSave for an unopened file
+	writeJSON(mock, client, `{"jsonrpc":"2.0","method":"textDocument/didSave","params":{"textDocument":{"uri":"file:///unopened_sentinel.vim"}}}`)
+
+	sentinel := "vimls: ignored save for file:///unopened_sentinel.vim"
+	sentinelDeadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(stderr.String(), sentinel) {
+		if time.Now().After(sentinelDeadline) {
+			t.Fatalf("timed out waiting for subprocess stderr sentinel %q, got: %s", sentinel, stderr.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Wait for a non-existent response ID 99999
 	_ = readResponse(mock, client, "99999")
@@ -1234,5 +1353,75 @@ func TestSubprocessTimeoutTranscript(t *testing.T) {
 	}
 	if !strings.Contains(mock.failMsg, "SERVER STDERR") {
 		t.Fatalf("expected failure to contain server stderr, got: %s", mock.failMsg)
+	}
+	if !strings.Contains(mock.failMsg, "vimls: ignored save for file:///unopened_sentinel.vim") {
+		t.Fatalf("expected failure to contain real subprocess stderr sentinel, got: %s", mock.failMsg)
+	}
+}
+
+func TestSafeBufferConcurrentReadWrite(t *testing.T) {
+	var buf safeBuffer
+	const workers = 8
+	const iterations = 500
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		workerID := i
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				_, _ = buf.Write([]byte(fmt.Sprintf("w%d-line%d\n", workerID, j)))
+			}
+		}()
+	}
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				_ = buf.Len()
+				_ = buf.String()
+			}
+		}()
+	}
+
+	wg.Wait()
+	if buf.Len() == 0 {
+		t.Fatal("expected non-empty buffer after concurrent writes")
+	}
+}
+
+func TestTestClientSubphaseTimeoutDoesNotConsumeLifetime(t *testing.T) {
+	lifetimeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	serverR, clientW := net.Pipe()
+	clientR, _ := net.Pipe()
+	t.Cleanup(func() {
+		_ = serverR.Close()
+		_ = clientW.Close()
+		_ = clientR.Close()
+	})
+
+	var stderr safeBuffer
+	mock := &fakeT{}
+	client := newTestClient(mock, clientR, clientW, &stderr, lifetimeCtx)
+
+	// Trigger a 30ms subphase read timeout
+	msg := client.readTimeout(30*time.Millisecond, "stalled-message")
+	if msg != nil {
+		t.Fatalf("expected nil message, got %#v", msg)
+	}
+	if !mock.failed {
+		t.Fatal("expected mock test helper to fail on subphase timeout")
+	}
+	if !strings.Contains(mock.failMsg, "timed out after 30ms waiting for stalled-message") {
+		t.Fatalf("unexpected failure message: %s", mock.failMsg)
+	}
+	// Verify that the lifetime context is still intact and not canceled!
+	if lifetimeCtx.Err() != nil {
+		t.Fatalf("expected lifetime context to be active, got: %v", lifetimeCtx.Err())
 	}
 }

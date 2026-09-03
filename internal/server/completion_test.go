@@ -877,6 +877,35 @@ func TestCompletionSetValueUsesUTF16CRLFRange(t *testing.T) {
 	}
 }
 
+func TestCompletionAutocmdMultiPattern(t *testing.T) {
+	for _, test := range []struct {
+		source        string
+		wantStartChar uint32
+		wantEndChar   uint32
+	}{
+		{"autocmd User A,<bu", 15, 18},
+		{"autocmd BufEnter *.vim,<bu", 23, 26},
+		{`autocmd BufEnter foo\,bar,<bu`, 26, 29},
+	} {
+		items := commandPartCompletionItems(t, test.source, 0, uint32(len(test.source)))
+		item := completionItemWithLabel(items, "<buffer>")
+		if item == nil {
+			t.Fatalf("%q: missing completion <buffer> in %#v", test.source, items)
+		}
+		edit, ok := item.TextEdit.(*protocol.TextEdit)
+		if !ok {
+			t.Fatalf("%q: missing textEdit on <buffer>: %#v", test.source, item.TextEdit)
+		}
+		expectedRange := navigationRange(0, test.wantStartChar, test.wantEndChar)
+		if edit.Range != expectedRange {
+			t.Fatalf("%q: range got %v, want %v", test.source, edit.Range, expectedRange)
+		}
+		if edit.NewText != "<buffer>" {
+			t.Fatalf("%q: newText got %q, want <buffer>", test.source, edit.NewText)
+		}
+	}
+}
+
 func commandPartCompletionItems(t *testing.T, source string, line, character uint32) protocol.CompletionItemSlice {
 	t.Helper()
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

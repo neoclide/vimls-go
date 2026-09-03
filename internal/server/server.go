@@ -55,12 +55,16 @@ type parsedDocument struct {
 	analysis  *analysis.FileAnalysis
 }
 
-type inFlightParse struct {
+type parseInFlightKey struct {
+	uri       string
 	contentID text.ContentID
-	source    string
-	done      chan struct{}
-	file      *syntax.File
-	analysis  *analysis.FileAnalysis
+}
+
+type inFlightParse struct {
+	source   string
+	done     chan struct{}
+	file     *syntax.File
+	analysis *analysis.FileAnalysis
 }
 
 type publishedDiagnosticsState struct {
@@ -68,6 +72,7 @@ type publishedDiagnosticsState struct {
 	hash           [32]byte
 	hasHash        bool
 	mustPublish    bool
+	publishSeq     uint64
 	lastVersion    int32
 	hasLastVersion bool
 }
@@ -159,9 +164,11 @@ type Server struct {
 	analysisPending             map[string]struct{}
 	analysisRunning             map[string]struct{}
 	analysisWorkers             int
+	testHookAnalysisFinished    func(documentURI string)
+	diagnosticsSendMu           sync.Mutex
 	publishMu                   sync.Mutex
 	parsed                      map[string]parsedDocument
-	parseInFlight               map[string]*inFlightParse
+	parseInFlight               map[parseInFlightKey]*inFlightParse
 	published                   map[string]publishedDiagnosticsState
 	pullDiagnosticResults       map[string]pullDiagnosticResult
 	nextDiagnosticResultID      uint64
@@ -192,20 +199,30 @@ type Server struct {
 	// The following hooks are test-only synchronization seams. They are set
 	// before use and are always called outside server locks.
 	beforeParseSnapshotCacheMissForTest func(*text.Snapshot)
+	beforeInFlightWaitForTest           func(*text.Snapshot)
 	beforeAnalyzeForTest                func(*syntax.File)
+	beforeStopAnalysisWaitForTest       func()
+	beforeWorkspaceWGWaitForTest        func()
 	beforeWorkspaceRestoreReadForTest   func(workspaceRestore)
 	beforeWorkspaceRebuildDelayForTest  func()
 	beforeWorkspaceIndexWaitForTest     func()
 	beforeWorkspaceBuildForTest         func([]*text.Snapshot)
+	afterWorkspaceIndexWorkerForTest    func()
+	beforeShutdownReturnForTest         func()
 
-	watchMu                       sync.Mutex
-	watchDynamicRegistration      bool
-	watchRelativePatterns         bool
-	watchRegistered               bool
-	initialized                   bool
-	watchWG                       sync.WaitGroup
-	workspaceConfiguration        bool
-	excludeRuntimePathCompletions bool
+	watchMu                         sync.Mutex
+	watchDynamicRegistration        bool
+	watchRelativePatterns           bool
+	watchRegistered                 bool
+	initialized                     bool
+	watchWG                         sync.WaitGroup
+	watchedFilesRunning             bool
+	watchedFilesDirty               bool
+	beforeWatchedFileProcessForTest func(path string)
+	beforeWatchedFileReadForTest    func(path string)
+	beforeWatchedFileInstallForTest func(path string)
+	workspaceConfiguration          bool
+	excludeRuntimePathCompletions   bool
 	// Diagnostic maps are replaced, never mutated, while mu is held. Analysis
 	// and publication may therefore snapshot their immutable map references.
 	disabledDiagnostics map[string]struct{}
@@ -235,7 +252,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		initialRefreshPending: make(map[string]struct{}),
 		analysisRunning:       make(map[string]struct{}),
 		parsed:                make(map[string]parsedDocument),
-		parseInFlight:         make(map[string]*inFlightParse),
+		parseInFlight:         make(map[parseInFlightKey]*inFlightParse),
 		published:             make(map[string]publishedDiagnosticsState),
 		workspaceIndex:        newWorkspaceIndex(),
 		workspaceGraph:        graph,
@@ -318,6 +335,9 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 			return nil, nil
 		}
 		if !request.IsCall() {
+			if request.Method() == protocol.MethodWorkspaceDidChangeWatchedFiles {
+				jsonrpc2.Async(ctx)
+			}
 			return next(valueContext{Context: jsonrpc2.DetachContext(ctx), values: ctx}, request)
 		}
 
@@ -636,6 +656,9 @@ func (s *Server) Shutdown(context.Context) error {
 	s.stopAnalysis()
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
+	if s.beforeShutdownReturnForTest != nil {
+		s.beforeShutdownReturnForTest()
+	}
 	return nil
 }
 
@@ -645,6 +668,7 @@ func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 	snapshot := s.documents.Open(document.URI.String(), document.Version, document.Text)
 	st := s.published[snapshot.URI()]
 	st.mustPublish = true
+	st.publishSeq++
 	s.published[snapshot.URI()] = st
 	var dependents []string
 	if snapshot.ByteLen() > maxFileBytes {
@@ -689,6 +713,7 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 	if err == nil {
 		st := s.published[params.TextDocument.URI.String()]
 		st.mustPublish = true
+		st.publishSeq++
 		s.published[params.TextDocument.URI.String()] = st
 	}
 	if err == nil && changed {
@@ -716,6 +741,7 @@ func (s *Server) DidSave(_ context.Context, params *protocol.DidSaveTextDocument
 	if err == nil {
 		st := s.published[params.TextDocument.URI.String()]
 		st.mustPublish = true
+		st.publishSeq++
 		s.published[params.TextDocument.URI.String()] = st
 	}
 	if err == nil && changed {
@@ -747,13 +773,10 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	delete(s.pullDiagnosticResults, documentURI)
 	delete(s.semanticTokenResults, documentURI)
 	delete(s.initialRefreshPending, documentURI)
-	clearDiagnostics := s.published[documentURI].hasDiagnostics
 	delete(s.published, documentURI)
 	s.publishMu.Unlock()
 	if closed {
 		s.restoreWorkspaceDocument(documentURI)
-	}
-	if clearDiagnostics {
 		s.clearDiagnostics(documentURI)
 	}
 	return nil
@@ -818,6 +841,7 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 		if diagnosticsChanged {
 			for uriKey, st := range s.published {
 				st.mustPublish = true
+				st.publishSeq++
 				s.published[uriKey] = st
 			}
 		}
@@ -1081,7 +1105,11 @@ func (s *Server) finishAnalysis(documentURI string) {
 	if len(s.analysisPending) > 0 && !s.analysisStopped {
 		s.wakeAnalysisLocked()
 	}
+	hook := s.testHookAnalysisFinished
 	s.analysisMu.Unlock()
+	if hook != nil {
+		hook(documentURI)
+	}
 }
 
 func (s *Server) wakeAnalysisLocked() {
@@ -1245,15 +1273,24 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		return file, fileAnalysis
 	}
 
+	key := parseInFlightKey{
+		uri:       documentURI,
+		contentID: contentID,
+	}
+
 	for {
 		if ctx.Err() != nil {
 			s.publishMu.Unlock()
 			return nil, nil
 		}
-		inFlight := s.parseInFlight[documentURI]
-		if inFlight != nil && inFlight.contentID == contentID && inFlight.source == source {
+		inFlight := s.parseInFlight[key]
+		if inFlight != nil && inFlight.source == source {
 			done := inFlight.done
+			hook := s.beforeInFlightWaitForTest
 			s.publishMu.Unlock()
+			if hook != nil {
+				hook(snapshot)
+			}
 			select {
 			case <-ctx.Done():
 				return nil, nil
@@ -1288,11 +1325,10 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		}
 
 		entry := &inFlightParse{
-			contentID: contentID,
-			source:    source,
-			done:      make(chan struct{}),
+			source: source,
+			done:   make(chan struct{}),
 		}
-		s.parseInFlight[documentURI] = entry
+		s.parseInFlight[key] = entry
 		s.publishMu.Unlock()
 
 		if s.beforeParseSnapshotCacheMissForTest != nil {
@@ -1308,8 +1344,8 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		entry.analysis = fileAnalysis
 
 		s.publishMu.Lock()
-		if s.parseInFlight[documentURI] == entry {
-			delete(s.parseInFlight, documentURI)
+		if s.parseInFlight[key] == entry {
+			delete(s.parseInFlight, key)
 		}
 		close(entry.done)
 
@@ -1338,24 +1374,26 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	s.mu.Unlock()
 
 	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
 	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
+		s.publishMu.Unlock()
 		return false
 	}
 	documentURI := analysis.Snapshot.URI()
 	s.workspaceMu.Lock()
 	if !s.workspaceIdentityCurrentLocked(identity) {
 		s.workspaceMu.Unlock()
+		s.publishMu.Unlock()
 		s.startAnalysis(documentURI)
 		return false
 	}
 	s.workspaceMu.Unlock()
 	_, initialRefresh := s.initialRefreshPending[documentURI]
-	delete(s.initialRefreshPending, documentURI)
 	initialRefresh = initialRefresh && analysis.Snapshot.ByteLen() <= maxFileBytes
 	diagnostics := protocolDiagnostics(analysis.Snapshot, file, encoding, diagnosticRelatedInformation, overrides)
 	if pullDiagnostics {
 		s.installPullDiagnosticResultLocked(analysis, identity, diagnostics)
+		delete(s.initialRefreshPending, documentURI)
+		s.publishMu.Unlock()
 		return initialRefresh
 	}
 	pubState := s.published[documentURI]
@@ -1364,15 +1402,10 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 
 	if len(diagnostics) == 0 {
 		if !pubState.hasDiagnostics {
+			delete(s.initialRefreshPending, documentURI)
+			s.publishMu.Unlock()
 			return initialRefresh
 		}
-		pubState = publishedDiagnosticsState{
-			hasDiagnostics: false,
-			mustPublish:    false,
-			hasLastVersion: hasVersion,
-			lastVersion:    curVersion,
-		}
-		s.published[documentURI] = pubState
 	} else {
 		unchanged := pubState.hasDiagnostics &&
 			!pubState.mustPublish &&
@@ -1380,27 +1413,86 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 			pubState.hash == diagHash &&
 			(!hasVersion || (pubState.hasLastVersion && pubState.lastVersion == curVersion))
 		if unchanged {
+			delete(s.initialRefreshPending, documentURI)
+			s.publishMu.Unlock()
 			return initialRefresh
 		}
-		pubState = publishedDiagnosticsState{
-			hasDiagnostics: true,
-			hasHash:        true,
-			hash:           diagHash,
-			mustPublish:    false,
-			hasLastVersion: hasVersion,
-			lastVersion:    curVersion,
-		}
-		s.published[documentURI] = pubState
 	}
 	if client == nil {
-		return initialRefresh
+		s.publishMu.Unlock()
+		return false
 	}
+	startSeq := pubState.publishSeq
 	params := &protocol.PublishDiagnosticsParams{URI: uri.URI(documentURI), Diagnostics: diagnostics}
 	if version, ok := analysis.Snapshot.Version(); ok {
 		params.Version = protocol.NewOptional(version)
 	}
-	if err := client.PublishDiagnostics(analysis.Context, params); err != nil && analysis.Context.Err() == nil {
-		s.logf("vimls: publish diagnostics for %s: %v", documentURI, err)
+	s.publishMu.Unlock()
+
+	s.diagnosticsSendMu.Lock()
+	defer s.diagnosticsSendMu.Unlock()
+
+	s.publishMu.Lock()
+	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
+		s.publishMu.Unlock()
+		return false
+	}
+	s.workspaceMu.Lock()
+	workspaceCurrent := s.workspaceIdentityCurrentLocked(identity)
+	s.workspaceMu.Unlock()
+	if !workspaceCurrent {
+		s.publishMu.Unlock()
+		s.startAnalysis(documentURI)
+		return false
+	}
+	s.publishMu.Unlock()
+
+	if err := client.PublishDiagnostics(analysis.Context, params); err != nil {
+		if analysis.Context.Err() == nil {
+			s.logf("vimls: publish diagnostics for %s: %v", documentURI, err)
+		}
+		return false
+	}
+
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+
+	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
+		return false
+	}
+	s.workspaceMu.Lock()
+	workspaceCurrent = s.workspaceIdentityCurrentLocked(identity)
+	s.workspaceMu.Unlock()
+	if !workspaceCurrent {
+		return false
+	}
+
+	currentPubState := s.published[documentURI]
+	if hasVersion && currentPubState.hasLastVersion && currentPubState.lastVersion > curVersion {
+		return false
+	}
+
+	delete(s.initialRefreshPending, documentURI)
+	newMustPublish := currentPubState.mustPublish && (currentPubState.publishSeq != startSeq)
+
+	if len(diagnostics) == 0 {
+		s.published[documentURI] = publishedDiagnosticsState{
+			hasDiagnostics: false,
+			mustPublish:    newMustPublish,
+			publishSeq:     currentPubState.publishSeq,
+			hasLastVersion: hasVersion,
+			lastVersion:    curVersion,
+		}
+	} else {
+		s.published[documentURI] = publishedDiagnosticsState{
+			hasDiagnostics: true,
+			hasHash:        true,
+			hash:           diagHash,
+			mustPublish:    newMustPublish,
+			publishSeq:     currentPubState.publishSeq,
+			hasLastVersion: hasVersion,
+			lastVersion:    curVersion,
+		}
 	}
 	return initialRefresh
 }
@@ -1547,8 +1639,8 @@ func protocolSeverity(severity syntax.DiagnosticSeverity) protocol.DiagnosticSev
 }
 
 func (s *Server) clearDiagnostics(documentURI string) {
-	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
+	s.diagnosticsSendMu.Lock()
+	defer s.diagnosticsSendMu.Unlock()
 	if s.analysisContext.Err() != nil {
 		return
 	}
@@ -1578,10 +1670,16 @@ func (s *Server) cancelAnalysis() {
 func (s *Server) stopAnalysis() {
 	s.stopOnce.Do(func() {
 		s.cancelAnalysis()
+		if s.beforeStopAnalysisWaitForTest != nil {
+			s.beforeStopAnalysisWaitForTest()
+		}
 		s.analysisWG.Wait()
 		// Synchronize with a rebuild that may have checked analysisContext just
 		// before cancellation, so its WaitGroup.Add completes before Wait starts.
 		waitGroupAddBarrier(&s.workspaceMu)
+		if s.beforeWorkspaceWGWaitForTest != nil {
+			s.beforeWorkspaceWGWaitForTest()
+		}
 		s.workspaceWG.Wait()
 		waitGroupAddBarrier(&s.watchMu)
 		s.watchWG.Wait()

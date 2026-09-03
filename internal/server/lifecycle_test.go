@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net"
 	"testing"
@@ -294,6 +293,21 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 		<-releaseWorker
 	}
 
+	workerExited := make(chan struct{})
+	instance.afterWorkspaceIndexWorkerForTest = func() {
+		close(workerExited)
+	}
+
+	var shutdownReturnedBeforeWorker bool
+	instance.beforeShutdownReturnForTest = func() {
+		select {
+		case <-workerExited:
+			// Worker has completely finished and exited
+		default:
+			shutdownReturnedBeforeWorker = true
+		}
+	}
+
 	done := make(chan int, 1)
 	go func() { done <- instance.Run(context.Background()) }()
 	writer := jsonrpc.NewWriter(clientConn)
@@ -302,6 +316,11 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	if message := readFrame(t, reader); idNumber(t, message) != 1 {
 		t.Fatalf("initialize response = %#v", message)
+	}
+
+	shutdownWaiting := make(chan struct{})
+	instance.beforeWorkspaceWGWaitForTest = func() {
+		close(shutdownWaiting)
 	}
 
 	// Trigger background workspace rebuild
@@ -316,29 +335,29 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 	// Send shutdown while worker is blocked
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
 
-	// Verify that shutdown response does not arrive before worker is released
-	responseChan := make(chan map[string]json.RawMessage, 1)
-	go func() {
-		responseChan <- readFrame(t, reader)
-	}()
-
+	// Verify that shutdown reaches the workspaceWG wait before worker is released
 	select {
-	case msg := <-responseChan:
-		t.Fatalf("shutdown returned before background worker finished: %#v", msg)
-	case <-time.After(50 * time.Millisecond):
-		// Expected: shutdown is still waiting for background work
+	case <-shutdownWaiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for shutdown to reach workspaceWG wait")
 	}
 
-	// Release the worker
+	// Release the worker and verify it finishes before shutdown returns
 	close(releaseWorker)
 
+	msg := readFrame(t, reader)
+	if idNumber(t, msg) != 2 || string(msg["result"]) != "null" {
+		t.Fatalf("shutdown response = %#v", msg)
+	}
+
+	if shutdownReturnedBeforeWorker {
+		t.Fatal("shutdown returned before background worker finished and exited")
+	}
+
 	select {
-	case msg := <-responseChan:
-		if idNumber(t, msg) != 2 || string(msg["result"]) != "null" {
-			t.Fatalf("shutdown response = %#v", msg)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("shutdown did not complete after worker release")
+	case <-workerExited:
+	default:
+		t.Fatal("worker did not exit")
 	}
 
 	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)

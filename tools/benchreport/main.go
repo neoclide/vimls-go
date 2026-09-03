@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"sort"
@@ -35,6 +36,13 @@ func main() {
 		r = f
 	}
 
+	if err := run(r, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "benchreport: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run(r io.Reader, w io.Writer) error {
 	samplesByName := make(map[string][]sample)
 	var order []string
 
@@ -70,15 +78,18 @@ func main() {
 			allocsPerOp: allocsOp,
 		})
 	}
-
-	if len(order) == 0 {
-		fmt.Println("No benchmark samples found.")
-		return
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scanner error: %w", err)
 	}
 
-	fmt.Println("=== Benchmark Summary (Median & P95) ===")
-	fmt.Printf("%-45s %8s %14s %14s %12s %12s\n", "Benchmark", "Samples", "Median (time)", "P95 (time)", "Median (B/op)", "Median (allocs)")
-	fmt.Println(strings.Repeat("-", 115))
+	if len(order) == 0 {
+		fmt.Fprintln(w, "No benchmark samples found.")
+		return nil
+	}
+
+	fmt.Fprintln(w, "=== Benchmark Summary (Median & P95) ===")
+	fmt.Fprintf(w, "%-45s %8s %14s %14s %12s %12s\n", "Benchmark", "Samples", "Median (time)", "P95 (time)", "Median (B/op)", "Median (allocs)")
+	fmt.Fprintln(w, strings.Repeat("-", 115))
 
 	for _, name := range order {
 		samples := samplesByName[name]
@@ -101,25 +112,38 @@ func main() {
 		medianB := percentileInt(bList, 0.50)
 		medianA := percentileInt(aList, 0.50)
 
-		fmt.Printf("%-45s %8d %14s %14s %12d %12d\n",
+		fmt.Fprintf(w, "%-45s %8d %14s %14s %12d %12d\n",
 			name, n, formatDuration(medianNs), formatDuration(p95Ns), medianB, medianA)
 	}
+	return nil
+}
+
+func percentileIndex(n int, p float64) int {
+	if n <= 0 {
+		return 0
+	}
+	idx := int(math.Ceil(p*float64(n))) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= n {
+		idx = n - 1
+	}
+	return idx
 }
 
 func percentileFloat(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	index := int(float64(len(sorted)-1) * p)
-	return sorted[index]
+	return sorted[percentileIndex(len(sorted), p)]
 }
 
 func percentileInt(sorted []int64, p float64) int64 {
 	if len(sorted) == 0 {
 		return 0
 	}
-	index := int(float64(len(sorted)-1) * p)
-	return sorted[index]
+	return sorted[percentileIndex(len(sorted), p)]
 }
 
 func formatDuration(ns float64) string {

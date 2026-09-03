@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1289,6 +1291,13 @@ func TestPushDiagnosticsDeduplicationAndResendOnEdit(t *testing.T) {
 	documentURI := uri.MustParse("file:///test-dedup.vim")
 	source := "vim9script\necho unknownVar\n"
 
+	analysisDone := make(chan string, 10)
+	instance.analysisMu.Lock()
+	instance.testHookAnalysisFinished = func(uri string) {
+		analysisDone <- uri
+	}
+	instance.analysisMu.Unlock()
+
 	// 1. Open document at version 1 (has 1 diagnostic)
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
@@ -1303,13 +1312,29 @@ func TestPushDiagnosticsDeduplicationAndResendOnEdit(t *testing.T) {
 	if v, ok := first.Version.Get(); !ok || v != 1 {
 		t.Fatalf("first version = %v, want 1", v)
 	}
+	select {
+	case uri := <-analysisDone:
+		if uri != documentURI.String() {
+			t.Fatalf("step 1: unexpected uri %s", uri)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("step 1: timed out waiting for analysisDone")
+	}
 
 	// 2. Pure repeated analysis on unchanged snapshot must NOT publish duplicate
 	instance.startAnalysis(documentURI.String())
 	select {
+	case uri := <-analysisDone:
+		if uri != documentURI.String() {
+			t.Fatalf("step 2: unexpected uri %s", uri)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for repeated analysis")
+	}
+	select {
 	case duplicate := <-client.published:
 		t.Fatalf("unexpected duplicate publication for identical snapshot: %#v", duplicate)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 
 	// 3. Edit to version 2 (same diagnostic content, but must publish due to new version)
@@ -1326,6 +1351,14 @@ func TestPushDiagnosticsDeduplicationAndResendOnEdit(t *testing.T) {
 	}
 	if v, ok := second.Version.Get(); !ok || v != 2 {
 		t.Fatalf("second version = %v, want 2", v)
+	}
+	select {
+	case uri := <-analysisDone:
+		if uri != documentURI.String() {
+			t.Fatalf("step 3: unexpected uri %s", uri)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("step 3: timed out waiting for analysisDone")
 	}
 
 	// 4. Edit to version 3 fixing the error (transition from non-empty to empty)
@@ -1344,13 +1377,29 @@ func TestPushDiagnosticsDeduplicationAndResendOnEdit(t *testing.T) {
 	if v, ok := third.Version.Get(); !ok || v != 3 {
 		t.Fatalf("third version = %v, want 3", v)
 	}
+	select {
+	case uri := <-analysisDone:
+		if uri != documentURI.String() {
+			t.Fatalf("step 4: unexpected uri %s", uri)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("step 4: timed out waiting for analysisDone")
+	}
 
 	// 5. Subsequent repeated analysis on clean snapshot must NOT publish
 	instance.startAnalysis(documentURI.String())
 	select {
+	case uri := <-analysisDone:
+		if uri != documentURI.String() {
+			t.Fatalf("step 5: unexpected uri %s", uri)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for clean repeated analysis")
+	}
+	select {
 	case duplicate := <-client.published:
 		t.Fatalf("unexpected duplicate publication for clean snapshot: %#v", duplicate)
-	case <-time.After(150 * time.Millisecond):
+	default:
 	}
 }
 
@@ -1382,5 +1431,341 @@ func TestPushDiagnosticsHashChangesOnConfiguration(t *testing.T) {
 	}
 	if updated.Diagnostics[0].Severity == initialSeverity {
 		t.Fatalf("expected severity to change, got %v", updated.Diagnostics[0].Severity)
+	}
+}
+
+func TestPushDiagnosticsRetryOnFailureForNonEmptyDiagnostics(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-retry-non-empty.vim")
+	source := "vim9script\necho unknownVar\n"
+
+	analysisDone := make(chan string, 10)
+	instance.analysisMu.Lock()
+	instance.testHookAnalysisFinished = func(uri string) {
+		analysisDone <- uri
+	}
+	instance.analysisMu.Unlock()
+
+	var attempts atomic.Int32
+	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
+		if attempts.Add(1) == 1 {
+			return errors.New("temporary network error")
+		}
+		return nil
+	}
+
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the first attempt to finish and fail.
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first attempt")
+	}
+
+	if attempts.Load() != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts.Load())
+	}
+
+	// Trigger analysis again for the same snapshot.
+	instance.startAnalysis(documentURI.String())
+
+	// Second attempt should succeed and publish the diagnostics.
+	params := waitForDiagnostics(t, client.published)
+	if len(params.Diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %#v", params.Diagnostics)
+	}
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for second attempt to finish committing")
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("expected 2 publish attempts, got %d", attempts.Load())
+	}
+}
+
+func TestPushDiagnosticsRetryOnFailureForClearingDiagnostics(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-retry-clear.vim")
+	source := "vim9script\necho unknownVar\n"
+
+	analysisDone := make(chan string, 10)
+	instance.analysisMu.Lock()
+	instance.testHookAnalysisFinished = func(uri string) {
+		analysisDone <- uri
+	}
+	instance.analysisMu.Unlock()
+
+	// 1. Initial publication succeeds.
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %#v", first)
+	}
+	// Drain analysisDone from DidOpen
+	<-analysisDone
+
+	// 2. Clear diagnostics fails on first attempt.
+	var clearAttempts atomic.Int32
+	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
+		if len(params.Diagnostics) == 0 && clearAttempts.Add(1) == 1 {
+			return errors.New("failed to clear diagnostics")
+		}
+		return nil
+	}
+
+	cleanSource := "vim9script\nvar unknownVar = 42\necho unknownVar\n"
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: cleanSource}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the clear attempt to finish and fail.
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for failed clear attempt")
+	}
+
+	if clearAttempts.Load() != 1 {
+		t.Fatalf("expected 1 clear attempt, got %d", clearAttempts.Load())
+	}
+
+	// 3. Trigger re-analysis of the clean snapshot.
+	instance.startAnalysis(documentURI.String())
+
+	// 4. Second attempt to clear succeeds.
+	cleared := waitForDiagnostics(t, client.published)
+	if len(cleared.Diagnostics) != 0 {
+		t.Fatalf("expected 0 diagnostics to clear, got %#v", cleared)
+	}
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for second clear attempt to finish committing")
+	}
+	if clearAttempts.Load() != 2 {
+		t.Fatalf("expected 2 clear attempts, got %d", clearAttempts.Load())
+	}
+}
+
+func TestPushDiagnosticsClientNilDoesNotCommitPublishedState(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-client-nil.vim")
+	source := "vim9script\necho unknownVar\n"
+
+	analysisDone := make(chan string, 10)
+	instance.analysisMu.Lock()
+	instance.testHookAnalysisFinished = func(uri string) {
+		analysisDone <- uri
+	}
+	instance.analysisMu.Unlock()
+
+	instance.mu.Lock()
+	instance.client = nil
+	instance.mu.Unlock()
+
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for first analysis to complete under client == nil
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for analysis with nil client")
+	}
+
+	instance.publishMu.Lock()
+	st := instance.published[documentURI.String()]
+	instance.publishMu.Unlock()
+	if st.hasDiagnostics {
+		t.Fatal("expected hasDiagnostics to be false when client is nil")
+	}
+
+	// Restore client and trigger analysis.
+	instance.mu.Lock()
+	instance.client = client
+	instance.mu.Unlock()
+
+	instance.startAnalysis(documentURI.String())
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for analysis after restoring client")
+	}
+
+	params := waitForDiagnostics(t, client.published)
+	if len(params.Diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic, got %#v", params.Diagnostics)
+	}
+}
+
+func TestPushDiagnosticsStaleSendDoesNotClearNewerPendingState(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-stale-send.vim")
+	source := "vim9script\necho unknownVar\n"
+
+	analysisDone := make(chan string, 10)
+	instance.analysisMu.Lock()
+	instance.testHookAnalysisFinished = func(uri string) {
+		analysisDone <- uri
+	}
+	instance.analysisMu.Unlock()
+
+	v1Started := make(chan struct{})
+	v1Release := make(chan struct{})
+
+	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
+		select {
+		case <-v1Started:
+		default:
+			close(v1Started)
+			<-v1Release
+		}
+		return nil
+	}
+
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait until v1 is in the middle of PublishDiagnostics
+	select {
+	case <-v1Started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for v1 to start publishing")
+	}
+
+	// DidSave arrives on the same snapshot/hash, setting mustPublish and incrementing publishSeq
+	if err := instance.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unblock v1
+	close(v1Release)
+
+	// First publication received
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic on first publication, got %#v", first.Diagnostics)
+	}
+	<-analysisDone
+
+	// Trigger re-analysis: because mustPublish was preserved despite identical hash/version,
+	// it must publish again
+	instance.startAnalysis(documentURI.String())
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for re-analysis")
+	}
+
+	second := waitForDiagnostics(t, client.published)
+	if len(second.Diagnostics) != 1 {
+		t.Fatalf("expected 1 diagnostic on second publication, got %#v", second.Diagnostics)
+	}
+
+	// Subsequent analysis on clean snapshot must NOT publish again (deduplication works)
+	instance.startAnalysis(documentURI.String())
+	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for clean repeated analysis")
+	}
+	select {
+	case dup := <-client.published:
+		t.Fatalf("unexpected duplicate publication: %#v", dup)
+	default:
+	}
+}
+
+func TestPushDiagnosticsCloseWhileFirstNonEmptyPublishBlocked(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-close-blocked.vim")
+	source := "vim9script\necho unknownVar\n"
+
+	analysisDone := make(chan string, 10)
+	instance.analysisMu.Lock()
+	instance.testHookAnalysisFinished = func(uri string) {
+		analysisDone <- uri
+	}
+	instance.analysisMu.Unlock()
+
+	v1Started := make(chan struct{})
+	v1Release := make(chan struct{})
+
+	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
+		if len(params.Diagnostics) > 0 {
+			select {
+			case <-v1Started:
+			default:
+				close(v1Started)
+				<-v1Release
+			}
+		}
+		return nil
+	}
+
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait until v1 non-empty publish has started and is blocked in publishHook
+	select {
+	case <-v1Started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for non-empty publish to start")
+	}
+
+	// Close the document while v1 is blocked
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		})
+	}()
+
+	// Unblock v1 publish
+	close(v1Release)
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for DidClose")
+	}
+
+	// First publication should be the non-empty one (v1)
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) == 0 {
+		t.Fatalf("expected first publication to have diagnostics, got empty")
+	}
+
+	// Second (last) publication MUST be empty diagnostics
+	last := waitForDiagnostics(t, client.published)
+	if len(last.Diagnostics) != 0 {
+		t.Fatalf("expected final publication after close to be empty, got %#v", last.Diagnostics)
 	}
 }

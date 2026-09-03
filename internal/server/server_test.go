@@ -202,7 +202,8 @@ func (errorWriter) Write([]byte) (int, error) {
 
 type diagnosticClient struct {
 	protocol.UnimplementedClient
-	published chan *protocol.PublishDiagnosticsParams
+	published   chan *protocol.PublishDiagnosticsParams
+	publishHook func(params *protocol.PublishDiagnosticsParams) error
 }
 
 type configurationClient struct {
@@ -220,6 +221,11 @@ func (c *configurationClient) Configuration(_ context.Context, params *protocol.
 }
 
 func (c *diagnosticClient) PublishDiagnostics(_ context.Context, params *protocol.PublishDiagnosticsParams) error {
+	if c.publishHook != nil {
+		if err := c.publishHook(params); err != nil {
+			return err
+		}
+	}
 	c.published <- params
 	return nil
 }

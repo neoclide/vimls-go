@@ -894,29 +894,63 @@ func TestServerConcurrentColdMissSingleParseAndAnalyze(t *testing.T) {
 
 	var parseCalls int32
 	var analyzeCalls int32
+	leaderPaused := make(chan struct{})
+	releaseLeader := make(chan struct{})
 	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
 		atomic.AddInt32(&parseCalls, 1)
+		close(leaderPaused)
+		<-releaseLeader
 	}
 	instance.beforeAnalyzeForTest = func(*syntax.File) {
 		atomic.AddInt32(&analyzeCalls, 1)
 	}
 
 	const concurrency = 10
+	var waiterCount atomic.Int32
+	allWaitersEntered := make(chan struct{})
+	instance.beforeInFlightWaitForTest = func(*text.Snapshot) {
+		if waiterCount.Add(1) == concurrency-1 {
+			close(allWaitersEntered)
+		}
+	}
+
 	var wg sync.WaitGroup
 	files := make([]*syntax.File, concurrency)
 	analyses := make([]*analysis.FileAnalysis, concurrency)
-	start := make(chan struct{})
 
-	for i := 0; i < concurrency; i++ {
+	// Launch leader first
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		files[0], analyses[0] = instance.analyzeSnapshot(snapshot)
+	}()
+
+	// Wait until leader is executing and paused
+	select {
+	case <-leaderPaused:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for leader to pause")
+	}
+
+	// Now launch the remaining concurrency-1 followers
+	for i := 1; i < concurrency; i++ {
 		idx := i
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			<-start
 			files[idx], analyses[idx] = instance.analyzeSnapshot(snapshot)
 		}()
 	}
-	close(start)
+
+	// Wait until all followers have explicitly entered in-flight waiting
+	select {
+	case <-allWaitersEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for followers to enter in-flight wait")
+	}
+
+	// Release leader to complete parse and analysis
+	close(releaseLeader)
 	wg.Wait()
 
 	if got := atomic.LoadInt32(&parseCalls); got != 1 {
@@ -948,10 +982,20 @@ func TestServerConcurrentWaitCancellationDoesNotDisruptOthers(t *testing.T) {
 
 	pauseParse := make(chan struct{})
 	releaseParse := make(chan struct{})
-	var releaseOnce sync.Once
 	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
 		close(pauseParse)
 		<-releaseParse
+	}
+
+	f1Entered := make(chan struct{})
+	f2Entered := make(chan struct{})
+	instance.beforeInFlightWaitForTest = func(*text.Snapshot) {
+		select {
+		case <-f1Entered:
+			close(f2Entered)
+		default:
+			close(f1Entered)
+		}
 	}
 
 	// Leader
@@ -963,12 +1007,35 @@ func TestServerConcurrentWaitCancellationDoesNotDisruptOthers(t *testing.T) {
 		leaderFile, leaderAnalysis = instance.analyzeSnapshot(snapshot)
 	}()
 
-	<-pauseParse
+	select {
+	case <-pauseParse:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for leader")
+	}
 
 	// Follower 1: cancels while waiting
 	ctx1, cancel1 := context.WithCancel(context.Background())
+	var f1File *syntax.File
+	var f1Analysis *analysis.FileAnalysis
+	f1Done := make(chan struct{})
+	go func() {
+		defer close(f1Done)
+		f1File, f1Analysis = instance.analyzeSnapshotContext(ctx1, snapshot)
+	}()
+
+	select {
+	case <-f1Entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for follower 1 to enter wait")
+	}
+	// Cancel follower 1 while it is waiting
 	cancel1()
-	f1File, f1Analysis := instance.analyzeSnapshotContext(ctx1, snapshot)
+
+	select {
+	case <-f1Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for follower 1 to return after cancellation")
+	}
 	if f1File != nil || f1Analysis != nil {
 		t.Fatalf("cancelled follower should return nil, got %p, %p", f1File, f1Analysis)
 	}
@@ -982,7 +1049,13 @@ func TestServerConcurrentWaitCancellationDoesNotDisruptOthers(t *testing.T) {
 		f2File, f2Analysis = instance.analyzeSnapshot(snapshot)
 	}()
 
-	releaseOnce.Do(func() { close(releaseParse) })
+	select {
+	case <-f2Entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for follower 2 to enter wait")
+	}
+
+	close(releaseParse)
 	<-leaderDone
 	<-f2Done
 
@@ -991,6 +1064,116 @@ func TestServerConcurrentWaitCancellationDoesNotDisruptOthers(t *testing.T) {
 	}
 	if f2File != leaderFile || f2Analysis != leaderAnalysis {
 		t.Fatalf("follower 2 did not receive leader results: file=%p/%p analysis=%p/%p", f2File, leaderFile, f2Analysis, leaderAnalysis)
+	}
+}
+
+func TestServerConcurrentABAInFlightDoesNotDuplicateA(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	documentURI := uri.MustParse("file:///aba.vim")
+	sourceA := "vim9script\nvar a = 1\n"
+	sourceB := "vim9script\nvar b = 2\n"
+	snapA := instance.documents.Open(documentURI.String(), 1, sourceA)
+	snapB := text.NewSnapshot(documentURI.String(), 2, nil, sourceB)
+
+	var parseACalls atomic.Int32
+	var parseBCalls atomic.Int32
+	pauseA := make(chan struct{})
+	releaseA := make(chan struct{})
+	pauseB := make(chan struct{})
+	releaseB := make(chan struct{})
+
+	instance.beforeParseSnapshotCacheMissForTest = func(s *text.Snapshot) {
+		if s.Text() == sourceA {
+			if parseACalls.Add(1) == 1 {
+				close(pauseA)
+				<-releaseA
+			}
+		} else if s.Text() == sourceB {
+			if parseBCalls.Add(1) == 1 {
+				close(pauseB)
+				<-releaseB
+			}
+		}
+	}
+
+	secondAEnteredWait := make(chan struct{})
+	instance.beforeInFlightWaitForTest = func(s *text.Snapshot) {
+		if s.Text() == sourceA {
+			close(secondAEnteredWait)
+		}
+	}
+
+	// 1. Leader A starts and pauses in beforeParse
+	var leaderAFile *syntax.File
+	var leaderAAnalysis *analysis.FileAnalysis
+	leaderADone := make(chan struct{})
+	go func() {
+		defer close(leaderADone)
+		leaderAFile, leaderAAnalysis = instance.analyzeSnapshot(snapA)
+	}()
+
+	select {
+	case <-pauseA:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for leader A")
+	}
+
+	// 2. B starts and pauses in beforeParse
+	var bFile *syntax.File
+	var bAnalysis *analysis.FileAnalysis
+	bDone := make(chan struct{})
+	go func() {
+		defer close(bDone)
+		bFile, bAnalysis = instance.analyzeSnapshot(snapB)
+	}()
+
+	select {
+	case <-pauseB:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for B")
+	}
+
+	// 3. Second request for A arrives while leader A is still in-flight
+	var secondAFile *syntax.File
+	var secondAAnalysis *analysis.FileAnalysis
+	secondADone := make(chan struct{})
+	go func() {
+		defer close(secondADone)
+		secondAFile, secondAAnalysis = instance.analyzeSnapshot(snapA)
+	}()
+
+	// Verify second A enters in-flight wait on leader A (not overwriting or starting another parse)
+	select {
+	case <-secondAEnteredWait:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for second A to enter in-flight wait")
+	}
+
+	// 4. Release A
+	close(releaseA)
+	<-leaderADone
+	<-secondADone
+
+	// 5. Release B
+	close(releaseB)
+	<-bDone
+
+	// Precise assertions
+	if got := parseACalls.Load(); got != 1 {
+		t.Fatalf("expected 1 parse for snapshot A, got %d", got)
+	}
+	if got := parseBCalls.Load(); got != 1 {
+		t.Fatalf("expected 1 parse for snapshot B, got %d", got)
+	}
+	if leaderAFile == nil || secondAFile == nil || leaderAFile != secondAFile {
+		t.Fatalf("expected matching file pointer for A: %p vs %p", leaderAFile, secondAFile)
+	}
+	if leaderAAnalysis == nil || secondAAnalysis == nil || leaderAAnalysis != secondAAnalysis {
+		t.Fatalf("expected matching analysis pointer for A: %p vs %p", leaderAAnalysis, secondAAnalysis)
+	}
+	if bFile == nil || bAnalysis == nil {
+		t.Fatal("B failed")
 	}
 }
 

@@ -73,7 +73,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
 		case completionContextSetOperator, completionContextSetValue, completionContextUserCommandAttribute, completionContextUserCommandAttributeValue:
 			selection = completionCommandPartSelection(file, offset, contextKind)
-		case completionContextAutocmdPattern, completionContextAutocmdModifier:
+		case completionContextAutocmdPattern:
+			selection = completionAutocmdPatternSelection(snapshot.Text(), offset)
+		case completionContextAutocmdModifier:
 			selection = completionAutocmdPartSelection(snapshot.Text(), offset)
 		case completionContextHighlightKey, completionContextHighlightValue:
 			selection = completionHighlightSelection(snapshot.Text(), file, offset, contextKind == completionContextHighlightValue)
@@ -761,6 +763,51 @@ func completionAutocmdPartSelection(source string, cursor int) completionSelecti
 	for end < len(source) && !isSpace(source[end]) {
 		end++
 	}
+	return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
+}
+
+func completionAutocmdPatternSelection(source string, cursor int) completionSelection {
+	if cursor < 0 {
+		cursor = 0
+	} else if cursor > len(source) {
+		cursor = len(source)
+	}
+	argStart := cursor
+	for argStart > 0 && !isSpace(source[argStart-1]) {
+		argStart--
+	}
+	argEnd := cursor
+	for argEnd < len(source) && !isSpace(source[argEnd]) {
+		argEnd++
+	}
+
+	isSep := func(i int) bool {
+		if source[i] != ',' {
+			return false
+		}
+		bsCount := 0
+		for j := i - 1; j >= argStart && source[j] == '\\'; j-- {
+			bsCount++
+		}
+		return bsCount%2 == 0
+	}
+
+	start := cursor
+	for start > argStart {
+		if isSep(start - 1) {
+			break
+		}
+		start--
+	}
+
+	end := cursor
+	for end < argEnd {
+		if isSep(end) {
+			break
+		}
+		end++
+	}
+
 	return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
 }
 
