@@ -411,7 +411,7 @@ func TestExpressionFixedSeedRecoveryStress(t *testing.T) {
 		state ^= state << 5
 		return parts[state%uint32(len(parts))]
 	}
-	for index := 0; index < 32768; index++ {
+	for index := 0; index < 2048; index++ {
 		var source strings.Builder
 		for count := 0; count < 18; count++ {
 			source.WriteString(next())

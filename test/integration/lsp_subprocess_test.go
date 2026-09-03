@@ -1215,7 +1215,7 @@ func readPublishedDiagnostic(t testHelper, target any, documentURI, code string)
 
 func runSharedEditingScenario(t *testing.T, client *testClient, workspaceRoot string) {
 	t.Helper()
-	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":%q}}`, uri.File(workspaceRoot)))
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":%q,"initializationOptions":{"runtimepath":[]}}}`, uri.File(workspaceRoot)))
 	initResp := readResponse(t, client, "1")
 	if string(initResp["id"]) != "1" {
 		t.Fatalf("initialize response = %s", initResp)

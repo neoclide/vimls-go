@@ -1161,6 +1161,7 @@ func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}}}}); err != nil {
 		t.Fatal(err)
 	}
+	analysisDone := installAnalysisFinishedHook(instance)
 	documentURI := uri.URI("file:///pull-cache.vim")
 	open := func(version int32) {
 		t.Helper()
@@ -1190,9 +1191,14 @@ func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 		t.Fatalf("wrong-id full = %#v, want cached id %q", full, *first.ResultID)
 	}
 	select {
+	case <-analysisDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for background pull analysis")
+	}
+	select {
 	case params := <-published:
 		t.Fatalf("pull client published diagnostics: %#v", params)
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	if err := instance.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
 		t.Fatal(err)
@@ -1232,7 +1238,7 @@ func TestDocumentPullDiagnosticRefreshCoalesces(t *testing.T) {
 		select {
 		case <-client.calls:
 			t.Fatal("client without refreshSupport received diagnostic refresh")
-		case <-time.After(50 * time.Millisecond):
+		default:
 		}
 	})
 

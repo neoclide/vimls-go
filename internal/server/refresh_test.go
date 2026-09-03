@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -105,7 +106,24 @@ func assertNoRefresh(t *testing.T, calls <-chan struct{}) {
 	select {
 	case <-calls:
 		t.Fatal("unexpected refresh")
-	case <-time.After(50 * time.Millisecond):
+	default:
+	}
+}
+
+func waitForRefreshIdle(t *testing.T, instance *Server) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		instance.mu.Lock()
+		running := instance.semanticTokensRefreshRunning || instance.inlayHintRefreshRunning || instance.codeLensRefreshRunning
+		instance.mu.Unlock()
+		if !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("refresh workers did not become idle")
+		}
+		runtime.Gosched()
 	}
 }
 
@@ -193,6 +211,7 @@ func TestRefreshCoalescesRequests(t *testing.T) {
 	client.semanticTokensRelease <- struct{}{}
 	client.inlayHintRelease <- struct{}{}
 	client.codeLensRelease <- struct{}{}
+	waitForRefreshIdle(t, instance)
 	assertNoRefresh(t, client.semanticTokensCalls)
 	assertNoRefresh(t, client.inlayHintCalls)
 	assertNoRefresh(t, client.codeLensCalls)

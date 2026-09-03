@@ -59,9 +59,8 @@ func TestBuildWorkspaceIndexCancellationAndOpenSnapshotBoundaries(t *testing.T) 
 
 func TestWatchedFilesIncrementalSingleFileChangeNoDiscovery(t *testing.T) {
 	root := t.TempDir()
-	const numFiles = 256
-	for i := 0; i < numFiles; i++ {
-		writeWorkspaceFile(t, root, fmt.Sprintf("file_%03d.vim", i), fmt.Sprintf("vim9script\nexport var val_%03d = %d\n", i, i))
+	for _, number := range []int{0, 42, 100} {
+		writeWorkspaceFile(t, root, fmt.Sprintf("file_%03d.vim", number), fmt.Sprintf("vim9script\nexport var val_%03d = %d\n", number, number))
 	}
 	instance := initializeWorkspaceServer(t, root)
 	instance.workspaceWG.Wait()

@@ -371,9 +371,10 @@ func (s *Server) startWorkspaceIndexProgress() *workspaceProgressSession {
 		queue:  make(chan workspaceProgressNotification, workspaceProgressReportLimit+1),
 	}
 	go session.run()
-	ctx, cancel := context.WithTimeout(s.analysisContext, workspaceProgressCreateTimeout)
+	createTimeout := s.workspaceProgressCallTimeout(workspaceProgressCreateTimeout)
+	ctx, cancel := context.WithTimeout(s.analysisContext, createTimeout)
 	defer cancel()
-	if err := s.sendWorkspaceProgressCall(session, ctx, workspaceProgressCreateTimeout, false, func(ctx context.Context) error {
+	if err := s.sendWorkspaceProgressCall(session, ctx, createTimeout, false, func(ctx context.Context) error {
 		err := client.WorkDoneProgressCreate(ctx, &protocol.WorkDoneProgressCreateParams{Token: token})
 		session.created = err == nil
 		return err
@@ -391,7 +392,7 @@ func (s *Server) startWorkspaceIndexProgress() *workspaceProgressSession {
 		close(session.queue)
 		return nil
 	}
-	if err := s.sendWorkspaceProgress(session, s.analysisContext, workspaceProgressNotificationTimeout, &protocol.ProgressParams{Token: token, Value: protocol.LSPAny(value)}, false); err != nil {
+	if err := s.sendWorkspaceProgress(session, s.analysisContext, s.workspaceProgressCallTimeout(workspaceProgressNotificationTimeout), &protocol.ProgressParams{Token: token, Value: protocol.LSPAny(value)}, false); err != nil {
 		s.disableWorkspaceProgress()
 		if s.analysisContext.Err() == nil {
 			s.logf("vimls: send workspace index progress: %v", err)
@@ -466,6 +467,13 @@ func (s *Server) workspaceProgressEnabled() bool {
 	return s.workspaceProgress
 }
 
+func (s *Server) workspaceProgressCallTimeout(fallback time.Duration) time.Duration {
+	if s.testHooks.workspaceProgressTimeout > 0 {
+		return s.testHooks.workspaceProgressTimeout
+	}
+	return fallback
+}
+
 // reportWorkspaceIndexProgress identifies a runtime root at the discovery
 // boundary. It is called outside workspace mutexes and does not affect index
 // completion when a client cannot receive a notification.
@@ -479,7 +487,7 @@ func (s *Server) reportWorkspaceIndexProgress(session *workspaceProgressSession,
 		s.logf("vimls: encode workspace index progress report: %v", err)
 		return false
 	}
-	if err := s.sendWorkspaceProgress(session, s.analysisContext, workspaceProgressNotificationTimeout, &protocol.ProgressParams{Token: session.token, Value: protocol.LSPAny(value)}, false); err != nil {
+	if err := s.sendWorkspaceProgress(session, s.analysisContext, s.workspaceProgressCallTimeout(workspaceProgressNotificationTimeout), &protocol.ProgressParams{Token: session.token, Value: protocol.LSPAny(value)}, false); err != nil {
 		s.disableWorkspaceProgress()
 		if s.analysisContext.Err() == nil {
 			s.logf("vimls: send workspace index progress report: %v", err)
@@ -497,7 +505,7 @@ func (s *Server) finishWorkspaceIndexProgress(session *workspaceProgressSession)
 	if err != nil {
 		return
 	}
-	_ = s.sendWorkspaceProgress(session, context.Background(), workspaceProgressEndTimeout, &protocol.ProgressParams{Token: session.token, Value: protocol.LSPAny(value)}, true)
+	_ = s.sendWorkspaceProgress(session, context.Background(), s.workspaceProgressCallTimeout(workspaceProgressEndTimeout), &protocol.ProgressParams{Token: session.token, Value: protocol.LSPAny(value)}, true)
 }
 
 func (s *Server) finishWorkspaceRebuildLocked() {
