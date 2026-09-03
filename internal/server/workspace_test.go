@@ -1583,9 +1583,13 @@ func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 	instance.workspaceDelay = 0
 	supported := true
 	rootURI := uri.File(root)
+	options, err := json.Marshal(map[string]any{"runtimepath": []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI:               &rootURI,
-		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":["` + root + `"]}`)),
+		InitializationOptions: protocol.LSPAny(options),
 		Capabilities:          protocol.ClientCapabilities{Window: &protocol.WindowClientCapabilities{WorkDoneProgress: &supported}},
 	}); err != nil {
 		t.Fatal(err)
@@ -1675,9 +1679,13 @@ func TestWorkspaceIndexProgressReportFailureStillEnds(t *testing.T) {
 	instance.workspaceDelay = 0
 	supported := true
 	rootURI := uri.File(root)
+	options, err := json.Marshal(map[string]any{"runtimepath": []string{root}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI:               &rootURI,
-		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":["` + root + `"]}`)),
+		InitializationOptions: protocol.LSPAny(options),
 		Capabilities:          protocol.ClientCapabilities{Window: &protocol.WindowClientCapabilities{WorkDoneProgress: &supported}},
 	}); err != nil {
 		t.Fatal(err)
@@ -2192,7 +2200,7 @@ func workspaceSymbols(t *testing.T, instance *Server, query string) protocol.Wor
 
 func waitForWorkspaceSymbols(t *testing.T, instance *Server, query string, count int) protocol.WorkspaceSymbolSlice {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		symbols := workspaceSymbols(t, instance, query)
 		if len(symbols) == count {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -121,7 +122,7 @@ func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool,
 }
 
 func safeImportCompletionPrefix(prefix string) bool {
-	if strings.ContainsAny(prefix, "\x00\r\n") || strings.Contains(prefix, "\\") {
+	if strings.ContainsAny(prefix, "\x00\r\n") || (runtime.GOOS != "windows" && strings.Contains(prefix, "\\")) {
 		return false
 	}
 	return true
@@ -528,7 +529,7 @@ func pathWithinOrEqual(root, path string) bool {
 }
 
 func isAbsolutePath(path string) bool {
-	if filepath.IsAbs(path) || filepath.VolumeName(path) != "" {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
 		return true
 	}
 	// filepath.VolumeName is platform-specific. Recognize a Windows drive

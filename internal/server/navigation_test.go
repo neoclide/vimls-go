@@ -1544,7 +1544,7 @@ func openNavigationDocument(t *testing.T, encoding text.Encoding, source string)
 	t.Helper()
 	instance := New(nil, nil, io.Discard)
 	instance.encoding = encoding
-	documentURI := uri.MustParse("file:///navigation.vim")
+	documentURI := uri.File(mustWorkspaceCanonicalPath(t, filepath.Join(t.TempDir(), "navigation.vim")))
 	version := int32(1)
 	instance.documents.Open(documentURI.String(), version, source)
 	return instance, documentURI

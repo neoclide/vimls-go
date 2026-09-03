@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
@@ -66,15 +67,27 @@ func TestPullDiagnosticRelatedInformationDoesNotInheritPushCapability(t *testing
 func TestRuntimepathFromOptions(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
-	paths, configured, warning := runtimepathFromOptions([]byte(`{"runtimepath":["` + second + `","` + first + `","` + second + `"]}`))
+	options, err := json.Marshal(map[string]any{"runtimepath": []string{second, first, second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, configured, warning := runtimepathFromOptions(options)
 	secondReal, _ := filepath.EvalSymlinks(second)
 	firstReal, _ := filepath.EvalSymlinks(first)
 	if warning != "" || !configured || len(paths) != 2 || paths[0] != secondReal || paths[1] != firstReal {
 		t.Fatalf("runtimepath = %#v, configured = %v, warning = %q", paths, configured, warning)
 	}
+	invalidString, err := json.Marshal(map[string]any{"runtimepath": first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidElement, err := json.Marshal(map[string]any{"runtimepath": []any{first, 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, raw := range []any{
-		[]byte(`{"runtimepath":"` + first + `"}`),
-		[]byte(`{"runtimepath":["` + first + `",1]}`),
+		invalidString,
+		invalidElement,
 		[]byte(`[]`),
 	} {
 		if paths, _, warning := runtimepathFromOptions(raw); len(paths) != 0 || warning == "" {

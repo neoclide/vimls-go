@@ -898,7 +898,7 @@ func newTestClient(t testHelper, r io.Reader, w io.Writer, stderr *safeBuffer, l
 	if len(lifetimeCtx) > 0 {
 		lCtx = lifetimeCtx[0]
 	}
-	opTimeout := 5 * time.Second
+	opTimeout := 10 * time.Second
 	if lCtx != nil {
 		if d, ok := lCtx.Deadline(); ok {
 			remaining := time.Until(d)

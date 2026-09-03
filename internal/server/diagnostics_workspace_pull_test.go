@@ -44,13 +44,14 @@ func TestDiagnosticWorkspacePullReportsOpenAndClosedFiles(t *testing.T) {
 	if len(report.Items) != 2 {
 		t.Fatalf("items = %#v", report.Items)
 	}
-	first, ok := report.Items[0].(*protocol.WorkspaceFullDocumentDiagnosticReport)
-	if !ok || first.URI != uri.File(mustWorkspaceCanonicalPath(t, closedPath)) || first.Version != nil {
-		t.Fatalf("closed report = %#v", report.Items[0])
+	closedURI := uri.File(mustWorkspaceCanonicalPath(t, closedPath))
+	first, ok := workspaceDiagnosticReportForURI(t, report.Items, closedURI).(*protocol.WorkspaceFullDocumentDiagnosticReport)
+	if !ok || first.URI != closedURI || first.Version != nil {
+		t.Fatalf("closed report = %#v", first)
 	}
-	second, ok := report.Items[1].(*protocol.WorkspaceFullDocumentDiagnosticReport)
+	second, ok := workspaceDiagnosticReportForURI(t, report.Items, openURI).(*protocol.WorkspaceFullDocumentDiagnosticReport)
 	if !ok || second.URI != openURI || second.Version == nil || *second.Version != 7 {
-		t.Fatalf("open report = %#v", report.Items[1])
+		t.Fatalf("open report = %#v", second)
 	}
 	if len(first.Items) == 0 || len(second.Items) == 0 || first.Items[0].Message == second.Items[0].Message {
 		t.Fatalf("closed=%#v open=%#v", first.Items, second.Items)
@@ -79,9 +80,28 @@ func TestDiagnosticWorkspacePullReportsOpenAndClosedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unchanged, ok := report.Items[1].(*protocol.WorkspaceUnchangedDocumentDiagnosticReport); !ok || unchanged.ResultID != *full.ResultID {
-		t.Fatalf("cross-pull cache = %#v", report.Items[1])
+	item := workspaceDiagnosticReportForURI(t, report.Items, openURI)
+	if unchanged, ok := item.(*protocol.WorkspaceUnchangedDocumentDiagnosticReport); !ok || unchanged.ResultID != *full.ResultID {
+		t.Fatalf("cross-pull cache = %#v", item)
 	}
+}
+
+func workspaceDiagnosticReportForURI(t *testing.T, items []protocol.WorkspaceDocumentDiagnosticReport, want uri.URI) protocol.WorkspaceDocumentDiagnosticReport {
+	t.Helper()
+	for _, item := range items {
+		switch report := item.(type) {
+		case *protocol.WorkspaceFullDocumentDiagnosticReport:
+			if report.URI == want {
+				return report
+			}
+		case *protocol.WorkspaceUnchangedDocumentDiagnosticReport:
+			if report.URI == want {
+				return report
+			}
+		}
+	}
+	t.Fatalf("workspace diagnostic report for %s not found: %#v", want, items)
+	return nil
 }
 
 func TestDiagnosticWorkspacePullRejectsNilParams(t *testing.T) {

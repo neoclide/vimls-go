@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"math"
+	"path/filepath"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -20,13 +21,18 @@ func TestImportGraphNilAndMutationBoundaries(t *testing.T) {
 	nilGraph.AdvanceRevision(2)
 
 	graph := NewImportGraph()
+	root := t.TempDir()
+	a := filepath.Join(root, "a.vim")
+	b := filepath.Join(root, "b.vim")
+	z := filepath.Join(root, "z.vim")
+	ignored := filepath.Join(root, "ignored.vim")
 	if err := graph.Replace(" ", nil); err != ErrImportGraphPath {
 		t.Fatalf("empty importer error = %v", err)
 	}
-	if err := graph.Replace("/a.vim", []ImportFact{
-		{Target: "/z.vim", ImportPath: "z", Alias: "z", PathSpan: span(3, 4)},
-		{Target: "/b.vim", ImportPath: "b", Alias: "b", PathSpan: span(1, 2)},
-		{Dynamic: true, Target: "/ignored.vim", ImportPath: "dynamic", Alias: "d", PathSpan: span(2, 3)},
+	if err := graph.Replace(a, []ImportFact{
+		{Target: z, ImportPath: "z", Alias: "z", PathSpan: span(3, 4)},
+		{Target: b, ImportPath: "b", Alias: "b", PathSpan: span(1, 2)},
+		{Dynamic: true, Target: ignored, ImportPath: "dynamic", Alias: "d", PathSpan: span(2, 3)},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,35 +50,35 @@ func TestImportGraphNilAndMutationBoundaries(t *testing.T) {
 	}
 
 	snapshot := graph.Snapshot()
-	if !snapshot.Has("/a.vim") || !snapshot.Has("/b.vim") || snapshot.Has(" ") {
+	if !snapshot.Has(a) || !snapshot.Has(b) || snapshot.Has(" ") {
 		t.Fatal("unexpected membership")
 	}
 	if got := snapshot.Imports(" "); got != nil {
 		t.Fatalf("invalid imports = %#v", got)
 	}
-	imports := snapshot.Imports("/a.vim")
+	imports := snapshot.Imports(a)
 	if len(imports) != 3 || imports[0].ImportPath != "b" {
 		t.Fatalf("imports not sorted: %#v", imports)
 	}
 	imports[0].Alias = "changed"
-	if snapshot.Imports("/a.vim")[0].Alias == "changed" {
+	if snapshot.Imports(a)[0].Alias == "changed" {
 		t.Fatal("imports were not cloned")
 	}
-	if got := snapshot.Outgoing("/a.vim"); len(got) != 2 {
+	if got := snapshot.Outgoing(a); len(got) != 2 {
 		t.Fatalf("outgoing = %#v", got)
 	}
-	if got := snapshot.Incoming("/b.vim"); len(got) != 1 {
+	if got := snapshot.Incoming(b); len(got) != 1 {
 		t.Fatalf("incoming = %#v", got)
 	}
-	if got := snapshot.ReverseDependents("/b.vim"); len(got) != 1 || got[0] != "/a.vim" {
+	if got := snapshot.ReverseDependents(b); len(got) != 1 || !sameGraphPath(got[0], a) {
 		t.Fatalf("dependents = %#v", got)
 	}
 	if got := snapshot.ReverseDependents(" "); got != nil {
 		t.Fatalf("invalid dependents = %#v", got)
 	}
 
-	graph.Remove("/b.vim")
-	after := graph.Snapshot().Imports("/a.vim")
+	graph.Remove(b)
+	after := graph.Snapshot().Imports(a)
 	if len(after) != 3 || !after[0].Missing || after[0].Target != "" {
 		t.Fatalf("removed target was not marked missing: %#v", after)
 	}
