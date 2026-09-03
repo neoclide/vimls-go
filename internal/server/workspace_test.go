@@ -1948,6 +1948,7 @@ func TestWaitForWorkspaceIndexPending(t *testing.T) {
 func TestWaitForWorkspaceIndexTimesOut(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
+	instance.testHooks.workspaceIndexWaitTimeout = time.Millisecond
 	instance.workspaceMu.Lock()
 	instance.workspaceRunning = true
 	instance.workspaceMu.Unlock()
@@ -2178,6 +2179,10 @@ func initializeWorkspaceServer(t *testing.T, root string) *Server {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Tests using this helper wait for index completion explicitly. Keeping the
+	// production debounce only adds wall-clock delay; debounce behavior has its
+	// own focused test below.
+	instance.workspaceDelay = 0
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}

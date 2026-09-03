@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -187,6 +188,7 @@ func TestDiagnosticWorkspacePullCancellationTimeoutRetryAndPartialResults(t *tes
 	t.Run("cancellation and timeout", func(t *testing.T) {
 		instance := New(nil, nil, io.Discard)
 		t.Cleanup(instance.stopAnalysis)
+		instance.testHooks.workspaceIndexWaitTimeout = time.Millisecond
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		if _, err := instance.DiagnosticWorkspace(ctx, &protocol.WorkspaceDiagnosticParams{}); !errors.Is(err, protocol.ErrRequestCancelled) {

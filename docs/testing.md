@@ -8,6 +8,12 @@
 - Keep parser goldens deterministic. CI never rewrites expected output.
 - Green narrow tests do not prove a milestone whose contract is broader.
 - A Vim executable is a development oracle, never a production dependency.
+- Server tests use only the smallest source needed for one feature behavior.
+  Parser corpora stay in their owning syntax, analysis, or workspace package
+  and are never replayed across every LSP feature. Synchronize asynchronous
+  server tests with hooks or channels instead of production-duration sleeps.
+  Keep the cumulative top-level test time attributed to each `_test.go` file
+  below five seconds in an uncached `go test -json -count=1` run.
 - Normal build and test commands use Go's global module cache with
   `-mod=readonly`. With the required versions cached they do not fetch modules
   from the network.

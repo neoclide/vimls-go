@@ -107,8 +107,8 @@ type workspaceAnalysisSnapshot struct {
 	ready             bool
 }
 
-// serverTestHooks are synchronous test-only seams. Tests install them before
-// starting the relevant work. Scheduling hooks run outside Server locks.
+// serverTestHooks are test-only seams. Tests install them before starting the
+// relevant work. Scheduling hooks run outside Server locks.
 type serverTestHooks struct {
 	afterAnalysisFinished        func(string)
 	beforeParseSnapshotCacheMiss func(*text.Snapshot)
@@ -119,6 +119,7 @@ type serverTestHooks struct {
 	beforeWorkspaceRestoreRead  func(workspaceRestore)
 	beforeWorkspaceRebuildDelay func()
 	beforeWorkspaceIndexWait    func()
+	workspaceIndexWaitTimeout   time.Duration
 	beforeWorkspaceBuild        func([]*text.Snapshot)
 	afterWorkspaceIndexWorker   func()
 	beforeShutdownReturn        func()
