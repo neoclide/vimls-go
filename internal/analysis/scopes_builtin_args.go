@@ -38,7 +38,7 @@ const (
 )
 
 func builtinValueTypeKind(typ ValueType) builtinValueKind {
-	switch typ.Name {
+	switch valueTypeCategory(typ) {
 	case "number":
 		return builtinNumber
 	case "float":

@@ -5424,7 +5424,7 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 		return
 	}
 	if !isUnknownType(iterable) && iterable.Name != "list" && iterable.Name != "tuple" && iterable.Name != "string" && iterable.Name != "blob" {
-		name := iterable.Name
+		name := valueTypeCategory(iterable)
 		if result.classes[name] != nil || result.classAliases[name] != "" || name == "enum" {
 			name = "object"
 		}
@@ -5898,13 +5898,13 @@ func assignmentTypesCompatible(expected, actual ValueType) bool {
 	if isUnknownType(expected) || isUnknownType(actual) {
 		return true
 	}
-	if !knownAssignmentType(expected.Name) || !knownAssignmentType(actual.Name) {
+	if !knownAssignmentType(expected) || !knownAssignmentType(actual) {
 		return true
 	}
 	if expected.Name == "float" && actual.Name == "number" {
 		return true
 	}
-	if expected.Name != actual.Name {
+	if valueTypeCategory(expected) != valueTypeCategory(actual) {
 		return false
 	}
 	if expected.Name == "func" && expected.ArgumentCountKnown && actual.ArgumentCountKnown && !expected.Variadic && !actual.Variadic && len(expected.Arguments) != len(actual.Arguments) {
@@ -5923,8 +5923,8 @@ func assignmentTypesCompatible(expected, actual ValueType) bool {
 	return expected.Return == nil || actual.Return == nil || assignmentTypesCompatible(*expected.Return, *actual.Return)
 }
 
-func knownAssignmentType(name string) bool {
-	switch name {
+func knownAssignmentType(typ ValueType) bool {
+	switch valueTypeCategory(typ) {
 	case "blob", "bool", "channel", "class", "dict", "enum", "float", "func", "job", "list", "number", "object", "partial", "special", "string", "tuple", "typealias", "void":
 		return true
 	default:

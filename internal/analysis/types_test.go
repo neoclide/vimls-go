@@ -169,6 +169,8 @@ var channel = test_null_channel()
 var truth = v:true
 var files = v:oldfiles
 var nullValue = v:null
+var literalNull = null
+var noneValue = v:none
 `
 	result := Analyze(syntax.Parse(source))
 	declarations := make(map[string]*Declaration)
@@ -177,7 +179,7 @@ var nullValue = v:null
 	}
 	for name, want := range map[string]string{
 		"count": "number", "pieces": "list", "copied": "tuple", "channel": "channel",
-		"truth": "bool", "files": "list", "nullValue": "special",
+		"truth": "bool", "files": "list", "nullValue": "null", "literalNull": "null", "noneValue": "none",
 	} {
 		if declarations[name] == nil || declarations[name].Type.Name != want {
 			t.Fatalf("%s type = %#v, want %s", name, declarations[name], want)
@@ -192,6 +194,14 @@ var nullValue = v:null
 	if got := declarations["files"].Type.Arguments; len(got) != 1 || got[0].Name != "string" {
 		t.Fatalf("files type = %#v", declarations["files"].Type)
 	}
+	for _, name := range []string{"nullValue", "literalNull", "noneValue"} {
+		if !isSpecialType(declarations[name].Type) {
+			t.Fatalf("%s category = %q, want special", name, valueTypeCategory(declarations[name].Type))
+		}
+	}
+	if merged := mergeTypes(declarations["nullValue"].Type, declarations["noneValue"].Type); merged.Name != ValueTypeSpecial {
+		t.Fatalf("merged special type = %#v", merged)
+	}
 }
 
 func TestAnalyzeInfersGetDefaultType(t *testing.T) {
@@ -199,6 +209,7 @@ func TestAnalyzeInfersGetDefaultType(t *testing.T) {
 var maxEditCount = get(g:, 'coc_edits_maximum_count', 200)
 var label = get(g:, 'label', 'fallback')
 var methodCount = g:->get('method_count', 100)
+var enabled = get(g:, 'enabled', true)
 var unknown = get(g:, 'missing')
 `
 	result := Analyze(syntax.Parse(source))
@@ -210,6 +221,7 @@ var unknown = get(g:, 'missing')
 		"maxEditCount": "number",
 		"label":        "string",
 		"methodCount":  "number",
+		"enabled":      "bool",
 	} {
 		if declarations[name] == nil || declarations[name].Type.Name != want {
 			t.Fatalf("%s type = %#v, want %s", name, declarations[name], want)
@@ -217,6 +229,39 @@ var unknown = get(g:, 'missing')
 	}
 	if declarations["unknown"] == nil || !isUnresolvedType(declarations["unknown"].Type) {
 		t.Fatalf("unknown type = %#v, want unresolved", declarations["unknown"])
+	}
+}
+
+func TestAnalyzeGetWithSpecialDefaultUsesContainerElementType(t *testing.T) {
+	source := `vim9script
+const nullDefault = get(g:, 'null_default', null)
+const vNullDefault = get(g:, 'v_null_default', v:null)
+const noneDefault = get(g:, 'none_default', v:none)
+echo nullDefault vNullDefault noneDefault
+def BufferLineCount(bufnr: number): number
+  const info = get(getbufinfo(bufnr), 0, null)
+  if empty(info)
+    throw $'Invalid buffer id: {bufnr}'
+  endif
+  return info.loaded == 0 ? 0 : info.linecount
+enddef
+`
+	result := Analyze(syntax.Parse(source))
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", result.Diagnostics)
+	}
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	for _, name := range []string{"nullDefault", "vNullDefault", "noneDefault"} {
+		if declarations[name] == nil || !isUnresolvedType(declarations[name].Type) {
+			t.Fatalf("%s type = %#v, want unresolved", name, declarations[name])
+		}
+	}
+	info := declarations["info"]
+	if info == nil || info.Type.Name != "dict" || len(info.Type.Arguments) != 1 || !isUnresolvedType(info.Type.Arguments[0]) {
+		t.Fatalf("info type = %#v, want dict<any>", info)
 	}
 }
 

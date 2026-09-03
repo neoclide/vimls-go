@@ -9,7 +9,8 @@ import (
 
 // ValueType is the small, protocol-independent type fact used by analysis.
 // The zero value is the analyzer's unknown state; Name "any" is reserved for
-// Vim9's explicit source type. Return is set for function values.
+// Vim9's explicit source type.  The concrete null and none names share the
+// special category through valueTypeCategory. Return is set for function values.
 type ValueType struct {
 	Name               string
 	Arguments          []ValueType
@@ -19,7 +20,12 @@ type ValueType struct {
 	Variadic           bool
 }
 
-const ValueTypeAny = "any"
+const (
+	ValueTypeAny     = "any"
+	ValueTypeNull    = "null"
+	ValueTypeNone    = "none"
+	ValueTypeSpecial = "special"
+)
 
 // UnknownValueType is returned when an expression cannot be inferred safely.
 var UnknownValueType = ValueType{}
@@ -348,7 +354,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		case "true", "false":
 			typ = ValueType{Name: "bool"}
 		case "null":
-			typ = ValueType{Name: "special"}
+			typ = ValueType{Name: ValueTypeNull}
 		case "null_blob":
 			typ = ValueType{Name: "blob"}
 		case "null_channel":
@@ -544,8 +550,11 @@ func builtinVariableValueType(variable vimdata.Variable) ValueType {
 	case "list<dict<any>>":
 		return ValueType{Name: "list", Arguments: []ValueType{{Name: "dict", Arguments: []ValueType{UnknownValueType}}}}
 	case "special":
-		if variable.Name == "v:null" || variable.Name == "v:none" {
-			return ValueType{Name: "special"}
+		switch variable.Name {
+		case "v:null":
+			return ValueType{Name: ValueTypeNull}
+		case "v:none":
+			return ValueType{Name: ValueTypeNone}
 		}
 	}
 	return UnknownValueType
@@ -566,6 +575,9 @@ func builtinOptionValueType(option vimdata.Option) ValueType {
 
 func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType) ValueType {
 	if function.Name == "get" && len(arguments) == 3 {
+		if isSpecialType(arguments[2]) {
+			return indexedType(arguments[0])
+		}
 		return arguments[2]
 	}
 	switch function.ReturnHelper {
@@ -754,6 +766,9 @@ func compatibleTypes(expected, actual ValueType) bool {
 	if (expected.Name == "float" && actual.Name == "number") || (expected.Name == "bool" && actual.Name == "number") {
 		return true
 	}
+	if isSpecialType(expected) && isSpecialType(actual) {
+		return true
+	}
 	if expected.Name != actual.Name {
 		return false
 	}
@@ -932,6 +947,9 @@ func mergeTypes(left, right ValueType) ValueType {
 	if left.Name == ValueTypeAny || right.Name == ValueTypeAny {
 		return ValueType{Name: ValueTypeAny}
 	}
+	if isSpecialType(left) && isSpecialType(right) {
+		return ValueType{Name: ValueTypeSpecial}
+	}
 	if left.Name != right.Name || len(left.Arguments) != len(right.Arguments) {
 		return ValueType{Name: ValueTypeAny}
 	}
@@ -958,6 +976,19 @@ func isFloatLiteral(value string) bool {
 
 func isUnknownType(typ ValueType) bool {
 	return isUnresolvedType(typ) || typ.Name == ValueTypeAny
+}
+
+func isSpecialType(typ ValueType) bool {
+	return valueTypeCategory(typ) == ValueTypeSpecial
+}
+
+func valueTypeCategory(typ ValueType) string {
+	switch typ.Name {
+	case ValueTypeNull, ValueTypeNone, ValueTypeSpecial:
+		return ValueTypeSpecial
+	default:
+		return typ.Name
+	}
 }
 
 func isUnresolvedType(typ ValueType) bool {

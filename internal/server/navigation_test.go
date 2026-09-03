@@ -476,12 +476,15 @@ func TestNavigationReusesCurrentParsedDocument(t *testing.T) {
 	}
 }
 
-func TestHoverShowsUnknownAndAnyVariableTypes(t *testing.T) {
+func TestHoverShowsVariableTypes(t *testing.T) {
 	for _, test := range []struct {
 		name, source, want string
 	}{
 		{name: "unknown", source: "vim9script\nvar value = UnknownCall()\necho value\n", want: "unknown"},
 		{name: "explicit any", source: "vim9script\nvar value: any\necho value\n", want: "any"},
+		{name: "null literal", source: "vim9script\nvar value = null\necho value\n", want: "null"},
+		{name: "v:null", source: "vim9script\nvar value = v:null\necho value\n", want: "null"},
+		{name: "v:none", source: "vim9script\nvar value = v:none\necho value\n", want: "none"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)

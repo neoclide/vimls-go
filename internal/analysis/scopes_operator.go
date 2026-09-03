@@ -72,7 +72,7 @@ func strictStringConversionDiagnostic(result *FileAnalysis, scope *Scope, expres
 	if expression.Kind == syntax.ExpressionIdentifier && expression.Value == "null_partial" {
 		name = "partial"
 	}
-	if isUnknownType(ValueType{Name: name}) || name == "string" || name == "special" || name == "bool" || name == "number" || name == "float" || interpolate && (name == "list" || name == "tuple" || name == "dict") {
+	if isUnknownType(ValueType{Name: name}) || name == "string" || isSpecialType(ValueType{Name: name}) || name == "bool" || name == "number" || name == "float" || interpolate && (name == "list" || name == "tuple" || name == "dict") {
 		return syntax.Diagnostic{}, false
 	}
 	switch name {
@@ -84,8 +84,8 @@ func strictStringConversionDiagnostic(result *FileAnalysis, scope *Scope, expres
 }
 
 func numericConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnostic, bool) {
-	switch typ.Name {
-	case "special":
+	switch valueTypeCategory(typ) {
+	case ValueTypeSpecial:
 		return syntax.Diagnostic{Code: "vim/E611", Message: "Using a Special as a Number", Span: span}, true
 	case "func":
 		return syntax.Diagnostic{Code: "vim/E703", Message: "Using a Funcref as a Number", Span: span}, true
@@ -329,30 +329,22 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						}
 						leftKind, rightKind := builtinValueTypeKind(left), builtinValueTypeKind(right)
 						invalid := false
+						leftCategory, rightCategory := valueTypeCategory(left), valueTypeCategory(right)
 						if !isUnknownType(left) && !isUnknownType(right) && leftKind != 0 && rightKind != 0 && left.Name != "void" && right.Name != "void" {
-							if left.Name == right.Name {
+							if leftCategory == rightCategory {
 								equality := base == "==" || base == "!=" || base == "is" || base == "isnot"
-								invalid = !equality && (left.Name == "bool" || left.Name == "special" || left.Name == "blob" || left.Name == "list")
+								invalid = !equality && (leftCategory == "bool" || leftCategory == ValueTypeSpecial || leftCategory == "blob" || leftCategory == "list")
 							} else if (left.Name == "number" || left.Name == "float") && (right.Name == "number" || right.Name == "float") {
 								// Number and Float comparisons use Vim's shared numeric path.
-							} else if left.Name == "special" || right.Name == "special" {
-								leftValue, rightValue := leftExpression, rightExpression
-								for leftValue.Kind == syntax.ExpressionParenthesized && len(leftValue.Children) == 1 {
-									leftValue = leftValue.Children[0]
-								}
-								for rightValue.Kind == syntax.ExpressionParenthesized && len(rightValue.Children) == 1 {
-									rightValue = rightValue.Children[0]
-								}
-								leftNone := leftValue.Kind == syntax.ExpressionIdentifier && leftValue.Value == "v:none"
-								rightNone := rightValue.Kind == syntax.ExpressionIdentifier && rightValue.Value == "v:none"
-								invalid = leftNone && right.Name != "string" || rightNone && left.Name != "string"
+							} else if leftCategory == ValueTypeSpecial || rightCategory == ValueTypeSpecial {
+								invalid = left.Name == ValueTypeNone && right.Name != "string" || right.Name == ValueTypeNone && left.Name != "string"
 							} else {
 								invalid = true
 							}
 						}
 						if invalid {
 							result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-								Code: "vim/E1072", Message: "Cannot compare " + left.Name + " with " + right.Name, Span: expression.Operator,
+								Code: "vim/E1072", Message: "Cannot compare " + leftCategory + " with " + rightCategory, Span: expression.Operator,
 							})
 						}
 					}
@@ -360,9 +352,10 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				if expression.Kind == syntax.ExpressionBinary && command.Dialect == syntax.Vim9 &&
 					(op == "is" || op == "isnot") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
 					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
-					if left.Name == right.Name && (left.Name == "bool" || left.Name == "special" || left.Name == "number" || left.Name == "float") {
+					leftCategory, rightCategory := valueTypeCategory(left), valueTypeCategory(right)
+					if leftCategory == rightCategory && (leftCategory == "bool" || leftCategory == ValueTypeSpecial || leftCategory == "number" || leftCategory == "float") {
 						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-							Code: "vim/E1037", Message: `Cannot use "` + op + `" with ` + left.Name, Span: expression.Operator,
+							Code: "vim/E1037", Message: `Cannot use "` + op + `" with ` + leftCategory, Span: expression.Operator,
 						})
 					}
 				}
@@ -617,7 +610,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						ok = true
 					}
 					if !ok {
-						leftConvertible := leftType.Name == "bool" || leftType.Name == "float" || leftType.Name == "number" || leftType.Name == "special" || leftType.Name == "string"
+						leftConvertible := leftType.Name == "bool" || leftType.Name == "float" || leftType.Name == "number" || isSpecialType(leftType) || leftType.Name == "string"
 						invalidRight := rightType.Name == "void" || rightType.Name == "job" || rightType.Name == "channel"
 						if command.Dialect == syntax.Vim9 && leftConvertible && invalidRight {
 							diagnostic = syntax.Diagnostic{Code: "vim/E908", Message: "Using an invalid value as a String: " + rightType.Name, Span: right.Span}
