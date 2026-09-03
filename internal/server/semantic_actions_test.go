@@ -165,11 +165,11 @@ func applySemanticTokenEdits(t *testing.T, data []uint32, edits []protocol.Seman
 func TestSemanticTokensFullReusesParserCacheForSameSnapshot(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
 	cacheMisses := 0
-	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
 		cacheMisses++
 	}
 	t.Cleanup(func() {
-		instance.beforeParseSnapshotCacheMissForTest = nil
+		instance.testHooks.beforeParseSnapshotCacheMiss = nil
 	})
 	params := &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}
 	for range 2 {
@@ -186,7 +186,7 @@ func TestSemanticTokensFullDoesNotInstallStaleSnapshot(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "echo before\n")
 	started := make(chan struct{})
 	continueParse := make(chan struct{})
-	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
 		close(started)
 		<-continueParse
 	}

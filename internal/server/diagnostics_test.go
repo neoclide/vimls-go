@@ -1286,17 +1286,22 @@ func openDiagnosticsServer(t *testing.T) (*Server, *diagnosticClient) {
 	return instance, client
 }
 
+func installAnalysisFinishedHook(instance *Server) <-chan string {
+	analysisDone := make(chan string, 10)
+	instance.analysisMu.Lock()
+	instance.testHooks.afterAnalysisFinished = func(uri string) {
+		analysisDone <- uri
+	}
+	instance.analysisMu.Unlock()
+	return analysisDone
+}
+
 func TestPushDiagnosticsDeduplicationAndResendOnEdit(t *testing.T) {
 	instance, client := openDiagnosticsServer(t)
 	documentURI := uri.MustParse("file:///test-dedup.vim")
 	source := "vim9script\necho unknownVar\n"
 
-	analysisDone := make(chan string, 10)
-	instance.analysisMu.Lock()
-	instance.testHookAnalysisFinished = func(uri string) {
-		analysisDone <- uri
-	}
-	instance.analysisMu.Unlock()
+	analysisDone := installAnalysisFinishedHook(instance)
 
 	// 1. Open document at version 1 (has 1 diagnostic)
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
@@ -1439,12 +1444,7 @@ func TestPushDiagnosticsRetryOnFailureForNonEmptyDiagnostics(t *testing.T) {
 	documentURI := uri.MustParse("file:///test-retry-non-empty.vim")
 	source := "vim9script\necho unknownVar\n"
 
-	analysisDone := make(chan string, 10)
-	instance.analysisMu.Lock()
-	instance.testHookAnalysisFinished = func(uri string) {
-		analysisDone <- uri
-	}
-	instance.analysisMu.Unlock()
+	analysisDone := installAnalysisFinishedHook(instance)
 
 	var attempts atomic.Int32
 	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
@@ -1494,12 +1494,7 @@ func TestPushDiagnosticsRetryOnFailureForClearingDiagnostics(t *testing.T) {
 	documentURI := uri.MustParse("file:///test-retry-clear.vim")
 	source := "vim9script\necho unknownVar\n"
 
-	analysisDone := make(chan string, 10)
-	instance.analysisMu.Lock()
-	instance.testHookAnalysisFinished = func(uri string) {
-		analysisDone <- uri
-	}
-	instance.analysisMu.Unlock()
+	analysisDone := installAnalysisFinishedHook(instance)
 
 	// 1. Initial publication succeeds.
 	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
@@ -1565,12 +1560,7 @@ func TestPushDiagnosticsClientNilDoesNotCommitPublishedState(t *testing.T) {
 	documentURI := uri.MustParse("file:///test-client-nil.vim")
 	source := "vim9script\necho unknownVar\n"
 
-	analysisDone := make(chan string, 10)
-	instance.analysisMu.Lock()
-	instance.testHookAnalysisFinished = func(uri string) {
-		analysisDone <- uri
-	}
-	instance.analysisMu.Unlock()
+	analysisDone := installAnalysisFinishedHook(instance)
 
 	instance.mu.Lock()
 	instance.client = nil
@@ -1619,12 +1609,7 @@ func TestPushDiagnosticsStaleSendDoesNotClearNewerPendingState(t *testing.T) {
 	documentURI := uri.MustParse("file:///test-stale-send.vim")
 	source := "vim9script\necho unknownVar\n"
 
-	analysisDone := make(chan string, 10)
-	instance.analysisMu.Lock()
-	instance.testHookAnalysisFinished = func(uri string) {
-		analysisDone <- uri
-	}
-	instance.analysisMu.Unlock()
+	analysisDone := installAnalysisFinishedHook(instance)
 
 	v1Started := make(chan struct{})
 	v1Release := make(chan struct{})
@@ -1701,13 +1686,6 @@ func TestPushDiagnosticsCloseWhileFirstNonEmptyPublishBlocked(t *testing.T) {
 	instance, client := openDiagnosticsServer(t)
 	documentURI := uri.MustParse("file:///test-close-blocked.vim")
 	source := "vim9script\necho unknownVar\n"
-
-	analysisDone := make(chan string, 10)
-	instance.analysisMu.Lock()
-	instance.testHookAnalysisFinished = func(uri string) {
-		analysisDone <- uri
-	}
-	instance.analysisMu.Unlock()
 
 	v1Started := make(chan struct{})
 	v1Release := make(chan struct{})

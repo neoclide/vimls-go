@@ -961,7 +961,7 @@ func TestSignatureHelpForStaticImportRetriesWorkspaceIdentity(t *testing.T) {
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 13},
 	}}
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		if checks == 1 {
 			instance.workspaceMu.Lock()
@@ -974,7 +974,7 @@ func TestSignatureHelpForStaticImportRetriesWorkspaceIdentity(t *testing.T) {
 		t.Fatalf("imported signature = %#v, checks=%d, error=%v", help, checks, err)
 	}
 
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		instance.workspaceMu.Lock()
 		instance.workspaceRevision++

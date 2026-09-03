@@ -330,7 +330,7 @@ func TestNavigationUsesNegotiatedPositionEncoding(t *testing.T) {
 func TestReferencesStayPureLocalWithoutWorkspaceIdentityCheck(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() { checks++ }
 	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
@@ -857,7 +857,7 @@ func TestWorkspaceIdentityImportedMemberNavigation(t *testing.T) {
 			instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1)\n")
 			position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
 			checks := 0
-			instance.beforeWorkspaceIdentityCheck = func() {
+			instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 				checks++
 				if checks == 1 {
 					instance.workspaceMu.Lock()
@@ -874,7 +874,7 @@ func TestWorkspaceIdentityImportedMemberNavigation(t *testing.T) {
 			instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1)\n")
 			position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
 			checks := 0
-			instance.beforeWorkspaceIdentityCheck = func() {
+			instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 				checks++
 				instance.workspaceMu.Lock()
 				instance.workspaceRevision++
@@ -1320,7 +1320,7 @@ func TestWorkspaceIdentityNavigationRetriesCurrentResult(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
 			checks := 0
-			instance.beforeWorkspaceIdentityCheck = func() {
+			instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 				checks++
 				if checks == 1 {
 					instance.workspaceMu.Lock()
@@ -1367,7 +1367,7 @@ func TestWorkspaceIdentityNavigationDropsSecondStaleResult(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
 			checks := 0
-			instance.beforeWorkspaceIdentityCheck = func() {
+			instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 				checks++
 				instance.workspaceMu.Lock()
 				instance.workspaceRevision++
@@ -1384,7 +1384,7 @@ func TestWorkspaceIdentityNavigationDropsSecondStaleResult(t *testing.T) {
 func TestWorkspaceIdentityNavigationValidatesMiss(t *testing.T) {
 	instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		instance.workspaceMu.Lock()
 		instance.workspaceRevision++
@@ -1400,7 +1400,7 @@ func TestWorkspaceIdentityNavigationValidatesMiss(t *testing.T) {
 func TestWorkspaceIdentityDocumentLinkRetry(t *testing.T) {
 	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		if checks == 1 {
 			instance.workspaceMu.Lock()
@@ -1417,7 +1417,7 @@ func TestWorkspaceIdentityDocumentLinkRetry(t *testing.T) {
 func TestWorkspaceIdentityDocumentLinkDropsSecondStaleMiss(t *testing.T) {
 	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		instance.workspaceMu.Lock()
 		instance.workspaceRevision++
@@ -1435,7 +1435,7 @@ func TestWorkspaceIdentityCompletionRetry(t *testing.T) {
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 9},
 	}}
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		if checks == 1 {
 			instance.workspaceMu.Lock()
@@ -1453,7 +1453,7 @@ func TestWorkspaceIdentityCompletionRetry(t *testing.T) {
 func TestWorkspaceIdentityCompletionDropsSecondStaleMiss(t *testing.T) {
 	instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		instance.workspaceMu.Lock()
 		instance.workspaceRevision++
@@ -1471,7 +1471,7 @@ func TestImportCompletionOpenTargetStaleIsImmediate(t *testing.T) {
 	instance, documentURI, targetURI := openWorkspaceFeatureRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.\n")
 	instance.documents.Open(targetURI.String(), 1, "vim9script\nexport def Run()\nenddef\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		instance.documents.Open(targetURI.String(), 2, "vim9script\nexport def Changed()\nenddef\n")
 	}
@@ -1486,7 +1486,7 @@ func TestImportCompletionOpenTargetStaleIsImmediate(t *testing.T) {
 func TestExpressionCompletionChecksWorkspaceFunctionIndexIdentity(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() { checks++ }
 	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 10},
 	}})

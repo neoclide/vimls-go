@@ -315,7 +315,7 @@ func TestCodeLensCancellationDuringResolution(t *testing.T) {
 	instance.documents.Open(documentURI.String(), 1, libSource)
 	lens := findCodeLens(t, instance, documentURI, "Target", codeLensReferences)
 	ctx, cancel := context.WithCancel(context.Background())
-	instance.beforeWorkspaceIdentityCheck = cancel
+	instance.testHooks.beforeWorkspaceIdentityCheck = cancel
 	if _, err := instance.CodeLensResolve(ctx, &lens); !errors.Is(err, protocol.ErrRequestCancelled) {
 		t.Fatalf("resolve error = %v", err)
 	}

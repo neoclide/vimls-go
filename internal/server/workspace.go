@@ -33,12 +33,9 @@ type DidChangeRuntimepathParams struct {
 	Runtimepath []string `json:"runtimepath"`
 }
 
-var workspaceGraphReplaceForTest func(*workspace.ImportGraph, string, []workspace.ImportFact) error
-var workspaceDiscoverFilesContextForTest func(context.Context, string, int) ([]string, bool, error)
-
-func discoverWorkspaceFilesContext(ctx context.Context, root string, limit int) ([]string, bool, error) {
-	if workspaceDiscoverFilesContextForTest != nil {
-		return workspaceDiscoverFilesContextForTest(ctx, root, limit)
+func (s *Server) discoverWorkspaceFilesContext(ctx context.Context, root string, limit int) ([]string, bool, error) {
+	if hook := s.testHooks.discoverWorkspaceFiles; hook != nil {
+		return hook(ctx, root, limit)
 	}
 	return workspace.DiscoverFilesContext(ctx, root, limit)
 }
@@ -235,15 +232,15 @@ func (s *Server) scheduleWorkspaceRebuild() {
 
 func (s *Server) workspaceIndexWorker() {
 	defer func() {
-		if s.afterWorkspaceIndexWorkerForTest != nil {
-			s.afterWorkspaceIndexWorkerForTest()
+		if hook := s.testHooks.afterWorkspaceIndexWorker; hook != nil {
+			hook()
 		}
 		s.workspaceWG.Done()
 	}()
 	timer := time.NewTimer(s.workspaceRebuildDelay())
 	defer timer.Stop()
-	if s.beforeWorkspaceRebuildDelayForTest != nil {
-		s.beforeWorkspaceRebuildDelayForTest()
+	if hook := s.testHooks.beforeWorkspaceRebuildDelay; hook != nil {
+		hook()
 	}
 	for {
 		select {
@@ -268,8 +265,8 @@ func (s *Server) workspaceIndexWorker() {
 			resolver = workspacePathResolver(workspaceRoots, runtimePaths)
 		}
 		openSnapshots := s.documents.Snapshots()
-		if s.beforeWorkspaceBuildForTest != nil {
-			s.beforeWorkspaceBuildForTest(openSnapshots)
+		if hook := s.testHooks.beforeWorkspaceBuild; hook != nil {
+			hook(openSnapshots)
 		}
 
 		progress := s.startWorkspaceIndexProgress()
@@ -532,8 +529,8 @@ func (s *Server) waitForWorkspaceIndex(ctx context.Context) error {
 		if !busy {
 			return nil
 		}
-		if s.beforeWorkspaceIndexWaitForTest != nil {
-			s.beforeWorkspaceIndexWaitForTest()
+		if hook := s.testHooks.beforeWorkspaceIndexWait; hook != nil {
+			hook()
 		}
 		select {
 		case <-ctx.Done():
@@ -627,7 +624,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			reportRuntimeRoot(root)
 			reportedRuntimeRoots++
 		}
-		files, truncated, err := discoverWorkspaceFilesContext(ctx, root, remaining)
+		files, truncated, err := s.discoverWorkspaceFilesContext(ctx, root, remaining)
 		if ctx.Err() != nil {
 			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
@@ -996,8 +993,8 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 			return ok
 		})
 		var graphErr error
-		if workspaceGraphReplaceForTest != nil {
-			graphErr = workspaceGraphReplaceForTest(s.workspaceGraph, path, facts)
+		if hook := s.testHooks.replaceWorkspaceGraph; hook != nil {
+			graphErr = hook(s.workspaceGraph, path, facts)
 		} else {
 			graphErr = s.workspaceGraph.Replace(path, facts)
 		}
@@ -1140,8 +1137,8 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 	if !ok {
 		return
 	}
-	if s.beforeWorkspaceRestoreReadForTest != nil {
-		s.beforeWorkspaceRestoreReadForTest(restore)
+	if hook := s.testHooks.beforeWorkspaceRestoreRead; hook != nil {
+		hook(restore)
 	}
 	var file *syntax.File
 	if !restore.knownDiskFile {
@@ -1424,7 +1421,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 			complete = false
 			break
 		}
-		files, truncated, err := discoverWorkspaceFilesContext(ctx, root, remaining)
+		files, truncated, err := s.discoverWorkspaceFilesContext(ctx, root, remaining)
 		if ctx.Err() != nil {
 			return false
 		}
@@ -1705,8 +1702,8 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 		if ctx.Err() != nil || s.analysisContext.Err() != nil {
 			return false
 		}
-		if s.beforeWatchedFileProcessForTest != nil {
-			s.beforeWatchedFileProcessForTest(path)
+		if hook := s.testHooks.beforeWatchedFileProcess; hook != nil {
+			hook(path)
 		}
 
 		s.publishMu.Lock()
@@ -1719,8 +1716,8 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 		info, err := os.Stat(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				if s.beforeWatchedFileInstallForTest != nil {
-					s.beforeWatchedFileInstallForTest(path)
+				if hook := s.testHooks.beforeWatchedFileInstall; hook != nil {
+					hook(path)
 				}
 				s.publishMu.Lock()
 				_, _, open = s.openWorkspaceSnapshotLocked(path)
@@ -1759,8 +1756,8 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 			continue
 		}
 
-		if s.beforeWatchedFileReadForTest != nil {
-			s.beforeWatchedFileReadForTest(path)
+		if hook := s.testHooks.beforeWatchedFileRead; hook != nil {
+			hook(path)
 		}
 
 		contentBytes, ok := readRegularWorkspaceFile(path, maxFileBytes)
@@ -1787,8 +1784,8 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 			return false
 		}
 
-		if s.beforeWatchedFileInstallForTest != nil {
-			s.beforeWatchedFileInstallForTest(path)
+		if hook := s.testHooks.beforeWatchedFileInstall; hook != nil {
+			hook(path)
 		}
 
 		s.publishMu.Lock()
@@ -1939,7 +1936,7 @@ func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolPa
 		if err := ctx.Err(); err != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
-		if hook := s.beforeWorkspaceIdentityCheck; hook != nil {
+		if hook := s.testHooks.beforeWorkspaceIdentityCheck; hook != nil {
 			hook()
 		}
 		s.workspaceMu.Lock()

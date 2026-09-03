@@ -1458,7 +1458,7 @@ func (s *Server) hierarchyCurrent(ctx context.Context, state workspaceNavigation
 	if err := ctx.Err(); err != nil {
 		return false, protocol.ErrRequestCancelled
 	}
-	if hook := s.beforeWorkspaceIdentityCheck; hook != nil {
+	if hook := s.testHooks.beforeWorkspaceIdentityCheck; hook != nil {
 		hook()
 	}
 	s.publishMu.Lock()

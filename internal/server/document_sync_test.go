@@ -551,7 +551,7 @@ func TestServerDocumentEditAnalyzesOnceWhenUpdatingWorkspaceIndex(t *testing.T) 
 	instance.analyzeDocument(documentURI.String())
 
 	calls := 0
-	instance.beforeAnalyzeForTest = func(*syntax.File) { calls++ }
+	instance.testHooks.beforeAnalyze = func(*syntax.File) { calls++ }
 	updatedSource := "vim9script\nvar After = 2\n"
 	_, changed, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: updatedSource}})
 	if err != nil || !changed {
@@ -575,7 +575,7 @@ func TestServerChangeRejectsPausedParseCacheMiss(t *testing.T) {
 	paused := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	instance.beforeParseSnapshotCacheMissForTest = func(snapshot *text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(snapshot *text.Snapshot) {
 		if snapshot == oldSnapshot {
 			close(paused)
 			<-release
@@ -896,19 +896,19 @@ func TestServerConcurrentColdMissSingleParseAndAnalyze(t *testing.T) {
 	var analyzeCalls int32
 	leaderPaused := make(chan struct{})
 	releaseLeader := make(chan struct{})
-	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
 		atomic.AddInt32(&parseCalls, 1)
 		close(leaderPaused)
 		<-releaseLeader
 	}
-	instance.beforeAnalyzeForTest = func(*syntax.File) {
+	instance.testHooks.beforeAnalyze = func(*syntax.File) {
 		atomic.AddInt32(&analyzeCalls, 1)
 	}
 
 	const concurrency = 10
 	var waiterCount atomic.Int32
 	allWaitersEntered := make(chan struct{})
-	instance.beforeInFlightWaitForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeInFlightWait = func(*text.Snapshot) {
 		if waiterCount.Add(1) == concurrency-1 {
 			close(allWaitersEntered)
 		}
@@ -982,14 +982,14 @@ func TestServerConcurrentWaitCancellationDoesNotDisruptOthers(t *testing.T) {
 
 	pauseParse := make(chan struct{})
 	releaseParse := make(chan struct{})
-	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
 		close(pauseParse)
 		<-releaseParse
 	}
 
 	f1Entered := make(chan struct{})
 	f2Entered := make(chan struct{})
-	instance.beforeInFlightWaitForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeInFlightWait = func(*text.Snapshot) {
 		select {
 		case <-f1Entered:
 			close(f2Entered)
@@ -1083,7 +1083,7 @@ func TestServerConcurrentABAInFlightDoesNotDuplicateA(t *testing.T) {
 	pauseB := make(chan struct{})
 	releaseB := make(chan struct{})
 
-	instance.beforeParseSnapshotCacheMissForTest = func(s *text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(s *text.Snapshot) {
 		if s.Text() == sourceA {
 			if parseACalls.Add(1) == 1 {
 				close(pauseA)
@@ -1098,7 +1098,7 @@ func TestServerConcurrentABAInFlightDoesNotDuplicateA(t *testing.T) {
 	}
 
 	secondAEnteredWait := make(chan struct{})
-	instance.beforeInFlightWaitForTest = func(s *text.Snapshot) {
+	instance.testHooks.beforeInFlightWait = func(s *text.Snapshot) {
 		if s.Text() == sourceA {
 			close(secondAEnteredWait)
 		}
@@ -1186,10 +1186,10 @@ func TestServerSameContentDifferentVersionReusesPureState(t *testing.T) {
 
 	var parseCalls int32
 	var analyzeCalls int32
-	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
 		atomic.AddInt32(&parseCalls, 1)
 	}
-	instance.beforeAnalyzeForTest = func(*syntax.File) {
+	instance.testHooks.beforeAnalyze = func(*syntax.File) {
 		atomic.AddInt32(&analyzeCalls, 1)
 	}
 

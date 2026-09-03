@@ -168,7 +168,13 @@ func TestInitializedRegistersOnlyWorkspaceWatchers(t *testing.T) {
 		t.Fatalf("registrations = %#v", client.registrations)
 	}
 	assertWatchRegistration(t, client.registrations[0], []string{workspaceRoot})
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) { t.Fatal("watch refresh started a complete workspace build") }
+	unexpectedBuild := make(chan struct{}, 1)
+	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
+		select {
+		case unexpectedBuild <- struct{}{}:
+		default:
+		}
+	}
 	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{secondRuntime}}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +182,11 @@ func TestInitializedRegistersOnlyWorkspaceWatchers(t *testing.T) {
 	instance.workspaceWG.Wait()
 	if len(client.unregistrations) != 0 || len(client.registrations) != 1 {
 		t.Fatalf("registrations = %d, unregistrations = %d", len(client.registrations), len(client.unregistrations))
+	}
+	select {
+	case <-unexpectedBuild:
+		t.Fatal("watch refresh started a complete workspace build")
+	default:
 	}
 }
 
@@ -287,7 +298,13 @@ func TestRuntimepathDeltaNoopAndReorder(t *testing.T) {
 	if got, ok := index.RuntimeFile("autoload/choice.vim"); !ok || got != firstFile {
 		t.Fatalf("first runtime file = %q, %t", got, ok)
 	}
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) { t.Fatal("runtimepath delta started a complete workspace build") }
+	unexpectedBuild := make(chan struct{}, 1)
+	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
+		select {
+		case unexpectedBuild <- struct{}{}:
+		default:
+		}
+	}
 	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{first, second}}); err != nil {
 		t.Fatal(err)
 	}
@@ -304,6 +321,11 @@ func TestRuntimepathDeltaNoopAndReorder(t *testing.T) {
 		t.Fatalf("reordered runtime file = %q, %t", got, ok)
 	}
 	instance.workspaceWG.Wait()
+	select {
+	case <-unexpectedBuild:
+		t.Fatal("runtimepath delta started a complete workspace build")
+	default:
+	}
 }
 
 func TestRuntimepathDeltaDoesNotDiscardConcurrentWorkspaceRebuild(t *testing.T) {
@@ -315,7 +337,7 @@ func TestRuntimepathDeltaDoesNotDiscardConcurrentWorkspaceRebuild(t *testing.T) 
 	started := make(chan struct{})
 	release := make(chan struct{})
 	builds := 0
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
 		builds++
 		if builds == 1 {
 			close(started)
@@ -479,11 +501,10 @@ func TestRuntimepathDeltaCancelsInFlightDiscoveryWithoutMutation(t *testing.T) {
 			revision := instance.workspaceRevision
 			instance.workspaceMu.Unlock()
 
-			previousDiscover := workspaceDiscoverFilesContextForTest
 			newRuntime = mustWorkspaceCanonicalPath(t, newRuntime)
 			started := make(chan struct{})
 			requestValue := make(chan any, 1)
-			workspaceDiscoverFilesContextForTest = func(ctx context.Context, root string, limit int) ([]string, bool, error) {
+			instance.testHooks.discoverWorkspaceFiles = func(ctx context.Context, root string, limit int) ([]string, bool, error) {
 				if root != newRuntime {
 					return nil, false, fmt.Errorf("discovery root = %q, want %q", root, newRuntime)
 				}
@@ -492,8 +513,6 @@ func TestRuntimepathDeltaCancelsInFlightDiscoveryWithoutMutation(t *testing.T) {
 				<-ctx.Done()
 				return nil, false, ctx.Err()
 			}
-			t.Cleanup(func() { workspaceDiscoverFilesContextForTest = previousDiscover })
-
 			requestCtx, requestCancel := context.WithCancel(context.WithValue(context.Background(), "request-context", test.name))
 			defer requestCancel()
 			result := make(chan error, 1)
@@ -1242,11 +1261,9 @@ func TestWorkspaceIdentityGraphFailureRemovesOldFactsAndRequeuesDependents(t *te
 	instance.workspaceGraph.SetReady(false)
 	instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
 	instance.workspaceMu.Unlock()
-	previousGraphReplace := workspaceGraphReplaceForTest
-	workspaceGraphReplaceForTest = func(*workspace.ImportGraph, string, []workspace.ImportFact) error {
+	instance.testHooks.replaceWorkspaceGraph = func(*workspace.ImportGraph, string, []workspace.ImportFact) error {
 		return errors.New("graph replace failed")
 	}
-	t.Cleanup(func() { workspaceGraphReplaceForTest = previousGraphReplace })
 	dependents := instance.replaceWorkspaceFile(uri.File(main).String(), syntax.Parse("vim9script\nimport './first.vim' as First\nvar Changed = 1\n"))
 	if len(dependents) != 1 || dependents[0] != dependent {
 		t.Fatalf("graph failure dependents = %#v, want %q", dependents, dependent)
@@ -1327,7 +1344,7 @@ func TestWorkspaceSymbolIdentityRetry(t *testing.T) {
 
 	t.Run("retries current result", func(t *testing.T) {
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			if checks == 1 {
 				instance.workspaceMu.Lock()
@@ -1344,7 +1361,7 @@ func TestWorkspaceSymbolIdentityRetry(t *testing.T) {
 
 	t.Run("drops second stale empty result", func(t *testing.T) {
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			instance.workspaceMu.Lock()
 			instance.workspaceRevision++
@@ -1392,7 +1409,7 @@ func TestServerCloseReopenRejectsPausedRestore(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	var capturedRevision uint64
-	instance.beforeWorkspaceRestoreReadForTest = func(restore workspaceRestore) {
+	instance.testHooks.beforeWorkspaceRestoreRead = func(restore workspaceRestore) {
 		if restore.documentURI == documentURI.String() {
 			capturedRevision = restore.revision
 			close(paused)
@@ -1472,7 +1489,7 @@ func TestServerRebuildRejectsCapturedSnapshotAfterOpenEdit(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	hookCalls := 0
-	instance.beforeWorkspaceBuildForTest = func(snapshots []*text.Snapshot) {
+	instance.testHooks.beforeWorkspaceBuild = func(snapshots []*text.Snapshot) {
 		hookCalls++
 		if len(snapshots) == 1 && snapshots[0] == oldSnapshot {
 			close(paused)
@@ -1528,8 +1545,8 @@ func TestWorkspaceRebuildDebouncesBurst(t *testing.T) {
 		releaseWorker()
 		instance.workspaceWG.Wait()
 	})
-	instance.beforeWorkspaceRebuildDelayForTest = func() { close(delayStarted) }
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+	instance.testHooks.beforeWorkspaceRebuildDelay = func() { close(delayStarted) }
+	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
 		close(started)
 		<-release
 	}
@@ -1875,7 +1892,7 @@ func TestWaitForWorkspaceIndex(t *testing.T) {
 		releaseWorker()
 		instance.workspaceWG.Wait()
 	})
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
 		close(started)
 		<-release
 	}
@@ -1898,7 +1915,7 @@ func TestWaitForWorkspaceIndexPending(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	waiting := make(chan struct{})
-	instance.beforeWorkspaceIndexWaitForTest = func() { close(waiting) }
+	instance.testHooks.beforeWorkspaceIndexWait = func() { close(waiting) }
 	instance.workspaceMu.Lock()
 	instance.workspacePending["file.vim"] = struct{}{}
 	instance.notifyWorkspaceIndexChangedLocked()

@@ -14,7 +14,7 @@ import (
 func TestPrepareRenameAndRenameBoundSymbol(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\nvalue += 1\n")
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() { checks++ }
 	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 7}}
 	prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: params})
 	if err != nil {
@@ -231,7 +231,7 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 	t.Run("prepare retry", func(t *testing.T) {
 		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			if checks == 1 {
 				instance.workspaceMu.Lock()
@@ -248,7 +248,7 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 	t.Run("rename retry returns full edit", func(t *testing.T) {
 		instance, documentURI, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			if checks == 1 {
 				instance.workspaceMu.Lock()
@@ -283,7 +283,7 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 	t.Run("second stale returns no edit", func(t *testing.T) {
 		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nimport './lib.vim' as lib\necho lib.Run()\n")
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			instance.workspaceMu.Lock()
 			instance.workspaceRevision++
@@ -298,7 +298,7 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 	t.Run("workspace miss validates identity", func(t *testing.T) {
 		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() { checks++ }
 		prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: position})
 		if err != nil || prepared != nil || checks != 1 {
 			t.Fatalf("prepare=%#v checks=%d error=%v", prepared, checks, err)
@@ -308,7 +308,7 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 	t.Run("rename workspace miss is rejected after identity check", func(t *testing.T) {
 		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() { checks++ }
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() { checks++ }
 		edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Execute"})
 		if edit != nil || err == nil || checks != 1 {
 			t.Fatalf("edit=%#v checks=%d error=%v", edit, checks, err)
@@ -318,7 +318,7 @@ func TestWorkspaceIdentityRenameRetriesAndRejectsStaleResults(t *testing.T) {
 	t.Run("rename workspace miss retries after stale identity", func(t *testing.T) {
 		instance, _, position := openWorkspaceNavigationRetryDocument(t, "vim9script\nvar path = './lib.vim'\nimport path as lib\necho lib.Run()\n")
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			if checks == 1 {
 				instance.workspaceMu.Lock()
@@ -340,7 +340,7 @@ func TestWorkspaceIdentityImportedMemberRename(t *testing.T) {
 		instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, source)
 		position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			if checks == 1 {
 				instance.workspaceMu.Lock()
@@ -358,7 +358,7 @@ func TestWorkspaceIdentityImportedMemberRename(t *testing.T) {
 		instance, documentURI, _ := openWorkspaceFeatureRetryDocument(t, source)
 		position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			instance.workspaceMu.Lock()
 			instance.workspaceRevision++

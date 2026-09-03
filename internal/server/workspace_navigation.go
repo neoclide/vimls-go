@@ -271,7 +271,7 @@ func (document *navigationDocument) checkWorkspaceTarget(ctx context.Context, ta
 }
 
 func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, snapshots ...*text.Snapshot) (bool, error) {
-	if hook := document.server.beforeWorkspaceIdentityCheck; hook != nil {
+	if hook := document.server.testHooks.beforeWorkspaceIdentityCheck; hook != nil {
 		hook()
 	}
 	document.server.publishMu.Lock()

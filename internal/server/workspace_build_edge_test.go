@@ -74,14 +74,10 @@ func TestWatchedFilesIncrementalSingleFileChangeNoDiscovery(t *testing.T) {
 
 	// Forbid discovery during incremental update
 	discovered := false
-	prevHook := workspaceDiscoverFilesContextForTest
-	workspaceDiscoverFilesContextForTest = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
+	instance.testHooks.discoverWorkspaceFiles = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
 		discovered = true
 		return nil, false, errors.New("discovery forbidden during incremental change")
 	}
-	t.Cleanup(func() {
-		workspaceDiscoverFilesContextForTest = prevHook
-	})
 
 	// Change file_042 on disk
 	filePath := filepath.Join(root, "file_042.vim")
@@ -124,14 +120,10 @@ func TestWatchedFilesIncrementalCreateAndDelete(t *testing.T) {
 	instance.workspaceWG.Wait()
 
 	discovered := false
-	prevHook := workspaceDiscoverFilesContextForTest
-	workspaceDiscoverFilesContextForTest = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
+	instance.testHooks.discoverWorkspaceFiles = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
 		discovered = true
 		return nil, false, errors.New("discovery forbidden")
 	}
-	t.Cleanup(func() {
-		workspaceDiscoverFilesContextForTest = prevHook
-	})
 
 	// 1. Create new file
 	newPath := filepath.Join(root, "created.vim")
@@ -182,14 +174,10 @@ func TestWatchedFilesIncrementalAtomicSaveAndBurst(t *testing.T) {
 	instance.workspaceWG.Wait()
 
 	discovered := false
-	prevHook := workspaceDiscoverFilesContextForTest
-	workspaceDiscoverFilesContextForTest = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
+	instance.testHooks.discoverWorkspaceFiles = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
 		discovered = true
 		return nil, false, errors.New("discovery forbidden")
 	}
-	t.Cleanup(func() {
-		workspaceDiscoverFilesContextForTest = prevHook
-	})
 
 	// Write new content to atomic.vim
 	writeWorkspaceFile(t, root, "atomic.vim", "vim9script\nvar atomicReplaced = 2\n")
@@ -227,8 +215,7 @@ func TestWatchedFilesDirectoryAndInvalidFallback(t *testing.T) {
 
 	discovered := false
 	discoveryRan := make(chan struct{}, 1)
-	prevHook := workspaceDiscoverFilesContextForTest
-	workspaceDiscoverFilesContextForTest = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
+	instance.testHooks.discoverWorkspaceFiles = func(ctx context.Context, r string, limit int) ([]string, bool, error) {
 		discovered = true
 		select {
 		case discoveryRan <- struct{}{}:
@@ -236,9 +223,6 @@ func TestWatchedFilesDirectoryAndInvalidFallback(t *testing.T) {
 		}
 		return workspace.DiscoverFilesContext(ctx, r, limit)
 	}
-	t.Cleanup(func() {
-		workspaceDiscoverFilesContextForTest = prevHook
-	})
 
 	// Sending watched event for directory must fall back to full rebuild
 	err := instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
@@ -454,7 +438,7 @@ func TestWatchedFilesReadLoopNotBlocked(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 
-	instance.beforeWatchedFileProcessForTest = func(p string) {
+	instance.testHooks.beforeWatchedFileProcess = func(p string) {
 		select {
 		case <-started:
 		default:
@@ -530,7 +514,7 @@ func TestDidChangeWatchedFilesContextCancellation(t *testing.T) {
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	instance.beforeWatchedFileProcessForTest = func(p string) {
+	instance.testHooks.beforeWatchedFileProcess = func(p string) {
 		if filepath.Base(p) == "f1.vim" {
 			select {
 			case <-started:
@@ -581,7 +565,7 @@ func TestWatchedFilesOverlayCheckPreservedAfterDidOpen(t *testing.T) {
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	instance.beforeWatchedFileInstallForTest = func(p string) {
+	instance.testHooks.beforeWatchedFileInstall = func(p string) {
 		if filepath.Base(p) == "overlay_race.vim" {
 			select {
 			case <-started:
@@ -644,7 +628,7 @@ func TestWatchedFilesOverlayCheckPreservedOnDeleteEvent(t *testing.T) {
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	instance.beforeWatchedFileInstallForTest = func(p string) {
+	instance.testHooks.beforeWatchedFileInstall = func(p string) {
 		if filepath.Base(p) == "overlay_del.vim" {
 			select {
 			case <-started:
@@ -705,13 +689,13 @@ func TestDidChangeWatchedFilesBurstMergesToSingleRebuild(t *testing.T) {
 	instance.workspaceWG.Wait()
 
 	var rebuildCount atomic.Int32
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
 		rebuildCount.Add(1)
 	}
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	instance.beforeWatchedFileProcessForTest = func(p string) {
+	instance.testHooks.beforeWatchedFileProcess = func(p string) {
 		select {
 		case <-started:
 		default:
@@ -778,7 +762,7 @@ func TestDidChangeWatchedFilesTOCTOUFileGrowth(t *testing.T) {
 	instance.workspaceWG.Wait()
 
 	// In the hook before processing, write oversized content
-	instance.beforeWatchedFileProcessForTest = func(p string) {
+	instance.testHooks.beforeWatchedFileProcess = func(p string) {
 		if filepath.Base(p) == "grow.vim" {
 			_ = os.WriteFile(p, []byte(strings.Repeat("x", maxFileBytes+1)), 0644)
 		}

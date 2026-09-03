@@ -105,6 +105,32 @@ type workspaceAnalysisSnapshot struct {
 	ready             bool
 }
 
+// serverTestHooks are synchronous test-only seams. Tests install them before
+// starting the relevant work. Scheduling hooks run outside Server locks.
+type serverTestHooks struct {
+	afterAnalysisFinished        func(string)
+	beforeParseSnapshotCacheMiss func(*text.Snapshot)
+	beforeInFlightWait           func(*text.Snapshot)
+	beforeAnalyze                func(*syntax.File)
+
+	beforeWorkspaceWGWait       func()
+	beforeWorkspaceRestoreRead  func(workspaceRestore)
+	beforeWorkspaceRebuildDelay func()
+	beforeWorkspaceIndexWait    func()
+	beforeWorkspaceBuild        func([]*text.Snapshot)
+	afterWorkspaceIndexWorker   func()
+	beforeShutdownReturn        func()
+
+	beforeWatchedFileProcess func(string)
+	beforeWatchedFileRead    func(string)
+	beforeWatchedFileInstall func(string)
+
+	beforeWorkspaceIdentityCheck func()
+	discoverWorkspaceFiles       func(context.Context, string, int) ([]string, bool, error)
+	// replaceWorkspaceGraph runs while workspaceMu is held and must not reenter Server.
+	replaceWorkspaceGraph func(*workspace.ImportGraph, string, []workspace.ImportFact) error
+}
+
 // Server mutexes use a partial, not total, lock order. When multiple Server
 // mutexes are held, acquire them only in these directions:
 //
@@ -164,7 +190,7 @@ type Server struct {
 	analysisPending             map[string]struct{}
 	analysisRunning             map[string]struct{}
 	analysisWorkers             int
-	testHookAnalysisFinished    func(documentURI string)
+	testHooks                   serverTestHooks
 	diagnosticsSendMu           sync.Mutex
 	publishMu                   sync.Mutex
 	parsed                      map[string]parsedDocument
@@ -196,40 +222,22 @@ type Server struct {
 	workspaceWG                 sync.WaitGroup
 	hierarchyLimit              int
 
-	// The following hooks are test-only synchronization seams. They are set
-	// before use and are always called outside server locks.
-	beforeParseSnapshotCacheMissForTest func(*text.Snapshot)
-	beforeInFlightWaitForTest           func(*text.Snapshot)
-	beforeAnalyzeForTest                func(*syntax.File)
-	beforeStopAnalysisWaitForTest       func()
-	beforeWorkspaceWGWaitForTest        func()
-	beforeWorkspaceRestoreReadForTest   func(workspaceRestore)
-	beforeWorkspaceRebuildDelayForTest  func()
-	beforeWorkspaceIndexWaitForTest     func()
-	beforeWorkspaceBuildForTest         func([]*text.Snapshot)
-	afterWorkspaceIndexWorkerForTest    func()
-	beforeShutdownReturnForTest         func()
-
-	watchMu                         sync.Mutex
-	watchDynamicRegistration        bool
-	watchRelativePatterns           bool
-	watchRegistered                 bool
-	initialized                     bool
-	watchWG                         sync.WaitGroup
-	watchedFilesRunning             bool
-	watchedFilesDirty               bool
-	beforeWatchedFileProcessForTest func(path string)
-	beforeWatchedFileReadForTest    func(path string)
-	beforeWatchedFileInstallForTest func(path string)
-	workspaceConfiguration          bool
-	excludeRuntimePathCompletions   bool
+	watchMu                       sync.Mutex
+	watchDynamicRegistration      bool
+	watchRelativePatterns         bool
+	watchRegistered               bool
+	initialized                   bool
+	watchWG                       sync.WaitGroup
+	watchedFilesRunning           bool
+	watchedFilesDirty             bool
+	workspaceConfiguration        bool
+	excludeRuntimePathCompletions bool
 	// Diagnostic maps are replaced, never mutated, while mu is held. Analysis
 	// and publication may therefore snapshot their immutable map references.
 	disabledDiagnostics map[string]struct{}
 	overrideDiagnostics map[string]protocol.DiagnosticSeverity
 
-	beforeWorkspaceIdentityCheck func()
-	completionNow                func() time.Time
+	completionNow func() time.Time
 }
 
 func New(input io.Reader, output, logOutput io.Writer) *Server {
@@ -657,9 +665,10 @@ func (s *Server) Shutdown(context.Context) error {
 	s.mu.Unlock()
 	s.stopAnalysis()
 	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
-	if s.beforeShutdownReturnForTest != nil {
-		s.beforeShutdownReturnForTest()
+	hook := s.testHooks.beforeShutdownReturn
+	s.publishMu.Unlock()
+	if hook != nil {
+		hook()
 	}
 	return nil
 }
@@ -1107,7 +1116,7 @@ func (s *Server) finishAnalysis(documentURI string) {
 	if len(s.analysisPending) > 0 && !s.analysisStopped {
 		s.wakeAnalysisLocked()
 	}
-	hook := s.testHookAnalysisFinished
+	hook := s.testHooks.afterAnalysisFinished
 	s.analysisMu.Unlock()
 	if hook != nil {
 		hook(documentURI)
@@ -1262,8 +1271,8 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		}
 		file := parsed.file
 		s.publishMu.Unlock()
-		if s.beforeAnalyzeForTest != nil {
-			s.beforeAnalyzeForTest(file)
+		if hook := s.testHooks.beforeAnalyze; hook != nil {
+			hook(file)
 		}
 		fileAnalysis := analysis.Analyze(file)
 		s.publishMu.Lock()
@@ -1288,7 +1297,7 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		inFlight := s.parseInFlight[key]
 		if inFlight != nil && inFlight.source == source {
 			done := inFlight.done
-			hook := s.beforeInFlightWaitForTest
+			hook := s.testHooks.beforeInFlightWait
 			s.publishMu.Unlock()
 			if hook != nil {
 				hook(snapshot)
@@ -1307,8 +1316,8 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 				}
 				file := parsed.file
 				s.publishMu.Unlock()
-				if s.beforeAnalyzeForTest != nil {
-					s.beforeAnalyzeForTest(file)
+				if hook := s.testHooks.beforeAnalyze; hook != nil {
+					hook(file)
 				}
 				fileAnalysis := analysis.Analyze(file)
 				s.publishMu.Lock()
@@ -1333,12 +1342,12 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		s.parseInFlight[key] = entry
 		s.publishMu.Unlock()
 
-		if s.beforeParseSnapshotCacheMissForTest != nil {
-			s.beforeParseSnapshotCacheMissForTest(snapshot)
+		if hook := s.testHooks.beforeParseSnapshotCacheMiss; hook != nil {
+			hook(snapshot)
 		}
 		file := syntax.Parse(source)
-		if s.beforeAnalyzeForTest != nil {
-			s.beforeAnalyzeForTest(file)
+		if hook := s.testHooks.beforeAnalyze; hook != nil {
+			hook(file)
 		}
 		fileAnalysis := analysis.Analyze(file)
 
@@ -1672,15 +1681,12 @@ func (s *Server) cancelAnalysis() {
 func (s *Server) stopAnalysis() {
 	s.stopOnce.Do(func() {
 		s.cancelAnalysis()
-		if s.beforeStopAnalysisWaitForTest != nil {
-			s.beforeStopAnalysisWaitForTest()
-		}
 		s.analysisWG.Wait()
 		// Synchronize with a rebuild that may have checked analysisContext just
 		// before cancellation, so its WaitGroup.Add completes before Wait starts.
 		waitGroupAddBarrier(&s.workspaceMu)
-		if s.beforeWorkspaceWGWaitForTest != nil {
-			s.beforeWorkspaceWGWaitForTest()
+		if hook := s.testHooks.beforeWorkspaceWGWait; hook != nil {
+			hook()
 		}
 		s.workspaceWG.Wait()
 		waitGroupAddBarrier(&s.watchMu)

@@ -153,7 +153,7 @@ func TestServerCancelsInFlightRequest(t *testing.T) {
 	t.Cleanup(func() { _ = clientConn.Close() })
 	instance := New(serverConn, serverConn, io.Discard)
 	waiting := make(chan struct{})
-	instance.beforeWorkspaceIndexWaitForTest = func() {
+	instance.testHooks.beforeWorkspaceIndexWait = func() {
 		select {
 		case <-waiting:
 		default:
@@ -218,7 +218,7 @@ func TestServerRejectsDuplicateRequestID(t *testing.T) {
 	t.Cleanup(func() { _ = clientConn.Close() })
 	instance := New(serverConn, serverConn, io.Discard)
 	waiting := make(chan struct{})
-	instance.beforeWorkspaceIndexWaitForTest = func() {
+	instance.testHooks.beforeWorkspaceIndexWait = func() {
 		select {
 		case <-waiting:
 		default:
@@ -284,7 +284,7 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 
 	workerBlocked := make(chan struct{})
 	releaseWorker := make(chan struct{})
-	instance.beforeWorkspaceBuildForTest = func([]*text.Snapshot) {
+	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
 		select {
 		case <-workerBlocked:
 		default:
@@ -294,12 +294,12 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 	}
 
 	workerExited := make(chan struct{})
-	instance.afterWorkspaceIndexWorkerForTest = func() {
+	instance.testHooks.afterWorkspaceIndexWorker = func() {
 		close(workerExited)
 	}
 
 	var shutdownReturnedBeforeWorker bool
-	instance.beforeShutdownReturnForTest = func() {
+	instance.testHooks.beforeShutdownReturn = func() {
 		select {
 		case <-workerExited:
 			// Worker has completely finished and exited
@@ -319,7 +319,7 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 	}
 
 	shutdownWaiting := make(chan struct{})
-	instance.beforeWorkspaceWGWaitForTest = func() {
+	instance.testHooks.beforeWorkspaceWGWait = func() {
 		close(shutdownWaiting)
 	}
 

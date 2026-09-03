@@ -306,8 +306,8 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 		if ctx.Err() != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
-		if s.beforeWorkspaceIdentityCheck != nil {
-			s.beforeWorkspaceIdentityCheck()
+		if hook := s.testHooks.beforeWorkspaceIdentityCheck; hook != nil {
+			hook()
 		}
 		s.publishMu.Lock()
 		s.workspaceMu.Lock()
@@ -371,8 +371,8 @@ func (s *Server) computeClosedWorkspaceDiagnostics(ctx context.Context, snapshot
 		file = &syntax.File{Diagnostics: []syntax.Diagnostic{{Code: "vimls/file-too-large", Message: "file exceeds the 4 MiB analysis limit"}}}
 	} else {
 		file = syntax.Parse(snapshot.Text())
-		if s.beforeAnalyzeForTest != nil {
-			s.beforeAnalyzeForTest(file)
+		if hook := s.testHooks.beforeAnalyze; hook != nil {
+			hook(file)
 		}
 		fileAnalysis = analysis.Analyze(file)
 	}

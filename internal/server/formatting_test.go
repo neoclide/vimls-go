@@ -130,7 +130,7 @@ func TestFormattingRejectsInvalidParamsAndStaleSnapshot(t *testing.T) {
 	}
 
 	stale, staleURI := openNavigationDocument(t, text.UTF16, "vim9script\nif true\necho 1\nendif\n")
-	stale.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+	stale.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
 		stale.publishMu.Lock()
 		stale.documents.Open(staleURI.String(), 2, "vim9script\n")
 		stale.publishMu.Unlock()

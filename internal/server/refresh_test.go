@@ -227,7 +227,7 @@ func TestDidOpenSchedulesInitialRefreshAfterParsing(t *testing.T) {
 	documentURI := uri.File(filepath.Join(t.TempDir(), "main.vim"))
 	parsing := make(chan struct{})
 	continueParsing := make(chan struct{})
-	instance.beforeParseSnapshotCacheMissForTest = func(*text.Snapshot) {
+	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
 		close(parsing)
 		<-continueParsing
 	}

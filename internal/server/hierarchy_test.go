@@ -579,7 +579,7 @@ func TestHierarchyResultLimitsCancellationAndWorkspaceRetry(t *testing.T) {
 	}
 
 	checks := 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		if checks == 1 {
 			instance.workspaceMu.Lock()
@@ -591,7 +591,7 @@ func TestHierarchyResultLimitsCancellationAndWorkspaceRetry(t *testing.T) {
 		t.Fatalf("retry subtypes = %#v, checks=%d, error=%v", result, checks, err)
 	}
 	checks = 0
-	instance.beforeWorkspaceIdentityCheck = func() {
+	instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 		checks++
 		instance.workspaceMu.Lock()
 		instance.workspaceRevision++

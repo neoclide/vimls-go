@@ -86,7 +86,7 @@ func TestDidChangeWatchedFilesTOCTOUFIFODoesNotBlock(t *testing.T) {
 	// Between os.Stat and reading, replace file with a FIFO
 	fifoPath := filePath
 	var hookErr atomic.Value
-	instance.beforeWatchedFileReadForTest = func(p string) {
+	instance.testHooks.beforeWatchedFileRead = func(p string) {
 		if filepath.Base(p) == "toctou_fifo.vim" {
 			_ = os.Remove(filePath)
 			if err := syscall.Mkfifo(fifoPath, 0666); err != nil {

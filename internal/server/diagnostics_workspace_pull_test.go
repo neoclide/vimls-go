@@ -185,7 +185,7 @@ func TestDiagnosticWorkspacePullCancellationTimeoutRetryAndPartialResults(t *tes
 		writeWorkspaceFile(t, root, "main.vim", "vim9script\necho missing\n")
 		instance := initializeWorkspaceServer(t, root)
 		checks := 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			if checks == 1 {
 				instance.workspaceMu.Lock()
@@ -197,7 +197,7 @@ func TestDiagnosticWorkspacePullCancellationTimeoutRetryAndPartialResults(t *tes
 			t.Fatalf("retry checks=%d err=%v", checks, err)
 		}
 		checks = 0
-		instance.beforeWorkspaceIdentityCheck = func() {
+		instance.testHooks.beforeWorkspaceIdentityCheck = func() {
 			checks++
 			instance.workspaceMu.Lock()
 			instance.workspaceRevision++
@@ -245,7 +245,7 @@ func TestDiagnosticWorkspacePullWaitsForInstalledIndex(t *testing.T) {
 	instance.workspaceRunning = true
 	instance.workspaceMu.Unlock()
 	started := make(chan struct{})
-	instance.beforeWorkspaceIndexWaitForTest = func() {
+	instance.testHooks.beforeWorkspaceIndexWait = func() {
 		select {
 		case <-started:
 		default:
