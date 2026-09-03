@@ -221,8 +221,10 @@ inside the server.
 the readable `internal/vimdata/options_set_generated.vim` fixture. The metadata
 generator emits one `:set` command for every pinned option; the oracle executes
 all of them in one clean process and reports failures with their `optiondefs.h`
-source lines. It also compares every generated static `CompletionValues` list
-with Vim's real `getcompletion('set option=', 'cmdline')` result in source order.
+source lines. It also verifies each `getcompletion('set option=', 'cmdline')`
+result is an in-order subset of the generated static `CompletionValues`: the
+metadata retains every source-defined candidate, while a Vim build can omit
+candidates behind optional compile features.
 The curated `option_validation.vim` fixture checks one representative of each
 migrated callback rule shape (exact value, comma list, flag list, and numeric
 range), including Vim's native E474, E487, and E539 failures through `:set`,

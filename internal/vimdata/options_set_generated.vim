@@ -601,8 +601,14 @@ function! s:CheckMigratedCompletion(name, expected, source) abort
         call insert(actual, current, expected_index)
       endif
     endif
-    if actual !=# a:expected
-      call add(s:option_set_failures, a:name .. ' completion [' .. a:source .. ']: expected ' .. string(a:expected) .. ', got ' .. string(actual))
+    let expected_available = []
+    for value in a:expected
+      if index(actual, value) >= 0
+        call add(expected_available, value)
+      endif
+    endfor
+    if actual !=# expected_available
+      call add(s:option_set_failures, a:name .. ' completion [' .. a:source .. ']: expected available subset ' .. string(expected_available) .. ', got ' .. string(actual))
     endif
   catch
     call add(s:option_set_failures, a:name .. ' completion [' .. a:source .. ']: ' .. v:exception .. ' @ ' .. v:throwpoint)

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -51,10 +52,26 @@ func (s *Server) RangesFormatting(ctx context.Context, params *protocol.Document
 		}
 		spans = append(spans, syntax.Span{Start: start, End: end})
 	}
+	// IndentEdits are source-ordered. Sort the requested spans once, then
+	// advance their greatest eligible end as each candidate moves forward.
+	// This preserves the rule that one span must contain the entire candidate
+	// without scanning every requested range for every edit.
+	sort.Slice(spans, func(left, right int) bool {
+		if spans[left].Start != spans[right].Start {
+			return spans[left].Start < spans[right].Start
+		}
+		return spans[left].End > spans[right].End
+	})
 	candidates := syntax.IndentEdits(file, syntax.IndentOptions{TabSize: int(params.Options.TabSize), InsertSpaces: params.Options.InsertSpaces})
 	result := make([]protocol.TextEdit, 0, len(candidates))
+	spanIndex := 0
+	maxSpanEnd := -1
 	for _, candidate := range candidates {
-		if !indentEditCovered(candidate.Span, spans) {
+		for spanIndex < len(spans) && spans[spanIndex].Start <= candidate.Span.Start {
+			maxSpanEnd = max(maxSpanEnd, spans[spanIndex].End)
+			spanIndex++
+		}
+		if candidate.Span.Start >= maxSpanEnd || candidate.Span.End > maxSpanEnd {
 			continue
 		}
 		rangeValue, ok := protocolRange(snapshot, encoding, candidate.Span)
@@ -76,19 +93,6 @@ func (s *Server) RangesFormatting(ctx context.Context, params *protocol.Document
 // candidate.Start < spanEnd.
 func indentEditInside(candidate syntax.Span, spanStart, spanEnd int) bool {
 	return candidate.Start >= spanStart && candidate.End <= spanEnd && candidate.Start < spanEnd
-}
-
-// indentEditCovered reports whether candidate lies fully inside at least one
-// requested byte span. Duplicates, out-of-order, adjacent and overlapping
-// requested ranges are all accepted because each candidate is decided once
-// against every span.
-func indentEditCovered(candidate syntax.Span, spans []syntax.Span) bool {
-	for _, span := range spans {
-		if indentEditInside(candidate, span.Start, span.End) {
-			return true
-		}
-	}
-	return false
 }
 
 // OnTypeFormatting re-indents the line the cursor rests on. Typing "\"
