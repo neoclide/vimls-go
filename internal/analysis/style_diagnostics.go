@@ -37,10 +37,65 @@ type autocmdCoverage struct {
 	patterns map[string]map[string]bool
 }
 
+func autocmdEventNames(file *syntax.File, events []syntax.Span) []string {
+	names := make([]string, 0, len(events))
+	known := vimdata.AutocmdEvents()
+	for _, event := range events {
+		name := strings.TrimSpace(file.Text(event))
+		if name != "" {
+			canonical := name
+			for _, candidate := range known {
+				if !strings.EqualFold(name, candidate.Name) {
+					continue
+				}
+				if candidate.AliasOf != "" {
+					canonical = candidate.AliasOf
+				} else {
+					canonical = candidate.Name
+				}
+				break
+			}
+			names = append(names, strings.ToLower(canonical))
+		}
+	}
+	return names
+}
+
+func autocmdPatterns(file *syntax.File, pattern syntax.Span) []string {
+	text := strings.TrimSpace(file.Text(pattern))
+	if text == "" {
+		return nil
+	}
+	patterns := make([]string, 0, strings.Count(text, ",")+1)
+	start, braces := 0, 0
+	for index := range len(text) {
+		switch text[index] {
+		case '{':
+			braces++
+		case '}':
+			braces--
+		case ',':
+			// Match Vim's v9.2.1015 autocmd.c separator rule: a comma
+			// belongs to the pattern when it is inside braces or its
+			// immediately preceding byte is a backslash.
+			if braces == 0 && (index == 0 || text[index-1] != '\\') {
+				if item := strings.TrimSpace(text[start:index]); item != "" {
+					patterns = append(patterns, item)
+				}
+				start = index + 1
+			}
+		}
+	}
+	if item := strings.TrimSpace(text[start:]); item != "" {
+		patterns = append(patterns, item)
+	}
+	return patterns
+}
+
 func (c *autocmdCoverage) addClear(file *syntax.File, events []syntax.Span, pattern syntax.Span) {
-	pat := strings.TrimSpace(file.Text(pattern))
+	patterns := autocmdPatterns(file, pattern)
 	if len(events) == 0 {
-		if pat == "" {
+		if len(patterns) == 0 {
 			c.all = true
 		}
 		return
@@ -48,20 +103,21 @@ func (c *autocmdCoverage) addClear(file *syntax.File, events []syntax.Span, patt
 	if c.patterns == nil {
 		c.patterns = make(map[string]map[string]bool)
 	}
-	for _, span := range events {
-		name := file.Text(span)
+	for _, name := range autocmdEventNames(file, events) {
 		if name == "*" {
-			if pat == "" {
+			if len(patterns) == 0 {
 				c.all = true
 			} else {
 				if c.patterns["*"] == nil {
 					c.patterns["*"] = make(map[string]bool)
 				}
-				c.patterns["*"][pat] = true
+				for _, pattern := range patterns {
+					c.patterns["*"][pattern] = true
+				}
 			}
 			continue
 		}
-		if pat == "" {
+		if len(patterns) == 0 {
 			if c.events == nil {
 				c.events = make(map[string]bool)
 			}
@@ -71,83 +127,112 @@ func (c *autocmdCoverage) addClear(file *syntax.File, events []syntax.Span, patt
 		if c.patterns[name] == nil {
 			c.patterns[name] = make(map[string]bool)
 		}
-		c.patterns[name][pat] = true
+		for _, pattern := range patterns {
+			c.patterns[name][pattern] = true
+		}
 	}
 }
 
-func (c *autocmdCoverage) covers(file *syntax.File, events []syntax.Span, pattern syntax.Span) bool {
+func (c *autocmdCoverage) covers(event, pattern string) bool {
 	if c.all {
 		return true
 	}
-	pat := strings.TrimSpace(file.Text(pattern))
-	for _, span := range events {
-		name := file.Text(span)
-		if name == "*" {
-			continue
-		}
-		if c.events[name] || c.events["*"] {
-			continue
-		}
-		if pat != "" && (c.patterns[name][pat] || c.patterns["*"][pat]) {
-			continue
-		}
-		return false
+	if event == "*" {
+		return pattern != "" && c.patterns["*"][pattern]
 	}
-	return len(events) > 0
+	if c.events[event] || c.events["*"] {
+		return true
+	}
+	return pattern != "" && (c.patterns[event][pattern] || c.patterns["*"][pattern])
 }
 
-// augroupTracking is the reload-safety state of one open augroup region. In
+// augroupTracking is the reload-safety state of one effective augroup. In
 // default (plugin) mode only the existence of any clear matters; in config
 // mode uncovered persistent autocommands are tracked so the report can point
-// to the first one as related information.
+// to the first one as related information. Explicit group operands outside an
+// :augroup region contribute to the same state.
 type augroupTracking struct {
-	header    *syntax.Command
+	span      syntax.Span
 	defines   bool
 	clears    bool
-	dynamic   bool
 	coverage  autocmdCoverage
-	uncovered *syntax.Command
+	uncovered []uncoveredAutocmd
 }
 
-var dynamicAutocmdPattern = regexp.MustCompile(`\bau!?|autocmd|augroup`)
+type uncoveredAutocmd struct {
+	command *syntax.Command
+	event   string
+	pattern string
+}
+
+var dynamicAutocmdPattern = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])(?:au|aut(?:o(?:c(?:m(?:d)?)?)?)?|aug(?:r(?:o(?:u(?:p)?)?)?)?)!?([^[:alnum:]_]|$)`)
 
 // dynamicAutocmdText reports whether source likely registers or clears
 // autocommands through :execute, which the static augroup reload-safety check
 // cannot reason about (kept unknown per §4.3).
 func dynamicAutocmdText(source string) bool {
-	return dynamicAutocmdPattern.MatchString(strings.ToLower(source))
+	return dynamicAutocmdPattern.MatchString(source)
+}
+
+func autocmdTargetsLocal(file *syntax.File, events []syntax.Span) bool {
+	names := autocmdEventNames(file, events)
+	if len(names) == 0 {
+		return false
+	}
+	for _, event := range names {
+		switch event {
+		case "bufadd", "bufcreate", "bufdelete", "bufenter", "buffilepost", "buffilepre", "bufhidden", "bufleave", "bufnew", "bufnewfile", "bufread", "bufreadcmd", "bufreadpost", "bufreadpre", "bufunload", "bufwinenter", "bufwinleave", "bufwipeout", "bufwrite", "bufwritecmd", "bufwritepost", "bufwritepre", "encodingchanged", "fileappendcmd", "fileappendpost", "fileappendpre", "filechangedro", "filechangedshell", "filechangedshellpost", "fileencoding", "filereadcmd", "filereadpost", "filereadpre", "filetype", "filewritecmd", "filewritepost", "filewritepre", "filterreadpost", "filterreadpre", "filterwritepost", "filterwritepre", "syntax", "swapexists", "winclosed", "winenter", "winleave", "winnew", "winnewpre", "winresized", "winscrolled":
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, commands []syntax.Command, blocks []syntax.Block, autocmdContext bool) {
-	activeAugroup := false
-	var tracking *augroupTracking
-	finishAugroup := func() {
-		if tracking != nil {
-			if result.configFile {
-				if tracking.defines && tracking.uncovered != nil && !tracking.dynamic {
-					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-						Code: "vimls/autocmd-group-not-cleared", Message: "augroup does not clear existing autocommands", Span: tracking.header.Augroup,
-						Related: syntax.RelatedDiagnostic{
-							Message: "autocommand is registered again every time this configuration is sourced",
-							Span:    tracking.uncovered.Autocmd.Pattern,
-						},
-					})
-				}
-			} else if tracking.defines && !tracking.clears {
-				appendStyleDiagnostic(result, "vimls/autocmd-group-not-cleared", "augroup does not clear existing autocommands", tracking.header.Augroup)
+	groups := make(map[string]*augroupTracking)
+	activeGroup := ""
+	dynamicAutocmd := false
+	trackingFor := func(name string, span syntax.Span) *augroupTracking {
+		tracking := groups[name]
+		if tracking == nil {
+			tracking = &augroupTracking{span: span}
+			groups[name] = tracking
+		} else if tracking.span.Start == tracking.span.End && span.Start < span.End {
+			tracking.span = span
+		}
+		return tracking
+	}
+	retireDefinitions := func(tracking *augroupTracking, events []syntax.Span, pattern syntax.Span) {
+		clear := autocmdCoverage{}
+		clear.addClear(file, events, pattern)
+		remaining := tracking.uncovered[:0]
+		for _, definition := range tracking.uncovered {
+			if !clear.covers(definition.event, definition.pattern) {
+				remaining = append(remaining, definition)
 			}
 		}
-		activeAugroup = false
-		tracking = nil
+		tracking.uncovered = remaining
+	}
+	noteDefinition := func(tracking *augroupTracking, command *syntax.Command) {
+		tracking.defines = true
+		for _, event := range autocmdEventNames(file, command.Autocmd.Events) {
+			for _, pattern := range autocmdPatterns(file, command.Autocmd.Pattern) {
+				if !tracking.coverage.covers(event, pattern) {
+					tracking.uncovered = append(tracking.uncovered, uncoveredAutocmd{command: command, event: event, pattern: pattern})
+				}
+			}
+		}
 	}
 	for index := range commands {
 		command := &commands[index]
 		if command.Canonical == "augroup" {
 			name := file.Text(command.Augroup)
-			finishAugroup()
 			if name != "" && !strings.EqualFold(name, "END") && command.Bang.Start == command.Bang.End {
-				activeAugroup = true
-				tracking = &augroupTracking{header: command}
+				activeGroup = name
+				trackingFor(name, command.Augroup)
+			} else {
+				activeGroup = ""
 			}
 		}
 		if command.Canonical == "normal" && command.Bang.Start == command.Bang.End && command.Argument.Start < command.Argument.End {
@@ -178,40 +263,43 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 				}
 			}
 		}
-		if result.configFile && activeAugroup && tracking != nil && command.Canonical == "execute" && command.Argument.Start < command.Argument.End && dynamicAutocmdText(file.Text(command.Argument)) {
-			tracking.dynamic = true
+		if result.configFile && command.Canonical == "execute" && command.Argument.Start < command.Argument.End && dynamicAutocmdText(file.Text(command.Argument)) {
+			// Dynamic command text may target any existing group, including one
+			// named explicitly outside the current :augroup region.
+			dynamicAutocmd = true
 		}
 		if command.Autocmd != nil {
 			operation := command.Autocmd.Operation
-			// Autocmd commands may name their group explicitly; only the
-			// effective group of the current region is tracked here. Group
-			// names are case sensitive in Vim.
-			inRegionGroup := true
-			if activeAugroup && tracking != nil {
-				if explicit := strings.TrimSpace(file.Text(command.Autocmd.Group)); explicit != "" && explicit != strings.TrimSpace(file.Text(tracking.header.Augroup)) {
-					inRegionGroup = false
-				}
+			// Groups are case sensitive in Vim. An explicit group names that
+			// group even while a different :augroup is active.
+			group := strings.TrimSpace(file.Text(command.Autocmd.Group))
+			if group == "" {
+				group = activeGroup
 			}
 			if operation == syntax.AutocmdDefine && command.Autocmd.Pattern.End < command.Argument.End {
-				if command.Autocmd.Group.Start == command.Autocmd.Group.End && !activeAugroup {
+				if group == "" {
 					appendStyleDiagnostic(result, "vimls/autocmd-outside-augroup", "autocommand is not contained in an augroup", command.Name)
 				}
 				body := file.Text(syntax.Span{Start: command.Autocmd.Pattern.End, End: command.Argument.End})
 				if commandComplexity(body) > 1 {
 					appendStyleDiagnostic(result, "vimls/complex-autocmd", "complex autocommand body; consider delegating to a function", command.Autocmd.Pattern)
 				}
-				if activeAugroup && tracking != nil && inRegionGroup {
-					tracking.defines = true
-					if result.configFile && tracking.uncovered == nil && !tracking.coverage.covers(file, command.Autocmd.Events, command.Autocmd.Pattern) {
-						tracking.uncovered = command
+				if group != "" {
+					tracking := trackingFor(group, command.Autocmd.Group)
+					if result.configFile {
+						noteDefinition(tracking, command)
+					} else {
+						tracking.defines = true
 					}
 				}
-			} else if activeAugroup && tracking != nil && inRegionGroup {
+			} else if group != "" {
+				tracking := trackingFor(group, command.Autocmd.Group)
 				switch operation {
 				case syntax.AutocmdClear:
 					if result.configFile {
 						if unconditionalAt(commands, blocks, index) {
 							tracking.coverage.addClear(file, command.Autocmd.Events, command.Autocmd.Pattern)
+							retireDefinitions(tracking, command.Autocmd.Events, command.Autocmd.Pattern)
 						}
 					} else {
 						tracking.clears = true
@@ -225,7 +313,10 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 						tracking.defines = true
 						if unconditionalAt(commands, blocks, index) {
 							tracking.coverage.addClear(file, command.Autocmd.Events, command.Autocmd.Pattern)
+							retireDefinitions(tracking, command.Autocmd.Events, command.Autocmd.Pattern)
 						}
+					} else {
+						tracking.defines = true
 					}
 				}
 			}
@@ -236,10 +327,28 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 		collectDeclarationStyleDiagnostics(result, file, command, blocks)
 		collectExpressionStyleDiagnostics(result, file, command)
 		if command.Embedded != nil {
-			collectStyleCommandDiagnostics(result, file, command.Embedded.Commands, command.Embedded.Blocks, autocmdContext || command.Autocmd != nil)
+			embeddedAutocmdContext := autocmdContext
+			if command.Autocmd != nil {
+				embeddedAutocmdContext = autocmdTargetsLocal(file, command.Autocmd.Events)
+			}
+			collectStyleCommandDiagnostics(result, file, command.Embedded.Commands, command.Embedded.Blocks, embeddedAutocmdContext)
 		}
 	}
-	finishAugroup()
+	for _, tracking := range groups {
+		if result.configFile {
+			if tracking.defines && len(tracking.uncovered) != 0 && !dynamicAutocmd {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vimls/autocmd-group-not-cleared", Message: "augroup does not clear existing autocommands", Span: tracking.span,
+					Related: syntax.RelatedDiagnostic{
+						Message: "autocommand is registered again every time this configuration is sourced",
+						Span:    tracking.uncovered[0].command.Autocmd.Pattern,
+					},
+				})
+			}
+		} else if tracking.defines && !tracking.clears {
+			appendStyleDiagnostic(result, "vimls/autocmd-group-not-cleared", "augroup does not clear existing autocommands", tracking.span)
+		}
+	}
 }
 
 func commandInsideStyleBlock(command *syntax.Command, blocks []syntax.Block, kind syntax.BlockKind) bool {
@@ -350,7 +459,7 @@ func appendStyleDiagnostic(result *FileAnalysis, code, message string, span synt
 }
 
 func hasWord(source, word string) bool {
-	for _, field := range strings.Fields(source) {
+	for field := range strings.FieldsSeq(source) {
 		if field == word {
 			return true
 		}

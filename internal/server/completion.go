@@ -55,13 +55,14 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 	excludeRuntimePath := s.excludeRuntimePathCompletions
 	s.mu.Unlock()
 	for attempt := range 2 {
-		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+		snapshot, file, analysisResult, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 		if err != nil {
 			return nil, err
 		}
 		if snapshot == nil || file == nil {
 			return &protocol.CompletionList{Items: []protocol.CompletionItem{}}, nil
 		}
+		configFile := s.configFileRoleForURI(snapshot.URI())
 		offset, err := snapshot.Offset(fromProtocolPosition(params.Position), encoding)
 		if err != nil {
 			return &protocol.CompletionList{Items: []protocol.CompletionItem{}}, s.structureCurrent(ctx, snapshot)
@@ -186,7 +187,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			continue
 		}
 		if contextKind == completionContextMember {
-			items, deep := completionObjectMembers(file, analysis.Analyze(file), offset)
+			items, deep := completionObjectMembers(file, analysisResult, offset)
 			result := s.completionList(snapshot, encoding, selection, completionCandidates(items, 9000, completionSourceLocal))
 			if ctx.Err() != nil {
 				return nil, protocol.ErrRequestCancelled
@@ -200,7 +201,6 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		if contextKind == completionContextNone {
 			return &protocol.CompletionList{Items: []protocol.CompletionItem{}}, s.structureCurrent(ctx, snapshot)
 		}
-		analysisResult := analysis.Analyze(file)
 		s.mu.Lock()
 		canSnippet := s.completion.snippet
 		s.mu.Unlock()
@@ -246,6 +246,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 		} else if contextKind == completionContextExpression {
 			scopePrefix := completionScopePrefixAt(snapshot.Text(), selection.start)
+			insideCallable := completionInsideCallable(analysisResult, offset)
 			if scopePrefix != "" {
 				selection.start -= 2
 				selection.prefix = snapshot.Text()[selection.start:selection.cursor]
@@ -288,6 +289,13 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				for depth := 0; depth < visible.scopeDepth; depth++ {
 					score = score * 99 / 100
 				}
+				// A g: value declared by a user configuration file is
+				// commonly the setting being edited. Prefer it over otherwise
+				// equal unscoped declarations without changing the candidate
+				// set or overriding an explicit scope prefix.
+				if configFile && scopePrefix == "" && !insideCallable && strings.HasPrefix(declaration.Name, "g:") {
+					score++
+				}
 				if declaration.Deprecated {
 					score /= 2
 				}
@@ -329,7 +337,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						break
 					}
 				}
-				if file.Dialect == syntax.Legacy && (scopePrefix == "g:" || !completionInsideCallable(analysisResult, offset)) {
+				if file.Dialect == syntax.Legacy && (scopePrefix == "g:" || !insideCallable) {
 					documentPath, _ := workspaceURIPath(uri.URI(snapshot.URI()))
 					variables, variablesIncomplete := completionWorkspaceState.index.GlobalVariableCompletionsMatching(func(name string) bool {
 						return completionTextMatches(workspacePrefix, name)

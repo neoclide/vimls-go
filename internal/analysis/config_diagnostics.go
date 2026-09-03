@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 // collectConfigLeaderOrderDiagnostics reports vimls/config-mapleader-order for
@@ -19,8 +20,8 @@ func collectConfigLeaderOrderDiagnostics(result *FileAnalysis) {
 		return
 	}
 	leaderState := map[string]*leaderOrderState{
-		"mapleader":      &leaderOrderState{},
-		"maplocalleader": &leaderOrderState{},
+		"mapleader":      {},
+		"maplocalleader": {},
 	}
 	for index := range file.Commands {
 		if !unconditionalAt(file.Commands, file.Blocks, index) {
@@ -30,10 +31,10 @@ func collectConfigLeaderOrderDiagnostics(result *FileAnalysis) {
 		if command.Mapping != nil && command.Mapping.RHS.Start > command.Mapping.LHS.Start {
 			text := strings.ToLower(file.Text(syntax.Span{Start: command.Mapping.LHS.Start, End: command.Mapping.RHS.End}))
 			if strings.Contains(text, "<leader>") {
-				leaderState["mapleader"].noteMapping(result, command)
+				leaderState["mapleader"].noteMapping(command)
 			}
 			if strings.Contains(text, "<localleader>") {
-				leaderState["maplocalleader"].noteMapping(result, command)
+				leaderState["maplocalleader"].noteMapping(command)
 			}
 		}
 		if command.Declaration != nil && command.Declaration.Name.Start < command.Declaration.Name.End {
@@ -52,7 +53,7 @@ type leaderOrderState struct {
 	reported map[*syntax.Command]bool
 }
 
-func (state *leaderOrderState) noteMapping(result *FileAnalysis, command *syntax.Command) {
+func (state *leaderOrderState) noteMapping(command *syntax.Command) {
 	if state.assigned {
 		return
 	}
@@ -98,12 +99,27 @@ func (state *leaderOrderState) noteAssignment(result *FileAnalysis, file *syntax
 // configMappingRecord tracks one mapping key that is statically active while a
 // configuration file is sourced (§5.1 duplicate-mapping).
 type configMappingRecord struct {
-	scope  string
-	modes  syntax.MappingMode
-	latest *syntax.Command
+	scope        string
+	abbreviation bool
+	modes        syntax.MappingMode
+	definitions  map[syntax.MappingMode]*syntax.Command
 }
 
-func configMappingScope(file *syntax.File, mapping *syntax.Mapping) string {
+func dynamicMappingMutationText(source string) bool {
+	for word := range strings.FieldsSeq(source) {
+		word = strings.Trim(strings.ToLower(word), "'\"|;")
+		command, ok := vimdata.Lookup(word)
+		if !ok {
+			continue
+		}
+		if strings.HasSuffix(command.Name, "unmap") || strings.HasSuffix(command.Name, "unabbrev") || command.Name == "unabbreviate" || strings.HasSuffix(command.Name, "mapclear") || strings.HasSuffix(command.Name, "abclear") {
+			return true
+		}
+	}
+	return false
+}
+
+func configMappingScope(mapping *syntax.Mapping) string {
 	if mapping.Buffer {
 		return "buffer"
 	}
@@ -117,7 +133,39 @@ func configMappingRecordKey(file *syntax.File, mapping *syntax.Mapping) string {
 	if mapping.Abbreviation {
 		category = "abbreviation"
 	}
-	return category + "\x00" + configMappingScope(file, mapping) + "\x00" + file.Text(mapping.LHS)
+	return category + "\x00" + configMappingScope(mapping) + "\x00" + file.Text(mapping.LHS)
+}
+
+func (record *configMappingRecord) clearModes(modes syntax.MappingMode) {
+	record.modes &^= modes
+	for mode := syntax.MappingModeNormal; mode <= syntax.MappingModeLangmap; mode <<= 1 {
+		if modes&mode != 0 {
+			delete(record.definitions, mode)
+		}
+	}
+}
+
+func (record *configMappingRecord) noteDefinition(command *syntax.Command, modes syntax.MappingMode) {
+	if record.definitions == nil {
+		record.definitions = make(map[syntax.MappingMode]*syntax.Command)
+	}
+	for mode := syntax.MappingModeNormal; mode <= syntax.MappingModeLangmap; mode <<= 1 {
+		if modes&mode != 0 {
+			record.definitions[mode] = command
+		}
+	}
+	record.modes |= modes
+}
+
+func (record *configMappingRecord) overlappingDefinition(modes syntax.MappingMode) *syntax.Command {
+	var latest *syntax.Command
+	for mode := syntax.MappingModeNormal; mode <= syntax.MappingModeLangmap; mode <<= 1 {
+		definition := record.definitions[mode]
+		if modes&mode != 0 && definition != nil && (latest == nil || definition.Span.Start > latest.Span.Start) {
+			latest = definition
+		}
+	}
+	return latest
 }
 
 // collectConfigDuplicateMappingDiagnostics reports vimls/duplicate-mapping for
@@ -133,20 +181,26 @@ func collectConfigDuplicateMappingDiagnostics(result *FileAnalysis) {
 	}
 	records := make(map[string]*configMappingRecord)
 	for index := range file.Commands {
-		if !unconditionalAt(file.Commands, file.Blocks, index) {
+		command := &file.Commands[index]
+		if command.Canonical == "execute" && dynamicMappingMutationText(file.Text(command.Argument)) {
+			// The command text is evaluated at runtime, so a mapping mutation in
+			// it may have changed any tracked mapping. Forget the state rather
+			// than reporting a later overwrite as certain.
+			clear(records)
 			continue
 		}
-		command := &file.Commands[index]
 		mapping := command.Mapping
 		if mapping == nil {
 			continue
 		}
 		if mapping.Kind == syntax.MappingClear {
-			// :mapclear removes every mapping of its modes for its scope.
-			scope := configMappingScope(file, mapping)
+			// A conditional or dynamic clear makes prior state unknown too: do
+			// not retain it and later claim an overwrite is certain. :mapclear
+			// and :abclear have distinct categories.
+			scope := configMappingScope(mapping)
 			for existingKey, existing := range records {
-				if existing.scope == scope && existing.modes&mapping.Mode != 0 {
-					existing.modes &^= mapping.Mode
+				if existing.scope == scope && existing.abbreviation == mapping.Abbreviation && existing.modes&mapping.Mode != 0 {
+					existing.clearModes(mapping.Mode)
 					if existing.modes == 0 {
 						delete(records, existingKey)
 					}
@@ -158,34 +212,43 @@ func collectConfigDuplicateMappingDiagnostics(result *FileAnalysis) {
 			continue
 		}
 		key := configMappingRecordKey(file, mapping)
+		if mapping.Kind == syntax.MappingUnmap {
+			// As above, a mutation that is not statically guaranteed to run
+			// invalidates certainty rather than preserving a possible stale map.
+			if record := records[key]; record != nil {
+				record.clearModes(mapping.Mode)
+				if record.modes == 0 {
+					delete(records, key)
+				}
+			}
+			continue
+		}
+		if !unconditionalAt(file.Commands, file.Blocks, index) {
+			continue
+		}
 		switch mapping.Kind {
 		case syntax.MappingDefine, syntax.MappingNoremap:
 			record := records[key]
 			if record != nil && record.modes&mapping.Mode != 0 {
+				earlier := record.overlappingDefinition(record.modes & mapping.Mode)
+				if earlier == nil {
+					continue
+				}
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code:    "vimls/duplicate-mapping",
 					Message: "mapping for " + file.Text(mapping.LHS) + " is defined again; the later definition overwrites the earlier one",
 					Span:    mapping.LHS,
 					Related: syntax.RelatedDiagnostic{
 						Message: "earlier definition of " + file.Text(mapping.LHS),
-						Span:    record.latest.Mapping.LHS,
+						Span:    earlier.Mapping.LHS,
 					},
 				})
 			}
 			if record == nil {
-				record = &configMappingRecord{}
+				record = &configMappingRecord{scope: configMappingScope(mapping), abbreviation: mapping.Abbreviation}
 				records[key] = record
 			}
-			record.modes |= mapping.Mode
-			record.scope = configMappingScope(file, mapping)
-			record.latest = command
-		case syntax.MappingUnmap:
-			if record := records[key]; record != nil {
-				record.modes &^= mapping.Mode
-				if record.modes == 0 {
-					delete(records, key)
-				}
-			}
+			record.noteDefinition(command, mapping.Mode)
 		}
 	}
 }

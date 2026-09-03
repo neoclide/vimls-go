@@ -93,7 +93,8 @@ func TestConfigFileModeRecursiveMapSeverityIsHint(t *testing.T) {
 
 // TestConfigFileModeSetVsSetlocal verifies the §4.1 set-vs-setlocal row: a
 // vimrc top-level :set establishes defaults and is not reported, while a :set
-// inside a FileType/BufRead autocmd body still suggests :setlocal.
+// inside a buffer/window-targeted FileType/BufRead autocmd body still suggests
+// :setlocal.
 func TestConfigFileModeSetVsSetlocal(t *testing.T) {
 	source := `set tabstop=4
 autocmd FileType python set tabstop=4
@@ -117,6 +118,34 @@ autocmd BufReadPost *.md set wrap
 	}
 	if got := analyzeModeCodes(t, source, true); !reflect.DeepEqual(got, configWant) {
 		t.Fatalf("config-mode diagnostics = %#v, want %#v", got, configWant)
+	}
+}
+
+func TestConfigFileModeSetVsSetlocalRequiresLocalAutocmdEvent(t *testing.T) {
+	source := "autocmd VimEnter * set tabstop=4\nautocmd ColorScheme * set tabstop=4\nautocmd FileType,VimEnter * set tabstop=4\nautocmd WinEnter * set tabstop=4\n"
+	got := analyzeModeCodes(t, source, true)
+	want := []string{
+		"vimls/autocmd-outside-augroup",
+		"vimls/autocmd-outside-augroup",
+		"vimls/autocmd-outside-augroup",
+		"vimls/autocmd-outside-augroup",
+		"vimls/set-vs-setlocal",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("config-mode diagnostics = %#v, want %#v", got, want)
+	}
+}
+
+func TestAutocmdPatternsKeepEscapedAndBraceCommas(t *testing.T) {
+	file := syntax.Parse(`autocmd BufRead foo\,bar,foo\\,baz,*.{go,mod} echomsg 'x'
+`)
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 1 || file.Commands[0].Autocmd == nil {
+		t.Fatalf("parsed autocmd = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	got := autocmdPatterns(file, file.Commands[0].Autocmd.Pattern)
+	want := []string{`foo\,bar`, `foo\\,baz`, `*.{go,mod}`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("autocmd patterns = %#v, want %#v", got, want)
 	}
 }
 
@@ -245,6 +274,16 @@ func TestConfigFileModeAugroupReloadSafety(t *testing.T) {
 			want:   false,
 		},
 		{
+			name:   "conditional replace itself never accumulates duplicates",
+			source: "augroup g\n  if exists('g:replace')\n    autocmd! BufRead *.vim echomsg 'x'\n  endif\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "conditional replace does not cover a later definition",
+			source: "augroup g\n  if exists('g:replace')\n    autocmd! BufRead *.vim echomsg 'x'\n  endif\n  autocmd BufRead *.vim echomsg 'y'\naugroup END\n",
+			want:   true,
+		},
+		{
 			name:   "query-only group is not reported",
 			source: "augroup g\n  autocmd BufRead *.vim\naugroup END\n",
 			want:   false,
@@ -255,13 +294,68 @@ func TestConfigFileModeAugroupReloadSafety(t *testing.T) {
 			want:   false,
 		},
 		{
-			name:   "clear after definitions does not cover them",
+			name:   "clear after definitions retires them",
 			source: "augroup g\n  autocmd BufRead *.vim echomsg 'x'\n  autocmd!\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "explicit group commands outside a region are tracked",
+			source: "autocmd g BufRead *.vim echomsg 'x'\nautocmd! g BufRead *.vim\n",
+			want:   false,
+		},
+		{
+			name:   "explicit group commands override the active region",
+			source: "augroup other\n  autocmd g BufRead *.vim echomsg 'x'\n  autocmd! g BufRead *.vim\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "case-insensitive events and comma-separated patterns are covered",
+			source: "augroup g\n  autocmd! bufread *.md,*.vim\n  autocmd BufRead *.md,*.vim echomsg 'x'\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "event aliases share coverage",
+			source: "augroup g\n  autocmd! BufRead\n  autocmd BufReadPost *.vim echomsg 'x'\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "wildcard event requires wildcard clear coverage",
+			source: "augroup g\n  autocmd! BufRead *.vim\n  autocmd * *.vim echomsg 'x'\naugroup END\n",
+			want:   true,
+		},
+		{
+			name:   "wildcard event and pattern clear covers wildcard definition",
+			source: "augroup g\n  autocmd! * *.vim\n  autocmd * *.vim echomsg 'x'\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "separate later clears retire a pattern list",
+			source: "augroup g\n  autocmd BufRead *.md,*.vim echomsg 'x'\n  autocmd! BufRead *.md\n  autocmd! BufRead *.vim\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "prior coverage and later clear cover distinct patterns",
+			source: "augroup g\n  autocmd! BufRead *.md\n  autocmd BufRead *.md,*.vim echomsg 'x'\n  autocmd! BufRead *.vim\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "later clear cannot reuse prior coverage for another pattern",
+			source: "augroup g\n  autocmd! BufRead *.md\n  autocmd BufRead *.md,*.vim echomsg 'x'\n  autocmd! BufRead *.md\naugroup END\n",
 			want:   true,
 		},
 		{
 			name:   "execute-based autocmd or clear stays unknown",
 			source: "augroup g\n  execute 'au! BufRead'\n  autocmd BufRead *.vim echomsg 'x'\naugroup END\n",
+			want:   false,
+		},
+		{
+			name:   "execute prose beginning with au remains analyzable",
+			source: "augroup g\n  execute 'author note'\n  autocmd BufRead *.vim echomsg 'x'\naugroup END\n",
+			want:   true,
+		},
+		{
+			name:   "execute outside a region makes explicit group state unknown",
+			source: "execute 'au! BufRead'\nautocmd g BufRead *.vim echomsg 'x'\n",
 			want:   false,
 		},
 	}

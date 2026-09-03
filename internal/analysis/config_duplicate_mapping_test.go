@@ -56,6 +56,31 @@ func TestConfigDuplicateMappingDiagnostics(t *testing.T) {
 			want:   0,
 		},
 		{
+			name:   "conditional unmap invalidates definite state",
+			source: "nnoremap x :echo 1<CR>\nif exists('g:maybe')\n  nunmap x\nendif\nnnoremap x :echo 2<CR>\n",
+			want:   0,
+		},
+		{
+			name:   "conditional mapclear invalidates definite state",
+			source: "nnoremap x :echo 1<CR>\nif exists('g:maybe')\n  nmapclear\nendif\nnnoremap x :echo 2<CR>\n",
+			want:   0,
+		},
+		{
+			name:   "execute abbreviated unmap invalidates definite state",
+			source: "nnoremap x :echo 1<CR>\nexecute 'nunm x'\nnnoremap x :echo 2<CR>\n",
+			want:   0,
+		},
+		{
+			name:   "abclear does not clear mappings",
+			source: "inoremap x :echo 1<CR>\ninoreabbrev x x\niabclear\ninoremap x :echo 2<CR>\n",
+			want:   1,
+		},
+		{
+			name:   "mapclear does not clear abbreviations",
+			source: "inoreabbrev x x\ninoremap x :echo 1<CR>\nimapclear\ninoreabbrev x y\n",
+			want:   1,
+		},
+		{
 			name:   "leader spelling duplicates are reported",
 			source: "nnoremap <Leader>x :echo 1<CR>\nnnoremap <Leader>x :echo 2<CR>\n",
 			want:   1,
@@ -94,6 +119,42 @@ func TestConfigDuplicateMappingDiagnostics(t *testing.T) {
 					t.Fatalf("duplicate-mapping message = %q", diagnostic.Message)
 				}
 			}
+		})
+	}
+}
+
+func TestConfigDuplicateMappingRelatedDefinitionOverlapsMode(t *testing.T) {
+	tests := []struct {
+		name, source string
+		wantOffset   int
+	}{
+		{
+			name:       "ignore later non-overlapping mode",
+			source:     "nmap x :echo 'normal'<CR>\nimap x :echo 'insert'<CR>\nnmap x :echo 'normal again'<CR>\n",
+			wantOffset: 5,
+		},
+		{
+			name:       "choose latest overlapping mode",
+			source:     "vmap x :echo 'visual'<CR>\nnmap x :echo 'normal'<CR>\nmap x :echo 'all'<CR>\n",
+			wantOffset: strings.Index("vmap x :echo 'visual'<CR>\nnmap x", "nmap x") + len("nmap "),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			for _, diagnostic := range AnalyzeConfigFile(file).Diagnostics {
+				if diagnostic.Code != "vimls/duplicate-mapping" {
+					continue
+				}
+				if got := file.Text(diagnostic.Related.Span); got != "x" || diagnostic.Related.Span.Start != test.wantOffset {
+					t.Fatalf("related definition = %q at %#v, want offset %d", got, diagnostic.Related.Span, test.wantOffset)
+				}
+				return
+			}
+			t.Fatalf("no duplicate-mapping diagnostic reported for %q", test.source)
 		})
 	}
 }

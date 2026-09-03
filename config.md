@@ -336,7 +336,8 @@ let g:loaded_my_vimrc = 1
   新增 `analysis.AnalyzeConfigFile`（角色字段不进入 AST，语义结构与 `Analyze` 一致）；
   服务器端在开放文档解析缓存（`analyzeSnapshotContext`）与封闭文件工作区诊断
   （`computeClosedWorkspaceDiagnostics`）中按路径判定角色后选择对应入口，缓存身份
-  同时包含角色，配置变化后可正确重析。`vimls/recursive-map` 在配置模式降为 Hint
+  同时包含角色，配置变化后可正确重析；completion 复用这份角色分析，不再另行执行
+  无角色的 analysis。`vimls/recursive-map` 在配置模式降为 Hint
   通过逐条诊断级别实现（`syntax.Diagnostic.Severity`），不改变稳定 code。
 - [x] **P0-2：应用第 4.1 节配置诊断策略矩阵。**
   配置模式下禁用 `vimls/configuration-overwrite`、`vimls/global-internal-state`、
@@ -346,7 +347,8 @@ let g:loaded_my_vimrc = 1
   同一次分析内可静态证明（同一无条件上下文、排除条件互斥分支）的重复定义——
   依据 v9.2.1015 实测：同脚本再次 source 的函数与 `:command` 会静默替换。
 - [x] P0-3：完善 `autocmd-group-not-cleared` 的组、定向清除、条件路径和 `++once` 边界。
-  - 配置模式改进已实现（分析层 + related information 转换测试）：仅统计区域内持久 autocmd；
+  - 配置模式改进已实现（分析层 + related information 转换测试）：按有效组归属统计持久 autocmd，
+    包括区域外的显式组写法；
     `autocmd!` 裸清除覆盖全部；`autocmd! Event` 按事件覆盖；`autocmd! Event Pattern` 按
     字面 pattern 覆盖；`autocmd! Event Pattern cmd` 替换形式自身不累积且覆盖同 (event, pattern)
     后续定义；`++once` 不视为安全；条件/循环内的清除不做证明；`execute` 动态内容保持 unknown
@@ -363,8 +365,9 @@ let g:loaded_my_vimrc = 1
 - [x] P0-6：配置模式补全排序测试。
   - 新增服务器端测试（`completion_config_test.go`）：在配置角色下验证 `:set` 选项名、
     mapping 修饰参数、autocmd 事件、文件中已出现 `g:` 配置变量的补全候选与顺序均服从语法
-    上下文且确定；同一内容在 plugin 角色下返回完全一致的候选与顺序（补全语义结果不受角色
-    影响）。候选排序仍按「分数 → 字面量」的现有上下文机制，未引入角色差异。
+    上下文且确定；两种角色的候选集合一致（补全语义结果不受角色影响），但配置文件内已声明
+    的 `g:` 配置变量在顶层无显式作用域的表达式位置优先于同分的未限定声明，plugin 角色保持原排序；
+    completion 同时复用路径角色分析并验证缓存角色；其余候选仍按「分数 → 字面量」排序。
 
 ### P1（§9 P1 提高编辑体验）
 
@@ -372,7 +375,8 @@ let g:loaded_my_vimrc = 1
   - 配置模式（同一无条件直线序列）下报告静态确定的后一个定义并 related 指向前一个定义；
     比较键含 effective mode 集合（`map`=nvso、`map!`=ic、`vmap` 与 `xmap`/`smap` 按 mode 交集），
     规范化字面量 LHS（`<Leader>` 同拼写比较）、global/`<buffer>` scope、mapping 与 abbreviation
-    类别；`unmap`/`mapclear` 会终止相应前序定义；条件分支内定义不做证明（不误报）。
+    类别；`unmap`/`mapclear` 会终止相应前序定义，条件或动态清除会将相关状态降为 unknown；
+    条件分支内定义不做证明（不误报）。
 - [ ] loaded guard Hint（`vimls/config-loaded-guard`）与 Vim9 reload 组合检查。
 - [ ] augroup、函数和 mapping snippet。
 - [ ] autocmd、`<expr>`/`<Cmd>` mapping、回调选项中的静态导航。
