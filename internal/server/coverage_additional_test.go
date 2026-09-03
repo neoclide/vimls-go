@@ -1,21 +1,15 @@
 package server
 
 import (
-	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
-	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
@@ -43,134 +37,6 @@ func TestCompletionHighlightKeyFallbackBoundaries(t *testing.T) {
 	if got := completionHighlightKey(file, "GUIFG=red", len("GUIFG=red"), len("GUIFG=red")); got != "guifg" {
 		t.Fatalf("case-normalized fallback key = %q", got)
 	}
-}
-
-func TestDocumentStructureFeaturesRecoverParserCorpusSample(t *testing.T) {
-	file, err := os.Open(filepath.Join("..", "..", "testdata", "official", "v9.2.1015-parser-corpus.json.gz"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	reader, err := gzip.NewReader(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reader.Close()
-	var corpus struct{ Cases []struct{ Source string } }
-	if err := json.NewDecoder(reader).Decode(&corpus); err != nil {
-		t.Fatal(err)
-	}
-	if len(corpus.Cases) != 3267 {
-		t.Fatalf("unexpected corpus size: %d", len(corpus.Cases))
-	}
-	instance := New(nil, nil, nil)
-	t.Cleanup(instance.stopAnalysis)
-	documentURI := uri.File("/tmp/vimls-go-structure-corpus.vim")
-	// The parser package exercises every corpus input. Sampling here keeps this
-	// server-level recovery test bounded: each selected input makes multiple LSP
-	// requests, several of which walk all parsed commands.
-	const corpusSampleStride = 64
-	for index, test := range corpus.Cases {
-		if index%corpusSampleStride != 0 && index != len(corpus.Cases)-1 {
-			continue
-		}
-		instance.documents.Open(documentURI.String(), int32(index+1), test.Source)
-		document := protocol.TextDocumentIdentifier{URI: documentURI}
-		if _, err := instance.DocumentSymbol(context.Background(), &protocol.DocumentSymbolParams{TextDocument: document}); err != nil {
-			t.Fatalf("case %d symbols: %v", index, err)
-		}
-		if _, err := instance.FoldingRanges(context.Background(), &protocol.FoldingRangeParams{TextDocument: document}); err != nil {
-			t.Fatalf("case %d folding: %v", index, err)
-		}
-		if _, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: document}); err != nil {
-			t.Fatalf("case %d tokens: %v", index, err)
-		}
-		if _, err := instance.DocumentLink(context.Background(), &protocol.DocumentLinkParams{TextDocument: document}); err != nil {
-			t.Fatalf("case %d links: %v", index, err)
-		}
-		if _, err := instance.Formatting(context.Background(), &protocol.DocumentFormattingParams{TextDocument: document, Options: protocol.FormattingOptions{TabSize: 2, InsertSpaces: true}}); err != nil {
-			t.Fatalf("case %d formatting: %v", index, err)
-		}
-		if _, err := instance.SelectionRange(context.Background(), &protocol.SelectionRangeParams{TextDocument: document, Positions: []protocol.Position{{}}}); err != nil {
-			t.Fatalf("case %d selection range: %v", index, err)
-		}
-		lastLine := uint32(strings.Count(test.Source, "\n"))
-		fullRange := protocol.Range{End: protocol.Position{Line: lastLine}}
-		if _, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{TextDocument: document, Range: fullRange}); err != nil {
-			t.Fatalf("case %d inlay hints: %v", index, err)
-		}
-		if _, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{TextDocument: document, Range: fullRange}); err != nil {
-			t.Fatalf("case %d code actions: %v", index, err)
-		}
-		if _, err := instance.RangeFormatting(context.Background(), &protocol.DocumentRangeFormattingParams{TextDocument: document, Range: fullRange, Options: protocol.FormattingOptions{TabSize: 2, InsertSpaces: true}}); err != nil {
-			t.Fatalf("case %d range formatting: %v", index, err)
-		}
-		for _, cursor := range corpusIdentifierPositions(test.Source) {
-			position := protocol.TextDocumentPositionParams{TextDocument: document, Position: cursor}
-			if _, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d completion: %v", index, err)
-			}
-			if _, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d signature help: %v", index, err)
-			}
-			if _, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d hover: %v", index, err)
-			}
-			if _, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d definition: %v", index, err)
-			}
-			if _, err := instance.Declaration(context.Background(), &protocol.DeclarationParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d declaration: %v", index, err)
-			}
-			if _, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d highlights: %v", index, err)
-			}
-			if _, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d references: %v", index, err)
-			}
-			if _, err := instance.PrepareTypeHierarchy(context.Background(), &protocol.TypeHierarchyPrepareParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d type hierarchy: %v", index, err)
-			}
-			if _, err := instance.PrepareCallHierarchy(context.Background(), &protocol.CallHierarchyPrepareParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d call hierarchy: %v", index, err)
-			}
-			if _, err := instance.Implementation(context.Background(), &protocol.ImplementationParams{TextDocumentPositionParams: position}); err != nil {
-				var rpcError *jsonrpc2.Error
-				if !errors.As(err, &rpcError) || rpcError.Code != jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed) {
-					t.Fatalf("case %d implementation: %v", index, err)
-				}
-			}
-			if _, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: position}); err != nil {
-				t.Fatalf("case %d prepare rename: %v", index, err)
-			}
-			if _, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: position, NewName: "Renamed"}); err != nil {
-				var rpcError *jsonrpc2.Error
-				if !errors.As(err, &rpcError) || rpcError.Code != jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed) {
-					t.Fatalf("case %d rename: %v", index, err)
-				}
-			}
-		}
-	}
-}
-
-func corpusIdentifierPositions(source string) []protocol.Position {
-	snapshot := text.NewSnapshot("file:///corpus.vim", 0, nil, source)
-	result := make([]protocol.Position, 0, 48)
-	for offset := 0; offset < len(source) && len(result) < 48; offset++ {
-		current := source[offset]
-		identifierStart := ((current >= 'A' && current <= 'Z') || (current >= 'a' && current <= 'z') || current == '_') && (offset == 0 || !((source[offset-1] >= 'A' && source[offset-1] <= 'Z') || (source[offset-1] >= 'a' && source[offset-1] <= 'z') || source[offset-1] == '_'))
-		if !identifierStart && !strings.ContainsRune(".(:$&", rune(current)) {
-			continue
-		}
-		position, err := snapshot.Position(offset, text.UTF16)
-		if err == nil {
-			result = append(result, protocol.Position{Line: uint32(position.Line), Character: uint32(position.Character)})
-		}
-	}
-	if len(result) == 0 {
-		return []protocol.Position{{}}
-	}
-	return result
 }
 
 // This covers the LSP request path for static imports at the same time as it

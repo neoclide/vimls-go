@@ -519,7 +519,11 @@ func (s *Server) notifyWorkspaceIndexChangedLocked() {
 
 // waitForWorkspaceIndex blocks while workspace index work is active.
 func (s *Server) waitForWorkspaceIndex(ctx context.Context) error {
-	timer := time.NewTimer(workspaceIndexWaitTimeout)
+	timeout := workspaceIndexWaitTimeout
+	if s.testHooks.workspaceIndexWaitTimeout > 0 {
+		timeout = s.testHooks.workspaceIndexWaitTimeout
+	}
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
 		s.workspaceMu.Lock()

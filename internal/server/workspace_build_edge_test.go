@@ -429,14 +429,12 @@ func TestWatchedFilesReadLoopNotBlocked(t *testing.T) {
 	t.Cleanup(func() { _ = clientConn.Close() })
 
 	instance := New(serverConn, serverConn, io.Discard)
-	instance.workspaceMu.Lock()
-	instance.workspaceDelay = 0
-	instance.workspaceMu.Unlock()
 	root := t.TempDir()
-	filePath := writeWorkspaceFile(t, root, "test.vim", "vim9script\nvar a = 1\n")
+	filePath := filepath.Join(root, "missing.vim")
 
 	started := make(chan struct{})
 	release := make(chan struct{})
+	indexed := make(chan struct{})
 
 	instance.testHooks.beforeWatchedFileProcess = func(p string) {
 		select {
@@ -446,6 +444,7 @@ func TestWatchedFilesReadLoopNotBlocked(t *testing.T) {
 		}
 		<-release
 	}
+	instance.testHooks.afterWorkspaceIndexWorker = func() { close(indexed) }
 
 	done := make(chan int, 1)
 	go func() { done <- instance.Run(context.Background()) }()
@@ -453,15 +452,22 @@ func TestWatchedFilesReadLoopNotBlocked(t *testing.T) {
 	writer := jsonrpc.NewWriter(clientConn)
 	reader := jsonrpc.NewReader(clientConn)
 
-	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"workspaceFolders":[{"uri":%q,"name":"root"}]}}`, uri.File(root)))
+	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"workspaceFolders":[{"uri":%q,"name":"root"}],"initializationOptions":{"runtimepath":[]}}}`, uri.File(root)))
 	if msg := readFrame(t, reader); idNumber(t, msg) != 1 {
 		t.Fatalf("initialize response = %#v", msg)
 	}
+	instance.workspaceMu.Lock()
+	instance.workspaceDelay = 0
+	instance.workspaceMu.Unlock()
 	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
-	waitForWorkspaceSymbols(t, instance, "a", 1)
+	select {
+	case <-indexed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for initial empty workspace index")
+	}
 
 	// Send didChangeWatchedFiles notification
-	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":%q,"type":2}]}}`, uri.File(filePath)))
+	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":%q,"type":3}]}}`, uri.File(filePath)))
 
 	// Wait until watched-file processing has blocked at the hook
 	select {
