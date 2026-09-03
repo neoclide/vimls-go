@@ -325,7 +325,51 @@ let g:loaded_my_vimrc = 1
 - `runtime/doc/vim9.txt`：`vim9-reload` 与 `vim9script noclear`；
 - `src/testdir/test_options.vim`、`test_let.vim`、`test_usercommands.vim` 及相关 Vim9 tests。
 
-## 11. 非目标
+## 12. 实施进度
+
+> 每完成一个小任务在此标记 `[x]` 并注明日期与行为依据。判断依据来自代码、
+> 测试与 Vim v9.2.1015 二进制复现，不属于「意图」。
+
+### P0（§9 P0 实施优先级）
+
+- [x] **P0-1：把 `IsConfigFile` 结果传入 analysis 调用边界。**
+  新增 `analysis.AnalyzeConfigFile`（角色字段不进入 AST，语义结构与 `Analyze` 一致）；
+  服务器端在开放文档解析缓存（`analyzeSnapshotContext`）与封闭文件工作区诊断
+  （`computeClosedWorkspaceDiagnostics`）中按路径判定角色后选择对应入口，缓存身份
+  同时包含角色，配置变化后可正确重析。`vimls/recursive-map` 在配置模式降为 Hint
+  通过逐条诊断级别实现（`syntax.Diagnostic.Severity`），不改变稳定 code。
+- [x] **P0-2：应用第 4.1 节配置诊断策略矩阵。**
+  配置模式下禁用 `vimls/configuration-overwrite`、`vimls/global-internal-state`、
+  `vimls/direct-user-keymap`、`vimls/mapping-without-unique`；`vimls/set-vs-setlocal`
+  仅保留在 autocmd 体（FileType/BufRead/Win* 等 buffer/window 定向）中；递归 mapping
+  保留 code 但默认级别 Hint。附带 §4.2：`vim/E122`/`vim/E174` 在配置模式下只报告
+  同一次分析内可静态证明（同一无条件上下文、排除条件互斥分支）的重复定义——
+  依据 v9.2.1015 实测：同脚本再次 source 的函数与 `:command` 会静默替换。
+- [x] P0-3：完善 `autocmd-group-not-cleared` 的组、定向清除、条件路径和 `++once` 边界。
+  - 配置模式改进已实现（分析层 + related information 转换测试）：仅统计区域内持久 autocmd；
+    `autocmd!` 裸清除覆盖全部；`autocmd! Event` 按事件覆盖；`autocmd! Event Pattern` 按
+    字面 pattern 覆盖；`autocmd! Event Pattern cmd` 替换形式自身不累积且覆盖同 (event, pattern)
+    后续定义；`++once` 不视为安全；条件/循环内的清除不做证明；`execute` 动态内容保持 unknown
+    不报告；显式组写法按组名（大小写敏感）归属；空组/查询/无定义组不报告。
+- [ ] P0-4：`mapleader`/`maplocalleader` 定义顺序诊断。
+- [ ] P0-5：保持 E113/E518 与选项元数据的 pinned-version 行为（补测试/审计）。
+- [ ] P0-6：配置模式补全排序实现与测试（`configFiles`/vimrc 角色的相关性排序）。
+
+### P1（§9 P1 提高编辑体验）
+
+- [ ] 确定的同文件重复 mapping 检查（`vimls/duplicate-mapping`）。
+- [ ] loaded guard Hint（`vimls/config-loaded-guard`）与 Vim9 reload 组合检查。
+- [ ] augroup、函数和 mapping snippet。
+- [ ] autocmd、`<expr>`/`<Cmd>` mapping、回调选项中的静态导航。
+
+### P2（§9 P2 需要完整索引证据）
+
+- [ ] 静态 source 图与 source cycle 检查。
+- [ ] 有确定 source 顺序时的跨文件 mapping 冲突。
+- [ ] `:source`、`:runtime`、`:packadd` 补全与导航扩展。
+- [ ] 经官方测试逐项确认的固定选项值诊断。
+
+## 13. 非目标
 
 - 不执行配置文件来计算真实 mapping、option 或 autocmd 状态；
 - 不把 Neovim Lua API 或 Neovim-only 行为当作 Vimscript 通用规则；

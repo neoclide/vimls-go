@@ -569,6 +569,11 @@ type Diagnostic struct {
 	Message string
 	Span    Span
 	Related RelatedDiagnostic
+	// Severity overrides the code's default severity for this occurrence. It
+	// is used by role-aware analyses (for example a config-file mode that
+	// lowers a warning to a hint) without changing the stable code identity.
+	// nil means the code's registered default severity applies.
+	Severity *DiagnosticSeverity
 }
 
 // RelatedDiagnostic is one authoritative source location associated with a

@@ -50,14 +50,16 @@ const (
 )
 
 type parsedDocument struct {
-	contentID text.ContentID
-	file      *syntax.File
-	analysis  *analysis.FileAnalysis
+	contentID  text.ContentID
+	configFile bool
+	file       *syntax.File
+	analysis   *analysis.FileAnalysis
 }
 
 type parseInFlightKey struct {
-	uri       string
-	contentID text.ContentID
+	uri        string
+	contentID  text.ContentID
+	configFile bool
 }
 
 type inFlightParse struct {
@@ -1272,6 +1274,26 @@ func (s *Server) analyzeSnapshot(snapshot *text.Snapshot) (*syntax.File, *analys
 	return s.analyzeSnapshotContext(context.Background(), snapshot)
 }
 
+// configFileRoleForURI reports whether the document behind documentURI is a
+// user configuration file. The decision is made at the analysis boundary from
+// the document path; it never changes the AST.
+func (s *Server) configFileRoleForURI(documentURI string) bool {
+	path, ok := workspaceURIPath(uri.URI(documentURI))
+	if !ok {
+		return false
+	}
+	return s.IsConfigFile(path)
+}
+
+// analyzeWithRole returns the file-local analysis for one parsed file in the
+// configuration-file mode selected for the document.
+func analyzeWithRole(file *syntax.File, configFile bool) *analysis.FileAnalysis {
+	if configFile {
+		return analysis.AnalyzeConfigFile(file)
+	}
+	return analysis.Analyze(file)
+}
+
 // analyzeSnapshotContext returns the syntax tree and pure file analysis for snapshot,
 // waiting for in-flight calculations or initiating a single parse+analysis pass.
 // If ctx is cancelled while waiting on an in-flight calculation, it yields without
@@ -1283,10 +1305,11 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 	documentURI := snapshot.URI()
 	contentID := snapshot.ContentID()
 	source := snapshot.Text()
+	configFile := s.configFileRoleForURI(documentURI)
 
 	s.publishMu.Lock()
 	parsed := s.parsed[documentURI]
-	if parsed.file != nil && parsed.contentID == contentID && parsed.file.Source == source {
+	if parsed.file != nil && parsed.contentID == contentID && parsed.configFile == configFile && parsed.file.Source == source {
 		if parsed.analysis != nil {
 			s.publishMu.Unlock()
 			return parsed.file, parsed.analysis
@@ -1296,9 +1319,9 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
-		fileAnalysis := analysis.Analyze(file)
+		fileAnalysis := analyzeWithRole(file, configFile)
 		s.publishMu.Lock()
-		if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID {
+		if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID && cur.configFile == configFile {
 			cur.analysis = fileAnalysis
 			s.parsed[documentURI] = cur
 		}
@@ -1307,8 +1330,9 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 	}
 
 	key := parseInFlightKey{
-		uri:       documentURI,
-		contentID: contentID,
+		uri:        documentURI,
+		contentID:  contentID,
+		configFile: configFile,
 	}
 
 	for {
@@ -1331,7 +1355,7 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 			}
 			s.publishMu.Lock()
 			parsed = s.parsed[documentURI]
-			if parsed.file != nil && parsed.contentID == contentID && parsed.file.Source == source {
+			if parsed.file != nil && parsed.contentID == contentID && parsed.configFile == configFile && parsed.file.Source == source {
 				if parsed.analysis != nil {
 					s.publishMu.Unlock()
 					return parsed.file, parsed.analysis
@@ -1341,9 +1365,9 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 				if hook := s.testHooks.beforeAnalyze; hook != nil {
 					hook(file)
 				}
-				fileAnalysis := analysis.Analyze(file)
+				fileAnalysis := analyzeWithRole(file, configFile)
 				s.publishMu.Lock()
-				if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID {
+				if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID && cur.configFile == configFile {
 					cur.analysis = fileAnalysis
 					s.parsed[documentURI] = cur
 				}
@@ -1371,7 +1395,7 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
-		fileAnalysis := analysis.Analyze(file)
+		fileAnalysis := analyzeWithRole(file, configFile)
 
 		entry.file = file
 		entry.analysis = fileAnalysis
@@ -1386,9 +1410,10 @@ func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snap
 			current, ok := s.documents.Snapshot(documentURI)
 			if ok && current == snapshot {
 				s.parsed[documentURI] = parsedDocument{
-					contentID: contentID,
-					file:      file,
-					analysis:  fileAnalysis,
+					contentID:  contentID,
+					configFile: configFile,
+					file:       file,
+					analysis:   fileAnalysis,
 				}
 			}
 		}
@@ -1552,7 +1577,7 @@ func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding te
 				Start: protocol.Position{Line: uint32(start.Line), Character: uint32(start.Character)},
 				End:   protocol.Position{Line: uint32(end.Line), Character: uint32(end.Character)},
 			},
-			Severity: protocolDiagnosticSeverity(item.Code),
+			Severity: diagnosticProtocolSeverity(item),
 			Code:     protocol.String(item.Code),
 			Source:   protocol.NewOptional(Name),
 			Message:  protocol.String(item.Message),
@@ -1566,20 +1591,27 @@ func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding te
 		case "vimls/unused-variable":
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagUnnecessary)
 		}
-		if diagnosticRelatedInformation && item.Related.URI != "" {
-			if relatedSnapshots == nil {
-				relatedSnapshots = make(map[string]*text.Snapshot)
-			}
-			relatedSnapshot := relatedSnapshots[item.Related.URI]
-			if relatedSnapshot == nil {
-				relatedSnapshot = text.NewSnapshot(item.Related.URI, 0, nil, item.Related.Source)
-				relatedSnapshots[item.Related.URI] = relatedSnapshot
+		if diagnosticRelatedInformation && item.Related.Message != "" && item.Related.Span.Start < item.Related.Span.End {
+			relatedURI := item.Related.URI
+			relatedSnapshot := snapshot
+			if relatedURI != "" {
+				if relatedSnapshots == nil {
+					relatedSnapshots = make(map[string]*text.Snapshot)
+				}
+				relatedSnapshot = relatedSnapshots[item.Related.URI]
+				if relatedSnapshot == nil {
+					relatedSnapshot = text.NewSnapshot(item.Related.URI, 0, nil, item.Related.Source)
+					relatedSnapshots[item.Related.URI] = relatedSnapshot
+				}
 			}
 			relatedStart, startError := relatedSnapshot.Position(item.Related.Span.Start, encoding)
 			relatedEnd, endError := relatedSnapshot.Position(item.Related.Span.End, encoding)
 			if startError == nil && endError == nil {
+				if relatedURI == "" {
+					relatedURI = snapshot.URI()
+				}
 				diagnostic.RelatedInformation = []protocol.DiagnosticRelatedInformation{{
-					Location: protocol.Location{URI: uri.URI(item.Related.URI), Range: protocol.Range{
+					Location: protocol.Location{URI: uri.URI(relatedURI), Range: protocol.Range{
 						Start: protocol.Position{Line: uint32(relatedStart.Line), Character: uint32(relatedStart.Character)},
 						End:   protocol.Position{Line: uint32(relatedEnd.Line), Character: uint32(relatedEnd.Character)},
 					}},
@@ -1650,6 +1682,17 @@ func filterDisabledDiagnostics(diagnostics []syntax.Diagnostic, disabled map[str
 		}
 	}
 	return filtered
+}
+
+// diagnosticProtocolSeverity returns the protocol severity of one diagnostic.
+// An occurrence-level severity set by a role-aware analysis (such as the
+// config-file mode) takes precedence; otherwise the code's registered default
+// or a vim/E special case applies.
+func diagnosticProtocolSeverity(item syntax.Diagnostic) protocol.DiagnosticSeverity {
+	if item.Severity != nil {
+		return protocolSeverity(*item.Severity)
+	}
+	return protocolDiagnosticSeverity(item.Code)
 }
 
 func protocolDiagnosticSeverity(code string) protocol.DiagnosticSeverity {

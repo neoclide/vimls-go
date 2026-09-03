@@ -19,6 +19,11 @@ type FileAnalysis struct {
 	Scopes       []*Scope
 	Declarations []*Declaration
 	References   []*Reference
+	// configFile marks a user configuration file (vimrc or an explicit
+	// configFiles document). The role is decided outside analysis from the
+	// document path; it only adjusts vimls-owned configuration diagnostics and
+	// never changes the syntax tree or lexical/semantic structures.
+	configFile bool
 	// Diagnostics contains protocol-independent semantic diagnostics with byte
 	// spans in File.Source.
 	Diagnostics     []syntax.Diagnostic
@@ -116,7 +121,19 @@ type Reference struct {
 // It deliberately does not report undefined names: an unresolved reference
 // is a valid result for dynamic legacy Vim script and for incomplete input.
 func Analyze(file *syntax.File) *FileAnalysis {
-	result := &FileAnalysis{File: file, suppressedSyntaxDiagnostics: make(map[syntax.Diagnostic]bool)}
+	return analyzeWithRole(file, false)
+}
+
+// AnalyzeConfigFile analyzes one document in user-configuration-file mode.
+// Semantic structures are identical to Analyze; only the vimls-owned
+// configuration diagnostics differ (see style_diagnostics.go). Callers that
+// know from the document path that IsConfigFile is true use this entry point.
+func AnalyzeConfigFile(file *syntax.File) *FileAnalysis {
+	return analyzeWithRole(file, true)
+}
+
+func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
+	result := &FileAnalysis{File: file, configFile: configFile, suppressedSyntaxDiagnostics: make(map[syntax.Diagnostic]bool)}
 	root := &Scope{Block: -1}
 	if file != nil {
 		root.Span = syntax.Span{End: len(file.Source)}
@@ -424,6 +441,10 @@ func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, command
 	if result == nil || result.File == nil {
 		return
 	}
+	if result.configFile {
+		collectConfigFunctionDuplicateDiagnostics(result, commands)
+		return
+	}
 	for index := range commands {
 		command := &commands[index]
 		if command.Canonical == "function" && command.Function != nil && emptySyntaxSpan(command.Bang) &&
@@ -441,8 +462,62 @@ func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, command
 	}
 }
 
+// collectConfigFunctionDuplicateDiagnostics reports vim/E122 only for no-bang
+// legacy function definitions that are statically provable duplicates of an
+// earlier unconditional definition in the same file. Vim v9.2.1015 silently
+// replaces a function when its own script is sourced again, so the mere
+// absence of "!" is not an error in a user configuration file (§4.2).
+func collectConfigFunctionDuplicateDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	file := result.File
+	var walk func([]syntax.Command, []syntax.Block)
+	walk = func(list []syntax.Command, blocks []syntax.Block) {
+		seen := make(map[string]bool)
+		for index := range list {
+			command := &list[index]
+			if command.Canonical == "function" && command.Function != nil && emptySyntaxSpan(command.Bang) &&
+				!emptySyntaxSpan(command.Function.Name) {
+				name := file.Text(command.Function.Name)
+				if (command.Dialect == syntax.Legacy || strings.HasPrefix(name, "g:")) && unconditionalAt(list, blocks, index) {
+					if seen[name] {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E122", Message: "Function " + name + " may already exist when this script is sourced again; add ! to replace it", Span: command.Function.Name,
+						})
+					}
+					seen[name] = true
+				}
+			}
+			if command.Embedded != nil {
+				walk(command.Embedded.Commands, command.Embedded.Blocks)
+			}
+		}
+	}
+	walk(commands, file.Blocks)
+}
+
+// unconditionalAt reports whether the command at index in list runs
+// unconditionally in its own block scope: it may open a function/def/command
+// block (the header is that block's own command) but must not be nested inside
+// a conditional, loop, try, or another function definition. When a function or
+// user command appears twice under mutually exclusive conditions, neither
+// occurrence is statically provable as a duplicate.
+func unconditionalAt(list []syntax.Command, blocks []syntax.Block, index int) bool {
+	for blockIndex := list[index].Block; blockIndex >= 0 && blockIndex < len(blocks); {
+		block := &blocks[blockIndex]
+		if (block.Kind == syntax.BlockFunction || block.Kind == syntax.BlockDef || block.Kind == syntax.BlockCommand) && block.Header == index {
+			blockIndex = block.Parent
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {
 	if result == nil || result.File == nil {
+		return
+	}
+	if result.configFile {
+		collectConfigUserCommandDuplicateDiagnostics(result, commands)
 		return
 	}
 	for index := range commands {
@@ -458,6 +533,33 @@ func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands [
 			collectUserCommandOverwriteRiskDiagnostics(result, command.Embedded.Commands)
 		}
 	}
+}
+
+// collectConfigUserCommandDuplicateDiagnostics mirrors
+// collectConfigFunctionDuplicateDiagnostics for :command definitions (§4.2).
+func collectConfigUserCommandDuplicateDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+	file := result.File
+	var walk func([]syntax.Command, []syntax.Block)
+	walk = func(list []syntax.Command, blocks []syntax.Block) {
+		seen := make(map[string]bool)
+		for index := range list {
+			command := &list[index]
+			if command.Canonical == "command" && emptySyntaxSpan(command.Bang) {
+				if name, span, _, definition := syntax.DefinedUserCommand(file, command); definition && unconditionalAt(list, blocks, index) {
+					if seen[name] {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
+						})
+					}
+					seen[name] = true
+				}
+			}
+			if command.Embedded != nil {
+				walk(command.Embedded.Commands, command.Embedded.Blocks)
+			}
+		}
+	}
+	walk(commands, file.Blocks)
 }
 
 // UserCommandAbbreviationDiagnostics warns when a parsed user-command call is

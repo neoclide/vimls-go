@@ -365,6 +365,10 @@ func workspaceDiagnosticVersion(open bool, version int32) *int32 {
 // installing parser or workspace state for a document that is not open.
 func (s *Server) computeClosedWorkspaceDiagnostics(ctx context.Context, snapshot *text.Snapshot) (*syntax.File, workspaceIdentity, bool) {
 	disabledDiagnostics := s.disabledDiagnosticsSnapshot()
+	path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
+	if !ok {
+		return nil, workspaceIdentity{}, false
+	}
 	var file *syntax.File
 	var fileAnalysis *analysis.FileAnalysis
 	if snapshot.ByteLen() > maxFileBytes {
@@ -374,13 +378,9 @@ func (s *Server) computeClosedWorkspaceDiagnostics(ctx context.Context, snapshot
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
-		fileAnalysis = analysis.Analyze(file)
+		fileAnalysis = analyzeWithRole(file, s.IsConfigFile(path))
 	}
 	if ctx.Err() != nil {
-		return nil, workspaceIdentity{}, false
-	}
-	path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
-	if !ok {
 		return nil, workspaceIdentity{}, false
 	}
 	s.workspaceMu.Lock()
