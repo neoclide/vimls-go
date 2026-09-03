@@ -533,6 +533,18 @@ func (s *Server) waitForWorkspaceIndex(ctx context.Context) error {
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
+	return s.waitForWorkspaceIndexUntil(ctx, timer.C)
+}
+
+// waitForWorkspaceIndexForDiagnostic keeps the document pull request pending
+// until the index is installed or the client cancels it. Returning a timeout
+// error can leave clients believing the completed request is still active, so
+// a later diagnostic refresh would not trigger another pull.
+func (s *Server) waitForWorkspaceIndexForDiagnostic(ctx context.Context) error {
+	return s.waitForWorkspaceIndexUntil(ctx, nil)
+}
+
+func (s *Server) waitForWorkspaceIndexUntil(ctx context.Context, timeout <-chan time.Time) error {
 	for {
 		s.workspaceMu.Lock()
 		busy := s.workspaceIndexBusyLocked()
@@ -549,7 +561,7 @@ func (s *Server) waitForWorkspaceIndex(ctx context.Context) error {
 			return protocol.ErrRequestCancelled
 		case <-s.analysisContext.Done():
 			return protocol.ErrRequestCancelled
-		case <-timer.C:
+		case <-timeout:
 			return jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "workspace index did not become ready within 1s")
 		case <-changed:
 		}

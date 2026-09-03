@@ -1153,6 +1153,65 @@ func TestDocumentPullDiagnosticsFullAndUnchanged(t *testing.T) {
 	}
 }
 
+func TestDocumentPullDiagnosticsWaitsPastWorkspaceTimeout(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.testHooks.workspaceIndexWaitTimeout = time.Millisecond
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{
+		TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	documentURI := uri.URI("file:///pull-during-index.vim")
+	instance.workspaceMu.Lock()
+	instance.workspaceRunning = true
+	instance.workspaceMu.Unlock()
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\necho missing\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	waiting := make(chan struct{})
+	instance.testHooks.beforeWorkspaceIndexWait = func() {
+		select {
+		case <-waiting:
+		default:
+			close(waiting)
+		}
+	}
+	type response struct {
+		report protocol.DocumentDiagnosticReport
+		err    error
+	}
+	done := make(chan response, 1)
+	go func() {
+		report, err := instance.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		})
+		done <- response{report: report, err: err}
+	}()
+	<-waiting
+	select {
+	case result := <-done:
+		t.Fatalf("document diagnostic returned at the workspace timeout: %#v", result)
+	case <-time.After(10 * time.Millisecond):
+	}
+
+	instance.workspaceMu.Lock()
+	instance.workspaceRunning = false
+	instance.notifyWorkspaceIndexChangedLocked()
+	instance.workspaceMu.Unlock()
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	full, ok := result.report.(*protocol.RelatedFullDocumentDiagnosticReport)
+	if !ok || len(full.Items) == 0 || full.Items[0].Code != protocol.String("vim/E121") {
+		t.Fatalf("document diagnostics after index installation = %#v", result.report)
+	}
+}
+
 func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 	published := make(chan *protocol.PublishDiagnosticsParams, 2)
 	instance := New(nil, nil, io.Discard)

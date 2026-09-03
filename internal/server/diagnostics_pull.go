@@ -66,7 +66,7 @@ func (s *Server) Diagnostic(ctx context.Context, params *protocol.DocumentDiagno
 		if ctx.Err() != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
-		if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		if err := s.waitForWorkspaceIndexForDiagnostic(ctx); err != nil {
 			if ctx.Err() != nil {
 				return nil, protocol.ErrRequestCancelled
 			}
