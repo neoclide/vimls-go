@@ -31,7 +31,7 @@ func main() {
 	if err := generateFunctions(*vimRoot, filepath.Join(*outputDir, "functions_generated.go")); err != nil {
 		fatalf("generate functions: %v", err)
 	}
-	if err := generateOptions(*vimRoot, filepath.Join(*outputDir, "options_generated.go")); err != nil {
+	if err := generateOptions(*vimRoot, filepath.Join(*outputDir, "options_generated.go"), filepath.Join(*outputDir, "options_set_generated.vim")); err != nil {
 		fatalf("generate options: %v", err)
 	}
 	if err := generateVariables(*vimRoot, filepath.Join(*outputDir, "variables_generated.go")); err != nil {
@@ -53,6 +53,21 @@ func readRevisionFile(root, path string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	return output, nil
+}
+
+func revisionFilesMatching(root, pattern string, pathspecs ...string) ([]string, error) {
+	arguments := []string{"-C", root, "grep", "-l", "-E", pattern, vimTag, "--"}
+	arguments = append(arguments, pathspecs...)
+	output, err := exec.Command("git", arguments...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("find files in %s: %w", vimTag, err)
+	}
+	prefix := vimTag + ":"
+	lines := strings.Fields(string(output))
+	for i := range lines {
+		lines[i] = strings.TrimPrefix(lines[i], prefix)
+	}
+	return lines, nil
 }
 
 func fatalf(format string, arguments ...any) {

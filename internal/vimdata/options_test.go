@@ -19,7 +19,7 @@ func TestLookupOptionMetadata(t *testing.T) {
 	}
 	for _, test := range tests {
 		option, ok := LookupOption(test.name)
-		if !ok || option.Name != test.canonical || option.ShortName != test.short || option.Type != test.typ || option.Scope != test.scope || option.Documentation == "" || option.DocumentationSource != test.source {
+		if !ok || option.Name != test.canonical || option.ShortName != test.short || option.Type != test.typ || option.Scope != test.scope || len(option.Flags) == 0 || len(option.Variants) == 0 || option.DefinitionSource != "src/optiondefs.h" || option.DefinitionLine <= 0 || option.Documentation == "" || option.DocumentationSource != test.source {
 			t.Errorf("LookupOption(%q) = %#v, %v", test.name, option, ok)
 		}
 	}
@@ -56,12 +56,23 @@ func TestLookupOptionMetadata(t *testing.T) {
 		OptionNumber: 0,
 		OptionString: 0,
 	}
+	completionCount := 0
+	callbackCount := 0
+	validationCount := 0
 	for _, option := range builtinOptions {
 		if option.Name == "" {
 			t.Fatalf("option has empty canonical name: %#v", option)
 		}
 		if option.Documentation == "" || option.DocumentationSource == "" {
 			t.Fatalf("%s documentation/source = %q/%q", option.Name, option.Documentation, option.DocumentationSource)
+		}
+		if len(option.Flags) == 0 || len(option.Variants) == 0 || option.AvailableWhen == "" || option.DefinitionSource != "src/optiondefs.h" || option.DefinitionLine <= 0 {
+			t.Fatalf("%s has incomplete migrated definition: %#v", option.Name, option)
+		}
+		for _, variant := range option.Variants {
+			if variant.Variable == "" || variant.Indirect == "" || variant.DidSetCallback == "" || variant.ExpandCallback == "" || variant.ViDefault == "" || variant.VimDefault == "" {
+				t.Fatalf("%s has incomplete variant: %#v", option.Name, variant)
+			}
 		}
 		if _, exists := seenCanonical[option.Name]; exists {
 			t.Fatalf("duplicate option name %q", option.Name)
@@ -75,6 +86,30 @@ func TestLookupOptionMetadata(t *testing.T) {
 			t.Fatalf("LookupOption(%q) = %#v, %v", option.Name, gotCanonical, ok)
 		}
 		typeCounts[option.Type]++
+		if len(option.CompletionValues) > 0 {
+			completionCount++
+		}
+		if option.Validation.Callback != "" {
+			callbackCount++
+			if len(option.Validation.Sources) == 0 {
+				t.Fatalf("%s callback has no source provenance: %#v", option.Name, option.Validation)
+			}
+			for _, source := range option.Validation.Sources {
+				if source.Source == "" || source.Line <= 0 {
+					t.Fatalf("%s callback has invalid source provenance: %#v", option.Name, option.Validation)
+				}
+			}
+		}
+		if option.Validation.Kind != ValidationNone {
+			validationCount++
+			if option.Validation.Kind == ValidationNumberRange {
+				if !option.Validation.HasMin && !option.Validation.HasMax {
+					t.Fatalf("%s has empty number validation: %#v", option.Name, option.Validation)
+				}
+			} else if len(option.Validation.Values) == 0 || option.Validation.ErrorCode == "" {
+				t.Fatalf("%s has incomplete validation: %#v", option.Name, option.Validation)
+			}
+		}
 		if option.ShortName == "" {
 			continue
 		}
@@ -86,6 +121,45 @@ func TestLookupOptionMetadata(t *testing.T) {
 	}
 	if typeCounts[OptionBool] != 157 || typeCounts[OptionNumber] != 89 || typeCounts[OptionString] != 316 {
 		t.Fatalf("option type counts = %#v, want bool=157 number=89 string=316", typeCounts)
+	}
+	if completionCount != 66 {
+		t.Fatalf("options with fixed completion values = %d, want 66", completionCount)
+	}
+	if callbackCount != 334 || validationCount != 44 {
+		t.Fatalf("callback/validation counts = %d/%d, want 334/44", callbackCount, validationCount)
+	}
+}
+
+func TestOptionMetadataIsDeepCopied(t *testing.T) {
+	option, ok := LookupOption("aleph")
+	if !ok || len(option.Flags) == 0 || len(option.Variants) < 2 {
+		t.Fatalf("LookupOption(aleph) = %#v, %v", option, ok)
+	}
+	option.Flags[0] = "changed"
+	option.Variants[0].Variable = "changed"
+	again, _ := LookupOption("aleph")
+	if again.Flags[0] == "changed" || again.Variants[0].Variable == "changed" {
+		t.Fatalf("LookupOption returned shared metadata: %#v", again)
+	}
+	completionOption, _ := LookupOption("ambiwidth")
+	completionOption.CompletionValues[0] = "changed"
+	completionOption, _ = LookupOption("ambiwidth")
+	if completionOption.CompletionValues[0] == "changed" {
+		t.Fatalf("LookupOption returned shared completion values: %#v", completionOption)
+	}
+	featureOption, _ := LookupOption("ballooneval")
+	featureOption.RequiredFeatures[0] = "changed"
+	featureOption.Validation.Sources[0].Source = "changed"
+	featureOption, _ = LookupOption("ballooneval")
+	if featureOption.RequiredFeatures[0] == "changed" || featureOption.Validation.Sources[0].Source == "changed" {
+		t.Fatalf("LookupOption returned shared required features: %#v", featureOption)
+	}
+	options := Options()
+	options[0].Flags[0] = "changed"
+	options[0].Variants[0].Variable = "changed"
+	again, _ = LookupOption(options[0].Name)
+	if again.Flags[0] == "changed" || again.Variants[0].Variable == "changed" {
+		t.Fatalf("Options returned shared metadata: %#v", again)
 	}
 }
 
@@ -101,6 +175,47 @@ func TestOptionValuesArePinnedAndCopied(t *testing.T) {
 	for _, name := range []string{"ignorecase", "encoding", "nosuchoption"} {
 		if values := OptionValues(name); len(values) != 0 {
 			t.Errorf("OptionValues(%q) = %#v", name, values)
+		}
+	}
+	if values := OptionValues("cpoptions"); len(values) < 50 || values[0] != "a" || values[len(values)-1] != "~" {
+		t.Fatalf("OptionValues(cpoptions) = %#v", values)
+	}
+}
+
+func TestValidateOptionValue(t *testing.T) {
+	tests := []struct {
+		option string
+		value  string
+		code   string
+		span   string
+	}{
+		{option: "bufhidden", value: "hide"},
+		{option: "bufhidden", value: "", code: ""},
+		{option: "bufhidden", value: "bogus", code: "E474", span: "bogus"},
+		{option: "belloff", value: "all,error"},
+		{option: "belloff", value: "all,bogus", code: "E474", span: "all,bogus"},
+		{option: "cpoptions", value: "aA"},
+		{option: "cpoptions", value: "a@", code: "E539", span: "@"},
+		{option: "cpoptions", value: "a★", code: "E539", span: "★"},
+		{option: "maxsearchcount", value: "1"},
+		{option: "maxsearchcount", value: "9999"},
+		{option: "maxsearchcount", value: "0", code: "E487", span: "0"},
+		{option: "maxsearchcount", value: "10000", code: "E474", span: "10000"},
+		{option: "browsedir", value: "not-a-static-enum"},
+		{option: "emoji", value: "single"},
+	}
+	for _, test := range tests {
+		option, ok := LookupOption(test.option)
+		if !ok {
+			t.Fatalf("LookupOption(%q) failed", test.option)
+		}
+		failure, invalid := ValidateOptionValue(option.Validation, test.value)
+		if invalid != (test.code != "") || failure.Code != test.code {
+			t.Errorf("%s=%q: failure=%#v invalid=%v, want code %q", test.option, test.value, failure, invalid, test.code)
+			continue
+		}
+		if invalid && test.value[failure.Start:failure.End] != test.span {
+			t.Errorf("%s=%q: failure span %d:%d = %q, want %q", test.option, test.value, failure.Start, failure.End, test.value[failure.Start:failure.End], test.span)
 		}
 	}
 }

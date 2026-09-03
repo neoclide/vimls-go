@@ -36,6 +36,7 @@ metadata-check:
 	cmp internal/vimdata/commands_generated.go "$$metadata_tmp/commands_generated.go"; \
 	cmp internal/vimdata/functions_generated.go "$$metadata_tmp/functions_generated.go"; \
 	cmp internal/vimdata/options_generated.go "$$metadata_tmp/options_generated.go"; \
+	cmp internal/vimdata/options_set_generated.vim "$$metadata_tmp/options_set_generated.vim"; \
 	cmp internal/vimdata/variables_generated.go "$$metadata_tmp/variables_generated.go"
 	$(GO) test $(GO_MOD) ./internal/vimdata ./tools/genmetadata ./tools/internal/vimhelp
 
