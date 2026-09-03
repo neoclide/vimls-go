@@ -549,6 +549,47 @@ func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
 	}
 }
 
+func TestHoverShowsOptionBuildRequirement(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho &autochdir &ballooneval\n")
+	for _, test := range []struct {
+		character uint32
+		want      string
+	}{
+		{character: 8, want: "build requirement: +autochdir (defined(FEAT_AUTOCHDIR))"},
+		{character: 20, want: "build requirement: +balloon_eval (defined(FEAT_BEVAL_GUI))"},
+	} {
+		hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: test.character},
+		}})
+		if err != nil || hover == nil {
+			t.Fatalf("hover = %#v, %v", hover, err)
+		}
+		content, ok := hover.Contents.(*protocol.MarkupContent)
+		if !ok || !strings.Contains(content.Value, test.want) {
+			t.Fatalf("hover content = %#v, want %q", hover.Contents, test.want)
+		}
+	}
+}
+
+func TestOptionBuildRequirementFormatting(t *testing.T) {
+	tests := map[string]string{
+		"1":                                  "",
+		"0":                                  "unavailable in Vim v9.2.1015",
+		"defined(FEAT_AUTOCHDIR)":            "+autochdir (defined(FEAT_AUTOCHDIR))",
+		"defined(FEAT_X) && defined(FEAT_Y)": "defined(FEAT_X) && defined(FEAT_Y)",
+		"defined(MSWIN) || defined(FEAT_WAYLAND)": "defined(MSWIN) || defined(FEAT_WAYLAND)",
+	}
+	for condition, want := range tests {
+		var features []string
+		if condition == "defined(FEAT_AUTOCHDIR)" {
+			features = []string{"autochdir"}
+		}
+		if got := optionBuildRequirement(condition, features); got != want {
+			t.Errorf("optionBuildRequirement(%q) = %q, want %q", condition, got, want)
+		}
+	}
+}
+
 func TestHoverShowsPinnedExCommandHelpForAbbreviation(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "ec 'value'\n")
 	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
