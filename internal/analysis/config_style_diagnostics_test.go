@@ -239,6 +239,16 @@ func TestConfigFileModeAugroupReloadSafety(t *testing.T) {
 			want:   false,
 		},
 		{
+			name:   "command chain keeps clear before embedded autocmd body",
+			source: "augroup g | autocmd! | autocmd BufRead *.vim call F() | augroup END\n",
+			want:   false,
+		},
+		{
+			name:   "continued targeted clear covers embedded autocmd body",
+			source: "augroup g\n  autocmd! BufRead\n  \\ *.vim\n  autocmd BufRead *.vim call F()\naugroup END\n",
+			want:   false,
+		},
+		{
 			name:   "event-targeted clear covers that event",
 			source: "augroup g\n  autocmd! BufRead\n  autocmd BufRead *.vim echomsg 'x'\naugroup END\n",
 			want:   false,

@@ -66,6 +66,16 @@ func TestConfigMapleaderOrderDiagnostics(t *testing.T) {
 			want:   1,
 		},
 		{
+			name:   "command chain preserves source order",
+			source: "nnoremap <Leader>a :echo 1<CR> | let g:mapleader = ','\n",
+			want:   1,
+		},
+		{
+			name:   "vim9 static global assignment is applicable",
+			source: "vim9script\nnnoremap <Leader>a <Cmd>echo 1<CR>\ng:mapleader = ','\n",
+			want:   1,
+		},
+		{
 			name:   "no later assignment is not reported",
 			source: "map <Leader>a :echo 1<CR>\n",
 			want:   0,
