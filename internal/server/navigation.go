@@ -666,6 +666,9 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		}
 		if option, ok := vimdata.LookupOption(name); ok {
 			lines := []string{"name: " + option.Name, "kind: option", "type: " + optionTypeName(option)}
+			if requirement := optionBuildRequirement(option.AvailableWhen, option.RequiredFeatures); requirement != "" {
+				lines = append(lines, "build requirement: "+requirement)
+			}
 			if option.Documentation != "" {
 				lines = append(lines, "", option.Documentation)
 			}
@@ -708,6 +711,19 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		lines = append(lines, "type: "+typeName)
 	}
 	return s.localHoverResult(ctx, document, lines)
+}
+
+func optionBuildRequirement(condition string, features []string) string {
+	if condition == "" || condition == "1" {
+		return ""
+	}
+	if condition == "0" {
+		return "unavailable in Vim " + vimdata.OptionVimTag
+	}
+	if len(features) == 1 {
+		return "+" + features[0] + " (" + condition + ")"
+	}
+	return condition
 }
 
 func (s *Server) localHoverResult(ctx context.Context, document *navigationDocument, lines []string) (*protocol.Hover, error) {
