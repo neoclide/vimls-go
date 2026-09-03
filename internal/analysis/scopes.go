@@ -6356,6 +6356,7 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	if command.Set != nil {
 		for _, option := range command.Set.Options {
 			appendUnknownSetOptionDiagnostic(result, file.Text(option.Name), option.Name)
+			appendSetOptionValueDiagnostic(result, file, command, option)
 		}
 	}
 	if command.Function != nil {
@@ -6448,6 +6449,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		if len(expression.Children) == 0 {
 			return
 		}
+		appendOptionAssignmentValueDiagnostic(result, file, expression, dialect)
 		diagnosticsBefore := len(result.Diagnostics)
 		for _, child := range expression.Children[1:] {
 			walkExpression(result, file, child, scope, skipped, false, dialect)
