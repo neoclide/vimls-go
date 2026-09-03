@@ -280,7 +280,6 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 	t.Cleanup(func() { _ = serverConn.Close() })
 	t.Cleanup(func() { _ = clientConn.Close() })
 	instance := New(serverConn, serverConn, io.Discard)
-	instance.workspaceDelay = 0
 
 	workerBlocked := make(chan struct{})
 	releaseWorker := make(chan struct{})
@@ -317,6 +316,7 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 	if message := readFrame(t, reader); idNumber(t, message) != 1 {
 		t.Fatalf("initialize response = %#v", message)
 	}
+	instance.workspaceDelay = 0
 
 	shutdownWaiting := make(chan struct{})
 	instance.testHooks.beforeWorkspaceWGWait = func() {

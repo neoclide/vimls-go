@@ -1,9 +1,10 @@
 GO ?= go
 GO_MOD ?= -mod=readonly
+TEST_PARALLEL ?= 4
 COVERAGE_MIN ?= 90
 VIM_EXECUTABLE ?= vim
 
-.PHONY: build check client-smoke client-tools coverage format-check metadata-check metadata-refresh oracle race test vet
+.PHONY: build check clean client-smoke client-tools coverage format-check metadata-check metadata-refresh oracle race test vet
 
 build:
 	mkdir -p bin
@@ -11,8 +12,11 @@ build:
 	$(GO) build $(GO_MOD) -o bin/vimparse ./cmd/vimparse
 	$(GO) build $(GO_MOD) -o bin/vim9parse ./cmd/vim9parse
 
+clean:
+	$(GO) clean -cache -testcache -fuzzcache
+
 test:
-	$(GO) test $(GO_MOD) ./...
+	$(GO) test $(GO_MOD) -p $(TEST_PARALLEL) ./...
 
 race:
 	$(GO) test $(GO_MOD) -race ./...

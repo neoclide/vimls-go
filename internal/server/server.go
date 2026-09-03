@@ -120,6 +120,7 @@ type serverTestHooks struct {
 	beforeWorkspaceRebuildDelay func()
 	beforeWorkspaceIndexWait    func()
 	workspaceIndexWaitTimeout   time.Duration
+	workspaceProgressTimeout    time.Duration
 	beforeWorkspaceBuild        func([]*text.Snapshot)
 	afterWorkspaceIndexWorker   func()
 	beforeShutdownReturn        func()

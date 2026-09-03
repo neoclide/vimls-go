@@ -5,8 +5,9 @@ These files are generated from Vim tag `v9.2.1015`, commit
 
 - `v9.2.1015-test-files.json.gz` losslessly contains all 362 tracked `.vim`
   files below `src/testdir`, totaling 8,558,061 source bytes. The offline test
-  gate parses every file with both independent parser entry points and checks
-  source retention and syntax spans. It never sources or executes the files.
+  gate parses every file with automatic dialect selection and checks source
+  retention and syntax spans. It never sources or executes the files. The
+  smaller embedded corpus below exercises both independent parser entry points.
 - `v9.2.1015-parser-corpus.json.gz` contains 3,267 heredoc scripts extracted
   from 17 selected parser and evaluator tests. It retains each upstream origin
   and the statically identifiable success or failure classification.

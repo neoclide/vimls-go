@@ -9,7 +9,7 @@
 - Green narrow tests do not prove a milestone whose contract is broader.
 - A Vim executable is a development oracle, never a production dependency.
 - Server tests use only the smallest source needed for one feature behavior.
-  Parser corpora stay in their owning syntax, analysis, or workspace package
+  Parser corpora stay in the owning syntax package
   and are never replayed across every LSP feature. Synchronize asynchronous
   server tests with hooks or channels instead of production-duration sleeps.
   Keep the cumulative top-level test time attributed to each `_test.go` file
@@ -74,9 +74,11 @@ The default offline gate also reads generated v9.2.1015 artifacts below
 `testdata/official/`. The full-file corpus losslessly contains all 362 tracked
 `.vim` files below Vim's `src/testdir` (8,558,061 source bytes). The embedded
 corpus contains 3,267 cases extracted from 17 official parser and evaluator
-tests. Both feed every source to `LegacyParser` and `Vim9Parser`, asserting
-retained source plus ordered, in-bounds command, token, block, and diagnostic
-spans without sourcing or executing the files. A separate helper inventory
+tests. The full-file corpus exercises automatic dialect selection once per
+file; the smaller embedded corpus exercises both `LegacyParser` and
+`Vim9Parser`. Both assert retained source plus ordered, in-bounds command,
+token, block, and diagnostic spans without sourcing or executing the files. A
+separate helper inventory
 classifies all 5,733 `Check*` candidates, including all 5,208 qualified
 `v9.Check*` calls, so each call can later become a generated conformance case or
 an explicit skip. `v9.2.1015-parser-files.json` is the fixed migration boundary:

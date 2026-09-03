@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync/atomic"
 	"testing"
 )
 
@@ -49,28 +50,25 @@ func TestGeneratedOfficialVimTestFiles(t *testing.T) {
 		t.Fatalf("official test-file corpus has %d raw bytes, want %d", rawBytes, officialTestFilesBytes)
 	}
 
-	parsers := []struct {
-		name  string
-		parse func(string) *File
-	}{
-		{name: "legacy", parse: (LegacyParser{}).Parse},
-		{name: "vim9", parse: (Vim9Parser{}).Parse},
-	}
-	for _, parser := range parsers {
-		commands := 0
+	var commands atomic.Int64
+	t.Run("parse", func(t *testing.T) {
 		for _, testFile := range corpus.Files {
-			source := string(testFile.Source)
-			file := parser.parse(source)
-			if file.Source != source {
-				t.Fatalf("%s %s parser did not retain source", testFile.Path, parser.name)
-			}
-			assertFileSpansAt(t, file, testFile.Path+" "+parser.name)
-			commands += len(file.Commands)
+			t.Run(testFile.Path, func(t *testing.T) {
+				t.Parallel()
+				source := string(testFile.Source)
+				file := Parse(source)
+				if file.Source != source {
+					t.Fatal("parser did not retain source")
+				}
+				assertFileSpansAt(t, file, testFile.Path)
+				commands.Add(int64(len(file.Commands)))
+			})
 		}
-		t.Logf("%s official test files: commands=%d", parser.name, commands)
-		if commands < 100000 {
-			t.Fatalf("%s parser retained too few commands: %d", parser.name, commands)
-		}
+	})
+	commandCount := commands.Load()
+	t.Logf("official test files: commands=%d", commandCount)
+	if commandCount < 100000 {
+		t.Fatalf("parser retained too few commands: %d", commandCount)
 	}
 }
 

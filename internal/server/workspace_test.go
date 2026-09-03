@@ -40,6 +40,7 @@ func TestWorkspaceFoldersOverrideRootURIAndBuildSymbolIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	instance.workspaceDelay = 0
 	if result.Capabilities.WorkspaceSymbolProvider == nil || result.Capabilities.Workspace == nil || result.Capabilities.Workspace.WorkspaceFolders == nil {
 		t.Fatalf("workspace capabilities = %#v", result.Capabilities)
 	}
@@ -77,6 +78,7 @@ func TestRuntimepathInitializationAndNotificationReplaceIndex(t *testing.T) {
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny(options)}); err != nil {
 		t.Fatal(err)
 	}
+	instance.workspaceDelay = 0
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +114,7 @@ func TestWorkspaceSymbolsExcludeRuntimepathOnlyFiles(t *testing.T) {
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: options}); err != nil {
 		t.Fatal(err)
 	}
+	instance.workspaceDelay = 0
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1478,6 +1481,7 @@ func TestServerRebuildRejectsCapturedSnapshotAfterOpenEdit(t *testing.T) {
 	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "rebuild.vim", "vim9script\nvar Disk = 1\n"))
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
+	instance.workspaceDelay = 0
 	instance.setWorkspaceRoots([]string{root})
 	documentURI := uri.File(path)
 	oldSource := "vim9script\nvar Old = 1\n"
@@ -1580,7 +1584,6 @@ func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 		instance.workspaceMu.Unlock()
 	}
 	instance.client = progress
-	instance.workspaceDelay = 0
 	supported := true
 	rootURI := uri.File(root)
 	options, err := json.Marshal(map[string]any{"runtimepath": []string{root}})
@@ -1594,6 +1597,7 @@ func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	instance.workspaceDelay = 0
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1639,7 +1643,6 @@ func TestWorkspaceIndexProgressIsCapabilityGated(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = progress
-	instance.workspaceDelay = 0
 	rootURI := uri.File(root)
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI:               &rootURI,
@@ -1647,6 +1650,7 @@ func TestWorkspaceIndexProgressIsCapabilityGated(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	instance.workspaceDelay = 0
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1676,7 +1680,6 @@ func TestWorkspaceIndexProgressReportFailureStillEnds(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	instance.client = progress
-	instance.workspaceDelay = 0
 	supported := true
 	rootURI := uri.File(root)
 	options, err := json.Marshal(map[string]any{"runtimepath": []string{root}})
@@ -1690,6 +1693,7 @@ func TestWorkspaceIndexProgressReportFailureStillEnds(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	instance.workspaceDelay = 0
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
@@ -1735,6 +1739,7 @@ func TestWorkspaceIndexProgressCreateTimesOut(t *testing.T) {
 	}}
 	instance.workspaceProgress = true
 	instance.workspaceDelay = 0
+	instance.testHooks.workspaceProgressTimeout = time.Millisecond
 	instance.scheduleWorkspaceRebuild()
 	done := make(chan struct{})
 	go func() {
@@ -1762,6 +1767,7 @@ func TestWorkspaceIndexProgressDoesNotBlockOnUncooperativeClient(t *testing.T) {
 	instance.client = progress
 	instance.workspaceProgress = true
 	instance.workspaceDelay = 0
+	instance.testHooks.workspaceProgressTimeout = time.Millisecond
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(progress.releaseBegin) }) }
 	t.Cleanup(func() {
@@ -1829,6 +1835,7 @@ func TestWorkspaceIndexProgressReportDoesNotArriveAfterEnd(t *testing.T) {
 	instance.client = progress
 	instance.workspaceProgress = true
 	instance.workspaceDelay = 0
+	instance.testHooks.workspaceProgressTimeout = time.Millisecond
 	t.Cleanup(func() {
 		release()
 		instance.stopAnalysis()
@@ -1890,6 +1897,7 @@ func TestWorkspaceIndexProgressTokensAreUnique(t *testing.T) {
 func TestWaitForWorkspaceIndex(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
+	instance.workspaceDelay = 0
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once

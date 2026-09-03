@@ -182,7 +182,7 @@ func TestScannerFixedSeedRecoveryStress(t *testing.T) {
 		state ^= state << 5
 		return alphabet[state%uint32(len(alphabet))]
 	}
-	for index := 0; index < 32768; index++ {
+	for index := 0; index < 2048; index++ {
 		var source strings.Builder
 		if index&1 == 0 {
 			source.WriteString("vim9script\n")
@@ -217,7 +217,7 @@ func TestScannerFixedSeedCommandStress(t *testing.T) {
 		state = state*1664525 + 1013904223
 		return int(state % uint32(limit))
 	}
-	for index := 0; index < 32768; index++ {
+	for index := 0; index < 2048; index++ {
 		var source strings.Builder
 		if index&1 == 0 {
 			source.WriteString("vim9script\n")

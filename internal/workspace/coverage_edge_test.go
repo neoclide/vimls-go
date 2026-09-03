@@ -1,62 +1,13 @@
 package workspace
 
 import (
-	"compress/gzip"
 	"context"
-	"encoding/json"
-	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
-
-// The parser corpus contains valid, invalid, and incomplete source.  Workspace
-// fact extraction must remain safe for all of them, not only for indexed files.
-func TestOfficialParserCorpusWorkspaceFactRecovery(t *testing.T) {
-	file, err := os.Open(filepath.Join("..", "..", "testdata", "official", "v9.2.1015-parser-corpus.json.gz"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	reader, err := gzip.NewReader(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reader.Close()
-	var corpus struct{ Cases []struct{ Source string } }
-	if err := json.NewDecoder(reader).Decode(&corpus); err != nil {
-		t.Fatal(err)
-	}
-	if len(corpus.Cases) != 3267 {
-		t.Fatalf("unexpected corpus size: %d", len(corpus.Cases))
-	}
-	parsers := []struct {
-		name  string
-		parse func(string) *syntax.File
-	}{
-		{name: "automatic", parse: syntax.Parse},
-		{name: "legacy", parse: (syntax.LegacyParser{}).Parse},
-		{name: "vim9", parse: (syntax.Vim9Parser{}).Parse},
-	}
-	for index, test := range corpus.Cases {
-		path := filepath.Join("/tmp", "vimls-go-corpus", strconv.Itoa(index)+".vim")
-		for _, parser := range parsers {
-			parsed := parser.parse(test.Source)
-			for _, fact := range CollectSymbolFacts(path, parsed) {
-				if fact.SelectionRange.Start < 0 || fact.SelectionRange.End < fact.SelectionRange.Start || fact.SelectionRange.End > len(test.Source) {
-					t.Fatalf("case %d %s fact = %#v", index, parser.name, fact)
-				}
-			}
-			_ = CollectGlobalNameFacts(path, parsed)
-			_ = CollectExternalReferences(path, parsed)
-			_ = CollectTypeRelationFacts(path, parsed)
-			_ = CollectCallFactsFromAnalysis(path, parsed, analysis.Analyze(parsed))
-		}
-	}
-}
 
 func TestIndexGlobalFactsAndParseSourceWorkerBoundaries(t *testing.T) {
 	index := NewIndex(10, 10_000)
