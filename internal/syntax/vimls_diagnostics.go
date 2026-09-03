@@ -30,6 +30,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/catch-error-message", Message: "catching human-readable error text is fragile", Severity: DiagnosticWarning},
 	{Code: "vimls/complex-autocmd", Message: "complex autocommand body; consider delegating to a function", Severity: DiagnosticHint},
 	{Code: "vimls/complex-command", Message: "complex user command body; consider delegating to a function", Severity: DiagnosticHint},
+	{Code: "vimls/config-loaded-guard", Message: "a loaded guard skips the rest of the file on a later :source; edits below may not take effect", Severity: DiagnosticHint},
 	{Code: "vimls/config-mapleader-order", Message: "mapping is defined before the leader assignment; <Leader> is expanded when the mapping is defined", Severity: DiagnosticWarning},
 	{Code: "vimls/configuration-overwrite", Message: "unconditional configuration assignment may overwrite a user value", Severity: DiagnosticWarning},
 	{Code: "vimls/deprecated", Message: "symbol is deprecated", Severity: DiagnosticHint},

@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -251,4 +252,121 @@ func collectConfigDuplicateMappingDiagnostics(result *FileAnalysis) {
 			record.noteDefinition(command, mapping.Mode)
 		}
 	}
+}
+
+// loadedGuardPattern matches an if condition that is exactly one exists()
+// call testing a g:loaded_* variable, e.g. exists('g:loaded_my_vimrc').
+var loadedGuardPattern = regexp.MustCompile(`(?is)^\s*exists\s*\(\s*['"]g:loaded_([a-z0-9_]+)['"]\s*\)\s*$`)
+
+// collectConfigLoadedGuardDiagnostics reports vimls/config-loaded-guard (§4.4)
+// for configuration files whose top-level plugin-style loaded guard prevents a
+// later :source from reaching the remainder of the file.
+func collectConfigLoadedGuardDiagnostics(result *FileAnalysis) {
+	file := result.File
+	if file == nil || len(file.Diagnostics) != 0 {
+		return
+	}
+	// vim9script noclear is an explicit single-load design and is exempt.
+	vim9 := file.Dialect == syntax.Vim9
+	if vim9 && hasVim9NoClear(file) {
+		return
+	}
+	var markers map[string]bool
+	if !vim9 {
+		markers = configLoadedMarkers(result)
+	}
+	for index := range file.Commands {
+		if !rootScopedCommand(file.Commands, file.Blocks, index) {
+			continue
+		}
+		command := &file.Commands[index]
+		if command.Canonical != "if" {
+			continue
+		}
+		guardName, ok := loadedGuardVariable(file.Text(command.Argument))
+		if !ok {
+			continue
+		}
+		if markers != nil {
+			if _, marked := markers[guardName]; !marked {
+				continue
+			}
+		}
+		if !guardFinishesBlock(file, command, file.Commands, file.Blocks, index) {
+			continue
+		}
+		message := "a loaded guard for " + guardName + " skips the rest of the file on a later :source; edits below may not take effect"
+		if vim9 {
+			message = "a loaded guard for " + guardName + " skips the rest of the file; Vim9 reload already cleared script-local items, so the file may stay half-initialized"
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code: "vimls/config-loaded-guard", Message: message,
+			Span: syntax.Span{Start: command.Argument.Start, End: command.Argument.End},
+		})
+	}
+}
+
+// hasVim9NoClear reports whether a Vim9 root file starts with
+// "vim9script noclear", the explicit single-load design.
+func hasVim9NoClear(file *syntax.File) bool {
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Canonical != "vim9script" {
+			continue
+		}
+		text := strings.ToLower(file.Text(command.Argument))
+		return strings.Contains(text, "noclear")
+	}
+	return false
+}
+
+// loadedGuardVariable extracts the g:loaded_* variable tested by a candidate
+// guard condition. Reject exists() arguments that address functions ('*...'),
+// commands (':...'), options ('+...'), autocommands ('##...'), or anything
+// that is not a plain global variable name.
+func loadedGuardVariable(argument string) (string, bool) {
+	match := loadedGuardPattern.FindStringSubmatch(argument)
+	if match == nil {
+		return "", false
+	}
+	return "g:loaded_" + match[1], true
+}
+
+// guardFinishesBlock reports whether the then-part of the if at index directly
+// contains a :finish before any elseif/else at the same level.
+func guardFinishesBlock(file *syntax.File, guard *syntax.Command, commands []syntax.Command, blocks []syntax.Block, index int) bool {
+	blockIndex := guard.Block
+	if blockIndex < 0 || blockIndex >= len(blocks) {
+		return false
+	}
+	for next := index + 1; next < len(commands); next++ {
+		if commands[next].Block != blockIndex {
+			continue
+		}
+		switch commands[next].Canonical {
+		case "finish":
+			return true
+		case "elseif", "else", "endif":
+			return false
+		}
+	}
+	return false
+}
+
+// configLoadedMarkers collects the g:loaded_* variables assigned at the root
+// level of a configuration file.
+func configLoadedMarkers(result *FileAnalysis) map[string]bool {
+	file := result.File
+	markers := make(map[string]bool)
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration == nil || command.Block != -1 {
+			continue
+		}
+		name := file.Text(command.Declaration.Name)
+		if strings.HasPrefix(name, "g:loaded_") {
+			markers[name] = true
+		}
+	}
+	return markers
 }

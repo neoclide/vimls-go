@@ -377,7 +377,11 @@ let g:loaded_my_vimrc = 1
     规范化字面量 LHS（`<Leader>` 同拼写比较）、global/`<buffer>` scope、mapping 与 abbreviation
     类别；`unmap`/`mapclear` 会终止相应前序定义，条件或动态清除会将相关状态降为 unknown；
     条件分支内定义不做证明（不误报）。
-- [ ] loaded guard Hint（`vimls/config-loaded-guard`）与 Vim9 reload 组合检查。
+- [x] loaded guard Hint（`vimls/config-loaded-guard`）与 Vim9 reload 组合检查。
+  - 配置模式：顶层 `if exists('g:loaded_*')` → 直接 `:finish` → `endif`，且文件存在对应
+    `let g:loaded_*` 标记赋值（Legacy）时给 Hint；Vim9 无需标记并带 reload 半初始化提示，
+    `vim9script noclear` 显式单次加载设计豁免。不误报 `exists('*Func')`/`:Cmd`/`+opt`/`##Event`、
+    `has()`、`!exists` 初始化、函数内 `finish`、缺标记或 else 分支里的 `finish`。
 - [ ] augroup、函数和 mapping snippet。
 - [ ] autocmd、`<expr>`/`<Cmd>` mapping、回调选项中的静态导航。
 

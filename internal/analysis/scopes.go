@@ -236,6 +236,7 @@ func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
 	if result.configFile {
 		collectConfigLeaderOrderDiagnostics(result)
 		collectConfigDuplicateMappingDiagnostics(result)
+		collectConfigLoadedGuardDiagnostics(result)
 	}
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
@@ -508,6 +509,22 @@ func unconditionalAt(list []syntax.Command, blocks []syntax.Block, index int) bo
 	for blockIndex := list[index].Block; blockIndex >= 0 && blockIndex < len(blocks); {
 		block := &blocks[blockIndex]
 		if (block.Kind == syntax.BlockFunction || block.Kind == syntax.BlockDef || block.Kind == syntax.BlockCommand) && block.Header == index {
+			blockIndex = block.Parent
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// rootScopedCommand reports whether the command at index in list is a header
+// whose own block is nested directly under the file root (or is not inside any
+// block). Unlike unconditionalAt it accepts every header kind, which is what
+// top-level structural scans such as loaded-guard detection need.
+func rootScopedCommand(list []syntax.Command, blocks []syntax.Block, index int) bool {
+	for blockIndex := list[index].Block; blockIndex >= 0 && blockIndex < len(blocks); {
+		block := &blocks[blockIndex]
+		if block.Header == index {
 			blockIndex = block.Parent
 			continue
 		}
