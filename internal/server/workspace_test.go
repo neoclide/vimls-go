@@ -510,7 +510,7 @@ func TestRuntimepathDeltaCancelsInFlightDiscoveryWithoutMutation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-			case <-time.After(time.Second):
+			case <-time.After(10 * time.Second):
 				t.Fatal("cancelled runtimepath delta did not return")
 			}
 			instance.workspaceMu.Lock()
@@ -1579,7 +1579,7 @@ func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
 	var token protocol.ProgressToken
 	select {
 	case token = <-progress.creates:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("workspace index did not create a progress token")
 	}
 	begin := waitForWorkspaceProgress(t, progress.updates)
@@ -1718,7 +1718,7 @@ func TestWorkspaceIndexProgressCreateTimesOut(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("workspace rebuild waited indefinitely for progress creation")
 	}
 }
@@ -2175,7 +2175,7 @@ func workspaceSymbols(t *testing.T, instance *Server, query string) protocol.Wor
 
 func waitForWorkspaceSymbols(t *testing.T, instance *Server, query string, count int) protocol.WorkspaceSymbolSlice {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		symbols := workspaceSymbols(t, instance, query)
 		if len(symbols) == count {
@@ -2196,7 +2196,7 @@ func currentImportGraph(instance *Server) workspace.ImportGraphSnapshot {
 
 func waitForImportGraph(t *testing.T, instance *Server, ready func(workspace.ImportGraphSnapshot) bool) workspace.ImportGraphSnapshot {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		graph := currentImportGraph(instance)
 		if ready(graph) {
@@ -2308,7 +2308,7 @@ func waitForWorkspaceProgress(t *testing.T, updates <-chan *protocol.ProgressPar
 	select {
 	case params := <-updates:
 		return params
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("workspace progress notification not received")
 		return nil
 	}

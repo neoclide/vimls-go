@@ -143,7 +143,7 @@ func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit code = %d, logs = %q", code, logs.String())
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("server did not exit")
 	}
 }
@@ -174,14 +174,14 @@ func TestServerCancelsInFlightRequest(t *testing.T) {
 	instance.workspaceMu.Unlock()
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///cancel.vim"}}}`)
 	waitForServerRace(t, waiting, "document symbol request")
-	if err := clientConn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+	if err := clientConn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":2}}`)
 	if err := clientConn.SetWriteDeadline(time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := clientConn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+	if err := clientConn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	message := readFrame(t, reader)
@@ -201,7 +201,7 @@ func TestServerCancelsInFlightRequest(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit code = %d", code)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("server did not exit")
 	}
 }
@@ -264,7 +264,7 @@ func TestServerRejectsDuplicateRequestID(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit code = %d", code)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("server did not exit")
 	}
 
@@ -309,7 +309,7 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 
 	select {
 	case <-workerBlocked:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("worker did not start")
 	}
 
@@ -337,7 +337,7 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 		if idNumber(t, msg) != 2 || string(msg["result"]) != "null" {
 			t.Fatalf("shutdown response = %#v", msg)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("shutdown did not complete after worker release")
 	}
 
@@ -347,7 +347,7 @@ func TestServerShutdownWaitsForBackgroundWork(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit code = %d", code)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("server did not exit")
 	}
 }

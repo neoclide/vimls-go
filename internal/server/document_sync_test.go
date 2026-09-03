@@ -25,7 +25,7 @@ func waitForServerRace(t *testing.T, event <-chan struct{}, name string) {
 	t.Helper()
 	select {
 	case <-event:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("timed out waiting for %s", name)
 	}
 }

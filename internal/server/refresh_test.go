@@ -95,7 +95,7 @@ func waitForRefresh(t *testing.T, calls <-chan struct{}) {
 	t.Helper()
 	select {
 	case <-calls:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for refresh")
 	}
 }

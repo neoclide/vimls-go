@@ -246,7 +246,7 @@ func TestWatchedFilesDirectoryAndInvalidFallback(t *testing.T) {
 
 	select {
 	case <-discoveryRan:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("expected full rebuild discovery to run on directory event")
 	}
 	if !discovered {

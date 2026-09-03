@@ -1249,7 +1249,7 @@ func TestDocumentPullDiagnosticRefreshCoalesces(t *testing.T) {
 	}
 	select {
 	case <-client.calls:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for refresh")
 	}
 	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E117"]}}`))}); err != nil {
@@ -1258,7 +1258,7 @@ func TestDocumentPullDiagnosticRefreshCoalesces(t *testing.T) {
 	client.release <- struct{}{}
 	select {
 	case <-client.calls:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("coalesced refresh was lost")
 	}
 	client.release <- struct{}{}

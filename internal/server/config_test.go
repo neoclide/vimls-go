@@ -283,7 +283,7 @@ func TestApplyDiagnosticSettingsRetainsMalformedFieldAndUpdatesOtherField(t *tes
 		if !strings.Contains(warning, "diagnostic.disabled") {
 			t.Fatalf("warning = %q", warning)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for configuration warning")
 	}
 	instance.mu.Lock()

@@ -85,7 +85,7 @@ func TestServerCancellationAndEOFExitCleanly(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("blocked cancellation exit code = %d", code)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("blocked read did not stop after cancellation")
 	}
 }

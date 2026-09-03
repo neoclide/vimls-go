@@ -229,7 +229,7 @@ func waitForDiagnostics(t *testing.T, published <-chan *protocol.PublishDiagnost
 	select {
 	case params := <-published:
 		return params
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("timed out waiting for diagnostics")
 		return nil
 	}

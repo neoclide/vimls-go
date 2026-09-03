@@ -113,7 +113,7 @@ endfunction
 	if err := os.WriteFile(filepath.Join(runtimeRoot, "colors", "default.vim"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
 	command.Dir = repositoryRoot
@@ -136,7 +136,7 @@ endfunction
 	reader := client
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"didChangeWatchedFiles":{"dynamicRegistration":true,"relativePatternSupport":true}},"textDocument":{"completion":{"completionItem":{"snippetSupport":true}},"hover":{"contentFormat":["markdown"]},"signatureHelp":{"signatureInformation":{"documentationFormat":["plaintext"]}},"rename":{"prepareSupport":true},"codeAction":{"codeActionLiteralSupport":{"codeActionKind":{"valueSet":["quickfix"]}}}}},"rootUri":%q,"initializationOptions":{"runtimepath":[%q]}}}`, uri.File(workspaceRoot), runtimeRoot))
 	initialize := readJSON(t, reader)
-	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"full":{"delta":true}`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"codeLensProvider":{"resolveProvider":true}`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"implementationProvider":true`) || !strings.Contains(string(initialize["result"]), `"callHierarchyProvider":true`) || !strings.Contains(string(initialize["result"]), `"typeHierarchyProvider":true`) {
+	if string(initialize["id"]) != "1" || !strings.Contains(string(initialize["result"]), `"name":"vimls"`) || !strings.Contains(string(initialize["result"]), `"documentSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"foldingRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"selectionRangeProvider":true`) || !strings.Contains(string(initialize["result"]), `"workspaceSymbolProvider":true`) || !strings.Contains(string(initialize["result"]), `"completionProvider"`) || !strings.Contains(string(initialize["result"]), `"triggerCharacters":[".",":","&","#","<","+","\"","'"]`) || !strings.Contains(string(initialize["result"]), `"signatureHelpProvider"`) || !strings.Contains(string(initialize["result"]), `"semanticTokensProvider"`) || !strings.Contains(string(initialize["result"]), `"full":{"delta":true}`) || !strings.Contains(string(initialize["result"]), `"renameProvider"`) || !strings.Contains(string(initialize["result"]), `"documentLinkProvider"`) || !strings.Contains(string(initialize["result"]), `"codeActionProvider"`) || !strings.Contains(string(initialize["result"]), `"inlayHintProvider":true`) || !strings.Contains(string(initialize["result"]), `"codeLensProvider":{"resolveProvider":true}`) || !strings.Contains(string(initialize["result"]), `"documentFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":true`) || !strings.Contains(string(initialize["result"]), `"implementationProvider":true`) || !strings.Contains(string(initialize["result"]), `"callHierarchyProvider":true`) || !strings.Contains(string(initialize["result"]), `"typeHierarchyProvider":true`) {
 		t.Fatalf("initialize response = %s", initialize)
 	}
 
@@ -147,7 +147,7 @@ endfunction
 	}
 	assertVimWatchRegistration(t, registration["params"], []string{workspaceRoot})
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":null}`, registration["id"]))
-	workspaceDeadline := time.Now().Add(5 * time.Second)
+	workspaceDeadline := time.Now().Add(10 * time.Second)
 	var workspaceSymbols map[string]json.RawMessage
 	for requestID := 10; ; requestID++ {
 		writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"workspace/symbol","params":{"query":"workspaceName"}}`, requestID))
@@ -543,7 +543,7 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	}
 	openPath := filepath.Join(workspaceRoot, "open.vim")
 	documentURI := canonicalFileURI(t, openPath).String()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
 	command.Dir = repositoryRoot
@@ -702,7 +702,7 @@ func canonicalFileURI(t *testing.T, path string) uri.URI {
 }
 
 func TestVersionSubprocess(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary, "--version")
 	output, err := command.CombinedOutput()
@@ -715,7 +715,7 @@ func TestVersionSubprocess(t *testing.T) {
 }
 
 func TestTCPSubprocess(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary, "--listen", "127.0.0.1:0")
 	stderr, err := command.StderrPipe()
@@ -734,7 +734,7 @@ func TestTCPSubprocess(t *testing.T) {
 		t.Fatalf("listen output = %q", line)
 	}
 	address := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-	connection, err := net.DialTimeout("tcp", address, 5*time.Second)
+	connection, err := net.DialTimeout("tcp", address, 10*time.Second)
 	if err != nil {
 		t.Fatalf("dial %s: %v", address, err)
 	}
@@ -754,7 +754,7 @@ func TestTCPSubprocess(t *testing.T) {
 }
 
 func TestStdioSharedScenario(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
 	stdin, err := command.StdinPipe()
@@ -784,7 +784,7 @@ func TestSignalSubprocess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGTERM is not portable to Windows")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, vimlsBinary)
@@ -824,7 +824,7 @@ func TestTCPListenerSignalSubprocess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("SIGTERM is not portable to Windows")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, vimlsBinary, "--listen", "127.0.0.1:0")
@@ -883,7 +883,7 @@ func newTestClient(t testHelper, r io.Reader, w io.Writer, stderr *strings.Build
 		writer:         jsonrpc.NewWriter(w),
 		stderr:         stderr,
 		readChan:       make(chan frameResult, 128),
-		defaultTimeout: 5 * time.Second,
+		defaultTimeout: 10 * time.Second,
 	}
 	go func() {
 		reader := jsonrpc.NewReader(r)

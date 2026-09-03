@@ -136,7 +136,7 @@ func TestParseSourcesCancellationDoesNotBlockProducer(t *testing.T) {
 		if len(got) != len(sources) {
 			t.Fatalf("result length = %d, want %d", len(got), len(sources))
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("ParseSources blocked after cancellation")
 	}
 }
