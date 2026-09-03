@@ -2215,12 +2215,18 @@ func waitForWorkspaceSymbols(t *testing.T, instance *Server, query string, count
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		symbols := workspaceSymbols(t, instance, query)
+		matches := workspaceSymbols(t, instance, query)
+		symbols := make(protocol.WorkspaceSymbolSlice, 0, len(matches))
+		for _, symbol := range matches {
+			if symbol.Name == query {
+				symbols = append(symbols, symbol)
+			}
+		}
 		if len(symbols) == count {
 			return symbols
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("workspace symbols for %q: got %d, want %d: %#v", query, len(symbols), count, symbols)
+			t.Fatalf("workspace symbols named %q: got %d, want %d (all fuzzy matches: %#v)", query, len(symbols), count, matches)
 		}
 		time.Sleep(time.Millisecond)
 	}
