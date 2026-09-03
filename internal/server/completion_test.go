@@ -798,6 +798,20 @@ func TestCompletionHighlightValueUsesUTF16EditRange(t *testing.T) {
 }
 
 func TestCompletionCommandSpecificFiniteValues(t *testing.T) {
+	for _, test := range []struct {
+		source, label string
+	}{
+		{"autocmd BufEnter <bu", "<buffer>"},
+		{"autocmd BufEnter * +", "++once"},
+		{"autocmd BufEnter * +", "++nested"},
+		{"autocmd BufEnter * ++once +", "++nested"},
+	} {
+		items := commandPartCompletionItems(t, test.source, 0, uint32(len(test.source)))
+		if completionItemWithLabel(items, test.label) == nil {
+			t.Errorf("%q completion %q missing from %#v", test.source, test.label, items)
+		}
+	}
+
 	items := commandPartCompletionItems(t, "augroup Existing\naugroup END\naugroup Exi", 2, uint32(len("augroup Exi")))
 	if completionItemWithLabel(items, "Existing") == nil || completionItemWithLabel(items, "END") != nil {
 		t.Fatalf("augroup completions = %#v", items)

@@ -126,7 +126,7 @@ func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 	if capabilities.DocumentLinkProvider == nil || capabilities.CompletionProvider == nil || capabilities.SignatureHelpProvider == nil || capabilities.RenameProvider == nil || capabilities.SemanticTokensProvider == nil || capabilities.CodeActionProvider == nil || capabilities.InlayHintProvider == nil {
 		t.Fatalf("language capabilities = %#v", capabilities)
 	}
-	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&", "#", "<", "\"", "'"}; !reflect.DeepEqual(got, want) {
+	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&", "#", "<", "+", "\"", "'"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("completion trigger characters = %#v, want %#v", got, want)
 	}
 	semanticOptions, ok := capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions)

@@ -73,6 +73,8 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
 		case completionContextSetOperator, completionContextSetValue, completionContextUserCommandAttribute, completionContextUserCommandAttributeValue:
 			selection = completionCommandPartSelection(file, offset, contextKind)
+		case completionContextAutocmdPattern, completionContextAutocmdModifier:
+			selection = completionAutocmdPartSelection(snapshot.Text(), offset)
 		case completionContextHighlightKey, completionContextHighlightValue:
 			selection = completionHighlightSelection(snapshot.Text(), file, offset, contextKind == completionContextHighlightValue)
 		case completionContextColorscheme:
@@ -513,6 +515,18 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 				}
 			}
+		} else if contextKind == completionContextAutocmdPattern {
+			add(protocol.CompletionItem{Label: "<buffer>", Kind: protocol.CompletionItemKindKeyword}, 8000, completionSourceCommand)
+		} else if contextKind == completionContextAutocmdModifier {
+			used := completionAutocmdModifiersAt(file, offset)
+			for _, label := range []string{"++once", "++nested"} {
+				if used[label] {
+					continue
+				}
+				if !add(protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindKeyword}, 8000, completionSourceCommand) {
+					break
+				}
+			}
 		} else if contextKind == completionContextMappingArgument {
 			var mapping *syntax.Mapping
 			walkCommands(file.Commands, func(command *syntax.Command) {
@@ -727,6 +741,62 @@ func completionCommandPartSelection(file *syntax.File, cursor int, contextKind c
 		}
 	}
 	return selection
+}
+
+func isSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
+}
+
+func completionAutocmdPartSelection(source string, cursor int) completionSelection {
+	if cursor < 0 {
+		cursor = 0
+	} else if cursor > len(source) {
+		cursor = len(source)
+	}
+	start := cursor
+	for start > 0 && !isSpace(source[start-1]) {
+		start--
+	}
+	end := cursor
+	for end < len(source) && !isSpace(source[end]) {
+		end++
+	}
+	return completionSelection{start: start, cursor: cursor, end: end, prefix: source[start:cursor]}
+}
+
+func autocmdModifierPrefixAt(source string, command *syntax.AutocmdCommand, offset int) bool {
+	if command == nil || command.Pattern.End >= offset || offset > len(source) {
+		return false
+	}
+	start := offset
+	for start > command.Pattern.End && !isSpace(source[start-1]) {
+		start--
+	}
+	if start == offset || source[start] != '+' {
+		return false
+	}
+	previous := command.Pattern.End
+	for _, modifier := range command.Modifiers {
+		if modifier.Span.End <= start {
+			previous = modifier.Span.End
+		}
+	}
+	return strings.TrimSpace(source[previous:start]) == ""
+}
+
+func completionAutocmdModifiersAt(file *syntax.File, offset int) map[string]bool {
+	used := make(map[string]bool)
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Autocmd == nil || !spanContains(command.Argument, offset) {
+			return
+		}
+		for _, modifier := range command.Autocmd.Modifiers {
+			if modifier.Span.End <= offset {
+				used[file.Text(modifier.Span)] = true
+			}
+		}
+	})
+	return used
 }
 
 func completionSetOptionAt(file *syntax.File, offset int) *syntax.SetOption {

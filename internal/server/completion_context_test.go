@@ -12,7 +12,7 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		source, at string
 		want       completionContext
 	}{
-		{"set noig", "noig", completionContextSetOption}, {"syntax key", "key", completionContextSyntaxSubcommand}, {"syntax keyword Group key", "Group", completionContextSyntaxGroup}, {"highlight link One Two", "Two", completionContextHighlight}, {"autocmd BufE *.vim echo 1", "BufE", completionContextAutocmdHead}, {"autocmd Group BufE *.vim echo 1", "BufE", completionContextAutocmdEvent}, {"silent echo 1", "silent", completionContextModifier},
+		{"set noig", "noig", completionContextSetOption}, {"syntax key", "key", completionContextSyntaxSubcommand}, {"syntax keyword Group key", "Group", completionContextSyntaxGroup}, {"highlight link One Two", "Two", completionContextHighlight}, {"autocmd BufE *.vim echo 1", "BufE", completionContextAutocmdHead}, {"autocmd Group BufE *.vim echo 1", "BufE", completionContextAutocmdEvent}, {"autocmd BufEnter <bu", "<bu", completionContextAutocmdPattern}, {"autocmd BufEnter * +", "+", completionContextAutocmdModifier}, {"silent echo 1", "silent", completionContextModifier},
 		{"set path+", "path+", completionContextSetOperator}, {"set ff=un", "un", completionContextSetValue},
 		{"augroup Pro", "Pro", completionContextAugroup}, {"command -co", "-co", completionContextUserCommandAttribute}, {"command -nargs=", "-nargs=", completionContextUserCommandAttributeValue},
 		{"command Build echo -nargs=", "-nargs=", completionContextExpression}, {"augroup One extra", "extra", completionContextExpression},
