@@ -143,7 +143,7 @@ func validateCharsOption(validation OptionValidation, value string) (OptionValue
 	listchars := validation.Kind == ValidationListChars
 	hasTab, hasLeadTab := false, false
 	offset := 0
-	for _, field := range strings.Split(value, ",") {
+	for field := range strings.SplitSeq(value, ",") {
 		end := offset + len(field)
 		name, characters, found := strings.Cut(field, ":")
 		if !found || name == "" {
@@ -191,14 +191,13 @@ func validateStatuslineOpt(value string) (OptionValueError, bool) {
 		return OptionValueError{}, false
 	}
 	offset := 0
-	for _, item := range strings.Split(value, ",") {
+	for item := range strings.SplitSeq(value, ",") {
 		end := offset + len(item)
 		if item == "fixedheight" {
 			offset = end + 1
 			continue
 		}
-		if strings.HasPrefix(item, "maxheight:") {
-			digits := strings.TrimPrefix(item, "maxheight:")
+		if digits, found := strings.CutPrefix(item, "maxheight:"); found {
 			if decimalPositive(digits) {
 				offset = end + 1
 				continue
@@ -232,7 +231,7 @@ func validateWinHighlight(value string) (OptionValueError, bool) {
 		return OptionValueError{}, false
 	}
 	offset := 0
-	for _, item := range strings.Split(value, ",") {
+	for item := range strings.SplitSeq(value, ",") {
 		end := offset + len(item)
 		from, to, found := strings.Cut(item, ":")
 		if !found || strings.Contains(to, ":") || from == "" || to == "" {

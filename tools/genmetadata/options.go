@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"go/format"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -563,11 +564,12 @@ func matchingBrace(source string, start int) int {
 			}
 			continue
 		}
-		if character == '"' {
+		switch character {
+		case '"':
 			inString = true
-		} else if character == '{' {
+		case '{':
 			depth++
-		} else if character == '}' {
+		case '}':
 			depth--
 			if depth == 0 {
 				return i
@@ -1271,9 +1273,7 @@ func parseNumberValidationBody(body string, variables []string, errorCodes map[s
 		return validation, nil
 	}
 	defines := make(map[string]int64, len(numericConstants))
-	for name, value := range numericConstants {
-		defines[name] = value
-	}
+	maps.Copy(defines, numericConstants)
 	definePattern := regexp.MustCompile(`(?m)^\s*#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)\s+(-?[0-9]+)\s*$`)
 	for _, match := range definePattern.FindAllStringSubmatch(body, -1) {
 		value, err := strconv.ParseInt(match[2], 10, 64)
@@ -1616,9 +1616,10 @@ func matchingCDelimiter(source string, start int, opening, closing byte) int {
 			inCharacter = true
 			continue
 		}
-		if character == opening {
+		switch character {
+		case opening:
 			depth++
-		} else if character == closing {
+		case closing:
 			depth--
 			if depth == 0 {
 				return i
