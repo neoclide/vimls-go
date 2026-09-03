@@ -235,6 +235,7 @@ func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
 	collectStyleDiagnostics(result)
 	if result.configFile {
 		collectConfigLeaderOrderDiagnostics(result)
+		collectConfigDuplicateMappingDiagnostics(result)
 	}
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start

@@ -94,3 +94,98 @@ func (state *leaderOrderState) noteAssignment(result *FileAnalysis, file *syntax
 	state.mappings = nil
 	state.assigned = true
 }
+
+// configMappingRecord tracks one mapping key that is statically active while a
+// configuration file is sourced (§5.1 duplicate-mapping).
+type configMappingRecord struct {
+	scope  string
+	modes  syntax.MappingMode
+	latest *syntax.Command
+}
+
+func configMappingScope(file *syntax.File, mapping *syntax.Mapping) string {
+	if mapping.Buffer {
+		return "buffer"
+	}
+	return "global"
+}
+
+// configMappingRecordKey identifies a mapping by its category (mapping vs
+// abbreviation), its local/global scope, and its literal LHS spelling.
+func configMappingRecordKey(file *syntax.File, mapping *syntax.Mapping) string {
+	category := "map"
+	if mapping.Abbreviation {
+		category = "abbreviation"
+	}
+	return category + "\x00" + configMappingScope(file, mapping) + "\x00" + file.Text(mapping.LHS)
+}
+
+// collectConfigDuplicateMappingDiagnostics reports vimls/duplicate-mapping for
+// configuration files (§5.1): when a later mapping definition overwrites an
+// earlier definition of the same key (same LHS spelling, same local/global
+// scope, same category) in overlapping modes on the same provable execution
+// path. :unmap and :mapclear terminate earlier definitions. Mutually exclusive
+// or dynamic contexts are not tracked, so no conflict is invented.
+func collectConfigDuplicateMappingDiagnostics(result *FileAnalysis) {
+	file := result.File
+	if file == nil || len(file.Diagnostics) != 0 {
+		return
+	}
+	records := make(map[string]*configMappingRecord)
+	for index := range file.Commands {
+		if !unconditionalAt(file.Commands, file.Blocks, index) {
+			continue
+		}
+		command := &file.Commands[index]
+		mapping := command.Mapping
+		if mapping == nil {
+			continue
+		}
+		if mapping.Kind == syntax.MappingClear {
+			// :mapclear removes every mapping of its modes for its scope.
+			scope := configMappingScope(file, mapping)
+			for existingKey, existing := range records {
+				if existing.scope == scope && existing.modes&mapping.Mode != 0 {
+					existing.modes &^= mapping.Mode
+					if existing.modes == 0 {
+						delete(records, existingKey)
+					}
+				}
+			}
+			continue
+		}
+		if mapping.Query || mapping.LHS.Start == mapping.LHS.End {
+			continue
+		}
+		key := configMappingRecordKey(file, mapping)
+		switch mapping.Kind {
+		case syntax.MappingDefine, syntax.MappingNoremap:
+			record := records[key]
+			if record != nil && record.modes&mapping.Mode != 0 {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code:    "vimls/duplicate-mapping",
+					Message: "mapping for " + file.Text(mapping.LHS) + " is defined again; the later definition overwrites the earlier one",
+					Span:    mapping.LHS,
+					Related: syntax.RelatedDiagnostic{
+						Message: "earlier definition of " + file.Text(mapping.LHS),
+						Span:    record.latest.Mapping.LHS,
+					},
+				})
+			}
+			if record == nil {
+				record = &configMappingRecord{}
+				records[key] = record
+			}
+			record.modes |= mapping.Mode
+			record.scope = configMappingScope(file, mapping)
+			record.latest = command
+		case syntax.MappingUnmap:
+			if record := records[key]; record != nil {
+				record.modes &^= mapping.Mode
+				if record.modes == 0 {
+					delete(records, key)
+				}
+			}
+		}
+	}
+}

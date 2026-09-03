@@ -70,6 +70,7 @@ the default message more specific without changing its code.
 | `vimls/deprecated` | Hint | symbol is deprecated |
 | `vimls/diagnostics-truncated` | Warning | additional diagnostics were omitted |
 | `vimls/direct-user-keymap` | Hint | user key mapping reduces configurability; consider exposing a `<Plug>` mapping |
+| `vimls/duplicate-mapping` | Warning | mapping for the same key is defined more than once; the later definition overwrites the earlier one |
 | `vimls/echoerr` | Hint | echoerr always raises an error; use it only for intended failures |
 | `vimls/embedded-command-depth` | Information | embedded command nesting exceeds parser limit |
 | `vimls/explicit-local-scope` | Hint | use an explicit local scope for this variable |

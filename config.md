@@ -368,7 +368,11 @@ let g:loaded_my_vimrc = 1
 
 ### P1（§9 P1 提高编辑体验）
 
-- [ ] 确定的同文件重复 mapping 检查（`vimls/duplicate-mapping`）。
+- [x] 确定的同文件重复 mapping 检查（`vimls/duplicate-mapping`）。
+  - 配置模式（同一无条件直线序列）下报告静态确定的后一个定义并 related 指向前一个定义；
+    比较键含 effective mode 集合（`map`=nvso、`map!`=ic、`vmap` 与 `xmap`/`smap` 按 mode 交集），
+    规范化字面量 LHS（`<Leader>` 同拼写比较）、global/`<buffer>` scope、mapping 与 abbreviation
+    类别；`unmap`/`mapclear` 会终止相应前序定义；条件分支内定义不做证明（不误报）。
 - [ ] loaded guard Hint（`vimls/config-loaded-guard`）与 Vim9 reload 组合检查。
 - [ ] augroup、函数和 mapping snippet。
 - [ ] autocmd、`<expr>`/`<Cmd>` mapping、回调选项中的静态导航。

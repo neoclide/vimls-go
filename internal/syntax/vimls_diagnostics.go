@@ -35,6 +35,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/deprecated", Message: "symbol is deprecated", Severity: DiagnosticHint},
 	{Code: "vimls/diagnostics-truncated", Message: "additional diagnostics were omitted", Severity: DiagnosticWarning},
 	{Code: "vimls/direct-user-keymap", Message: "user key mapping reduces configurability; consider exposing a <Plug> mapping", Severity: DiagnosticHint},
+	{Code: "vimls/duplicate-mapping", Message: "mapping for the same key is defined more than once; the later definition overwrites the earlier one", Severity: DiagnosticWarning},
 	{Code: "vimls/echoerr", Message: "echoerr always raises an error; use it only for intended failures", Severity: DiagnosticHint},
 	{Code: "vimls/embedded-command-depth", Message: "embedded command nesting exceeds parser limit", Severity: DiagnosticInformation},
 	{Code: "vimls/explicit-local-scope", Message: "use an explicit local scope for this variable", Severity: DiagnosticHint},
