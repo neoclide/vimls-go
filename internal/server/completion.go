@@ -54,6 +54,8 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 	s.mu.Lock()
 	excludeRuntimePath := s.excludeRuntimePathCompletions
 	s.mu.Unlock()
+	// §7 relevance: configuration files reuse the role decided from the path.
+	configFile := s.configFileRoleForURI(params.TextDocument.URI.String())
 	for attempt := range 2 {
 		snapshot, file, analysisResult, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 		if err != nil {
@@ -566,6 +568,14 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						break
 					}
 				}
+				// §7 P1: user configuration files get a <Leader> mapping
+				// skeleton at the empty LHS position (no <unique>).
+				if configFile && canSnippet && mapping.LHS.Start == mapping.LHS.End && mapping.RHS.Start == mapping.RHS.End {
+					item := configMappingSkeleton()
+					if completionTextMatches(selection.prefix, item.Label) && !add(item, 9000, completionSourceCommand) {
+						break
+					}
+				}
 			}
 		} else {
 			for _, command := range vimdata.Commands() {
@@ -573,7 +583,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					continue
 				}
 				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command")}
-				if snippet, ok := commandBlockSnippet(command.Name, file.Dialect, canSnippet); ok {
+				if snippet, ok := commandBlockSnippet(command.Name, file.Dialect, canSnippet, configFile); ok {
 					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
 				}

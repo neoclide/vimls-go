@@ -62,10 +62,27 @@ func completionSnippetItems(dialect syntax.Dialect, enabled bool) []protocol.Com
 	return items
 }
 
+// configMappingSkeleton is the §7 P1 mapping skeleton for user configuration
+// files. It is offered at the mapping LHS position, deliberately without
+// <unique>, and leaves the key and the command payload as placeholders the
+// user confirms.
+func configMappingSkeleton() protocol.CompletionItem {
+	const insertText = "<Leader>${1:key} ${2:<Cmd>call ${3:Function}()<CR>}"
+	return protocol.CompletionItem{
+		Label:            "<Leader>",
+		Kind:             protocol.CompletionItemKindSnippet,
+		InsertText:       protocol.NewOptional(insertText),
+		InsertTextFormat: protocol.InsertTextFormatSnippet,
+		Documentation:    &protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: "```vim\n" + insertText + "\n```"},
+	}
+}
+
 // commandBlockSnippet returns a block snippet for an Ex command when snippet
 // expansion is enabled and the command starts a block that benefits from a
-// source template.
-func commandBlockSnippet(name string, dialect syntax.Dialect, enabled bool) (string, bool) {
+// source template. In user configuration files the :function block omits the
+// "!" (Vim v9.2.1015 silently replaces same-script functions on re-source, so
+// a bang is neither needed nor safer there).
+func commandBlockSnippet(name string, dialect syntax.Dialect, enabled, configFile bool) (string, bool) {
 	if !enabled {
 		return "", false
 	}
@@ -80,6 +97,9 @@ func commandBlockSnippet(name string, dialect syntax.Dialect, enabled bool) (str
 		return "try\n\t$1\ncatch /.*/\n\t$0\nendtry", true
 	case "function":
 		if dialect == syntax.Legacy {
+			if configFile {
+				return "function ${1:Name}()\n\t$0\nendfunction", true
+			}
 			return "function! ${1:Name}()\n\t$0\nendfunction", true
 		}
 	case "def":

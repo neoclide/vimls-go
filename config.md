@@ -382,7 +382,11 @@ let g:loaded_my_vimrc = 1
     `let g:loaded_*` 标记赋值（Legacy）时给 Hint；Vim9 无需标记并带 reload 半初始化提示，
     `vim9script noclear` 显式单次加载设计豁免。不误报 `exists('*Func')`/`:Cmd`/`+opt`/`##Event`、
     `has()`、`!exists` 初始化、函数内 `finish`、缺标记或 else 分支里的 `finish`。
-- [ ] augroup、函数和 mapping snippet。
+- [x] augroup、函数和 mapping snippet。
+  - 复用现有 augroup（含 `autocmd!` 与 `augroup END`）、Legacy `function ... abort`/Vim9 `def` 模板；
+    配置模式下 `:function` 块不再默认带 `!`（与 §4.2 的重新 source 语义一致，plugin 角色保持 `!`）；
+    配置模式新增 `<Leader>` mapping 骨架 snippet（含 `<Cmd>call ...` 占位、无 `<unique>`），
+    仅在 LHS 空位与 snippet-capable 客户端提供。
 - [ ] autocmd、`<expr>`/`<Cmd>` mapping、回调选项中的静态导航。
 
 ### P2（§9 P2 需要完整索引证据）

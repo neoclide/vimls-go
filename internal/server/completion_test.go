@@ -235,7 +235,7 @@ func TestCompletionSnippetsRequireClientSupportAndMatchDialect(t *testing.T) {
 		name, source, label, want string
 		line, character           uint32
 	}{
-		{name: "legacy block", source: "fun\n", label: "function", want: "function! ${1:Name}()\n\t$0\nendfunction", character: 3},
+		{name: "legacy block (config role standalone)", source: "fun\n", label: "function", want: "function ${1:Name}()\n\t$0\nendfunction", character: 3},
 		{name: "Vim9 block", source: "vim9script\nde\n", label: "def", want: "def ${1:Name}()\n\t$0\nenddef", line: 1, character: 2},
 		{name: "user function", source: "vim9script\ndef Call(value: number)\nenddef\necho Cal\n", label: "Call", want: "Call(${1:value})$0", line: 3, character: 8},
 		{name: "builtin function", source: "vim9script\necho strl\n", label: "strlen", want: `strlen(${1:{string\}})$0`, line: 1, character: 9},
@@ -306,7 +306,7 @@ func TestCompletionPortableSnippetsAndVim9Blocks(t *testing.T) {
 		{name: "for command", source: "for\n", label: "for", want: "for ${1:item} in ${2:list}\n\t$0\nendfor", character: 3, command: true},
 		{name: "while command", source: "while\n", label: "while", want: "while ${1:condition}\n\t$0\nendwhile", character: 5, command: true},
 		{name: "try command", source: "try\n", label: "try", want: "try\n\t$1\ncatch /.*/\n\t$0\nendtry", character: 3, command: true},
-		{name: "legacy function command", source: "function\n", label: "function", want: "function! ${1:Name}()\n\t$0\nendfunction", character: 8, command: true},
+		{name: "legacy function command (config role standalone)", source: "function\n", label: "function", want: "function ${1:Name}()\n\t$0\nendfunction", character: 8, command: true},
 		{name: "Vim9 def command", source: "vim9script\ndef\n", label: "def", want: "def ${1:Name}()\n\t$0\nenddef", line: 1, character: 3, command: true},
 		{
 			name:      "Vim9 class template",

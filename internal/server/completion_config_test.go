@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -150,5 +151,85 @@ func TestConfigCompletionOrderingInvariants(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// snippetText returns the snippet insert text of an item or "".
+func snippetText(item *protocol.CompletionItem) string {
+	if value, ok := item.InsertText.Get(); ok {
+		return value
+	}
+	if edit, ok := item.TextEdit.(*protocol.TextEdit); ok {
+		return edit.NewText
+	}
+	return ""
+}
+
+// TestConfigSnippetTemplates verifies §7 P1 for user configuration files: the
+// mapping skeleton appears only in config files, the legacy :function block
+// omits "!", and neither defaults to <unique> or a bang.
+func TestConfigSnippetTemplates(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginPath := filepath.Join(root, "plugin", "demo.vim")
+	if err := os.MkdirAll(filepath.Dir(pluginPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pluginPath, []byte("let g:pluginSet = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	itemWithLabel := func(t *testing.T, instance *Server, documentURI uri.URI, source string, line, character uint32, label string) *protocol.CompletionItem {
+		t.Helper()
+		instance.completion.snippet = true
+		instance.documents.Open(documentURI.String(), 1, source)
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: line, Character: character},
+		}})
+		if err != nil {
+			t.Fatalf("completion: %v", err)
+		}
+		for _, item := range completionItems(t, result) {
+			if item.Label == label {
+				return &item
+			}
+		}
+		return nil
+	}
+
+	configURI := uri.File(filepath.Join(root, ".vimrc"))
+	pluginURI := uri.File(pluginPath)
+
+	// Config files offer a <Leader> mapping skeleton (LHS position) without
+	// <unique>.
+	config := newRootedServer(t, root)
+	item := itemWithLabel(t, config, configURI, "nnoremap \n", 0, uint32(len("nnoremap ")), "<Leader>")
+	if item == nil {
+		t.Fatal("config mapping skeleton missing")
+	}
+	if text := snippetText(item); !strings.HasPrefix(text, "<Leader>") || strings.Contains(text, "<unique>") || !strings.Contains(text, "<Cmd>") {
+		t.Fatalf("mapping skeleton = %q", text)
+	}
+	if item.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Fatalf("mapping skeleton format = %v", item.InsertTextFormat)
+	}
+
+	// Plugin files do not offer the config mapping skeleton.
+	plugin := newRootedServer(t, root)
+	if item := itemWithLabel(t, plugin, pluginURI, "nnoremap \n", 0, uint32(len("nnoremap ")), "<Leader>"); item != nil {
+		t.Fatalf("plugin file offered mapping skeleton: %#v", item)
+	}
+
+	// The :function block omits "!" in config files but keeps it in plugins.
+	configFn := itemWithLabel(t, newRootedServer(t, root), configURI, "function\n", 0, uint32(len("function")), "function")
+	if configFn == nil || strings.Contains(snippetText(configFn), "function!") {
+		t.Fatalf("config function block = %#v", configFn)
+	}
+	pluginFn := itemWithLabel(t, newRootedServer(t, root), pluginURI, "function\n", 0, uint32(len("function")), "function")
+	if pluginFn == nil || !strings.Contains(snippetText(pluginFn), "function!") {
+		t.Fatalf("plugin function block = %#v", pluginFn)
 	}
 }
