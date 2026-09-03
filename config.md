@@ -351,8 +351,15 @@ let g:loaded_my_vimrc = 1
     字面 pattern 覆盖；`autocmd! Event Pattern cmd` 替换形式自身不累积且覆盖同 (event, pattern)
     后续定义；`++once` 不视为安全；条件/循环内的清除不做证明；`execute` 动态内容保持 unknown
     不报告；显式组写法按组名（大小写敏感）归属；空组/查询/无定义组不报告。
-- [ ] P0-4：`mapleader`/`maplocalleader` 定义顺序诊断。
-- [ ] P0-5：保持 E113/E518 与选项元数据的 pinned-version 行为（补测试/审计）。
+- [x] P0-4：`mapleader`/`maplocalleader` 定义顺序诊断。
+  - 新增 `vimls/config-mapleader-order`（Warning，指向较早 mapping，related 指向后续赋值）：
+    仅配置模式、同一无条件顶层直线序列内，<Leader>/<LocalLeader> mapping 先于对应 leader
+    的静态字面量赋值时报告；动态赋值、条件块、函数体内 mapping 均保持 unknown 不报告；
+    赋值在 mapping 前或赋值间隔后的 mapping 不报告；`mapleader` 与 `g:mapleader` 等价。
+- [x] P0-5：保持 E113/E518 与选项元数据的 pinned-version 行为。
+  - 新增配置模式回归测试（`config_option_test.go`）：短/长名称、`no`/`inv`、`+=`/`-=`/`^=`/`?`/`&`、
+    `:setlocal`/`:setglobal`、`&g:`/`&l:` 与未知 `t_` 终端选项的 E113/E518 行为与插件模式一致，
+    选项元数据（vimdata，pinned v9.2.1015）在两种角色下等价，无任何配置专属偏差。
 - [ ] P0-6：配置模式补全排序实现与测试（`configFiles`/vimrc 角色的相关性排序）。
 
 ### P1（§9 P1 提高编辑体验）

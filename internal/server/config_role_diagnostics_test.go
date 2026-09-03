@@ -224,6 +224,50 @@ func TestConfigFileRoleRecursiveMapSeverityHint(t *testing.T) {
 	}
 }
 
+// TestConfigFileRoleMapleaderOrderPublishesOnlyForConfigFiles verifies §5.2
+// end to end: vimls/config-mapleader-order is published for a .vimrc whose
+// mapping precedes the leader assignment, and never for the plugin role.
+func TestConfigFileRoleMapleaderOrderPublishesOnlyForConfigFiles(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := "map <Leader>a :echo 1<CR>\nlet g:mapleader = ','\n"
+	pluginPath := filepath.Join(root, "plugin", "demo.vim")
+	if err := os.MkdirAll(filepath.Dir(pluginPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pluginPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vimrcPath := filepath.Join(root, ".vimrc")
+	if err := os.WriteFile(vimrcPath, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	openAndWait := func(t *testing.T, path string) map[string]int {
+		t.Helper()
+		instance := newRootedServer(t, root)
+		client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+		instance.client = client
+		documentURI := uri.MustParse(path)
+		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+			URI: documentURI, Version: 1, Text: source,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		return publishedCodes(waitForDiagnostics(t, client.published))
+	}
+
+	code := "vimls/config-mapleader-order"
+	if codes := openAndWait(t, uri.File(pluginPath).String()); codes[code] != 0 {
+		t.Fatalf("plugin file reported %s: %#v", code, codes)
+	}
+	if codes := openAndWait(t, uri.File(vimrcPath).String()); codes[code] != 1 {
+		t.Fatalf("config file reported %s %d times, want 1: %#v", code, codes[code], codes)
+	}
+}
+
 // TestProtocolDiagnosticsSameFileRelatedInformation verifies that a related
 // diagnostic without an explicit URI is published against the current document
 // (used by the config-mode augroup report).

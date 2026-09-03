@@ -65,6 +65,7 @@ the default message more specific without changing its code.
 | `vimls/catch-error-message` | Warning | catching human-readable error text is fragile |
 | `vimls/complex-autocmd` | Hint | complex autocommand body; consider delegating to a function |
 | `vimls/complex-command` | Hint | complex user command body; consider delegating to a function |
+| `vimls/config-mapleader-order` | Warning | mapping is defined before the leader assignment; `<Leader>` is expanded when the mapping is defined |
 | `vimls/configuration-overwrite` | Warning | unconditional configuration assignment may overwrite a user value |
 | `vimls/deprecated` | Hint | symbol is deprecated |
 | `vimls/diagnostics-truncated` | Warning | additional diagnostics were omitted |
