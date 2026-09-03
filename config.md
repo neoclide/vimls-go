@@ -199,7 +199,7 @@ let g:loaded_my_vimrc = 1
 - `&missing`、`&g:missing`、`&l:missing` 使用 E113；
 - `:set missing`、`:setlocal missing`、`:setglobal missing` 使用 E518。
 
-检查前必须正确处理短名称，以及 `no`、`inv`、`+=`、`-=`、`^=`、`?`、`&`、`<` 等形式。未知 `t_` 终端选项依赖终端和构建，保持 unknown。
+检查前必须正确处理短名称，以及 `no`、`inv`、`+=`、`-=`、`^=`、`?`、`&`、`<` 等形式。未知 `t_` 终端选项依赖终端和构建，不做名称或值诊断。
 
 ### 6.2 作用域建议
 
@@ -210,13 +210,198 @@ let g:loaded_my_vimrc = 1
 
 ### 6.3 值检查
 
-优先补全，不急于诊断。只有当固定值集合和错误语义在 Vim v9.2.1015 中可精确证明时，才检查枚举值、布尔形式或范围；路径、表达式、逗号列表、平台相关值和 feature 相关值保持 unknown。
+选项值诊断必须在**完整迁移 Vim v9.2.1015 的每个选项定义之后**启用，不能继续扩充
+手写的 `fixedOptionValues` 并把补全候选误当成合法值全集。迁移与检查分为以下阶段。
 
-不要创建一个笼统的“invalid option value”规则来替代不同的 Vim 原生错误。
+#### 6.3.1 完整定义的来源与内容
+
+现有生成器已经从 `src/optiondefs.h` 迁移 469 个普通选项与 93 个 `t_` 终端选项，
+但每项仅保留名称、短名、粗粒度类型、作用域和帮助文本。下一步仍在
+`tools/genmetadata` 与 `internal/vimdata` 内扩展现有实现，不新建独立包；生成器继续通过
+`git show v9.2.1015:<path>` 读取固定提交，而不依赖 Vim checkout 的当前 HEAD。
+
+每个普通选项的生成定义必须保留：
+
+- `fullname`、`shortname`，以及 `P_BOOL`/`P_NUM`/`P_STRING`；
+- `option.h` 中所有声明性 flags，而不只保留当前用到的 `P_COMMA`、`P_FLAGLIST` 等；
+- `var`、`indir` 及其条件编译分支，用于区分 global、window、buffer、global-local，并推导该
+  option 可用所需的完整编译条件；
+- `opt_did_set_cb` 与 `opt_expand_cb` 的原始函数符号；`NULL` 也必须显式保留；
+- Vi/Vim 两套默认值的原始常量或字面量，以及影响它们的平台/feature 条件；不能把条件默认值
+  折叠成生成机器上的一个值；
+- 帮助文档来源，以及定义和校验回调所在的 Vim 源文件与符号。
+
+`t_` 终端选项也保留在完整清单中，但其存在和值由终端、构建和运行环境决定，不启用值校验。
+语言服务器不能因为固定 tag 的 `p_term()` 清单中没有某个 `t_XX` 就报告错误。
+
+迁移时的权威文件分工固定为：`optiondefs.h` 提供每项定义，`option.h` 提供 flags 语义，
+`optionstr.c` 提供字符串 callback 与补全数组，`option.c` 提供数值 callback 和通用 bounds，
+`errors.h` 提供错误 code，`src/testdir/test_options.vim` 及各 option 所属的专项测试提供行为证据。
+帮助文本只能补充解释，不能覆盖这些源码与测试结论。
+
+生成器不能继续用只截取前三列的正则表达式承担完整迁移。应使用一个有界的 C 初始化器扫描器：
+识别 `options[]` 的条目边界、字符串/注释/括号，并记录 `#if`/`#else`/`#endif` 条件栈；不需要实现
+通用 C 解析器。任何无法解析的条目、flag、callback、default 或条件分支都使生成失败，不能静默
+降级成空字段。
+
+#### 6.3.2 补全数据与校验规则分离
+
+`opt_expand_cb` 给出的只是命令行补全候选，不一定是合法值全集；`opt_did_set_cb` 还可能只执行
+副作用而不拒绝值。因此生成数据必须把以下内容分开：
+
+1. `CompletionValues`：从 `expand_set_*` 及其固定数组迁移，用于补全；替代当前手写
+   `fixedOptionValues`，并保持已有候选顺序。
+2. `Validation`：仅在能静态证明错误时描述一个不执行 Vim C 代码的纯校验规则；至少区分
+   exact enum、逗号列表、单字符 flag list、数值范围和结构化语法。不能静态校验的项不生成规则。
+3. `MigrationStatus`：这是生成器的迁移完整性分类，不是值校验结果。每个选项必须明确标记
+   `validator`、`skip-dynamic`、`skip-side-effect`、`skip-runtime`、`skip-build` 或迁移期间的
+   `not-yet-ported`，并带 Vim callback 来源。
+
+“完整”表示 562 个选项都有来源完整的定义和明确分类，不表示强行给 562 个选项制造错误。
+生成器应拒绝未分类的新 option 或 callback，这样 Vim tag 升级时不会静默漏掉新语义。迁移阶段
+可以使用 `not-yet-ported` 暴露进度，但开始启用值诊断前必须清零；最终没有 validator 的项必须由
+脚本根据源代码明确归类为 skip-dynamic、skip-runtime、skip-build 或 skip-side-effect，而不是人工漏项。
+
+建议直接扩展现有 `vimdata.Option`，而不是再加一层 service/registry。字段关系应能表达下面的
+等价信息（名称可在实现时按现有风格调整）：
+
+```go
+type Option struct {
+    Name, ShortName string
+    Type             OptionType
+    Scope            OptionScope
+    Flags            []string
+    Variants         []OptionVariant
+    CompletionValues []string
+    AvailableWhen    string
+    RequiredFeatures []string
+    DefinitionSource string
+    DefinitionLine   int
+    // Added when a pure validator is implemented:
+    Validation       OptionValidation
+    Documentation, DocumentationSource string
+}
+
+type OptionVariant struct {
+    Condition                  string
+    Variable, Indirect         string
+    DidSetCallback, ExpandCallback string
+    ViDefault, VimDefault      string
+}
+```
+
+同一 option 在不同 `#if` 分支中的 storage、callback 或 default 不得相互覆盖；无条件且完全相同的
+分支才可在生成时合并。由于结构中包含 slice，现有 `Options()` 的“调用者拥有返回值”合同也必须
+升级为深拷贝测试，不能把 generated backing arrays 暴露给调用方。
+
+校验规则至少需要表达：允许值或 flag、是否允许空值、列表分隔方式、是否允许连续逗号和重复项、
+静态上下界、对应 Vim 错误 code，以及规则成立所需的平台/feature 条件。复杂 callback 不应被
+翻译成一个万能正则；它应保留 callback 身份，并在专属纯函数完成前保持 `not-yet-ported`。
+
+迁移脚本负责把所有 option 与 callback 映射为有限的规则类型：直接读取固定 value arrays、flag
+常量、通用 `did_set_opt_strings()`/`did_set_option_listflag()` 调用、静态数值比较和返回的 Vim
+错误符号；同一种结构只生成一个规则实现和不同参数。无法化约为这些共享形态的 callback 映射到
+按语法类别实现的 custom rule；custom rule 的数量由不同语法决定，不按 option 数量复制。
+脚本必须对 callback body 的未消费判断、返回分支或新调用报错，避免 Vim 升级后沿用不完整规则。
+
+#### 6.3.3 只报告可证明错误的边界
+
+值校验入口只返回“一个确定的 Vim diagnostic”或“不返回 diagnostic”，不引入 valid/invalid/unknown
+状态。只有以下条件同时成立才返回 diagnostic：
+
+- 选项、运算符和值都被结构化解析，且值是无需执行代码即可确定的字面量；
+- 对该赋值形式存在已迁移的纯校验规则；
+- 相同错误在目标 tag 的所有相关平台/feature 分支上成立；
+- 能使用 Vim 实际返回的原生错误 code 和对应值 span。
+
+首批接入 `:set`、`:setlocal`、`:setglobal` 的完整替换运算符 `=`/`:`，以及
+`:let &option = literal` 和 Vim9 的 `&option = literal`。字符串表达式必须先按各自语法解码；
+`:set` 的反斜杠转义与 Vim 表达式字符串不是同一种规则。
+
+`+=`、`^=`、`-=` 的最终结果依赖旧值。只有新增片段自身无论旧值为何都非法时才能报告；重复项、
+最终长度、最终范围等依赖状态的情况不运行对应校验。变量、函数调用、字符串拼接、插值、
+`execute()`、环境展开和无法静态求值的表达式直接跳过，不产生值诊断。
+
+以下选项默认不启用值校验：
+
+- 路径、shell 命令、编码、locale、runtime 名称或外部程序相关值；
+- 校验依赖当前 buffer/window、终端能力、屏幕尺寸或其他 option 当前值；
+- 某些构建中 option 不可用，或不同平台/feature 分支的接受集合不同；
+- callback 会触发 autocommand、加载 runtime 文件或包含无法隔离的副作用，而错误条件尚未被
+  纯函数完整迁移。
+
+语言服务器只移植**声明性定义与纯校验语义**，不移植或模拟 callback 的副作用，也绝不执行
+用户 Vimscript。
+
+#### 6.3.4 错误码与启用顺序
+
+不能新增笼统的 `vimls/invalid-option-value`。每条规则使用固定 Vim 实际产生的错误，例如
+`vim/E474`（Invalid argument）或 `vim/E487`（Argument must be positive）；若同一 callback 在
+不同失败分支返回不同 code，规则也必须保留该区别。无法确定具体分支时不报告 Error。
+
+实现顺序固定为：
+
+1. 先完成全部 option 定义、callback/expander inventory、默认值与条件分支迁移，此阶段不新增诊断；
+2. 用生成的 completion 数据替换手写表，并证明候选无回退；
+3. 接入无状态的 exact enum 与单值规则；
+4. 接入逗号列表、flag list 及其 `P_ONECOMMA`/`P_NODUP`/`P_COLON` 结构规则；
+5. 接入不依赖运行状态的数值集合与上下界；
+6. 最后逐个迁移 `did_set_*` 中的结构化纯校验；动态或副作用 callback 不生成 validator。
+
+每一批只启用已经由迁移脚本从 pinned Vim 源码完整提取、并由该规则类型的代表性正反例验证过的
+规则。不得因为 callback 名称、帮助文本措辞或 completion 数组看起来像枚举就推断错误语义。
+
+#### 6.3.5 测试与验收
+
+完整定义迁移的生成器门槛：
+
+- 562 个 option 全部可追溯，名称/短名唯一，type/scope/flags/callback/default/条件分支均不丢失；
+- optiondefs 中出现的每个 `did_set_*`、`expand_set_*` 和 `NULL` 都被 inventory 覆盖；
+- 每个 option 都有明确 `MigrationStatus`，tag 升级新增未分类项时 `metadata-check` 失败；
+- 两次生成 byte-for-byte 一致，且不受 checkout 当前分支、平台或本机 feature 集影响；
+- 生成的 completion 数据覆盖 66 个具有静态数组或 flag 字符串的 option，原有 30 项候选及顺序
+  保持不变；动态 callback 不生成静态候选。
+
+测试不按 562 个 option 展开，也不按错误 code 复制官方测试。测试单位是**不同的迁移和校验情况**：
+
+- C initializer 的普通项、条件分支、不可用分支、两套 default 与 `p_term()`；
+- 无 callback、纯副作用 callback、固定 enum、逗号列表、单字符 flags、静态 number bounds、
+  custom structured grammar，以及 dynamic/runtime/build-dependent 跳过分类；
+- 空值、重复项、连续分隔符、非法 flag、上下界内外和同一规则的不同 Vim 错误分支；
+- `:set` 与 option expression、短名、Legacy/Vim9、转义、incomplete 输入，以及动态值不产生诊断。
+
+每种情况选择一个最小代表 option 做端到端断言；共享规则再用 table test 覆盖参数差异，不为每个
+option 重复相同测试。对全部 option 的保证来自生成器 invariant：每项字段完整、每个 callback body
+已消费、每项引用的 rule kind 和参数有效、没有 `not-yet-ported`，而不是 562 组手工行为测试。
+
+迁移脚本完成后必须额外生成一份可读 Vim 脚本，按迁移结果为清单中的每个 option 写出对应的
+`:set` 命令，并用干净的 Vim v9.2.1015 进程完整执行一次。脚本不能在首个错误处退出；每条命令
+都要保留 option 名称与源码 provenance，并收集 `v:errors`、`:messages`、异常、退出状态、Vim
+版本和 patch level，使失败能直接定位到迁移错误。受当前构建影响而不可用的 option
+也必须出现在脚本中，其预期结果由迁移出的条件分支决定，不能从生成脚本中静默省略。
+
+这次全量 Vim 执行用于确认每个 option 的迁移结果确实能被目标 Vim 接受，不需要再为每个 option
+复制一份 Go 行为测试，也不保存按 option 或错误码批量展开的诊断 artifact。规则级 Go 测试仍只
+覆盖上一段列出的不同情况。正常语言服务器分析不启动 Vim；feature/platform 分支无法由静态迁移
+证明一致时仍不生成值校验器。
+
+每批默认验证：
+
+    gofmt -w <changed-go-files>
+    VIM_SOURCE=/Users/chemzqm/lib/vim make metadata-check
+    go test ./internal/vimdata ./tools/genmetadata ./internal/syntax ./internal/analysis ./internal/server
+    go test ./...
+    go vet ./...
+
+不运行 race 或 coverage，除非任务另有要求。
 
 ## 7. 补全、Hover 与导航
 
 配置模式只调整相关性，不改变语义结果：
+
+option hover 对 `AvailableWhen != "1"` 的条目显示由 pinned `optiondefs.h` 推导出的 Vim 编译条件；
+简单的单个 `FEAT_*` 条件同时显示对应的 `+feature` 名称，复杂的平台/feature 表达式保持原样以免
+错误简化。当前只展示要求，不探测 client Vim 的实际 feature，也不新增“不支持选项”诊断。
 
 ### P0：排序优化
 
@@ -302,7 +487,7 @@ let g:loaded_my_vimrc = 1
 1. 静态 source 图与 source cycle 检查。
 2. 有确定 source 顺序时的跨文件 mapping 冲突。
 3. `:source`、`:runtime`、`:packadd` 补全和导航扩展。
-4. 经官方测试逐项确认的固定选项值诊断。
+4. 完整选项定义迁移，以及经官方测试按规则情况确认的值、列表、范围和结构诊断。
 
 ## 10. 测试要求
 
@@ -413,9 +598,22 @@ let g:loaded_my_vimrc = 1
     与参数语法位识别。
   - 决定：`runtime`/`packadd` 的路径解析与补全列为后续工作项，需先补齐 runtimepath 顺序与
     `pack/*/start|opt/*` 路径索引及 `<sfile>`/转义的 v9.2.1015 语义确认。
-- [ ]（评估：推迟）经官方测试逐项确认的固定选项值诊断。
-  - 按 §6.3 仅当固定值集合与错误语义可在 v9.2.1015 中精确证明（test_options.vim 等逐项证据）
-    才开启；本里程碑保持 unknown 保守策略，不引入笼统的 “invalid option value” 规则。
+- [ ]（基础值诊断已实现，结构化 callback 待实现）完整选项定义迁移与可证明的值诊断。
+  - `Option` 已迁移 562 项的完整 flags、条件 storage/default、`did_set`/`expand` callback 和源码行号；
+    `metadata-check` 会拒绝字段或生成结果遗漏，生成的 Vim 脚本也已在 v9.2.1015 中逐项执行 `:set`。
+  - `expand_set_*` 的固定数组与 flag 字符串已由脚本迁移为 66 项 `CompletionValues`，原有
+    `fixedOptionValues` 已删除。生成器还会从 pinned tag 自动定位全部 callback 实现；334 个带
+    callback 的 option 均保留所有实现分支的源码位置，其中 44 项已经从共享 helper 或静态数值
+    比较迁移为 `OptionValidation`（exact enum 10、逗号列表 15、flag list 5、number range 14）。
+    其余复杂、动态或只有副作用的 callback 使用 `ValidationNone`，即不做值检查；这不是校验结果的
+    第三态。上述四类规则中 36 项能证明 option 在所有构建中存在，已接入
+    `:set`/`:setlocal`/`:setglobal` 的 `=`/`:` 完整赋值，以及 Legacy 和 Vim9 的 option 字面量赋值；
+    分别产生 `vim/E474`、`vim/E487`、`vim/E539`。其余 8 项条件编译规则只保留元数据，在尚未协商
+    client feature 前不诊断；值包含尚未精确解码的 `:set` 转义或表达式为动态值时也不诊断。
+    结构化 callback 仍待后续分批实现，测试按不同规则情况选择代表 option，不为每个 option 或
+    每个错误 code 重复生成测试。
+  - runtime/build/state-dependent 项不生成 validator、不产生值诊断；不引入笼统的
+    “invalid option value” 规则，不执行 Vim callback 或用户配置。
 
 ## 13. 非目标
 
