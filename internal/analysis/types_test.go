@@ -154,6 +154,32 @@ var nullValue = v:null
 	}
 }
 
+func TestAnalyzeInfersGetDefaultType(t *testing.T) {
+	source := `vim9script
+var maxEditCount = get(g:, 'coc_edits_maximum_count', 200)
+var label = get(g:, 'label', 'fallback')
+var methodCount = g:->get('method_count', 100)
+var unknown = get(g:, 'missing')
+`
+	result := Analyze(syntax.Parse(source))
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Root.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	for name, want := range map[string]string{
+		"maxEditCount": "number",
+		"label":        "string",
+		"methodCount":  "number",
+	} {
+		if declarations[name] == nil || declarations[name].Type.Name != want {
+			t.Fatalf("%s type = %#v, want %s", name, declarations[name], want)
+		}
+	}
+	if declarations["unknown"] == nil || !isUnresolvedType(declarations["unknown"].Type) {
+		t.Fatalf("unknown type = %#v, want unresolved", declarations["unknown"])
+	}
+}
+
 func TestAnalyzeUnknownTypesStayConservativeAndNilSafe(t *testing.T) {
 	result := Analyze(nil)
 	if got := result.TypeOf(nil); !isUnresolvedType(got) {

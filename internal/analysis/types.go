@@ -557,6 +557,9 @@ func builtinOptionValueType(option vimdata.Option) ValueType {
 }
 
 func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType) ValueType {
+	if function.Name == "get" && len(arguments) == 3 {
+		return arguments[2]
+	}
 	switch function.ReturnHelper {
 	case "ret_copy", "ret_first_arg", "ret_extend", "ret_slice":
 		if len(arguments) > 0 {
