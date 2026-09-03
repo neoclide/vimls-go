@@ -131,6 +131,66 @@ func TestAnalyzeFunctionDefaultReferencesEarlierParameter(t *testing.T) {
 	}
 }
 
+func TestAnalyzeVim9HeredocConstDeclaration(t *testing.T) {
+	source := `vim9script
+const call_function =<< trim END
+  function! coc#api#call(method, args) abort
+    return coc#api#Call(a:method, a:args)
+  endfunction
+END
+
+execute $'legacy execute "{join(call_function, '\n')}"'
+`
+	result := Analyze(syntax.Parse(source))
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", result.Diagnostics)
+	}
+	if len(result.Root.Declarations) != 1 || result.Root.Declarations[0].Name != "call_function" || result.Root.Declarations[0].Kind != SymbolKindConstant {
+		t.Fatalf("declarations = %#v", result.Root.Declarations)
+	}
+	if typ := result.Root.Declarations[0].Type; typ.Name != "list" || len(typ.Arguments) != 1 || typ.Arguments[0].Name != "string" {
+		t.Fatalf("call_function type = %#v", typ)
+	}
+	var reference *Reference
+	for _, candidate := range result.References {
+		if candidate.Name == "call_function" && candidate.Span.Start > result.Root.Declarations[0].Span.End {
+			reference = candidate
+			break
+		}
+	}
+	if reference == nil || reference.Declaration != result.Root.Declarations[0] {
+		t.Fatalf("call_function reference = %#v", reference)
+	}
+}
+
+func TestAnalyzeIncompleteVim9HeredocConstDeclaration(t *testing.T) {
+	source := `vim9script
+const call_function =<< trim CALL_FUNCTION_END
+  function! coc#api#call(method, args) abort
+    return coc#api#Call(a:method, a:args)
+  endfunction
+
+execute $'legacy execute "{join(call_function, '\n')}"'
+`
+	result := Analyze(syntax.Parse(source))
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", result.Diagnostics)
+	}
+	if len(result.Root.Declarations) != 1 || result.Root.Declarations[0].Name != "call_function" || result.Root.Declarations[0].Kind != SymbolKindConstant {
+		t.Fatalf("declarations = %#v", result.Root.Declarations)
+	}
+	var reference *Reference
+	for _, candidate := range result.References {
+		if candidate.Name == "call_function" && candidate.Span.Start > result.Root.Declarations[0].Span.End {
+			reference = candidate
+			break
+		}
+	}
+	if reference == nil || reference.Declaration != result.Root.Declarations[0] {
+		t.Fatalf("call_function reference = %#v", reference)
+	}
+}
+
 func TestAnalyzeInitializerUsesOuterShadowedDeclaration(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar value = 1\nif true\n  var value = value\n  echo value\nendif\n"))
 	if len(result.References) != 2 {

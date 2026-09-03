@@ -311,6 +311,54 @@ func TestIncompleteFunctionHeredocRecoversAtFunctionEnd(t *testing.T) {
 	}
 }
 
+func TestIncompleteHeredocRecoversAtBlankLine(t *testing.T) {
+	source := "vim9script\nconst text =<< trim DONE_TEXT\n  payload\n\necho text\n"
+	file := Parse(source)
+	if len(file.Commands) != 3 || len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E990" || file.Diagnostics[0].Message != "missing end marker 'DONE_TEXT'" {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	heredoc := file.Commands[1].Heredoc
+	declaration := file.Commands[1].Declaration
+	if heredoc == nil || !heredoc.Incomplete || file.Text(heredoc.Body) != "  payload" || heredoc.EndMarker != (Span{}) {
+		t.Fatalf("heredoc = %#v, body = %q", heredoc, file.Text(heredoc.Body))
+	}
+	if declaration == nil || file.Text(declaration.Name) != "text" || file.Text(declaration.Assignment) != "=<<" {
+		t.Fatalf("declaration = %#v", declaration)
+	}
+	if file.Commands[2].Canonical != "echo" {
+		t.Fatalf("following command = %#v", file.Commands[2])
+	}
+	assertFileSpans(t, file)
+}
+
+func TestIncompleteHeredocDeclarationSuppressesCascades(t *testing.T) {
+	source := "vim9script\nvar text: =<< STOP_HERE\npayload\n\necho 'after'\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != "vim/E990" || file.Diagnostics[0].Message != "missing end marker 'STOP_HERE'" {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	if len(file.Commands) != 3 || file.Commands[1].Declaration == nil || file.Commands[2].Canonical != "echo" {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+	assertFileSpans(t, file)
+}
+
+func TestCompleteHeredocKeepsBlankPayloadLine(t *testing.T) {
+	source := "vim9script\nconst text =<< trim END\n  first\n\n  last\nEND\necho text\n"
+	file := Parse(source)
+	if len(file.Commands) != 3 || len(file.Diagnostics) != 0 {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	heredoc := file.Commands[1].Heredoc
+	if heredoc == nil || heredoc.Incomplete || file.Text(heredoc.Body) != "  first\n\n  last" || file.Text(heredoc.EndMarker) != "END" {
+		t.Fatalf("heredoc = %#v, body = %q", heredoc, file.Text(heredoc.Body))
+	}
+	if file.Commands[2].Canonical != "echo" {
+		t.Fatalf("following command = %#v", file.Commands[2])
+	}
+	assertFileSpans(t, file)
+}
+
 func TestCompleteFunctionHeredocCanContainFunctionEndLine(t *testing.T) {
 	source := "function! F()\n  let text =<< END\nendfunction\nstill text\nEND\nendfunction\nlet g:after = 1\n"
 	file := (LegacyParser{}).Parse(source)

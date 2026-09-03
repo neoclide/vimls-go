@@ -180,6 +180,22 @@ var unknown = get(g:, 'missing')
 	}
 }
 
+func TestAnalyzeInfersVim9HeredocType(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\nconst call_function =<< trim CALL_FUNCTION_END\n  function! coc#api#call(method, args) abort\n  endfunction\nCALL_FUNCTION_END\n",
+		"vim9script\nconst call_function =<< trim CALL_FUNCTION_END\n  function! coc#api#call(method, args) abort\n  endfunction\n\necho call_function\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		if len(result.Root.Declarations) != 1 {
+			t.Fatalf("declarations = %#v", result.Root.Declarations)
+		}
+		declaration := result.Root.Declarations[0]
+		if declaration.Name != "call_function" || declaration.Type.Name != "list" || len(declaration.Type.Arguments) != 1 || declaration.Type.Arguments[0].Name != "string" {
+			t.Fatalf("heredoc type = %#v", declaration)
+		}
+	}
+}
+
 func TestAnalyzeUnknownTypesStayConservativeAndNilSafe(t *testing.T) {
 	result := Analyze(nil)
 	if got := result.TypeOf(nil); !isUnresolvedType(got) {

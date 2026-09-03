@@ -505,6 +505,24 @@ func TestHoverShowsUnknownAndAnyVariableTypes(t *testing.T) {
 	}
 }
 
+func TestHoverShowsVim9HeredocListStringType(t *testing.T) {
+	source := "vim9script\nconst call_function =<< trim CALL_FUNCTION_END\n  function! coc#api#call(method, args) abort\n  endfunction\nCALL_FUNCTION_END\necho call_function\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 5, Character: 7},
+		},
+	})
+	if err != nil || hover == nil {
+		t.Fatalf("hover = %#v, error = %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Value != "name: call_function\nkind: constant\ntype: list<string>" {
+		t.Fatalf("hover = %#v", hover)
+	}
+}
+
 func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho argc()\n")
 	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{

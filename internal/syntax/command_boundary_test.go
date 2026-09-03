@@ -329,7 +329,7 @@ func TestEmptyAssignmentRHSSuppressesSameLineTail(t *testing.T) {
 	}
 }
 
-func TestDeclarationHeredocDoesNotReuseInitializerBoundary(t *testing.T) {
+func TestDeclarationHeredocKeepsInitializerOpaque(t *testing.T) {
 	tests := []struct {
 		name  string
 		parse func(string) *File
@@ -353,8 +353,16 @@ func TestDeclarationHeredocDoesNotReuseInitializerBoundary(t *testing.T) {
 			if len(file.Diagnostics) != 0 || len(file.Commands) != afterIndex+1 || file.Commands[commandIndex].Heredoc == nil || file.Commands[afterIndex].Declaration == nil {
 				t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 			}
-			if file.Commands[commandIndex].Declaration != nil || file.Text(file.Commands[commandIndex].Argument) == "" {
-				t.Fatalf("heredoc declaration = %#v, argument = %q", file.Commands[commandIndex].Declaration, file.Text(file.Commands[commandIndex].Argument))
+			declaration := file.Commands[commandIndex].Declaration
+			if test.name == "legacy" {
+				if declaration != nil {
+					t.Fatalf("legacy heredoc declaration = %#v", declaration)
+				}
+			} else if declaration == nil || file.Text(declaration.Name) != "text" || file.Text(declaration.Assignment) != "=<<" || declaration.Initializer != nil {
+				t.Fatalf("Vim9 heredoc declaration = %#v", declaration)
+			}
+			if file.Text(file.Commands[commandIndex].Argument) == "" {
+				t.Fatal("empty heredoc argument")
 			}
 			assertFileSpans(t, file)
 		})
@@ -881,13 +889,14 @@ func TestVim9TypedDeclarationBoundaryProbeOwnsMalformedLine(t *testing.T) {
 	assertFileSpans(t, file)
 }
 
-func TestVim9TypedDeclarationBoundaryProbeExcludesHeredoc(t *testing.T) {
+func TestVim9TypedDeclarationBoundaryProbeKeepsHeredocInitializerOpaque(t *testing.T) {
 	source := "vim9script\nvar text =<< END\npayload | not a command\nEND\nvar after = 1\n"
 	file := Parse(source)
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 3 || file.Commands[1].Heredoc == nil || file.Commands[2].Declaration == nil {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}
-	if file.Commands[1].Declaration != nil || file.Commands[1].Expressions != nil {
+	if file.Commands[1].Declaration == nil || file.Text(file.Commands[1].Declaration.Name) != "text" ||
+		file.Commands[1].Declaration.Initializer != nil || file.Commands[1].Expressions != nil {
 		t.Fatalf("heredoc declaration = %#v", file.Commands[1])
 	}
 	assertFileSpans(t, file)

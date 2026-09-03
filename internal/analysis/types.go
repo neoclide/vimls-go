@@ -130,6 +130,9 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 				}
 				if !isUnresolvedType(typ) {
 					declaration.Type = typ
+				} else if command.Heredoc != nil && len(command.Declaration.Bindings) == 1 &&
+					binding.ParsedType == nil && command.Declaration.ParsedType == nil {
+					declaration.Type = ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}
 				}
 			}
 		}

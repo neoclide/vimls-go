@@ -185,7 +185,12 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 				offset = nextOffset
 				continue
 			} else {
-				if heredocRecoveryOffset < 0 && heredocRecoveryCommand != "" && isPayloadRecoveryLine(source, offset, contentEnd, heredocRecoveryCommand) {
+				blankRecoveryLine := skipSpace(source, offset, contentEnd) == contentEnd
+				functionRecoveryLine := heredocRecoveryCommand != "" && isPayloadRecoveryLine(source, offset, contentEnd, heredocRecoveryCommand)
+				if heredocRecoveryOffset < 0 && (blankRecoveryLine || functionRecoveryLine) {
+					// Keep looking for the real marker: blank lines are valid heredoc
+					// payload.  If no marker is found by EOF, rewind to the first
+					// blank line (or the enclosing function end) and resume parsing.
 					heredocRecoveryOffset = offset
 					heredocRecoveryBody = command.Heredoc.Body
 					heredocRecoverySpanEnd = command.Span.End
@@ -433,13 +438,19 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 			}
 			continue
 		}
-		if file.Commands[index].Heredoc == nil || file.Commands[index].Canonical == "execute" {
-			diagnosticsBeforeDetails := len(file.Diagnostics)
-			parseLogicalCommandDetails(file, &file.Commands[index])
-			if len(file.Diagnostics) == diagnosticsBeforeDetails {
-				if diagnostic, ok := nestedGenericTypeParameterDiagnostic(file, &file.Commands[index]); ok {
-					file.Diagnostics = append(file.Diagnostics, diagnostic)
-				}
+		command := &file.Commands[index]
+		if command.Heredoc != nil && command.Canonical != "execute" {
+			if command.Dialect == Vim9 &&
+				(command.Canonical == "var" || command.Canonical == "const" || command.Canonical == "final") {
+				parseVim9HeredocDeclaration(file, command)
+			}
+			continue
+		}
+		diagnosticsBeforeDetails := len(file.Diagnostics)
+		parseLogicalCommandDetails(file, command)
+		if len(file.Diagnostics) == diagnosticsBeforeDetails {
+			if diagnostic, ok := nestedGenericTypeParameterDiagnostic(file, command); ok {
+				file.Diagnostics = append(file.Diagnostics, diagnostic)
 			}
 		}
 	}
@@ -2194,11 +2205,6 @@ func detectHeredoc(file *File, command *Command) bool {
 		}
 	}
 	if assignmentOffset >= 0 {
-		if command.Dialect == Vim9 && (command.Canonical == "var" || command.Canonical == "const" || command.Canonical == "final") {
-			left := argument[:assignmentOffset]
-			name, _ := declarationSpans(left, command.Argument.Start, Vim9)
-			diagnoseVim9TypeDelimiter(file, left, command.Argument.Start, name)
-		}
 		diagnostics := len(file.Diagnostics)
 		diagnoseVim9AssignmentSpacing(file, command, Span{
 			Start: command.Argument.Start + assignmentOffset,
@@ -2261,6 +2267,43 @@ func detectHeredoc(file *File, command *Command) bool {
 	}
 	command.Heredoc = &Heredoc{Marker: marker, Trim: trim, Eval: eval}
 	return true
+}
+
+func parseVim9HeredocDeclaration(file *File, command *Command) {
+	assignmentOffset := findHeredocAssignment(file.Text(command.Argument))
+	if assignmentOffset < 0 {
+		return
+	}
+	assignment := Span{
+		Start: command.Argument.Start + assignmentOffset,
+		End:   command.Argument.Start + assignmentOffset + len("=<<"),
+	}
+	left := file.Source[command.Argument.Start:assignment.Start]
+	diagnosticsStart := len(file.Diagnostics)
+	declaration := parseDeclarationHead(file, left, command.Argument.Start, command.Dialect)
+	diagnoseCannotLockOption(file, command, declaration)
+	diagnoseVim9ScopeDeclaration(file, command, declaration, true)
+	if diagnostic, ok := vim9ScopedVariableTypeDiagnostic(file, command, declaration); ok {
+		file.Diagnostics = append(file.Diagnostics, diagnostic)
+	}
+	diagnoseVim9IllegalDeclarationName(file, command, declaration)
+	diagnoseVim9ReservedDeclarationName(file, command, declaration)
+	diagnoseVim9OptionDeclaration(file, command, declaration)
+	diagnoseObjectTypeTail(file, command, declaration, diagnosticsStart)
+	diagnoseDeclarationTypeTail(file, command, declaration, diagnosticsStart)
+	diagnoseInvalidClassDeclaration(file, command, declaration)
+	var diagnostics []Diagnostic
+	declaration.Target, diagnostics = parseDeclarationTarget(file, command, declaration, left, diagnostics)
+	file.Diagnostics = append(file.Diagnostics, diagnostics...)
+	declaration.Assignment = assignment
+	diagnoseInvalidInterfaceDeclaration(file, command, declaration)
+	command.Declaration = declaration
+	if command.Heredoc.Incomplete {
+		// The missing-marker diagnostic is sufficient for an unfinished
+		// heredoc.  Retain the declaration for name binding, but discard
+		// diagnostics produced from its potentially half-written head.
+		file.Diagnostics = file.Diagnostics[:diagnosticsStart]
+	}
 }
 
 func heredocEndMarkerMatches(source string, command *Command, lineStart, lineEnd int) bool {
