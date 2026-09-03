@@ -33,6 +33,57 @@ func TestCompletionCapabilitiesFromClient(t *testing.T) {
 	}
 }
 
+func TestCompletionItemDefaultsEditRangeCapability(t *testing.T) {
+	enabled := true
+	allPerItem := completionCapabilities{snippet: true, insertReplace: true, preselect: true, tags: true, docsMarkdown: true}
+	perItem := func() *protocol.ClientCompletionItemOptions {
+		return &protocol.ClientCompletionItemOptions{
+			SnippetSupport:       &enabled,
+			InsertReplaceSupport: &enabled,
+			PreselectSupport:     &enabled,
+			TagSupport:           protocol.CompletionItemTagOptions{ValueSet: []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}},
+			DocumentationFormat:  []protocol.MarkupKind{protocol.MarkupKindPlainText, protocol.MarkupKindMarkdown},
+		}
+	}
+	withList := func(item *protocol.ClientCompletionItemOptions, list *protocol.CompletionListCapabilities) completionCapabilities {
+		return completionCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{Completion: &protocol.CompletionClientCapabilities{
+			CompletionItem: item, CompletionList: list,
+		}})
+	}
+	for _, test := range []struct {
+		name string
+		item *protocol.ClientCompletionItemOptions
+		list *protocol.CompletionListCapabilities
+		want completionCapabilities
+	}{
+		// List-level support must survive the absence of any per-item support;
+		// this is the regression for the old CompletionItem-only early return.
+		{name: "item defaults only", item: nil, list: &protocol.CompletionListCapabilities{ItemDefaults: []string{"editRange"}}, want: completionCapabilities{itemDefaultsEditRange: true}},
+		{name: "item defaults with per item", item: perItem(), list: &protocol.CompletionListCapabilities{ItemDefaults: []string{"editRange"}}, want: completionCapabilities{itemDefaultsEditRange: true, snippet: true, insertReplace: true, preselect: true, tags: true, docsMarkdown: true}},
+		{name: "nil item defaults", item: perItem(), list: &protocol.CompletionListCapabilities{}, want: allPerItem},
+		{name: "other default only", item: perItem(), list: &protocol.CompletionListCapabilities{ItemDefaults: []string{"commitCharacters"}}, want: allPerItem},
+		{name: "wrong casing", item: perItem(), list: &protocol.CompletionListCapabilities{ItemDefaults: []string{"EditRange"}}, want: allPerItem},
+		{name: "partial alongside", item: perItem(), list: &protocol.CompletionListCapabilities{ItemDefaults: []string{"editRange", "commitCharacters"}}, want: completionCapabilities{itemDefaultsEditRange: true, snippet: true, insertReplace: true, preselect: true, tags: true, docsMarkdown: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := withList(test.item, test.list); got != test.want {
+				t.Fatalf("completion capabilities = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+	// The list capability must not be parsed away by a nil CompletionItem, and
+	// absent Completion or textDocument must still yield the zero struct.
+	if got := completionCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{}); got != (completionCapabilities{}) {
+		t.Fatalf("absent completion capabilities = %#v", got)
+	}
+	if got := completionCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{Completion: &protocol.CompletionClientCapabilities{CompletionItem: nil, CompletionList: &protocol.CompletionListCapabilities{ItemDefaults: []string{"editRange"}}}}); got != (completionCapabilities{itemDefaultsEditRange: true}) {
+		t.Fatalf("item-defaults-only capabilities = %#v", got)
+	}
+	if got := completionCapabilitiesFromClient(nil); got != (completionCapabilities{}) {
+		t.Fatalf("nil textDocument capabilities = %#v", got)
+	}
+}
+
 func TestLanguageFeatureCapabilitiesRespectClientOrder(t *testing.T) {
 	enabled := true
 	capabilities := languageFeatureCapabilitiesFromClient(&protocol.TextDocumentClientCapabilities{

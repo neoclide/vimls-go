@@ -24,6 +24,9 @@ type completionCapabilities struct {
 	preselect     bool
 	tags          bool
 	docsMarkdown  bool
+	// itemDefaultsEditRange reports whether the client declared "editRange"
+	// among its supported CompletionList.itemDefaults properties.
+	itemDefaultsEditRange bool
 }
 
 type languageFeatureCapabilities struct {
@@ -64,17 +67,23 @@ func preferredMarkupKind(formats []protocol.MarkupKind) protocol.MarkupKind {
 }
 
 func completionCapabilitiesFromClient(textDocument *protocol.TextDocumentClientCapabilities) completionCapabilities {
-	if textDocument == nil || textDocument.Completion == nil || textDocument.Completion.CompletionItem == nil {
+	if textDocument == nil || textDocument.Completion == nil {
 		return completionCapabilities{}
 	}
-	item := textDocument.Completion.CompletionItem
-	return completionCapabilities{
-		snippet:       item.SnippetSupport != nil && *item.SnippetSupport,
-		insertReplace: item.InsertReplaceSupport != nil && *item.InsertReplaceSupport,
-		preselect:     item.PreselectSupport != nil && *item.PreselectSupport,
-		tags:          len(item.TagSupport.ValueSet) > 0,
-		docsMarkdown:  slices.Contains(item.DocumentationFormat, protocol.MarkupKindMarkdown),
+	var result completionCapabilities
+	if item := textDocument.Completion.CompletionItem; item != nil {
+		result.snippet = item.SnippetSupport != nil && *item.SnippetSupport
+		result.insertReplace = item.InsertReplaceSupport != nil && *item.InsertReplaceSupport
+		result.preselect = item.PreselectSupport != nil && *item.PreselectSupport
+		result.tags = len(item.TagSupport.ValueSet) > 0
+		result.docsMarkdown = slices.Contains(item.DocumentationFormat, protocol.MarkupKindMarkdown)
 	}
+	// CompletionList support is a sibling of CompletionItem support, so it must
+	// survive a client that declares only list-level capabilities.
+	if list := textDocument.Completion.CompletionList; list != nil {
+		result.itemDefaultsEditRange = slices.Contains(list.ItemDefaults, "editRange")
+	}
+	return result
 }
 
 func runtimepathFromOptions(raw any) ([]string, bool, string) {

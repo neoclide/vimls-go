@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -49,6 +50,53 @@ func TestInitializeAdvertisesNegotiatedOptionalCapabilities(t *testing.T) {
 		t.Fatalf("initial workspace delay = %s, want %s", s.workspaceDelay, defaultWorkspaceRebuildDebounce)
 	}
 	s.workspaceMu.Unlock()
+}
+
+func TestInitializeDocumentRangeFormattingCapabilityShapes(t *testing.T) {
+	rangesSupport := true
+	t.Run("no client ranges support keeps plain boolean", func(t *testing.T) {
+		s := New(nil, nil, nil)
+		t.Cleanup(s.stopAnalysis)
+		result, err := s.Initialize(context.Background(), &protocol.InitializeParams{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := result.Capabilities.DocumentRangeFormattingProvider.(protocol.Boolean); !ok {
+			t.Fatalf("range formatting provider = %#v, want plain true", result.Capabilities.DocumentRangeFormattingProvider)
+		}
+		encoded, err := protocol.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(encoded, []byte(`"documentRangeFormattingProvider":true`)) {
+			t.Fatalf("initialize result omitted plain provider: %s", encoded)
+		}
+	})
+	t.Run("client ranges support advertises options", func(t *testing.T) {
+		s := New(nil, nil, nil)
+		t.Cleanup(s.stopAnalysis)
+		result, err := s.Initialize(context.Background(), &protocol.InitializeParams{
+			Capabilities: protocol.ClientCapabilities{
+				TextDocument: &protocol.TextDocumentClientCapabilities{
+					RangeFormatting: &protocol.DocumentRangeFormattingClientCapabilities{RangesSupport: &rangesSupport},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		options, ok := result.Capabilities.DocumentRangeFormattingProvider.(*protocol.DocumentRangeFormattingOptions)
+		if !ok || options.RangesSupport == nil || !*options.RangesSupport {
+			t.Fatalf("range formatting provider = %#v, want options with rangesSupport true", result.Capabilities.DocumentRangeFormattingProvider)
+		}
+		encoded, err := protocol.Marshal(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(encoded, []byte(`"documentRangeFormattingProvider":{"rangesSupport":true}`)) {
+			t.Fatalf("initialize result omitted options provider: %s", encoded)
+		}
+	})
 }
 
 func TestInitializeDiagnosticTransportCapability(t *testing.T) {

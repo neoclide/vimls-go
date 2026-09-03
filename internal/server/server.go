@@ -492,6 +492,7 @@ func implementedMethod(method string) bool {
 		protocol.MethodTextDocumentInlayHint,
 		protocol.MethodTextDocumentFormatting,
 		protocol.MethodTextDocumentRangeFormatting,
+		protocol.MethodTextDocumentRangesFormatting,
 		protocol.MethodTextDocumentOnTypeFormatting,
 		protocol.MethodTextDocumentImplementation,
 		protocol.MethodTextDocumentPrepareCallHierarchy,
@@ -526,6 +527,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 	workspaceProgress := params.Capabilities.Window != nil && params.Capabilities.Window.WorkDoneProgress != nil && *params.Capabilities.Window.WorkDoneProgress
 	prepareRename := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.Rename != nil && params.Capabilities.TextDocument.Rename.PrepareSupport != nil && *params.Capabilities.TextDocument.Rename.PrepareSupport
+	rangeFormattingRanges := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.RangeFormatting != nil && params.Capabilities.TextDocument.RangeFormatting.RangesSupport != nil && *params.Capabilities.TextDocument.RangeFormatting.RangesSupport
 	codeActionLiterals := params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.CodeAction != nil && params.Capabilities.TextDocument.CodeAction.CodeActionLiteralSupport.CodeActionKind.ValueSet != nil
 	completion := completionCapabilitiesFromClient(params.Capabilities.TextDocument)
 	languageFeatures := languageFeatureCapabilitiesFromClient(params.Capabilities.TextDocument)
@@ -580,6 +582,11 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	if prepareRename {
 		renameProvider = &protocol.RenameOptions{PrepareProvider: &renamePrepare}
 	}
+	var documentRangeFormattingProvider protocol.DocumentRangeFormattingProvider = protocol.Boolean(true)
+	if rangeFormattingRanges {
+		rangesFormattingRangesSupport := true
+		documentRangeFormattingProvider = &protocol.DocumentRangeFormattingOptions{RangesSupport: &rangesFormattingRangesSupport}
+	}
 	var codeActionProvider protocol.CodeActionProvider
 	if codeActionLiterals {
 		codeActionProvider = &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}}
@@ -587,7 +594,7 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	capabilities := protocol.ServerCapabilities{
 		PositionEncoding:                protocolEncoding,
 		DocumentFormattingProvider:      protocol.Boolean(true),
-		DocumentRangeFormattingProvider: protocol.Boolean(true),
+		DocumentRangeFormattingProvider: documentRangeFormattingProvider,
 		DocumentOnTypeFormattingProvider: protocol.DocumentOnTypeFormattingOptions{
 			FirstTriggerCharacter: "\n",
 			MoreTriggerCharacter:  []string{"\\"},

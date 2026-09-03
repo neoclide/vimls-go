@@ -214,8 +214,10 @@ func codeLensImplementation(fact workspace.SymbolFact, facts []workspace.SymbolF
 
 func codeLensCommand(kind codeLensKind, documentURI uri.URI, position protocol.Position, locations []protocol.Location) (protocol.Command, bool) {
 	name := "reference"
+	tooltip := "Show references"
 	if kind == codeLensImplementations {
 		name = "implementation"
+		tooltip = "Show implementations"
 	}
 	if len(locations) != 1 {
 		name += "s"
@@ -228,5 +230,5 @@ func codeLensCommand(kind codeLensKind, documentURI uri.URI, position protocol.P
 		}
 		arguments = append(arguments, protocol.LSPAny(encoded))
 	}
-	return protocol.Command{Title: fmt.Sprintf("%d %s", len(locations), name), Command: "editor.action.showReferences", Arguments: arguments}, true
+	return protocol.Command{Title: fmt.Sprintf("%d %s", len(locations), name), Command: "editor.action.showReferences", Arguments: arguments, Tooltip: &tooltip}, true
 }

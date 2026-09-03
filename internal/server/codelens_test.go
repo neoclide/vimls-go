@@ -55,6 +55,9 @@ func TestCodeLensResolveReferenceTitlesAndCommand(t *testing.T) {
 			if err != nil || resolved.Command.Title != test.wantTitle || resolved.Command.Command != "editor.action.showReferences" {
 				t.Fatalf("resolved = %#v, %v", resolved, err)
 			}
+			if resolved.Command.Tooltip == nil || *resolved.Command.Tooltip != "Show references" {
+				t.Fatalf("reference tooltip = %#v, want fixed %q independent of count", resolved.Command.Tooltip, "Show references")
+			}
 			if len(resolved.Command.Arguments) != 3 {
 				t.Fatalf("command arguments = %#v", resolved.Command.Arguments)
 			}
@@ -136,6 +139,9 @@ func TestCodeLensImplementationEligibilityAndResolve(t *testing.T) {
 		resolved, err := instance.CodeLensResolve(context.Background(), &lens)
 		if err != nil || resolved.Command.Title != "1 implementation" {
 			t.Fatalf("%s resolve = %#v, %v", name, resolved, err)
+		}
+		if resolved.Command.Tooltip == nil || *resolved.Command.Tooltip != "Show implementations" {
+			t.Fatalf("%s tooltip = %#v, want %q", name, resolved.Command.Tooltip, "Show implementations")
 		}
 	}
 }

@@ -21,7 +21,7 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 | Code Lens | Reference counts for named Legacy and Vim9 functions, methods and constructors. Implementation counts are limited to Vim9 abstract-class and interface methods. Clickable navigation depends on client support for `editor.action.showReferences`. |
 | Symbols and structure | Document symbols, workspace symbols, folding ranges and selection ranges. |
 | Safe editing | Prepare rename, rename, semantic highlighting, inferred-type inlay hints and a small set of syntax quick fixes. |
-| Formatting | Source-preserving indentation for whole documents, selected ranges and on-type newline/continuation triggers. Only proven leading whitespace is changed. |
+| Formatting | Source-preserving indentation for whole documents, selected ranges and on-type newline/continuation triggers. Clients that declare `textDocument.rangeFormatting.rangesSupport` may format several selected ranges in one request. Only proven leading whitespace is changed. |
 | Workspace updates | Incremental document synchronization, workspace folders, watched Vim files and delta runtimepath refreshes through `vimls/didChangeRuntimepath` (request or compatible notification). |
 
 Legacy and Vim9 files may use the same workspace. The server understands
@@ -30,8 +30,8 @@ language rules.
 
 ## Current limitations
 
-- Document, range and on-type formatting adjust indentation only; they do not
-  rewrite expressions, spacing, wrapping or embedded languages.
+- Document, range, multi-range and on-type formatting adjust indentation only;
+  they do not rewrite expressions, spacing, wrapping or embedded languages.
 - Rename is offered only when every affected symbol can be resolved safely.
   Autoload function rename and other namespace-changing edits are rejected.
 - Code actions are limited to a few unambiguous syntax repairs; there is no

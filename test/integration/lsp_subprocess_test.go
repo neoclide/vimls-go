@@ -674,6 +674,120 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 	}
 }
 
+func TestRangesFormattingSubprocess(t *testing.T) {
+	type lspPosition struct {
+		Line      uint32 `json:"line"`
+		Character uint32 `json:"character"`
+	}
+	type lspRange struct {
+		Start lspPosition `json:"start"`
+		End   lspPosition `json:"end"`
+	}
+	type lspTextEdit struct {
+		Range   lspRange `json:"range"`
+		NewText string   `json:"newText"`
+	}
+	positionLess := func(left, right lspPosition) bool {
+		return left.Line < right.Line || left.Line == right.Line && left.Character < right.Character
+	}
+	// inside reports whether the edit lies fully inside the end-exclusive
+	// requested range [start,end), mirroring the server containment rule.
+	inside := func(edit lspTextEdit, start, end lspPosition) bool {
+		return !positionLess(edit.Range.Start, start) && !positionLess(end, edit.Range.End) && positionLess(edit.Range.Start, end)
+	}
+
+	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceRoot := t.TempDir()
+	documentURI := canonicalFileURI(t, filepath.Join(workspaceRoot, "ranges.vim")).String()
+	ctx, cancel := subprocessContext(t, 20*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, vimlsBinary)
+	command.Dir = repositoryRoot
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr safeBuffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	client := newTestClient(t, stdout, stdin, &stderr, ctx)
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"textDocument":{"rangeFormatting":{"rangesSupport":true}}},"rootUri":%q,"initializationOptions":{"runtimepath":[]}}}`, canonicalFileURI(t, workspaceRoot).String()))
+	initialize := readResponse(t, client, "1")
+	if !strings.Contains(string(initialize["result"]), `"documentRangeFormattingProvider":{"rangesSupport":true}`) {
+		t.Fatalf("initialize response = %s", initialize)
+	}
+	writeJSON(t, client, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+
+	// Two separate mis-indented regions: the body of the first if is one space
+	// too shallow and the second if body is unindented, so whole-document
+	// formatting edits two different lines.
+	source := "vim9script\nif true\n echo 1\nendif\nif false\necho 2\nendif\n"
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, documentURI, source))
+
+	firstRangeStart := lspPosition{Line: 2}
+	firstRangeEnd := lspPosition{Line: 3}
+	secondRangeStart := lspPosition{Line: 5}
+	secondRangeEnd := lspPosition{Line: 6}
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"textDocument/rangesFormatting","params":{"textDocument":{"uri":%q},"ranges":[{"start":{"line":%d,"character":%d},"end":{"line":%d,"character":%d}},{"start":{"line":%d,"character":%d},"end":{"line":%d,"character":%d}}],"options":{"tabSize":2,"insertSpaces":true}}}`, documentURI, firstRangeStart.Line, firstRangeStart.Character, firstRangeEnd.Line, firstRangeEnd.Character, secondRangeStart.Line, secondRangeStart.Character, secondRangeEnd.Line, secondRangeEnd.Character))
+	first := readResponse(t, client, "2")
+	var edits []lspTextEdit
+	if err := json.Unmarshal(first["result"], &edits); err != nil {
+		t.Fatalf("decode ranges formatting response: %v, response: %s", err, first)
+	}
+	if len(edits) != 2 {
+		t.Fatalf("ranges formatting edits = %#v, want 2", edits)
+	}
+	firstInside := inside(edits[0], firstRangeStart, firstRangeEnd)
+	firstInsideSecond := inside(edits[0], secondRangeStart, secondRangeEnd)
+	secondInside := inside(edits[1], secondRangeStart, secondRangeEnd)
+	secondInsideFirst := inside(edits[1], firstRangeStart, firstRangeEnd)
+	if !firstInside || firstInsideSecond || !secondInside || secondInsideFirst {
+		t.Fatalf("edits %#v not exactly inside their requested ranges", edits)
+	}
+	if positionLess(edits[1].Range.Start, edits[0].Range.Start) || positionLess(edits[1].Range.Start, edits[0].Range.End) {
+		t.Fatalf("edits %#v are not ordered and non-overlapping", edits)
+	}
+	for index, edit := range edits {
+		if edit.NewText != "  " {
+			t.Fatalf("edit %d newText = %q, want two-space indent", index, edit.NewText)
+		}
+	}
+
+	// An empty ranges array formats nothing and returns an empty array.
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"textDocument/rangesFormatting","params":{"textDocument":{"uri":%q},"ranges":[],"options":{"tabSize":2,"insertSpaces":true}}}`, documentURI))
+	empty := readResponse(t, client, "3")
+	if string(empty["result"]) != "[]" {
+		t.Fatalf("empty ranges formatting response = %s", empty)
+	}
+
+	writeJSON(t, client, `{"jsonrpc":"2.0","id":4,"method":"shutdown"}`)
+	shutdown := readResponse(t, client, "4")
+	if string(shutdown["result"]) != "null" {
+		t.Fatalf("shutdown response = %s", shutdown)
+	}
+	writeJSON(t, client, `{"jsonrpc":"2.0","method":"exit"}`)
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitCommand(t, ctx, command, 5*time.Second, &stderr)
+	if ctx.Err() != nil {
+		t.Fatalf("server timed out: %v", ctx.Err())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+}
+
 func assertVimWatchRegistration(t *testing.T, raw json.RawMessage, roots []string) {
 	t.Helper()
 	var params protocol.RegistrationParams

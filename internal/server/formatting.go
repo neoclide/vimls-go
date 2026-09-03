@@ -23,6 +23,74 @@ func (s *Server) RangeFormatting(ctx context.Context, params *protocol.DocumentR
 	return s.formattingEdits(ctx, params.TextDocument.URI.String(), params.Options, &params.Range)
 }
 
+// RangesFormatting formats several selections of one document in a single
+// request (LSP 3.18 textDocument/rangesFormatting). The requested ranges form
+// a selection union: every candidate IndentEdit is returned at most once, in
+// syntax.IndentEdits document order, when it lies fully inside at least one
+// requested range. The document snapshot, syntax file, encoding and IndentEdits
+// are obtained exactly once so the result is never spliced across versions.
+func (s *Server) RangesFormatting(ctx context.Context, params *protocol.DocumentRangesFormattingParams) ([]protocol.TextEdit, error) {
+	if params == nil || !validFormattingOptions(params.Options) {
+		return nil, jsonrpc2.ErrInvalidParams
+	}
+	snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil || file == nil {
+		return []protocol.TextEdit{}, nil
+	}
+	// Convert every requested range to a byte span first. Any invalid range
+	// fails the whole request before any edit is produced.
+	spans := make([]syntax.Span, 0, len(params.Ranges))
+	for _, requested := range params.Ranges {
+		start, startErr := snapshot.Offset(fromProtocolPosition(requested.Start), encoding)
+		end, endErr := snapshot.Offset(fromProtocolPosition(requested.End), encoding)
+		if startErr != nil || endErr != nil || end < start {
+			return nil, jsonrpc2.ErrInvalidParams
+		}
+		spans = append(spans, syntax.Span{Start: start, End: end})
+	}
+	candidates := syntax.IndentEdits(file, syntax.IndentOptions{TabSize: int(params.Options.TabSize), InsertSpaces: params.Options.InsertSpaces})
+	result := make([]protocol.TextEdit, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !indentEditCovered(candidate.Span, spans) {
+			continue
+		}
+		rangeValue, ok := protocolRange(snapshot, encoding, candidate.Span)
+		if !ok {
+			continue
+		}
+		result = append(result, protocol.TextEdit{Range: rangeValue, NewText: candidate.NewText})
+	}
+	if err := s.structureCurrent(ctx, snapshot); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// indentEditInside reports whether candidate [start,end) is fully inside the
+// byte span [spanStart,spanEnd), applying the exact containment rule of the
+// existing single-range formatting filter: a candidate is kept when
+// candidate.Start >= spanStart && candidate.End <= spanEnd &&
+// candidate.Start < spanEnd.
+func indentEditInside(candidate syntax.Span, spanStart, spanEnd int) bool {
+	return candidate.Start >= spanStart && candidate.End <= spanEnd && candidate.Start < spanEnd
+}
+
+// indentEditCovered reports whether candidate lies fully inside at least one
+// requested byte span. Duplicates, out-of-order, adjacent and overlapping
+// requested ranges are all accepted because each candidate is decided once
+// against every span.
+func indentEditCovered(candidate syntax.Span, spans []syntax.Span) bool {
+	for _, span := range spans {
+		if indentEditInside(candidate, span.Start, span.End) {
+			return true
+		}
+	}
+	return false
+}
+
 // OnTypeFormatting re-indents the line the cursor rests on. Typing "\"
 // re-aligns a continuation line (both legacy scripts and multi-line
 // expressions in Vim9 script where a leading backslash is used), and
@@ -148,7 +216,7 @@ func (s *Server) formattingEdits(ctx context.Context, documentURI string, option
 	candidates := syntax.IndentEdits(file, syntax.IndentOptions{TabSize: int(options.TabSize), InsertSpaces: options.InsertSpaces})
 	result := make([]protocol.TextEdit, 0, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.Span.Start < start || candidate.Span.End > end || candidate.Span.Start >= end {
+		if !indentEditInside(candidate.Span, start, end) {
 			continue
 		}
 		rangeValue, ok := protocolRange(snapshot, encoding, candidate.Span)

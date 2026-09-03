@@ -1433,6 +1433,23 @@ func (s *Server) completionList(snapshot *text.Snapshot, encoding text.Encoding,
 	result := make([]protocol.CompletionItem, 0, len(items))
 	insertRange, insertValid := protocolRange(snapshot, encoding, syntax.Span{Start: selection.start, End: selection.cursor})
 	replaceRange, replaceValid := protocolRange(snapshot, encoding, syntax.Span{Start: selection.start, End: selection.end})
+	// CompletionList.ItemDefaults.editRange (LSP 3.17) lets the list carry the
+	// one shared insert/replace range instead of repeating it on every item.
+	// Every item in this list would carry exactly the same selection-derived
+	// range, so it is safe only when the client declared the capability and the
+	// shared range is valid and the list is non-empty (every candidate in
+	// `items` becomes one item in `result`).
+	useItemDefaults := capabilities.itemDefaultsEditRange && len(items) > 0 && insertValid && replaceValid
+	var itemDefaults *protocol.CompletionItemDefaults
+	if useItemDefaults {
+		itemDefaults = &protocol.CompletionItemDefaults{}
+		if capabilities.insertReplace {
+			itemDefaults.EditRange = &protocol.EditRangeWithInsertReplace{Insert: insertRange, Replace: replaceRange}
+		} else {
+			replace := replaceRange
+			itemDefaults.EditRange = &replace
+		}
+	}
 	for index, candidate := range items {
 		item := candidate.item
 		insertText := item.Label
@@ -1452,7 +1469,9 @@ func (s *Server) completionList(snapshot *text.Snapshot, encoding text.Encoding,
 			item.Preselect = protocol.NewOptional(true)
 		}
 		if insertValid && replaceValid {
-			if capabilities.insertReplace {
+			if useItemDefaults {
+				item.TextEditText = protocol.NewOptional(insertText)
+			} else if capabilities.insertReplace {
 				item.TextEdit = &protocol.InsertReplaceEdit{NewText: insertText, Insert: insertRange, Replace: replaceRange}
 			} else {
 				item.TextEdit = &protocol.TextEdit{NewText: insertText, Range: replaceRange}
@@ -1460,5 +1479,5 @@ func (s *Server) completionList(snapshot *text.Snapshot, encoding text.Encoding,
 		}
 		result = append(result, item)
 	}
-	return &protocol.CompletionList{IsIncomplete: truncated, Items: result}
+	return &protocol.CompletionList{IsIncomplete: truncated, ItemDefaults: itemDefaults, Items: result}
 }

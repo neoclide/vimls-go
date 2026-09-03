@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -180,6 +181,248 @@ func applyProtocolEdits(t *testing.T, source string, encoding text.Encoding, edi
 
 func protocolPositionLess(left, right protocol.Position) bool {
 	return left.Line < right.Line || left.Line == right.Line && left.Character < right.Character
+}
+
+func TestRangesFormattingCapabilityGating(t *testing.T) {
+	rangesSupportFalse := false
+	rangesSupportTrue := true
+	tests := []struct {
+		name       string
+		capability *protocol.DocumentRangeFormattingClientCapabilities
+		wantWire   string
+	}{
+		{name: "no client range formatting capability", capability: nil, wantWire: `"documentRangeFormattingProvider":true`},
+		{name: "client rangesSupport false", capability: &protocol.DocumentRangeFormattingClientCapabilities{RangesSupport: &rangesSupportFalse}, wantWire: `"documentRangeFormattingProvider":true`},
+		{name: "client rangesSupport true", capability: &protocol.DocumentRangeFormattingClientCapabilities{RangesSupport: &rangesSupportTrue}, wantWire: `"documentRangeFormattingProvider":{"rangesSupport":true}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance := New(nil, nil, io.Discard)
+			params := &protocol.InitializeParams{}
+			if test.capability != nil {
+				params.Capabilities.TextDocument = &protocol.TextDocumentClientCapabilities{RangeFormatting: test.capability}
+			}
+			result, err := instance.Initialize(context.Background(), params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := result.Capabilities.DocumentRangeFormattingProvider
+			options, optionsOK := provider.(*protocol.DocumentRangeFormattingOptions)
+			if test.capability != nil && test.capability.RangesSupport != nil && *test.capability.RangesSupport {
+				if !optionsOK || options.RangesSupport == nil || !*options.RangesSupport {
+					t.Fatalf("provider = %#v, want options with rangesSupport true", provider)
+				}
+			} else if _, ok := provider.(protocol.Boolean); !ok {
+				t.Fatalf("provider = %#v, want plain true", provider)
+			}
+			encoded, err := protocol.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(encoded, []byte(test.wantWire)) {
+				t.Fatalf("initialize result omitted %s: %s", test.wantWire, encoded)
+			}
+			if !implementedMethod(protocol.MethodTextDocumentRangesFormatting) {
+				t.Fatalf("method %q is not implemented", protocol.MethodTextDocumentRangesFormatting)
+			}
+		})
+	}
+}
+
+// multiBlockFormattingSource has two separate mis-indented regions: the body of
+// the first if is one space too shallow and the body of the second has no
+// indentation at all, so whole-document formatting edits both lines.
+const multiBlockFormattingSource = "vim9script\nif true\n echo 1\nendif\nif false\necho 2\nendif\n"
+
+// multiBlockFormattingEdits are the two candidate IndentEdits for
+// multiBlockFormattingSource with two-space indentation, in document order.
+var multiBlockFormattingEdits = []protocol.TextEdit{
+	{Range: protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 1}}, NewText: "  "},
+	{Range: protocol.Range{Start: protocol.Position{Line: 5}, End: protocol.Position{Line: 5}}, NewText: "  "},
+}
+
+func TestRangesFormattingSelectionUnion(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, multiBlockFormattingSource)
+	options := protocol.FormattingOptions{TabSize: 2, InsertSpaces: true}
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	line2 := protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 3}}
+	line5 := protocol.Range{Start: protocol.Position{Line: 5}, End: protocol.Position{Line: 6}}
+	fullEdits, err := instance.Formatting(context.Background(), &protocol.DocumentFormattingParams{
+		TextDocument: textDocument, Options: options,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fullEdits, multiBlockFormattingEdits) {
+		t.Fatalf("whole-document edits = %#v, want %#v", fullEdits, multiBlockFormattingEdits)
+	}
+	tests := []struct {
+		name   string
+		ranges []protocol.Range
+	}{
+		{name: "two disjoint ranges", ranges: []protocol.Range{line2, line5}},
+		{name: "out of order ranges", ranges: []protocol.Range{line5, line2}},
+		{name: "duplicate ranges", ranges: []protocol.Range{line2, line2, line5}},
+		{name: "overlapping ranges", ranges: []protocol.Range{
+			{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 6}},
+			{Start: protocol.Position{Line: 3}, End: protocol.Position{Line: 6}},
+		}},
+		{name: "adjacent ranges", ranges: []protocol.Range{
+			line2,
+			{Start: protocol.Position{Line: 3}, End: protocol.Position{Line: 4}},
+			{Start: protocol.Position{Line: 4}, End: protocol.Position{Line: 5}},
+			line5,
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+				TextDocument: textDocument, Ranges: test.ranges, Options: options,
+			})
+			if err != nil || !reflect.DeepEqual(got, multiBlockFormattingEdits) {
+				t.Fatalf("ranges edits = %#v, %v, want %#v", got, err, multiBlockFormattingEdits)
+			}
+		})
+	}
+
+	// The selection formed by the two mis-indented lines formats to the same
+	// text as whole-document formatting of the same snapshot.
+	rangesResult, err := instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: textDocument, Ranges: []protocol.Range{line2, line5}, Options: options,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := applyProtocolEdits(t, multiBlockFormattingSource, text.UTF16, rangesResult), applyProtocolEdits(t, multiBlockFormattingSource, text.UTF16, fullEdits); got != want {
+		t.Fatalf("ranges formatting text = %q, whole-document formatting text = %q", got, want)
+	}
+}
+
+func TestRangesFormattingSameLineRanges(t *testing.T) {
+	// One candidate IndentEdit replaces the three-space indent on line 2.
+	source := "vim9script\nif true\n   echo 1\nendif\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	options := protocol.FormattingOptions{TabSize: 2, InsertSpaces: true}
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	candidate := protocol.TextEdit{Range: protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 3}}, NewText: "  "}
+
+	// Two requested ranges on the same line that both fully contain the
+	// candidate span still return it exactly once.
+	got, err := instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: textDocument,
+		Ranges: []protocol.Range{
+			{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 4}},
+			{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 5}},
+		},
+		Options: options,
+	})
+	if err != nil || !reflect.DeepEqual(got, []protocol.TextEdit{candidate}) {
+		t.Fatalf("same-line covering ranges = %#v, %v, want %#v", got, err, []protocol.TextEdit{candidate})
+	}
+
+	// Two same-line ranges that only jointly span the indent are not a union:
+	// a candidate must lie fully inside one requested range, exactly like the
+	// single-range filter which drops a range starting after the indent.
+	partial := []protocol.Range{
+		{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 2}},
+		{Start: protocol.Position{Line: 2, Character: 2}, End: protocol.Position{Line: 2, Character: 6}},
+	}
+	got, err = instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: textDocument, Ranges: partial, Options: options,
+	})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("partial same-line ranges = %#v, %v, want no edits", got, err)
+	}
+	single, err := instance.RangeFormatting(context.Background(), &protocol.DocumentRangeFormattingParams{
+		TextDocument: textDocument, Range: partial[0], Options: options,
+	})
+	if err != nil || len(single) != 0 {
+		t.Fatalf("single partial range = %#v, %v, want no edits", single, err)
+	}
+}
+
+func TestRangesFormattingEmptyInvalidAndUnknown(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nif true\necho 1\nendif\n")
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	options := protocol.FormattingOptions{TabSize: 2, InsertSpaces: true}
+	validRange := protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 3}}
+
+	if edits, err := instance.RangesFormatting(context.Background(), nil); !errors.Is(err, jsonrpc2.ErrInvalidParams) || edits != nil {
+		t.Fatalf("nil params = %#v, %v", edits, err)
+	}
+	if edits, err := instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: textDocument, Ranges: []protocol.Range{validRange}, Options: protocol.FormattingOptions{},
+	}); !errors.Is(err, jsonrpc2.ErrInvalidParams) || edits != nil {
+		t.Fatalf("invalid options = %#v, %v", edits, err)
+	}
+
+	// One invalid range fails the whole request even when other ranges are
+	// valid; no partial results are returned.
+	reversed := protocol.Range{Start: protocol.Position{Line: 3}, End: protocol.Position{Line: 1}}
+	if edits, err := instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: textDocument, Ranges: []protocol.Range{validRange, reversed}, Options: options,
+	}); !errors.Is(err, jsonrpc2.ErrInvalidParams) || edits != nil {
+		t.Fatalf("reversed range among valid = %#v, %v", edits, err)
+	}
+	outOfDocument := protocol.Range{Start: protocol.Position{Line: 99}, End: protocol.Position{Line: 100}}
+	if edits, err := instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: textDocument, Ranges: []protocol.Range{validRange, outOfDocument}, Options: options,
+	}); !errors.Is(err, jsonrpc2.ErrInvalidParams) || edits != nil {
+		t.Fatalf("out-of-document range among valid = %#v, %v", edits, err)
+	}
+
+	// An empty selection formats nothing but is not an error.
+	empty, err := instance.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: textDocument, Ranges: []protocol.Range{}, Options: options,
+	})
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty ranges = %#v, %v", empty, err)
+	}
+
+	// An unknown document mirrors whole-document formatting: empty edits, nil error.
+	missing := New(nil, nil, io.Discard)
+	unknown, err := missing.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri.MustParse("file:///missing-ranges.vim")},
+		Ranges:       []protocol.Range{validRange},
+		Options:      options,
+	})
+	if err != nil || unknown == nil || len(unknown) != 0 {
+		t.Fatalf("unknown document ranges = %#v, %v", unknown, err)
+	}
+}
+
+func TestRangesFormattingRejectsStaleSnapshot(t *testing.T) {
+	// beforeParseSnapshotCacheMiss replaces the open document while the
+	// request parses, so the final freshness check must fail even when the
+	// requested ranges (or none at all) would otherwise format successfully.
+	tests := []struct {
+		name   string
+		ranges []protocol.Range
+	}{
+		{name: "with requested ranges", ranges: []protocol.Range{
+			{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 3}},
+			{Start: protocol.Position{Line: 5}, End: protocol.Position{Line: 6}},
+		}},
+		{name: "empty ranges", ranges: []protocol.Range{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stale, staleURI := openNavigationDocument(t, text.UTF16, multiBlockFormattingSource)
+			stale.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
+				stale.publishMu.Lock()
+				stale.documents.Open(staleURI.String(), 2, "vim9script\n")
+				stale.publishMu.Unlock()
+			}
+			edits, err := stale.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: staleURI},
+				Ranges:       test.ranges,
+				Options:      protocol.FormattingOptions{TabSize: 2, InsertSpaces: true},
+			})
+			if !errors.Is(err, protocol.ErrContentModified) || edits != nil {
+				t.Fatalf("stale ranges formatting = %#v, %v", edits, err)
+			}
+		})
+	}
 }
 
 func TestOnTypeFormattingCapabilityAndMethod(t *testing.T) {

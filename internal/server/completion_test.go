@@ -1010,3 +1010,472 @@ func TestCompletionResolveIsStatelessAndPreservesFields(t *testing.T) {
 		t.Fatalf("option detail = %q", detail)
 	}
 }
+
+// completionListRequest runs a completion request at a UTF-16 position and
+// returns the list.
+func completionListRequest(t *testing.T, instance *Server, documentURI uri.URI, line, character uint32) *protocol.CompletionList {
+	t.Helper()
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: line, Character: character},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := result.(*protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want *protocol.CompletionList", result)
+	}
+	return list
+}
+
+// completionMainEdit is the explicit main edit a completion item implies:
+// the accepted range (replace, plus insert when both are reported), the text
+// inserted over that range, and the item's per-item insert text format.
+type completionMainEdit struct {
+	text    string
+	replace protocol.Range
+	insert  *protocol.Range // nil when the main edit reports only one range
+	format  protocol.InsertTextFormat
+}
+
+// completionMainEditFromItem extracts the explicit main edit a completion
+// item carries in the pre-itemDefaults response shape.
+func completionMainEditFromItem(item protocol.CompletionItem) completionMainEdit {
+	edit := completionMainEdit{format: item.InsertTextFormat}
+	switch main := item.TextEdit.(type) {
+	case *protocol.TextEdit:
+		edit.text = main.NewText
+		edit.replace = main.Range
+	case *protocol.InsertReplaceEdit:
+		insert := main.Insert
+		edit.text = main.NewText
+		edit.replace = main.Replace
+		edit.insert = &insert
+	}
+	return edit
+}
+
+// expandCompletionListItemDefaults expands each item of a list produced with
+// CompletionList.ItemDefaults.editRange into the explicit main edit it
+// implies: the range comes from the shared default, the text from the item's
+// textEditText, and per-item fields (format and friends) stay untouched.
+func expandCompletionListItemDefaults(t *testing.T, list *protocol.CompletionList) []completionMainEdit {
+	t.Helper()
+	if list.ItemDefaults == nil {
+		t.Fatalf("completion list carries no item defaults: %#v", list)
+	}
+	var insert *protocol.Range
+	var replace protocol.Range
+	switch editRange := list.ItemDefaults.EditRange.(type) {
+	case *protocol.Range:
+		replace = *editRange
+	case *protocol.EditRangeWithInsertReplace:
+		insertRange := editRange.Insert
+		insert = &insertRange
+		replace = editRange.Replace
+	default:
+		t.Fatalf("itemDefaults.editRange = %#v", list.ItemDefaults.EditRange)
+	}
+	expanded := make([]completionMainEdit, 0, len(list.Items))
+	for _, item := range list.Items {
+		text, ok := item.TextEditText.Get()
+		if !ok {
+			t.Fatalf("item %q in item-defaults list has no textEditText", item.Label)
+		}
+		if item.TextEdit != nil {
+			t.Fatalf("item %q in item-defaults list still carries textEdit %#v", item.Label, item.TextEdit)
+		}
+		expanded = append(expanded, completionMainEdit{text: text, replace: replace, insert: insert, format: item.InsertTextFormat})
+	}
+	return expanded
+}
+
+func completionMainEditsEqual(left, right completionMainEdit) bool {
+	if left.text != right.text || left.format != right.format || left.replace != right.replace {
+		return false
+	}
+	if left.insert == nil || right.insert == nil {
+		return left.insert == nil && right.insert == nil
+	}
+	return *left.insert == *right.insert
+}
+
+// applyCompletionMainEdit applies one explicit main edit over its replace
+// range and returns the resulting document text.
+func applyCompletionMainEdit(t *testing.T, source string, edit completionMainEdit) string {
+	t.Helper()
+	snapshot := text.NewSnapshot("file:///completion-apply.vim", 1, nil, source)
+	start, startErr := snapshot.Offset(fromProtocolPosition(edit.replace.Start), text.UTF16)
+	end, endErr := snapshot.Offset(fromProtocolPosition(edit.replace.End), text.UTF16)
+	if startErr != nil || endErr != nil || end < start {
+		t.Fatalf("cannot apply main edit %#v: %v, %v", edit, startErr, endErr)
+	}
+	return source[:start] + edit.text + source[end:]
+}
+
+// assertCompletionItemDefaultsEquivalent checks that a list produced with
+// itemDefaults.editRange expands, item for item, into the same explicit main
+// edit (range, text, and per-item insert text format) that the same source
+// and selection yield with the defaults off, and that applying each explicit
+// edit produces the same document text in both shapes.
+func assertCompletionItemDefaultsEquivalent(t *testing.T, source string, oldList, newList *protocol.CompletionList) {
+	t.Helper()
+	if len(oldList.Items) != len(newList.Items) {
+		t.Fatalf("item counts differ with and without itemDefaults: old %d, new %d", len(oldList.Items), len(newList.Items))
+	}
+	expanded := expandCompletionListItemDefaults(t, newList)
+	for index := range oldList.Items {
+		oldItem, newItem := oldList.Items[index], newList.Items[index]
+		if oldItem.Label != newItem.Label || oldItem.SortText != newItem.SortText {
+			t.Fatalf("item %d differs between shapes: old %#v, new %#v", index, oldItem, newItem)
+		}
+		oldEdit := completionMainEditFromItem(oldItem)
+		if !completionMainEditsEqual(oldEdit, expanded[index]) {
+			t.Fatalf("item %d %q explicit main edit = %#v, want old-shape edit %#v", index, oldItem.Label, expanded[index], oldEdit)
+		}
+		if newItem.TextEdit != nil {
+			t.Fatalf("item %d %q retains textEdit %#v in item-defaults list", index, newItem.Label, newItem.TextEdit)
+		}
+		appliedNew := applyCompletionMainEdit(t, source, expanded[index])
+		appliedOld := applyCompletionMainEdit(t, source, oldEdit)
+		if appliedNew != appliedOld {
+			t.Fatalf("item %d %q: applying shared-default edit yields %q, old shape yields %q", index, oldItem.Label, appliedNew, appliedOld)
+		}
+	}
+}
+
+func TestCompletionItemDefaultsEditRangePlainShape(t *testing.T) {
+	const source = "vim9script\necho absc\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	oldList := completionListRequest(t, instance, documentURI, 1, 8)
+	if len(oldList.Items) == 0 {
+		t.Fatalf("no completion items for %q", source)
+	}
+	for _, item := range oldList.Items {
+		if _, ok := item.TextEdit.(*protocol.TextEdit); !ok {
+			t.Fatalf("old-shape item %q edit = %#v, want plain TextEdit", item.Label, item.TextEdit)
+		}
+	}
+	first, ok := oldList.Items[0].TextEdit.(*protocol.TextEdit)
+	if !ok {
+		t.Fatalf("first item edit = %#v, want plain TextEdit", oldList.Items[0].TextEdit)
+	}
+
+	instance.completion.itemDefaultsEditRange = true
+	newList := completionListRequest(t, instance, documentURI, 1, 8)
+	if newList.ItemDefaults == nil {
+		t.Fatal("itemDefaults.editRange declared but list carries no itemDefaults")
+	}
+	editRange, ok := newList.ItemDefaults.EditRange.(*protocol.Range)
+	if !ok {
+		t.Fatalf("itemDefaults.editRange = %T, want *protocol.Range", newList.ItemDefaults.EditRange)
+	}
+	if *editRange != first.Range {
+		t.Fatalf("itemDefaults.editRange = %#v, want the selection replace range %#v", *editRange, first.Range)
+	}
+	for _, item := range newList.Items {
+		if item.TextEdit != nil {
+			t.Fatalf("item %q still carries textEdit %#v with itemDefaults", item.Label, item.TextEdit)
+		}
+		if _, ok := item.TextEditText.Get(); !ok {
+			t.Fatalf("item %q has no textEditText", item.Label)
+		}
+	}
+	assertCompletionItemDefaultsEquivalent(t, source, oldList, newList)
+}
+
+func TestCompletionItemDefaultsEditRangeInsertReplaceShape(t *testing.T) {
+	const source = "vim9script\necho absc\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	instance.completion.insertReplace = true
+	oldList := completionListRequest(t, instance, documentURI, 1, 8)
+	if len(oldList.Items) == 0 {
+		t.Fatalf("no completion items for %q", source)
+	}
+	first, ok := oldList.Items[0].TextEdit.(*protocol.InsertReplaceEdit)
+	if !ok {
+		t.Fatalf("first item edit = %#v, want InsertReplaceEdit", oldList.Items[0].TextEdit)
+	}
+	for _, item := range oldList.Items {
+		edit, ok := item.TextEdit.(*protocol.InsertReplaceEdit)
+		if !ok {
+			t.Fatalf("old-shape item %q edit = %#v, want InsertReplaceEdit", item.Label, item.TextEdit)
+		}
+		if edit.Insert != first.Insert || edit.Replace != first.Replace {
+			t.Fatalf("old-shape item %q edit range %#v diverges from first item %#v", item.Label, edit, first)
+		}
+	}
+
+	instance.completion.itemDefaultsEditRange = true
+	newList := completionListRequest(t, instance, documentURI, 1, 8)
+	if newList.ItemDefaults == nil {
+		t.Fatal("itemDefaults.editRange declared but list carries no itemDefaults")
+	}
+	editRange, ok := newList.ItemDefaults.EditRange.(*protocol.EditRangeWithInsertReplace)
+	if !ok {
+		t.Fatalf("itemDefaults.editRange = %T, want *protocol.EditRangeWithInsertReplace", newList.ItemDefaults.EditRange)
+	}
+	if editRange.Insert != first.Insert || editRange.Replace != first.Replace {
+		t.Fatalf("itemDefaults.editRange = %#v, want old-shape insert %#v replace %#v", editRange, first.Insert, first.Replace)
+	}
+	for _, item := range newList.Items {
+		if item.TextEdit != nil {
+			t.Fatalf("item %q still carries textEdit %#v with itemDefaults", item.Label, item.TextEdit)
+		}
+		if _, ok := item.TextEditText.Get(); !ok {
+			t.Fatalf("item %q has no textEditText", item.Label)
+		}
+	}
+	assertCompletionItemDefaultsEquivalent(t, source, oldList, newList)
+}
+
+func TestCompletionItemDefaultsEditRangeMarshalShape(t *testing.T) {
+	plainInstance, plainURI := openNavigationDocument(t, text.UTF16, "vim9script\necho absc\n")
+	plainInstance.completion.itemDefaultsEditRange = true
+	plain := completionListRequest(t, plainInstance, plainURI, 1, 8)
+	encoded, err := protocol.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	if !strings.Contains(raw, `"itemDefaults":{"editRange":{"start":`) {
+		t.Fatalf("plain marshal lacks itemDefaults.editRange range: %s", raw)
+	}
+	if strings.Contains(raw, `"itemDefaults":{"editRange":{"insert":`) {
+		t.Fatalf("plain marshal carries an insert/replace default: %s", raw)
+	}
+	if strings.Contains(raw, `"textEdit":`) {
+		t.Fatalf("item-defaults marshal still has a textEdit member: %s", raw)
+	}
+	if got := strings.Count(raw, `"textEditText":`); got != len(plain.Items) {
+		t.Fatalf("textEditText members = %d, want %d: %s", got, len(plain.Items), raw)
+	}
+
+	irInstance, irURI := openNavigationDocument(t, text.UTF16, "vim9script\necho absc\n")
+	irInstance.completion.insertReplace = true
+	irInstance.completion.itemDefaultsEditRange = true
+	irList := completionListRequest(t, irInstance, irURI, 1, 8)
+	encoded, err = protocol.Marshal(irList)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = string(encoded)
+	if !strings.Contains(raw, `"itemDefaults":{"editRange":{"insert":{"start":`) || !strings.Contains(raw, `,"replace":{"start":`) {
+		t.Fatalf("insert/replace marshal lacks the shared editRange: %s", raw)
+	}
+	if strings.Contains(raw, `"textEdit":`) {
+		t.Fatalf("item-defaults marshal still has a textEdit member: %s", raw)
+	}
+	if got := strings.Count(raw, `"textEditText":`); got != len(irList.Items) {
+		t.Fatalf("textEditText members = %d, want %d: %s", got, len(irList.Items), raw)
+	}
+
+	oldInstance, oldURI := openNavigationDocument(t, text.UTF16, "vim9script\necho absc\n")
+	oldList := completionListRequest(t, oldInstance, oldURI, 1, 8)
+	encoded, err = protocol.Marshal(oldList)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = string(encoded)
+	if strings.Contains(raw, `"itemDefaults"`) || strings.Contains(raw, `"textEditText"`) {
+		t.Fatalf("old-shape marshal leaks item defaults: %s", raw)
+	}
+	if got := strings.Count(raw, `"textEdit":`); got != len(oldList.Items) {
+		t.Fatalf("old-shape textEdit members = %d, want %d: %s", got, len(oldList.Items), raw)
+	}
+}
+
+func TestCompletionItemDefaultsEditRangeSnippetAndPlainItems(t *testing.T) {
+	const source = "vim9script\nvar strlenValue = 1\necho strl\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	instance.completion.snippet = true
+	oldList := completionListRequest(t, instance, documentURI, 2, 9)
+	oldSnippet := completionItemWithLabel(protocol.CompletionItemSlice(oldList.Items), "strlen")
+	oldPlain := completionItemWithLabel(protocol.CompletionItemSlice(oldList.Items), "strlenValue")
+	if oldSnippet == nil || oldPlain == nil {
+		t.Fatalf("snippet/plain pair missing from %#v", oldList.Items)
+	}
+	snippetEdit, ok := oldSnippet.TextEdit.(*protocol.TextEdit)
+	if !ok {
+		t.Fatalf("snippet item edit = %#v, want plain TextEdit", oldSnippet.TextEdit)
+	}
+	plainEdit, ok := oldPlain.TextEdit.(*protocol.TextEdit)
+	if !ok {
+		t.Fatalf("plain item edit = %#v, want plain TextEdit", oldPlain.TextEdit)
+	}
+
+	instance.completion.itemDefaultsEditRange = true
+	newList := completionListRequest(t, instance, documentURI, 2, 9)
+	if newList.ItemDefaults == nil {
+		t.Fatal("itemDefaults.editRange declared but list carries no itemDefaults")
+	}
+	newItems := protocol.CompletionItemSlice(newList.Items)
+	snippetItem := completionItemWithLabel(newItems, "strlen")
+	if snippetItem == nil {
+		t.Fatalf("snippet item missing from %#v", newList.Items)
+	}
+	if snippetItem.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Fatalf("snippet item format = %v, want Snippet", snippetItem.InsertTextFormat)
+	}
+	snippetText, ok := snippetItem.TextEditText.Get()
+	if !ok || snippetText != snippetEdit.NewText {
+		t.Fatalf("snippet textEditText = %q, %t, want %q", snippetText, ok, snippetEdit.NewText)
+	}
+	plainItem := completionItemWithLabel(newItems, "strlenValue")
+	if plainItem == nil {
+		t.Fatalf("plain item missing from %#v", newList.Items)
+	}
+	if plainItem.InsertTextFormat == protocol.InsertTextFormatSnippet {
+		t.Fatal("plain item carries a snippet format")
+	}
+	plainText, ok := plainItem.TextEditText.Get()
+	if !ok || plainText != plainEdit.NewText {
+		t.Fatalf("plain textEditText = %q, %t, want %q", plainText, ok, plainEdit.NewText)
+	}
+	assertCompletionItemDefaultsEquivalent(t, source, oldList, newList)
+}
+
+func TestCompletionItemDefaultsEditRangeRequiresValidSharedRange(t *testing.T) {
+	const source = "vim9script\necho ab"
+	snapshot := text.NewSnapshot("file:///item-defaults-fallback.vim", 1, nil, source)
+	candidates := map[string]completionCandidate{
+		"ab":   {item: protocol.CompletionItem{Label: "ab", Kind: protocol.CompletionItemKindFunction}, score: 8000, source: completionSourceBuiltin},
+		"abcd": {item: protocol.CompletionItem{Label: "abcd", Kind: protocol.CompletionItemKindFunction}, score: 7000, source: completionSourceBuiltin},
+	}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.completion.itemDefaultsEditRange = true
+
+	// A replace end beyond the document makes the shared range invalid: the
+	// response must fall back to today's per-item shape (no edit at all).
+	invalid := completionSelection{start: len("vim9script\necho "), cursor: len(source), end: len(source) + 5, prefix: "ab"}
+	list := instance.completionList(snapshot, text.UTF16, invalid, candidates)
+	if list.ItemDefaults != nil {
+		t.Fatalf("invalid-range list carries itemDefaults %#v", list.ItemDefaults)
+	}
+	if len(list.Items) != 2 {
+		t.Fatalf("invalid-range items = %d, want 2", len(list.Items))
+	}
+	for _, item := range list.Items {
+		if item.TextEdit != nil {
+			t.Fatalf("invalid-range item %q carries textEdit %#v", item.Label, item.TextEdit)
+		}
+		if _, ok := item.TextEditText.Get(); ok {
+			t.Fatalf("invalid-range item %q carries textEditText", item.Label)
+		}
+	}
+
+	// An empty list cannot share one range, even though the selection is valid.
+	empty := instance.completionList(snapshot, text.UTF16, completionSelection{start: len("vim9script\necho "), cursor: len(source), end: len(source), prefix: "zz"}, candidates)
+	if empty.ItemDefaults != nil {
+		t.Fatalf("empty list carries itemDefaults %#v", empty.ItemDefaults)
+	}
+	if len(empty.Items) != 0 {
+		t.Fatalf("non-matching completion returned %#v", empty.Items)
+	}
+}
+
+// TestCompletionItemDefaultsEditRangeSnippetWithInsertReplace exercises the
+// realistic client combination of snippet support, insert/replace support and
+// itemDefaults editRange: the snippet item's text moves into textEditText under
+// a shared {insert,replace} edit range while its per-item Snippet format and
+// the plain item in the same list stay intact.
+func TestCompletionItemDefaultsEditRangeSnippetWithInsertReplace(t *testing.T) {
+	const source = "vim9script\nvar strlenValue = 1\necho strl\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	instance.completion.snippet = true
+	instance.completion.insertReplace = true
+	oldList := completionListRequest(t, instance, documentURI, 2, 9)
+	oldSnippet := completionItemWithLabel(protocol.CompletionItemSlice(oldList.Items), "strlen")
+	oldPlain := completionItemWithLabel(protocol.CompletionItemSlice(oldList.Items), "strlenValue")
+	if oldSnippet == nil || oldPlain == nil {
+		t.Fatalf("snippet/plain pair missing from %#v", oldList.Items)
+	}
+	snippetEdit, ok := oldSnippet.TextEdit.(*protocol.InsertReplaceEdit)
+	if !ok {
+		t.Fatalf("snippet item edit = %#v, want InsertReplaceEdit", oldSnippet.TextEdit)
+	}
+
+	instance.completion.itemDefaultsEditRange = true
+	newList := completionListRequest(t, instance, documentURI, 2, 9)
+	if newList.ItemDefaults == nil {
+		t.Fatal("itemDefaults.editRange declared but list carries no itemDefaults")
+	}
+	editRange, ok := newList.ItemDefaults.EditRange.(*protocol.EditRangeWithInsertReplace)
+	if !ok {
+		t.Fatalf("itemDefaults.editRange = %T, want *protocol.EditRangeWithInsertReplace", newList.ItemDefaults.EditRange)
+	}
+	if editRange.Insert != snippetEdit.Insert || editRange.Replace != snippetEdit.Replace {
+		t.Fatalf("itemDefaults.editRange = %#v, want old-shape insert %#v replace %#v", editRange, snippetEdit.Insert, snippetEdit.Replace)
+	}
+	newItems := protocol.CompletionItemSlice(newList.Items)
+	snippetItem := completionItemWithLabel(newItems, "strlen")
+	if snippetItem == nil {
+		t.Fatalf("snippet item missing from %#v", newList.Items)
+	}
+	if snippetItem.InsertTextFormat != protocol.InsertTextFormatSnippet {
+		t.Fatalf("snippet item format = %v, want Snippet", snippetItem.InsertTextFormat)
+	}
+	snippetText, ok := snippetItem.TextEditText.Get()
+	if !ok || snippetText != snippetEdit.NewText {
+		t.Fatalf("snippet textEditText = %q, %t, want %q", snippetText, ok, snippetEdit.NewText)
+	}
+	plainItem := completionItemWithLabel(newItems, "strlenValue")
+	if plainItem == nil {
+		t.Fatalf("plain item missing from %#v", newList.Items)
+	}
+	if plainItem.InsertTextFormat == protocol.InsertTextFormatSnippet {
+		t.Fatal("plain item carries a snippet format")
+	}
+	plainText, ok := plainItem.TextEditText.Get()
+	if !ok || plainText != completionMainEditFromItem(*oldPlain).text {
+		t.Fatalf("plain textEditText = %q, %t, want %q", plainText, ok, completionMainEditFromItem(*oldPlain).text)
+	}
+	assertCompletionItemDefaultsEquivalent(t, source, oldList, newList)
+}
+
+// TestCompletionItemDefaultsEditRangeFromInitializeCapabilities drives the
+// full wiring from client capability JSON parsed in Initialize down to the
+// completion list shape.
+func TestCompletionItemDefaultsEditRangeFromInitializeCapabilities(t *testing.T) {
+	enabled := true
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	_, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{
+		TextDocument: &protocol.TextDocumentClientCapabilities{Completion: &protocol.CompletionClientCapabilities{
+			CompletionItem: &protocol.ClientCompletionItemOptions{SnippetSupport: &enabled, InsertReplaceSupport: &enabled},
+			CompletionList: &protocol.CompletionListCapabilities{ItemDefaults: []string{"editRange"}},
+		}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.mu.Lock()
+	if !instance.completion.itemDefaultsEditRange || !instance.completion.snippet || !instance.completion.insertReplace {
+		t.Fatalf("completion capabilities after initialize = %#v", instance.completion)
+	}
+	instance.mu.Unlock()
+
+	const source = "vim9script\nvar strlenValue = 1\necho strl\n"
+	path := writeWorkspaceFile(t, t.TempDir(), "main.vim", source)
+	documentURI := canonicalTestURI(t, path)
+	instance.documents.Open(documentURI.String(), 1, source)
+	list := completionListRequest(t, instance, documentURI, 2, 9)
+	if list.ItemDefaults == nil {
+		t.Fatal("list carries no itemDefaults after initialize capability parse")
+	}
+	if _, ok := list.ItemDefaults.EditRange.(*protocol.EditRangeWithInsertReplace); !ok {
+		t.Fatalf("itemDefaults.editRange = %T, want *protocol.EditRangeWithInsertReplace", list.ItemDefaults.EditRange)
+	}
+	snippetItem := completionItemWithLabel(protocol.CompletionItemSlice(list.Items), "strlen")
+	if snippetItem == nil {
+		t.Fatalf("snippet item missing from %#v", list.Items)
+	}
+	if snippetItem.InsertTextFormat != protocol.InsertTextFormatSnippet || snippetItem.TextEdit != nil {
+		t.Fatalf("snippet item = %#v, want Snippet format without textEdit", snippetItem)
+	}
+	if _, ok := snippetItem.TextEditText.Get(); !ok {
+		t.Fatal("snippet item has no textEditText")
+	}
+}
