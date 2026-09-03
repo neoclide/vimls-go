@@ -3,6 +3,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"go/format"
 	"os"
@@ -800,6 +802,25 @@ type callbackDefinition struct {
 	Body   string
 }
 
+type structuredOptionEvidence struct {
+	chars              string
+	encodedChar        string
+	statusline         string
+	winhighlight       string
+	winhighlightParser string
+}
+
+const (
+	didSetCharsOptionFingerprint    = "d803c055cb29b64268999f922cbe83402792a16ce9f2334aa0248065888f3898"
+	setCharsOptionFingerprint       = "2f5f8f373532734e583f2155e3d3f472379a403ead1251a108fb351b166e794f"
+	getEncodedCharAdvFingerprint    = "4cede8f66c769e544ad345600437028902ee708374bb43c9bcebc0561d9d43e5"
+	didSetStatuslineoptFingerprint  = "32a53f2f5a7d41b20620112e75fbf0ab1aeb0099ab5c8ef7002eb9b6d58df061"
+	statuslineoptChangedFingerprint = "52cf056bc4f53c056d2a2ffe81114118914d556d31df4bedd2539cda5bc0d6c2"
+	didSetWinhighlightFingerprint   = "8325095ec6fdf4b9ac67c3deb95248c923e3ed6b57a793154fd69c4589e6d57d"
+	updateWinhighlightFingerprint   = "d6aac8fd8304824f20081e6a92626539c16e1523a25945aa50cf0fd895d9646e"
+	parseWinhighlightFingerprint    = "be6806d1b985de21ff08122a3bd7f4ff407fd9b3ac2db4ca710848efe7de720a"
+)
+
 func addOptionValidations(root string, options []option) error {
 	optionHeader, err := readRevisionFile(root, "src/option.h")
 	if err != nil {
@@ -816,6 +837,51 @@ func addOptionValidations(root string, options []option) error {
 	arrays, err := parseCStringArrays(optionstr, macros)
 	if err != nil {
 		return err
+	}
+	screen, err := readRevisionFile(root, "src/screen.c")
+	if err != nil {
+		return err
+	}
+	chars, ok := cFunctionBody(string(screen), "set_chars_option")
+	if !ok {
+		return fmt.Errorf("set_chars_option was not found")
+	}
+	encodedChar, ok := cFunctionBody(string(screen), "get_encoded_char_adv")
+	if !ok {
+		return fmt.Errorf("get_encoded_char_adv was not found")
+	}
+	window, err := readRevisionFile(root, "src/window.c")
+	if err != nil {
+		return err
+	}
+	statusline, ok := cFunctionBody(string(window), "statuslineopt_changed")
+	if !ok {
+		return fmt.Errorf("statuslineopt_changed was not found")
+	}
+	highlight, err := readRevisionFile(root, "src/highlight.c")
+	if err != nil {
+		return err
+	}
+	winhighlight, ok := cFunctionBody(string(highlight), "update_winhighlight")
+	if !ok {
+		return fmt.Errorf("update_winhighlight was not found")
+	}
+	winhighlightParser, ok := cFunctionBody(string(highlight), "parse_winhighlight")
+	if !ok {
+		return fmt.Errorf("parse_winhighlight was not found")
+	}
+	structured := structuredOptionEvidence{chars: chars, encodedChar: encodedChar, statusline: statusline, winhighlight: winhighlight, winhighlightParser: winhighlightParser}
+	listChars, err := parseCharsOptionNames(screen, "lcstab")
+	if err != nil {
+		return err
+	}
+	fillChars, err := parseCharsOptionNames(screen, "filltab")
+	if err != nil {
+		return err
+	}
+	statuslineOpt, ok := arrays["p_stlo_values"]
+	if !ok || len(statuslineOpt) == 0 {
+		return fmt.Errorf("p_stlo_values not found")
 	}
 	errorsSource, err := readRevisionFile(root, "src/errors.h")
 	if err != nil {
@@ -880,9 +946,87 @@ func addOptionValidations(root string, options []option) error {
 		if err != nil {
 			return fmt.Errorf("%s for %s: %w", callback, options[i].Name, err)
 		}
+		validation, err = parseStructuredOptionValidation(options[i].Name, validation, callbackDefinitions, listChars, fillChars, statuslineOpt, errorCodes, structured)
+		if err != nil {
+			return fmt.Errorf("%s for %s: %w", callback, options[i].Name, err)
+		}
 		options[i].Validation = validation
 	}
 	return nil
+}
+
+func parseCharsOptionNames(source []byte, table string) ([]string, error) {
+	tablePattern := regexp.MustCompile(`(?s)static struct charstab\s+` + regexp.QuoteMeta(table) + `\[\]\s*=\s*\{(.*?)\n\};`)
+	match := tablePattern.FindSubmatch(source)
+	if len(match) != 2 {
+		return nil, fmt.Errorf("%s table not found", table)
+	}
+	entryPattern := regexp.MustCompile(`CHARSTAB_ENTRY\([^,]+,\s*"([^"]+)"\)`)
+	var names []string
+	for _, entry := range entryPattern.FindAllSubmatch(match[1], -1) {
+		names = appendUnique(names, string(entry[1]))
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("%s has no CHARSTAB_ENTRY values", table)
+	}
+	return names, nil
+}
+
+func parseStructuredOptionValidation(name string, validation optionValidation, definitions []callbackDefinition, listChars, fillChars, statuslineOpt []string, errorCodes map[string]string, evidence structuredOptionEvidence) (optionValidation, error) {
+	switch name {
+	case "listchars":
+		if len(definitions) != 1 || definitions[0].Source != "src/optionstr.c" || validation.Callback != "did_set_chars_option" || bodyFingerprint(definitions[0].Body) != didSetCharsOptionFingerprint {
+			return validation, fmt.Errorf("unrecognized listchars callback body")
+		}
+		if errorCodes["e_invalid_argument"] != "E474" || errorCodes["e_wrong_number_of_characters_for_field_str"] != "E1511" || errorCodes["e_leadtab_requires_tab"] != "E1572" || !structuredOptionEvidenceMatchesPin(evidence) {
+			return validation, fmt.Errorf("unrecognized listchars helper semantics")
+		}
+		validation.Kind, validation.Values, validation.ErrorCode = "ValidationListChars", listChars, errorCodes["e_invalid_argument"]
+	case "fillchars":
+		if len(definitions) != 1 || definitions[0].Source != "src/optionstr.c" || validation.Callback != "did_set_chars_option" || bodyFingerprint(definitions[0].Body) != didSetCharsOptionFingerprint {
+			return validation, fmt.Errorf("unrecognized fillchars callback body")
+		}
+		if errorCodes["e_invalid_argument"] != "E474" || errorCodes["e_wrong_number_of_characters_for_field_str"] != "E1511" || errorCodes["e_leadtab_requires_tab"] != "E1572" || !structuredOptionEvidenceMatchesPin(evidence) {
+			return validation, fmt.Errorf("unrecognized fillchars helper semantics")
+		}
+		validation.Kind, validation.Values, validation.ErrorCode = "ValidationFillChars", fillChars, errorCodes["e_invalid_argument"]
+	case "statuslineopt":
+		if len(definitions) != 1 || definitions[0].Source != "src/optionstr.c" || validation.Callback != "did_set_statuslineopt" || bodyFingerprint(definitions[0].Body) != didSetStatuslineoptFingerprint {
+			return validation, fmt.Errorf("unrecognized statuslineopt callback body")
+		}
+		if errorCodes["e_invalid_argument"] != "E474" || !slices.Equal(statuslineOpt, []string{"fixedheight", "maxheight:"}) || !structuredOptionEvidenceMatchesPin(evidence) {
+			return validation, fmt.Errorf("unrecognized statuslineopt helper semantics")
+		}
+		validation.Kind, validation.Values, validation.ErrorCode = "ValidationStatuslineOpt", statuslineOpt, errorCodes["e_invalid_argument"]
+	case "winhighlight":
+		if len(definitions) != 1 || definitions[0].Source != "src/optionstr.c" || validation.Callback != "did_set_winhighlight" || bodyFingerprint(definitions[0].Body) != didSetWinhighlightFingerprint {
+			return validation, fmt.Errorf("unrecognized winhighlight callback body")
+		}
+		if errorCodes["e_invalid_argument"] != "E474" || !structuredOptionEvidenceMatchesPin(evidence) {
+			return validation, fmt.Errorf("unrecognized winhighlight helper semantics")
+		}
+		// Highlight groups and ! occasions depend on runtime state; only the
+		// delimiter structure above is statically diagnosed.
+		validation.Kind, validation.ErrorCode = "ValidationWinHighlight", errorCodes["e_invalid_argument"]
+	}
+	return validation, nil
+}
+
+func bodyFingerprint(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+func structuredOptionEvidenceMatchesPin(evidence structuredOptionEvidence) bool {
+	return bodyMatchesFingerprint(evidence.chars, setCharsOptionFingerprint) &&
+		bodyMatchesFingerprint(evidence.encodedChar, getEncodedCharAdvFingerprint) &&
+		bodyMatchesFingerprint(evidence.statusline, statuslineoptChangedFingerprint) &&
+		bodyMatchesFingerprint(evidence.winhighlight, updateWinhighlightFingerprint) &&
+		bodyMatchesFingerprint(evidence.winhighlightParser, parseWinhighlightFingerprint)
+}
+
+func bodyMatchesFingerprint(body, fingerprint string) bool {
+	return bodyFingerprint(body) == fingerprint
 }
 
 func parseOptionValidation(callback string, definitions []callbackDefinition, arrays map[string][]string, macros map[string]string, variables []string, errorCodes map[string]string, numericConstants map[string]int64, optionType string) (optionValidation, error) {
@@ -1529,12 +1673,24 @@ func validateOptions(options []option) error {
 					return fmt.Errorf("%s has incomplete callback source: %#v", option.Name, source)
 				}
 			}
-			if option.Validation.Kind == "ValidationNumberRange" {
-				if !option.Validation.HasMin && !option.Validation.HasMax {
-					return fmt.Errorf("%s has empty number validation: %#v", option.Name, option.Validation)
-				}
-			} else if option.Validation.Kind != "ValidationNone" && (len(option.Validation.Values) == 0 || option.Validation.ErrorCode == "") {
+		}
+		if option.Validation.Kind == "ValidationNumberRange" {
+			if !option.Validation.HasMin && !option.Validation.HasMax {
+				return fmt.Errorf("%s has empty number validation: %#v", option.Name, option.Validation)
+			}
+		} else if option.Validation.Kind != "" && option.Validation.Kind != "ValidationNone" {
+			if option.Validation.ErrorCode == "" {
 				return fmt.Errorf("%s has incomplete validation rule: %#v", option.Name, option.Validation)
+			}
+			switch option.Validation.Kind {
+			case "ValidationExact", "ValidationCommaList", "ValidationFlagList", "ValidationListChars", "ValidationFillChars", "ValidationStatuslineOpt":
+				if len(option.Validation.Values) == 0 {
+					return fmt.Errorf("%s has validation without values: %#v", option.Name, option.Validation)
+				}
+			case "ValidationWinHighlight":
+				// Syntax is structural; highlight names remain runtime state.
+			default:
+				return fmt.Errorf("%s has unknown validation kind: %#v", option.Name, option.Validation)
 			}
 		}
 		if option.ShortName != "" {

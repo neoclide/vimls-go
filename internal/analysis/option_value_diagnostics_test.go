@@ -35,6 +35,11 @@ func TestOptionValueDiagnostics(t *testing.T) {
 		{name: "vim9 lowercase hexadecimal digit", source: "vim9script\n&msc = 0xbeef\n", code: "vim/E474", message: "Invalid argument", span: "0xbeef"},
 		{name: "vim9 leading zero decimal", source: "vim9script\n&msc = 010000\n", code: "vim/E474", message: "Invalid argument", span: "010000"},
 		{name: "vim9 digit separator", source: "vim9script\n&msc = 0'0\n", code: "vim/E487", message: "Argument must be positive", span: "0'0"},
+		{name: "listchars unknown field", source: "set lcs=bogus:$\n", code: "vim/E474", message: "Invalid argument", span: "bogus:$"},
+		{name: "listchars field length", source: "set lcs=eol:$$\n", code: "vim/E1511", message: "Wrong number of characters for field \"eol\"", span: "eol:$$"},
+		{name: "listchars leadtab dependency", source: "set lcs=leadtab:.-\n", code: "vim/E1572", message: "'listchars' field \"leadtab\" requires \"tab\" to be specified", span: "leadtab:.-"},
+		{name: "fillchars field length", source: "set fcs=stl:xx\n", code: "vim/E1511", message: "Wrong number of characters for field \"stl\"", span: "stl:xx"},
+		{name: "winhighlight missing separator", source: "set whl=Normal\n", code: "vim/E474", message: "Invalid argument", span: "Normal"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -42,7 +47,7 @@ func TestOptionValueDiagnostics(t *testing.T) {
 			analysis := Analyze(file)
 			var got []syntax.Diagnostic
 			for _, diagnostic := range analysis.Diagnostics {
-				if diagnostic.Code == "vim/E474" || diagnostic.Code == "vim/E487" || diagnostic.Code == "vim/E539" {
+				if diagnostic.Code == "vim/E474" || diagnostic.Code == "vim/E487" || diagnostic.Code == "vim/E539" || diagnostic.Code == "vim/E1511" || diagnostic.Code == "vim/E1572" {
 					got = append(got, diagnostic)
 				}
 			}
@@ -70,6 +75,8 @@ func TestOptionValueDiagnosticsSkipNoGlobalAndInvalidNumberSyntax(t *testing.T) 
 func TestOptionValueDiagnosticsSkipValidAndDynamicValues(t *testing.T) {
 	source := "set bh=hide belloff=all,error cpo=aA msc=1 msc=010 emoji=single\n" +
 		"set bh+=bogus bh=bo\\gus\n" +
+		"let &listchars = 'eol:\\x24'\n" +
+		"let &fillchars = 'stl:\\u002d'\n" +
 		"let value = 'bogus'\n" +
 		"let &bh = value\n" +
 		"let &bh = 'bo' . 'gus'\n" +

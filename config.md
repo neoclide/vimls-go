@@ -603,15 +603,21 @@ option hover 对 `AvailableWhen != "1"` 的条目显示由 pinned `optiondefs.h`
     `metadata-check` 会拒绝字段或生成结果遗漏，生成的 Vim 脚本也已在 v9.2.1015 中逐项执行 `:set`。
   - `expand_set_*` 的固定数组与 flag 字符串已由脚本迁移为 66 项 `CompletionValues`，原有
     `fixedOptionValues` 已删除。生成器还会从 pinned tag 自动定位全部 callback 实现；334 个带
-    callback 的 option 均保留所有实现分支的源码位置，其中 44 项已经从共享 helper 或静态数值
-    比较迁移为 `OptionValidation`（exact enum 10、逗号列表 15、flag list 5、number range 14）。
+    callback 的 option 均保留所有实现分支的源码位置，其中 48 项已经从共享 helper、静态数值
+    比较或结构化 callback 迁移为 `OptionValidation`（exact enum 10、逗号列表 15、flag list 5、
+    number range 14、`listchars`/`fillchars`、`statuslineopt`、`winhighlight` 各 1）。
     其余复杂、动态或只有副作用的 callback 使用 `ValidationNone`，即不做值检查；这不是校验结果的
     第三态。上述四类规则中 36 项能证明 option 在所有构建中存在，已接入
     `:set`/`:setlocal`/`:setglobal` 的 `=`/`:` 完整赋值，以及 Legacy 和 Vim9 的 option 字面量赋值；
     分别产生 `vim/E474`、`vim/E487`、`vim/E539`。其余 8 项条件编译规则只保留元数据，在尚未协商
     client feature 前不诊断；值包含尚未精确解码的 `:set` 转义或表达式为动态值时也不诊断。
-    结构化 callback 仍待后续分批实现，测试按不同规则情况选择代表 option，不为每个 option 或
-    每个错误 code 重复生成测试。
+    第一批结构化 callback 已从 pinned `screen.c` 与 callback 调用关系迁移：`listchars`/
+    `fillchars` 检查字段名、字段字符数和 `leadtab` 依赖；`statuslineopt` 检查
+    `fixedheight` 与正整数 `maxheight:`；`winhighlight` 检查非空 `from:to` 项。转义、字符
+    cell 宽度、运行时 highlight group 是否存在和窗口高度等仍不诊断。`statuslineopt` 仍受
+    `+statusline` 编译条件保护，在 client 尚未协商 feature 前只保留规则元数据。其余结构化
+    callback 留待后续分批实现；测试按不同规则情况选择代表 option，不为每个 option 或每个错误
+    code 重复生成测试。
   - runtime/build/state-dependent 项不生成 validator、不产生值诊断；不引入笼统的
     “invalid option value” 规则，不执行 Vim callback 或用户配置。
 

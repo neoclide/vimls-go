@@ -62,6 +62,38 @@ let v:errmsg = ''
 silent! vim9cmd &maxsearchcount = 0xbeef
 call assert_match('^E474:', v:errmsg)
 
+set listchars=tab:>-,leadtab:.-,eol:$
+let v:errmsg = ''
+silent! set listchars=bogus:$
+call assert_match('^E474:', v:errmsg)
+let v:errmsg = ''
+silent! set listchars=eol:$$
+call assert_match('^E1511:', v:errmsg)
+let v:errmsg = ''
+silent! set listchars=leadtab:.-
+call assert_match('^E1572:', v:errmsg)
+
+set fillchars=stl:-,vert:/
+let v:errmsg = ''
+silent! set fillchars=stl:xx
+call assert_match('^E1511:', v:errmsg)
+let v:errmsg = ''
+silent! let &listchars = 'eol:\x24'
+call assert_equal('', v:errmsg)
+let v:errmsg = ''
+silent! let &fillchars = 'stl:\u002d'
+call assert_equal('', v:errmsg)
+
+set statuslineopt=fixedheight,maxheight:2
+let v:errmsg = ''
+silent! set statuslineopt=maxheight:0
+call assert_match('^E474:', v:errmsg)
+
+set winhighlight=Normal:Comment,LineNr:Identifier
+let v:errmsg = ''
+silent! set winhighlight=Normal
+call assert_match('^E474:', v:errmsg)
+
 let v:errmsg = ''
 silent! let &bufhidden = 'bogus'
 call assert_match('^E474:', v:errmsg)

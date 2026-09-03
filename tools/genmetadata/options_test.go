@@ -8,6 +8,58 @@ import (
 	"testing"
 )
 
+func TestBodyFingerprintRejectsAnyReviewedBodyChange(t *testing.T) {
+	bodies := map[string]string{
+		"did_set_chars_option":  "return set_chars_option();",
+		"set_chars_option":      "return field_value_err();",
+		"get_encoded_char_adv":  "return hexhex2nr();",
+		"did_set_statuslineopt": "return statuslineopt_changed();",
+		"statuslineopt_changed": "return FAIL;",
+		"did_set_winhighlight":  "return update_winhighlight();",
+		"update_winhighlight":   "return parse_winhighlight();",
+		"parse_winhighlight":    "return e_invalid_argument;",
+	}
+	for name, body := range bodies {
+		fingerprint := bodyFingerprint(body)
+		if !bodyMatchesFingerprint(body, fingerprint) {
+			t.Fatalf("%s did not match its fingerprint", name)
+		}
+		if bodyMatchesFingerprint(body+" ", fingerprint) {
+			t.Fatalf("%s accepted a changed body", name)
+		}
+	}
+}
+
+func TestValidateOptionsRequiresValuesForValueBasedRules(t *testing.T) {
+	base := func(validation optionValidation) option {
+		validation.Callback = "did_set_test"
+		validation.Sources = []callbackSource{{Source: "src/optionstr.c", Line: 1}}
+		return option{
+			Name:             "test",
+			Type:             "OptionString",
+			Flags:            []string{"P_STRING"},
+			Variants:         []optionVariant{{Variable: "(char_u *)&p_test", Indirect: "PV_NONE", DidSetCallback: "did_set_test", ExpandCallback: "NULL", ViDefault: "(char_u *)\"\"", VimDefault: "(char_u *)0L"}},
+			Validation:       validation,
+			AvailableWhen:    "1",
+			DefinitionSource: "src/optiondefs.h",
+			DefinitionLine:   1,
+		}
+	}
+	for _, kind := range []string{"ValidationExact", "ValidationCommaList", "ValidationFlagList", "ValidationListChars", "ValidationFillChars", "ValidationStatuslineOpt"} {
+		t.Run(kind, func(t *testing.T) {
+			if err := validateOptions([]option{base(optionValidation{Kind: kind, ErrorCode: "E474"})}); err == nil {
+				t.Fatalf("%s accepted empty Values", kind)
+			}
+		})
+	}
+	if err := validateOptions([]option{base(optionValidation{Kind: "ValidationWinHighlight", ErrorCode: "E474"})}); err != nil {
+		t.Fatalf("ValidationWinHighlight = %v", err)
+	}
+	if err := validateOptions([]option{base(optionValidation{Kind: "ValidationUnknown", ErrorCode: "E474", Values: []string{"value"}})}); err == nil {
+		t.Fatal("unknown validation kind was accepted")
+	}
+}
+
 func TestParseOptionSourceAndTerms(t *testing.T) {
 	source := []byte(`#define PV_BETA OPT_BUF(BV_BETA)
 #define PV_GAMMA OPT_BOTH(OPT_WIN(WV_GAMMA))

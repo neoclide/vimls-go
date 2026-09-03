@@ -106,8 +106,19 @@ func TestLookupOptionMetadata(t *testing.T) {
 				if !option.Validation.HasMin && !option.Validation.HasMax {
 					t.Fatalf("%s has empty number validation: %#v", option.Name, option.Validation)
 				}
-			} else if len(option.Validation.Values) == 0 || option.Validation.ErrorCode == "" {
-				t.Fatalf("%s has incomplete validation: %#v", option.Name, option.Validation)
+			} else {
+				switch option.Validation.Kind {
+				case ValidationExact, ValidationCommaList, ValidationFlagList, ValidationListChars, ValidationFillChars, ValidationStatuslineOpt:
+					if len(option.Validation.Values) == 0 || option.Validation.ErrorCode == "" {
+						t.Fatalf("%s has incomplete validation: %#v", option.Name, option.Validation)
+					}
+				case ValidationWinHighlight:
+					if option.Validation.ErrorCode == "" {
+						t.Fatalf("%s has incomplete validation: %#v", option.Name, option.Validation)
+					}
+				default:
+					t.Fatalf("%s has unknown validation kind: %#v", option.Name, option.Validation)
+				}
 			}
 		}
 		if option.ShortName == "" {
@@ -125,8 +136,8 @@ func TestLookupOptionMetadata(t *testing.T) {
 	if completionCount != 66 {
 		t.Fatalf("options with fixed completion values = %d, want 66", completionCount)
 	}
-	if callbackCount != 334 || validationCount != 44 {
-		t.Fatalf("callback/validation counts = %d/%d, want 334/44", callbackCount, validationCount)
+	if callbackCount != 334 || validationCount != 48 {
+		t.Fatalf("callback/validation counts = %d/%d, want 334/48", callbackCount, validationCount)
 	}
 }
 
@@ -203,6 +214,19 @@ func TestValidateOptionValue(t *testing.T) {
 		{option: "maxsearchcount", value: "10000", code: "E474", span: "10000"},
 		{option: "browsedir", value: "not-a-static-enum"},
 		{option: "emoji", value: "single"},
+		{option: "listchars", value: "tab:>-,leadtab:.-,eol:$"},
+		{option: "listchars", value: "bogus:$", code: "E474", span: "bogus:$"},
+		{option: "listchars", value: "eol:$$", code: "E1511", span: "eol:$$"},
+		{option: "listchars", value: "leadtab:.-", code: "E1572", span: "leadtab:.-"},
+		{option: "listchars", value: "eol:\\x24"},
+		{option: "listchars", value: "eol:\\U00000024"},
+		{option: "fillchars", value: "stl: ,vert:|"},
+		{option: "fillchars", value: "stl:xx", code: "E1511", span: "stl:xx"},
+		{option: "fillchars", value: "stl:\\u002d"},
+		{option: "statuslineopt", value: "fixedheight,maxheight:2"},
+		{option: "statuslineopt", value: "maxheight:0", code: "E474", span: "maxheight:0"},
+		{option: "winhighlight", value: "Normal:Comment,LineNr:Identifier"},
+		{option: "winhighlight", value: "Normal", code: "E474", span: "Normal"},
 	}
 	for _, test := range tests {
 		option, ok := LookupOption(test.option)

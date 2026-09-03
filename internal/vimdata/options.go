@@ -39,6 +39,10 @@ const (
 	ValidationCommaList
 	ValidationFlagList
 	ValidationNumberRange
+	ValidationListChars
+	ValidationFillChars
+	ValidationStatuslineOpt
+	ValidationWinHighlight
 )
 
 // OptionValidation is the statically reproducible part of an opt_did_set_cb.
@@ -118,8 +122,129 @@ func ValidateOptionValue(validation OptionValidation, value string) (OptionValue
 		if validation.HasMax && number > validation.Max {
 			return optionValueError(validation.MaxErrorCode, 0, len(value)), true
 		}
+	case ValidationListChars, ValidationFillChars:
+		return validateCharsOption(validation, value)
+	case ValidationStatuslineOpt:
+		return validateStatuslineOpt(value)
+	case ValidationWinHighlight:
+		return validateWinHighlight(value)
 	}
 	return OptionValueError{}, false
+}
+
+func validateCharsOption(validation OptionValidation, value string) (OptionValueError, bool) {
+	if value == "" {
+		return OptionValueError{}, false
+	}
+	allowed := make(map[string]struct{}, len(validation.Values))
+	for _, name := range validation.Values {
+		allowed[name] = struct{}{}
+	}
+	listchars := validation.Kind == ValidationListChars
+	hasTab, hasLeadTab := false, false
+	offset := 0
+	for _, field := range strings.Split(value, ",") {
+		end := offset + len(field)
+		name, characters, found := strings.Cut(field, ":")
+		if !found || name == "" {
+			return optionValueError(validation.ErrorCode, offset, end), true
+		}
+		if _, ok := allowed[name]; !ok {
+			return optionValueError(validation.ErrorCode, offset, end), true
+		}
+		if characters == "" {
+			return charsFieldError("E1511", name, offset, end), true
+		}
+		if listchars && name == "tab" {
+			hasTab = true
+		} else if listchars && name == "leadtab" {
+			hasLeadTab = true
+		}
+		// screen.c decodes these forms before it counts characters.  Keep the
+		// static check conservative until that decoding can be reproduced.
+		if strings.Contains(characters, "\\x") || strings.Contains(characters, "\\u") || strings.Contains(characters, "\\U") {
+			offset = end + 1
+			continue
+		}
+		count := utf8.RuneCountInString(characters)
+		if listchars && (name == "multispace" || name == "leadmultispace") {
+			// These fields accept one or more single-cell characters. Cell
+			// width depends on Vim's encoding and runtime state, so it is not
+			// statically diagnosed here.
+		} else if listchars && (name == "tab" || name == "leadtab") {
+			if count < 2 || count > 3 {
+				return charsFieldError("E1511", name, offset, end), true
+			}
+		} else if count != 1 {
+			return charsFieldError("E1511", name, offset, end), true
+		}
+		offset = end + 1
+	}
+	if listchars && hasLeadTab && !hasTab {
+		return OptionValueError{Code: "E1572", Message: "'listchars' field \"leadtab\" requires \"tab\" to be specified", Start: 0, End: len(value)}, true
+	}
+	return OptionValueError{}, false
+}
+
+func validateStatuslineOpt(value string) (OptionValueError, bool) {
+	if value == "" {
+		return OptionValueError{}, false
+	}
+	offset := 0
+	for _, item := range strings.Split(value, ",") {
+		end := offset + len(item)
+		if item == "fixedheight" {
+			offset = end + 1
+			continue
+		}
+		if strings.HasPrefix(item, "maxheight:") {
+			digits := strings.TrimPrefix(item, "maxheight:")
+			if decimalPositive(digits) {
+				offset = end + 1
+				continue
+			}
+		}
+		// Vim's loop accepts one trailing comma.
+		if item == "" && end == len(value) {
+			return OptionValueError{}, false
+		}
+		return optionValueError("E474", offset, end), true
+	}
+	return OptionValueError{}, false
+}
+
+func decimalPositive(value string) bool {
+	if value == "" {
+		return false
+	}
+	positive := false
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+		positive = positive || character != '0'
+	}
+	return positive
+}
+
+func validateWinHighlight(value string) (OptionValueError, bool) {
+	if value == "" {
+		return OptionValueError{}, false
+	}
+	offset := 0
+	for _, item := range strings.Split(value, ",") {
+		end := offset + len(item)
+		from, to, found := strings.Cut(item, ":")
+		if !found || strings.Contains(to, ":") || from == "" || to == "" {
+			return optionValueError("E474", offset, end), true
+		}
+		offset = end + 1
+	}
+	return OptionValueError{}, false
+}
+
+func charsFieldError(code, field string, start, end int) OptionValueError {
+	return OptionValueError{Code: code, Message: "Wrong number of characters for field \"" + field + "\"", Start: start, End: end}
 }
 
 func commaListValid(validation OptionValidation, value string) bool {
