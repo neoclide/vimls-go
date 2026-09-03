@@ -210,8 +210,13 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 				if declaration == nil || explicitType || !isUnresolvedType(declaration.Type) {
 					continue
 				}
-				expression := initializerElement(command.Declaration.Initializer, bindingIndex, len(command.Declaration.Bindings))
-				declaration.Type = state.infer(expression, declaration.Scope)
+				typ := UnknownValueType
+				if command.Declaration.Target != nil && command.Declaration.Target.Kind == syntax.ExpressionList {
+					typ = state.destructuredBindingType(command.Declaration.Initializer, bindingIndex, binding.Rest, declaration.Scope)
+				} else {
+					typ = state.infer(command.Declaration.Initializer, declaration.Scope)
+				}
+				declaration.Type = typ
 			}
 		}
 		if command.For != nil {
@@ -842,6 +847,65 @@ func initializerElement(initializer *syntax.Expression, index, count int) *synta
 		return initializer.Children[index]
 	}
 	return initializer
+}
+
+func (state *typeState) destructuredBindingType(initializer *syntax.Expression, index int, rest bool, scope *Scope) ValueType {
+	if initializer == nil {
+		return UnknownValueType
+	}
+	if initializer.Kind == syntax.ExpressionList || initializer.Kind == syntax.ExpressionTuple {
+		if rest {
+			if initializer.Kind == syntax.ExpressionList {
+				return state.infer(initializer, scope)
+			}
+			if index > len(initializer.Children) {
+				return UnknownValueType
+			}
+			return ValueType{Name: "tuple", Arguments: state.childTypes(initializer.Children[index:], scope)}
+		}
+		if index >= len(initializer.Children) {
+			return UnknownValueType
+		}
+		return state.infer(initializer.Children[index], scope)
+	}
+
+	typ := state.infer(initializer, scope)
+	if typ.Name == ValueTypeAny {
+		return typ
+	}
+	if typ.Name == "list" {
+		if rest {
+			return typ
+		}
+		return indexedType(typ)
+	}
+	if typ.Name != "tuple" {
+		return UnknownValueType
+	}
+
+	fixed := len(typ.Arguments)
+	if typ.Variadic && fixed > 0 {
+		fixed--
+	}
+	if rest {
+		if index > fixed && !typ.Variadic {
+			return UnknownValueType
+		}
+		arguments := []ValueType(nil)
+		if index < fixed {
+			arguments = append(arguments, typ.Arguments[index:]...)
+		} else if typ.Variadic && len(typ.Arguments) > 0 {
+			arguments = append(arguments, typ.Arguments[len(typ.Arguments)-1])
+		}
+		return ValueType{Name: "tuple", Arguments: arguments, Variadic: typ.Variadic}
+	}
+	if index < fixed {
+		return typ.Arguments[index]
+	}
+	if typ.Variadic && len(typ.Arguments) > 0 {
+		return indexedType(typ.Arguments[len(typ.Arguments)-1])
+	}
+	return UnknownValueType
 }
 
 func indexedType(typ ValueType) ValueType {

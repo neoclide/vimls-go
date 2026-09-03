@@ -50,15 +50,55 @@ var hexadecimal = 0xDEAD
 }
 
 func TestAnalyzeInfersShiftAndDestructuredElementTypes(t *testing.T) {
-	result := Analyze(syntax.Parse("vim9script\nvar shifted = 8 << 1\nvar [count, label] = [1, 'one']\n"))
+	result := Analyze(syntax.Parse("vim9script\nvar shifted = 8 << 1\nvar [count, label] = [1, 'one']\nconst winid = win_getid()\nconst [row, col] = win_screenpos(winid)\n"))
 	declarations := make(map[string]*Declaration)
 	for _, declaration := range result.Declarations {
 		declarations[declaration.Name] = declaration
 	}
-	for name, want := range map[string]string{"shifted": "number", "count": "number", "label": "string"} {
+	for name, want := range map[string]string{"shifted": "number", "count": "number", "label": "string", "row": "number", "col": "number"} {
 		if declarations[name] == nil || declarations[name].Type.Name != want {
 			t.Fatalf("%s type = %#v, want %s", name, declarations[name], want)
 		}
+	}
+}
+
+func TestAnalyzeInfersTupleAndRestDestructuringTypes(t *testing.T) {
+	source := `vim9script
+var pair: tuple<number, string> = (1, 'one')
+var [pairNumber, pairString] = pair
+def GetPair(): tuple<bool, float>
+  return (true, 1.5)
+enddef
+var [callBool, callFloat] = GetPair()
+var [tupleHead; tupleRest] = (1, 'two', true)
+var [listHead; listRest] = [1, 2, 3]
+var [only] = [42]
+var variadic: tuple<number, ...list<string>> = (1, 'a', 'b')
+var [fixed, variable; variadicRest] = variadic
+`
+	result := Analyze(syntax.Parse(source))
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	for name, want := range map[string]string{
+		"pairNumber": "number", "pairString": "string",
+		"callBool": "bool", "callFloat": "float",
+		"tupleHead": "number", "listHead": "number", "only": "number",
+		"fixed": "number", "variable": "string",
+	} {
+		if declarations[name] == nil || declarations[name].Type.Name != want {
+			t.Fatalf("%s type = %#v, want %s", name, declarations[name], want)
+		}
+	}
+	if typ := declarations["tupleRest"].Type; typ.Name != "tuple" || len(typ.Arguments) != 2 || typ.Arguments[0].Name != "string" || typ.Arguments[1].Name != "bool" {
+		t.Fatalf("tupleRest type = %#v", typ)
+	}
+	if typ := declarations["listRest"].Type; typ.Name != "list" || len(typ.Arguments) != 1 || typ.Arguments[0].Name != "number" {
+		t.Fatalf("listRest type = %#v", typ)
+	}
+	if typ := declarations["variadicRest"].Type; typ.Name != "tuple" || !typ.Variadic || len(typ.Arguments) != 1 || typ.Arguments[0].Name != "list" || len(typ.Arguments[0].Arguments) != 1 || typ.Arguments[0].Arguments[0].Name != "string" {
+		t.Fatalf("variadicRest type = %#v", typ)
 	}
 }
 
