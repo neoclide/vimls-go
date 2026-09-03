@@ -1682,6 +1682,71 @@ func TestPushDiagnosticsStaleSendDoesNotClearNewerPendingState(t *testing.T) {
 	}
 }
 
+func TestPushDiagnosticsEditDuringSendStillClearsStaleDiagnostics(t *testing.T) {
+	instance, client := openDiagnosticsServer(t)
+	documentURI := uri.MustParse("file:///test-edit-during-send.vim")
+	analysisDone := installAnalysisFinishedHook(instance)
+	sendStarted := make(chan struct{})
+	releaseSend := make(chan struct{})
+	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
+		if len(params.Diagnostics) > 0 {
+			select {
+			case <-sendStarted:
+			default:
+				close(sendStarted)
+				<-releaseSend
+			}
+		}
+		return nil
+	}
+
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI: documentURI, Version: 1,
+			Text: "vim9script\nvar value: number = 'error'\n",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sendStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for initial diagnostics send")
+	}
+
+	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2,
+		},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{
+			Text: "vim9script\nvar value: number = 42\necho value\n",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseSend)
+
+	first := waitForDiagnostics(t, client.published)
+	if len(first.Diagnostics) == 0 {
+		t.Fatal("initial diagnostics unexpectedly empty")
+	}
+	for step := range 2 {
+		select {
+		case <-analysisDone:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for analysis %d", step+1)
+		}
+	}
+	select {
+	case cleared := <-client.published:
+		if version, ok := cleared.Version.Get(); !ok || version != 2 || len(cleared.Diagnostics) != 0 {
+			t.Fatalf("cleared diagnostics = %#v", cleared)
+		}
+	default:
+		t.Fatal("current clean snapshot did not clear stale diagnostics")
+	}
+}
+
 func TestPushDiagnosticsCloseWhileFirstNonEmptyPublishBlocked(t *testing.T) {
 	instance, client := openDiagnosticsServer(t)
 	documentURI := uri.MustParse("file:///test-close-blocked.vim")

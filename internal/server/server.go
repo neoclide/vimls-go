@@ -1490,13 +1490,15 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
 
-	if s.analysisContext.Err() != nil || !s.documents.IsCurrent(analysis) {
+	if s.analysisContext.Err() != nil {
 		return false
 	}
+	_, documentOpen := s.documents.Snapshot(documentURI)
+	analysisCurrent := s.documents.IsCurrent(analysis)
 	s.workspaceMu.Lock()
 	workspaceCurrent = s.workspaceIdentityCurrentLocked(identity)
 	s.workspaceMu.Unlock()
-	if !workspaceCurrent {
+	if !documentOpen {
 		return false
 	}
 
@@ -1505,7 +1507,6 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 		return false
 	}
 
-	delete(s.initialRefreshPending, documentURI)
 	newMustPublish := currentPubState.mustPublish && (currentPubState.publishSeq != startSeq)
 
 	if len(diagnostics) == 0 {
@@ -1527,6 +1528,13 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 			lastVersion:    curVersion,
 		}
 	}
+	// A successful send is client-visible even when an edit raced with it.
+	// Record that send, then analyze the current state so it can be corrected.
+	if !analysisCurrent || !workspaceCurrent {
+		s.startAnalysis(documentURI)
+		return false
+	}
+	delete(s.initialRefreshPending, documentURI)
 	return initialRefresh
 }
 
