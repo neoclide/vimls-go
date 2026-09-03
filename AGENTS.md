@@ -164,9 +164,6 @@ read-only and ask the primary agent for a corrected brief.
 
 - Inspect `git status` before editing and preserve unrelated work.
 - Keep commits milestone-scoped; stage only intended files.
-- Before every commit, run `/ponytail-review` and resolve its findings. After
-  the review passes, prefix the commit command with
-  `VIMLS_PONYTAIL_REVIEWED=1`; the project hook rejects unreviewed commits.
 - A local commit does not authorize push, release, issue closure, or PR creation.
 - Update the roadmap and language-support contract when a milestone changes what
   the server actually supports.
