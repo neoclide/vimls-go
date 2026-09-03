@@ -20,7 +20,7 @@ var callbackFunctionOptions = map[string]bool{
 // appendStaticFunctionReference records a function-name reference at span and
 // resolves it like an ordinary identifier reference.
 func appendStaticFunctionReference(result *FileAnalysis, file *syntax.File, scope *Scope, name string, span syntax.Span) {
-	if scope == nil || !staticFunctionName(name) {
+	if scope == nil || !staticFunctionName(name, file.Dialect) {
 		return
 	}
 	declaration := resolve(scope, name, span.Start, true, nil)
@@ -31,14 +31,21 @@ func appendStaticFunctionReference(result *FileAnalysis, file *syntax.File, scop
 }
 
 // staticFunctionName reports whether name looks like a statically addressable
-// Vim function name: optional "g:"/"s:" prefix, then either one plain segment
-// that starts with an uppercase letter or any number of "#"-separated autoload
-// segments, each starting with a letter.
-func staticFunctionName(name string) bool {
+// Vim function name: optional "g:"/"s:"/"<SID>" prefix, then either one plain
+// segment or any number of "#"-separated autoload segments. Legacy global
+// names start uppercase; only Legacy script-local names may start lowercase.
+func staticFunctionName(name string, dialect syntax.Dialect) bool {
 	if name == "" {
 		return false
 	}
-	if strings.HasPrefix(name, "s:") || strings.HasPrefix(name, "g:") {
+	scriptLocal := false
+	if strings.HasPrefix(name, "s:") {
+		name = name[2:]
+		scriptLocal = true
+	} else if len(name) > len("<SID>") && strings.EqualFold(name[:len("<SID>")], "<SID>") {
+		name = name[len("<SID>"):]
+		scriptLocal = true
+	} else if strings.HasPrefix(name, "g:") {
 		name = name[2:]
 	}
 	autoload := strings.Contains(name, "#")
@@ -52,7 +59,7 @@ func staticFunctionName(name string) bool {
 		if !letter {
 			return false
 		}
-		if !autoload && index == 0 && !(first >= 'A' && first <= 'Z') {
+		if !autoload && index == 0 && !(scriptLocal && dialect == syntax.Legacy) && !(first >= 'A' && first <= 'Z') {
 			return false
 		}
 		for position := 1; position < len(segment); position++ {
@@ -87,27 +94,29 @@ func appendMappingCmdReferences(result *FileAnalysis, file *syntax.File, scope *
 		return
 	}
 	payload := rest[:crStart]
-	// Only the "call Func(...)" payload form is statically recognizable; other
-	// Ex payloads remain opaque. Command modifiers before "call" are skipped.
-	lowerPayload := strings.ToLower(payload)
-	callIndex := strings.Index(lowerPayload, "call ")
-	if callIndex < 0 {
+	var parsed *syntax.File
+	if file.Dialect == syntax.Vim9 {
+		parsed = (syntax.Vim9Parser{}).Parse(payload)
+	} else {
+		parsed = (syntax.LegacyParser{}).Parse(payload)
+	}
+	if len(parsed.Diagnostics) != 0 || len(parsed.Commands) != 1 {
 		return
 	}
-	nameRelStart := callIndex + len("call ")
-	nameEnd := nameRelStart
-	for nameEnd < len(payload) && !isCompletionSpace(payload[nameEnd]) && payload[nameEnd] != '(' && payload[nameEnd] != '<' {
-		nameEnd++
-	}
-	if nameEnd == nameRelStart {
+	command := &parsed.Commands[0]
+	if command.Canonical != "call" || len(command.Expressions) != 1 {
 		return
 	}
-	name := payload[nameRelStart:nameEnd]
-	if !staticFunctionName(name) {
+	call := command.Expressions[0]
+	if call == nil || call.Kind != syntax.ExpressionCall || len(call.Children) == 0 {
 		return
 	}
-	start := mapping.RHS.Start + payloadStart + nameRelStart
-	appendStaticFunctionReference(result, file, scope, name, syntax.Span{Start: start, End: start + len(name)})
+	callee := call.Children[0]
+	if callee == nil || callee.Kind != syntax.ExpressionIdentifier || !staticFunctionName(callee.Value, file.Dialect) {
+		return
+	}
+	start := mapping.RHS.Start + payloadStart + callee.Span.Start
+	appendStaticFunctionReference(result, file, scope, callee.Value, syntax.Span{Start: start, End: start + callee.Span.End - callee.Span.Start})
 }
 
 // appendCallbackOptionReferences records a static function name used as the
@@ -127,7 +136,7 @@ func appendCallbackOptionReferences(result *FileAnalysis, file *syntax.File, sco
 				continue
 			}
 			value := strings.TrimSpace(file.Text(option.Value))
-			if !staticFunctionName(value) {
+			if !staticFunctionName(value, file.Dialect) {
 				continue
 			}
 			appendStaticFunctionReference(result, file, scope, value, option.Value)
@@ -147,7 +156,7 @@ func appendCallbackOptionReferences(result *FileAnalysis, file *syntax.File, sco
 		return
 	}
 	value := strings.Trim(file.Text(initializer.Span), "'\"")
-	if !staticFunctionName(value) {
+	if !staticFunctionName(value, file.Dialect) {
 		return
 	}
 	appendStaticFunctionReference(result, file, scope, value, initializer.Span)
@@ -166,8 +175,4 @@ func normalizeOptionName(name string) string {
 		return name[1:]
 	}
 	return name
-}
-
-func isCompletionSpace(value byte) bool {
-	return value == ' ' || value == '\t' || value == '\n' || value == '\r'
 }

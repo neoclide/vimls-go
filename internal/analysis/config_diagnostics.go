@@ -360,7 +360,7 @@ func configLoadedMarkers(result *FileAnalysis) map[string]bool {
 	markers := make(map[string]bool)
 	for index := range file.Commands {
 		command := &file.Commands[index]
-		if command.Declaration == nil || command.Block != -1 {
+		if command.Declaration == nil || !rootScopedCommand(file.Commands, file.Blocks, index) || command.Declaration.Assignment.Start == command.Declaration.Assignment.End || command.Declaration.Initializer == nil || command.Declaration.Initializer.Kind == syntax.ExpressionMissing {
 			continue
 		}
 		name := file.Text(command.Declaration.Name)

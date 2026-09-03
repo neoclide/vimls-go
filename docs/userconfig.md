@@ -95,9 +95,10 @@ All codes stay configurable through the normal `vim.diagnostic.disabled` and
   `completefunc`, `omnifunc`, `operatorfunc`, and `tagfunc` (`:set opt=Func`
   or `:let &opt = 'Func'`) straight to the function definition.
 
-Completion candidate sets and ordering stay identical to the plugin role for
-the same text: the configuration role only influences which rules are
-relevant, never the semantics of a result.
+Completion candidate sets stay identical to the plugin role for the same text.
+At top level with no explicit scope prefix, a configuration file gives an
+otherwise tied `g:` declaration a small relevance preference; function-local
+completion order stays unchanged.
 
 ## Notes
 

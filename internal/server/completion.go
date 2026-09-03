@@ -54,8 +54,6 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 	s.mu.Lock()
 	excludeRuntimePath := s.excludeRuntimePathCompletions
 	s.mu.Unlock()
-	// §7 relevance: configuration files reuse the role decided from the path.
-	configFile := s.configFileRoleForURI(params.TextDocument.URI.String())
 	for attempt := range 2 {
 		snapshot, file, analysisResult, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 		if err != nil {
@@ -591,7 +589,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
-			for _, item := range completionSnippetItems(file.Dialect, canSnippet) {
+			for _, item := range completionSnippetItems(file.Dialect, canSnippet, configFile) {
 				if !add(item, 7500, completionSourceCommand) {
 					break
 				}

@@ -43,3 +43,37 @@ let &tagfunc = 'Target'
 		})
 	}
 }
+
+func TestStaticCallbackNavigationScriptLocalNames(t *testing.T) {
+	tests := []struct {
+		name, source, declaration string
+		line, column              uint32
+	}{
+		{
+			name:        "legacy s lowercase",
+			source:      "function! s:lowercase() abort\nendfunction\nnnoremap <F1> <Cmd>call s:lowercase()<CR>\n",
+			declaration: "s:lowercase",
+			line:        2,
+			column:      uint32(len("nnoremap <F1> <Cmd>call ")),
+		},
+		{
+			name:        "legacy SID name",
+			source:      "function! s:Named() abort\nendfunction\nnnoremap <F1> <Cmd>call <SID>Named()<CR>\n",
+			declaration: "s:Named",
+			line:        2,
+			column:      uint32(len("nnoremap <F1> <Cmd>call ")),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			document, err := instance.navigationAt(context.Background(), documentURI.String(), protocol.Position{Line: test.line, Character: test.column})
+			if err != nil || document == nil || document.declaration == nil {
+				t.Fatalf("navigation = %#v, error = %v", document, err)
+			}
+			if document.declaration.Name != test.declaration {
+				t.Fatalf("navigation declaration = %q, want %q", document.declaration.Name, test.declaration)
+			}
+		})
+	}
+}

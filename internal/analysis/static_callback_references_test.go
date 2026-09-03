@@ -48,6 +48,7 @@ func TestStaticCallbackReferencesStayOpaque(t *testing.T) {
 endfunction
 nnoremap <F1> <Cmd>echo 'plain payload'<CR>
 nnoremap <F2> <Cmd>call SomeOtherUnknown()<CR>
+nnoremap <F3> <Cmd>echo 'call Target()'<CR>
 set omnifunc=notlower
 set omnifunc+=Suffix
 let &tagfunc = 'plain' . 'concatenated'
@@ -60,6 +61,47 @@ let &tagfunc = 'plain' . 'concatenated'
 		}
 		if strings.Contains(file.Text(reference.Span), "echo 'plain") {
 			t.Fatalf("plain <Cmd> payload produced reference %#v", reference)
+		}
+		if reference.Name == "Target" {
+			t.Fatalf("quoted <Cmd> text produced Target reference %#v", reference)
+		}
+	}
+}
+
+func TestStaticCallbackReferencesResolveScriptLocalAndVim9Names(t *testing.T) {
+	tests := []struct {
+		name, source string
+		references   []string
+	}{
+		{
+			name:       "legacy script-local forms",
+			source:     "function! s:lowercase() abort\nendfunction\nfunction! s:Named() abort\nendfunction\nnnoremap <F1> <Cmd>call s:lowercase()<CR>\nnnoremap <F2> <Cmd>call <SID>Named()<CR>\nset omnifunc=s:lowercase\nlet &tagfunc = '<SID>Named'\n",
+			references: []string{"s:lowercase", "<SID>Named"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			found := make(map[string]bool)
+			for _, reference := range Analyze(file).References {
+				if reference.Declaration != nil {
+					found[reference.Name] = true
+				}
+			}
+			for _, name := range test.references {
+				if !found[name] {
+					t.Fatalf("resolved %q reference is missing", name)
+				}
+			}
+		})
+	}
+}
+
+func TestStaticCallbackReferencesRejectVim9LowercaseNames(t *testing.T) {
+	file := syntax.Parse("vim9script\ndef Callback()\nenddef\nnnoremap <F1> <Cmd>call lowercase()<CR>\nset omnifunc=lowercase\n")
+	for _, reference := range Analyze(file).References {
+		if reference.Name == "lowercase" {
+			t.Fatalf("illegal Vim9 lowercase callback produced reference %#v", reference)
 		}
 	}
 }

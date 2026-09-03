@@ -35,8 +35,8 @@ func completionLabels(t *testing.T, instance *Server, documentURI uri.URI, line 
 // TestConfigCompletionOrderingInvariants verifies §7 P0 in config-file mode:
 // completion consumes the path-derived role-aware analysis while candidates at
 // option, mapping-argument, autocmd-event and g: variable positions stay
-// contextually relevant and deterministic. The role changes diagnostic policy,
-// not the completion candidate set or its contextual order.
+// contextually relevant and deterministic. The role preserves the candidate
+// set; only top-level unscoped g: declarations get a config-specific tie-break.
 func TestConfigCompletionOrderingInvariants(t *testing.T) {
 	// Each scenario is one line of source; the cursor is placed at the end of
 	// the partial token the client is completing.
@@ -231,5 +231,14 @@ func TestConfigSnippetTemplates(t *testing.T) {
 	pluginFn := itemWithLabel(t, newRootedServer(t, root), pluginURI, "function\n", 0, uint32(len("function")), "function")
 	if pluginFn == nil || !strings.Contains(snippetText(pluginFn), "function!") {
 		t.Fatalf("plugin function block = %#v", pluginFn)
+	}
+
+	configCommand := itemWithLabel(t, newRootedServer(t, root), configURI, "cmd\n", 0, uint32(len("cmd")), "cmd")
+	if configCommand == nil || strings.Contains(snippetText(configCommand), "command!") {
+		t.Fatalf("config command snippet = %#v", configCommand)
+	}
+	pluginCommand := itemWithLabel(t, newRootedServer(t, root), pluginURI, "cmd\n", 0, uint32(len("cmd")), "cmd")
+	if pluginCommand == nil || !strings.Contains(snippetText(pluginCommand), "command!") {
+		t.Fatalf("plugin command snippet = %#v", pluginCommand)
 	}
 }

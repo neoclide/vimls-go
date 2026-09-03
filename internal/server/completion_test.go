@@ -300,7 +300,7 @@ func TestCompletionPortableSnippetsAndVim9Blocks(t *testing.T) {
 		{name: "legacy try/catch/finally template", source: "trycf\n", label: "trycf", want: "try\n\t${1}\ncatch /.*/\n\t${2}\nfinally\n\t$0\nendtry", character: 5},
 		{name: "legacy augroup template", source: "au\n", label: "aug", want: "augroup ${1:Start}\n\tautocmd!\n\t$0\naugroup END", character: 2},
 		{name: "legacy autocmd template", source: "aut\n", label: "aut", want: "autocmd ${1:group-event} ${2:pat} ${3:once} ${4:nested} ${5:cmd}", character: 3},
-		{name: "legacy command template", source: "cmd\n", label: "cmd", want: "command! ${1:attr} ${2:cmd} ${3:rep} $0", character: 3},
+		{name: "legacy command template (config role standalone)", source: "cmd\n", label: "cmd", want: "command ${1:attr} ${2:cmd} ${3:rep} $0", character: 3},
 		{name: "legacy highlight template", source: "hi\n", label: "hi", want: "highlight ${1:default} ${2:group-name} ${3:args} $0", character: 2},
 		{name: "if command", source: "if\n", label: "if", want: "if ${1:condition}\n\t$0\nendif", character: 2, command: true},
 		{name: "for command", source: "for\n", label: "for", want: "for ${1:item} in ${2:list}\n\t$0\nendfor", character: 3, command: true},

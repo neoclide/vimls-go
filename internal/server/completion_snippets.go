@@ -16,7 +16,11 @@ type completionSnippet struct {
 // vim-language-server (src/server/snippets.ts). Labels that exactly name a
 // built-in Ex command (such as "if") are handled by commandBlockSnippet so the
 // completion list does not contain duplicate labels.
-func legacyCompletionSnippets() []completionSnippet {
+func legacyCompletionSnippets(configFile bool) []completionSnippet {
+	command := "command! ${1:attr} ${2:cmd} ${3:rep} $0"
+	if configFile {
+		command = "command ${1:attr} ${2:cmd} ${3:rep} $0"
+	}
 	return []completionSnippet{
 		{label: "func", insertText: "function ${1:Name}(${2}) ${3:abort}\n\t$0\nendfunction"},
 		{label: "tryc", insertText: "try\n\t${1}\ncatch /.*/\n\t$0\nendtry"},
@@ -24,7 +28,7 @@ func legacyCompletionSnippets() []completionSnippet {
 		{label: "trycf", insertText: "try\n\t${1}\ncatch /.*/\n\t${2}\nfinally\n\t$0\nendtry"},
 		{label: "aug", insertText: "augroup ${1:Start}\n\tautocmd!\n\t$0\naugroup END"},
 		{label: "aut", insertText: "autocmd ${1:group-event} ${2:pat} ${3:once} ${4:nested} ${5:cmd}"},
-		{label: "cmd", insertText: "command! ${1:attr} ${2:cmd} ${3:rep} $0"},
+		{label: "cmd", insertText: command},
 		{label: "hi", insertText: "highlight ${1:default} ${2:group-name} ${3:args} $0"},
 	}
 }
@@ -41,11 +45,11 @@ func vim9CompletionSnippets() []completionSnippet {
 // completionSnippetItems converts snippet templates to completion items. They
 // are only useful to snippet-capable clients; otherwise the labels are not
 // real Ex commands and selecting them would not insert useful text.
-func completionSnippetItems(dialect syntax.Dialect, enabled bool) []protocol.CompletionItem {
+func completionSnippetItems(dialect syntax.Dialect, enabled, configFile bool) []protocol.CompletionItem {
 	if !enabled {
 		return nil
 	}
-	templates := legacyCompletionSnippets()
+	templates := legacyCompletionSnippets(configFile)
 	if dialect == syntax.Vim9 {
 		templates = append(templates, vim9CompletionSnippets()...)
 	}

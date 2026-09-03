@@ -70,6 +70,10 @@ func TestConfigLoadedGuardExclusions(t *testing.T) {
 			source: "if exists('g:loaded_my_vimrc')\n  finish\nendif\nset tabstop=2\n",
 		},
 		{
+			name:   "bare loaded variable query is not a marker assignment",
+			source: "if exists('g:loaded_my_vimrc')\n  finish\nendif\nlet g:loaded_my_vimrc\n",
+		},
+		{
 			name:   "vim9script noclear explicit single load",
 			source: "vim9script noclear\nif exists('g:loaded_vimrc')\n  finish\nendif\nvar g:loaded_vimrc = 1\n",
 		},
