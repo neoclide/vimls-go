@@ -39,9 +39,20 @@ func collectConfigLeaderOrderDiagnostics(result *FileAnalysis) {
 			}
 		}
 		if command.Declaration != nil && command.Declaration.Name.Start < command.Declaration.Name.End {
-			name := strings.TrimPrefix(strings.ToLower(file.Text(command.Declaration.Name)), "g:")
+			rawName := file.Text(command.Declaration.Name)
+			name := strings.TrimPrefix(strings.ToLower(rawName), "g:")
 			if state, ok := leaderState[name]; ok {
-				state.noteAssignment(result, file, command)
+				state.noteAssignment(result, file, rawName, command.Declaration.Name, command.Declaration.Initializer)
+			}
+		} else if len(command.Expressions) == 1 && command.Expressions[0].Kind == syntax.ExpressionAssignment && len(command.Expressions[0].Children) == 2 && file.Text(command.Expressions[0].Operator) == "=" {
+			assignment := command.Expressions[0]
+			target := assignment.Children[0]
+			if target != nil && target.Kind == syntax.ExpressionIdentifier {
+				rawName := file.Text(target.Span)
+				name := strings.TrimPrefix(strings.ToLower(rawName), "g:")
+				if state, ok := leaderState[name]; ok {
+					state.noteAssignment(result, file, rawName, target.Span, assignment.Children[1])
+				}
 			}
 		}
 	}
@@ -61,14 +72,14 @@ func (state *leaderOrderState) noteMapping(command *syntax.Command) {
 	state.mappings = append(state.mappings, command)
 }
 
-func (state *leaderOrderState) noteAssignment(result *FileAnalysis, file *syntax.File, command *syntax.Command) {
+func (state *leaderOrderState) noteAssignment(result *FileAnalysis, file *syntax.File, targetName string, targetSpan syntax.Span, initializer *syntax.Expression) {
 	if state.assigned {
 		return
 	}
 	// A statically literal assignment makes the ordering problem visible: the
 	// mapping that ran earlier expanded the old (or default) leader. A dynamic
 	// assignment is kept unknown (§5.2) and resets the pending mappings.
-	static := command.Declaration.Initializer != nil && command.Declaration.Initializer.Kind == syntax.ExpressionString
+	static := initializer != nil && initializer.Kind == syntax.ExpressionString
 	if static {
 		for _, mapping := range state.mappings {
 			if state.reported == nil {
@@ -78,7 +89,7 @@ func (state *leaderOrderState) noteAssignment(result *FileAnalysis, file *syntax
 				continue
 			}
 			state.reported[mapping] = true
-			leader := strings.TrimSpace(file.Text(command.Declaration.Name))
+			leader := strings.TrimSpace(targetName)
 			if !strings.HasPrefix(leader, "g:") {
 				leader = "g:" + leader
 			}
@@ -88,7 +99,7 @@ func (state *leaderOrderState) noteAssignment(result *FileAnalysis, file *syntax
 				Span:    mapping.Mapping.LHS,
 				Related: syntax.RelatedDiagnostic{
 					Message: leader + " is assigned here",
-					Span:    command.Declaration.Name,
+					Span:    targetSpan,
 				},
 			})
 		}
