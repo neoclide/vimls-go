@@ -396,10 +396,26 @@ let g:loaded_my_vimrc = 1
 
 ### P2（§9 P2 需要完整索引证据）
 
-- [ ] 静态 source 图与 source cycle 检查。
-- [ ] 有确定 source 顺序时的跨文件 mapping 冲突。
-- [ ] `:source`、`:runtime`、`:packadd` 补全与导航扩展。
-- [ ] 经官方测试逐项确认的固定选项值诊断。
+> 评估结论（2026）：四项均需要「跨文件顺序/边索引」或「逐选项官方证据」，
+> 本里程碑已完成 P0/P1 全部配置专属增量；P2 记录为明确决定并给出触发条件，不静默实现。
+
+- [ ]（评估：推迟）静态 source 图与 source cycle 检查。
+  - 现状证据：`workspace.PathResolver.ResolveSource` 只解析单条 `:source`
+    （相对 cwd/root），workspace 图仅对 Vim9 `import` 建边；没有 `:source` 边索引。
+  - 决定：需先为跨文件 `:source` 边建模与循环检测提供索引与顺序证据，超出本增量范围；单文件
+    self-source（`:source` 自身路径）为低价值个案，一并推迟。
+- [ ]（评估：推迟）有确定 source 顺序时的跨文件 mapping 冲突。
+  - 现状证据：配置文件之间加载顺序由用户启动顺序决定，静态上大多不确定；§5.1 因此限定同文件
+    检查。跨文件需「顺序 + 映射状态传播 + leader 前值」三层证据，实现前必须先建立跨文件映射序。
+- [ ]（评估：推迟）`:source`、`:runtime`、`:packadd` 补全与导航扩展。
+  - 现状证据：`:source` document link（DocumentLink → `ResolveSource`）与 import/colorscheme
+    路径补全已存在并在配置测试中保留；`:runtime`/`:packadd` 尚无 runtimepath/package 顺序候选
+    与参数语法位识别。
+  - 决定：`runtime`/`packadd` 的路径解析与补全列为后续工作项，需先补齐 runtimepath 顺序与
+    `pack/*/start|opt/*` 路径索引及 `<sfile>`/转义的 v9.2.1015 语义确认。
+- [ ]（评估：推迟）经官方测试逐项确认的固定选项值诊断。
+  - 按 §6.3 仅当固定值集合与错误语义可在 v9.2.1015 中精确证明（test_options.vim 等逐项证据）
+    才开启；本里程碑保持 unknown 保守策略，不引入笼统的 “invalid option value” 规则。
 
 ## 13. 非目标
 
