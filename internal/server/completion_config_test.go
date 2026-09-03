@@ -242,3 +242,35 @@ func TestConfigSnippetTemplates(t *testing.T) {
 		t.Fatalf("plugin command snippet = %#v", pluginCommand)
 	}
 }
+
+// TestConfigColorschemeCompletionKeepsContextAndOrder adds the §7 colorscheme
+// row to the role-aware completion matrix.  Colorscheme lookup is deliberately
+// role-neutral; the config role must still retain its syntax context and the
+// runtimepath order used for tied prefix candidates.
+func TestConfigColorschemeCompletionKeepsContextAndOrder(t *testing.T) {
+	root := t.TempDir()
+	runtime := t.TempDir()
+	for _, name := range []string{"desert", "desolate"} {
+		writeWorkspaceFile(t, runtime, filepath.Join("colors", name+".vim"), "")
+	}
+	source := "colorscheme des\n"
+	path := writeWorkspaceFile(t, root, ".vimrc", source)
+	instance := initializeWorkspaceServer(t, root)
+	instance.setRuntimePaths([]string{runtime})
+	instance.refreshWorkspaceResolver()
+	instance.scheduleWorkspaceRebuild()
+	instance.workspaceWG.Wait()
+	documentURI := uri.File(path)
+	instance.documents.Open(documentURI.String(), 1, source)
+	labels := completionLabels(t, instance, documentURI, 0, uint32(len("colorscheme des")))
+	first, second := slices.Index(labels, "desert"), slices.Index(labels, "desolate")
+	if first < 0 || second < 0 || first >= second {
+		t.Fatalf("config colorscheme labels = %#v, want deterministic desert before desolate", labels)
+	}
+	// An extra argument is expression context, never colorscheme completion.
+	instance.documents.Open(documentURI.String(), 2, "colorscheme desert extra\n")
+	labels = completionLabels(t, instance, documentURI, 0, uint32(len("colorscheme desert extra")))
+	if slices.Contains(labels, "desert") || slices.Contains(labels, "desolate") {
+		t.Fatalf("non-colorscheme context returned colors: %#v", labels)
+	}
+}

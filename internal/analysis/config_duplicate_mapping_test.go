@@ -86,6 +86,16 @@ func TestConfigDuplicateMappingDiagnostics(t *testing.T) {
 			want:   1,
 		},
 		{
+			name:   "vim9 mappings use the same static overlap rule",
+			source: "vim9script\nnnoremap <F1> <Cmd>echo 1<CR>\nnnoremap <F1> <Cmd>echo 2<CR>\n",
+			want:   1,
+		},
+		{
+			name:   "unicode lhs is compared as one literal mapping",
+			source: "nnoremap 你 <Cmd>echo 1<CR>\nnnoremap 你 <Cmd>echo 2<CR>\n",
+			want:   1,
+		},
+		{
 			name:   "definitions inside a conditional are not proven",
 			source: "if has('gui')\n  nnoremap x :echo 1<CR>\nendif\nif has('gui')\n  nnoremap x :echo 2<CR>\nendif\n",
 			want:   0,

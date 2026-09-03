@@ -77,3 +77,41 @@ func TestStaticCallbackNavigationScriptLocalNames(t *testing.T) {
 		})
 	}
 }
+
+// TestStaticCallbackNavigationHandlers keeps the handler contract separate
+// from navigationAt: static callback sites must be usable through definition,
+// references, and hover, while an execute-generated call remains opaque.
+func TestStaticCallbackNavigationHandlers(t *testing.T) {
+	source := "function! Target() abort\nendfunction\nautocmd BufReadPost * call Target()\nnnoremap <expr> <F1> Target()\nnnoremap <F2> <Cmd>call Target()<CR>\nset omnifunc=Target\nexecute 'call Target()'\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	position := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 2, Character: uint32(len("autocmd BufReadPost * call "))},
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	locations, ok := definition.(protocol.LocationSlice)
+	if err != nil || !ok || len(locations) != 1 || locations[0].Range != navigationRange(0, 10, 16) {
+		t.Fatalf("callback definition = %#v, %v", definition, err)
+	}
+	references, err := instance.References(context.Background(), &protocol.ReferenceParams{
+		TextDocumentPositionParams: position,
+		Context:                    protocol.ReferenceContext{IncludeDeclaration: true},
+	})
+	if err != nil || len(references) != 5 {
+		t.Fatalf("callback references = %#v, %v", references, err)
+	}
+	for _, location := range references {
+		if location.Range.Start.Line == 6 {
+			t.Fatalf("dynamic execute call was treated as a callback reference: %#v", references)
+		}
+	}
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position})
+	if err != nil || hover == nil || hover.Range == nil || *hover.Range != navigationRange(2, uint32(len("autocmd BufReadPost * call ")), uint32(len("autocmd BufReadPost * call Target"))) {
+		t.Fatalf("callback hover = %#v, %v", hover, err)
+	}
+	dynamic := position
+	dynamic.Position = protocol.Position{Line: 6, Character: uint32(len("execute 'call "))}
+	if result, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: dynamic}); err != nil || len(result.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("dynamic callback definition = %#v, %v", result, err)
+	}
+}

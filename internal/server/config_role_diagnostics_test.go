@@ -268,6 +268,146 @@ func TestConfigFileRoleMapleaderOrderPublishesOnlyForConfigFiles(t *testing.T) {
 	}
 }
 
+// TestConfigFileRolesUseServerPathClassification exercises the three §10 file
+// roles through DidOpen.  In particular, an explicit configFiles entry must be
+// an absolute path and takes precedence over the plugin/runtime defaults.
+func TestConfigFileRolesUseServerPathClassification(t *testing.T) {
+	root := mustWorkspaceCanonicalPath(t, t.TempDir())
+	runtimeRoot := mustWorkspaceCanonicalPath(t, t.TempDir())
+	source := "map <Leader>a :echo 1<CR>\nlet g:mapleader = ','\n"
+	explicitPath := filepath.Join(root, "plugin", "configured.vim")
+	paths := []string{
+		filepath.Join(root, ".vimrc"),
+		explicitPath,
+		filepath.Join(runtimeRoot, "plugin", "runtime.vim"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, test := range []struct {
+		name, path string
+		wantConfig bool
+	}{
+		{name: "standard vimrc", path: paths[0], wantConfig: true},
+		{name: "explicit absolute configFiles plugin", path: explicitPath, wantConfig: true},
+		{name: "runtime plugin", path: paths[2], wantConfig: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance := newRootedServer(t, root)
+			instance.mu.Lock()
+			instance.configFiles = []string{explicitPath}
+			instance.mu.Unlock()
+			instance.workspaceMu.Lock()
+			instance.runtimePaths = []string{runtimeRoot}
+			instance.workspaceMu.Unlock()
+			if got := instance.IsConfigFile(test.path); got != test.wantConfig {
+				t.Fatalf("IsConfigFile(%q) = %v, want %v", test.path, got, test.wantConfig)
+			}
+			client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+			instance.client = client
+			documentURI := uri.File(test.path)
+			if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+				t.Fatal(err)
+			}
+			got := publishedCodes(waitForDiagnostics(t, client.published))["vimls/config-mapleader-order"]
+			if test.wantConfig && got != 1 || !test.wantConfig && got != 0 {
+				t.Fatalf("mapleader diagnostics = %d, want config role %v", got, test.wantConfig)
+			}
+		})
+	}
+}
+
+// TestConfigDiagnosticsPreserveUnicodeCRLFPositions verifies that the
+// configuration-only duplicate-mapping diagnostic is converted at the LSP
+// boundary, not by byte offset.  The second LHS follows a CRLF and contains a
+// non-ASCII rune, so UTF-8 and UTF-16 necessarily have distinct end columns.
+func TestConfigDiagnosticsPreserveUnicodeCRLFPositions(t *testing.T) {
+	source := "nnoremap 你 :echo 1<CR>\r\nnnoremap 你 :echo 2<CR>\r\n"
+	for _, test := range []struct {
+		name     string
+		encoding text.Encoding
+		want     protocol.Range
+	}{
+		{name: "utf8", encoding: text.UTF8, want: navigationRange(1, 9, 12)},
+		{name: "utf16", encoding: text.UTF16, want: navigationRange(1, 9, 10)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := mustWorkspaceCanonicalPath(t, t.TempDir())
+			path := filepath.Join(root, ".vimrc")
+			if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			instance := newRootedServer(t, root)
+			instance.encoding = test.encoding
+			client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+			instance.client = client
+			documentURI := uri.File(path)
+			if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+				t.Fatal(err)
+			}
+			for _, diagnostic := range waitForDiagnostics(t, client.published).Diagnostics {
+				if diagnostic.Code == protocol.String("vimls/duplicate-mapping") {
+					if diagnostic.Range != test.want {
+						t.Fatalf("duplicate mapping range = %#v, want %#v", diagnostic.Range, test.want)
+					}
+					return
+				}
+			}
+			t.Fatal("missing duplicate-mapping diagnostic")
+		})
+	}
+}
+
+// TestConfigDiagnosticSettingsApplyToConfigOnlyRules verifies that the normal
+// disabled/override settings pipeline also controls diagnostics introduced for
+// configuration files, rather than treating them as an unconfigurable side
+// channel.
+func TestConfigDiagnosticSettingsApplyToConfigOnlyRules(t *testing.T) {
+	root := mustWorkspaceCanonicalPath(t, t.TempDir())
+	path := filepath.Join(root, ".vimrc")
+	source := "map <Leader>a :echo 1<CR>\nlet g:mapleader = ','\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	instance := newRootedServer(t, root)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 4)}
+	instance.client = client
+	documentURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+		t.Fatal(err)
+	}
+	code := protocol.String("vimls/config-mapleader-order")
+	find := func(params *protocol.PublishDiagnosticsParams) *protocol.Diagnostic {
+		for index := range params.Diagnostics {
+			if params.Diagnostics[index].Code == code {
+				return &params.Diagnostics[index]
+			}
+		}
+		return nil
+	}
+	if diagnostic := find(waitForDiagnostics(t, client.published)); diagnostic == nil || diagnostic.Severity != protocol.DiagnosticSeverityWarning {
+		t.Fatalf("initial config diagnostic = %#v", diagnostic)
+	}
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"diagnostic":{"disabled":["vimls/config-mapleader-order"]}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if diagnostic := find(waitForDiagnostics(t, client.published)); diagnostic != nil {
+		t.Fatalf("disabled config diagnostic remained published: %#v", diagnostic)
+	}
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"diagnostic":{"disabled":[],"override":{"vimls/config-mapleader-order":"information"}}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if diagnostic := find(waitForDiagnostics(t, client.published)); diagnostic == nil || diagnostic.Severity != protocol.DiagnosticSeverityInformation {
+		t.Fatalf("overridden config diagnostic = %#v", diagnostic)
+	}
+}
+
 // TestProtocolDiagnosticsSameFileRelatedInformation verifies that a related
 // diagnostic without an explicit URI is published against the current document
 // (used by the config-mode augroup report).

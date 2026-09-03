@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -519,6 +521,98 @@ func TestCodeActionRepairsStyleDiagnostics(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestConfigOnlyDiagnosticsDoNotOfferQuickFixes proves the §8 safety boundary
+// using the real config-file role and diagnostics published by the server.
+// These messages intentionally stay explanatory: their apparent repairs would
+// change reload or mapping semantics.
+func TestConfigOnlyDiagnosticsDoNotOfferQuickFixes(t *testing.T) {
+	root := mustWorkspaceCanonicalPath(t, t.TempDir())
+	path := filepath.Join(root, ".vimrc")
+	source := "augroup config_test\n  autocmd BufRead * echo 'once'\naugroup END\nmap <Leader>a :echo 1<CR>\nlet g:mapleader = ','\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	instance := newRootedServer(t, root)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+	instance.client = client
+	documentURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnostics(t, client.published)
+	for _, code := range []protocol.String{
+		"vimls/autocmd-group-not-cleared",
+		"vimls/config-mapleader-order",
+	} {
+		var diagnostic *protocol.Diagnostic
+		for index := range params.Diagnostics {
+			if params.Diagnostics[index].Code == code {
+				diagnostic = &params.Diagnostics[index]
+				break
+			}
+		}
+		if diagnostic == nil {
+			t.Fatalf("missing %s in %#v", code, params.Diagnostics)
+		}
+		actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Range:        diagnostic.Range,
+			Context: protocol.CodeActionContext{
+				Diagnostics: []protocol.Diagnostic{*diagnostic},
+				Only:        []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
+			},
+		})
+		if err != nil || len(actions) != 0 {
+			t.Fatalf("%s actions = %#v, error = %v", code, actions, err)
+		}
+	}
+}
+
+// TestConfigFileQuickFixRejectsAStalePublishedDiagnostic proves that the
+// existing stale-range protocol guard also applies when the document has the
+// config role.  Config-only diagnostics above are deliberately not eligible
+// for a fix, so their stale state cannot be used to manufacture an action.
+func TestConfigFileQuickFixRejectsAStalePublishedDiagnostic(t *testing.T) {
+	root := mustWorkspaceCanonicalPath(t, t.TempDir())
+	path := filepath.Join(root, ".vimrc")
+	source := "normal gg\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	instance := newRootedServer(t, root)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+	instance.client = client
+	documentURI := uri.File(path)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnostics(t, client.published)
+	var stale *protocol.Diagnostic
+	for index := range params.Diagnostics {
+		if params.Diagnostics[index].Code == protocol.String("vimls/normal-without-bang") {
+			stale = &params.Diagnostics[index]
+			break
+		}
+	}
+	if stale == nil {
+		t.Fatalf("missing normal-without-bang in %#v", params.Diagnostics)
+	}
+	if _, _, err := instance.documents.Change(documentURI.String(), 2, text.UTF16, []text.Change{{Text: "normal! gg\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Range:        stale.Range,
+		Context: protocol.CodeActionContext{
+			Diagnostics: []protocol.Diagnostic{*stale},
+			Only:        []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
+		},
+	})
+	if !errors.Is(err, protocol.ErrContentModified) || len(actions) != 0 {
+		t.Fatalf("stale config quick fix = %#v, error = %v", actions, err)
 	}
 }
 
