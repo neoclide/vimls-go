@@ -49,6 +49,42 @@ func IndentEdits(file *File, options IndentOptions) []IndentEdit {
 	return edits
 }
 
+// IndentForLine returns the wanted leading whitespace for one zero-based
+// physical line, including the blank line a client has just inserted with a
+// newline keystroke.  Bracket continuations win over block structure because
+// they are the more specific context.  Top-level blank lines return zero-level
+// indentation, allowing deletion of existing whitespace. The second result
+// is false when the planner cannot prove an indentation, for example on
+// protected payload lines inside heredocs or lines outside the document.
+func IndentForLine(file *File, options IndentOptions, line int) (string, bool) {
+	if file == nil || options.TabSize <= 0 || line < 0 {
+		return "", false
+	}
+	planner := newIndentPlanner(file.Source)
+	planner.collectFile(file, 0)
+	planner.normalizeBrackets()
+	if line >= len(planner.lines) || planner.protected[line] {
+		return "", false
+	}
+	level := planner.lineLevels[line]
+	if level < 0 {
+		level = planner.bracketLevel(line)
+	}
+	if level < 0 {
+		level = planner.structuralLevels[line]
+	}
+	if level < 0 && planner.continuation[line] {
+		level = planner.continuationLevel(line)
+	}
+	if level < 0 && planner.comments[line] {
+		level = max(0, planner.structuralLevels[line], planner.bracketLevel(line))
+	}
+	if level < 0 {
+		level = 0
+	}
+	return indentText(level, options), true
+}
+
 type indentLine struct {
 	start       int
 	contentEnd  int
@@ -407,24 +443,42 @@ func (planner *indentPlanner) addExpressionBracket(expression *Expression, level
 	switch expression.Kind {
 	case ExpressionList:
 		open, close = planner.edgePair(span, '[', ']')
+		if open < 0 {
+			open, close = planner.unclosedEdge(span, '[')
+		}
 	case ExpressionDictionary:
 		open, close = planner.edgePair(span, '{', '}')
+		if open < 0 {
+			open, close = planner.unclosedEdge(span, '{')
+		}
 	case ExpressionParenthesized, ExpressionTuple:
 		open, close = planner.edgePair(span, '(', ')')
+		if open < 0 {
+			open, close = planner.unclosedEdge(span, '(')
+		}
 	case ExpressionLambdaBlock:
 		open, close = planner.edgePair(span, '{', '}')
+		if open < 0 {
+			open, close = planner.unclosedEdge(span, '{')
+		}
 	case ExpressionCall:
 		start := span.Start
 		if len(expression.Children) > 0 {
 			start = expression.Children[0].Span.End
 		}
 		open, close = planner.trailingPair(span, start, '(', ')')
+		if open < 0 {
+			open, close = planner.unclosedTrailing(span, start, '(')
+		}
 	case ExpressionIndex, ExpressionSlice:
 		start := span.Start
 		if len(expression.Children) > 0 {
 			start = expression.Children[0].Span.End
 		}
 		open, close = planner.trailingPair(span, start, '[', ']')
+		if open < 0 {
+			open, close = planner.unclosedTrailing(span, start, '[')
+		}
 	case ExpressionCurlyName:
 		open, close = planner.edgePair(span, '{', '}')
 	case ExpressionLambda:
@@ -459,6 +513,14 @@ func (planner *indentPlanner) edgePair(span Span, opening, closing byte) (int, i
 	return open, close
 }
 
+func (planner *indentPlanner) unclosedEdge(span Span, opening byte) (int, int) {
+	open := strings.IndexByte(planner.source[span.Start:min(span.End, span.Start+3)], opening)
+	if open < 0 {
+		return -1, -1
+	}
+	return span.Start + open, len(planner.source)
+}
+
 func (planner *indentPlanner) trailingPair(span Span, start int, opening, closing byte) (int, int) {
 	start = max(start, span.Start)
 	if start >= span.End {
@@ -476,6 +538,18 @@ func (planner *indentPlanner) trailingPair(span Span, start int, opening, closin
 	return open, close
 }
 
+func (planner *indentPlanner) unclosedTrailing(span Span, start int, opening byte) (int, int) {
+	start = max(start, span.Start)
+	if start >= span.End {
+		return -1, -1
+	}
+	open := strings.IndexByte(planner.source[start:span.End], opening)
+	if open < 0 {
+		return -1, -1
+	}
+	return start + open, len(planner.source)
+}
+
 func (planner *indentPlanner) addFunctionBracket(command *Command, level int) {
 	function := command.Function
 	start := function.Name.End
@@ -490,11 +564,15 @@ func (planner *indentPlanner) addFunctionBracket(command *Command, level int) {
 		return
 	}
 	open := strings.IndexByte(planner.source[start:end], '(')
-	close := strings.LastIndexByte(planner.source[start:end], ')')
-	if open < 0 || close < 0 {
+	if open < 0 {
 		return
 	}
-	planner.addBracket(start+open, start+close, level+2, level+2)
+	close := strings.LastIndexByte(planner.source[start:end], ')')
+	closePos := len(planner.source)
+	if close >= 0 && start+close > start+open {
+		closePos = start + close
+	}
+	planner.addBracket(start+open, closePos, level+2, level+2)
 }
 
 func (planner *indentPlanner) addBracket(open, close, contentLevel, closeLevel int) {

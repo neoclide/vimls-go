@@ -206,6 +206,9 @@ func (s *Server) resolveUserTypeName(state workspaceNavigationSnapshot, path, so
 			ImportPath: file.Text(found.PathSpan), ImportAutoload: found.Autoload,
 		}
 		if target, ok := s.resolveWorkspaceReference(state, reference); ok {
+			if !typeHierarchyKind(target.match.Fact.Kind) {
+				return hierarchySymbol{}, false
+			}
 			return hierarchySymbolFromNavigationTarget(target), true
 		}
 		return hierarchySymbol{}, false

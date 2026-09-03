@@ -78,6 +78,36 @@ func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.Semant
 	return semanticTokensFullResult(result), nil
 }
 
+// SemanticTokensRange returns the tokens that overlap with the requested
+// range.  Range responses carry no result ID and never touch the
+// full/delta result registry, so a range request cannot corrupt a client's
+// delta base.
+func (s *Server) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
+	if s.workspaceIndexRebuilding() {
+		return nil, nil
+	}
+	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil || file == nil {
+		return &protocol.SemanticTokens{Data: []uint32{}}, nil
+	}
+	start, startErr := snapshot.Offset(fromProtocolPosition(params.Range.Start), encoding)
+	end, endErr := snapshot.Offset(fromProtocolPosition(params.Range.End), encoding)
+	if startErr != nil || endErr != nil || end <= start {
+		return &protocol.SemanticTokens{Data: []uint32{}}, s.structureCurrent(ctx, snapshot)
+	}
+	data, err := encodeSemanticTokens(ctx, snapshot, encoding, collectSemanticFacts(file, fileAnalysis), &semanticTokenRange{start: start, end: end})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.structureCurrent(ctx, snapshot); err != nil {
+		return nil, err
+	}
+	return &protocol.SemanticTokens{Data: data}, nil
+}
+
 // SemanticTokensFullDelta returns an edit only when the supplied result is
 // still this URI's latest result. In every other case a full result safely
 // resets the client base.
@@ -121,12 +151,33 @@ func (s *Server) semanticTokensData(ctx context.Context, documentURI string) (*t
 	if snapshot == nil || file == nil {
 		return nil, nil, nil
 	}
-	facts := collectSemanticFacts(file, fileAnalysis)
+	data, err := encodeSemanticTokens(ctx, snapshot, encoding, collectSemanticFacts(file, fileAnalysis), nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return snapshot, data, nil
+}
+
+type semanticTokenRange struct {
+	start int
+	end   int
+}
+
+// encodeSemanticTokens delta-encodes facts. If tokenRange is non-nil, output is
+// restricted to facts overlapping with [tokenRange.start, tokenRange.end), as
+// required by LSP 3.18 for textDocument/semanticTokens/range.
+func encodeSemanticTokens(ctx context.Context, snapshot *text.Snapshot, encoding text.Encoding, facts []semanticFact, tokenRange *semanticTokenRange) ([]uint32, error) {
 	data := make([]uint32, 0, len(facts)*5)
+	if tokenRange != nil && tokenRange.end <= tokenRange.start {
+		return data, nil
+	}
 	var previousLine, previousCharacter uint32
 	for index, fact := range facts {
 		if index%64 == 0 && ctx.Err() != nil {
-			return nil, nil, protocol.ErrRequestCancelled
+			return nil, protocol.ErrRequestCancelled
+		}
+		if tokenRange != nil && (fact.span.End <= tokenRange.start || fact.span.Start >= tokenRange.end) {
+			continue
 		}
 		start, startErr := snapshot.Position(fact.span.Start, encoding)
 		end, endErr := snapshot.Position(fact.span.End, encoding)
@@ -142,7 +193,7 @@ func (s *Server) semanticTokensData(ctx context.Context, documentURI string) (*t
 		data = append(data, deltaLine, deltaCharacter, uint32(end.Character-start.Character), fact.tokenType, fact.modifiers)
 		previousLine, previousCharacter = line, character
 	}
-	return snapshot, data, nil
+	return data, nil
 }
 
 func (s *Server) installSemanticTokenResult(ctx context.Context, snapshot *text.Snapshot, data []uint32) (semanticTokenResult, error) {

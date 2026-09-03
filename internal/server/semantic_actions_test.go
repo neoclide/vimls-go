@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -671,5 +672,161 @@ func TestCodeActionUsesNegotiatedEncodingAtEndOfFile(t *testing.T) {
 				t.Fatalf("text edit = %#v", textEdit)
 			}
 		})
+	}
+}
+
+func decodeSemanticTokens(data []uint32) [][5]uint32 {
+	tokens := make([][5]uint32, 0, len(data)/5)
+	line, character := uint32(0), uint32(0)
+	for index := 0; index+4 < len(data); index += 5 {
+		if data[index] != 0 {
+			line += data[index]
+			character = data[index+1]
+		} else {
+			character += data[index+1]
+		}
+		tokens = append(tokens, [5]uint32{line, character, data[index+2], data[index+3], data[index+4]})
+	}
+	return tokens
+}
+
+func TestSemanticTokensRangeCapabilityAndMethod(t *testing.T) {
+	instance := New(nil, nil, nil)
+	t.Cleanup(instance.stopAnalysis)
+	result, err := instance.Initialize(context.Background(), &protocol.InitializeParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Capabilities.SemanticTokensProvider == nil {
+		t.Fatal("semantic tokens provider missing")
+	}
+	options, ok := result.Capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions)
+	if !ok {
+		t.Fatalf("semantic tokens provider = %#v", result.Capabilities.SemanticTokensProvider)
+	}
+	if options.Range == nil {
+		t.Fatalf("semantic tokens range = %#v", options.Range)
+	}
+	encoded, err := protocol.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"semanticTokensProvider":{"legend":`)) || !bytes.Contains(encoded, []byte(`"range":true`)) {
+		t.Fatalf("initialize result omitted semantic tokens range: %s", encoded)
+	}
+	if !implementedMethod(protocol.MethodTextDocumentSemanticTokensRange) {
+		t.Fatalf("method %q is not implemented", protocol.MethodTextDocumentSemanticTokensRange)
+	}
+}
+
+func TestSemanticTokensRangeFiltersByRange(t *testing.T) {
+	source := "vim9script\nconst value = 1\n# comment\necho value\necho value\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+
+	full, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := decodeSemanticTokens(full.Data)
+	if len(all) == 0 {
+		t.Fatal("full tokens are empty")
+	}
+
+	rangeResult, err := instance.SemanticTokensRange(context.Background(), &protocol.SemanticTokensRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Range:        protocol.Range{Start: protocol.Position{Line: 3, Character: 0}, End: protocol.Position{Line: 4, Character: 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limited := decodeSemanticTokens(rangeResult.Data)
+	if len(limited) == 0 {
+		t.Fatalf("range tokens are empty; full = %#v", all)
+	}
+	for _, token := range limited {
+		if token[0] != 3 {
+			t.Fatalf("range token on line %d, want line 3 only: %#v", token[0], limited)
+		}
+	}
+
+	// A range covering the whole document returns the same tokens.
+	whole, err := instance.SemanticTokensRange(context.Background(), &protocol.SemanticTokensRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Range:        protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 4, Character: 10}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decodeSemanticTokens(whole.Data), all) {
+		t.Fatalf("whole-document range = %#v, want %#v", whole.Data, full.Data)
+	}
+}
+
+func TestSemanticTokensRangeIncludesOverlappingTokens(t *testing.T) {
+	source := "vim9script\nconst value = 1\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	// The range starts inside `const` and ends inside `value`.
+	// LSP 3.18 requires returning tokens that overlap the range boundary,
+	// so both `const` and `value` must be returned, while `1` is excluded.
+	result, err := instance.SemanticTokensRange(context.Background(), &protocol.SemanticTokensRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Range:        protocol.Range{Start: protocol.Position{Line: 1, Character: 3}, End: protocol.Position{Line: 1, Character: 8}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens := decodeSemanticTokens(result.Data)
+	if len(tokens) != 2 ||
+		tokens[0][0] != 1 || tokens[0][1] != 0 || tokens[0][2] != 5 ||
+		tokens[1][0] != 1 || tokens[1][1] != 6 || tokens[1][2] != 5 {
+		t.Fatalf("range tokens = %#v", tokens)
+	}
+}
+
+func TestSemanticTokensRangeInvalidRangesReturnEmpty(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nconst value = 1\n")
+	for name, valueRange := range map[string]protocol.Range{
+		"empty-origin": {Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 0}},
+		"inverted":     {Start: protocol.Position{Line: 1, Character: 5}, End: protocol.Position{Line: 1, Character: 2}},
+		"empty":        {Start: protocol.Position{Line: 1, Character: 3}, End: protocol.Position{Line: 1, Character: 3}},
+		"beyond":       {Start: protocol.Position{Line: 99, Character: 0}, End: protocol.Position{Line: 99, Character: 9}},
+	} {
+		result, err := instance.SemanticTokensRange(context.Background(), &protocol.SemanticTokensRangeParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Range:        valueRange,
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(result.Data) != 0 {
+			t.Fatalf("%s: data = %#v, want empty", name, result.Data)
+		}
+	}
+}
+
+func TestSemanticTokensRangeDoesNotTouchDeltaRegistry(t *testing.T) {
+	documentURI := uri.MustParse("file:///semantic-range-registry.vim")
+	instance := New(nil, nil, nil)
+	t.Cleanup(instance.stopAnalysis)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\nconst value = 1\necho value\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := instance.SemanticTokensRange(context.Background(), &protocol.SemanticTokensRangeParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Range:        protocol.Range{Start: protocol.Position{Line: 1, Character: 0}, End: protocol.Position{Line: 2, Character: 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResultID != nil {
+		t.Fatalf("range result ID = %q, want none", *result.ResultID)
+	}
+	instance.publishMu.Lock()
+	_, installed := instance.semanticTokenResults[documentURI.String()]
+	instance.publishMu.Unlock()
+	if installed {
+		t.Fatal("range request installed a delta registry entry")
 	}
 }

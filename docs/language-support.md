@@ -16,12 +16,12 @@ plugins, autoload scripts, imports, syntax files and color schemes.
 | Completion | Commands, variables, functions, options, events, mappings, highlight and syntax groups, imports, members, autoload names, color schemes and other context-specific values. |
 | Hover | Symbol kind, type, signature, source comments and pinned Vim help. Variables always show a type, including `unknown` and explicit Vim9 `any`. |
 | Signature help | Built-in functions and statically resolved user functions, imported functions, function values, methods and constructors. |
-| Navigation | Definition, declaration, references, document highlights and document links for statically resolved local, imported, global and autoload symbols. |
+| Navigation | Definition, declaration, type definition, references, document highlights and document links for statically resolved local, imported, global and autoload symbols. |
 | Hierarchies and implementations | Direct type supertypes/subtypes, interface and abstract-class implementations, compatible member providers, and incoming/outgoing calls for statically resolved named callables. |
 | Code Lens | Reference counts for named Legacy and Vim9 functions, methods and constructors. Implementation counts are limited to Vim9 abstract-class and interface methods. Clickable navigation depends on client support for `editor.action.showReferences`. |
 | Symbols and structure | Document symbols, workspace symbols, folding ranges and selection ranges. |
 | Safe editing | Prepare rename, rename, semantic highlighting, inferred-type inlay hints and a small set of syntax quick fixes. |
-| Formatting | Source-preserving indentation for a whole document or selected range. Only proven leading whitespace is changed. |
+| Formatting | Source-preserving indentation for whole documents, selected ranges and on-type newline/continuation triggers. Only proven leading whitespace is changed. |
 | Workspace updates | Incremental document synchronization, workspace folders, watched Vim files and delta runtimepath refreshes through `vimls/didChangeRuntimepath` (request or compatible notification). |
 
 Legacy and Vim9 files may use the same workspace. The server understands
@@ -30,9 +30,8 @@ language rules.
 
 ## Current limitations
 
-- On-type formatting is not available. Document and range formatting adjust
-  indentation only; they do not rewrite expressions, spacing, wrapping or
-  embedded languages.
+- Document, range and on-type formatting adjust indentation only; they do not
+  rewrite expressions, spacing, wrapping or embedded languages.
 - Rename is offered only when every affected symbol can be resolved safely.
   Autoload function rename and other namespace-changing edits are rejected.
 - Code actions are limited to a few unambiguous syntax repairs; there is no

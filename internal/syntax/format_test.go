@@ -432,3 +432,120 @@ func assertSameFormatShape(t *testing.T, before, after *File) {
 		t.Fatalf("parse shape changed:\n%#v\n%#v", left, right)
 	}
 }
+
+func TestIndentForLine(t *testing.T) {
+	options := IndentOptions{TabSize: 4, InsertSpaces: true}
+	tests := []struct {
+		name   string
+		source string
+		line   int
+		want   string
+		ok     bool
+	}{
+		{
+			name:   "Legacy closed function",
+			source: "function! Foo()\n\nendfunction\n",
+			line:   1,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Legacy unclosed function",
+			source: "function! Foo()\n\n",
+			line:   1,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 closed def",
+			source: "vim9script\ndef Foo()\n\nenddef\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 unclosed def",
+			source: "vim9script\ndef Foo()\n\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 unclosed if inside def",
+			source: "vim9script\ndef Foo()\n    if true\n\n",
+			line:   3,
+			want:   "        ",
+			ok:     true,
+		},
+		{
+			name:   "Legacy unclosed if",
+			source: "if 1\n\n",
+			line:   1,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 closed list bracket",
+			source: "vim9script\nvar list = [\n\n]\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 unclosed list bracket",
+			source: "vim9script\nvar list = [\n\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 closed dict bracket",
+			source: "vim9script\nvar d = {\n\n}\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 unclosed dict bracket",
+			source: "vim9script\nvar d = {\n\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 closed paren in call",
+			source: "vim9script\nFunc(\n\n)\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 unclosed paren in call",
+			source: "vim9script\nFunc(\n\n",
+			line:   2,
+			want:   "    ",
+			ok:     true,
+		},
+		{
+			name:   "Vim9 multiline function signature unclosed",
+			source: "vim9script\ndef Func(\n\n",
+			line:   2,
+			want:   "        ",
+			ok:     true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			file := Parse(tc.source)
+			got, ok := IndentForLine(file, options, tc.line)
+			if ok != tc.ok || got != tc.want {
+				t.Logf("commands: %#v", file.Commands)
+				if len(file.Commands) > 1 && file.Commands[1].Declaration != nil {
+					t.Logf("init: %#v", file.Commands[1].Declaration.Initializer)
+				}
+				t.Logf("diagnostics: %#v", file.Diagnostics)
+				t.Fatalf("IndentForLine() = (%q, %v), want (%q, %v)", got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}

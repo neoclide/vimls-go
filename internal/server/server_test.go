@@ -86,15 +86,12 @@ func TestInitializeAdvertisesFormatting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capability := range []string{`"documentFormattingProvider":true`, `"documentRangeFormattingProvider":true`} {
+	for _, capability := range []string{`"documentFormattingProvider":true`, `"documentRangeFormattingProvider":true`, `"documentOnTypeFormattingProvider":{"firstTriggerCharacter":"\n","moreTriggerCharacter":["\\"]}`} {
 		if !bytes.Contains(encoded, []byte(capability)) {
 			t.Fatalf("initialize result omitted %s: %s", capability, encoded)
 		}
 	}
-	if bytes.Contains(encoded, []byte(`"documentOnTypeFormattingProvider"`)) {
-		t.Fatalf("initialize result advertised on-type formatting: %s", encoded)
-	}
-	for _, method := range []string{protocol.MethodTextDocumentFormatting, protocol.MethodTextDocumentRangeFormatting} {
+	for _, method := range []string{protocol.MethodTextDocumentFormatting, protocol.MethodTextDocumentRangeFormatting, protocol.MethodTextDocumentOnTypeFormatting} {
 		if !implementedMethod(method) {
 			t.Fatalf("formatting method %q is not implemented", method)
 		}
