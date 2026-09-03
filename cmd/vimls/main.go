@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"syscall"
 
 	"github.com/neoclide/vimls-go/internal/server"
 )
@@ -25,7 +24,7 @@ func run() int {
 		return 0
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
 	if *listen != "" {
