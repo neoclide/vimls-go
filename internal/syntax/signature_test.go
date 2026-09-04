@@ -917,13 +917,30 @@ func TestVim9NestedGenericTypeVariableDuplicate(t *testing.T) {
 }
 
 func TestParsesLegacyFunctionSignatureAndAttributes(t *testing.T) {
-	file := (LegacyParser{}).Parse("function! s:Collect(items, ...) abort dict\nendfunction\n")
+	file := (LegacyParser{}).Parse("function! s:Collect(items, ...) range abort dict\nendfunction\n")
 	if len(file.Diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", file.Diagnostics)
 	}
 	function := file.Commands[0].Function
-	if function == nil || file.Text(function.Name) != "s:Collect" || len(function.Parameters) != 2 || !function.Parameters[1].Variadic || file.Text(function.Attributes) != "abort dict" {
+	if function == nil || file.Text(function.Name) != "s:Collect" || len(function.Parameters) != 2 || !function.Parameters[1].Variadic || file.Text(function.AttributeTail) != " range abort dict" || len(function.Attributes) != 3 {
 		t.Fatalf("function = %#v", function)
+	}
+	for index, want := range []string{"range", "abort", "dict"} {
+		if got := file.Text(function.Attributes[index]); got != want {
+			t.Fatalf("attribute %d = %q, want %q", index, got, want)
+		}
+	}
+
+	incomplete := (LegacyParser{}).Parse("function! Foo() cl\nendfunction\n")
+	function = incomplete.Commands[0].Function
+	if function == nil || incomplete.Text(function.AttributeTail) != " cl" || len(function.Attributes) != 0 || len(incomplete.Diagnostics) != 1 || incomplete.Diagnostics[0].Code != "vim/E488" {
+		t.Fatalf("incomplete function = %#v, diagnostics = %#v", function, incomplete.Diagnostics)
+	}
+
+	continued := (LegacyParser{}).Parse("function! Continued()\n  \\ range abort\nendfunction\n")
+	function = continued.Commands[0].Function
+	if function == nil || len(function.Attributes) != 2 || continued.Text(function.Attributes[0]) != "range" || continued.Text(function.Attributes[1]) != "abort" || len(continued.Diagnostics) != 0 {
+		t.Fatalf("continued function = %#v, diagnostics = %#v", function, continued.Diagnostics)
 	}
 }
 

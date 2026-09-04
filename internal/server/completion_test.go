@@ -311,6 +311,46 @@ func TestCompletionVim9DefStatementHeadIncludesUserCommands(t *testing.T) {
 	}
 }
 
+func TestCompletionFunctionAttributes(t *testing.T) {
+	tests := []struct {
+		name, source, prefix string
+		line                 uint32
+		want                 []string
+		reject               []string
+	}{
+		{name: "legacy empty", source: "function! Foo() \nendfunction\n", line: 0, want: []string{"range", "abort", "dict", "closure"}},
+		{name: "legacy prefix", source: "function! Foo() cl\nendfunction\n", prefix: "cl", line: 0, want: []string{"closure"}},
+		{name: "legacy continuation", source: "function! Foo()\n  \\ cl\nendfunction\n", prefix: "cl", line: 1, want: []string{"closure"}},
+		{name: "Vim9 legacy function", source: "vim9script\nfunction Foo() di\nendfunction\n", prefix: "di", line: 1, want: []string{"dict"}},
+		{name: "used attributes", source: "function! Foo() range abort d\nendfunction\n", prefix: "d", line: 0, want: []string{"dict"}, reject: []string{"range", "abort"}},
+		{name: "Vim9 def", source: "vim9script\ndef Foo() cl\nenddef\n", prefix: "cl", line: 1, reject: []string{"closure"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			lineStart := 0
+			for line := uint32(0); line < test.line; line++ {
+				lineStart += strings.IndexByte(test.source[lineStart:], '\n') + 1
+			}
+			lineEnd := strings.IndexByte(test.source[lineStart:], '\n')
+			if lineEnd < 0 {
+				lineEnd = len(test.source) - lineStart
+			}
+			items := completionListRequest(t, instance, documentURI, test.line, uint32(lineEnd)).Items
+			for _, label := range test.want {
+				if !hasCompletion(items, label, protocol.CompletionItemKindKeyword) {
+					t.Fatalf("%s completion missing for prefix %q; items = %#v", label, test.prefix, items)
+				}
+			}
+			for _, label := range test.reject {
+				if hasCompletion(items, label, protocol.CompletionItemKindKeyword) {
+					t.Fatalf("%s completion unexpectedly present for prefix %q; items = %#v", label, test.prefix, items)
+				}
+			}
+		})
+	}
+}
+
 func TestCompletionBuiltinFunctionsAfterMethodArrow(t *testing.T) {
 	tests := []struct {
 		name      string

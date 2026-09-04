@@ -114,7 +114,10 @@ func assertFileSpansAt(t *testing.T, file *File, origin string) {
 			function := command.Function
 			check("function name", function.Name)
 			check("function return type", function.ReturnTypeSpan)
-			check("function attributes", function.Attributes)
+			check("function attribute tail", function.AttributeTail)
+			for _, attribute := range function.Attributes {
+				check("function attribute", attribute)
+			}
 			for _, parameter := range function.Parameters {
 				assertParameterSpans(t, file, origin, parameter)
 			}

@@ -191,6 +191,7 @@ const (
 	completionContextAugroup
 	completionContextUserCommandAttribute
 	completionContextUserCommandAttributeValue
+	completionContextFunctionAttribute
 	completionContextColorscheme
 	completionContextImportPath
 	completionContextMember
@@ -231,6 +232,10 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 	}
 	result := completionContextNone
 	walkCommands(file.Commands, func(command *syntax.Command) {
+		if _, ok := completionFunctionAttributeAt(file, command, offset); ok {
+			result = completionContextFunctionAttribute
+			return
+		}
 		if !spanContains(command.Span, offset) && offset != command.Span.End {
 			if contextKind, ok := completionHighlightContextAt(file, command, offset); ok {
 				result = contextKind
@@ -690,6 +695,34 @@ func completionHorizontalSpace(source string, start, end int) bool {
 		}
 	}
 	return true
+}
+
+func completionFunctionAttributeAt(file *syntax.File, command *syntax.Command, offset int) (*syntax.Span, bool) {
+	if file == nil || command == nil || command.Canonical != "function" || command.Function == nil || offset < 0 || offset > len(file.Source) {
+		return nil, false
+	}
+	tail := command.Function.AttributeTail
+	if tail == (syntax.Span{}) || offset < tail.Start {
+		return nil, false
+	}
+	if offset > tail.End {
+		if !completionHorizontalSpace(file.Source, tail.End, offset) {
+			return nil, false
+		}
+		if tail.End != tail.Start {
+			attributes := command.Function.Attributes
+			if len(attributes) == 0 || attributes[len(attributes)-1].End != tail.End {
+				return nil, false
+			}
+		}
+	}
+	for index := range command.Function.Attributes {
+		attribute := &command.Function.Attributes[index]
+		if attribute.Start <= offset && offset <= attribute.End {
+			return attribute, true
+		}
+	}
+	return nil, true
 }
 
 func hasLeadingColon(source string, start, end int) bool {

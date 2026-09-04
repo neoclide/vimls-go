@@ -311,8 +311,12 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 	}
 	offset = close
-	if offset < len(source) && source[offset] == ')' {
+	closedParameters := offset < len(source) && source[offset] == ')'
+	if closedParameters {
 		offset++
+	}
+	if !defSignature && closedParameters {
+		function.AttributeTail = Span{Start: command.Argument.Start + offset, End: command.Argument.Start + offset}
 	}
 	tailStart := offset
 	offset = skipSyntaxSpace(rawSource, offset, len(rawSource))
@@ -366,21 +370,21 @@ func parseFunctionSignature(file *File, command *Command) {
 				Span: Span{Start: command.Argument.Start + offset, End: command.Argument.End},
 			})
 		} else {
-			attributeStart := offset
-			attributeEnd := offset
 			closure := false
 			for offset < len(rawSource) {
 				wordEnd := scanWord(rawSource, offset, len(rawSource))
 				word := rawSource[offset:wordEnd]
 				if word != "range" && word != "dict" && word != "abort" && word != "closure" {
+					if wordEnd > offset {
+						function.AttributeTail.End = command.Argument.Start + wordEnd
+					}
 					break
 				}
 				closure = closure || word == "closure"
-				attributeEnd = wordEnd
+				attribute := Span{Start: command.Argument.Start + offset, End: command.Argument.Start + wordEnd}
+				function.Attributes = append(function.Attributes, attribute)
+				function.AttributeTail.End = attribute.End
 				offset = skipSyntaxSpace(rawSource, wordEnd, len(rawSource))
-			}
-			if attributeEnd > attributeStart {
-				function.Attributes = Span{Start: command.Argument.Start + attributeStart, End: command.Argument.Start + attributeEnd}
 			}
 			if closure && !file.lambdaBody {
 				topLevel := true

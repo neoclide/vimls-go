@@ -121,7 +121,10 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 		function := command.Function
 		function.Name = mapper.span(function.Name)
 		function.ReturnTypeSpan = mapper.optional(function.ReturnTypeSpan)
-		function.Attributes = mapper.optional(function.Attributes)
+		function.AttributeTail = mapper.optional(function.AttributeTail)
+		for index := range function.Attributes {
+			function.Attributes[index] = mapper.span(function.Attributes[index])
+		}
 		mapper.typeNode(function.ReturnType)
 		for index := range function.TypeParameters {
 			function.TypeParameters[index].Span = mapper.span(function.TypeParameters[index].Span)

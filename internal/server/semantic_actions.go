@@ -282,6 +282,9 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 			for _, parameter := range command.Function.Parameters {
 				collectTypeSemanticFacts(parameter.Type, &facts)
 			}
+			for _, attribute := range command.Function.Attributes {
+				facts = append(facts, semanticFact{span: attribute, tokenType: semanticModifier, priority: 1})
+			}
 			collectTypeSemanticFacts(command.Function.ReturnType, &facts)
 		}
 		if command.Declaration != nil {

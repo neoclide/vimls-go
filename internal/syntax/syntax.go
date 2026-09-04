@@ -431,7 +431,11 @@ type Function struct {
 	Parameters     []Parameter
 	ReturnType     *Type
 	ReturnTypeSpan Span
-	Attributes     Span
+	// AttributeTail starts immediately after a complete legacy :function
+	// parameter list and covers the parsed attribute input. Attributes keeps
+	// the exact span of each recognized range, abort, dict, or closure word.
+	AttributeTail Span
+	Attributes    []Span
 }
 
 type TypeParameter struct {

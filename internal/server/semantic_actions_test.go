@@ -320,6 +320,20 @@ func TestSemanticTokensClassifyForInAsKeyword(t *testing.T) {
 	assertSemanticToken(t, tokens.Data, 2, uint32(len("  for nr ")), semanticKeyword, semanticDefaultLibrary)
 }
 
+func TestSemanticTokensClassifyFunctionAttributesAsModifiers(t *testing.T) {
+	source := "function! Outer()\n  function! Inner() range abort dict closure\n  endfunction\nendfunction\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	character := uint32(len("  function! Inner() "))
+	for _, attribute := range []string{"range", "abort", "dict", "closure"} {
+		assertSemanticToken(t, tokens.Data, 1, character, semanticModifier, 0)
+		character += uint32(len(attribute) + 1)
+	}
+}
+
 func TestSemanticTokensClassifyVim9DeclarationsAndProvenModifiers(t *testing.T) {
 	source := "vim9script\nimport './mod.vim' as mod\nclass Thing\n  static final Value = 1\n  static def Build(arg: number)\n    echo arg\n  enddef\nendclass\n# @deprecated\nconst old = 1\necho old\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

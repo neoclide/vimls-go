@@ -1870,7 +1870,10 @@ func (s *lambdaRebaseState) command(command *Command, source string, offset int)
 		function := command.Function
 		function.Name = shiftLambdaSpan(function.Name, offset)
 		function.ReturnTypeSpan = shiftLambdaOptionalSpan(function.ReturnTypeSpan, offset)
-		function.Attributes = shiftLambdaOptionalSpan(function.Attributes, offset)
+		function.AttributeTail = shiftLambdaOptionalSpan(function.AttributeTail, offset)
+		for index := range function.Attributes {
+			function.Attributes[index] = shiftLambdaSpan(function.Attributes[index], offset)
+		}
 		s.typeNode(function.ReturnType, source, offset)
 		for index := range function.TypeParameters {
 			function.TypeParameters[index].Span = shiftLambdaSpan(function.TypeParameters[index].Span, offset)

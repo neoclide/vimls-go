@@ -444,6 +444,29 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
+		} else if contextKind == completionContextFunctionAttribute {
+			used := make(map[string]bool)
+			walkCommands(file.Commands, func(command *syntax.Command) {
+				current, ok := completionFunctionAttributeAt(file, command, offset)
+				if !ok {
+					return
+				}
+				for index := range command.Function.Attributes {
+					attribute := &command.Function.Attributes[index]
+					if current == attribute {
+						continue
+					}
+					used[file.Text(*attribute)] = true
+				}
+			})
+			for _, attribute := range []string{"range", "abort", "dict", "closure"} {
+				if used[attribute] {
+					continue
+				}
+				if !add(protocol.CompletionItem{Label: attribute, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("function attribute")}, 8000, completionSourceCommand) {
+					break
+				}
+			}
 		} else if contextKind == completionContextModifier {
 			for _, modifier := range vimdata.Modifiers() {
 				if (!modifier.Vim9Member || completionAggregateAt(file, offset)) && len(selection.prefix) >= modifier.MinLen && completionTextMatches(selection.prefix, modifier.Name) {

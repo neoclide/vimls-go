@@ -557,8 +557,8 @@ func (planner *indentPlanner) addFunctionBracket(command *Command, level int) {
 	if function.ReturnTypeSpan.Start > start {
 		end = min(end, function.ReturnTypeSpan.Start)
 	}
-	if function.Attributes.Start > start {
-		end = min(end, function.Attributes.Start)
+	if len(function.Attributes) > 0 && function.Attributes[0].Start > start {
+		end = min(end, function.Attributes[0].Start)
 	}
 	if start >= end {
 		return
