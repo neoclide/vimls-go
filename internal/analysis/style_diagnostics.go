@@ -428,7 +428,7 @@ func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, com
 	rhs := file.Text(mapping.RHS)
 	// A recursive mapping may be intentional composition of existing user
 	// mappings in a configuration file, so its default level is a hint there.
-	if mapping.Kind == syntax.MappingDefine && !strings.Contains(strings.ToLower(rhs), "<plug>") && !mapping.Script {
+	if mapping.Kind == syntax.MappingDefine && (!result.configFile || !mapping.Abbreviation) && !strings.Contains(strings.ToLower(rhs), "<plug>") && !mapping.Script {
 		if result.configFile {
 			severity := syntax.DiagnosticHint
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{

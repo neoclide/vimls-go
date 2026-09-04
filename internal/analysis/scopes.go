@@ -5049,6 +5049,19 @@ func collectVim9RedeclarationDiagnostics(result *FileAnalysis) {
 		if declaration.Scope == nil || declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
 			continue
 		}
+		legacyFunction := false
+		for scope := declaration.Scope; scope != nil; scope = scope.Parent {
+			if scope.Kind == syntax.BlockDef || scope.Lambda != nil {
+				break
+			}
+			if scope.Kind == syntax.BlockFunction {
+				legacyFunction = true
+				break
+			}
+		}
+		if legacyFunction {
+			continue
+		}
 		duplicate := first[declaration.Scope][declaration.Name] < declaration.Span.Start &&
 			(scopeUsesDefTypeRules(declaration.Scope) || declarationHasCompoundTarget(result.File, declaration.Span))
 		if !duplicate && declaration.Scope.Kind == syntax.BlockFor && scopeUsesDefTypeRules(declaration.Scope) {

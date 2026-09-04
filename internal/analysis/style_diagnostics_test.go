@@ -108,6 +108,33 @@ func TestNoremapStyleDiagnostics(t *testing.T) {
 	}
 }
 
+func TestConfigFileAbbreviationsDoNotReportRecursiveMap(t *testing.T) {
+	source := "iabbrev cosnt const\ncabbrev nao noa\n"
+	for _, diagnostic := range AnalyzeConfigFile(syntax.Parse(source)).Diagnostics {
+		if diagnostic.Code == "vimls/recursive-map" {
+			t.Fatalf("config abbreviation diagnostic = %#v", diagnostic)
+		}
+	}
+
+	pluginCount := 0
+	for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
+		if diagnostic.Code == "vimls/recursive-map" {
+			pluginCount++
+		}
+	}
+	if pluginCount != 2 {
+		t.Fatalf("plugin recursive-map count = %d, want 2", pluginCount)
+	}
+
+	configMap := AnalyzeConfigFile(syntax.Parse("map <leader>x :echo 'x'<CR>\n"))
+	for _, diagnostic := range configMap.Diagnostics {
+		if diagnostic.Code == "vimls/recursive-map" {
+			return
+		}
+	}
+	t.Fatalf("config recursive map diagnostic missing: %#v", configMap.Diagnostics)
+}
+
 func TestAdditionalStyleDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string

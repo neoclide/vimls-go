@@ -10681,6 +10681,7 @@ func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
 		"vim9script\nvar value = 1\nvar value = 2\n",
 		"vim9script\ndef F()\n  var value = 1\n  if true\n    var value = 2\n  endif\nenddef\n",
 		"function F()\n  let value = 1\n  let value = 2\nendfunction\n",
+		"function! coc#_insert_keymap(key, ...) abort\n  if has('nvim')\n    let result .= key\n  else\n    let code = ''\n    execute 'let code = \\\"\\\\' . key . '\\\"'\n    let result .= code\n  endif\nendfunction\n",
 	} {
 		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
 			if diagnostic.Code == "vim/E1017" {
