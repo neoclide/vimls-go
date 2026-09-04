@@ -1191,19 +1191,23 @@ func readJSON(t testHelper, target any) map[string]json.RawMessage {
 
 func completionItemJSON(t testHelper, response map[string]json.RawMessage, label string) string {
 	t.Helper()
-	var list protocol.CompletionList
+	var list struct {
+		Items []json.RawMessage `json:"items"`
+	}
 	if err := json.Unmarshal(response["result"], &list); err != nil {
 		t.Fatalf("unmarshal completion list: %v", err)
 	}
-	for _, item := range list.Items {
+	for _, raw := range list.Items {
+		var item struct {
+			Label string `json:"label"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			t.Fatalf("unmarshal completion item: %v", err)
+		}
 		if item.Label != label {
 			continue
 		}
-		data, err := json.Marshal(item)
-		if err != nil {
-			t.Fatalf("marshal completion item %q: %v", label, err)
-		}
-		return string(data)
+		return string(raw)
 	}
 	t.Fatalf("completion item %q not found", label)
 	return ""
