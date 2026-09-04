@@ -420,6 +420,7 @@ type Binding struct {
 
 type ForLoop struct {
 	Bindings     []Binding
+	In           Span
 	Iterable     *Expression
 	IterableSpan Span
 }

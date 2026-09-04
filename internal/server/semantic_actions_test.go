@@ -310,6 +310,16 @@ func TestSemanticTokensClassifyBuiltinMethodCallAsFunction(t *testing.T) {
 	assertSemanticToken(t, tokens.Data, 1, uint32(len("echo values({})->")), semanticFunction, semanticDefaultLibrary)
 }
 
+func TestSemanticTokensClassifyForInAsKeyword(t *testing.T) {
+	source := "vim9script\nexport def Tabpage_is_valid(tid: number): bool\n  for nr in range(1, tabpagenr('$'))\n    if gettabvar(nr, '__coc_tid', -1) == tid\n      return true\n    endif\n  endfor\n  return false\nenddef\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSemanticToken(t, tokens.Data, 2, uint32(len("  for nr ")), semanticKeyword, semanticDefaultLibrary)
+}
+
 func TestSemanticTokensClassifyVim9DeclarationsAndProvenModifiers(t *testing.T) {
 	source := "vim9script\nimport './mod.vim' as mod\nclass Thing\n  static final Value = 1\n  static def Build(arg: number)\n    echo arg\n  enddef\nendclass\n# @deprecated\nconst old = 1\necho old\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

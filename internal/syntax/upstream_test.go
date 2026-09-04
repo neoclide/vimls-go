@@ -151,6 +151,7 @@ func assertFileSpansAt(t *testing.T, file *File, origin string) {
 			assertExpressionSpans(t, file, origin, command.Import.Path)
 		}
 		if command.For != nil {
+			check("for in", command.For.In)
 			check("for iterable", command.For.IterableSpan)
 			assertExpressionSpans(t, file, origin, command.For.Iterable)
 			for _, binding := range command.For.Bindings {

@@ -482,7 +482,7 @@ func TestVim9ForHeaderLineBreaksKeepIterableSpans(t *testing.T) {
 	}
 	for index, want := range map[int]string{1: "[1]", 3: "[2]", 5: "[3]"} {
 		loop := file.Commands[index].For
-		if loop == nil || loop.Iterable == nil || file.Text(loop.IterableSpan) != want || file.Text(loop.Iterable.Span) != want {
+		if loop == nil || file.Text(loop.In) != "in" || loop.Iterable == nil || file.Text(loop.IterableSpan) != want || file.Text(loop.Iterable.Span) != want {
 			t.Fatalf("for command %d = %#v, iterable span text = %q", index, file.Commands[index], file.Text(loop.IterableSpan))
 		}
 	}

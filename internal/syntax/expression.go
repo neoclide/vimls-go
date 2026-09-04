@@ -1910,6 +1910,7 @@ func (s *lambdaRebaseState) command(command *Command, source string, offset int)
 	}
 	if command.For != nil {
 		loop := command.For
+		loop.In = shiftLambdaOptionalSpan(loop.In, offset)
 		loop.IterableSpan = shiftLambdaOptionalSpan(loop.IterableSpan, offset)
 		s.expression(loop.Iterable, source, offset)
 		for index := range loop.Bindings {

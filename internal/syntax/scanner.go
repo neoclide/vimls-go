@@ -5377,7 +5377,10 @@ func parseForLoop(file *File, command *Command) {
 	leftEnd := trimExpressionSpaceEnd(source, 0, in)
 	rightStart := skipExpressionSpace(source, in+2)
 	iterableSpan := Span{Start: command.Argument.Start + rightStart, End: command.Argument.End}
-	loop := &ForLoop{IterableSpan: iterableSpan}
+	loop := &ForLoop{
+		In:           Span{Start: command.Argument.Start + in, End: command.Argument.Start + in + 2},
+		IterableSpan: iterableSpan,
+	}
 	leftStart := skipExpressionSpace(source, 0)
 	if leftStart < leftEnd && source[leftStart] == '[' {
 		if close := findMatching(source, leftStart, '[', ']'); close >= 0 {

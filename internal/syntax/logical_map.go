@@ -161,6 +161,7 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 		mapper.expression(command.Import.Path)
 	}
 	if command.For != nil {
+		command.For.In = mapper.optional(command.For.In)
 		command.For.IterableSpan = mapper.optional(command.For.IterableSpan)
 		mapper.expression(command.For.Iterable)
 		for index := range command.For.Bindings {

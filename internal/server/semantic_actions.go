@@ -290,6 +290,9 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 			}
 		}
 		if command.For != nil {
+			if command.For.In.Start < command.For.In.End {
+				facts = append(facts, semanticFact{span: command.For.In, tokenType: semanticKeyword, modifiers: semanticDefaultLibrary, priority: 1})
+			}
 			for _, binding := range command.For.Bindings {
 				collectTypeSemanticFacts(binding.ParsedType, &facts)
 			}
