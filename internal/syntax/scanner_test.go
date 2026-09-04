@@ -240,6 +240,20 @@ func TestUnknownUserCommandsAndLegacyContinuationRecover(t *testing.T) {
 	}
 }
 
+func TestLowercaseUnknownCommandReportsE492(t *testing.T) {
+	file := (LegacyParser{}).Parse("function! s:AddStrict() abort\n  abcdefxuz\nendfunction\nPluginCommand\n")
+	if len(file.Diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	diagnostic := file.Diagnostics[0]
+	if diagnostic.Code != "vim/E492" || diagnostic.Message != "Not an editor command: abcdefxuz" || file.Text(diagnostic.Span) != "abcdefxuz" {
+		t.Fatalf("diagnostic = %#v, text = %q", diagnostic, file.Text(diagnostic.Span))
+	}
+	if len(file.Commands) != 4 || file.Commands[1].Kind != CommandUnknown || file.Commands[3].Kind != CommandUser {
+		t.Fatalf("commands = %#v", file.Commands)
+	}
+}
+
 func TestMalformedDefDoesNotBlockFollowingLine(t *testing.T) {
 	file := Parse("def00%\n0000000")
 	if len(file.Commands) < 2 {

@@ -634,6 +634,24 @@ func TestAnalyzeHandlesNilAndMalformedSyntax(t *testing.T) {
 	}
 }
 
+func TestAnalyzeLowercaseUnknownVim9CommandDiagnostics(t *testing.T) {
+	file := syntax.Parse("vim9script\nabcdefxuz\ndef Func()\n  var callback = () => 1\n  callback()\n  Missing()\n  anotherbad value\nenddef\nPluginCommand\n")
+	result := Analyze(file)
+	var got []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E492" || diagnostic.Code == "vim/E476" {
+			got = append(got, diagnostic)
+		}
+	}
+	if len(got) != 2 || got[0].Code != "vim/E492" || file.Text(got[0].Span) != "abcdefxuz" ||
+		got[1].Code != "vim/E476" || file.Text(got[1].Span) != "anotherbad value" {
+		t.Fatalf("diagnostics = %#v", result.Diagnostics)
+	}
+	if len(file.Commands) != 9 || file.Commands[4].Kind != syntax.CommandExpression || file.Commands[5].Kind != syntax.CommandExpression {
+		t.Fatalf("function-call commands = %#v", file.Commands)
+	}
+}
+
 func declarationNames(scope *Scope) []string {
 	result := make([]string, 0, len(scope.Declarations))
 	for _, declaration := range scope.Declarations {

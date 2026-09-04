@@ -421,7 +421,6 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 			_, closing := closingBlock(&file.Commands[index+1])
 			file.Commands[index].hasNextStatement = !closing
 		}
-		diagnoseVim9InvalidCommand(file, &file.Commands[index])
 		if file.Commands[index].detailsOpaque {
 			command := &file.Commands[index]
 			if logical := command.logical; logical != nil {
@@ -465,6 +464,9 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 	normalizeLambdaBodySources(file)
 	diagnoseVim9ScriptNamespaces(file)
 	normalizeVim9CommandStartCalls(file)
+	for index := range file.Commands {
+		diagnoseInvalidCommand(file, &file.Commands[index])
+	}
 	sort.SliceStable(file.Tokens, func(left, right int) bool {
 		return file.Tokens[left].Span.Start < file.Tokens[right].Span.Start
 	})
@@ -640,14 +642,26 @@ func normalizeVim9CallDiagnostics(file *File) {
 	}
 }
 
-func diagnoseVim9InvalidCommand(file *File, command *Command) {
-	if command == nil || command.Dialect != Vim9 {
+func diagnoseInvalidCommand(file *File, command *Command) {
+	if command == nil {
 		return
 	}
-	invalid := command.Kind == CommandUnknown && command.TypedName == "ka" ||
-		command.Kind == CommandBuiltin && command.Canonical == "mode"
+	invalid := command.Dialect == Legacy && command.Kind == CommandUnknown && len(command.TypedName) > 0 &&
+		command.TypedName[0] >= 'a' && command.TypedName[0] <= 'z'
+	if command.Dialect == Vim9 && (command.Kind == CommandUnknown && command.TypedName == "ka" ||
+		command.Kind == CommandBuiltin && command.Canonical == "mode") {
+		invalid = true
+	}
 	if !invalid {
 		return
+	}
+	if len(command.EnumValues) > 0 {
+		return
+	}
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Span.Start < command.Span.End && command.Span.Start < diagnostic.Span.End {
+			return
+		}
 	}
 	span := command.Name
 	if command.Argument.End > command.Argument.Start {
@@ -655,7 +669,7 @@ func diagnoseVim9InvalidCommand(file *File, command *Command) {
 	}
 	code := "vim/E492"
 	message := "Not an editor command: " + file.Text(span)
-	if commandInsideBlock(command, file.Blocks, BlockDef) {
+	if command.Dialect == Vim9 && commandInsideBlock(command, file.Blocks, BlockDef) {
 		code = "vim/E476"
 		message = "Invalid command: " + file.Text(span)
 	}

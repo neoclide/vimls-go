@@ -1489,6 +1489,28 @@ func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []synta
 		seen[expression.Span] = true
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1207", Message: "Expression without an effect: " + result.File.Text(expression.Span), Span: expression.Span})
 	}
+	appendUnknownCommandDiagnostic := func(command *syntax.Command, scope *Scope) {
+		span := command.Name
+		if command.Argument.End > command.Argument.Start {
+			span.End = command.Argument.End
+		}
+		if syntaxDiagnosticOverlaps(result.File.Diagnostics, span) || syntaxDiagnosticOverlaps(result.Diagnostics, span) {
+			return
+		}
+		code := "vim/E492"
+		message := "Not an editor command: " + result.File.Text(span)
+		for current := scope; current != nil; current = current.Parent {
+			if current.Kind == syntax.BlockDef {
+				code = "vim/E476"
+				message = "Invalid command: " + result.File.Text(span)
+				break
+			}
+			if current.Kind == syntax.BlockFunction {
+				break
+			}
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
+	}
 	nameOnly := func(expression *syntax.Expression, scope *Scope, eval bool) bool {
 		if expression == nil || expressionContainsMissing(expression) {
 			return false
@@ -1568,6 +1590,14 @@ func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []synta
 					name := result.File.Text(command.Name)
 					if declaration := resolve(scope, name, command.Name.Start, false, nil); declaration != nil && (declaration.Kind == SymbolKindVariable || declaration.Kind == SymbolKindConstant || declaration.Parameter) {
 						appendDiagnostic(&syntax.Expression{Kind: syntax.ExpressionIdentifier, Span: command.Name, Value: name})
+					} else if command.Kind == syntax.CommandUnknown && len(command.EnumValues) == 0 && len(name) > 0 && name[0] >= 'a' && name[0] <= 'z' {
+						appendUnknownCommandDiagnostic(command, scope)
+					}
+				} else if command.Kind == syntax.CommandUnknown && len(command.EnumValues) == 0 && len(command.TypedName) > 0 &&
+					command.TypedName[0] >= 'a' && command.TypedName[0] <= 'z' {
+					declaration := resolve(scope, command.TypedName, command.Name.Start, false, nil)
+					if declaration == nil || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant && !declaration.Parameter {
+						appendUnknownCommandDiagnostic(command, scope)
 					}
 				}
 			}
