@@ -1,4 +1,12 @@
-# vimls-go
+<p align="center">
+  <img src="assets/vimls-go-logo.svg" width="180" alt="vimls-go logo">
+</p>
+
+<h1 align="center">vimls-go</h1>
+
+<p align="center">
+  <a href="https://github.com/neoclide/vimls-go/actions/workflows/ci.yml"><img src="https://github.com/neoclide/vimls-go/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+</p>
 
 `vimls-go` is a fast, lightweight, and safe Language Server Protocol (LSP) server for **Legacy Vim script** and **Vim9 script**, written in Go.
 

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">vimls-go logo</title>
+  <desc id="desc">A language server below sending code intelligence up into a green Vim-inspired V.</desc>
+
+  <path d="M56 40H152L256 208L360 40H456L256 328Z" fill="#16A34A"/>
+
+  <rect x="128" y="344" width="256" height="144" rx="24" fill="#0F172A"/>
+  <rect x="152" y="368" width="208" height="40" rx="10" fill="#1E293B"/>
+  <circle cx="176" cy="388" r="8" fill="#22D3EE"/>
+  <rect x="200" y="382" width="128" height="12" rx="6" fill="#64748B"/>
+  <rect x="152" y="424" width="208" height="40" rx="10" fill="#1E293B"/>
+  <circle cx="176" cy="444" r="8" fill="#22C55E"/>
+  <rect x="200" y="438" width="96" height="12" rx="6" fill="#64748B"/>
+
+  <path d="M236 376H276V296H308L256 232L204 296H236Z" fill="#22D3EE"/>
+</svg>
