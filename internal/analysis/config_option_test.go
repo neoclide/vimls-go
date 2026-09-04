@@ -71,3 +71,113 @@ func TestConfigOptionMetadataMatchesBothRoles(t *testing.T) {
 		}
 	}
 }
+
+func TestUnknownOptionInGuiOrNvimGuard(t *testing.T) {
+	cases := []struct {
+		name        string
+		source      string
+		wantWarning bool
+	}{
+		{
+			name: "if has gui_running",
+			source: `if has('gui_running')
+  set missingopt
+  let &missingexpr = 1
+endif`,
+			wantWarning: true,
+		},
+		{
+			name: "if has nvim double quotes",
+			source: `if has("nvim")
+  setlocal missingopt
+  let &g:missingexpr = 1
+endif`,
+			wantWarning: true,
+		},
+		{
+			name: "if has gui_running or nvim",
+			source: `if has('gui_running') || has('nvim')
+  set missingopt
+endif`,
+			wantWarning: true,
+		},
+		{
+			name: "if has gui_running and other condition",
+			source: `if has('gui_running') && has('mac')
+  set missingopt
+endif`,
+			wantWarning: true,
+		},
+		{
+			name: "elseif has gui_running",
+			source: `if 0
+  echo 1
+elseif has('gui_running')
+  set missingopt
+endif`,
+			wantWarning: true,
+		},
+		{
+			name: "comparison to 1",
+			source: `if has('gui_running') == 1
+  set missingopt
+endif`,
+			wantWarning: true,
+		},
+		{
+			name: "else branch of has gui_running",
+			source: `if has('gui_running')
+  echo 'gui'
+else
+  set missingopt
+endif`,
+			wantWarning: false,
+		},
+		{
+			name: "negated has gui_running",
+			source: `if !has('gui_running')
+  set missingopt
+endif`,
+			wantWarning: false,
+		},
+		{
+			name: "regular if condition",
+			source: `if some_var
+  set missingopt
+endif`,
+			wantWarning: false,
+		},
+		{
+			name:        "outside if",
+			source:      `set missingopt`,
+			wantWarning: false,
+		},
+		{
+			name:        "vim9script if has nvim",
+			source:      "vim9script\nif has('nvim')\n  &missingexpr = 1\nendif\n",
+			wantWarning: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := syntax.Parse(tc.source)
+			analysis := Analyze(file)
+			diags := filterOptionDiagnostics(analysis.Diagnostics)
+			if len(diags) == 0 {
+				t.Fatalf("expected unknown option diagnostics, got none")
+			}
+			for _, diag := range diags {
+				if tc.wantWarning {
+					if diag.Severity == nil || *diag.Severity != syntax.DiagnosticWarning {
+						t.Errorf("diagnostic %v: severity = %v, want DiagnosticWarning", diag.Code, diag.Severity)
+					}
+				} else {
+					if diag.Severity != nil {
+						t.Errorf("diagnostic %v: severity = %v, want nil (default error)", diag.Code, *diag.Severity)
+					}
+				}
+			}
+		})
+	}
+}

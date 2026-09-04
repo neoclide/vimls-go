@@ -1993,3 +1993,43 @@ func TestPushDiagnosticsCloseWhileFirstNonEmptyPublishBlocked(t *testing.T) {
 		t.Fatalf("expected final publication after close to be empty, got %#v", last.Diagnostics)
 	}
 }
+
+func TestUnknownOptionInGuiOrNvimGuardProtocolSeverity(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+	instance.mu.Lock()
+	instance.client = client
+	instance.mu.Unlock()
+
+	documentURI := uri.MustParse("file:///test.vim")
+	text := "if has('gui_running')\n  set missingopt\nendif\nset anothermissing\n"
+	err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:        documentURI,
+			LanguageID: "vim",
+			Version:    1,
+			Text:       text,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	published := waitForDiagnostics(t, client.published)
+	var e518Diags []protocol.Diagnostic
+	for _, diag := range published.Diagnostics {
+		if diag.Code == protocol.String("vim/E518") {
+			e518Diags = append(e518Diags, diag)
+		}
+	}
+	if len(e518Diags) != 2 {
+		t.Fatalf("expected 2 vim/E518 diagnostics, got %d: %#v", len(e518Diags), e518Diags)
+	}
+	if e518Diags[0].Severity != protocol.DiagnosticSeverityWarning {
+		t.Errorf("guarded option severity = %v, want warning (%v)", e518Diags[0].Severity, protocol.DiagnosticSeverityWarning)
+	}
+	if e518Diags[1].Severity != protocol.DiagnosticSeverityError {
+		t.Errorf("unguarded option severity = %v, want error (%v)", e518Diags[1].Severity, protocol.DiagnosticSeverityError)
+	}
+}

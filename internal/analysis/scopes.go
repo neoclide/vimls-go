@@ -6356,7 +6356,7 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	}
 	if command.Set != nil {
 		for _, option := range command.Set.Options {
-			appendUnknownSetOptionDiagnostic(result, file.Text(option.Name), option.Name)
+			appendUnknownSetOptionDiagnostic(result, file.Text(option.Name), option.Name, scope)
 			appendSetOptionValueDiagnostic(result, file, command, option)
 		}
 	}
@@ -6473,7 +6473,7 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		appendSuperMustBeFollowedByDotDiagnostic(result, file, scope, expression, dialect)
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
 			if strings.HasPrefix(expression.Value, "&") {
-				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
+				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span, scope)
 			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped)
 			result.References = append(result.References, &Reference{
@@ -7223,7 +7223,7 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 		}
 		if expression.Kind == syntax.ExpressionIdentifier && !isLiteralIdentifier(expression.Value) && !skipped[expression.Span] && validNameSpan(file, expression.Span) {
 			if strings.HasPrefix(expression.Value, "&") {
-				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span)
+				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span, scope)
 			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, false, skipped)
 			result.References = append(result.References, &Reference{
@@ -7346,24 +7346,177 @@ func vim9UnsupportedNamespace(name string) bool {
 	return strings.HasPrefix(name, "a:") || strings.HasPrefix(name, "l:") || strings.HasPrefix(name, "x:")
 }
 
-func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span) {
+func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span, scope *Scope) {
 	display, ok := unknownOptionDisplay(result, name, span)
 	if !ok {
 		return
 	}
-	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+	diag := syntax.Diagnostic{
 		Code: "vim/E113", Message: "Unknown option: " + display, Span: span,
-	})
+	}
+	if isUnderGuiOrNvimGuard(result, scope, span) {
+		severity := syntax.DiagnosticWarning
+		diag.Severity = &severity
+	}
+	result.Diagnostics = append(result.Diagnostics, diag)
 }
 
-func appendUnknownSetOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span) {
+func appendUnknownSetOptionDiagnostic(result *FileAnalysis, name string, span syntax.Span, scope *Scope) {
 	display, ok := unknownOptionDisplay(result, name, span)
 	if !ok {
 		return
 	}
-	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+	diag := syntax.Diagnostic{
 		Code: "vim/E518", Message: "Unknown option: " + display, Span: span,
-	})
+	}
+	if isUnderGuiOrNvimGuard(result, scope, span) {
+		severity := syntax.DiagnosticWarning
+		diag.Severity = &severity
+	}
+	result.Diagnostics = append(result.Diagnostics, diag)
+}
+
+func isUnderGuiOrNvimGuard(result *FileAnalysis, scope *Scope, span syntax.Span) bool {
+	if result == nil || result.File == nil || scope == nil {
+		return false
+	}
+	for s := scope; s != nil; s = s.Parent {
+		if s.Kind != syntax.BlockIf || s.Block < 0 {
+			continue
+		}
+		var commands []syntax.Command
+		var blocks []syntax.Block
+		if s.CommandList != nil {
+			commands = s.CommandList.Commands
+			blocks = s.CommandList.Blocks
+		} else {
+			commands = result.File.Commands
+			blocks = result.File.Blocks
+		}
+		if s.Block >= len(blocks) {
+			continue
+		}
+		block := blocks[s.Block]
+		if block.Header < 0 || block.Header >= len(commands) {
+			continue
+		}
+		if block.End >= 0 && block.End < len(commands) && span.Start >= commands[block.End].Span.Start {
+			continue
+		}
+		branchCmdIdx := -1
+		if len(block.Branches) == 0 {
+			if span.Start >= commands[block.Header].Span.End {
+				branchCmdIdx = block.Header
+			}
+		} else {
+			if span.Start < commands[block.Branches[0]].Span.Start {
+				if span.Start >= commands[block.Header].Span.End {
+					branchCmdIdx = block.Header
+				}
+			} else {
+				for i := len(block.Branches) - 1; i >= 0; i-- {
+					branchIdx := block.Branches[i]
+					if branchIdx >= 0 && branchIdx < len(commands) && span.Start >= commands[branchIdx].Span.End {
+						branchCmdIdx = branchIdx
+						break
+					}
+				}
+			}
+		}
+		if branchCmdIdx >= 0 && branchCmdIdx < len(commands) {
+			guardCmd := &commands[branchCmdIdx]
+			if guardCmd.Canonical == "if" || guardCmd.Canonical == "elseif" {
+				for _, expr := range guardCmd.Expressions {
+					if isGuiOrNvimCondition(expr) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isGuiOrNvimCondition(expr *syntax.Expression) bool {
+	if expr == nil {
+		return false
+	}
+	switch expr.Kind {
+	case syntax.ExpressionParenthesized:
+		for _, child := range expr.Children {
+			if isGuiOrNvimCondition(child) {
+				return true
+			}
+		}
+		return false
+	case syntax.ExpressionCall:
+		return isHasGuiOrNvimCall(expr)
+	case syntax.ExpressionBinary:
+		op := expr.Value
+		if (op == "&&" || op == "and") && len(expr.Children) == 2 {
+			return isGuiOrNvimCondition(expr.Children[0]) || isGuiOrNvimCondition(expr.Children[1])
+		}
+		if (op == "||" || op == "or") && len(expr.Children) == 2 {
+			return isGuiOrNvimCondition(expr.Children[0]) && isGuiOrNvimCondition(expr.Children[1])
+		}
+		if (op == "==" || op == "!=") && len(expr.Children) == 2 {
+			return isComparisonToHasFeature(expr)
+		}
+	}
+	return false
+}
+
+func isHasGuiOrNvimCall(expr *syntax.Expression) bool {
+	if expr == nil || expr.Kind != syntax.ExpressionCall {
+		return false
+	}
+	if len(expr.Children) >= 2 {
+		callee := expr.Children[0]
+		arg := expr.Children[1]
+		if callee != nil && callee.Kind == syntax.ExpressionIdentifier && callee.Value == "has" && arg != nil && arg.Kind == syntax.ExpressionString {
+			feature, ok := unquoteFeatureString(arg.Value)
+			if ok && (strings.EqualFold(feature, "gui_running") || strings.EqualFold(feature, "nvim")) {
+				return true
+			}
+		}
+	}
+	if expr.Value == "->" && len(expr.Children) == 2 {
+		for _, child := range expr.Children {
+			if child.Kind == syntax.ExpressionCall && isHasGuiOrNvimCall(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func unquoteFeatureString(s string) (string, bool) {
+	if len(s) >= 2 && ((s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"')) {
+		return s[1 : len(s)-1], true
+	}
+	return "", false
+}
+
+func isComparisonToHasFeature(expr *syntax.Expression) bool {
+	if expr == nil || len(expr.Children) != 2 {
+		return false
+	}
+	left, right := expr.Children[0], expr.Children[1]
+	op := expr.Value
+	check := func(callExpr, constExpr *syntax.Expression) bool {
+		if !isHasGuiOrNvimCall(callExpr) || constExpr == nil || constExpr.Kind != syntax.ExpressionNumber {
+			return false
+		}
+		val := constExpr.Value
+		if op == "==" && val != "0" {
+			return true
+		}
+		if op == "!=" && val == "0" {
+			return true
+		}
+		return false
+	}
+	return check(left, right) || check(right, left)
 }
 
 func unknownOptionDisplay(result *FileAnalysis, name string, span syntax.Span) (string, bool) {
