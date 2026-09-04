@@ -4544,34 +4544,24 @@ func collectFuncrefVariableNameDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
-	indirectBindings := make(map[syntax.Span]bool)
-	var collectIndirectBindings func([]syntax.Command)
-	collectIndirectBindings = func(commands []syntax.Command) {
-		for index := range commands {
-			command := &commands[index]
-			if declaration := command.Declaration; declaration != nil && declaration.Target != nil &&
-				(declaration.Target.Kind == syntax.ExpressionMember || declaration.Target.Kind == syntax.ExpressionIndex || declaration.Target.Kind == syntax.ExpressionSlice) &&
-				(len(declaration.Target.Children) == 0 || !scopeDictionary(declaration.Target.Children[0])) {
-				for _, binding := range declaration.Bindings {
-					indirectBindings[binding.Name] = true
-				}
-			}
-			if command.Embedded != nil {
-				collectIndirectBindings(command.Embedded.Commands)
-			}
-		}
-	}
-	collectIndirectBindings(result.File.Commands)
 	for _, declaration := range result.Declarations {
 		if declaration == nil || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant ||
-			declaration.Type.Name != "func" && declaration.Type.Name != "partial" || indirectBindings[declaration.Span] ||
-			funcrefVariableNameAllowed(result.File.Dialect, declaration) {
+			declaration.Type.Name != "func" && declaration.Type.Name != "partial" || funcrefVariableNameAllowed(result.File.Dialect, declaration) {
 			continue
 		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vim/E704", Message: "Funcref variable name must start with a capital: " + declaration.Name, Span: declaration.Span,
 		})
 	}
+}
+
+func ordinaryContainerAssignment(command *syntax.Command) bool {
+	if command == nil || command.Dialect != syntax.Legacy || command.Canonical != "let" || command.Declaration == nil || command.Declaration.Target == nil {
+		return false
+	}
+	target := command.Declaration.Target
+	return (target.Kind == syntax.ExpressionMember || target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) &&
+		(len(target.Children) == 0 || !scopeDictionary(target.Children[0]))
 }
 
 func funcrefVariableNameAllowed(dialect syntax.Dialect, declaration *Declaration) bool {
@@ -6210,7 +6200,7 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 	if command.Import != nil {
 		addDeclaration(result, commandScope, file, command.Import.Alias, SymbolKindImport, false)
 	}
-	if command.Declaration != nil {
+	if command.Declaration != nil && !ordinaryContainerAssignment(command) {
 		mutable := command.Canonical != "const" && command.Canonical != "final"
 		kind := SymbolKindVariable
 		if !mutable {
@@ -6411,7 +6401,7 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 			continue
 		}
 		skip := map[syntax.Span]bool(nil)
-		if command.Declaration != nil {
+		if command.Declaration != nil && !ordinaryContainerAssignment(command) {
 			skip = make(map[syntax.Span]bool, len(command.Declaration.Bindings))
 			for _, binding := range command.Declaration.Bindings {
 				if strings.HasPrefix(file.Text(binding.Name), "&") {

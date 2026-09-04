@@ -2927,6 +2927,7 @@ func TestAnalyzeE1523LegacyForIterableDiagnostics(t *testing.T) {
 		"for item in [1]\nendfor\nfor item in 'text'\nendfor\nfor item in 0z12\nendfor\n",
 		"for item in unknown\nendfor\n",
 		"vim9script\nfor item in 99\nendfor\n",
+		"if !exists('g:rst_syntax_code_list')\n  let g:rst_syntax_code_list = {}\nelseif type(g:rst_syntax_code_list) == type([])\n  let s:old_spec = g:rst_syntax_code_list\n  let g:rst_syntax_code_list = {}\n  for s:elem in s:old_spec\n    let g:rst_syntax_code_list[s:elem] = [s:elem]\n  endfor\nendif\n",
 	} {
 		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
 			if diagnostic.Code == "vim/E1523" {
@@ -4563,6 +4564,7 @@ func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 		{name: "window local", source: "let w:lower = function('len')\n"},
 		{name: "autoload", source: "let package#lower = function('len')\n"},
 		{name: "dictionary index", source: "let client['start'] = function('len')\n"},
+		{name: "dictionary index in function", source: "function! Test() abort\n  let client = {}\n  let client['start'] = function('s:start', [], client)\nendfunction\n"},
 		{name: "dictionary member", source: "let client = {}\nlet client.start = function('len')\n"},
 		{name: "class member", source: "vim9script\nclass C\n  static var handler: func\nendclass\n"},
 	}
@@ -7594,6 +7596,7 @@ func TestAnalyzeE695CannotIndexFuncref(t *testing.T) {
 		"vim9script\nvar value: any\necho value[0]\n",
 		"echo Unknown()[0]\n",
 		"vim9script\necho function('min')[0 : 1]\n",
+		"function! Test() abort\n  let client = {}\n  let client['start'] = function('s:start', [], client)\nendfunction\n",
 	} {
 		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
 			if diagnostic.Code == "vim/E695" {

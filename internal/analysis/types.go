@@ -350,6 +350,10 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	var typ ValueType
 	switch expression.Kind {
 	case syntax.ExpressionIdentifier:
+		if guarded, ok := state.guardedIdentifierType(expression, scope); ok {
+			typ = guarded
+			break
+		}
 		switch strings.ToLower(expression.Value) {
 		case "true", "false":
 			typ = ValueType{Name: "bool"}
@@ -518,6 +522,259 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	}
 	state.result.expressionTypes[expression] = typ
 	return typ
+}
+
+// guardedIdentifierType returns the type established by a surrounding
+// type(name) == type-code condition.  Vim plugins commonly use this form to
+// migrate a global option from an older representation before using it in the
+// guarded branch.  Keep this deliberately local to if/elseif bodies: it is not
+// a general control-flow solver.
+func (state *typeState) guardedIdentifierType(expression *syntax.Expression, scope *Scope) (ValueType, bool) {
+	if state == nil || state.result == nil || state.result.File == nil || expression == nil || expression.Kind != syntax.ExpressionIdentifier {
+		return UnknownValueType, false
+	}
+	for current := scope; current != nil; current = current.Parent {
+		if current.Kind != syntax.BlockIf || current.Block < 0 {
+			continue
+		}
+		commands, blocks := state.scopeCommandList(current)
+		if current.Block >= len(blocks) {
+			continue
+		}
+		block := blocks[current.Block]
+		if block.Header < 0 || block.Header >= len(commands) {
+			continue
+		}
+		headers := make([]int, 0, len(block.Branches)+1)
+		headers = append(headers, block.Header)
+		headers = append(headers, block.Branches...)
+		branchHeader := -1
+		branchEnd := block.End
+		for index, header := range headers {
+			if header < 0 || header >= len(commands) {
+				continue
+			}
+			end := block.End
+			if index+1 < len(headers) {
+				end = headers[index+1]
+			}
+			if expression.Span.Start >= commands[header].Span.End && (end < 0 || end >= len(commands) || expression.Span.Start < commands[end].Span.Start) {
+				branchHeader = header
+				branchEnd = end
+				break
+			}
+		}
+		if branchHeader < 0 {
+			continue
+		}
+		guard := &commands[branchHeader]
+		if guard.Canonical != "if" && guard.Canonical != "elseif" {
+			continue
+		}
+		if state.identifierAssignedInBranch(expression.Value, expression.Span.Start, current, commands, branchHeader+1, branchEnd) {
+			return UnknownValueType, false
+		}
+		for _, condition := range guard.Expressions {
+			if typ, ok := typeGuardForIdentifier(condition, expression.Value); ok {
+				return typ, true
+			}
+		}
+	}
+	return UnknownValueType, false
+}
+
+func (state *typeState) scopeCommandList(scope *Scope) ([]syntax.Command, []syntax.Block) {
+	if scope.CommandList != nil {
+		return scope.CommandList.Commands, scope.CommandList.Blocks
+	}
+	return state.result.File.Commands, state.result.File.Blocks
+}
+
+func (state *typeState) identifierAssignedInBranch(name string, offset int, scope *Scope, commands []syntax.Command, start, end int) bool {
+	if end < 0 || end > len(commands) {
+		end = len(commands)
+	}
+	for index := start; index < end; index++ {
+		command := &commands[index]
+		if command.Span.End > offset {
+			break
+		}
+		if state.commandScopes[command] != scope {
+			continue
+		}
+		if command.Declaration != nil {
+			for _, binding := range command.Declaration.Bindings {
+				if state.result.File.Text(binding.Name) == name {
+					return true
+				}
+			}
+		}
+		for _, candidate := range command.Expressions {
+			if expressionAssignsIdentifier(candidate, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func expressionAssignsIdentifier(expression *syntax.Expression, name string) bool {
+	if expression == nil {
+		return false
+	}
+	if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) > 0 {
+		target := expression.Children[0]
+		return target != nil && target.Kind == syntax.ExpressionIdentifier && target.Value == name
+	}
+	for _, child := range expression.Children {
+		if expressionAssignsIdentifier(child, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func typeGuardForIdentifier(condition *syntax.Expression, name string) (ValueType, bool) {
+	condition = unwrapParenthesizedExpression(condition)
+	if condition == nil {
+		return UnknownValueType, false
+	}
+	if condition.Kind == syntax.ExpressionBinary && condition.Value == "&&" && len(condition.Children) == 2 {
+		if typ, ok := typeGuardForIdentifier(condition.Children[0], name); ok {
+			return typ, true
+		}
+		return typeGuardForIdentifier(condition.Children[1], name)
+	}
+	if condition.Kind != syntax.ExpressionBinary || len(condition.Children) != 2 ||
+		(condition.Value != "==" && condition.Value != "==#" && condition.Value != "==?") {
+		return UnknownValueType, false
+	}
+	if typeCallTargetsIdentifier(condition.Children[0], name) {
+		typ, _ := staticTypeCode(condition.Children[1])
+		return typ, true
+	}
+	if typeCallTargetsIdentifier(condition.Children[1], name) {
+		typ, _ := staticTypeCode(condition.Children[0])
+		return typ, true
+	}
+	return UnknownValueType, false
+}
+
+func typeCallTargetsIdentifier(expression *syntax.Expression, name string) bool {
+	expression = unwrapParenthesizedExpression(expression)
+	if expression == nil || expression.Kind != syntax.ExpressionCall || len(expression.Children) != 2 {
+		return false
+	}
+	callee := expression.Children[0]
+	target := unwrapParenthesizedExpression(expression.Children[1])
+	return callee != nil && callee.Kind == syntax.ExpressionIdentifier && callee.Value == "type" &&
+		target != nil && target.Kind == syntax.ExpressionIdentifier && target.Value == name
+}
+
+func staticTypeCode(expression *syntax.Expression) (ValueType, bool) {
+	expression = unwrapParenthesizedExpression(expression)
+	if expression == nil {
+		return UnknownValueType, false
+	}
+	if value, ok := staticNumberValue(expression); ok {
+		switch value {
+		case 0:
+			return ValueType{Name: "number"}, true
+		case 1:
+			return ValueType{Name: "string"}, true
+		case 2:
+			return ValueType{Name: "func", Return: new(UnknownValueType)}, true
+		case 3:
+			return ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}, true
+		case 4:
+			return ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}, true
+		case 5:
+			return ValueType{Name: "float"}, true
+		case 6:
+			return ValueType{Name: "bool"}, true
+		case 7:
+			return ValueType{Name: ValueTypeSpecial}, true
+		case 10:
+			return ValueType{Name: "blob"}, true
+		default:
+			return UnknownValueType, false
+		}
+	}
+	if expression.Kind == syntax.ExpressionIdentifier {
+		switch strings.ToLower(expression.Value) {
+		case "v:t_number":
+			return ValueType{Name: "number"}, true
+		case "v:t_string":
+			return ValueType{Name: "string"}, true
+		case "v:t_func":
+			return ValueType{Name: "func", Return: new(UnknownValueType)}, true
+		case "v:t_list":
+			return ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}, true
+		case "v:t_dict":
+			return ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}, true
+		case "v:t_float":
+			return ValueType{Name: "float"}, true
+		case "v:t_bool":
+			return ValueType{Name: "bool"}, true
+		case "v:t_none":
+			return ValueType{Name: ValueTypeSpecial}, true
+		case "v:t_blob":
+			return ValueType{Name: "blob"}, true
+		}
+	}
+	if expression.Kind == syntax.ExpressionCall && len(expression.Children) == 2 {
+		callee := expression.Children[0]
+		if callee != nil && callee.Kind == syntax.ExpressionIdentifier && callee.Value == "type" {
+			return staticSampleType(expression.Children[1])
+		}
+	}
+	return UnknownValueType, false
+}
+
+func staticSampleType(expression *syntax.Expression) (ValueType, bool) {
+	expression = unwrapParenthesizedExpression(expression)
+	if expression == nil {
+		return UnknownValueType, false
+	}
+	switch expression.Kind {
+	case syntax.ExpressionNumber:
+		if isFloatLiteral(expression.Value) {
+			return ValueType{Name: "float"}, true
+		}
+		return ValueType{Name: "number"}, true
+	case syntax.ExpressionString:
+		return ValueType{Name: "string"}, true
+	case syntax.ExpressionBlob:
+		return ValueType{Name: "blob"}, true
+	case syntax.ExpressionList:
+		return ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}, true
+	case syntax.ExpressionDictionary:
+		return ValueType{Name: "dict", Arguments: []ValueType{UnknownValueType}}, true
+	case syntax.ExpressionLambda:
+		return ValueType{Name: "func", Return: new(UnknownValueType)}, true
+	case syntax.ExpressionIdentifier:
+		switch strings.ToLower(expression.Value) {
+		case "true", "false", "v:true", "v:false":
+			return ValueType{Name: "bool"}, true
+		case "v:none", "v:null":
+			return ValueType{Name: ValueTypeSpecial}, true
+		}
+	case syntax.ExpressionCall:
+		if len(expression.Children) > 0 && expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
+			switch expression.Children[0].Value {
+			case "function", "funcref":
+				return ValueType{Name: "func", Return: new(UnknownValueType)}, true
+			}
+		}
+	}
+	return UnknownValueType, false
+}
+
+func unwrapParenthesizedExpression(expression *syntax.Expression) *syntax.Expression {
+	for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	return expression
 }
 
 func (state *typeState) constructorObjectClass(expression *syntax.Expression, scope *Scope) (string, bool) {

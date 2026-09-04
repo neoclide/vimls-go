@@ -141,6 +141,70 @@ func TestAnalyzeInfersLegacyImplicitArgumentTypes(t *testing.T) {
 	}
 }
 
+func TestAnalyzeNarrowsLegacyTypeGuards(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		typeCode  string
+		want      string
+		wantKnown bool
+	}{
+		{"number constant", "v:t_number", "number", true},
+		{"string constant", "v:t_string", "string", true},
+		{"function constant", "v:t_func", "func", true},
+		{"list constant", "v:t_list", "list", true},
+		{"dictionary constant", "v:t_dict", "dict", true},
+		{"float constant", "v:t_float", "float", true},
+		{"boolean constant", "v:t_bool", "bool", true},
+		{"none constant", "v:t_none", ValueTypeSpecial, true},
+		{"blob constant", "v:t_blob", "blob", true},
+		{"numeric number code", "0", "number", true},
+		{"numeric string code", "1", "string", true},
+		{"numeric function code", "2", "func", true},
+		{"numeric list code", "3", "list", true},
+		{"numeric dictionary code", "4", "dict", true},
+		{"numeric float code", "5", "float", true},
+		{"numeric boolean code", "6", "bool", true},
+		{"numeric none code", "7", ValueTypeSpecial, true},
+		{"numeric blob code", "10", "blob", true},
+		{"list sample", "type([])", "list", true},
+		{"string sample", "type('')", "string", true},
+		{"null sample", "type(v:null)", ValueTypeSpecial, true},
+		{"unsupported type code", "v:t_job", "", false},
+		{"dynamic type code", "wanted_type", "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "let value = {}\nlet wanted_type = 3\nif type(value) == " + test.typeCode + "\n  let narrowed = value\nendif\n"
+			result := Analyze(syntax.Parse(source))
+			var narrowed *Declaration
+			for _, declaration := range result.Declarations {
+				if declaration.Name == "narrowed" {
+					narrowed = declaration
+					break
+				}
+			}
+			if narrowed == nil {
+				t.Fatal("narrowed declaration not found")
+			}
+			if test.wantKnown {
+				if narrowed.Type.Name != test.want {
+					t.Fatalf("narrowed type = %#v, want %s", narrowed.Type, test.want)
+				}
+			} else if !isUnknownType(narrowed.Type) {
+				t.Fatalf("narrowed type = %#v, want unknown", narrowed.Type)
+			}
+		})
+	}
+}
+
+func TestAnalyzeLegacyTypeGuardAssignmentInvalidatesNarrowing(t *testing.T) {
+	result := Analyze(syntax.Parse("let value = {}\nif type(value) == v:t_list\n  let value = {}\n  let narrowed = value\nendif\n"))
+	for _, declaration := range result.Declarations {
+		if declaration.Name == "narrowed" && declaration.Type.Name != "dict" {
+			t.Fatalf("narrowed type = %#v, want dict", declaration.Type)
+		}
+	}
+}
+
 func TestAnalyzeInfersOperatorsReferencesAndFunctions(t *testing.T) {
 	source := `vim9script
 var n = 1

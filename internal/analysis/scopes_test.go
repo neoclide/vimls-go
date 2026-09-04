@@ -474,6 +474,36 @@ func TestAnalyzeLegacyExplicitScopesBindOnlyProvenDeclarations(t *testing.T) {
 	}
 }
 
+func TestAnalyzeLegacyContainerAssignmentDoesNotRedeclareReceiver(t *testing.T) {
+	source := "function! Test() abort\n  let client = {}\n  let client['start'] = function('s:start', [], client)\nendfunction\n"
+	result := Analyze(syntax.Parse(source))
+	var client *Declaration
+	for _, declaration := range result.Declarations {
+		if declaration.Name != "client" {
+			continue
+		}
+		if client != nil {
+			t.Fatalf("client redeclared by container assignment: %#v", result.Declarations)
+		}
+		client = declaration
+	}
+	if client == nil || client.Type.Name != "dict" {
+		t.Fatalf("client declaration = %#v", client)
+	}
+	foundTarget := false
+	for _, reference := range result.References {
+		if reference.Name == "client" && reference.assignmentTarget {
+			foundTarget = true
+			if reference.Declaration != client {
+				t.Fatalf("container assignment reference = %#v, want %#v", reference, client)
+			}
+		}
+	}
+	if !foundTarget {
+		t.Fatalf("references = %#v, want client assignment target", result.References)
+	}
+}
+
 func TestAnalyzeDoesNotDuplicateTargetsOrEnumArguments(t *testing.T) {
 	source := "vim9script\nvar input = 1\nenum E\n  One(input)\nendenum\n"
 	vim9 := Analyze(syntax.Parse(source))
