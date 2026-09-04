@@ -447,3 +447,33 @@ func TestUnknownAutocmdEventReportsHint(t *testing.T) {
 		t.Fatalf("unknown-autocmd-event spans = %#v, want %#v; diagnostics = %#v", got, want, result.Diagnostics)
 	}
 }
+
+func TestKnownLowercaseAugroupIsNotReportedAsUnknownEvent(t *testing.T) {
+	source := `augroup coc_nvim
+augroup END
+autocmd! coc_nvim
+autocmd coc_nvim
+autocmd! coc_nvim,BufEnter
+autocmd coc_nvim * echo 1
+autocmd! missing_group
+augroup UpperGroup
+augroup END
+autocmd! UpperGroup
+augroup removed_group
+augroup END
+augroup! removed_group
+autocmd! removed_group
+`
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []string
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vimls/unknown-autocmd-event" {
+			got = append(got, file.Text(diagnostic.Span))
+		}
+	}
+	want := []string{"coc_nvim", "coc_nvim", "missing_group", "UpperGroup", "removed_group"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unknown-autocmd-event spans = %#v, want %#v; diagnostics = %#v", got, want, result.Diagnostics)
+	}
+}

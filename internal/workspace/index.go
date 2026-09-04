@@ -160,6 +160,7 @@ type indexedFile struct {
 	functionParameters map[syntax.Span][]string
 	references         []ExternalReferenceFact
 	commands           []UserCommandFact
+	augroups           []string
 	globals            []GlobalNameFact
 	types              []TypeRelationFact
 	aliases            []TypeAliasFact
@@ -181,6 +182,7 @@ type Index struct {
 	byName              map[string][]SymbolFact
 	byExternalName      map[string][]ExternalReferenceFact
 	byUserCommand       map[string][]UserCommandFact
+	byAugroup           map[string]int
 	byGlobalName        map[string][]GlobalNameFact
 	typesByChild        map[SymbolKey][]TypeRelationFact
 	typesByParent       map[string][]TypeRelationFact
@@ -237,6 +239,7 @@ func NewIndex(maxFiles, maxBytes int, relationLimits ...int) *Index {
 		byName:           make(map[string][]SymbolFact),
 		byExternalName:   make(map[string][]ExternalReferenceFact),
 		byUserCommand:    make(map[string][]UserCommandFact),
+		byAugroup:        make(map[string]int),
 		byGlobalName:     make(map[string][]GlobalNameFact),
 		typesByChild:     make(map[SymbolKey][]TypeRelationFact),
 		typesByParent:    make(map[string][]TypeRelationFact),
@@ -285,11 +288,12 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	sortFacts(facts)
 	references := CollectExternalReferencesFromAnalysis(normalized, file, result)
 	commands := CollectUserCommandFacts(normalized, file)
+	augroups := analysis.CollectAugroupNames(file)
 	globals := CollectGlobalNameFacts(normalized, file)
 	types := CollectTypeRelationFacts(normalized, file)
 	aliases := CollectTypeAliasFacts(normalized, file)
 	calls := CollectCallFactsFromAnalysis(normalized, file, result)
-	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, globals: globals, types: types, aliases: aliases, calls: calls}
+	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, augroups: augroups, globals: globals, types: types, aliases: aliases, calls: calls}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -324,6 +328,7 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 		i.removeFactsLocked(old.facts)
 		i.removeExternalReferencesLocked(old.references)
 		i.removeUserCommandsLocked(old.commands)
+		i.removeAugroupsLocked(old.augroups)
 		i.removeGlobalNamesLocked(old.globals)
 		i.removeTypeRelationsLocked(old.types)
 		i.removeTypeAliasesLocked(old.aliases)
@@ -351,6 +356,9 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	}
 	for _, command := range commands {
 		i.byUserCommand[command.Name] = append(i.byUserCommand[command.Name], command)
+	}
+	for _, name := range augroups {
+		i.byAugroup[name]++
 	}
 	for _, fact := range globals {
 		i.byGlobalName[fact.Name] = append(i.byGlobalName[fact.Name], fact)
@@ -385,6 +393,7 @@ func (i *Index) Remove(path string) {
 	i.removeFactsLocked(old.facts)
 	i.removeExternalReferencesLocked(old.references)
 	i.removeUserCommandsLocked(old.commands)
+	i.removeAugroupsLocked(old.augroups)
 	i.removeGlobalNamesLocked(old.globals)
 	i.removeTypeRelationsLocked(old.types)
 	i.removeTypeAliasesLocked(old.aliases)
@@ -858,6 +867,19 @@ func (i *Index) UserCommandNames() []string {
 	i.mu.RLock()
 	names := make([]string, 0, len(i.byUserCommand))
 	for name := range i.byUserCommand {
+		names = append(names, name)
+	}
+	i.mu.RUnlock()
+	sort.Strings(names)
+	return names
+}
+
+// AugroupNames returns every distinct statically defined autocommand group in
+// bytewise name order. The returned slice is independent of the index.
+func (i *Index) AugroupNames() []string {
+	i.mu.RLock()
+	names := make([]string, 0, len(i.byAugroup))
+	for name := range i.byAugroup {
 		names = append(names, name)
 	}
 	i.mu.RUnlock()
@@ -2245,6 +2267,16 @@ func (i *Index) removeUserCommandsLocked(facts []UserCommandFact) {
 				}
 				break
 			}
+		}
+	}
+}
+
+func (i *Index) removeAugroupsLocked(names []string) {
+	for _, name := range names {
+		if i.byAugroup[name] <= 1 {
+			delete(i.byAugroup, name)
+		} else {
+			i.byAugroup[name]--
 		}
 	}
 }

@@ -1085,6 +1085,7 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File,
 	}
 	if s.workspaceIndexReadyLocked() {
 		snapshot.globalDiagnostics = s.workspaceIndex.GlobalNameConflictDiagnostics(path, file)
+		snapshot.augroupNames = s.workspaceIndex.AugroupNames()
 		var references []workspace.ExternalReferenceFact
 		if file != nil {
 			if result == nil || result.File != file {

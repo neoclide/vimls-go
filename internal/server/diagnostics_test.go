@@ -228,6 +228,33 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	}
 }
 
+func TestUnknownAutocmdEventUsesWorkspaceAugroups(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "plugin/groups.vim", "augroup coc_nvim\naugroup END\naugroup UpperGroup\naugroup END\n")
+	mainSource := "autocmd! coc_nvim\nautocmd! missing_group\nautocmd! UpperGroup\n"
+	mainPath := writeWorkspaceFile(t, root, "plugin/main.vim", mainSource)
+	instance, published := initializeWorkspaceDiagnosticServer(t, root)
+	documentURI := uri.File(mainPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: mainSource}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnosticsForURI(t, published, documentURI)
+	var got []string
+	for _, diagnostic := range params.Diagnostics {
+		if diagnostic.Code == protocol.String("vimls/unknown-autocmd-event") {
+			message, ok := diagnostic.Message.(protocol.String)
+			if !ok {
+				t.Fatalf("unknown-autocmd-event message = %#v", diagnostic.Message)
+			}
+			got = append(got, string(message))
+		}
+	}
+	want := []string{"unknown autocommand event: missing_group", "unknown autocommand event: UpperGroup"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unknown-autocmd-event messages = %#v, want %#v; diagnostics = %#v", got, want, params.Diagnostics)
+	}
+}
+
 func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	runtimeRoot := t.TempDir()
 	writeWorkspaceFile(t, runtimeRoot, "plugin/function.vim", "function Shared()\nendfunction\n")

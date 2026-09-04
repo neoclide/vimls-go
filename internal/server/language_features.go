@@ -243,7 +243,16 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		}
 	}
 	rejected := false
+	autocmdBody := false
+	autocmdBodyDialect := file.Dialect
+	autocmdBodySpanSize := len(file.Source) + 1
 	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Autocmd != nil && command.Autocmd.Pattern.Start < command.Autocmd.Pattern.End &&
+			offset > command.Autocmd.Pattern.End && offset <= command.Span.End && command.Span.End-command.Span.Start < autocmdBodySpanSize {
+			autocmdBody = true
+			autocmdBodyDialect = command.Dialect
+			autocmdBodySpanSize = command.Span.End - command.Span.Start
+		}
 		if command.Heredoc != nil && (spanContains(command.Heredoc.Body, offset) || offset == command.Heredoc.Body.End) || command.TextBody != nil && (spanContains(command.TextBody.Body, offset) || offset == command.TextBody.Body.End) || command.Keymap != nil && (spanContains(command.Keymap.Body, offset) || offset == command.Keymap.Body.End) || command.Mapping != nil && (spanContains(command.Mapping.RHS, offset) || offset == command.Mapping.RHS.End) {
 			rejected = true
 		}
@@ -384,6 +393,11 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 				result = completionContextAutocmdModifier
 				return
 			}
+			// Let the parsed command body determine its own completion context.
+			// For an empty body, the fallback below uses the autocmd dialect.
+			if command.Autocmd.Pattern.Start < command.Autocmd.Pattern.End && offset > command.Autocmd.Pattern.End && offset <= command.Span.End {
+				return
+			}
 		}
 		if command.Canonical == "colorscheme" && offset > command.Name.End &&
 			(spanContains(command.Argument, offset) || offset == command.Argument.End) &&
@@ -417,6 +431,10 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 				result = completionContextCommand
 				return
 			}
+			if autocmdBody && command.Dialect == syntax.Vim9 {
+				result = completionContextVim9Statement
+				return
+			}
 			result = completionContextCommand
 			return
 		}
@@ -437,6 +455,12 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 	})
 	if result != completionContextNone {
 		return result
+	}
+	if autocmdBody {
+		if autocmdBodyDialect == syntax.Vim9 {
+			return completionContextVim9Statement
+		}
+		return completionContextCommand
 	}
 	lineStart := strings.LastIndexByte(file.Source[:offset], '\n') + 1
 	linePrefix := strings.TrimSpace(file.Source[lineStart:offset])

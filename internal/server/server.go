@@ -105,6 +105,7 @@ type workspaceAnalysisSnapshot struct {
 	missingAutoloadFunctions map[string]bool
 	missingGlobalFunctions   map[string]bool
 	userCommandNames         []string
+	augroupNames             []string
 	globalDiagnostics        []syntax.Diagnostic
 	ready                    bool
 }
@@ -1233,7 +1234,11 @@ func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.
 		}
 	}
 	versionedAnalysis.Diagnostics = analysis.AutoloadExportedDefDiagnostics(file, fileAnalysis, autoload, versionedAnalysis.Diagnostics)
-	file.Diagnostics = analysis.CombinedDiagnostics(file, &versionedAnalysis)
+	file.Diagnostics = analysis.SuppressKnownAugroupEventDiagnostics(
+		file,
+		analysis.CombinedDiagnostics(file, &versionedAnalysis),
+		workspaceSnapshot.augroupNames,
+	)
 	file.Diagnostics = append(file.Diagnostics, s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)...)
 	if workspaceSnapshot.indexComplete {
 		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandAbbreviationDiagnostics(file, workspaceSnapshot.userCommandNames)...)

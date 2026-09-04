@@ -238,6 +238,32 @@ func TestIndexUserCommandNamesTrackReplaceAndRemove(t *testing.T) {
 	}
 }
 
+func TestIndexAugroupNamesTrackReplaceAndRemove(t *testing.T) {
+	index := NewIndex(10, 10000)
+	root := t.TempDir()
+	first := filepath.Join(root, "first.vim")
+	second := filepath.Join(root, "second.vim")
+	if err := index.Replace(first, syntax.Parse("augroup coc_nvim\naugroup END\naugroup deleted_group\naugroup END\naugroup! deleted_group\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Replace(second, syntax.Parse("augroup coc_nvim\naugroup END\naugroup other_group\naugroup END\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.AugroupNames(); len(got) != 2 || got[0] != "coc_nvim" || got[1] != "other_group" {
+		t.Fatalf("augroup names = %#v", got)
+	}
+	if err := index.Replace(first, syntax.Parse("let value = 1\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := index.AugroupNames(); len(got) != 2 || got[0] != "coc_nvim" || got[1] != "other_group" {
+		t.Fatalf("replaced augroup names = %#v", got)
+	}
+	index.Remove(second)
+	if got := index.AugroupNames(); len(got) != 0 {
+		t.Fatalf("removed augroup names = %#v", got)
+	}
+}
+
 func TestIndexGlobalNameFactsTrackLocationsAndDeletes(t *testing.T) {
 	index := NewIndex(10, 10000)
 	root := t.TempDir()

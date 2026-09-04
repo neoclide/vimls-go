@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -14,6 +15,93 @@ func collectStyleDiagnostics(result *FileAnalysis) {
 		return
 	}
 	collectStyleCommandDiagnostics(result, result.File, result.File.Commands, result.File.Blocks, false)
+	result.Diagnostics = SuppressKnownAugroupEventDiagnostics(result.File, result.Diagnostics, nil)
+}
+
+// CollectAugroupNames returns every statically named :augroup definition.
+// Dynamic :execute forms are intentionally absent.
+func CollectAugroupNames(file *syntax.File) []string {
+	if file == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.Canonical == "augroup" {
+				name := strings.TrimSpace(file.Text(command.Augroup))
+				if name != "" && !strings.EqualFold(name, "END") {
+					if command.Bang.Start < command.Bang.End {
+						delete(seen, name)
+					} else {
+						seen[strings.Clone(name)] = true
+					}
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	result := make([]string, 0, len(seen))
+	for name := range seen {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// SuppressKnownAugroupEventDiagnostics resolves the ambiguous
+// `:autocmd[!] name` form when a matching lower-case augroup is known. Vim
+// treats that single argument as a group name; event lists and definitions
+// with a pattern remain event syntax and are not suppressed.
+func SuppressKnownAugroupEventDiagnostics(file *syntax.File, diagnostics []syntax.Diagnostic, workspaceNames []string) []syntax.Diagnostic {
+	if file == nil || len(diagnostics) == 0 {
+		return diagnostics
+	}
+	known := make(map[string]bool, len(workspaceNames))
+	for _, name := range workspaceNames {
+		known[name] = true
+	}
+	for _, name := range CollectAugroupNames(file) {
+		known[name] = true
+	}
+	if len(known) == 0 {
+		return diagnostics
+	}
+	groupSpans := make(map[syntax.Span]bool)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			autocmd := command.Autocmd
+			if autocmd != nil && autocmd.Group.Start == autocmd.Group.End && len(autocmd.Events) == 1 && autocmd.Pattern.Start == autocmd.Pattern.End &&
+				(autocmd.Operation == syntax.AutocmdQuery || autocmd.Operation == syntax.AutocmdClear) {
+				span := autocmd.Events[0]
+				name := strings.TrimSpace(file.Text(span))
+				if len(name) > 0 && name[0] >= 'a' && name[0] <= 'z' && known[name] && strings.TrimSpace(file.Text(command.Argument)) == name {
+					groupSpans[span] = true
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(file.Commands)
+	if len(groupSpans) == 0 {
+		return diagnostics
+	}
+	kept := diagnostics[:0]
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "vimls/unknown-autocmd-event" && groupSpans[diagnostic.Span] {
+			continue
+		}
+		kept = append(kept, diagnostic)
+	}
+	return kept
 }
 
 func onlyUnusedVariableDiagnostics(diagnostics []syntax.Diagnostic) bool {

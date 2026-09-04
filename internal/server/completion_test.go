@@ -292,6 +292,37 @@ func TestCompletionFunctionAtCallableCommandStart(t *testing.T) {
 	}
 }
 
+func TestCompletionFunctionsInAutocmdBody(t *testing.T) {
+	tests := []struct {
+		name, source, label string
+		kind                protocol.CompletionItemKind
+	}{
+		{name: "legacy call", source: "autocmd WinEnter          * call c", label: "ceil", kind: protocol.CompletionItemKindFunction},
+		{name: "legacy expression", source: "autocmd WinEnter * echo c", label: "ceil", kind: protocol.CompletionItemKindFunction},
+		{name: "legacy command", source: "autocmd WinEnter * ec", label: "echo", kind: protocol.CompletionItemKindKeyword},
+		{name: "Vim9 direct call", source: "vim9script\nautocmd WinEnter * c", label: "ceil", kind: protocol.CompletionItemKindFunction},
+		{name: "Vim9 expression", source: "vim9script\nautocmd WinEnter * echo c", label: "ceil", kind: protocol.CompletionItemKindFunction},
+		{name: "Vim9 command", source: "vim9script\nautocmd WinEnter * ec", label: "echo", kind: protocol.CompletionItemKindKeyword},
+		{name: "legacy empty body", source: "autocmd WinEnter          * ", label: "call", kind: protocol.CompletionItemKindKeyword},
+		{name: "legacy empty body after modifier", source: "autocmd WinEnter * ++once ", label: "call", kind: protocol.CompletionItemKindKeyword},
+		{name: "legacy empty body after bar", source: "autocmd WinEnter * | ", label: "call", kind: protocol.CompletionItemKindKeyword},
+		{name: "Vim9 empty body", source: "vim9script\nautocmd WinEnter * ", label: "echo", kind: protocol.CompletionItemKindKeyword},
+		{name: "Vim9 empty body after modifier", source: "vim9script\nautocmd WinEnter * ++once ", label: "echo", kind: protocol.CompletionItemKindKeyword},
+		{name: "Vim9 empty body after bar", source: "vim9script\nautocmd WinEnter * | ", label: "echo", kind: protocol.CompletionItemKindKeyword},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			line := uint32(strings.Count(test.source, "\n"))
+			character := uint32(len(test.source) - strings.LastIndexByte(test.source, '\n') - 1)
+			items := completionListRequest(t, instance, documentURI, line, character).Items
+			if !hasCompletion(items, test.label, test.kind) {
+				t.Fatalf("%s completion missing; items = %#v", test.label, items)
+			}
+		})
+	}
+}
+
 func TestCompletionVim9DefStatementHeadIncludesCommandsAndFunctions(t *testing.T) {
 	tests := []struct {
 		prefix, function string
