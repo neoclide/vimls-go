@@ -313,15 +313,21 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if label == "" {
 					continue
 				}
+				item := protocol.CompletionItem{Label: label, Kind: completionSymbolKind(declaration.Kind)}
+				var (
+					snippet string
+					ok      bool
+				)
 				if methodCall {
-					if parameters, found := completionUserFunctionParameters(file, label); found && len(parameters) == 0 {
+					parameters, found := completionUserFunctionParameters(file, label)
+					if found && len(parameters) == 0 {
 						continue
 					}
-				}
-				item := protocol.CompletionItem{Label: label, Kind: completionSymbolKind(declaration.Kind)}
-				snippet, ok := completionUserFunctionSnippet(file, label, canSnippet)
-				if methodCall {
-					snippet, ok = completionUserMethodSnippet(file, label, canSnippet)
+					if found && len(parameters) > 0 {
+						snippet, ok = completionFunctionSnippet(label, parameters[1:], canSnippet)
+					}
+				} else {
+					snippet, ok = completionUserFunctionSnippet(file, label, canSnippet)
 				}
 				if ok {
 					item.InsertText = protocol.NewOptional(snippet)
@@ -420,9 +426,14 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					continue
 				}
 				item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}
-				snippet, ok := completionBuiltinFunctionSnippet(function, canSnippet)
+				var (
+					snippet string
+					ok      bool
+				)
 				if methodCall {
 					snippet, ok = completionBuiltinMethodSnippet(function, canSnippet)
+				} else {
+					snippet, ok = completionBuiltinFunctionSnippet(function, canSnippet)
 				}
 				if ok {
 					item.InsertText = protocol.NewOptional(snippet)

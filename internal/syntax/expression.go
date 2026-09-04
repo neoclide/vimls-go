@@ -277,7 +277,9 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			left = p.parseArrowCallable(left)
 			continue
 		}
-		if token.text == "->" && p.peek(1).kind == expressionEOF {
+		next := p.peek(1)
+		missingMethod := next.kind == expressionEOF || next.text == "]" || next.text == ")" || next.text == "," || next.text == ";"
+		if token.text == "->" && missingMethod {
 			// Vim does not allow a line break immediately after a method
 			// operator. Keep the operator in the AST, but represent the
 			// missing callable at its insertion point so callers can recover

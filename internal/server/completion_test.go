@@ -323,6 +323,8 @@ func TestCompletionBuiltinFunctionsAfterMethodArrow(t *testing.T) {
 		{"partial prefix", "vim9script\ndef GetNamespaceTypes(): list<string>\n  return values({})->flat\nenddef\n", 2, uint32(len("  return values({})->flat")), uint32(len("  return values({})->"))},
 		{"space recovery", "vim9script\ndef GetNamespaceTypes(): list<string>\n  return values({})->  flat\nenddef\n", 2, uint32(len("  return values({})->  flat")), uint32(len("  return values({})->  "))},
 		{"continuation before arrow", "vim9script\ndef GetNamespaceTypes(): list<string>\n  return values({})\n    ->flat\nenddef\n", 3, uint32(len("    ->flat")), uint32(len("    ->"))},
+		{"inside list literal", "vim9script\ndef GetNamespaceTypes(): list<string>\n  var x = [values({})->]\n  return x\nenddef\n", 2, uint32(len("  var x = [values({})->")), uint32(len("  var x = [values({})->"))},
+		{"inside call argument", "vim9script\ndef GetNamespaceTypes(): list<string>\n  var x = len(values({})->)\n  return []\nenddef\n", 2, uint32(len("  var x = len(values({})->")), uint32(len("  var x = len(values({})->"))},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -343,6 +345,30 @@ func TestCompletionBuiltinFunctionsAfterMethodArrow(t *testing.T) {
 				t.Fatalf("non-method builtin argc was offered: %#v", items)
 			}
 		})
+	}
+}
+
+func TestCompletionVim9DefLeadingColonForcesCommands(t *testing.T) {
+	source := "vim9script\ndef Main(): void\n  var foo_var = 1\n  :f\nenddef\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	items := completionListRequest(t, instance, documentURI, 3, uint32(len("  :f"))).Items
+	if !hasCompletion(items, "finish", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("finish command missing after leading colon: %#v", items)
+	}
+	if hasCompletion(items, "foo_var", protocol.CompletionItemKindVariable) {
+		t.Fatalf("local variable foo_var was offered after leading colon: %#v", items)
+	}
+}
+
+func TestCompletionVim9DefEnddefPositionForcesCommand(t *testing.T) {
+	source := "vim9script\ndef Main(): void\n  var foo_var = 1\n  enddef\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	items := completionListRequest(t, instance, documentURI, 3, uint32(len("  enddef"))).Items
+	if !hasCompletion(items, "enddef", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("enddef command missing at enddef position: %#v", items)
+	}
+	if hasCompletion(items, "foo_var", protocol.CompletionItemKindVariable) {
+		t.Fatalf("local variable foo_var was offered at enddef position: %#v", items)
 	}
 }
 

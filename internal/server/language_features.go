@@ -356,6 +356,10 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 			return
 		}
 		if command.Span.Start <= offset && offset <= command.Name.End {
+			if isBlockEndCommand(command) || hasLeadingColon(file.Source, command.Span.Start, command.Name.Start) {
+				result = completionContextCommand
+				return
+			}
 			switch completionCallableBlockAt(file, offset) {
 			case syntax.BlockDef:
 				result = completionContextVim9Statement
@@ -387,7 +391,10 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 	}
 	lineStart := strings.LastIndexByte(file.Source[:offset], '\n') + 1
 	linePrefix := strings.TrimSpace(file.Source[lineStart:offset])
-	if linePrefix == "" || linePrefix == ":" {
+	if linePrefix == ":" {
+		return completionContextCommand
+	}
+	if linePrefix == "" {
 		if completionCallableBlockAt(file, offset) == syntax.BlockDef {
 			return completionContextVim9Statement
 		}
@@ -648,6 +655,11 @@ func completionMethodCallableSpan(file *syntax.File, expression *syntax.Expressi
 		if span, ok := expressionMemberSpan(expression); ok && span.Start <= offset && offset <= span.End {
 			return span, true
 		}
+		if len(expression.Children) > 1 && expression.Children[1].Kind == syntax.ExpressionMissing {
+			if expression.Operator.End <= offset && completionHorizontalSpace(file.Source, expression.Operator.End, offset) {
+				return syntax.Span{Start: offset, End: offset}, true
+			}
+		}
 	}
 	if expression.Kind != syntax.ExpressionCall || expression.Value != "->" || len(expression.Children) == 0 {
 		return syntax.Span{}, false
@@ -656,7 +668,7 @@ func completionMethodCallableSpan(file *syntax.File, expression *syntax.Expressi
 	if callable == nil {
 		return syntax.Span{}, false
 	}
-	if callable.Kind == syntax.ExpressionMissing {
+	if callable.Kind == syntax.ExpressionMissing || len(expression.Children) > 1 && expression.Children[1].Kind == syntax.ExpressionMissing {
 		if expression.Operator.End <= offset && completionHorizontalSpace(file.Source, expression.Operator.End, offset) {
 			return syntax.Span{Start: offset, End: offset}, true
 		}
@@ -678,6 +690,27 @@ func completionHorizontalSpace(source string, start, end int) bool {
 		}
 	}
 	return true
+}
+
+func hasLeadingColon(source string, start, end int) bool {
+	if start < 0 || end > len(source) || start >= end {
+		return false
+	}
+	return strings.ContainsRune(source[start:end], ':')
+}
+
+func isBlockEndCommand(command *syntax.Command) bool {
+	if command == nil {
+		return false
+	}
+	if command.Kind == syntax.CommandBlockEnd {
+		return true
+	}
+	switch command.Canonical {
+	case "enddef", "endfunction", "endif", "endfor", "endwhile", "endtry", "endclass", "endinterface", "endenum":
+		return true
+	}
+	return false
 }
 
 func completionAggregateAt(file *syntax.File, offset int) bool {
