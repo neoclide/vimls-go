@@ -13,8 +13,8 @@ func TestCompletionMetadataTables(t *testing.T) {
 	}
 
 	features := HasFeatures()
-	if len(features) != 222 {
-		t.Fatalf("has() features = %d, want 222", len(features))
+	if len(features) != 223 {
+		t.Fatalf("has() features = %d, want 223", len(features))
 	}
 	for index, feature := range features {
 		if feature.Name == "" || feature.Documentation == "" {
@@ -24,7 +24,7 @@ func TestCompletionMetadataTables(t *testing.T) {
 			t.Fatalf("has() features are not uniquely sorted at %q", feature.Name)
 		}
 	}
-	wantFeatures := map[string]bool{"all_builtin_terms": false, "clipboard_working": false, "patch-9.2.1015": false, "vim9script": false, "X11": false, ":tearoff": false}
+	wantFeatures := map[string]bool{"all_builtin_terms": false, "clipboard_working": false, "nvim": false, "patch-9.2.1015": false, "vim9script": false, "X11": false, ":tearoff": false}
 	for _, feature := range features {
 		if _, ok := wantFeatures[feature.Name]; ok {
 			wantFeatures[feature.Name] = true

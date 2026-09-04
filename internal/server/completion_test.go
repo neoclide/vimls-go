@@ -69,7 +69,7 @@ func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 			t.Fatalf("completion at %#v = %#v, %v", test.position, result, err)
 		}
 	}
-	builtinSource := "vim9script\necho has('gui_')\necho expand('<cf')\n"
+	builtinSource := "vim9script\necho has('gui_')\necho expand('<cf')\necho has('nv')\n"
 	builtinURI := uri.File(filepath.Join(root, "builtin.vim"))
 	instance.documents.Open(builtinURI.String(), 1, builtinSource)
 	for _, test := range []struct {
@@ -79,6 +79,7 @@ func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 	}{
 		{line: 1, prefix: "echo has('gui_", label: "gui_running"},
 		{line: 2, prefix: "echo expand('<cf", label: "<cfile>"},
+		{line: 3, prefix: "echo has('nv", label: "nvim"},
 	} {
 		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: builtinURI}, Position: protocol.Position{Line: test.line, Character: uint32(len(test.prefix))}}})
 		if err != nil || !hasCompletionLabel(completionItems(t, result), test.label) {

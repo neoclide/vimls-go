@@ -319,7 +319,7 @@ func TestPinnedBuiltinStringCompletionIsCompleteAndDeterministic(t *testing.T) {
 		position  protocol.Position
 		itemCount int
 	}{
-		{source: "echo has('')\n", position: protocol.Position{Line: 0, Character: 10}, itemCount: 222},
+		{source: "echo has('')\n", position: protocol.Position{Line: 0, Character: 10}, itemCount: 223},
 		{source: "echo expand('')\n", position: protocol.Position{Line: 0, Character: 13}, itemCount: 16},
 	}
 	for _, test := range tests {

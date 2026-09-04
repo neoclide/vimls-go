@@ -235,6 +235,7 @@ var dynamicHasFeatures = []CompletionValue{
 	{Name: "mouse_gpm_enabled", Documentation: "Whether GPM mouse support is currently enabled."},
 	{Name: "multi_byte_encoding", Documentation: "Whether Vim is currently using a multibyte encoding."},
 	{Name: "netbeans_enabled", Documentation: "Whether the NetBeans interface is currently active."},
+	{Name: "nvim", Documentation: "Whether the editor is Neovim."},
 	{Name: "patch-9.2.1015", Documentation: "Whether Vim includes patch 9.2.1015, the language metadata ceiling used by this server."},
 	{Name: "syntax_items", Documentation: "Whether syntax highlighting items exist in the current buffer."},
 	{Name: "ttyin", Documentation: "Whether Vim's input is connected to a terminal."},
