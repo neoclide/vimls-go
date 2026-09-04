@@ -49,9 +49,6 @@ func completionResolveTargetFromData(data []byte) (completionResolveTarget, bool
 }
 
 func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) ([]protocol.DocumentLink, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil {
@@ -932,9 +929,6 @@ func completionSymbolKind(kind analysis.SymbolKind) protocol.CompletionItemKind 
 }
 
 func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err

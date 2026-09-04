@@ -96,6 +96,9 @@ func (s *Server) CodeLensResolve(ctx context.Context, lens *protocol.CodeLens) (
 	if malformed {
 		return lens, nil
 	}
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(data.URI)
 	s.publishMu.Unlock()

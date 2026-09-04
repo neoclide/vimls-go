@@ -20,6 +20,9 @@ import (
 var renameIdentifier = regexp.MustCompile(`^(?:[sglabwtv]:)?[A-Za-z_][A-Za-z0-9_]*$`)
 
 func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (protocol.PrepareRenameResult, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	for attempt := range 2 {
 		document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)
 		if err != nil || document == nil {
@@ -134,6 +137,9 @@ func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRena
 func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	if !validRenameIdentifier(params.NewName) {
 		return nil, jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "new name is not a statically valid Vim identifier")
+	}
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
 	}
 	for attempt := range 2 {
 		document, err := s.navigationAt(ctx, params.TextDocument.URI.String(), params.Position)

@@ -61,9 +61,6 @@ type syntaxQuickFix struct {
 }
 
 func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
-	if s.workspaceIndexRebuilding() {
-		return nil, nil
-	}
 	snapshot, data, err := s.semanticTokensData(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
@@ -83,9 +80,6 @@ func (s *Server) SemanticTokensFull(ctx context.Context, params *protocol.Semant
 // full/delta result registry, so a range request cannot corrupt a client's
 // delta base.
 func (s *Server) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
-	if s.workspaceIndexRebuilding() {
-		return nil, nil
-	}
 	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
@@ -112,9 +106,6 @@ func (s *Server) SemanticTokensRange(ctx context.Context, params *protocol.Seman
 // still this URI's latest result. In every other case a full result safely
 // resets the client base.
 func (s *Server) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (protocol.SemanticTokensDeltaResult, error) {
-	if s.workspaceIndexRebuilding() {
-		return nil, nil
-	}
 	snapshot, data, err := s.semanticTokensData(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err
@@ -942,9 +933,6 @@ func lineIndent(source string, offset int) string {
 }
 
 func (s *Server) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
-	if s.workspaceIndexRebuilding() {
-		return nil, nil
-	}
 	snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 	if err != nil {
 		return nil, err

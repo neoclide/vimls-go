@@ -66,12 +66,6 @@ func (s *Server) Diagnostic(ctx context.Context, params *protocol.DocumentDiagno
 		if ctx.Err() != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
-		if err := s.waitForWorkspaceIndexForDiagnostic(ctx); err != nil {
-			if ctx.Err() != nil {
-				return nil, protocol.ErrRequestCancelled
-			}
-			return nil, err
-		}
 		// The JSON-RPC request values are borrowed and become invalid when the
 		// handler returns. Keep its cancellation signal, but never retain those
 		// values in the document's longer-lived analysis context.

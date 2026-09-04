@@ -1996,6 +1996,77 @@ func TestWaitForWorkspaceIndexCancellableRequestHasNoTimeout(t *testing.T) {
 	}
 }
 
+func TestDocumentRequestsDoNotWaitForWorkspaceIndex(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nclass Item\nendclass\ndef Local(value: number): number\n  return value\nenddef\nvar result = Local(1)\n")
+	t.Cleanup(instance.stopAnalysis)
+	instance.testHooks.workspaceIndexWaitTimeout = time.Millisecond
+	instance.workspaceMu.Lock()
+	instance.workspaceRunning = true
+	instance.workspaceMu.Unlock()
+
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	position := protocol.Position{Line: 6, Character: 15}
+	positionParams := protocol.TextDocumentPositionParams{TextDocument: textDocument, Position: position}
+	requests := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "document symbols", run: func() error {
+			_, err := instance.DocumentSymbol(context.Background(), &protocol.DocumentSymbolParams{TextDocument: textDocument})
+			return err
+		}},
+		{name: "document links", run: func() error {
+			_, err := instance.DocumentLink(context.Background(), &protocol.DocumentLinkParams{TextDocument: textDocument})
+			return err
+		}},
+		{name: "signature help", run: func() error {
+			_, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "definition", run: func() error {
+			_, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "references", run: func() error {
+			_, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "document highlights", run: func() error {
+			_, err := instance.DocumentHighlight(context.Background(), &protocol.DocumentHighlightParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "hover", run: func() error {
+			_, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "type definition", run: func() error {
+			_, err := instance.TypeDefinition(context.Background(), &protocol.TypeDefinitionParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "implementation", run: func() error {
+			_, err := instance.Implementation(context.Background(), &protocol.ImplementationParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "prepare call hierarchy", run: func() error {
+			_, err := instance.PrepareCallHierarchy(context.Background(), &protocol.CallHierarchyPrepareParams{TextDocumentPositionParams: positionParams})
+			return err
+		}},
+		{name: "prepare type hierarchy", run: func() error {
+			_, err := instance.PrepareTypeHierarchy(context.Background(), &protocol.TypeHierarchyPrepareParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: textDocument, Position: protocol.Position{Line: 1, Character: 7},
+			}})
+			return err
+		}},
+	}
+	for _, request := range requests {
+		t.Run(request.name, func(t *testing.T) {
+			if err := request.run(); err != nil {
+				t.Fatalf("request was blocked by workspace index work: %v", err)
+			}
+		})
+	}
+}
+
 func TestServerRebuildCancellationDoesNotPublishIndex(t *testing.T) {
 	root := t.TempDir()
 	instance := New(nil, nil, io.Discard)

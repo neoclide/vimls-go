@@ -18,6 +18,8 @@ import (
 
 type refreshClient struct {
 	protocol.UnimplementedClient
+	diagnosticCalls       chan struct{}
+	diagnosticRelease     chan struct{}
 	semanticTokensCalls   chan struct{}
 	semanticTokensRelease chan struct{}
 	inlayHintCalls        chan struct{}
@@ -28,12 +30,28 @@ type refreshClient struct {
 
 func newRefreshClient() *refreshClient {
 	return &refreshClient{
+		diagnosticCalls:       make(chan struct{}, 2),
+		diagnosticRelease:     make(chan struct{}, 2),
 		semanticTokensCalls:   make(chan struct{}, 2),
 		semanticTokensRelease: make(chan struct{}, 2),
 		inlayHintCalls:        make(chan struct{}, 2),
 		inlayHintRelease:      make(chan struct{}, 2),
 		codeLensCalls:         make(chan struct{}, 2),
 		codeLensRelease:       make(chan struct{}, 2),
+	}
+}
+
+func (c *refreshClient) DiagnosticRefresh(ctx context.Context) error {
+	select {
+	case c.diagnosticCalls <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-c.diagnosticRelease:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -350,19 +368,22 @@ func TestWorkspaceIndexSchedulesRefresh(t *testing.T) {
 		RootURI:               &rootURI,
 		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
 		Capabilities: protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{
+			Diagnostics:    &protocol.DiagnosticWorkspaceClientCapabilities{RefreshSupport: &value},
 			SemanticTokens: &protocol.SemanticTokensWorkspaceClientCapabilities{RefreshSupport: &value},
 			InlayHint:      &protocol.InlayHintWorkspaceClientCapabilities{RefreshSupport: &value},
 			CodeLens:       &protocol.CodeLensWorkspaceClientCapabilities{RefreshSupport: &value},
-		}},
+		}, TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
 		t.Fatal(err)
 	}
+	waitForRefresh(t, client.diagnosticCalls)
 	waitForRefresh(t, client.semanticTokensCalls)
 	waitForRefresh(t, client.inlayHintCalls)
 	waitForRefresh(t, client.codeLensCalls)
+	client.diagnosticRelease <- struct{}{}
 	client.semanticTokensRelease <- struct{}{}
 	client.inlayHintRelease <- struct{}{}
 	client.codeLensRelease <- struct{}{}

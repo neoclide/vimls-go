@@ -543,14 +543,6 @@ func (s *Server) waitForWorkspaceIndex(ctx context.Context) error {
 	return s.waitForWorkspaceIndexUntil(ctx, timer.C)
 }
 
-// waitForWorkspaceIndexForDiagnostic keeps the document pull request pending
-// until the index is installed or the client cancels it. Returning a timeout
-// error can leave clients believing the completed request is still active, so
-// a later diagnostic refresh would not trigger another pull.
-func (s *Server) waitForWorkspaceIndexForDiagnostic(ctx context.Context) error {
-	return s.waitForWorkspaceIndexUntil(ctx, nil)
-}
-
 func (s *Server) waitForWorkspaceIndexUntil(ctx context.Context, timeout <-chan time.Time) error {
 	for {
 		s.workspaceMu.Lock()
@@ -573,12 +565,6 @@ func (s *Server) waitForWorkspaceIndexUntil(ctx context.Context, timeout <-chan 
 		case <-changed:
 		}
 	}
-}
-
-func (s *Server) workspaceIndexRebuilding() bool {
-	s.workspaceMu.Lock()
-	defer s.workspaceMu.Unlock()
-	return s.workspaceIndexBusyLocked()
 }
 
 func (s *Server) workspaceRebuildDelay() time.Duration {
@@ -1076,6 +1062,10 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File,
 		roots: workspaceIndexRoots(s.workspaceRoots, s.runtimePaths), ready: true,
 	}
 	if path == "" || !workspacePathInRoots(path, snapshot.roots) {
+		return snapshot
+	}
+	if s.workspaceRunning {
+		snapshot.ready = false
 		return snapshot
 	}
 	if !snapshot.graph.Ready() {
@@ -1958,6 +1948,9 @@ func vimFileWatchers(roots []string, relative bool) []protocol.FileSystemWatcher
 }
 
 func (s *Server) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolParams) (protocol.WorkspaceSymbolResult, error) {
+	if err := s.waitForWorkspaceIndex(ctx); err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, protocol.ErrRequestCancelled
 	}

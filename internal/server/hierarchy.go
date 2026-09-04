@@ -36,9 +36,6 @@ type hierarchyItemData struct {
 }
 
 func (s *Server) PrepareTypeHierarchy(ctx context.Context, params *protocol.TypeHierarchyPrepareParams) ([]protocol.TypeHierarchyItem, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil || snapshot == nil || file == nil {
@@ -194,9 +191,6 @@ func (s *Server) Subtypes(ctx context.Context, params *protocol.TypeHierarchySub
 }
 
 func (s *Server) Implementation(ctx context.Context, params *protocol.ImplementationParams) (protocol.DefinitionResult, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil || snapshot == nil || file == nil {
@@ -592,9 +586,6 @@ func equalValueType(left, right analysis.ValueType) bool {
 }
 
 func (s *Server) PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) ([]protocol.CallHierarchyItem, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	for attempt := range 2 {
 		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil || snapshot == nil || file == nil {

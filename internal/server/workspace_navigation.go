@@ -125,6 +125,12 @@ func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
 		workspaceRoots: workspaceRoots,
 		runtimePaths:   runtimePaths,
 	}
+	if s.workspaceRunning {
+		// A rebuild prepares its replacement index off-lock. Do not expose the
+		// previously installed index under the new workspace revision to
+		// document requests; they can still return document-local results.
+		state.index = nil
+	}
 	s.workspaceMu.Unlock()
 	return state
 }

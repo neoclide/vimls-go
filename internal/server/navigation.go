@@ -36,9 +36,6 @@ type navigationDocument struct {
 }
 
 func (s *Server) navigationAt(ctx context.Context, documentURI string, position protocol.Position) (*navigationDocument, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)
 	s.publishMu.Unlock()
@@ -767,7 +764,7 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 			if current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); err != nil {
 				return nil, err
 			} else if current {
-				if document.external.Kind == workspace.ExternalReferenceGlobalFunction && startsWithUppercaseASCII(document.external.Name) && (state.index == nil || !state.index.HasGlobalFunction(document.external.Name)) {
+				if document.external.Kind == workspace.ExternalReferenceGlobalFunction && startsWithUppercaseASCII(document.external.Name) && state.index != nil && !state.index.HasGlobalFunction(document.external.Name) {
 					return s.localHoverResult(ctx, document, []string{
 						fmt.Sprintf("**%s** A function.", document.external.Name),
 						"",

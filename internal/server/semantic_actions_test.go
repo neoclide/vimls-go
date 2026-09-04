@@ -241,10 +241,10 @@ func TestSemanticTokensFullClassifiesSyntaxAndBoundSymbols(t *testing.T) {
 	}
 }
 
-func TestSemanticTokensAndInlayHintReturnNullDuringWorkspaceIndexWork(t *testing.T) {
+func TestSemanticTokensAndInlayHintReturnDocumentResultsDuringWorkspaceIndexWork(t *testing.T) {
 	for _, name := range []string{"rebuild", "pending"} {
 		t.Run(name, func(t *testing.T) {
-			instance := New(nil, nil, nil)
+			instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\n")
 			t.Cleanup(instance.stopAnalysis)
 			instance.workspaceMu.Lock()
 			if name == "rebuild" {
@@ -253,10 +253,30 @@ func TestSemanticTokensAndInlayHintReturnNullDuringWorkspaceIndexWork(t *testing
 				instance.workspacePending["file.vim"] = struct{}{}
 			}
 			instance.workspaceMu.Unlock()
-			if tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{}); err != nil || tokens != nil {
+			textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+			tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: textDocument})
+			if err != nil || tokens == nil || len(tokens.Data) == 0 {
 				t.Fatalf("semantic tokens = %#v, error = %v", tokens, err)
 			}
-			if hints, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{}); err != nil || hints != nil {
+			rangeTokens, err := instance.SemanticTokensRange(context.Background(), &protocol.SemanticTokensRangeParams{
+				TextDocument: textDocument,
+				Range:        protocol.Range{Start: protocol.Position{}, End: protocol.Position{Line: 1, Character: 13}},
+			})
+			if err != nil || rangeTokens == nil || len(rangeTokens.Data) == 0 {
+				t.Fatalf("range semantic tokens = %#v, error = %v", rangeTokens, err)
+			}
+			delta, err := instance.SemanticTokensFullDelta(context.Background(), &protocol.SemanticTokensDeltaParams{
+				TextDocument:     textDocument,
+				PreviousResultID: *tokens.ResultID,
+			})
+			if err != nil || delta == nil {
+				t.Fatalf("delta semantic tokens = %#v, error = %v", delta, err)
+			}
+			hints, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{
+				TextDocument: textDocument,
+				Range:        protocol.Range{Start: protocol.Position{}, End: protocol.Position{Line: 1, Character: 13}},
+			})
+			if err != nil || len(hints) != 1 {
 				t.Fatalf("inlay hints = %#v, error = %v", hints, err)
 			}
 		})

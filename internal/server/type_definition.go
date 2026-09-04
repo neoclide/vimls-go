@@ -17,9 +17,6 @@ import (
 // container types, and ambiguous names return an empty result; no position is
 // ever invented for a value whose type the analysis cannot prove.
 func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) (protocol.DefinitionResult, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	for attempt := range 2 {
 		snapshot, file, fileAnalysis, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
 		if err != nil || snapshot == nil || file == nil {

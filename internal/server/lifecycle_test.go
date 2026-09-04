@@ -171,8 +171,8 @@ func TestServerCancelsInFlightRequest(t *testing.T) {
 	instance.workspaceMu.Lock()
 	instance.workspaceRunning = true
 	instance.workspaceMu.Unlock()
-	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///cancel.vim"}}}`)
-	waitForServerRace(t, waiting, "document symbol request")
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":""}}`)
+	waitForServerRace(t, waiting, "workspace symbol request")
 	if err := clientConn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
@@ -237,8 +237,8 @@ func TestServerRejectsDuplicateRequestID(t *testing.T) {
 	instance.workspaceRunning = true
 	instance.workspaceMu.Unlock()
 
-	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{"textDocument":{"uri":"file:///duplicate.vim"}}}`)
-	waitForServerRace(t, waiting, "document symbol request")
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":""}}`)
+	waitForServerRace(t, waiting, "workspace symbol request")
 
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///duplicate.vim"},"position":{"line":0,"character":0}}}`)
 

@@ -920,9 +920,6 @@ func (s *Server) IsConfigFile(path string) bool {
 }
 
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (protocol.DocumentSymbolResult, error) {
-	if err := s.waitForWorkspaceIndex(ctx); err != nil {
-		return nil, err
-	}
 	documentURI := params.TextDocument.URI.String()
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)
@@ -1218,9 +1215,12 @@ func (s *Server) computeDocumentDiagnostics(work workspace.Analysis) (*syntax.Fi
 }
 
 func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.Snapshot, file *syntax.File, fileAnalysis *analysis.FileAnalysis, workspaceSnapshot workspaceAnalysisSnapshot, disabledDiagnostics map[string]struct{}) (*syntax.File, workspaceIdentity, bool) {
-	if !workspaceSnapshot.ready || ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return nil, workspaceIdentity{}, false
 	}
+	// Workspace-dependent diagnostics are omitted when the captured index is
+	// not ready. The local result remains useful, and index installation asks
+	// capable pull clients to refresh it.
 	if snapshot.ByteLen() > maxFileBytes {
 		file.Diagnostics = filterDisabledDiagnostics(file.Diagnostics, disabledDiagnostics)
 		return file, workspaceSnapshot.identity, true

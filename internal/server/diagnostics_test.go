@@ -1296,10 +1296,9 @@ func TestDocumentPullDiagnosticsFullAndUnchanged(t *testing.T) {
 	}
 }
 
-func TestDocumentPullDiagnosticsWaitsPastWorkspaceTimeout(t *testing.T) {
+func TestDocumentPullDiagnosticsReturnLocalResultsDuringWorkspaceIndexWork(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
-	instance.testHooks.workspaceIndexWaitTimeout = time.Millisecond
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{
 		TextDocument: &protocol.TextDocumentClientCapabilities{Diagnostic: &protocol.DiagnosticClientCapabilities{}},
 	}}); err != nil {
@@ -1315,43 +1314,15 @@ func TestDocumentPullDiagnosticsWaitsPastWorkspaceTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waiting := make(chan struct{})
-	instance.testHooks.beforeWorkspaceIndexWait = func() {
-		select {
-		case <-waiting:
-		default:
-			close(waiting)
-		}
+	report, err := instance.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	type response struct {
-		report protocol.DocumentDiagnosticReport
-		err    error
-	}
-	done := make(chan response, 1)
-	go func() {
-		report, err := instance.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
-		})
-		done <- response{report: report, err: err}
-	}()
-	<-waiting
-	select {
-	case result := <-done:
-		t.Fatalf("document diagnostic returned at the workspace timeout: %#v", result)
-	case <-time.After(10 * time.Millisecond):
-	}
-
-	instance.workspaceMu.Lock()
-	instance.workspaceRunning = false
-	instance.notifyWorkspaceIndexChangedLocked()
-	instance.workspaceMu.Unlock()
-	result := <-done
-	if result.err != nil {
-		t.Fatal(result.err)
-	}
-	full, ok := result.report.(*protocol.RelatedFullDocumentDiagnosticReport)
+	full, ok := report.(*protocol.RelatedFullDocumentDiagnosticReport)
 	if !ok || len(full.Items) == 0 || full.Items[0].Code != protocol.String("vim/E121") {
-		t.Fatalf("document diagnostics after index installation = %#v", result.report)
+		t.Fatalf("document diagnostics during index work = %#v", report)
 	}
 }
 
