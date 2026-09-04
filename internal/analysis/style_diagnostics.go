@@ -468,11 +468,13 @@ func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, com
 	}
 	// Direct <Leader> mappings and <unique> expectations are normal for user
 	// configuration files; only plugin-oriented mappings are checked here.
+	// Plugin <Plug> mappings are internal interfaces meant for users to map to
+	// and do not require <unique>.
 	if !result.configFile {
 		if strings.Contains(strings.ToLower(lhs), "<leader>") && !strings.Contains(strings.ToLower(rhs), "<plug>") {
 			appendStyleDiagnostic(result, "vimls/direct-user-keymap", "plugin-defined <leader> mapping reduces configurability; consider exposing <Plug>", mapping.LHS)
 		}
-		if !mapping.Unique {
+		if !mapping.Unique && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(lhs)), "<plug>") {
 			appendStyleDiagnostic(result, "vimls/mapping-without-unique", "mapping may overwrite an existing mapping; consider <unique>", mapping.LHS)
 		}
 	}

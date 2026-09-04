@@ -108,6 +108,35 @@ func TestNoremapStyleDiagnostics(t *testing.T) {
 	}
 }
 
+func TestPlugMappingDoesNotReportMappingWithoutUnique(t *testing.T) {
+	sources := []string{
+		"nnoremap <silent> <Plug>(coc-diagnostic-next-error) :<C-u>call CocActionAsync('diagnosticNext', 'error')<CR>\n",
+		"nnoremap <Plug>PluginCommand :call foo#bar()<CR>\n",
+		"inoremap <silent> <plug>(test) <C-r>=foo()<CR>\n",
+	}
+	for _, src := range sources {
+		result := Analyze(syntax.Parse(src))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vimls/mapping-without-unique" {
+				t.Fatalf("unexpected vimls/mapping-without-unique for %q: %#v", src, diagnostic)
+			}
+		}
+	}
+
+	// Non-<Plug> mappings in plugin files should still report vimls/mapping-without-unique
+	nonPlugResult := Analyze(syntax.Parse("nnoremap <silent> x :call foo#bar()<CR>\n"))
+	hasUniqueWarning := false
+	for _, diagnostic := range nonPlugResult.Diagnostics {
+		if diagnostic.Code == "vimls/mapping-without-unique" {
+			hasUniqueWarning = true
+			break
+		}
+	}
+	if !hasUniqueWarning {
+		t.Fatalf("expected vimls/mapping-without-unique for non-Plug mapping, got %#v", nonPlugResult.Diagnostics)
+	}
+}
+
 func TestConfigFileAbbreviationsDoNotReportRecursiveMap(t *testing.T) {
 	source := "iabbrev cosnt const\ncabbrev nao noa\n"
 	for _, diagnostic := range AnalyzeConfigFile(syntax.Parse(source)).Diagnostics {
