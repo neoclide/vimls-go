@@ -299,6 +299,52 @@ var neovimCompatCommands = []Command{
 	{Name: "DiffTool"},
 }
 
+// neovimCompatEvents are Neovim-only autocmd events.
+var neovimCompatEvents = []string{
+	"ChanClose",
+	"ChanInfo",
+	"ChanOpen",
+	"CmdAtom",
+	"DiagnosticChanged",
+	"LspAttach",
+	"LspDetach",
+	"LspNotify",
+	"LspProgress",
+	"LspRequest",
+	"LspTokenUpdate",
+	"MarkSet",
+	"PackChanged",
+	"PackChangedPre",
+	"Progress",
+	"RecordingEnter",
+	"RecordingLeave",
+	"SearchWrapped",
+	"SessionWritePre",
+	"Signal",
+	"TabMoved",
+	"TabNewEntered",
+	"TermClose",
+	"TermEnter",
+	"TermLeave",
+	"TermOpen",
+	"TermRequest",
+	"UIEnter",
+	"UILeave",
+}
+
+func IsNeovimCompatEvent(name string) bool {
+	for _, event := range neovimCompatEvents {
+		if strings.EqualFold(event, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func NeovimCompatEvents() []string {
+	return append([]string(nil), neovimCompatEvents...)
+}
+
 func IsNeovimCompatFunction(name string) bool {
 	_, ok := lookupNeovimCompatFunction(name)
 	return ok

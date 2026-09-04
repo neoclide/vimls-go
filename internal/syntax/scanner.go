@@ -4263,14 +4263,6 @@ func isEmbeddedCommand(name string) bool {
 	return listDoCommand(name) || name == "folddoopen" || name == "folddoclosed"
 }
 
-var autocmdEventNames = []string{
-	"BufAdd", "BufCreate", "BufDelete", "BufEnter", "BufFilePost", "BufFilePre", "BufHidden", "BufLeave", "BufNew", "BufNewFile", "BufRead", "BufReadCmd", "BufReadPost", "BufReadPre", "BufUnload", "BufWinEnter", "BufWinLeave", "BufWipeout", "BufWrite", "BufWriteCmd", "BufWritePost", "BufWritePre",
-	"CmdlineChanged", "CmdlineEnter", "CmdlineLeave", "CmdlineLeavePre", "CmdUndefined", "CmdwinEnter", "CmdwinLeave", "ColorScheme", "ColorSchemePre", "CompleteChanged", "CompleteDone", "CompleteDonePre", "CursorHold", "CursorHoldI", "CursorMoved", "CursorMovedC", "CursorMovedI", "DiffUpdated", "DirChanged", "DirChangedPre", "EncodingChanged", "ExitPre",
-	"FileAppendCmd", "FileAppendPost", "FileAppendPre", "FileChangedRO", "FileChangedShell", "FileChangedShellPost", "FileEncoding", "FileReadCmd", "FileReadPost", "FileReadPre", "FileType", "FileWriteCmd", "FileWritePost", "FileWritePre", "FilterReadPost", "FilterReadPre", "FilterWritePost", "FilterWritePre", "FocusGained", "FocusLost", "FuncUndefined", "GUIEnter", "GUIFailed",
-	"InsertChange", "InsertCharPre", "InsertEnter", "InsertLeave", "InsertLeavePre", "KeyInputPre", "MenuPopup", "ModeChanged", "OptionSet", "QuickFixCmdPost", "QuickFixCmdPre", "QuitPre", "RemoteReply", "SafeState", "SafeStateAgain", "SessionLoadPost", "SessionLoadPre", "SessionWritePost", "ShellCmdPost", "ShellFilterPost", "SigUSR1", "SourceCmd", "SourcePost", "SourcePre",
-	"SpellFileMissing", "StdinReadPost", "StdinReadPre", "SwapExists", "Syntax", "TabClosed", "TabClosedPre", "TabEnter", "TabLeave", "TabNew", "TermChanged", "TerminalOpen", "TerminalWinOpen", "TermResponse", "TermResponseAll", "TextChanged", "TextChangedI", "TextChangedP", "TextChangedT", "TextPutPost", "TextPutPre", "TextYankPost", "User", "VimEnter", "VimLeave", "VimLeavePre", "VimResized", "VimResume", "VimSuspend", "WinClosed", "WinEnter", "WinLeave", "WinNew", "WinNewPre", "WinResized", "WinScrolled",
-}
-
 func isAutocmdEventToken(token string) bool {
 	if token == "*" {
 		return true
@@ -4279,18 +4271,15 @@ func isAutocmdEventToken(token string) bool {
 		if event == "" {
 			return false
 		}
-		found := false
-		for _, name := range autocmdEventNames {
-			if strings.EqualFold(event, name) {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !vimdata.IsKnownAutocmdEvent(event) {
 			return false
 		}
 	}
 	return true
+}
+
+func isAutocmdPatternToken(token string) bool {
+	return token == "*" || strings.ContainsAny(token, "*?./\\")
 }
 
 func scanAutocmdWord(source string, start, end int) int {
@@ -4326,7 +4315,7 @@ func scanAutocmdCommandArgument(source string, start, end int) (int, Span) {
 	if !isAutocmdEventToken(source[position:firstEnd]) {
 		candidate := skipSpace(source, firstEnd, end)
 		candidateEnd := scanAutocmdWord(source, candidate, end)
-		if candidate < candidateEnd && isAutocmdEventToken(source[candidate:candidateEnd]) {
+		if candidate < candidateEnd && source[candidate:candidateEnd] != "*" && isAutocmdEventToken(source[candidate:candidateEnd]) {
 			eventEnd = candidateEnd
 		}
 	}
@@ -4358,9 +4347,13 @@ func parseAutocmdHeader(source string, argument Span, dialect Dialect, bang bool
 		// A known second word is the only static evidence that the first word
 		// is a group. Unknown groups and future events remain ambiguous and are
 		// retained as the event head rather than being diagnosed here.
-		if candidate < candidateEnd && isAutocmdEventToken(source[candidate:candidateEnd]) {
+		if candidate < candidateEnd && (source[candidate:candidateEnd] != "*" || bang) && isAutocmdEventToken(source[candidate:candidateEnd]) {
 			header.Group = Span{Start: start, End: firstEnd}
 			eventStart = candidate
+		} else if candidate < candidateEnd && isAutocmdPatternToken(source[candidate:candidateEnd]) {
+			eventStart = start
+		} else if strings.Contains(source[start:firstEnd], ",") {
+			eventStart = start
 		} else {
 			// A user-defined event and an existing augroup have identical
 			// spelling at this boundary. Without the mutable augroup table,

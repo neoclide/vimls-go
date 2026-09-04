@@ -292,6 +292,12 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 			dynamicAutocmd = true
 		}
 		if command.Autocmd != nil {
+			for _, eventSpan := range command.Autocmd.Events {
+				eventName := strings.TrimSpace(file.Text(eventSpan))
+				if eventName != "" && eventName != "*" && !vimdata.IsKnownAutocmdEvent(eventName) {
+					appendStyleDiagnostic(result, "vimls/unknown-autocmd-event", "unknown autocommand event: "+eventName, eventSpan)
+				}
+			}
 			operation := command.Autocmd.Operation
 			// Groups are case sensitive in Vim. An explicit group names that
 			// group even while a different :augroup is active.

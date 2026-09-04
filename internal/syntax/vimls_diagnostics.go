@@ -72,6 +72,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/trailing-type", Message: "unexpected text after type", Severity: DiagnosticInformation},
 	{Code: "vimls/type-too-deep", Message: "type nesting exceeds parser limit", Severity: DiagnosticInformation},
 	{Code: "vimls/unexpected-token", Message: "unexpected token in expression", Severity: DiagnosticInformation},
+	{Code: "vimls/unknown-autocmd-event", Message: "unknown autocommand event", Severity: DiagnosticHint},
 	{Code: "vimls/unused-variable", Message: "variable is declared but never used", Severity: DiagnosticHint},
 }
 

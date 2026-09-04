@@ -107,6 +107,7 @@ the default message more specific without changing its code.
 | `vimls/trailing-type` | Information | unexpected text after type |
 | `vimls/type-too-deep` | Information | type nesting exceeds parser limit |
 | `vimls/unexpected-token` | Information | unexpected token in expression |
+| `vimls/unknown-autocmd-event` | Hint | unknown autocommand event |
 | `vimls/unused-variable` | Hint | variable is declared but never used |
 
 The source-of-truth table is `internal/syntax/vimls_diagnostics.go`. New

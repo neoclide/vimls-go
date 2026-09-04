@@ -431,3 +431,19 @@ augroup END
 		}
 	}
 }
+
+func TestUnknownAutocmdEventReportsHint(t *testing.T) {
+	source := "autocmd UnknownEvent,BufEnter,AnotherUnknown * echo 1\n"
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []string
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vimls/unknown-autocmd-event" {
+			got = append(got, file.Text(diagnostic.Span))
+		}
+	}
+	want := []string{"UnknownEvent", "AnotherUnknown"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unknown-autocmd-event spans = %#v, want %#v; diagnostics = %#v", got, want, result.Diagnostics)
+	}
+}

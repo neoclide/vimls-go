@@ -1,5 +1,7 @@
 package vimdata
 
+import "strings"
+
 const (
 	AutocmdEventVimTag    = "v9.2.1015"
 	AutocmdEventVimCommit = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
@@ -17,3 +19,24 @@ var autocmdEvents = []AutocmdEvent{
 
 // AutocmdEvents returns a caller-owned event_tab-order copy.
 func AutocmdEvents() []AutocmdEvent { return append([]AutocmdEvent(nil), autocmdEvents...) }
+
+// LookupAutocmdEvent looks up a Vim autocmd event by case-insensitive name.
+func LookupAutocmdEvent(name string) (AutocmdEvent, bool) {
+	for _, event := range autocmdEvents {
+		if strings.EqualFold(event.Name, name) {
+			return event, true
+		}
+	}
+	return AutocmdEvent{}, false
+}
+
+// IsAutocmdEvent reports whether name matches a Vim built-in autocmd event.
+func IsAutocmdEvent(name string) bool {
+	_, ok := LookupAutocmdEvent(name)
+	return ok
+}
+
+// IsKnownAutocmdEvent reports whether name matches a Vim or Neovim compat autocmd event.
+func IsKnownAutocmdEvent(name string) bool {
+	return IsAutocmdEvent(name) || IsNeovimCompatEvent(name)
+}

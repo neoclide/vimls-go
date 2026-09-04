@@ -21,6 +21,9 @@ func TestAnalyzeNeovimCompatNamesDoNotReportUnknown(t *testing.T) {
 		"rshada!\n",
 		"wshada viminfo\n",
 		"rshada | echo 1\n",
+		// Neovim-only autocmd events.
+		"augroup coc_nvim\n  autocmd!\n  autocmd TermOpen * call s:Autocmd('TermOpen', +expand('<abuf>'))\naugroup end\n",
+		"augroup nvim_test\n  autocmd!\n  autocmd LspAttach,TermClose * echo 1\naugroup END\n",
 	}
 	for _, source := range sources {
 		file := syntax.Parse(source)

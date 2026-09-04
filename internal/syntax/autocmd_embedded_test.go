@@ -94,6 +94,7 @@ func TestAutocmdHeaderSpansAndOperations(t *testing.T) {
 		{name: "define", source: "autocmd BufRead,BufWrite {a,b} echo x\n", operation: AutocmdDefine, events: []string{"BufRead", "BufWrite"}, pattern: "{a,b}"},
 		{name: "replace", source: "autocmd! BufRead *.vim echo x\n", operation: AutocmdReplace, events: []string{"BufRead"}, pattern: "*.vim"},
 		{name: "group-head", source: "autocmd mygroup BufRead *.vim ++once ++nested echo x\n", operation: AutocmdDefine, group: "mygroup", events: []string{"BufRead"}, pattern: "*.vim", modifiers: []AutocmdModifierKind{AutocmdOnce, AutocmdNested}},
+		{name: "neovim-termopen", source: "autocmd TermOpen * echo x\n", operation: AutocmdDefine, events: []string{"TermOpen"}, pattern: "*"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
