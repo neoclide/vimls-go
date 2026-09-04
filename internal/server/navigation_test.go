@@ -2029,3 +2029,66 @@ func navigationRange(line, start, end uint32) protocol.Range {
 		End:   protocol.Position{Line: line, Character: end},
 	}
 }
+
+func TestHoverKeymapDetails(t *testing.T) {
+	source := "vnoremap <silent> <Plug>(coc-range-select-backward) :<C-u>call       CocActionAsync('rangeSelect',     visualmode(), v:false)<CR>\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+
+	for _, tc := range []struct {
+		name      string
+		character uint32
+		wantRange protocol.Range
+		contains  []string
+	}{
+		{
+			name:      "mapping command vnoremap",
+			character: 2,
+			wantRange: navigationRange(0, 0, 8),
+			contains: []string{
+				":vn[oremap] {lhs} {rhs}",
+				"`mapmode-v`",
+				"Map the key sequence {lhs} to {rhs} for the modes",
+				"Disallow mapping of",
+			},
+		},
+		{
+			name:      "mapping argument <silent>",
+			character: 12,
+			wantRange: navigationRange(0, 9, 17),
+			contains: []string{
+				"**<silent>** A mapping argument.",
+				"To define a mapping which will not be echoed on the command line",
+			},
+		},
+		{
+			name:      "mapping special key <Plug>",
+			character: 20,
+			wantRange: navigationRange(0, 18, 24),
+			contains: []string{
+				"**<Plug>** A special key name for internal mappings.",
+				"not to be matched with any key sequence",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+					Position:     protocol.Position{Line: 0, Character: tc.character},
+				},
+			})
+			if err != nil || hover == nil || hover.Range == nil || *hover.Range != tc.wantRange {
+				t.Fatalf("hover = %#v, err = %v, want range = %#v", hover, err, tc.wantRange)
+			}
+			content, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || content.Kind != protocol.MarkupKindMarkdown {
+				t.Fatalf("hover content = %#v", hover.Contents)
+			}
+			for _, piece := range tc.contains {
+				if !strings.Contains(content.Value, piece) {
+					t.Errorf("hover text missing %q; got:\n%s", piece, content.Value)
+				}
+			}
+		})
+	}
+}

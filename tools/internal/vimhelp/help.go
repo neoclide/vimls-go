@@ -46,9 +46,24 @@ func ParseTags(source []byte) (map[string]string, error) {
 	return result, nil
 }
 
+type boundary struct {
+	line int
+	tags []string
+}
+
 // Extract selects target help tags from one runtime help file. Multiple target
 // tags on the same heading line share the same Markdown entry.
 func Extract(sourceName string, source []byte, targets []string) (map[string]Documentation, error) {
+	return extractHelp(sourceName, source, targets, false)
+}
+
+// ExtractCommands selects target help tags for Ex commands, attaching shared
+// explanation prose following command definition tables to each variant in the table.
+func ExtractCommands(sourceName string, source []byte, targets []string) (map[string]Documentation, error) {
+	return extractHelp(sourceName, source, targets, true)
+}
+
+func extractHelp(sourceName string, source []byte, targets []string, shareTableProse bool) (map[string]Documentation, error) {
 	targetSet := make(map[string]bool, len(targets))
 	for _, target := range targets {
 		if target == "" || targetSet[target] {
@@ -57,10 +72,6 @@ func Extract(sourceName string, source []byte, targets []string) (map[string]Doc
 		targetSet[target] = true
 	}
 	lines := strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n")
-	type boundary struct {
-		line int
-		tags []string
-	}
 	var boundaries []boundary
 	found := make(map[string]bool, len(targets))
 	for lineNumber, line := range lines {
@@ -105,19 +116,38 @@ func Extract(sourceName string, source []byte, targets []string) (map[string]Doc
 	}
 
 	result := make(map[string]Documentation, len(targets))
-	for index, current := range boundaries {
-		end := len(lines)
-		if index+1 < len(boundaries) {
-			end = boundaries[index+1].line
-		}
-		for line := current.line + 1; line < end; line++ {
-			trimmed := strings.TrimSpace(lines[line])
-			if len(trimmed) >= 12 && (strings.Trim(trimmed, "=") == "" || strings.Trim(trimmed, "-") == "") {
-				end = line
-				break
+	for index := 0; index < len(boundaries); index++ {
+		current := boundaries[index]
+		end := boundaryEnd(lines, boundaries, index)
+
+		var markdown string
+		if shareTableProse && index+1 < len(boundaries) && end-current.line <= 2 &&
+			!hasBlankLine(lines, current.line, end) &&
+			!hasIndentedProse(lines, current.line+1, end) {
+			tailIndex := index
+			for k := index + 1; k < len(boundaries); k++ {
+				if boundaries[k].line-boundaries[k-1].line > 2 ||
+					hasBlankLine(lines, boundaries[k-1].line, boundaries[k].line) {
+					break
+				}
+				tailEnd := boundaryEnd(lines, boundaries, k)
+				if hasIndentedProse(lines, boundaries[k].line+1, tailEnd) {
+					tailIndex = k
+					break
+				}
+			}
+			if tailIndex > index {
+				tailEnd := boundaryEnd(lines, boundaries, tailIndex)
+				header := lines[current.line]
+				shared := lines[boundaries[tailIndex].line+1 : tailEnd]
+				merged := append([]string{header}, shared...)
+				markdown = ToMarkdown(strings.Join(merged, "\n"))
 			}
 		}
-		markdown := ToMarkdown(strings.Join(lines[current.line:end], "\n"))
+
+		if markdown == "" {
+			markdown = ToMarkdown(strings.Join(lines[current.line:end], "\n"))
+		}
 		if markdown == "" {
 			return nil, fmt.Errorf("Vim help tags %s have empty documentation in %s", strings.Join(current.tags, ", "), sourceName)
 		}
@@ -127,6 +157,43 @@ func Extract(sourceName string, source []byte, targets []string) (map[string]Doc
 		}
 	}
 	return result, nil
+}
+
+func boundaryEnd(lines []string, boundaries []boundary, index int) int {
+	end := len(lines)
+	if index+1 < len(boundaries) {
+		end = boundaries[index+1].line
+	}
+	for line := boundaries[index].line + 1; line < end; line++ {
+		trimmed := strings.TrimSpace(lines[line])
+		if len(trimmed) >= 12 && (strings.Trim(trimmed, "=") == "" || strings.Trim(trimmed, "-") == "") {
+			return line
+		}
+	}
+	return end
+}
+
+func hasIndentedProse(lines []string, start, end int) bool {
+	for line := start; line < end; line++ {
+		original := lines[line]
+		trimmed := strings.TrimSpace(original)
+		if trimmed == "" {
+			continue
+		}
+		if (strings.HasPrefix(original, " ") || strings.HasPrefix(original, "\t")) && !strings.HasPrefix(trimmed, ":") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBlankLine(lines []string, start, end int) bool {
+	for line := start; line < end; line++ {
+		if strings.TrimSpace(lines[line]) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // ToMarkdown converts the small set of Vim help markup used by generated

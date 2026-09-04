@@ -3959,8 +3959,9 @@ func parseMapping(file *File, command *Command, depth int) {
 	}
 	argument := command.Argument
 	if clear {
-		if file.Text(argument) == "<buffer>" {
+		if strings.EqualFold(file.Text(argument), "<buffer>") {
 			mapping.Buffer = true
+			mapping.Modifiers = append(mapping.Modifiers, argument)
 		}
 		command.Mapping = mapping
 		return
@@ -3972,6 +3973,7 @@ func parseMapping(file *File, command *Command, depth int) {
 		if size == 0 {
 			break
 		}
+		mapping.Modifiers = append(mapping.Modifiers, Span{Start: position, End: position + size})
 		switch name {
 		case "buffer":
 			mapping.Buffer = true
@@ -4062,7 +4064,7 @@ func mappingCommandBodySpan(source string, mapping *Mapping) (Span, bool) {
 func mappingModifierAt(source string, start, end int) (string, int) {
 	for _, name := range []string{"buffer", "nowait", "silent", "special", "script", "expr", "unique"} {
 		text := "<" + name + ">"
-		if start+len(text) <= end && source[start:start+len(text)] == text {
+		if start+len(text) <= end && strings.EqualFold(source[start:start+len(text)], text) {
 			return name, len(text)
 		}
 	}

@@ -392,6 +392,8 @@ type Mapping struct {
 	Expr    bool
 	Unique  bool
 
+	Modifiers []Span
+
 	LHS Span
 	RHS Span
 	// RHSExpression is populated only for <expr> mappings. RHS remains the
