@@ -195,6 +195,38 @@ func TestAnalyzeBuiltinArgumentTypeDiagnostics(t *testing.T) {
 	}
 }
 
+func TestAnalyzeUserCommandReplacementArgumentsHaveUnknownType(t *testing.T) {
+	source := `vim9script
+def StartDebug(bang: bool, ...args: list<string>)
+enddef
+command -nargs=* -complete=file -bang Termdebug StartDebug(<bang>0, <f-args>)
+`
+	result := Analyze(syntax.Parse(source))
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1013" {
+			t.Fatalf("user-command replacement received E1013: %#v", result.Diagnostics)
+		}
+	}
+
+	staticMismatch := Analyze(syntax.Parse(`vim9script
+def StartDebug(bang: bool, ...args: list<string>)
+enddef
+command! -nargs=* -bang Termdebug StartDebug('wrong', <f-args>)
+`))
+	count := 0
+	for _, diagnostic := range staticMismatch.Diagnostics {
+		if diagnostic.Code == "vim/E1013" {
+			count++
+			if diagnostic.Message != "Argument 1: type mismatch, expected bool but got string" {
+				t.Fatalf("unexpected E1013: %#v", diagnostic)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("static mismatch diagnostics = %#v", staticMismatch.Diagnostics)
+	}
+}
+
 func TestAnalyzeE1428DuplicateEnumValue(t *testing.T) {
 	tests := []struct {
 		name   string

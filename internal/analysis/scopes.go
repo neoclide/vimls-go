@@ -5393,12 +5393,7 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 		return
 	}
 	if command.Dialect == syntax.Vim9 && loop.Iterable.Kind == syntax.ExpressionList {
-		targetStart := command.Argument.Start
-		for targetStart < loop.Iterable.Span.Start && (result.File.Source[targetStart] == ' ' || result.File.Source[targetStart] == '\t') {
-			targetStart++
-		}
-		destructuring := targetStart < loop.Iterable.Span.Start && result.File.Source[targetStart] == '['
-		if destructuring {
+		if forLoopDestructures(result.File, command) {
 			fixed := 0
 			rest := false
 			for _, binding := range loop.Bindings {

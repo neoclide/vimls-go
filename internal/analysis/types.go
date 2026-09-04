@@ -48,6 +48,7 @@ type typeState struct {
 	explicitTypes map[syntax.Span]bool
 	references    map[syntax.Span]*Reference
 	commandScopes map[*syntax.Command]*Scope
+	commandBodies []syntax.Span
 }
 
 func inferTypes(result *FileAnalysis) {
@@ -62,6 +63,7 @@ func inferTypes(result *FileAnalysis) {
 		references:    make(map[syntax.Span]*Reference),
 		commandScopes: result.commandScopes,
 	}
+	state.collectUserCommandBodies(result.File.Commands)
 	for _, scope := range result.Scopes {
 		for _, declaration := range scope.Declarations {
 			state.declarations[declaration.Span] = declaration
@@ -201,6 +203,18 @@ func (state *typeState) walkCommands() {
 	state.walkCommandList(file.Commands)
 }
 
+func (state *typeState) collectUserCommandBodies(commands []syntax.Command) {
+	for index := range commands {
+		command := &commands[index]
+		if command.Canonical == "command" && command.Embedded != nil {
+			state.commandBodies = append(state.commandBodies, command.Embedded.Span)
+		}
+		if command.Embedded != nil {
+			state.collectUserCommandBodies(command.Embedded.Commands)
+		}
+	}
+}
+
 func (state *typeState) walkCommandList(commands []syntax.Command) {
 	file := state.result.File
 	for index := range commands {
@@ -227,9 +241,14 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 		}
 		if command.For != nil {
 			iterable := state.infer(command.For.Iterable, scope)
-			for _, binding := range command.For.Bindings {
+			destructuring := forLoopDestructures(file, command)
+			for bindingIndex, binding := range command.For.Bindings {
 				if declaration := state.declarations[binding.Name]; declaration != nil && isUnresolvedType(declaration.Type) {
-					declaration.Type = indexedType(iterable)
+					if destructuring {
+						declaration.Type = state.forDestructuredBindingType(command.For.Iterable, bindingIndex, binding.Rest, scope)
+					} else {
+						declaration.Type = indexedType(iterable)
+					}
 				}
 			}
 		}
@@ -341,6 +360,10 @@ func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) 
 
 func (state *typeState) infer(expression *syntax.Expression, scope *Scope) ValueType {
 	if expression == nil {
+		return UnknownValueType
+	}
+	if state.isUserCommandReplacement(expression) {
+		state.result.expressionTypes[expression] = UnknownValueType
 		return UnknownValueType
 	}
 	if typ, ok := state.result.expressionTypes[expression]; ok && !isUnresolvedType(typ) {
@@ -522,6 +545,18 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 	}
 	state.result.expressionTypes[expression] = typ
 	return typ
+}
+
+func (state *typeState) isUserCommandReplacement(expression *syntax.Expression) bool {
+	if state == nil || state.result == nil || state.result.File == nil || expression == nil {
+		return false
+	}
+	for _, body := range state.commandBodies {
+		if expression.Span.Start >= body.Start && expression.Span.Start < body.End {
+			return syntax.IsUserCommandReplacementAt(state.result.File.Source, expression.Span.Start, body.End)
+		}
+	}
+	return false
 }
 
 // guardedIdentifierType returns the type established by a surrounding
@@ -1166,7 +1201,29 @@ func (state *typeState) destructuredBindingType(initializer *syntax.Expression, 
 		return state.infer(initializer.Children[index], scope)
 	}
 
-	typ := state.infer(initializer, scope)
+	return destructuredValueType(state.infer(initializer, scope), index, rest)
+}
+
+func (state *typeState) forDestructuredBindingType(iterable *syntax.Expression, index int, rest bool, scope *Scope) ValueType {
+	if iterable == nil {
+		return UnknownValueType
+	}
+	if (iterable.Kind == syntax.ExpressionList || iterable.Kind == syntax.ExpressionTuple) && len(iterable.Children) > 0 {
+		var merged ValueType
+		for childIndex, child := range iterable.Children {
+			current := state.destructuredBindingType(child, index, rest, scope)
+			if childIndex == 0 {
+				merged = current
+			} else {
+				merged = mergeTypes(merged, current)
+			}
+		}
+		return merged
+	}
+	return destructuredValueType(indexedType(state.infer(iterable, scope)), index, rest)
+}
+
+func destructuredValueType(typ ValueType, index int, rest bool) ValueType {
 	if typ.Name == ValueTypeAny {
 		return typ
 	}
@@ -1203,6 +1260,18 @@ func (state *typeState) destructuredBindingType(initializer *syntax.Expression, 
 		return indexedType(typ.Arguments[len(typ.Arguments)-1])
 	}
 	return UnknownValueType
+}
+
+func forLoopDestructures(file *syntax.File, command *syntax.Command) bool {
+	if file == nil || command == nil || command.For == nil {
+		return false
+	}
+	start := command.Argument.Start
+	end := command.For.In.Start
+	for start < end && (file.Source[start] == ' ' || file.Source[start] == '\t') {
+		start++
+	}
+	return start < end && file.Source[start] == '['
 }
 
 func indexedType(typ ValueType) ValueType {

@@ -205,6 +205,29 @@ func TestAnalyzeLegacyTypeGuardAssignmentInvalidatesNarrowing(t *testing.T) {
 	}
 }
 
+func TestAnalyzeInfersForDestructuredBindingTypes(t *testing.T) {
+	source := "for [s:kind, s:body] in [[\"Style\", '@markoCSS'], [\"Script\", '@markoTS']]\n  echo s:kind . s:body\nendfor\n"
+	result := Analyze(syntax.Parse(source))
+	seen := make(map[string]bool)
+	for _, declaration := range result.Declarations {
+		if declaration.Name != "s:kind" && declaration.Name != "s:body" {
+			continue
+		}
+		seen[declaration.Name] = true
+		if declaration.Type.Name != "string" {
+			t.Fatalf("%s type = %#v, want string", declaration.Name, declaration.Type)
+		}
+	}
+	if !seen["s:kind"] || !seen["s:body"] {
+		t.Fatalf("destructured declarations = %#v", result.Declarations)
+	}
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E730" {
+			t.Fatalf("destructured string received E730: %#v", result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeInfersOperatorsReferencesAndFunctions(t *testing.T) {
 	source := `vim9script
 var n = 1

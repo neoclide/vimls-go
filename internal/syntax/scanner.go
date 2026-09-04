@@ -4701,31 +4701,48 @@ func parseLegacyDoCommandList(file *File, span Span, depth int) *CommandList {
 
 func hasUserCommandReplacement(source string, span Span) bool {
 	for index := span.Start; index < span.End; index++ {
-		if source[index] != '<' {
-			continue
-		}
-		end := index + 1
-		for end < span.End && source[end] != '>' {
-			end++
-		}
-		if end >= span.End {
-			continue
-		}
-		name := source[index+1 : end]
-		// Vim's uc_check_code() accepts q/Q/f/F as an optional prefix,
-		// then matches the replacement name case-insensitively.  Keep the
-		// accepted names finite; arbitrary angle-bracket text is not a user
-		// command replacement.
-		if len(name) >= 2 && name[1] == '-' && strings.ContainsRune("qQfF", rune(name[0])) {
-			name = name[2:]
-		}
-		switch strings.ToLower(name) {
-		case "line1", "line2", "range", "count", "bang", "mods", "reg", "register", "args", "lt":
+		if end, ok := userCommandReplacementEnd(source, index, span.End); ok {
 			return true
+		} else if end > index {
+			index = end
 		}
-		index = end
 	}
 	return false
+}
+
+// IsUserCommandReplacementAt reports whether start begins one of the finite
+// replacement forms accepted by Vim's user-command expander. The caller must
+// still establish that the source location belongs to a :command body.
+func IsUserCommandReplacementAt(source string, start, end int) bool {
+	_, ok := userCommandReplacementEnd(source, start, end)
+	return ok
+}
+
+func userCommandReplacementEnd(source string, start, end int) (int, bool) {
+	if start < 0 || start >= end || end > len(source) || source[start] != '<' {
+		return start, false
+	}
+	close := start + 1
+	for close < end && source[close] != '>' {
+		close++
+	}
+	if close >= end {
+		return close, false
+	}
+	name := source[start+1 : close]
+	// Vim's uc_check_code() accepts q/Q/f/F as an optional prefix,
+	// then matches the replacement name case-insensitively. Keep the
+	// accepted names finite; arbitrary angle-bracket text is not a user
+	// command replacement.
+	if len(name) >= 2 && name[1] == '-' && strings.ContainsRune("qQfF", rune(name[0])) {
+		name = name[2:]
+	}
+	switch strings.ToLower(name) {
+	case "line1", "line2", "range", "count", "bang", "mods", "reg", "register", "args", "lt":
+		return close, true
+	default:
+		return close, false
+	}
 }
 
 // parseLegacyAutocmdCommandList handles the legacy source-file continuation
