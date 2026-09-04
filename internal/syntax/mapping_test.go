@@ -36,6 +36,12 @@ func TestMappingExprAST(t *testing.T) {
 				if mapping.Kind != MappingNoremap || mapping.Mode != MappingModeVisual|MappingModeSelect || !mapping.Script || !mapping.Buffer || !mapping.Expr || !mapping.Silent || !mapping.Special || !mapping.Unique {
 					t.Fatalf("mapping = %#v", mapping)
 				}
+				if len(mapping.Modifiers) != 6 {
+					t.Fatalf("modifiers count = %d, want 6", len(mapping.Modifiers))
+				}
+				if file.Text(mapping.Modifiers[0]) != "<script>" || file.Text(mapping.Modifiers[3]) != "<silent>" {
+					t.Fatalf("modifiers = %#v", mapping.Modifiers)
+				}
 				if file.Text(mapping.LHS) != "bar" || file.Text(mapping.RHS) != "isbar" {
 					t.Fatalf("spans = lhs %q rhs %q", file.Text(mapping.LHS), file.Text(mapping.RHS))
 				}

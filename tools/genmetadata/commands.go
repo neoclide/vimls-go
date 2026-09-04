@@ -103,7 +103,7 @@ func addCommandDocumentation(root string, commands []command) error {
 		if err != nil {
 			return err
 		}
-		docs, err := vimhelp.Extract(filename, source, byFile[filename])
+		docs, err := vimhelp.ExtractCommands(filename, source, byFile[filename])
 		if err != nil {
 			return err
 		}

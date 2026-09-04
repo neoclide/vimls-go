@@ -172,6 +172,11 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 			document.occurrence = span
 		}
 	}
+	if document.occurrence.Start >= document.occurrence.End {
+		if span, _, ok := mappingHoverAt(file, offset); ok {
+			document.occurrence = span
+		}
+	}
 	return document, document.checkCurrent(ctx)
 }
 
@@ -713,6 +718,9 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		if _, lines, ok := userCommandAttributeHoverAt(document.analysis.File, document.occurrence.Start); ok {
 			return s.localHoverResult(ctx, document, lines)
 		}
+		if _, lines, ok := mappingHoverAt(document.analysis.File, document.occurrence.Start); ok {
+			return s.localHoverResult(ctx, document, lines)
+		}
 		if option, ok := vimdata.LookupOption(name); ok {
 			var lines []string
 			if requirement := optionBuildRequirement(option.AvailableWhen, option.RequiredFeatures); requirement != "" {
@@ -992,4 +1000,86 @@ func userCommandAttributeHoverAt(file *syntax.File, offset int) (syntax.Span, []
 		return attrSpan, lines, true
 	}
 	return syntax.Span{}, nil, false
+}
+
+func mappingHoverAt(file *syntax.File, offset int) (syntax.Span, []string, bool) {
+	if file == nil {
+		return syntax.Span{}, nil, false
+	}
+	var (
+		foundSpan  syntax.Span
+		foundLines []string
+		found      bool
+	)
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if found || command.Mapping == nil {
+			return
+		}
+		mapping := command.Mapping
+		for _, modSpan := range mapping.Modifiers {
+			if spanContains(modSpan, offset) {
+				if item, ok := vimdata.LookupMappingItem(file.Text(modSpan)); ok {
+					foundSpan = modSpan
+					foundLines = formatMappingItemHover(item)
+					found = true
+					return
+				}
+			}
+		}
+		for _, span := range []syntax.Span{mapping.LHS, mapping.RHS} {
+			if spanContains(span, offset) {
+				if keySpan, keyText, ok := mappingKeyAt(file.Source, span, offset); ok {
+					if item, ok := vimdata.LookupMappingItem(keyText); ok {
+						foundSpan = keySpan
+						foundLines = formatMappingItemHover(item)
+						found = true
+						return
+					}
+				}
+			}
+		}
+	})
+	return foundSpan, foundLines, found
+}
+
+func formatMappingItemHover(item vimdata.MappingItem) []string {
+	lines := []string{fmt.Sprintf("**%s** %s", item.Name, item.Detail)}
+	if item.Documentation != "" {
+		lines = append(lines, "", item.Documentation)
+	}
+	return lines
+}
+
+func mappingKeyAt(source string, container syntax.Span, offset int) (syntax.Span, string, bool) {
+	if offset < container.Start || offset >= container.End {
+		return syntax.Span{}, "", false
+	}
+	start := -1
+	for i := offset; i >= container.Start; i-- {
+		if source[i] == '<' {
+			start = i
+			break
+		}
+		if source[i] == '>' && i < offset {
+			return syntax.Span{}, "", false
+		}
+	}
+	if start < 0 {
+		return syntax.Span{}, "", false
+	}
+	end := -1
+	for i := offset; i < container.End; i++ {
+		if source[i] == '>' {
+			end = i + 1
+			break
+		}
+		if source[i] == '<' && i > start {
+			return syntax.Span{}, "", false
+		}
+	}
+	if end < 0 || strings.ContainsAny(source[start:end], " \t\r\n") {
+		return syntax.Span{}, "", false
+	}
+	keySpan := syntax.Span{Start: start, End: end}
+	return keySpan, source[start:end], true
 }
