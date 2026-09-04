@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -136,6 +138,25 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 			}
 			if _, ok := vimdata.Lookup(file.Text(command.Name)); ok {
 				document.occurrence = command.Name
+			}
+		})
+	}
+	if document.occurrence.Start >= document.occurrence.End {
+		walkCommands(file.Commands, func(command *syntax.Command) {
+			if document.occurrence.Start < document.occurrence.End || command.Set == nil {
+				return
+			}
+			for _, option := range command.Set.Options {
+				matchSpan := option.Name
+				if option.Prefix.Start < option.Prefix.End {
+					matchSpan = syntax.Span{Start: option.Prefix.Start, End: option.Name.End}
+				}
+				if spanContains(matchSpan, offset) {
+					if _, ok := vimdata.LookupOption(file.Text(option.Name)); ok {
+						document.occurrence = option.Name
+						return
+					}
+				}
 			}
 		})
 	}
@@ -607,15 +628,17 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 				if displayName == "" {
 					displayName = target.match.Fact.Name
 				}
-				lines := []string{"name: " + displayName, "kind: " + string(target.match.Fact.Kind)}
+				_, declaration := s.analyzeWorkspaceTarget(target)
+				typeName, _ := hoverDeclarationType(declaration)
+				header := hoverDeclarationDescription(displayName, analysis.SymbolKind(target.match.Fact.Kind), typeName)
+				lines := []string{header}
 				if signature := target.match.Fact.Signature; signature != "" {
 					if displayName != target.match.Fact.Name && strings.HasPrefix(signature, target.match.Fact.Name+"(") {
 						signature = displayName + signature[len(target.match.Fact.Name):]
 					}
 					lines = append(lines, "signature: "+signature)
 				}
-				_, declaration := s.analyzeWorkspaceTarget(target)
-				if typeName, ok := hoverDeclarationType(declaration); ok {
+				if typeName != "" && typeName != "unknown" && analysis.SymbolKind(target.match.Fact.Kind) != analysis.SymbolKindVariable && analysis.SymbolKind(target.match.Fact.Kind) != analysis.SymbolKindConstant {
 					lines = append(lines, "type: "+typeName)
 				}
 				if target.match.Fact.Documentation != "" {
@@ -642,8 +665,7 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 			} else if current {
 				if document.external.Kind == workspace.ExternalReferenceGlobalFunction && startsWithUppercaseASCII(document.external.Name) && (state.index == nil || !state.index.HasGlobalFunction(document.external.Name)) {
 					return s.localHoverResult(ctx, document, []string{
-						"name: " + document.external.Name,
-						"kind: function",
+						fmt.Sprintf("**%s** A function.", document.external.Name),
 						"",
 						"function not found in workspace index",
 					})
@@ -669,16 +691,17 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		name := document.analysis.File.Text(document.occurrence)
 		if contextKind, _ := completionBuiltinStringAt(document.analysis.File, document.occurrence.Start); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
 			var values []vimdata.CompletionValue
-			kind := "has() feature"
+			var header string
 			if contextKind == completionContextHasFeature {
 				values = vimdata.HasFeatures()
+				header = fmt.Sprintf("**%s** A has() feature.", name)
 			} else {
 				values = vimdata.ExpandSpecials()
-				kind = "expand() special"
+				header = fmt.Sprintf("**%s** An expand() special.", name)
 			}
 			for _, value := range values {
 				if value.Name == name {
-					lines := []string{"name: " + value.Name, "kind: " + kind}
+					lines := []string{header}
 					if value.Documentation != "" {
 						lines = append(lines, "", value.Documentation)
 					}
@@ -691,24 +714,42 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			return s.localHoverResult(ctx, document, lines)
 		}
 		if option, ok := vimdata.LookupOption(name); ok {
-			lines := []string{"name: " + option.Name, "kind: option", "type: " + optionTypeName(option)}
+			var lines []string
 			if requirement := optionBuildRequirement(option.AvailableWhen, option.RequiredFeatures); requirement != "" {
 				lines = append(lines, "build requirement: "+requirement)
 			}
 			if option.Documentation != "" {
-				lines = append(lines, "", option.Documentation)
+				if len(lines) > 0 {
+					lines = append(lines, "")
+				}
+				lines = append(lines, option.Documentation)
+			} else {
+				optType := optionTypeName(option)
+				var header string
+				if optType != "" {
+					header = fmt.Sprintf("**%s** %s %s option.", option.Name, titleArticle(optType), optType)
+				} else {
+					header = fmt.Sprintf("**%s** An option.", option.Name)
+				}
+				lines = append([]string{header}, lines...)
 			}
 			return s.localHoverResult(ctx, document, lines)
 		}
 		if variable, ok := vimdata.LookupVariable(name); ok {
-			lines := []string{"name: " + variable.Name, "kind: predefined variable", "type: " + variable.Type}
+			var header string
+			if variable.Type != "" {
+				header = fmt.Sprintf("**%s** A predefined %s variable.", variable.Name, variable.Type)
+			} else {
+				header = fmt.Sprintf("**%s** A predefined variable.", variable.Name)
+			}
+			lines := []string{header}
 			if variable.Documentation != "" {
 				lines = append(lines, "", variable.Documentation)
 			}
 			return s.localHoverResult(ctx, document, lines)
 		}
 		if command, ok := vimdata.Lookup(name); ok && !vimdata.IsNeovimCompatCommand(command.Name) {
-			lines := []string{"name: " + command.Name, "kind: Ex command"}
+			lines := []string{fmt.Sprintf("**%s** An Ex command.", command.Name)}
 			if command.Documentation != "" {
 				lines = append(lines, "", command.Documentation)
 			}
@@ -737,38 +778,57 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		function, ok := vimdata.LookupFunction(name)
 		if !ok {
 			if method {
-				return s.localHoverResult(ctx, document, []string{"name: " + name, "kind: function", "", "function not found"})
+				return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** A function.", name), "", "function not found"})
 			}
 			return nil, nil
 		}
-		lines := []string{"name: " + function.Name, "kind: builtin function"}
-		if returnType := function.ReturnType.DisplayName(); returnType != "" {
-			lines = append(lines, "type: "+returnType)
-		}
-		if function.Documentation != "" {
-			lines = append(lines, "", function.Documentation)
-		}
-		return s.localHoverResult(ctx, document, lines)
+		return s.localHoverResult(ctx, document, []string{formatFunctionHover(function.Name, function.Documentation)})
 	}
 	declaration := document.declaration
-	lines := []string{"name: " + declaration.Name, "kind: " + string(declaration.Kind)}
-	if typeName, ok := hoverDeclarationType(declaration); ok {
-		lines = append(lines, "type: "+typeName)
-	}
-	return s.localHoverResult(ctx, document, lines)
+	typeName, _ := hoverDeclarationType(declaration)
+	line := hoverDeclarationDescription(declaration.Name, declaration.Kind, typeName)
+	return s.localHoverResult(ctx, document, []string{line})
 }
 
 func optionBuildRequirement(condition string, features []string) string {
-	if condition == "" || condition == "1" {
-		return ""
-	}
 	if condition == "0" {
 		return "unavailable in Vim " + vimdata.OptionVimTag
 	}
-	if len(features) == 1 {
-		return "+" + features[0] + " (" + condition + ")"
+	if len(features) > 0 {
+		formatted := make([]string, len(features))
+		for i, feature := range features {
+			formatted[i] = "+" + feature
+		}
+		return strings.Join(formatted, ", ")
 	}
-	return condition
+	return ""
+}
+
+func formatFunctionHover(name string, documentation string) string {
+	if documentation == "" {
+		return fmt.Sprintf("```vim\n%s()\n```", name)
+	}
+	lines := strings.Split(documentation, "\n")
+	var sigs []string
+	idx := 0
+	for idx < len(lines) {
+		trimmed := strings.TrimSpace(lines[idx])
+		if strings.HasPrefix(trimmed, name+"(") {
+			sigs = append(sigs, trimmed)
+			idx++
+		} else {
+			break
+		}
+	}
+	if len(sigs) == 0 {
+		return documentation
+	}
+	codeBlock := "```vim\n" + strings.Join(sigs, "\n") + "\n```"
+	rest := strings.TrimSpace(strings.Join(lines[idx:], "\n"))
+	if rest != "" {
+		return codeBlock + "\n\n" + rest
+	}
+	return codeBlock
 }
 
 func (s *Server) localHoverResult(ctx context.Context, document *navigationDocument, lines []string) (*protocol.Hover, error) {
@@ -783,7 +843,61 @@ func (s *Server) localHoverResult(ctx context.Context, document *navigationDocum
 }
 
 func (s *Server) hoverContent(value string) *protocol.MarkupContent {
-	return boundedMarkupContent(s.languageFeatures.hoverMarkup, value)
+	return boundedMarkupContent(protocol.MarkupKindMarkdown, value)
+}
+
+func titleArticle(word string) string {
+	if word == "" {
+		return "A"
+	}
+	switch unicode.ToLower(rune(word[0])) {
+	case 'a', 'e', 'i', 'o', 'u':
+		return "An"
+	default:
+		return "A"
+	}
+}
+
+func hoverDeclarationDescription(name string, kind analysis.SymbolKind, typeName string) string {
+	switch kind {
+	case analysis.SymbolKindVariable:
+		if typeName != "" {
+			return fmt.Sprintf("**%s** %s %s variable.", name, titleArticle(typeName), typeName)
+		}
+		return fmt.Sprintf("**%s** A variable.", name)
+	case analysis.SymbolKindConstant:
+		if typeName != "" {
+			return fmt.Sprintf("**%s** %s %s constant.", name, titleArticle(typeName), typeName)
+		}
+		return fmt.Sprintf("**%s** A constant.", name)
+	case analysis.SymbolKindFunction:
+		return fmt.Sprintf("**%s** A function.", name)
+	case analysis.SymbolKindMethod:
+		return fmt.Sprintf("**%s** A method.", name)
+	case analysis.SymbolKindConstructor:
+		return fmt.Sprintf("**%s** A constructor.", name)
+	case analysis.SymbolKindClass:
+		return fmt.Sprintf("**%s** A class.", name)
+	case analysis.SymbolKindInterface:
+		return fmt.Sprintf("**%s** An interface.", name)
+	case analysis.SymbolKindEnum:
+		return fmt.Sprintf("**%s** An enum.", name)
+	case analysis.SymbolKindEnumMember:
+		return fmt.Sprintf("**%s** An enum member.", name)
+	case analysis.SymbolKindTypeAlias:
+		if typeName != "" && typeName != "unknown" {
+			return fmt.Sprintf("**%s** A type alias for %s.", name, typeName)
+		}
+		return fmt.Sprintf("**%s** A type alias.", name)
+	case analysis.SymbolKindImport:
+		return fmt.Sprintf("**%s** An import.", name)
+	default:
+		kindStr := string(kind)
+		if typeName != "" && typeName != "unknown" {
+			return fmt.Sprintf("**%s** %s %s %s.", name, titleArticle(typeName), typeName, kindStr)
+		}
+		return fmt.Sprintf("**%s** %s %s.", name, titleArticle(kindStr), kindStr)
+	}
 }
 
 func hoverDeclarationType(declaration *analysis.Declaration) (string, bool) {
@@ -842,7 +956,7 @@ func userCommandAttributeHoverAt(file *syntax.File, offset int) (syntax.Span, []
 			}
 		}
 		if val, detail, ok := vimdata.LookupUserCommandAttributeValue(attrName, valText); ok {
-			lines := []string{"name: " + val.Name, "kind: " + detail}
+			lines := []string{fmt.Sprintf("**%s** %s %s value.", val.Name, titleArticle(detail), detail)}
 			if val.Documentation != "" {
 				lines = append(lines, "", val.Documentation)
 			}
@@ -858,7 +972,7 @@ func userCommandAttributeHoverAt(file *syntax.File, offset int) (syntax.Span, []
 			}
 			attrSpan = syntax.Span{Start: attribute.Span.Start, End: nameEnd}
 		}
-		lines := []string{"name: -" + attr.Name, "kind: " + attr.Detail}
+		lines := []string{fmt.Sprintf("**-%s** A user command attribute (%s).", attr.Name, attr.Detail)}
 		if attr.Documentation != "" {
 			lines = append(lines, "", attr.Documentation)
 		}

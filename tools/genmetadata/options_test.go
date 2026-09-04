@@ -110,6 +110,36 @@ func TestParseSourceRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestParseOptionAvailabilitySimplifiesPartitionedBranches(t *testing.T) {
+	source := []byte(`static struct vimoption options[] = {
+ {"delta", "dl", P_STRING|P_VI_DEF,
+#ifdef FEATURE_DELTA
+  (char_u *)&p_delta, PV_NONE, NULL, NULL,
+  {
+# if defined(MSWIN)
+  (char_u *)"win",
+# elif defined(UNIX)
+  (char_u *)"unix",
+# else
+  (char_u *)"other",
+# endif
+  (char_u *)0L}
+#else
+  (char_u *)NULL, PV_NONE, NULL, NULL,
+  {(char_u *)NULL, (char_u *)0L}
+#endif
+  SCTX_INIT},
+};
+`)
+	options, err := parseOptionSource(source)
+	if err != nil || len(options) != 1 {
+		t.Fatalf("options = %#v, err = %v", options, err)
+	}
+	if options[0].AvailableWhen != "defined(FEATURE_DELTA)" {
+		t.Fatalf("AvailableWhen = %q, want %q", options[0].AvailableWhen, "defined(FEATURE_DELTA)")
+	}
+}
+
 func TestExpandConditionalTextPreservesElifAndElseConditions(t *testing.T) {
 	forms, err := expandConditionalText("before\n#if FIRST && \\\n    CONTINUED\none\n#elif SECOND\ntwo\n#else\nthree\n#endif\nafter\n")
 	if err != nil {

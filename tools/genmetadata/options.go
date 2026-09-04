@@ -84,6 +84,7 @@ var termPattern = regexp.MustCompile(`(?m)^[ \t]*p_term\("([^"]+)"\s*,\s*([A-Za-
 var cStringArrayPattern = regexp.MustCompile(`(?m)\bchar\s+\*\s*(?:\(\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*\]\s*(?:\))?\s*=\s*\{`)
 var cStringMacroPattern = regexp.MustCompile(`(?m)^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+("(?:\\.|[^"])*")`)
 var simpleDefinedPattern = regexp.MustCompile(`^defined\(([A-Za-z_][A-Za-z0-9_]*)\)$`)
+var definedIdentifierPattern = regexp.MustCompile(`\bdefined\(([A-Za-z_][A-Za-z0-9_]*)\)`)
 var vimFeaturePattern = regexp.MustCompile(`(?m)^[ \t]*#[ \t]*(?:ifdef[ \t]+([A-Za-z_][A-Za-z0-9_]*)|if[ \t]+defined\(([A-Za-z_][A-Za-z0-9_]*)\))[ \t]*\r?\n[ \t]*"\+([^"]+)"`)
 
 func generateOptions(root, output, oracleOutput string) error {
@@ -671,7 +672,60 @@ func optionAvailability(variants []optionVariant) string {
 	if len(conditions) == 0 {
 		return "0"
 	}
+	return simplifyConditions(conditions)
+}
+
+func simplifyConditions(conditions []string) string {
+	if len(conditions) <= 1 {
+		if len(conditions) == 1 {
+			return stripOuterParens(conditions[0])
+		}
+		return "0"
+	}
+	firstLeft, _, ok := splitConditionAnd(conditions[0])
+	if ok && firstLeft != "" {
+		allSame := true
+		for _, c := range conditions[1:] {
+			left, _, ok := splitConditionAnd(c)
+			if !ok || left != firstLeft {
+				allSame = false
+				break
+			}
+		}
+		if allSame {
+			return stripOuterParens(firstLeft)
+		}
+	}
 	return conditionOr(conditions)
+}
+
+func splitConditionAnd(s string) (string, string, bool) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "(") {
+		return "", "", false
+	}
+	closeIndex := matchingCDelimiter(s, 0, '(', ')')
+	if closeIndex < 0 || closeIndex+len(" && (") >= len(s) {
+		return "", "", false
+	}
+	if !strings.HasPrefix(s[closeIndex+1:], " && (") || !strings.HasSuffix(s, ")") {
+		return "", "", false
+	}
+	rightStart := closeIndex + 1 + len(" && ")
+	if matchingCDelimiter(s, rightStart, '(', ')') != len(s)-1 {
+		return "", "", false
+	}
+	left := s[1:closeIndex]
+	right := s[rightStart+1 : len(s)-1]
+	return left, right, true
+}
+
+func stripOuterParens(s string) string {
+	s = strings.TrimSpace(s)
+	for strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") && matchingCDelimiter(s, 0, '(', ')') == len(s)-1 {
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
+	return s
 }
 
 func optionType(flags string) (string, error) {
@@ -1381,11 +1435,22 @@ func addOptionRequiredFeatures(root string, options []option) error {
 	features := parseVimFeatures(versionSource)
 	for i := range options {
 		match := simpleDefinedPattern.FindStringSubmatch(options[i].AvailableWhen)
-		if len(match) != 2 {
+		if len(match) == 2 {
+			if feature := features[match[1]]; feature != "" {
+				options[i].RequiredFeatures = []string{feature}
+			}
 			continue
 		}
-		if feature := features[match[1]]; feature != "" {
-			options[i].RequiredFeatures = []string{feature}
+		if !strings.Contains(options[i].AvailableWhen, "||") {
+			var reqs []string
+			for _, sub := range definedIdentifierPattern.FindAllStringSubmatch(options[i].AvailableWhen, -1) {
+				if feature := features[sub[1]]; feature != "" && !slices.Contains(reqs, feature) {
+					reqs = append(reqs, feature)
+				}
+			}
+			if len(reqs) > 0 {
+				options[i].RequiredFeatures = reqs
+			}
 		}
 	}
 	return nil

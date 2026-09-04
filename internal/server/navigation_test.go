@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -110,7 +111,7 @@ func TestDocumentNavigation(t *testing.T) {
 		t.Fatal("hover is nil")
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindPlainText || content.Value != "name: value\nkind: variable\ntype: number" || hover.Range == nil || *hover.Range != navigationRange(2, 11, 16) {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || content.Value != "**value** A number variable." || hover.Range == nil || *hover.Range != navigationRange(2, 11, 16) {
 		t.Fatalf("hover = %#v", hover)
 	}
 }
@@ -501,7 +502,8 @@ func TestHoverShowsVariableTypes(t *testing.T) {
 				t.Fatal("hover is nil")
 			}
 			content, ok := hover.Contents.(*protocol.MarkupContent)
-			if !ok || content.Value != "name: value\nkind: variable\ntype: "+test.want {
+			wantValue := fmt.Sprintf("**value** %s %s variable.", titleArticle(test.want), test.want)
+			if !ok || content.Kind != protocol.MarkupKindMarkdown || content.Value != wantValue {
 				t.Fatalf("hover = %#v", hover)
 			}
 		})
@@ -521,7 +523,7 @@ func TestHoverShowsVim9HeredocListStringType(t *testing.T) {
 		t.Fatalf("hover = %#v, error = %v", hover, err)
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Value != "name: call_function\nkind: constant\ntype: list<string>" {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || content.Value != "**call_function** A list<string> constant." {
 		t.Fatalf("hover = %#v", hover)
 	}
 }
@@ -539,8 +541,69 @@ func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
 		t.Fatal("builtin hover is nil")
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, "name: argc\nkind: builtin function\ntype: number\n\nargc([{winid}])") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, "```vim\nargc([{winid}])\n```") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
 		t.Fatalf("builtin hover = %#v", hover)
+	}
+}
+
+func TestHoverShowsBuiltinFunctionSignatureBlock(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho getcompletion('c', 'color')\n")
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 1, Character: 7},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hover == nil {
+		t.Fatal("builtin hover is nil")
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	wantPrefix := "```vim\ngetcompletion({pat}, {type} [, {filtered}])\n```\n\nReturn a list of command-line completion matches."
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, wantPrefix) {
+		t.Fatalf("builtin hover = %#v", hover)
+	}
+}
+
+func TestFormatFunctionHover(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  string
+		want string
+	}{
+		{
+			name: "getcompletion",
+			doc:  "getcompletion({pat}, {type} [, {filtered}])\nReturn a list of matches.",
+			want: "```vim\ngetcompletion({pat}, {type} [, {filtered}])\n```\n\nReturn a list of matches.",
+		},
+		{
+			name: "cursor",
+			doc:  "cursor({lnum}, {col} [, {off}])\ncursor({list})\nPositions the cursor.",
+			want: "```vim\ncursor({lnum}, {col} [, {off}])\ncursor({list})\n```\n\nPositions the cursor.",
+		},
+		{
+			name: "empty doc",
+			doc:  "",
+			want: "```vim\nempty doc()\n```",
+		},
+		{
+			name: "obsolete without signature",
+			doc:  "Obsolete name: buffer_exists().",
+			want: "Obsolete name: buffer_exists().",
+		},
+		{
+			name: "signature only",
+			doc:  "signature only()",
+			want: "```vim\nsignature only()\n```",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatFunctionHover(tt.name, tt.doc)
+			if got != tt.want {
+				t.Fatalf("formatFunctionHover(%q, %q) = %q, want %q", tt.name, tt.doc, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -556,22 +619,22 @@ func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 		{
 			name: "Vim9 unknown function", source: "vim9script\nindent(1)->bar()\n",
 			line: 1, character: 12, wantRange: navigationRange(1, 11, 14),
-			want: "name: bar\nkind: function\n\nfunction not found",
+			want: "**bar** A function.\n\nfunction not found",
 		},
 		{
 			name: "legacy unknown function", source: "call indent(1)->bar()\n",
 			character: 17, wantRange: navigationRange(0, 16, 19),
-			want: "name: bar\nkind: function\n\nfunction not found",
+			want: "**bar** A function.\n\nfunction not found",
 		},
 		{
 			name: "builtin method", source: "vim9script\n[1]->len()\n",
 			line: 1, character: 6, wantRange: navigationRange(1, 5, 8),
-			want: "name: len\nkind: builtin function\ntype: number",
+			want: "```vim\nlen({expr})\n```",
 		},
 		{
 			name: "local function", source: "vim9script\ndef transform(value: number): number\n  return value\nenddef\nindent(1)->transform()\n",
 			line: 4, character: 12, wantRange: navigationRange(4, 11, 20),
-			want: "name: transform\nkind: function",
+			want: "**transform** A function.",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -584,7 +647,7 @@ func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 				t.Fatalf("hover = %#v, error = %v", hover, err)
 			}
 			content, ok := hover.Contents.(*protocol.MarkupContent)
-			if !ok || !strings.HasPrefix(content.Value, test.want) {
+			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.want) {
 				t.Fatalf("hover content = %#v", hover.Contents)
 			}
 		})
@@ -599,8 +662,8 @@ func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
 		prefix    string
 		fragment  string
 	}{
-		{name: "option", character: 7, prefix: "name: number\nkind: option\ntype: bool", fragment: "Print the line number"},
-		{name: "predefined variable", character: 15, prefix: "name: v:version\nkind: predefined variable\ntype: number", fragment: "Version number of Vim"},
+		{name: "option", character: 7, prefix: "'number' 'nu'", fragment: "Print the line number"},
+		{name: "predefined variable", character: 15, prefix: "**v:version** A predefined number variable.", fragment: "Version number of Vim"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -610,21 +673,73 @@ func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
 				t.Fatalf("hover = %#v, %v", hover, err)
 			}
 			content, ok := hover.Contents.(*protocol.MarkupContent)
-			if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) || len(content.Value) > maxLanguageFeatureDocumentationBytes {
 				t.Fatalf("hover content = %#v", hover.Contents)
 			}
 		})
 	}
 }
 
+func TestHoverShowsTerminalOptionVariable(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "let &t_SI = \"\\e[5 q\"\necho &t_SI\n")
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 7},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || content.Value != "**&t_SI** A string variable." {
+		t.Fatalf("hover content = %#v, want %q", hover.Contents, "**&t_SI** A string variable.")
+	}
+}
+
+func TestHoverShowsSetCommandOptionHelp(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "set backspace=2 nonumber\nsetlocal tabstop=4 nu\nsetglobal wrap invlist\nset relativenumber\n")
+	for _, test := range []struct {
+		name      string
+		line      uint32
+		character uint32
+		prefix    string
+		fragment  string
+	}{
+		{name: "set command", line: 0, character: 1, prefix: "**set** An Ex command.", fragment: "Show all options that differ from their default value"},
+		{name: "backspace", line: 0, character: 5, prefix: "'backspace' 'bs'", fragment: "Influences the working of <BS>"},
+		{name: "nonumber prefix", line: 0, character: 17, prefix: "'number' 'nu'", fragment: "Print the line number"},
+		{name: "nonumber name", line: 0, character: 20, prefix: "'number' 'nu'", fragment: "Print the line number"},
+		{name: "setlocal tabstop", line: 1, character: 11, prefix: "'tabstop' 'ts'", fragment: "Defines the column multiple"},
+		{name: "setlocal nu abbreviation", line: 1, character: 19, prefix: "'number' 'nu'", fragment: "Print the line number"},
+		{name: "setglobal wrap", line: 2, character: 11, prefix: "'wrap'", fragment: "This option changes how text is displayed"},
+		{name: "invlist prefix", line: 2, character: 16, prefix: "'list'", fragment: "List mode"},
+		{name: "relativenumber", line: 3, character: 6, prefix: "'relativenumber' 'rnu'", fragment: "Show the line number relative to the line with the cursor"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: test.line, Character: test.character},
+			}})
+			if err != nil || hover == nil {
+				t.Fatalf("hover = %#v, %v", hover, err)
+			}
+			content, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) {
+				t.Fatalf("hover content = %#v", hover.Contents)
+			}
+			if strings.Contains(content.Value, "A bool option") || strings.Contains(content.Value, "A string option") || strings.Contains(content.Value, "A number option") {
+				t.Fatalf("hover content still has redundant option description: %q", content.Value)
+			}
+		})
+	}
+}
+
 func TestHoverShowsOptionBuildRequirement(t *testing.T) {
-	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho &autochdir &ballooneval\n")
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho &autochdir &ballooneval &grepprg\n")
 	for _, test := range []struct {
 		character uint32
 		want      string
 	}{
-		{character: 8, want: "build requirement: +autochdir (defined(FEAT_AUTOCHDIR))"},
-		{character: 20, want: "build requirement: +balloon_eval (defined(FEAT_BEVAL_GUI))"},
+		{character: 8, want: "build requirement: +autochdir"},
+		{character: 20, want: "build requirement: +balloon_eval"},
+		{character: 32, want: "build requirement: +quickfix"},
 	} {
 		hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: test.character},
@@ -636,24 +751,27 @@ func TestHoverShowsOptionBuildRequirement(t *testing.T) {
 		if !ok || !strings.Contains(content.Value, test.want) {
 			t.Fatalf("hover content = %#v, want %q", hover.Contents, test.want)
 		}
+		if strings.Contains(content.Value, "defined(") {
+			t.Fatalf("hover content leaked C preprocessor condition: %q", content.Value)
+		}
 	}
 }
 
 func TestOptionBuildRequirementFormatting(t *testing.T) {
-	tests := map[string]string{
-		"1":                                  "",
-		"0":                                  "unavailable in Vim v9.2.1015",
-		"defined(FEAT_AUTOCHDIR)":            "+autochdir (defined(FEAT_AUTOCHDIR))",
-		"defined(FEAT_X) && defined(FEAT_Y)": "defined(FEAT_X) && defined(FEAT_Y)",
-		"defined(MSWIN) || defined(FEAT_WAYLAND)": "defined(MSWIN) || defined(FEAT_WAYLAND)",
+	tests := []struct {
+		condition string
+		features  []string
+		want      string
+	}{
+		{condition: "1", want: ""},
+		{condition: "0", want: "unavailable in Vim v9.2.1015"},
+		{condition: "defined(FEAT_AUTOCHDIR)", features: []string{"autochdir"}, want: "+autochdir"},
+		{condition: "defined(FEAT_X) && defined(FEAT_Y)", features: []string{"feat_x", "feat_y"}, want: "+feat_x, +feat_y"},
+		{condition: "defined(ELAPSED_FUNC)", want: ""},
 	}
-	for condition, want := range tests {
-		var features []string
-		if condition == "defined(FEAT_AUTOCHDIR)" {
-			features = []string{"autochdir"}
-		}
-		if got := optionBuildRequirement(condition, features); got != want {
-			t.Errorf("optionBuildRequirement(%q) = %q, want %q", condition, got, want)
+	for _, tt := range tests {
+		if got := optionBuildRequirement(tt.condition, tt.features); got != tt.want {
+			t.Errorf("optionBuildRequirement(%q, %v) = %q, want %q", tt.condition, tt.features, got, tt.want)
 		}
 	}
 }
@@ -667,7 +785,7 @@ func TestHoverShowsPinnedExCommandHelpForAbbreviation(t *testing.T) {
 		t.Fatalf("hover = %#v, %v", hover, err)
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, "name: echo\nkind: Ex command") || !strings.Contains(content.Value, "Echoes each {expr1}") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, "**echo** An Ex command.") || !strings.Contains(content.Value, "Echoes each {expr1}") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
 		t.Fatalf("hover content = %#v", hover.Contents)
 	}
 }
@@ -681,8 +799,8 @@ func TestHoverShowsHasFeatureAndExpandSpecialDocs(t *testing.T) {
 		prefix    string
 		fragment  string
 	}{
-		{name: "has feature", line: 1, character: 15, prefix: "name: gui_running\nkind: has() feature", fragment: "Whether the Vim GUI is running"},
-		{name: "expand special", line: 2, character: 16, prefix: "name: <cfile>\nkind: expand() special", fragment: "File name under the cursor"},
+		{name: "has feature", line: 1, character: 15, prefix: "**gui_running** A has() feature.", fragment: "Whether the Vim GUI is running"},
+		{name: "expand special", line: 2, character: 16, prefix: "**<cfile>** An expand() special.", fragment: "File name under the cursor"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -692,7 +810,7 @@ func TestHoverShowsHasFeatureAndExpandSpecialDocs(t *testing.T) {
 				t.Fatalf("hover = %#v, %v", hover, err)
 			}
 			content, ok := hover.Contents.(*protocol.MarkupContent)
-			if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) || len(content.Value) > maxLanguageFeatureDocumentationBytes {
 				t.Fatalf("hover content = %#v", hover.Contents)
 			}
 		})
@@ -711,28 +829,28 @@ func TestHoverShowsUserCommandAttributeAndValueDocs(t *testing.T) {
 		{
 			name:      "attribute nargs",
 			character: 11, // inside "-nargs="
-			prefix:    "name: -nargs=\nkind: command argument count",
+			prefix:    "**-nargs=** A user command attribute (command argument count).",
 			fragment:  "Specifies how many arguments are allowed",
 			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 9}, End: protocol.Position{Line: 0, Character: 16}},
 		},
 		{
 			name:      "attribute nargs value",
 			character: 16, // at "+"
-			prefix:    "name: +\nkind: command argument count",
+			prefix:    "**+** A command argument count value.",
 			fragment:  "Arguments must be supplied",
 			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 16}, End: protocol.Position{Line: 0, Character: 17}},
 		},
 		{
 			name:      "attribute bang",
 			character: 20, // inside "-bang"
-			prefix:    "name: -bang\nkind: command flag",
+			prefix:    "**-bang** A user command attribute (command flag).",
 			fragment:  "The command can take a ! modifier",
 			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 18}, End: protocol.Position{Line: 0, Character: 23}},
 		},
 		{
 			name:      "attribute complete custom value",
 			character: 35, // inside "custom"
-			prefix:    "name: custom\nkind: command completion type",
+			prefix:    "**custom** A command completion type value.",
 			fragment:  "Custom completion, defined via custom,{func}",
 			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 34}, End: protocol.Position{Line: 0, Character: 40}},
 		},
@@ -749,7 +867,7 @@ func TestHoverShowsUserCommandAttributeAndValueDocs(t *testing.T) {
 				t.Fatalf("hover range = %#v, want %#v", hover.Range, test.wantRange)
 			}
 			content, ok := hover.Contents.(*protocol.MarkupContent)
-			if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) {
+			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) {
 				t.Fatalf("hover content = %#v", hover.Contents)
 			}
 		})
@@ -834,7 +952,7 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Value != "name: Run\nkind: function\nsignature: Run(): number\ntype: func(): number" || hover.Range == nil || *hover.Range != navigationRange(2, 17, 20) {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || content.Value != "**Run** A function.\nsignature: Run(): number\ntype: func(): number" || hover.Range == nil || *hover.Range != navigationRange(2, 17, 20) {
 		t.Fatalf("cross-file hover = %#v", hover)
 	}
 
@@ -1196,7 +1314,7 @@ func TestHoverShowsUnindexedLegacyGlobalFunction(t *testing.T) {
 		t.Fatalf("missing global function hover = %#v, %v", hover, err)
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || !strings.Contains(content.Value, "name: MissingGlobal") || !strings.Contains(content.Value, "function not found in workspace index") {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.Contains(content.Value, "**MissingGlobal**") || !strings.Contains(content.Value, "function not found in workspace index") {
 		t.Fatalf("missing global function hover content = %#v", hover.Contents)
 	}
 
@@ -1218,7 +1336,7 @@ func TestHoverShowsUnindexedLegacyGlobalFunction(t *testing.T) {
 		t.Fatalf("missing Vim9 global function hover = %#v, %v", hover, err)
 	}
 	content, ok = hover.Contents.(*protocol.MarkupContent)
-	if !ok || !strings.Contains(content.Value, "name: MissingGlobal") || !strings.Contains(content.Value, "function not found in workspace index") {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.Contains(content.Value, "**MissingGlobal**") || !strings.Contains(content.Value, "function not found in workspace index") {
 		t.Fatalf("missing Vim9 global function hover content = %#v", hover.Contents)
 	}
 }
