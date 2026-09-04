@@ -139,6 +139,68 @@ func TestPlugMappingDoesNotReportMappingWithoutUnique(t *testing.T) {
 	}
 }
 
+func TestMappingWithMapcheckDoesNotReportMappingWithoutUnique(t *testing.T) {
+	guardedSources := []string{
+		`if empty(mapcheck('<C-y>', 'i'))
+  inoremap <silent><expr> <C-y> coc#pum#visible() ? coc#pum#confirm() : coc#inline#visible() ? coc#inline#accept() :"\<C-y>"
+endif
+`,
+		`if mapcheck('<C-y>', 'i') == ''
+  inoremap <silent><expr> <C-y> "\<C-y>"
+endif
+`,
+		`if !mapcheck('<C-y>', 'i')
+  inoremap <silent> <C-y> "\<C-y>"
+endif
+`,
+		`if has('nvim')
+  if empty(mapcheck('<C-y>', 'i'))
+    inoremap <silent><expr> <C-y> "\<C-y>"
+  endif
+endif
+`,
+		`if cond
+  let x = 1
+elseif empty(mapcheck('<C-y>', 'i'))
+  inoremap <silent><expr> <C-y> "\<C-y>"
+endif
+`,
+		`if !empty(mapcheck('<C-y>', 'i'))
+  let x = 1
+else
+  inoremap <silent><expr> <C-y> "\<C-y>"
+endif
+`,
+	}
+
+	for _, src := range guardedSources {
+		result := Analyze(syntax.Parse(src))
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vimls/mapping-without-unique" {
+				t.Fatalf("unexpected vimls/mapping-without-unique for guarded mapping: %s\nDiagnostics: %#v", src, diagnostic)
+			}
+		}
+	}
+
+	// An unguarded mapping alongside a guarded mapping should still trigger the diagnostic
+	mixedSource := `if empty(mapcheck('<C-y>', 'i'))
+  inoremap <silent><expr> <C-y> "\<C-y>"
+endif
+inoremap <silent> <C-x> "\<C-x>"
+`
+	mixedResult := Analyze(syntax.Parse(mixedSource))
+	found := false
+	for _, diagnostic := range mixedResult.Diagnostics {
+		if diagnostic.Code == "vimls/mapping-without-unique" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected vimls/mapping-without-unique for unguarded mapping in mixed source, got %#v", mixedResult.Diagnostics)
+	}
+}
+
 func TestConfigFileAbbreviationsDoNotReportRecursiveMap(t *testing.T) {
 	source := "iabbrev cosnt const\ncabbrev nao noa\n"
 	for _, diagnostic := range AnalyzeConfigFile(syntax.Parse(source)).Diagnostics {
