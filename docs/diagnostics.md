@@ -97,6 +97,7 @@ the default message more specific without changing its code.
 | `vimls/missing-list-end` | Information | missing end of list |
 | `vimls/missing-member` | Information | expected member name |
 | `vimls/missing-method-call` | Information | expected argument list after callable |
+| `vimls/missing-option-value` | Warning | option requires a value; :set without an operator displays the current value |
 | `vimls/missing-ternary-colon` | Information | expected : in ternary expression |
 | `vimls/missing-type` | Information | expected Vim9 type |
 | `vimls/normal-without-bang` | Warning | :normal may invoke user-defined mappings; prefer :normal! |

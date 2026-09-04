@@ -23,6 +23,7 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 		"vimls/mapping-script-local-reference": DiagnosticWarning,
 		"vimls/mapping-without-unique":         DiagnosticHint,
 		"vimls/match-command":                  DiagnosticHint,
+		"vimls/missing-option-value":           DiagnosticWarning,
 		"vimls/normal-without-bang":            DiagnosticWarning,
 		"vimls/recursive-map":                  DiagnosticWarning,
 		"vimls/set-vs-setlocal":                DiagnosticWarning,

@@ -266,6 +266,16 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 				}
 			}
 		}
+		if result.configFile && command.Set != nil {
+			for _, option := range command.Set.Options {
+				if file.Text(option.Prefix) == "" && file.Text(option.Operator) == "" {
+					optName := file.Text(option.Name)
+					if metadata, ok := vimdata.LookupOption(optName); ok && metadata.Type != vimdata.OptionBool {
+						appendStyleDiagnostic(result, "vimls/missing-option-value", "option requires a value; :set without an operator displays the current value", option.Name)
+					}
+				}
+			}
+		}
 		if result.configFile && command.Canonical == "execute" && command.Argument.Start < command.Argument.End && dynamicAutocmdText(file.Text(command.Argument)) {
 			// Dynamic command text may target any existing group, including one
 			// named explicitly outside the current :augroup region.

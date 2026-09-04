@@ -462,3 +462,41 @@ func TestConfigFileModeRepeatSourceFunctionBang(t *testing.T) {
 		t.Fatalf("plugin single function definition expected default severity (warning), got %#v", resPlugin.Diagnostics)
 	}
 }
+
+func TestConfigFileMissingOptionValue(t *testing.T) {
+	// Value-requiring options without operator trigger vimls/missing-option-value in config files.
+	missingSources := []string{
+		"set backspace\n",
+		"setlocal tabstop\n",
+		"setglobal shiftwidth\n",
+		"set encoding\n",
+	}
+	for _, source := range missingSources {
+		if got := countCode(t, source, "vimls/missing-option-value", true); got != 1 {
+			t.Errorf("source %q in config mode want 1 vimls/missing-option-value, got %d", source, got)
+		}
+		// In plugin files, no missing-option-value diagnostic is emitted.
+		if got := countCode(t, source, "vimls/missing-option-value", false); got != 0 {
+			t.Errorf("source %q in plugin mode want 0 vimls/missing-option-value, got %d", source, got)
+		}
+	}
+
+	// Valid operations should not trigger vimls/missing-option-value.
+	validSources := []string{
+		"set backspace=2\n",
+		"set backspace+=indent\n",
+		"set backspace:2\n",
+		"set backspace?\n",
+		"set backspace&\n",
+		"set backspace<\n",
+		"set number\n",
+		"set nonumber\n",
+		"set invnumber\n",
+		"set number!\n",
+	}
+	for _, source := range validSources {
+		if got := countCode(t, source, "vimls/missing-option-value", true); got != 0 {
+			t.Errorf("source %q in config mode want 0 vimls/missing-option-value, got %d", source, got)
+		}
+	}
+}

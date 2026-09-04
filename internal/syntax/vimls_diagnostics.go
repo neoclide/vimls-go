@@ -62,6 +62,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/missing-list-end", Message: "missing end of list", Severity: DiagnosticInformation},
 	{Code: "vimls/missing-member", Message: "expected member name", Severity: DiagnosticInformation},
 	{Code: "vimls/missing-method-call", Message: "expected argument list after callable", Severity: DiagnosticInformation},
+	{Code: "vimls/missing-option-value", Message: "option requires a value; :set without an operator displays the current value", Severity: DiagnosticWarning},
 	{Code: "vimls/missing-ternary-colon", Message: "expected : in ternary expression", Severity: DiagnosticInformation},
 	{Code: "vimls/missing-type", Message: "expected Vim9 type", Severity: DiagnosticInformation},
 	{Code: "vimls/normal-without-bang", Message: ":normal may invoke user-defined mappings; prefer :normal!", Severity: DiagnosticWarning},
