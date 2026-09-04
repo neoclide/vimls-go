@@ -931,6 +931,12 @@ func TestParsesLegacyFunctionSignatureAndAttributes(t *testing.T) {
 		}
 	}
 
+	withoutSpace := (LegacyParser{}).Parse("function! s:InstallOptions(...)abort\nendfunction\n")
+	function = withoutSpace.Commands[0].Function
+	if function == nil || len(function.Attributes) != 1 || withoutSpace.Text(function.Attributes[0]) != "abort" || len(withoutSpace.Diagnostics) != 0 {
+		t.Fatalf("function attribute without space = %#v, diagnostics = %#v", function, withoutSpace.Diagnostics)
+	}
+
 	incomplete := (LegacyParser{}).Parse("function! Foo() cl\nendfunction\n")
 	function = incomplete.Commands[0].Function
 	if function == nil || incomplete.Text(function.AttributeTail) != " cl" || len(function.Attributes) != 0 || len(incomplete.Diagnostics) != 1 || incomplete.Diagnostics[0].Code != "vim/E488" {

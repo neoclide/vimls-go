@@ -41,7 +41,7 @@ func analyzeModeCodes(t *testing.T, source string, configFile bool) []string {
 // configuration-overwrite and global-internal-state: the plugin-oriented
 // heuristics are disabled because top-level g: values are user configuration.
 func TestConfigFileModeDisablesPluginConfigurationRules(t *testing.T) {
-	source := "let g:plug_config = 1\nlet g:plug_internal_cache = {}\n"
+	source := "let g:plug_config = 1\nlet g:state = {}\n"
 	want := []string{"vimls/configuration-overwrite", "vimls/global-internal-state"}
 	if got := analyzeModeCodes(t, source, false); !reflect.DeepEqual(got, want) {
 		t.Fatalf("plugin-mode diagnostics = %#v, want %#v", got, want)

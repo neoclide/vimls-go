@@ -16,7 +16,7 @@ import (
 // configRoleTestSource is deliberately identical for the config-file and the
 // plugin file so the two tests differ only in the file role.
 const configRoleTestSource = `let g:plug_config = 1
-let g:plug_internal_cache = {}
+let g:state = {}
 map <leader>x :echo 'x'<CR>
 set tabstop=2
 autocmd FileType python set sw=4

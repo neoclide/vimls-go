@@ -55,6 +55,8 @@ func TestStyleDiagnosticsAvoidDocumentedExceptions(t *testing.T) {
 	source := `normal! gg
 function! s:Run() abort
 endfunction
+function! s:InstallOptions(...)abort
+endfunction
 try
 catch /E117/
 endtry
@@ -181,7 +183,7 @@ func TestAdditionalStyleDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "global configuration and internal state",
-			source: "let g:plugin_timeout = 100\nlet g:plugin_internal_cache = {}\n",
+			source: "let g:plugin_timeout = 100\nlet g:state = {}\n",
 			want:   []string{"vimls/configuration-overwrite", "vimls/global-internal-state"},
 		},
 		{
@@ -275,7 +277,7 @@ func TestConfigurationOverwriteSkipsSelfPreservingGet(t *testing.T) {
 }
 
 func TestPluginGlobalAssignmentsReportDebuggingHint(t *testing.T) {
-	source := "let g:x = 33\nfunction! coc#expandable() abort\n  let g:y = 44\n  if exists('g:z')\n    let g:z = 55\n  endif\n  try\n    let g:w = 66\n  endtry\nendfunction\n"
+	source := "let g:x = 33\nlet g:abcde = 1\nlet g:abcdef = 2\nfunction! coc#expandable() abort\n  let g:y = 44\n  if exists('g:z')\n    let g:z = 55\n  endif\n  try\n    let g:w = 66\n  endtry\nendfunction\n"
 	file := syntax.Parse(source)
 	result := Analyze(file)
 	var got []string
@@ -284,14 +286,14 @@ func TestPluginGlobalAssignmentsReportDebuggingHint(t *testing.T) {
 			got = append(got, file.Text(diagnostic.Span))
 		}
 	}
-	want := []string{"g:x", "g:y", "g:z", "g:w"}
+	want := []string{"g:x", "g:abcde", "g:y", "g:z", "g:w"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("global-internal-state spans = %#v, want %#v; diagnostics = %#v", got, want, result.Diagnostics)
 	}
 }
 
 func TestPluginGlobalAssignmentHintExclusions(t *testing.T) {
-	source := "let g:coc_user_config = get(g:, 'coc_user_config', {})\nlet g:coc_global_extensions = get(g:, 'coc_global_extensions', [])\nlet g:loaded_example = 1\n"
+	source := "let g:coc_user_config = get(g:, 'coc_user_config', {})\nlet g:coc_global_extensions = get(g:, 'coc_global_extensions', [])\nlet g:loaded_example = 1\nlet g:debug_value = 1\nlet g:internal_cache = {}\n"
 	if got := collectVimlsCodes(Analyze(syntax.Parse(source))); len(got) != 0 {
 		t.Fatalf("plugin diagnostics = %#v, want none", got)
 	}

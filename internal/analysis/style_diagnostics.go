@@ -3,6 +3,7 @@ package analysis
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/vimdata"
@@ -241,8 +242,17 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 		if command.Canonical == "normal" && command.Bang.Start == command.Bang.End && command.Argument.Start < command.Argument.End {
 			appendStyleDiagnostic(result, "vimls/normal-without-bang", ":normal may invoke user-defined mappings; prefer :normal!", command.Name)
 		}
-		if command.Canonical == "function" && command.Function != nil && !hasWord(file.Text(command.Argument), "abort") {
-			appendStyleDiagnostic(result, "vimls/function-without-abort", "function does not use abort", command.Name)
+		if command.Canonical == "function" && command.Function != nil {
+			hasAbort := false
+			for _, attribute := range command.Function.Attributes {
+				if file.Text(attribute) == "abort" {
+					hasAbort = true
+					break
+				}
+			}
+			if !hasAbort {
+				appendStyleDiagnostic(result, "vimls/function-without-abort", "function does not use abort", command.Name)
+			}
 		}
 		if command.Canonical == "catch" && strings.TrimSpace(file.Text(command.Argument)) != "" && !hasVimErrorCode(file.Text(command.Argument)) {
 			appendStyleDiagnostic(result, "vimls/catch-error-message", "catching human-readable error text is fragile; prefer a Vim error code", command.Argument)
@@ -397,8 +407,11 @@ func collectDeclarationStyleDiagnostics(result *FileAnalysis, file *syntax.File,
 		return
 	}
 	lower := strings.ToLower(name[2:])
+	shortGlobal := utf8.RuneCountInString(lower) <= 5
 	if command.Block < 0 && (strings.Contains(lower, "internal") || strings.Contains(lower, "state") || strings.Contains(lower, "cache") || strings.Contains(lower, "queue") || strings.Contains(lower, "counter")) {
-		appendStyleDiagnostic(result, "vimls/global-internal-state", "global variable appears to be plugin-internal state; consider script-local state", command.Declaration.Name)
+		if shortGlobal {
+			appendStyleDiagnostic(result, "vimls/global-internal-state", "global variable appears to be plugin-internal state; consider script-local state", command.Declaration.Name)
+		}
 		return
 	}
 	if command.Block < 0 && (strings.Contains(lower, "option") || strings.Contains(lower, "timeout") || strings.Contains(lower, "enable") || strings.Contains(lower, "disable") || strings.Contains(lower, "path") || strings.Contains(lower, "config")) {
@@ -406,6 +419,9 @@ func collectDeclarationStyleDiagnostics(result *FileAnalysis, file *syntax.File,
 		return
 	}
 	if strings.HasPrefix(lower, "loaded_") {
+		return
+	}
+	if !shortGlobal {
 		return
 	}
 	appendStyleDiagnostic(result, "vimls/global-internal-state", "global assignment may be leftover debugging; prefer script-local or local state", command.Declaration.Name)
@@ -485,15 +501,6 @@ func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, com
 
 func appendStyleDiagnostic(result *FileAnalysis, code, message string, span syntax.Span) {
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
-}
-
-func hasWord(source, word string) bool {
-	for field := range strings.FieldsSeq(source) {
-		if field == word {
-			return true
-		}
-	}
-	return false
 }
 
 func hasVimErrorCode(source string) bool {

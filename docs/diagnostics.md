@@ -80,7 +80,7 @@ the default message more specific without changing its code.
 | `vimls/file-too-large` | Warning | file exceeds the 4 MiB analysis limit |
 | `vimls/function-without-abort` | Hint | function does not use abort |
 | `vimls/global-function-not-indexed` | Hint | global function not found in workspace index |
-| `vimls/global-internal-state` | Hint | global variable appears to be plugin-internal state |
+| `vimls/global-internal-state` | Hint | short global variable appears to be plugin-internal state |
 | `vimls/implicit-pattern-case` | Hint | pattern match depends on 'ignorecase' |
 | `vimls/implicit-regex-magic` | Hint | pattern relies on Vim's magic setting |
 | `vimls/implicit-string-case` | Hint | string comparison depends on 'ignorecase' |
