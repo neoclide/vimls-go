@@ -304,7 +304,7 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 					appendStyleDiagnostic(result, "vimls/autocmd-outside-augroup", "autocommand is not contained in an augroup", command.Name)
 				}
 				body := file.Text(syntax.Span{Start: command.Autocmd.Pattern.End, End: command.Argument.End})
-				if commandComplexity(body) > 1 {
+				if isComplexAutocmd(file, command, body) {
 					appendStyleDiagnostic(result, "vimls/complex-autocmd", "complex autocommand body; consider delegating to a function", command.Autocmd.Pattern)
 				}
 				if group != "" {
@@ -628,4 +628,25 @@ func commandComplexity(body string) int {
 		}
 	}
 	return complexity
+}
+
+func isComplexAutocmd(file *syntax.File, command *syntax.Command, body string) bool {
+	if commandComplexity(body) <= 1 {
+		return false
+	}
+	if file == nil || command.Span.Start < 0 || command.Span.Start > len(file.Source) {
+		return true
+	}
+	lineStart := strings.LastIndexByte(file.Source[:command.Span.Start], '\n') + 1
+	lineEnd := strings.IndexByte(file.Source[command.Span.Start:], '\n')
+	if lineEnd < 0 {
+		lineEnd = len(file.Source)
+	} else {
+		lineEnd += command.Span.Start
+	}
+	if command.Span.End <= lineEnd {
+		line := strings.TrimRight(file.Source[lineStart:lineEnd], "\r")
+		return utf8.RuneCountInString(line) > 180
+	}
+	return true
 }

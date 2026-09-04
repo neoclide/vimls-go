@@ -18,7 +18,7 @@ endtry
 echoerr 'failed'
 match Error /bad/
 nmap <leader>x :call s:Run()<CR>
-autocmd BufEnter * if 1 | call s:Run() | endif
+autocmd BufEnter * if 1 | call s:Run() | echo 'this autocommand body is deliberately long enough to exceed the one hundred and eighty character single line threshold for complex-autocmd' | endif
 command! Run if 1 | call s:Run() | endif
 `
 	file := syntax.Parse(source)
@@ -362,5 +362,72 @@ func TestPluginGlobalAssignmentHintExclusions(t *testing.T) {
 	configSource := "let g:x = 33\nfunction! F() abort\n  let g:y = 44\nendfunction\n"
 	if got := collectVimlsCodes(AnalyzeConfigFile(syntax.Parse(configSource))); len(got) != 0 {
 		t.Fatalf("config diagnostics = %#v, want none", got)
+	}
+}
+
+func TestComplexAutocmdLineLengthThreshold(t *testing.T) {
+	// Under 180 characters: no complex-autocmd diagnostic even if complexity > 1
+	shortSource := `augroup TestGroup
+  autocmd!
+  autocmd BufEnter * if 1 | call s:Run() | endif
+augroup END
+`
+	result := Analyze(syntax.Parse(shortSource))
+	for _, diag := range result.Diagnostics {
+		if diag.Code == "vimls/complex-autocmd" {
+			t.Fatalf("unexpected complex-autocmd diagnostic for short line: %#v", diag)
+		}
+	}
+
+	// Over 180 characters on a single line: reports complex-autocmd diagnostic
+	longSource := `augroup TestGroup
+  autocmd!
+  autocmd BufEnter * if 1 | call s:Run() | echo 'this autocommand body is deliberately long enough to exceed the one hundred and eighty character single line threshold for complex-autocmd' | endif
+augroup END
+`
+	resultLong := Analyze(syntax.Parse(longSource))
+	found := false
+	for _, diag := range resultLong.Diagnostics {
+		if diag.Code == "vimls/complex-autocmd" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected complex-autocmd diagnostic for line exceeding 180 characters, got: %#v", resultLong.Diagnostics)
+	}
+
+	// Multiline autocmd with complexity > 1: reports complex-autocmd diagnostic
+	multilineSource := `augroup TestGroup
+  autocmd!
+  autocmd BufEnter *
+    \ if 1 |
+    \   call s:Run() |
+    \ endif
+augroup END
+`
+	resultMultiline := Analyze(syntax.Parse(multilineSource))
+	foundMultiline := false
+	for _, diag := range resultMultiline.Diagnostics {
+		if diag.Code == "vimls/complex-autocmd" {
+			foundMultiline = true
+			break
+		}
+	}
+	if !foundMultiline {
+		t.Fatalf("expected complex-autocmd diagnostic for multiline autocmd, got: %#v", resultMultiline.Diagnostics)
+	}
+
+	// Over 180 characters on a single line without complexity > 1: no complex-autocmd diagnostic
+	longSimpleSource := `augroup TestGroup
+  autocmd!
+  autocmd BufEnter * echo 'this is a very long string without multiple statements or branches to verify that simple autocmd lines exceeding 180 characters do not trigger complex-autocmd warning'
+augroup END
+`
+	resultLongSimple := Analyze(syntax.Parse(longSimpleSource))
+	for _, diag := range resultLongSimple.Diagnostics {
+		if diag.Code == "vimls/complex-autocmd" {
+			t.Fatalf("unexpected complex-autocmd diagnostic for simple long line: %#v", diag)
+		}
 	}
 }
