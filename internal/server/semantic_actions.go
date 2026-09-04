@@ -252,9 +252,18 @@ func semanticTokenEdits(previous, current []uint32) []protocol.SemanticTokensEdi
 func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis) []semanticFact {
 	facts := make([]semanticFact, 0, len(file.Tokens))
 	commandKinds := make(map[syntax.Span]syntax.CommandKind)
+	commandTokens := make(map[syntax.Span]bool)
+	for _, token := range file.Tokens {
+		if token.Kind == syntax.TokenCommand {
+			commandTokens[token.Span] = true
+		}
+	}
 	staticDeclarations := make(map[syntax.Span]bool)
 	walkCommands(file.Commands, func(command *syntax.Command) {
 		commandKinds[command.Name] = command.Kind
+		if command.Name.Start < command.Name.End && !commandTokens[command.Name] {
+			facts = append(facts, semanticCommandFact(command.Name, command.Kind))
+		}
 		isStatic := false
 		for _, modifier := range command.Modifiers {
 			if modifier.Name == "static" {
@@ -330,13 +339,10 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 			tokenType = semanticComment
 		case syntax.TokenCommand:
 			kind, known := commandKinds[token.Span]
-			if known && kind == syntax.CommandUser {
-				tokenType = semanticFunction
-			} else {
-				tokenType = semanticKeyword
-				if known && (kind == syntax.CommandBuiltin || kind == syntax.CommandBlockStart || kind == syntax.CommandBlockEnd) {
-					modifiers = semanticDefaultLibrary
-				}
+			fact := semanticCommandFact(token.Span, kind)
+			tokenType, modifiers = fact.tokenType, fact.modifiers
+			if !known {
+				modifiers = 0
 			}
 		case syntax.TokenModifier:
 			tokenType = semanticModifier
@@ -398,6 +404,17 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 		filtered = append(filtered, fact)
 	}
 	return filtered
+}
+
+func semanticCommandFact(span syntax.Span, kind syntax.CommandKind) semanticFact {
+	if kind == syntax.CommandUser {
+		return semanticFact{span: span, tokenType: semanticFunction, priority: 1}
+	}
+	modifiers := uint32(0)
+	if kind == syntax.CommandBuiltin || kind == syntax.CommandBlockStart || kind == syntax.CommandBlockEnd {
+		modifiers = semanticDefaultLibrary
+	}
+	return semanticFact{span: span, tokenType: semanticKeyword, modifiers: modifiers, priority: 1}
 }
 
 func semanticType(declaration *analysis.Declaration) uint32 {

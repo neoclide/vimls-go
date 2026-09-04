@@ -2,9 +2,10 @@ package syntax
 
 import "testing"
 
-// Mapping <expr> semantics follow Vim v9.2.1015 runtime/doc/map.txt and the
-// command handling in src/map.c.  The parser keeps the raw RHS span while
-// exposing its expression only for <expr> mappings.
+// Mapping semantics follow Vim v9.2.1015 runtime/doc/map.txt and the command
+// handling in src/map.c. The parser keeps the raw RHS span, exposing an
+// expression for <expr> mappings and an embedded command list only for RHS
+// forms that directly execute Ex commands.
 
 func TestMappingExprAST(t *testing.T) {
 	tests := []struct {
@@ -256,5 +257,23 @@ func TestMappingExprAST(t *testing.T) {
 			}
 			test.check(t, file, file.Commands[test.index].Mapping)
 		})
+	}
+}
+
+func TestMappingCommandRHSAST(t *testing.T) {
+	source := "vnoremap <silent> <Plug>(coc-range-select) :<C-u>call CocActionAsync('rangeSelect', visualmode(), v:true)<CR>\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 1 {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	command := &file.Commands[0]
+	if command.Mapping == nil || command.Embedded == nil || file.Text(command.Embedded.Span) != "call CocActionAsync('rangeSelect', visualmode(), v:true)" {
+		t.Fatalf("mapping = %#v, embedded = %#v", command.Mapping, command.Embedded)
+	}
+	if len(command.Embedded.Commands) != 1 || command.Embedded.Commands[0].Canonical != "call" {
+		t.Fatalf("embedded commands = %#v", command.Embedded.Commands)
+	}
+	if got := file.Text(command.Embedded.Commands[0].Argument); got != "CocActionAsync('rangeSelect', visualmode(), v:true)" {
+		t.Fatalf("embedded call argument = %q", got)
 	}
 }

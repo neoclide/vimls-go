@@ -323,6 +323,41 @@ func TestCompletionFunctionsInAutocmdBody(t *testing.T) {
 	}
 }
 
+func TestCompletionFunctionsInMappingCommandBody(t *testing.T) {
+	functionSource := "function! CocActionAsync(...) abort\nendfunction\n"
+	tests := []struct {
+		name, mapping, label string
+		kind                 protocol.CompletionItemKind
+		cursor               int
+	}{
+		{name: "legacy call", mapping: "vnoremap <silent> <Plug>(coc-range-select) :<C-u>call CocA('rangeSelect', visualmode(), v:true)<CR>", label: "CocActionAsync", kind: protocol.CompletionItemKindFunction, cursor: len("vnoremap <silent> <Plug>(coc-range-select) :<C-u>call CocA")},
+		{name: "legacy command", mapping: "vnoremap <silent> <Plug>(coc-range-select) :<C-u>ec", label: "echo", kind: protocol.CompletionItemKindKeyword},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := functionSource + test.mapping
+			instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+			cursor := test.cursor
+			if cursor == 0 {
+				cursor = len(test.mapping)
+			}
+			items := completionListRequest(t, instance, documentURI, 2, uint32(cursor)).Items
+			if !hasCompletion(items, test.label, test.kind) {
+				t.Fatalf("%s completion missing; items = %#v", test.label, items)
+			}
+		})
+	}
+	vim9Source := "vim9script\ndef LocalAction(): void\nenddef\nvnoremap <silent> <Plug>(local-action) :<C-u>Loc"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, vim9Source)
+	items := completionListRequest(t, instance, documentURI, 3, uint32(len("vnoremap <silent> <Plug>(local-action) :<C-u>Loc"))).Items
+	if !hasCompletion(items, "LocalAction", protocol.CompletionItemKindFunction) {
+		t.Fatalf("Vim9 mapping function completion missing; items = %#v", items)
+	}
+	if items := mappingCompletionItems(t, "nmap lhs CocA", len("nmap lhs CocA")); len(items) != 0 {
+		t.Fatalf("ordinary mapping RHS returned completion items: %#v", items)
+	}
+}
+
 func TestCompletionVim9DefStatementHeadIncludesCommandsAndFunctions(t *testing.T) {
 	tests := []struct {
 		prefix, function string

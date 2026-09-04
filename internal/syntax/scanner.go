@@ -2800,7 +2800,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	diagnoseEnumEndTrailingCharacters(file, command)
 	diagnoseEnumAbstractMember(file, command)
 	if isMappingCommand(command.Canonical) {
-		parseMapping(file, command)
+		parseMapping(file, command, depth)
 		return
 	}
 	if globalCommand(command.Canonical) {
@@ -3951,7 +3951,7 @@ func mappingInfo(name string, bang bool) (MappingKind, MappingMode, bool, bool) 
 	return kind, mode, abbreviation, clear
 }
 
-func parseMapping(file *File, command *Command) {
+func parseMapping(file *File, command *Command, depth int) {
 	kind, mode, abbreviation, clear := mappingInfo(command.Canonical, command.Bang.Start < command.Bang.End)
 	mapping := &Mapping{
 		Kind: kind, Mode: mode, Bang: command.Bang.Start < command.Bang.End,
@@ -4014,6 +4014,49 @@ func parseMapping(file *File, command *Command) {
 		mapping.Query = true
 	}
 	command.Mapping = mapping
+	if body, ok := mappingCommandBodySpan(file.Source, mapping); ok {
+		diagnostics := len(file.Diagnostics)
+		command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
+		// Mapping key notation is decoded only when the mapping executes. The
+		// embedded tree supports editor features, but cannot prove compile
+		// diagnostics against the undecoded source text.
+		file.Diagnostics = file.Diagnostics[:diagnostics]
+	}
+}
+
+// mappingCommandBodySpan recognizes only mapping forms that directly execute
+// an Ex command. Other RHS key sequences remain opaque.
+func mappingCommandBodySpan(source string, mapping *Mapping) (Span, bool) {
+	if mapping == nil || mapping.Expr || mapping.Abbreviation || mapping.RHS.Start >= mapping.RHS.End {
+		return Span{}, false
+	}
+	start, end := mapping.RHS.Start, mapping.RHS.End
+	if mapping.Mode&MappingModeNormalVisualSelectOperator == 0 || source[start] != ':' {
+		return Span{}, false
+	}
+	start++
+	controlStart := skipSpace(source, start, end)
+	const clearRange = "<C-U>"
+	if controlStart+len(clearRange) <= end && strings.EqualFold(source[controlStart:controlStart+len(clearRange)], clearRange) {
+		start = controlStart + len(clearRange)
+	} else if controlStart < end && source[controlStart] == '<' {
+		// Other key notation changes how Vim constructs or executes the command
+		// line and cannot be parsed directly from the stored RHS bytes.
+		return Span{}, false
+	}
+	for position := start; position+len("<CR>") <= end; position++ {
+		if strings.EqualFold(source[position:position+len("<CR>")], "<CR>") {
+			end = position
+			break
+		}
+	}
+	// A backslash-escaped bar is decoded by the mapping engine before the Ex
+	// command runs. Keep such multi-command RHS text opaque until that decoded
+	// view can be represented without losing source spans.
+	if strings.Contains(source[start:end], `\|`) {
+		return Span{}, false
+	}
+	return Span{Start: start, End: end}, true
 }
 
 func mappingModifierAt(source string, start, end int) (string, int) {

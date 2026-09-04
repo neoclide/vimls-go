@@ -289,6 +289,25 @@ func TestSemanticTokensClassifyLegacyNamesAndPinnedBuiltins(t *testing.T) {
 	assertSemanticToken(t, tokens.Data, 6, 12, semanticFunction, semanticReadonly)
 }
 
+func TestSemanticTokensClassifyMappingCommandBody(t *testing.T) {
+	prefix := "vnoremap <silent> <Plug>(coc-range-select) :<C-u>"
+	source := prefix + "call CocActionAsync('rangeSelect', visualmode(), v:true)<CR>\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandStart := uint32(len(prefix))
+	functionStart := commandStart + uint32(len("call "))
+	visualmodeStart := functionStart + uint32(len("CocActionAsync('rangeSelect', "))
+	vimVariableStart := visualmodeStart + uint32(len("visualmode(), "))
+	assertSemanticToken(t, tokens.Data, 0, commandStart, semanticKeyword, semanticDefaultLibrary)
+	assertSemanticToken(t, tokens.Data, 0, functionStart, semanticFunction, 0)
+	assertSemanticToken(t, tokens.Data, 0, visualmodeStart, semanticFunction, semanticDefaultLibrary)
+	assertSemanticToken(t, tokens.Data, 0, vimVariableStart, semanticNamespace, 0)
+	assertSemanticTokenHasModifiers(t, tokens.Data, 0, vimVariableStart+2, semanticVariable, semanticDefaultLibrary)
+}
+
 func TestSemanticTokensClassifyBuiltinMethodCallAsFunction(t *testing.T) {
 	source := "vim9script\necho values({})->flattennew(1)\n"
 	file := syntax.Parse(source)

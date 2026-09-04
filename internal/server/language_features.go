@@ -243,17 +243,27 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		}
 	}
 	rejected := false
-	autocmdBody := false
-	autocmdBodyDialect := file.Dialect
-	autocmdBodySpanSize := len(file.Source) + 1
+	embeddedCommandBody := false
+	embeddedCommandDialect := file.Dialect
+	embeddedCommandSpanSize := len(file.Source) + 1
+	noteEmbeddedCommandBody := func(dialect syntax.Dialect, size int) {
+		if size < embeddedCommandSpanSize {
+			embeddedCommandBody = true
+			embeddedCommandDialect = dialect
+			embeddedCommandSpanSize = size
+		}
+	}
 	walkCommands(file.Commands, func(command *syntax.Command) {
 		if command.Autocmd != nil && command.Autocmd.Pattern.Start < command.Autocmd.Pattern.End &&
-			offset > command.Autocmd.Pattern.End && offset <= command.Span.End && command.Span.End-command.Span.Start < autocmdBodySpanSize {
-			autocmdBody = true
-			autocmdBodyDialect = command.Dialect
-			autocmdBodySpanSize = command.Span.End - command.Span.Start
+			offset > command.Autocmd.Pattern.End && offset <= command.Span.End {
+			noteEmbeddedCommandBody(command.Dialect, command.Span.End-command.Span.Start)
 		}
-		if command.Heredoc != nil && (spanContains(command.Heredoc.Body, offset) || offset == command.Heredoc.Body.End) || command.TextBody != nil && (spanContains(command.TextBody.Body, offset) || offset == command.TextBody.Body.End) || command.Keymap != nil && (spanContains(command.Keymap.Body, offset) || offset == command.Keymap.Body.End) || command.Mapping != nil && (spanContains(command.Mapping.RHS, offset) || offset == command.Mapping.RHS.End) {
+		mappingCommandBody := command.Mapping != nil && command.Embedded != nil &&
+			command.Embedded.Span.Start <= offset && offset <= command.Embedded.Span.End
+		if mappingCommandBody {
+			noteEmbeddedCommandBody(command.Dialect, command.Embedded.Span.End-command.Embedded.Span.Start)
+		}
+		if command.Heredoc != nil && (spanContains(command.Heredoc.Body, offset) || offset == command.Heredoc.Body.End) || command.TextBody != nil && (spanContains(command.TextBody.Body, offset) || offset == command.TextBody.Body.End) || command.Keymap != nil && (spanContains(command.Keymap.Body, offset) || offset == command.Keymap.Body.End) || command.Mapping != nil && (spanContains(command.Mapping.RHS, offset) || offset == command.Mapping.RHS.End) && !mappingCommandBody {
 			rejected = true
 		}
 		walkCommandExpressions(command, func(expression *syntax.Expression) {
@@ -431,7 +441,7 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 				result = completionContextCommand
 				return
 			}
-			if autocmdBody && command.Dialect == syntax.Vim9 {
+			if embeddedCommandBody && command.Dialect == syntax.Vim9 {
 				result = completionContextVim9Statement
 				return
 			}
@@ -456,8 +466,8 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 	if result != completionContextNone {
 		return result
 	}
-	if autocmdBody {
-		if autocmdBodyDialect == syntax.Vim9 {
+	if embeddedCommandBody {
+		if embeddedCommandDialect == syntax.Vim9 {
 			return completionContextVim9Statement
 		}
 		return completionContextCommand
