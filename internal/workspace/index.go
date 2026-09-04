@@ -1844,7 +1844,8 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 		kind := ExternalReferenceAutoload
 		if separator > 0 && separator < len(name)-1 {
 			// Autoload variables and functions both resolve by their full name.
-		} else if directCalls[reference.Span] && (file.Dialect == syntax.Legacy || strings.HasPrefix(reference.Name, "g:")) {
+		} else if globalName := strings.TrimPrefix(reference.Name, "g:"); directCalls[reference.Span] &&
+			(file.Dialect == syntax.Legacy || strings.HasPrefix(reference.Name, "g:")) && globalName != "" && globalName[0] >= 'A' && globalName[0] <= 'Z' {
 			kind = ExternalReferenceGlobalFunction
 		} else if file.Dialect == syntax.Legacy && strings.HasPrefix(reference.Name, "g:") {
 			kind = ExternalReferenceGlobalVariable

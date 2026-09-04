@@ -5156,6 +5156,16 @@ func TestAnalyzeUnknownFunctionDiagnostics(t *testing.T) {
 			code:   "vim/E117", message: "Unknown function: doesnotexist", text: "doesnotexist",
 		},
 		{
+			name:   "Vim9 arrow call",
+			source: "vim9script\nindent(1)->bar()\n",
+			code:   "vim/E117", message: "Unknown function: bar", text: "bar",
+		},
+		{
+			name:   "legacy arrow call",
+			source: "call indent(1)->bar()\n",
+			code:   "vim/E117", message: "Unknown function: bar", text: "bar",
+		},
+		{
 			name:   "long Vim9 script call",
 			source: "vim9script\necho " + longName + "()\n",
 			code:   "vim/E117", message: "Unknown function: " + longName, text: longName,
@@ -6830,6 +6840,7 @@ func TestAnalyzeE1220StringOrNumberBuiltinArgumentDiagnostics(t *testing.T) {
 		{"line number", "vim9script\nappend([], 'x')\n", "String or Number required for argument 1", "[]"},
 		{"later dictionary remove", "vim9script\nremove({key: 1}, [])\n", "String or Number required for argument 2", "[]"},
 		{"method argument", "vim9script\n['x']->append([])\n", "String or Number required for argument 1", "[]"},
+		{"void method receiver", "vim9script\ndef Invalidate_highlights(first: number, last: number): void\nenddef\nInvalidate_highlights(1, 1)->indent()\n", "String or Number required for argument 1", "->indent"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(test.source)

@@ -544,6 +544,53 @@ func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
 	}
 }
 
+func TestHoverHandlesArrowFunctionNames(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		source    string
+		line      uint32
+		character uint32
+		wantRange protocol.Range
+		want      string
+	}{
+		{
+			name: "Vim9 unknown function", source: "vim9script\nindent(1)->bar()\n",
+			line: 1, character: 12, wantRange: navigationRange(1, 11, 14),
+			want: "name: bar\nkind: function\n\nfunction not found",
+		},
+		{
+			name: "legacy unknown function", source: "call indent(1)->bar()\n",
+			character: 17, wantRange: navigationRange(0, 16, 19),
+			want: "name: bar\nkind: function\n\nfunction not found",
+		},
+		{
+			name: "builtin method", source: "vim9script\n[1]->len()\n",
+			line: 1, character: 6, wantRange: navigationRange(1, 5, 8),
+			want: "name: len\nkind: builtin function\ntype: number",
+		},
+		{
+			name: "local function", source: "vim9script\ndef transform(value: number): number\n  return value\nenddef\nindent(1)->transform()\n",
+			line: 4, character: 12, wantRange: navigationRange(4, 11, 20),
+			want: "name: transform\nkind: function",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Position:     protocol.Position{Line: test.line, Character: test.character},
+			}})
+			if err != nil || hover == nil || hover.Range == nil || *hover.Range != test.wantRange {
+				t.Fatalf("hover = %#v, error = %v", hover, err)
+			}
+			content, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || !strings.HasPrefix(content.Value, test.want) {
+				t.Fatalf("hover content = %#v", hover.Contents)
+			}
+		})
+	}
+}
+
 func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho &number v:version\n")
 	for _, test := range []struct {

@@ -111,6 +111,11 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 			if document.external != nil {
 				return document, document.checkCurrent(ctx)
 			}
+			if file.Text(member.Operator) == "->" {
+				if span, ok := expressionMemberSpan(member); ok {
+					document.occurrence = span
+				}
+			}
 			declarationSymbol, definitionSymbol, ok := memberNavigationSymbols(file, result, member)
 			if ok {
 				document.declaration = declarationForSymbol(result, declarationSymbol)
@@ -710,11 +715,30 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			return s.localHoverResult(ctx, document, lines)
 		}
 		call := callAt(document.analysis.File, document.occurrence.Start)
-		if call == nil || len(call.Children) == 0 || call.Children[0].Span != document.occurrence {
+		if call == nil || len(call.Children) == 0 {
 			return nil, nil
 		}
-		function, ok := vimdata.LookupFunction(document.analysis.File.Text(document.occurrence))
+		callee := call.Children[0]
+		name = ""
+		method := false
+		switch {
+		case callee.Kind == syntax.ExpressionIdentifier && callee.Span == document.occurrence:
+			name = callee.Value
+		case callee.Kind == syntax.ExpressionMember && document.analysis.File.Text(callee.Operator) == "->":
+			span, ok := expressionMemberSpan(callee)
+			if !ok || span != document.occurrence {
+				return nil, nil
+			}
+			name = callee.Value
+			method = true
+		default:
+			return nil, nil
+		}
+		function, ok := vimdata.LookupFunction(name)
 		if !ok {
+			if method {
+				return s.localHoverResult(ctx, document, []string{"name: " + name, "kind: function", "", "function not found"})
+			}
 			return nil, nil
 		}
 		lines := []string{"name: " + function.Name, "kind: builtin function"}

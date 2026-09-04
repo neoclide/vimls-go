@@ -471,6 +471,15 @@ enddef
 	if len(methodReferences) != 1 || methodReferences[0].Name != "foo#bar#Transform" || !methodReferences[0].DirectCall {
 		t.Fatalf("autoload method references = %#v; syntax diagnostics = %#v", methodReferences, method.Diagnostics)
 	}
+	invalidMethods := syntax.Parse("call 1->bar()\ncall []->len()\n")
+	if references := CollectExternalReferences(filepath.Join(root, "invalid-methods.vim"), invalidMethods); len(references) != 0 {
+		t.Fatalf("lower-case and builtin methods are not global function references: %#v", references)
+	}
+	globalMethod := syntax.Parse("call 1->MissingGlobal()\n")
+	globalMethodReferences := CollectExternalReferences(filepath.Join(root, "global-method.vim"), globalMethod)
+	if len(globalMethodReferences) != 1 || globalMethodReferences[0].Name != "MissingGlobal" || globalMethodReferences[0].Kind != ExternalReferenceGlobalFunction || !globalMethodReferences[0].DirectCall {
+		t.Fatalf("global method references = %#v", globalMethodReferences)
+	}
 	vim9Global := syntax.Parse("vim9script\ng:MissingGlobal()\n")
 	vim9GlobalReferences := CollectExternalReferences(filepath.Join(root, "vim9-global.vim"), vim9Global)
 	if len(vim9GlobalReferences) != 1 || vim9GlobalReferences[0].Name != "MissingGlobal" || vim9GlobalReferences[0].Kind != ExternalReferenceGlobalFunction || !vim9GlobalReferences[0].DirectCall {

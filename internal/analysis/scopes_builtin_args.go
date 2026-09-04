@@ -685,8 +685,14 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						if !scopeUsesDefTypeRules(scope) && trimmedChecker == "arg_list_or_dict_or_blob_or_string" && actual[index].Name == "tuple" {
 							continue
 						}
+						diagnosticSpan := argument.Span
+						if actual[index].Name == "void" {
+							if methodSpan, ok := methodReceiverDiagnosticSpan(result.File, expression, argument); ok {
+								diagnosticSpan = methodSpan
+							}
+						}
 						if !scopeUsesDefTypeRules(scope) || trimmedChecker == "arg_string_list_tuple_or_dict" || trimmedChecker == "arg_list_tuple_dict_blob_or_string" {
-							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, actual, argument.Span, dialect == syntax.Vim9); ok {
+							if diagnostic, ok := builtinArgumentDiagnostic(checker, index, actual, diagnosticSpan, dialect == syntax.Vim9); ok {
 								result.Diagnostics = append(result.Diagnostics, diagnostic)
 								continue
 							}
@@ -694,7 +700,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 						if expressionContainsInvalidPlus(result, argument) {
 							continue
 						}
-						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: argument.Span})
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1013", Message: "Argument " + strconv.Itoa(index+1) + ": type mismatch, expected " + expected.display + " but got " + valueTypeDisplay(actual[index]), Span: diagnosticSpan})
 						continue
 					}
 					if dialect == syntax.Vim9 && !scopeUsesDefTypeRules(scope) && strings.TrimSuffix(checker, "_mod") == "arg_bool_or_nr" && actual[index].Name == "number" {
@@ -775,6 +781,20 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 		}
 	}
 	walkCommands(commands, parent)
+}
+
+func methodReceiverDiagnosticSpan(file *syntax.File, call, receiver *syntax.Expression) (syntax.Span, bool) {
+	if file == nil || call == nil || receiver == nil || len(call.Children) == 0 || call.Children[0] == nil {
+		return syntax.Span{}, false
+	}
+	callee := call.Children[0]
+	if call.Value == "->" && len(call.Children) >= 2 && call.Children[1] == receiver && callee.Kind == syntax.ExpressionIdentifier {
+		return syntax.Span{Start: call.Operator.Start, End: callee.Span.End}, true
+	}
+	if call.Value == "" && callee.Kind == syntax.ExpressionMember && file.Text(callee.Operator) == "->" && len(callee.Children) == 1 && callee.Children[0] == receiver {
+		return syntax.Span{Start: callee.Operator.Start, End: callee.Span.End}, true
+	}
+	return syntax.Span{}, false
 }
 
 func digraphSetlistArgumentInvalid(result *FileAnalysis, expression *syntax.Expression, actual ValueType) (bool, bool) {
@@ -1138,7 +1158,14 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 	arguments := call.Children[1:]
 	if callee.Kind == syntax.ExpressionMember && len(callee.Children) == 1 && result.File.Text(callee.Operator) == "->" {
 		declaration := resolve(scope, callee.Value, call.Span.Start, true, nil)
-		if declaration == nil || !checkTypes && declaration.Span.Start >= call.Span.Start {
+		if declaration == nil {
+			_, builtin := vimdata.LookupFunction(callee.Value)
+			if !builtin && unresolvedFunctionName(callee.Value) && !vimdata.IsNeovimCompatFunction(callee.Value) {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E117", Message: "Unknown function: " + callee.Value, Span: memberNameSpan(result.File, callee)})
+			}
+			return
+		}
+		if !checkTypes && declaration.Span.Start >= call.Span.Start {
 			return
 		}
 		callable = declaration.Type
@@ -1193,13 +1220,14 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 }
 
 func unresolvedDirectFunction(scope *Scope, callee *syntax.Expression) bool {
-	if scope == nil || callee == nil || callee.Kind != syntax.ExpressionIdentifier || callee.Value == "" || strings.ContainsAny(callee.Value, ":#&$@") {
-		return false
-	}
-	if callee.Value[0] < 'a' || callee.Value[0] > 'z' {
+	if scope == nil || callee == nil || callee.Kind != syntax.ExpressionIdentifier || !unresolvedFunctionName(callee.Value) {
 		return false
 	}
 	return resolve(scope, callee.Value, callee.Span.Start, true, nil) == nil
+}
+
+func unresolvedFunctionName(name string) bool {
+	return name != "" && name[0] >= 'a' && name[0] <= 'z' && !strings.ContainsAny(name, ":#&$@")
 }
 
 func callbackReceivesTooManyArguments(actual ValueType, expected builtinArgumentType) bool {

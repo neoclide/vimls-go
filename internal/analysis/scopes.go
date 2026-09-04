@@ -6497,7 +6497,17 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		}
 	case syntax.ExpressionMember:
 		// Value is the member spelling, not a lexical variable.  Only the
-		// receiver expression participates in same-file resolution.
+		// receiver expression participates in same-file resolution, except
+		// when an arrow member is the callable of a function call.
+		if preferFunction && file.Text(expression.Operator) == "->" {
+			span := memberNameSpan(file, expression)
+			if validNameSpan(file, span) && file.Text(span) == expression.Value {
+				result.References = append(result.References, &Reference{
+					Name: expression.Value, Span: span,
+					Declaration: resolve(scope, expression.Value, span.Start, true, skipped), functionCallee: true, scope: scope, dialect: dialect,
+				})
+			}
+		}
 		if dialect == syntax.Vim9 {
 			appendSuperOutsideClassMethodDiagnostic(result, file, scope, expression, dialect)
 			appendSuperNotInChildClassDiagnostic(result, file, scope, expression, dialect)
