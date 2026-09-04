@@ -736,24 +736,22 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			return s.localHoverResult(ctx, document, lines)
 		}
 		if variable, ok := vimdata.LookupVariable(name); ok {
+			if variable.Documentation != "" {
+				return s.localHoverResult(ctx, document, []string{variable.Documentation})
+			}
 			var header string
 			if variable.Type != "" {
 				header = fmt.Sprintf("**%s** A predefined %s variable.", variable.Name, variable.Type)
 			} else {
 				header = fmt.Sprintf("**%s** A predefined variable.", variable.Name)
 			}
-			lines := []string{header}
-			if variable.Documentation != "" {
-				lines = append(lines, "", variable.Documentation)
-			}
-			return s.localHoverResult(ctx, document, lines)
+			return s.localHoverResult(ctx, document, []string{header})
 		}
 		if command, ok := vimdata.Lookup(name); ok && !vimdata.IsNeovimCompatCommand(command.Name) {
-			lines := []string{fmt.Sprintf("**%s** An Ex command.", command.Name)}
 			if command.Documentation != "" {
-				lines = append(lines, "", command.Documentation)
+				return s.localHoverResult(ctx, document, []string{command.Documentation})
 			}
-			return s.localHoverResult(ctx, document, lines)
+			return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** An Ex command.", command.Name)})
 		}
 		call := callAt(document.analysis.File, document.occurrence.Start)
 		if call == nil || len(call.Children) == 0 {

@@ -663,7 +663,7 @@ func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
 		fragment  string
 	}{
 		{name: "option", character: 7, prefix: "'number' 'nu'", fragment: "Print the line number"},
-		{name: "predefined variable", character: 15, prefix: "**v:version** A predefined number variable.", fragment: "Version number of Vim"},
+		{name: "predefined variable", character: 15, prefix: "v:version", fragment: "Version number of Vim"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -703,7 +703,7 @@ func TestHoverShowsSetCommandOptionHelp(t *testing.T) {
 		prefix    string
 		fragment  string
 	}{
-		{name: "set command", line: 0, character: 1, prefix: "**set** An Ex command.", fragment: "Show all options that differ from their default value"},
+		{name: "set command", line: 0, character: 1, prefix: ":se[t]", fragment: "Show all options that differ from their default value"},
 		{name: "backspace", line: 0, character: 5, prefix: "'backspace' 'bs'", fragment: "Influences the working of <BS>"},
 		{name: "nonumber prefix", line: 0, character: 17, prefix: "'number' 'nu'", fragment: "Print the line number"},
 		{name: "nonumber name", line: 0, character: 20, prefix: "'number' 'nu'", fragment: "Print the line number"},
@@ -785,7 +785,24 @@ func TestHoverShowsPinnedExCommandHelpForAbbreviation(t *testing.T) {
 		t.Fatalf("hover = %#v, %v", hover, err)
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, "**echo** An Ex command.") || !strings.Contains(content.Value, "Echoes each {expr1}") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, ":ec[ho]") || !strings.Contains(content.Value, "Echoes each {expr1}") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+		t.Fatalf("hover content = %#v", hover.Contents)
+	}
+	if strings.Contains(content.Value, "An Ex command") {
+		t.Fatalf("hover content still has redundant Ex command description: %q", content.Value)
+	}
+}
+
+func TestHoverShowsColorschemeCommandHelp(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "colorscheme desert\n")
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Character: 4},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, ":colo[rscheme]") || strings.Contains(content.Value, "An Ex command") {
 		t.Fatalf("hover content = %#v", hover.Contents)
 	}
 }
