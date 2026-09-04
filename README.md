@@ -175,9 +175,10 @@ User settings are supplied through LSP `workspace/configuration`.
 | `suggest.excludeRuntimePath` | `boolean` | `false` | Omit completion items sourced from runtimepath files outside current workspace roots. |
 | `diagnostic.disabled` | `string[]` | `[]` | Exact diagnostic codes to omit from published LSP diagnostics; accepts native, `vimls/`, and future codes. |
 | `diagnostic.override` | `object` | `{}` | Exact diagnostic code to LSP severity (`error`, `warning`, `information`, or `hint`); disabled codes take precedence. |
+| `diagnostic.maxNumber` | `number` | `1000` | Maximum diagnostics per document, including the truncation marker. |
 
 Settings are nested objects inside the workspace configuration: `diagnostic`
-carries `disabled` and `override`, `workspace` carries `rebuildDebounce`, and
+carries `disabled`, `override`, and `maxNumber`, `workspace` carries `rebuildDebounce`, and
 `suggest` carries `excludeRuntimePath`. They are read under the `vim` workspace
 configuration section and are dynamic; changed values reanalyze open documents.
 Every setting is optional: a missing, empty, or `null` setting is not an error
@@ -185,6 +186,9 @@ and keeps the documented default. They do not belong in
 `initializationOptions`.
 
 `diagnostic.disabled` takes precedence over `diagnostic.override`, and
+when diagnostics exceed `diagnostic.maxNumber`, the server retains errors,
+warnings, information, then hints in that order. `diagnostic.maxNumber` must be
+a positive integer. The limit includes the final truncation marker.
 `workspace.rebuildDebounce` keeps its previous value when omitted or invalid.
 `suggest.excludeRuntimePath` is a boolean workspace setting: empty, missing, or
 `null` values mean `false`; when enabled, workspace-root files remain eligible

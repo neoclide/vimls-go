@@ -421,7 +421,7 @@ func TestProtocolDiagnosticsSameFileRelatedInformation(t *testing.T) {
 		Span:    syntax.Span{Start: 8, End: 9},
 		Related: syntax.RelatedDiagnostic{Message: "autocommand is registered again every time this configuration is sourced", Span: syntax.Span{Start: 23, End: 34}},
 	}}}
-	items := protocolDiagnostics(snapshot, file, text.UTF8, true, nil)
+	items := protocolDiagnostics(snapshot, file, text.UTF8, true, nil, maxDiagnosticsPerDocument)
 	if len(items) != 1 || len(items[0].RelatedInformation) != 1 {
 		t.Fatalf("related diagnostics = %#v", items)
 	}

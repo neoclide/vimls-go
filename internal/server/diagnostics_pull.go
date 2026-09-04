@@ -109,8 +109,9 @@ func (s *Server) Diagnostic(ctx context.Context, params *protocol.DocumentDiagno
 		encoding := s.encoding
 		related := s.languageFeatures.diagnosticRelatedInformation
 		overrides := s.overrideDiagnostics
+		maxNumber := s.diagnosticMaxNumber
 		s.mu.Unlock()
-		items := protocolDiagnostics(work.Snapshot, file, encoding, related, overrides)
+		items := protocolDiagnostics(work.Snapshot, file, encoding, related, overrides, maxNumber)
 		s.publishMu.Lock()
 		s.workspaceMu.Lock()
 		currentWorkspace = s.workspaceIdentityCurrentLocked(resultIdentity)
@@ -261,8 +262,9 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 				encoding := s.encoding
 				related := s.languageFeatures.diagnosticRelatedInformation
 				overrides := s.overrideDiagnostics
+				maxNumber := s.diagnosticMaxNumber
 				s.mu.Unlock()
-				diagnostics := protocolDiagnostics(document.snapshot, file, encoding, related, overrides)
+				diagnostics := protocolDiagnostics(document.snapshot, file, encoding, related, overrides, maxNumber)
 				s.publishMu.Lock()
 				s.workspaceMu.Lock()
 				currentWorkspace := s.workspaceIdentityCurrentLocked(identity)

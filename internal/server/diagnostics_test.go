@@ -121,15 +121,19 @@ func TestDisabledDiagnosticsAreFilteredBeforeTruncationAndRepublished(t *testing
 	instance.mu.Lock()
 	instance.client = client
 	instance.mu.Unlock()
+	const maxNumber = 5
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"diagnostic":{"maxNumber":5}}`)); err != nil {
+		t.Fatal(err)
+	}
 	documentURI := uri.MustParse("file:///filtered.vim")
 	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
-		URI: documentURI, Version: 1, Text: strings.Repeat("if true\n", maxDiagnosticsPerDocument+25),
+		URI: documentURI, Version: 1, Text: strings.Repeat("if true\n", maxNumber+3),
 	}})
 	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) != maxDiagnosticsPerDocument {
+	if len(first.Diagnostics) != maxNumber {
 		t.Fatalf("initial diagnostics = %d, want cap", len(first.Diagnostics))
 	}
-	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"diagnostic":{"disabled":["vim/E171"],"override":{"vim/E171":"error"}}}}`)); err != nil {
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"diagnostic":{"disabled":["vim/E171"],"override":{"vim/E171":"error"},"maxNumber":5}}}`)); err != nil {
 		t.Fatal(err)
 	}
 	filtered := waitForDiagnostics(t, client.published)
@@ -349,18 +353,22 @@ func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
 	instance.mu.Lock()
 	instance.client = client
 	instance.mu.Unlock()
+	const maxNumber = 5
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"diagnostic":{"maxNumber":5}}`)); err != nil {
+		t.Fatal(err)
+	}
 	_, _ = instance.Initialize(context.Background(), &protocol.InitializeParams{})
 	documentURI := uri.MustParse("file:///many-diagnostics.vim")
-	source := strings.Repeat("if true\n", maxDiagnosticsPerDocument+25)
+	source := strings.Repeat("if true\n", maxNumber+3)
 	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
 		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
 	})
 	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) != maxDiagnosticsPerDocument {
-		t.Fatalf("diagnostic count = %d, want %d", len(first.Diagnostics), maxDiagnosticsPerDocument)
+	if len(first.Diagnostics) != maxNumber {
+		t.Fatalf("diagnostic count = %d, want %d", len(first.Diagnostics), maxNumber)
 	}
 	marker := first.Diagnostics[len(first.Diagnostics)-1]
-	wantEOF := protocol.Position{Line: uint32(maxDiagnosticsPerDocument + 25)}
+	wantEOF := protocol.Position{Line: uint32(maxNumber + 3)}
 	if marker.Code != protocol.String("vimls/diagnostics-truncated") || marker.Range.Start != wantEOF || marker.Range.End != wantEOF {
 		t.Fatalf("diagnostic count = %d, last = %#v", len(first.Diagnostics), first.Diagnostics[len(first.Diagnostics)-1])
 	}
@@ -380,6 +388,56 @@ func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
 	second := waitForDiagnostics(t, client.published)
 	if !reflect.DeepEqual(first.Diagnostics, second.Diagnostics) {
 		t.Fatalf("diagnostic truncation changed across identical analysis:\nfirst=%#v\nsecond=%#v", first.Diagnostics, second.Diagnostics)
+	}
+}
+
+func TestProtocolDiagnosticsTruncationPrioritizesSeverity(t *testing.T) {
+	const maxNumber = 7
+	hint := syntax.DiagnosticHint
+	information := syntax.DiagnosticInformation
+	warning := syntax.DiagnosticWarning
+	errorSeverity := syntax.DiagnosticError
+	file := &syntax.File{Source: "x"}
+	for range maxNumber {
+		file.Diagnostics = append(file.Diagnostics, syntax.Diagnostic{
+			Code: "vimls/unused-variable", Message: "hint", Span: syntax.Span{Start: 0, End: 1}, Severity: &hint,
+		})
+	}
+	file.Diagnostics = append(file.Diagnostics,
+		syntax.Diagnostic{Code: "vimls/information", Message: "information", Span: syntax.Span{Start: 0, End: 1}, Severity: &information},
+		syntax.Diagnostic{Code: "vimls/warning", Message: "warning", Span: syntax.Span{Start: 0, End: 1}, Severity: &warning},
+		syntax.Diagnostic{Code: "vim/E15", Message: "error", Span: syntax.Span{Start: 0, End: 1}, Severity: &errorSeverity},
+		syntax.Diagnostic{Code: "zz-override", Message: "overridden", Span: syntax.Span{Start: 0, End: 1}, Severity: &hint},
+	)
+	snapshot := text.NewSnapshot("file:///severity.vim", 1, nil, file.Source)
+	diagnostics := protocolDiagnostics(snapshot, file, text.UTF8, false, nil, maxNumber)
+	if len(diagnostics) != maxNumber {
+		t.Fatalf("diagnostic count = %d, want %d", len(diagnostics), maxNumber)
+	}
+	want := []protocol.DiagnosticSeverity{
+		protocol.DiagnosticSeverityError,
+		protocol.DiagnosticSeverityWarning,
+		protocol.DiagnosticSeverityInformation,
+		protocol.DiagnosticSeverityHint,
+	}
+	for index, severity := range want {
+		if diagnostics[index].Severity != severity {
+			t.Fatalf("diagnostic %d severity = %v, want %v", index, diagnostics[index].Severity, severity)
+		}
+	}
+	marker := diagnostics[len(diagnostics)-1]
+	if marker.Code != protocol.String("vimls/diagnostics-truncated") {
+		t.Fatalf("last diagnostic = %#v", marker)
+	}
+
+	overridden := protocolDiagnostics(snapshot, file, text.UTF8, false, map[string]protocol.DiagnosticSeverity{
+		"zz-override": protocol.DiagnosticSeverityError,
+	}, maxNumber)
+	if overridden[0].Severity != protocol.DiagnosticSeverityError || overridden[1].Severity != protocol.DiagnosticSeverityError {
+		t.Fatalf("overridden priority = %#v", overridden[:2])
+	}
+	if overridden[0].Code != protocol.String("vim/E15") || overridden[1].Code != protocol.String("zz-override") {
+		t.Fatalf("overridden retained diagnostics = %#v", overridden[:2])
 	}
 }
 

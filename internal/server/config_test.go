@@ -284,13 +284,14 @@ func TestExcludeRuntimePathFromSettings(t *testing.T) {
 func TestDiagnosticSettingsFromSettings(t *testing.T) {
 	previousDisabled := map[string]struct{}{"vim/E117": {}}
 	previousOverrides := map[string]protocol.DiagnosticSeverity{"vim/E121": protocol.DiagnosticSeverityHint}
+	previousMaxNumber := 12
 	for _, raw := range []string{
-		`{"diagnostic":{"disabled":["vim/E117","vimls/deprecated","future/code"],"override":{"vim/E121":"warning","vimls/deprecated":"information"}}}`,
-		`{"vim":{"diagnostic":{"disabled":["vim/E117","vimls/deprecated","future/code"],"override":{"vim/E121":"warning","vimls/deprecated":"information"}}}}`,
+		`{"diagnostic":{"disabled":["vim/E117","vimls/deprecated","future/code"],"override":{"vim/E121":"warning","vimls/deprecated":"information"},"maxNumber":7}}`,
+		`{"vim":{"diagnostic":{"disabled":["vim/E117","vimls/deprecated","future/code"],"override":{"vim/E121":"warning","vimls/deprecated":"information"},"maxNumber":7}}}`,
 	} {
-		disabled, overrides, warning := diagnosticSettingsFromSettings([]byte(raw), previousDisabled, previousOverrides)
-		if warning != "" || len(disabled) != 3 || len(overrides) != 2 || overrides["vim/E121"] != protocol.DiagnosticSeverityWarning || overrides["vimls/deprecated"] != protocol.DiagnosticSeverityInformation {
-			t.Fatalf("settings %s = disabled=%#v overrides=%#v warning=%q", raw, disabled, overrides, warning)
+		disabled, overrides, maxNumber, warning := diagnosticSettingsFromSettings([]byte(raw), previousDisabled, previousOverrides, previousMaxNumber)
+		if warning != "" || len(disabled) != 3 || len(overrides) != 2 || overrides["vim/E121"] != protocol.DiagnosticSeverityWarning || overrides["vimls/deprecated"] != protocol.DiagnosticSeverityInformation || maxNumber != 7 {
+			t.Fatalf("settings %s = disabled=%#v overrides=%#v maxNumber=%d warning=%q", raw, disabled, overrides, maxNumber, warning)
 		}
 	}
 	for _, raw := range []string{
@@ -299,26 +300,26 @@ func TestDiagnosticSettingsFromSettings(t *testing.T) {
 		`{"diagnostic":null}`,
 		`{"vim":null}`,
 	} {
-		disabled, overrides, warning := diagnosticSettingsFromSettings([]byte(raw), previousDisabled, previousOverrides)
-		if warning != "" || len(disabled) != 0 || len(overrides) != 0 {
-			t.Fatalf("missing diagnostic settings %s did not reset silently: disabled=%#v overrides=%#v warning=%q", raw, disabled, overrides, warning)
+		disabled, overrides, maxNumber, warning := diagnosticSettingsFromSettings([]byte(raw), previousDisabled, previousOverrides, previousMaxNumber)
+		if warning != "" || len(disabled) != 0 || len(overrides) != 0 || maxNumber != maxDiagnosticsPerDocument {
+			t.Fatalf("missing diagnostic settings %s did not reset silently: disabled=%#v overrides=%#v maxNumber=%d warning=%q", raw, disabled, overrides, maxNumber, warning)
 		}
 	}
-	disabled, overrides, warning := diagnosticSettingsFromSettings([]byte(`{"diagnostic":{"disabled":["vim/E117",1],"override":{"vim/E121":"off"}}}`), previousDisabled, previousOverrides)
-	if warning == "" || len(disabled) != 1 || len(overrides) != 1 || overrides["vim/E121"] != protocol.DiagnosticSeverityHint {
-		t.Fatalf("invalid fields did not retain independently: disabled=%#v overrides=%#v warning=%q", disabled, overrides, warning)
+	disabled, overrides, maxNumber, warning := diagnosticSettingsFromSettings([]byte(`{"diagnostic":{"disabled":["vim/E117",1],"override":{"vim/E121":"off"},"maxNumber":0}}`), previousDisabled, previousOverrides, previousMaxNumber)
+	if warning == "" || len(disabled) != 1 || len(overrides) != 1 || overrides["vim/E121"] != protocol.DiagnosticSeverityHint || maxNumber != previousMaxNumber {
+		t.Fatalf("invalid fields did not retain independently: disabled=%#v overrides=%#v maxNumber=%d warning=%q", disabled, overrides, maxNumber, warning)
 	}
-	disabled, overrides, warning = diagnosticSettingsFromSettings([]byte(`{"diagnostic":{"disabled":[]}}`), previousDisabled, previousOverrides)
-	if warning != "" || len(disabled) != 0 || len(overrides) != 0 {
-		t.Fatalf("empty settings = disabled=%#v overrides=%#v warning=%q", disabled, overrides, warning)
+	disabled, overrides, maxNumber, warning = diagnosticSettingsFromSettings([]byte(`{"diagnostic":{"disabled":[]}}`), previousDisabled, previousOverrides, previousMaxNumber)
+	if warning != "" || len(disabled) != 0 || len(overrides) != 0 || maxNumber != maxDiagnosticsPerDocument {
+		t.Fatalf("empty settings = disabled=%#v overrides=%#v maxNumber=%d warning=%q", disabled, overrides, maxNumber, warning)
 	}
-	disabled, overrides, warning = diagnosticSettingsFromSettings([]byte(`{"diagnostic":{"disabled":null,"override":null}}`), previousDisabled, previousOverrides)
-	if warning != "" || len(disabled) != 0 || len(overrides) != 0 {
-		t.Fatalf("null diagnostic fields = disabled=%#v overrides=%#v warning=%q", disabled, overrides, warning)
+	disabled, overrides, maxNumber, warning = diagnosticSettingsFromSettings([]byte(`{"diagnostic":{"disabled":null,"override":null,"maxNumber":null}}`), previousDisabled, previousOverrides, previousMaxNumber)
+	if warning != "" || len(disabled) != 0 || len(overrides) != 0 || maxNumber != maxDiagnosticsPerDocument {
+		t.Fatalf("null diagnostic fields = disabled=%#v overrides=%#v maxNumber=%d warning=%q", disabled, overrides, maxNumber, warning)
 	}
-	disabled, overrides, warning = diagnosticSettingsFromSettings([]byte(`{"diagnostic":[]}`), previousDisabled, previousOverrides)
-	if warning == "" || len(disabled) != 1 || len(overrides) != 1 || disabled["vim/E117"] != struct{}{} || overrides["vim/E121"] != protocol.DiagnosticSeverityHint {
-		t.Fatalf("invalid diagnostic section did not retain: disabled=%#v overrides=%#v warning=%q", disabled, overrides, warning)
+	disabled, overrides, maxNumber, warning = diagnosticSettingsFromSettings([]byte(`{"diagnostic":[]}`), previousDisabled, previousOverrides, previousMaxNumber)
+	if warning == "" || len(disabled) != 1 || len(overrides) != 1 || disabled["vim/E117"] != struct{}{} || overrides["vim/E121"] != protocol.DiagnosticSeverityHint || maxNumber != previousMaxNumber {
+		t.Fatalf("invalid diagnostic section did not retain: disabled=%#v overrides=%#v maxNumber=%d warning=%q", disabled, overrides, maxNumber, warning)
 	}
 }
 
@@ -371,14 +372,14 @@ func TestInitializeDoesNotReadDiagnosticInitializationOptions(t *testing.T) {
 	instance := New(nil, nil, nil)
 	t.Cleanup(instance.stopAnalysis)
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
-		InitializationOptions: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E117"],"override":{"vim/E121":"hint"}}}`)),
+		InitializationOptions: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E117"],"override":{"vim/E121":"hint"},"maxNumber":5}}`)),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	instance.mu.Lock()
 	defer instance.mu.Unlock()
-	if len(instance.disabledDiagnostics) != 0 || len(instance.overrideDiagnostics) != 0 {
-		t.Fatalf("initializationOptions changed diagnostic settings: disabled=%#v overrides=%#v", instance.disabledDiagnostics, instance.overrideDiagnostics)
+	if len(instance.disabledDiagnostics) != 0 || len(instance.overrideDiagnostics) != 0 || instance.diagnosticMaxNumber != maxDiagnosticsPerDocument {
+		t.Fatalf("initializationOptions changed diagnostic settings: disabled=%#v overrides=%#v maxNumber=%d", instance.disabledDiagnostics, instance.overrideDiagnostics, instance.diagnosticMaxNumber)
 	}
 }
 

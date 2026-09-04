@@ -203,7 +203,7 @@ that needs it.
 | `limits.maxFileBytes` | 4 MiB | Keep sync, skip analysis, publish one file-too-large diagnostic |
 | `limits.maxPendingRequests` | 128 | Reject another request with JSON-RPC server error `-32000` |
 | `limits.maxParallelAnalysis` | min(`GOMAXPROCS`, 4), at least 1 | Queue bounded work |
-| `limits.maxDiagnosticsPerDocument` | 200 | Truncate deterministically within the cap |
+| `diagnostic.maxNumber` | 1000 | Truncate by Error, Warning, Information, then Hint within the cap |
 | `limits.maxCompletionItems` | 2,000 | Return a deterministic bounded result |
 | `limits.maxWorkspaceFiles` | 20,000 | Stop discovery and send one warning |
 | `limits.maxIndexBytes` | 256 MiB | Stop adding files and send one warning |

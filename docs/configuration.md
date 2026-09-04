@@ -73,8 +73,8 @@ If the client advertises `workspace.configuration`, vimls-go requests the
 `vim` section after `initialized` and after a
 `workspace/didChangeConfiguration` notification with null settings. The
 section's value is an object carrying the optional settings
-`workspace.rebuildDebounce`, `diagnostic.disabled`, `diagnostic.override`, and
-`suggest.excludeRuntimePath`:
+`workspace.rebuildDebounce`, `diagnostic.disabled`, `diagnostic.override`,
+`diagnostic.maxNumber`, and `suggest.excludeRuntimePath`:
 
 ```json
 {
@@ -86,7 +86,8 @@ section's value is an object carrying the optional settings
     "override": {
       "vim/E121": "warning",
       "vimls/deprecated": "information"
-    }
+    },
+    "maxNumber": 1000
   },
   "suggest": {
     "excludeRuntimePath": true
@@ -139,7 +140,8 @@ section:
       "override": {
         "vim/E121": "information",
         "vimls/unused-variable": "warning"
-      }
+      },
+      "maxNumber": 1000
     }
   }
 }
@@ -153,11 +155,16 @@ severity. Overrides affect only published LSP diagnostics and do not change
 the syntax or analysis result. Disabled diagnostics are removed before the
 per-document diagnostic limit is applied.
 
-Both diagnostic settings are dynamic. A changed valid value reanalyzes open
+`diagnostic.maxNumber` is a positive integer and defaults to `1000`. It includes
+the truncation marker. When a document exceeds the limit, diagnostics are
+retained in Error, Warning, Information, then Hint order.
+
+All diagnostic settings are dynamic. A changed valid value reanalyzes open
 documents and republishes their diagnostics. An unchanged value does not
 invalidate diagnostics. A missing field in a complete configuration snapshot
-resets that field to empty. Invalid field values retain that field's previous
-value and produce a visible warning, while the other field can still update.
+resets `disabled` and `override` to empty and `maxNumber` to its default. Invalid
+field values retain that field's previous value and produce a visible warning,
+while the other fields can still update.
 The settings are read from workspace configuration, not `initializationOptions`.
 
 ## Diagnostic policy

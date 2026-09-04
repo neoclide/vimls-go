@@ -28,7 +28,7 @@ const (
 	maxFileBytes                = 4 << 20
 	maxPendingRequests          = 128
 	maxParallelAnalysis         = 6
-	maxDiagnosticsPerDocument   = 200
+	maxDiagnosticsPerDocument   = 1000
 	maxWorkspaceFiles           = 20000
 	maxIndexBytes               = 256 << 20
 	maxWorkspaceSymbols         = 200
@@ -244,6 +244,7 @@ type Server struct {
 	// and publication may therefore snapshot their immutable map references.
 	disabledDiagnostics map[string]struct{}
 	overrideDiagnostics map[string]protocol.DiagnosticSeverity
+	diagnosticMaxNumber int
 
 	completionNow func() time.Time
 }
@@ -281,6 +282,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		workspaceDelay:        defaultWorkspaceRebuildDebounce,
 		disabledDiagnostics:   make(map[string]struct{}),
 		overrideDiagnostics:   make(map[string]protocol.DiagnosticSeverity),
+		diagnosticMaxNumber:   maxDiagnosticsPerDocument,
 		hierarchyLimit:        maxHierarchyResults,
 		completionNow:         time.Now,
 	}
@@ -866,10 +868,11 @@ func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byt
 	s.workspaceMu.Unlock()
 	s.publishMu.Lock()
 	s.mu.Lock()
-	disabled, overrides, diagnosticsWarning := diagnosticSettingsFromSettings(settings, s.disabledDiagnostics, s.overrideDiagnostics)
-	diagnosticsChanged := !maps.Equal(disabled, s.disabledDiagnostics) || !maps.Equal(overrides, s.overrideDiagnostics)
+	disabled, overrides, maxNumber, diagnosticsWarning := diagnosticSettingsFromSettings(settings, s.disabledDiagnostics, s.overrideDiagnostics, s.diagnosticMaxNumber)
+	diagnosticsChanged := !maps.Equal(disabled, s.disabledDiagnostics) || !maps.Equal(overrides, s.overrideDiagnostics) || maxNumber != s.diagnosticMaxNumber
 	s.disabledDiagnostics = disabled
 	s.overrideDiagnostics = overrides
+	s.diagnosticMaxNumber = maxNumber
 	s.mu.Unlock()
 	var snapshots []*text.Snapshot
 	if workspaceDelayChanged || diagnosticsChanged {
@@ -1251,12 +1254,6 @@ func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.
 		}
 		return file.Diagnostics[left].Span.End < file.Diagnostics[right].Span.End
 	})
-	if len(file.Diagnostics) > maxDiagnosticsPerDocument {
-		file.Diagnostics = append(file.Diagnostics[:maxDiagnosticsPerDocument-1], syntax.Diagnostic{
-			Code: "vimls/diagnostics-truncated", Message: "additional diagnostics were omitted",
-			Span: syntax.Span{Start: len(file.Source), End: len(file.Source)},
-		})
-	}
 	return file, workspaceSnapshot.identity, true
 }
 
@@ -1444,6 +1441,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	client := s.client
 	diagnosticRelatedInformation := s.languageFeatures.diagnosticRelatedInformation
 	overrides := s.overrideDiagnostics
+	maxNumber := s.diagnosticMaxNumber
 	pullDiagnostics := s.pullDiagnostics
 	s.mu.Unlock()
 
@@ -1463,7 +1461,7 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	s.workspaceMu.Unlock()
 	_, initialRefresh := s.initialRefreshPending[documentURI]
 	initialRefresh = initialRefresh && analysis.Snapshot.ByteLen() <= maxFileBytes
-	diagnostics := protocolDiagnostics(analysis.Snapshot, file, encoding, diagnosticRelatedInformation, overrides)
+	diagnostics := protocolDiagnostics(analysis.Snapshot, file, encoding, diagnosticRelatedInformation, overrides, maxNumber)
 	if pullDiagnostics {
 		s.installPullDiagnosticResultLocked(analysis, identity, diagnostics)
 		delete(s.initialRefreshPending, documentURI)
@@ -1579,10 +1577,41 @@ func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, i
 	return initialRefresh
 }
 
-func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding text.Encoding, diagnosticRelatedInformation bool, overrides map[string]protocol.DiagnosticSeverity) []protocol.Diagnostic {
-	diagnostics := make([]protocol.Diagnostic, 0, len(file.Diagnostics))
+func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding text.Encoding, diagnosticRelatedInformation bool, overrides map[string]protocol.DiagnosticSeverity, maxNumber int) []protocol.Diagnostic {
+	items := file.Diagnostics
+	if len(items) > maxNumber {
+		items = append([]syntax.Diagnostic(nil), items...)
+		sort.Slice(items, func(left, right int) bool {
+			leftSeverity := diagnosticProtocolSeverity(items[left])
+			if severity, ok := overrides[items[left].Code]; ok {
+				leftSeverity = severity
+			}
+			rightSeverity := diagnosticProtocolSeverity(items[right])
+			if severity, ok := overrides[items[right].Code]; ok {
+				rightSeverity = severity
+			}
+			if leftSeverity != rightSeverity {
+				return leftSeverity < rightSeverity
+			}
+			if items[left].Span.Start != items[right].Span.Start {
+				return items[left].Span.Start < items[right].Span.Start
+			}
+			if items[left].Span.End != items[right].Span.End {
+				return items[left].Span.End < items[right].Span.End
+			}
+			if items[left].Code != items[right].Code {
+				return items[left].Code < items[right].Code
+			}
+			return items[left].Message < items[right].Message
+		})
+		items = append(items[:maxNumber-1], syntax.Diagnostic{
+			Code: "vimls/diagnostics-truncated", Message: "additional diagnostics were omitted",
+			Span: syntax.Span{Start: snapshot.ByteLen(), End: snapshot.ByteLen()},
+		})
+	}
+	diagnostics := make([]protocol.Diagnostic, 0, len(items))
 	var relatedSnapshots map[string]*text.Snapshot
-	for _, item := range file.Diagnostics {
+	for _, item := range items {
 		start, startError := snapshot.Position(item.Span.Start, encoding)
 		end, endError := snapshot.Position(item.Span.End, encoding)
 		if startError != nil || endError != nil {

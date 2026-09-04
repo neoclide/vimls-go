@@ -313,22 +313,23 @@ func workspaceRebuildDebounce(value json.RawMessage) (time.Duration, bool) {
 	return time.Duration(milliseconds) * time.Millisecond, true
 }
 
-func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]struct{}, previousOverrides map[string]protocol.DiagnosticSeverity) (map[string]struct{}, map[string]protocol.DiagnosticSeverity, string) {
+func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]struct{}, previousOverrides map[string]protocol.DiagnosticSeverity, previousMaxNumber int) (map[string]struct{}, map[string]protocol.DiagnosticSeverity, int, string) {
 	settings, warning := workspaceSettingsObject(raw, "previous diagnostic settings")
 	if warning != "" {
-		return previousDisabled, previousOverrides, warning
+		return previousDisabled, previousOverrides, previousMaxNumber, warning
 	}
 	disabled := make(map[string]struct{})
 	overrides := make(map[string]protocol.DiagnosticSeverity)
+	maxNumber := maxDiagnosticsPerDocument
 	rawDiagnostic, exists := settings["diagnostic"]
 	if !exists || string(rawDiagnostic) == "null" {
-		return disabled, overrides, ""
+		return disabled, overrides, maxNumber, ""
 	}
 	var diagnosticSettings map[string]json.RawMessage
 	if err := json.Unmarshal(rawDiagnostic, &diagnosticSettings); err != nil || diagnosticSettings == nil {
-		return previousDisabled, previousOverrides, "vimls: diagnostic workspace settings must be an object; retaining previous diagnostic settings"
+		return previousDisabled, previousOverrides, previousMaxNumber, "vimls: diagnostic workspace settings must be an object; retaining previous diagnostic settings"
 	}
-	warnings := make([]string, 0, 2)
+	warnings := make([]string, 0, 3)
 	if value, exists := diagnosticSettings["disabled"]; exists && string(value) != "null" {
 		var values []json.RawMessage
 		if err := json.Unmarshal(value, &values); err != nil || values == nil {
@@ -389,7 +390,13 @@ func diagnosticSettingsFromSettings(raw []byte, previousDisabled map[string]stru
 			}
 		}
 	}
-	return disabled, overrides, strings.Join(warnings, "; ")
+	if value, exists := diagnosticSettings["maxNumber"]; exists && string(value) != "null" {
+		if err := json.Unmarshal(value, &maxNumber); err != nil || maxNumber <= 0 {
+			warnings = append(warnings, "vimls: diagnostic.maxNumber must be a positive integer; retaining previous value")
+			maxNumber = previousMaxNumber
+		}
+	}
+	return disabled, overrides, maxNumber, strings.Join(warnings, "; ")
 }
 
 func excludeRuntimePathFromSettings(raw []byte, previous bool) (bool, string) {
