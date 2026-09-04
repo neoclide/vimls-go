@@ -371,20 +371,34 @@ func collectDeclarationStyleDiagnostics(result *FileAnalysis, file *syntax.File,
 	if command.Dialect == syntax.Legacy && commandInsideStyleBlock(command, blocks, syntax.BlockFunction) && !strings.Contains(name, ":") {
 		appendStyleDiagnostic(result, "vimls/explicit-local-scope", "use an explicit local scope for this variable", command.Declaration.Name)
 	}
-	// User configuration files own their g: values: an unconditional top-level
-	// g: assignment is user configuration, not plugin-internal state, so the
-	// plugin-oriented overwrite/state heuristics are disabled in this mode.
-	if result.configFile || command.Block >= 0 || !strings.HasPrefix(name, "g:") || command.Declaration.Assignment.Start == command.Declaration.Assignment.End {
+	// User configuration files own their g: values, so plugin-oriented
+	// overwrite/state heuristics are disabled in this mode.
+	target := command.Declaration.Target
+	if result.configFile || target == nil || target.Kind != syntax.ExpressionIdentifier ||
+		!strings.HasPrefix(name, "g:") || command.Declaration.Assignment.Start == command.Declaration.Assignment.End {
+		return
+	}
+	initializer := command.Declaration.Initializer
+	if file.Text(command.Declaration.Assignment) == "=" &&
+		initializer != nil && initializer.Kind == syntax.ExpressionCall && (len(initializer.Children) == 3 || len(initializer.Children) == 4) &&
+		initializer.Children[0].Kind == syntax.ExpressionIdentifier && initializer.Children[0].Value == "get" &&
+		initializer.Children[1].Kind == syntax.ExpressionIdentifier && initializer.Children[1].Value == "g:" &&
+		initializer.Children[2].Kind == syntax.ExpressionString && simpleVimStringLiteral(initializer.Children[2].Value) == name[2:] {
 		return
 	}
 	lower := strings.ToLower(name[2:])
-	if strings.Contains(lower, "internal") || strings.Contains(lower, "state") || strings.Contains(lower, "cache") || strings.Contains(lower, "queue") || strings.Contains(lower, "counter") {
+	if command.Block < 0 && (strings.Contains(lower, "internal") || strings.Contains(lower, "state") || strings.Contains(lower, "cache") || strings.Contains(lower, "queue") || strings.Contains(lower, "counter")) {
 		appendStyleDiagnostic(result, "vimls/global-internal-state", "global variable appears to be plugin-internal state; consider script-local state", command.Declaration.Name)
 		return
 	}
-	if strings.Contains(lower, "option") || strings.Contains(lower, "timeout") || strings.Contains(lower, "enable") || strings.Contains(lower, "disable") || strings.Contains(lower, "path") || strings.Contains(lower, "config") {
+	if command.Block < 0 && (strings.Contains(lower, "option") || strings.Contains(lower, "timeout") || strings.Contains(lower, "enable") || strings.Contains(lower, "disable") || strings.Contains(lower, "path") || strings.Contains(lower, "config")) {
 		appendStyleDiagnostic(result, "vimls/configuration-overwrite", "unconditional configuration assignment may overwrite a user value", command.Declaration.Name)
+		return
 	}
+	if strings.HasPrefix(lower, "loaded_") {
+		return
+	}
+	appendStyleDiagnostic(result, "vimls/global-internal-state", "global assignment may be leftover debugging; prefer script-local or local state", command.Declaration.Name)
 }
 
 func collectExpressionStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command) {

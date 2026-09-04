@@ -185,3 +185,89 @@ func TestAdditionalStyleDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigurationOverwriteSkipsSelfPreservingGet(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         bool
+	}{
+		{
+			name:   "dictionary default",
+			source: "let g:coc_user_config = get(g:, 'coc_user_config', {})\n",
+		},
+		{
+			name:   "list default without matching heuristic name",
+			source: "let g:coc_global_extensions = get(g:, 'coc_global_extensions', [])\n",
+		},
+		{
+			name:   "no default",
+			source: "let g:plugin_config = get(g:, 'plugin_config')\n",
+		},
+		{
+			name:   "different key",
+			source: "let g:plugin_config = get(g:, 'other_config', {})\n",
+			want:   true,
+		},
+		{
+			name:   "dynamic key",
+			source: "let key = 'plugin_config'\nlet g:plugin_config = get(g:, key, {})\n",
+			want:   true,
+		},
+		{
+			name:   "different dictionary",
+			source: "let s:values = {}\nlet g:plugin_config = get(s:values, 'plugin_config', {})\n",
+			want:   true,
+		},
+		{
+			name:   "direct assignment",
+			source: "let g:plugin_config = {}\n",
+			want:   true,
+		},
+		{
+			name:   "compound assignment",
+			source: "let g:plugin_config += get(g:, 'plugin_config', {})\n",
+			want:   true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			got := false
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vimls/configuration-overwrite" {
+					got = true
+				}
+			}
+			if got != test.want {
+				t.Fatalf("configuration-overwrite = %t, want %t; diagnostics = %#v", got, test.want, result.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestPluginGlobalAssignmentsReportDebuggingHint(t *testing.T) {
+	source := "let g:x = 33\nfunction! coc#expandable() abort\n  let g:y = 44\n  if exists('g:z')\n    let g:z = 55\n  endif\n  try\n    let g:w = 66\n  endtry\nendfunction\n"
+	file := syntax.Parse(source)
+	result := Analyze(file)
+	var got []string
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vimls/global-internal-state" {
+			got = append(got, file.Text(diagnostic.Span))
+		}
+	}
+	want := []string{"g:x", "g:y", "g:z", "g:w"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("global-internal-state spans = %#v, want %#v; diagnostics = %#v", got, want, result.Diagnostics)
+	}
+}
+
+func TestPluginGlobalAssignmentHintExclusions(t *testing.T) {
+	source := "let g:coc_user_config = get(g:, 'coc_user_config', {})\nlet g:coc_global_extensions = get(g:, 'coc_global_extensions', [])\nlet g:loaded_example = 1\n"
+	if got := collectVimlsCodes(Analyze(syntax.Parse(source))); len(got) != 0 {
+		t.Fatalf("plugin diagnostics = %#v, want none", got)
+	}
+	configSource := "let g:x = 33\nfunction! F() abort\n  let g:y = 44\nendfunction\n"
+	if got := collectVimlsCodes(AnalyzeConfigFile(syntax.Parse(configSource))); len(got) != 0 {
+		t.Fatalf("config diagnostics = %#v, want none", got)
+	}
+}
