@@ -1962,8 +1962,37 @@ func TestWaitForWorkspaceIndexTimesOut(t *testing.T) {
 	instance.workspaceMu.Unlock()
 	err := instance.waitForWorkspaceIndex(context.Background())
 	var rpcError *jsonrpc2.Error
-	if !errors.As(err, &rpcError) || rpcError.Code != jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed) || rpcError.Message != "workspace index did not become ready within 1s" {
+	if !errors.As(err, &rpcError) || rpcError.Code != jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed) || rpcError.Message != "workspace index did not become ready within 5s" {
 		t.Fatalf("timeout error = %#v", err)
+	}
+}
+
+func TestWaitForWorkspaceIndexCancellableRequestHasNoTimeout(t *testing.T) {
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	instance.testHooks.workspaceIndexWaitTimeout = time.Millisecond
+	waiting := make(chan struct{})
+	var waitingOnce sync.Once
+	instance.testHooks.beforeWorkspaceIndexWait = func() {
+		waitingOnce.Do(func() { close(waiting) })
+	}
+	instance.workspaceMu.Lock()
+	instance.workspaceRunning = true
+	instance.workspaceMu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	result := make(chan error, 1)
+	go func() { result <- instance.waitForWorkspaceIndex(ctx) }()
+	waitForServerRace(t, waiting, "workspace index wait")
+	time.Sleep(10 * time.Millisecond)
+	select {
+	case err := <-result:
+		t.Fatalf("cancellable wait returned at fallback timeout: %v", err)
+	default:
+	}
+	cancel()
+	if err := <-result; !errors.Is(err, protocol.ErrRequestCancelled) {
+		t.Fatalf("cancel error = %v", err)
 	}
 }
 

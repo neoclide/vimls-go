@@ -23,7 +23,7 @@ import (
 )
 
 const defaultWorkspaceRebuildDebounce = 100 * time.Millisecond
-const workspaceIndexWaitTimeout = time.Second
+const workspaceIndexWaitTimeout = 5 * time.Second
 const workspaceProgressCreateTimeout = 100 * time.Millisecond
 const workspaceProgressNotificationTimeout = 100 * time.Millisecond
 const workspaceProgressEndTimeout = workspaceProgressNotificationTimeout
@@ -527,6 +527,13 @@ func (s *Server) notifyWorkspaceIndexChangedLocked() {
 
 // waitForWorkspaceIndex blocks while workspace index work is active.
 func (s *Server) waitForWorkspaceIndex(ctx context.Context) error {
+	// LSP has no capability flag for request cancellation. Requests handled by
+	// cancellationHandler have a cancellable context, so keep them pending until
+	// the index is ready or the client sends $/cancelRequest. Retain a bounded
+	// fallback for direct callers that pass a non-cancellable context.
+	if ctx.Done() != nil {
+		return s.waitForWorkspaceIndexUntil(ctx, nil)
+	}
 	timeout := workspaceIndexWaitTimeout
 	if s.testHooks.workspaceIndexWaitTimeout > 0 {
 		timeout = s.testHooks.workspaceIndexWaitTimeout
@@ -562,7 +569,7 @@ func (s *Server) waitForWorkspaceIndexUntil(ctx context.Context, timeout <-chan 
 		case <-s.analysisContext.Done():
 			return protocol.ErrRequestCancelled
 		case <-timeout:
-			return jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "workspace index did not become ready within 1s")
+			return jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "workspace index did not become ready within 5s")
 		case <-changed:
 		}
 	}

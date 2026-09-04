@@ -197,7 +197,7 @@ func TestDiagnosticWorkspacePullCancellationTimeoutRetryAndPartialResults(t *tes
 		instance.workspaceMu.Lock()
 		instance.workspaceRunning = true
 		instance.workspaceMu.Unlock()
-		if _, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{}); err == nil || err.Error() != "workspace index did not become ready within 1s" {
+		if _, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{}); err == nil || err.Error() != "workspace index did not become ready within 5s" {
 			t.Fatalf("timeout error = %v", err)
 		}
 	})
