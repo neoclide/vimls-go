@@ -497,7 +497,7 @@ func (i *Index) AutoloadDependents(path string) []string {
 }
 
 // GlobalFunctionDependents returns indexed files with direct calls to a
-// top-level legacy global function declared by path.
+// top-level global function declared by path.
 func (i *Index) GlobalFunctionDependents(path string) []string {
 	normalized, err := normalizeIndexPath(path)
 	if err != nil {
@@ -512,7 +512,8 @@ func (i *Index) GlobalFunctionDependents(path string) []string {
 	names := make(map[string]bool)
 	for _, fact := range file.facts {
 		name := strings.TrimPrefix(fact.Name, "g:")
-		if fact.TopLevel && fact.Dialect == syntax.Legacy && fact.Kind == analysis.SymbolKindFunction && !strings.Contains(name, "#") {
+		if fact.TopLevel && fact.Kind == analysis.SymbolKindFunction && !strings.Contains(name, "#") &&
+			(fact.Dialect == syntax.Legacy || strings.HasPrefix(fact.Name, "g:")) {
 			names[name] = true
 		}
 	}
@@ -1042,7 +1043,7 @@ func (i *Index) GlobalFunction(name string) (SymbolMatch, bool) {
 	return i.globalSymbol(name, analysis.NameDeclarationFunction)
 }
 
-// HasGlobalFunction reports whether any indexed top-level legacy function has
+// HasGlobalFunction reports whether any indexed top-level global function has
 // name. Unlike GlobalFunction, ambiguity does not make an indexed name absent.
 func (i *Index) HasGlobalFunction(name string) bool {
 	name = strings.TrimPrefix(name, "g:")
@@ -1056,7 +1057,8 @@ func (i *Index) HasGlobalFunction(name string) bool {
 			continue
 		}
 		for _, fact := range i.files[global.Path].facts {
-			if fact.SelectionRange == global.Span && fact.TopLevel && fact.Dialect == syntax.Legacy && fact.Kind == analysis.SymbolKindFunction {
+			if fact.SelectionRange == global.Span && fact.TopLevel && fact.Kind == analysis.SymbolKindFunction &&
+				(fact.Dialect == syntax.Legacy || strings.HasPrefix(fact.Name, "g:")) {
 				return true
 			}
 		}
@@ -1084,7 +1086,7 @@ func (i *Index) globalSymbol(name string, kind analysis.NameDeclarationKind) (Sy
 		}
 		file := i.files[global.Path]
 		for _, fact := range file.facts {
-			if fact.SelectionRange != global.Span || !fact.TopLevel || fact.Dialect != syntax.Legacy {
+			if fact.SelectionRange != global.Span || !fact.TopLevel || !(fact.Dialect == syntax.Legacy || strings.HasPrefix(fact.Name, "g:")) {
 				continue
 			}
 			if kind == analysis.NameDeclarationFunction && fact.Kind != analysis.SymbolKindFunction || kind == analysis.NameDeclarationVariable && fact.Kind != analysis.SymbolKindVariable && fact.Kind != analysis.SymbolKindConstant {
@@ -1102,7 +1104,7 @@ func (i *Index) globalSymbol(name string, kind analysis.NameDeclarationKind) (Sy
 
 // FunctionCompletions returns indexed callable function names. Autoload
 // functions are available in both dialects. includeLegacyGlobals additionally
-// includes ordinary legacy global functions.
+// includes top-level global functions.
 func (i *Index) FunctionCompletions(prefix string, includeLegacyGlobals bool, limit int, acceptPath ...func(string) bool) ([]FunctionMatch, bool) {
 	prefix = strings.ToLower(prefix)
 	return i.FunctionCompletionsMatching(func(name string) bool {
@@ -1131,7 +1133,7 @@ func (i *Index) FunctionCompletionsMatching(matchName func(string) bool, include
 				} else if !includeLegacyGlobals || fact.Dialect != syntax.Legacy {
 					continue
 				}
-			} else if !includeLegacyGlobals || fact.Dialect != syntax.Legacy || strings.HasPrefix(fact.Name, "s:") {
+			} else if !includeLegacyGlobals || (fact.Dialect != syntax.Legacy && !strings.HasPrefix(fact.Name, "g:")) || strings.HasPrefix(fact.Name, "s:") {
 				continue
 			}
 			if matchName != nil && !matchName(name) {

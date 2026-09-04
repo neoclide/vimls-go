@@ -4976,6 +4976,15 @@ func collectVim9RedeclarationDiagnostics(result *FileAnalysis) {
 		return
 	}
 	first := make(map[*Scope]map[string]int)
+	commandDialects := make(map[syntax.Span]syntax.Dialect)
+	for command := range result.commandScopes {
+		if command.Declaration == nil {
+			continue
+		}
+		for _, binding := range command.Declaration.Bindings {
+			commandDialects[binding.Name] = command.Dialect
+		}
+	}
 	for _, declaration := range result.Declarations {
 		if declaration.Scope == nil || declaration.Parameter || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant {
 			continue
@@ -5007,8 +5016,12 @@ func collectVim9RedeclarationDiagnostics(result *FileAnalysis) {
 		if legacyFunction {
 			continue
 		}
-		duplicate := first[declaration.Scope][declaration.Name] < declaration.Span.Start &&
-			(scopeUsesDefTypeRules(declaration.Scope) || declarationHasCompoundTarget(result.File, declaration.Span))
+		vim9Context := scopeUsesDefTypeRules(declaration.Scope) ||
+			(commandDialects[declaration.Span] == syntax.Vim9 && declarationHasCompoundTarget(result.File, declaration.Span))
+		if !vim9Context {
+			continue
+		}
+		duplicate := first[declaration.Scope][declaration.Name] < declaration.Span.Start
 		if !duplicate && declaration.Scope.Kind == syntax.BlockFor && scopeUsesDefTypeRules(declaration.Scope) {
 			for scope := declaration.Scope.Parent; scope != nil; scope = scope.Parent {
 				if position, exists := first[scope][declaration.Name]; exists && position < declaration.Span.Start {

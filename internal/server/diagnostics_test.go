@@ -988,6 +988,10 @@ func TestWorkspaceGlobalFunctionNotIndexedHints(t *testing.T) {
 	if err := index.Replace(knownPath, syntax.Parse("function KnownGlobal() abort\nendfunction\n")); err != nil {
 		t.Fatal(err)
 	}
+	vim9KnownPath := filepath.Join(root, "vim9_known.vim")
+	if err := index.Replace(vim9KnownPath, syntax.Parse("vim9script\ndef g:KnownVim9Global()\nenddef\n")); err != nil {
+		t.Fatal(err)
+	}
 	index.SetComplete(false)
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
@@ -1005,8 +1009,8 @@ func TestWorkspaceGlobalFunctionNotIndexedHints(t *testing.T) {
 	for _, test := range []struct {
 		name, source, missing string
 	}{
-		{name: "legacy", source: "call KnownGlobal()\ncall MissingGlobal()\ncall missingglobal()\n", missing: "MissingGlobal"},
-		{name: "Vim9 explicit global", source: "vim9script\ng:MissingGlobal()\n", missing: "g:MissingGlobal"},
+		{name: "legacy", source: "call KnownGlobal()\ncall KnownVim9Global()\ncall MissingGlobal()\ncall missingglobal()\n", missing: "MissingGlobal"},
+		{name: "Vim9 explicit global", source: "vim9script\ng:KnownVim9Global()\ng:MissingGlobal()\n", missing: "g:MissingGlobal"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(test.source)

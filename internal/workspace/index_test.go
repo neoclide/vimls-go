@@ -643,13 +643,15 @@ func TestIndexAutoloadFunctionLookupAndDependents(t *testing.T) {
 	vim9Path := filepath.Join(first, "autoload", "vim9", "api.vim")
 	shadowedPath := filepath.Join(second, "autoload", "foo", "bar.vim")
 	globalPath := filepath.Join(first, "plugin", "globals.vim")
+	vim9GlobalPath := filepath.Join(first, "plugin", "vim9_globals.vim")
 	callerPath := filepath.Join(first, "plugin", "caller.vim")
 	for path, source := range map[string]string{
-		legacyPath:   "function foo#bar#Known() abort\nendfunction\n",
-		vim9Path:     "vim9script\nexport def Run()\nenddef\ndef Private()\nenddef\n",
-		shadowedPath: "function foo#bar#ShadowOnly() abort\nendfunction\n",
-		globalPath:   "function GlobalRun() abort\nendfunction\n",
-		callerPath:   "call foo#bar#Known()\ncall foo#bar#Missing()\ncall vim9#api#Run()\ncall GlobalRun()\nlet value = g:foo#bar#Value\n",
+		legacyPath:     "function foo#bar#Known() abort\nendfunction\n",
+		vim9Path:       "vim9script\nexport def Run()\nenddef\ndef Private()\nenddef\n",
+		shadowedPath:   "function foo#bar#ShadowOnly() abort\nendfunction\n",
+		globalPath:     "function GlobalRun() abort\nendfunction\n",
+		vim9GlobalPath: "vim9script\ndef g:Vim9GlobalRun()\nenddef\n",
+		callerPath:     "call foo#bar#Known()\ncall foo#bar#Missing()\ncall vim9#api#Run()\ncall GlobalRun()\ncall g:Vim9GlobalRun()\nlet value = g:foo#bar#Value\n",
 	} {
 		if err := index.Replace(path, syntax.Parse(source)); err != nil {
 			t.Fatal(err)
@@ -661,6 +663,9 @@ func TestIndexAutoloadFunctionLookupAndDependents(t *testing.T) {
 	if index.HasAutoloadFunction("foo#bar#Missing") || index.HasAutoloadFunction("foo#bar#ShadowOnly") || index.HasAutoloadFunction("vim9#api#Private") {
 		t.Fatal("missing, shadowed, or private autoload function was found")
 	}
+	if !index.HasGlobalFunction("Vim9GlobalRun") || !index.HasGlobalFunction("g:Vim9GlobalRun") {
+		t.Fatal("Vim9 global function was not found in index")
+	}
 	wantCaller := mustResolverCanonical(t, callerPath)
 	for _, target := range []string{legacyPath, vim9Path} {
 		if dependents := index.AutoloadDependents(target); !reflect.DeepEqual(dependents, []string{wantCaller}) {
@@ -669,6 +674,9 @@ func TestIndexAutoloadFunctionLookupAndDependents(t *testing.T) {
 	}
 	if dependents := index.GlobalFunctionDependents(globalPath); !reflect.DeepEqual(dependents, []string{wantCaller}) {
 		t.Fatalf("global function dependents = %#v, want %#v", dependents, []string{wantCaller})
+	}
+	if dependents := index.GlobalFunctionDependents(vim9GlobalPath); !reflect.DeepEqual(dependents, []string{wantCaller}) {
+		t.Fatalf("Vim9 global function dependents = %#v, want %#v", dependents, []string{wantCaller})
 	}
 }
 

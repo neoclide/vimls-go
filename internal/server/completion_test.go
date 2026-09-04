@@ -171,6 +171,25 @@ func TestCompletionExcludesRuntimePathOnlyItemsButKeepsWorkspaceItems(t *testing
 	}
 }
 
+func TestCompletionIncludesVim9ExplicitGlobalFunction(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "plugin/globals.vim", "vim9script\ndef g:Vim9GlobalRun(arg: number)\nenddef\n")
+	mainPath := writeWorkspaceFile(t, root, "main.vim", "vim9script\ng:Vim9Glo\n")
+	instance := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(mainPath)
+	instance.documents.Open(documentURI.String(), 1, "vim9script\ng:Vim9Glo\n")
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Line: 1, Character: 9},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items := completionItems(t, result); !hasCompletionLabel(items, "g:Vim9GlobalRun") {
+		t.Fatalf("Vim9 global function completion = %#v", items)
+	}
+}
+
 func BenchmarkCompletionLatency(b *testing.B) {
 	for _, size := range []struct {
 		name  string

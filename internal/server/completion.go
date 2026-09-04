@@ -371,7 +371,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 				functions, incomplete := completionWorkspaceState.index.FunctionCompletionsMatching(func(name string) bool {
 					return completionTextMatches(workspacePrefix, name)
-				}, file.Dialect == syntax.Legacy, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
+				}, file.Dialect == syntax.Legacy || scopePrefix == "g:", maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
 				workspaceIncomplete = workspaceIncomplete || incomplete
 				for _, function := range functions {
 					if methodCall && len(function.Parameters) == 0 {

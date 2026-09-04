@@ -700,48 +700,72 @@ func styleQuickFixesFor(file *syntax.File, diagnostic syntax.Diagnostic) []synta
 	fix := syntaxQuickFix{diagnostic: diagnostic, preferred: true}
 	switch diagnostic.Code {
 	case "vimls/normal-without-bang":
-		for index := range file.Commands {
-			command := &file.Commands[index]
+		var fixes []syntaxQuickFix
+		walkCommands(file.Commands, func(command *syntax.Command) {
+			if len(fixes) > 0 {
+				return
+			}
 			if command.Canonical == "normal" && command.Name == diagnostic.Span && command.Bang.Start == command.Bang.End {
 				fix.span = syntax.Span{Start: command.Name.End, End: command.Name.End}
 				fix.newText = "!"
 				fix.title = "Use :normal!"
-				return []syntaxQuickFix{fix}
+				fixes = append(fixes, fix)
 			}
+		})
+		if len(fixes) > 0 {
+			return fixes
 		}
 	case "vim/E174":
-		for index := range file.Commands {
-			command := &file.Commands[index]
+		var fixes []syntaxQuickFix
+		walkCommands(file.Commands, func(command *syntax.Command) {
+			if len(fixes) > 0 {
+				return
+			}
 			if command.Canonical == "command" && command.Bang.Start == command.Bang.End {
 				if _, span, _, ok := syntax.DefinedUserCommand(file, command); ok && span == diagnostic.Span {
 					fix.span = syntax.Span{Start: command.Name.End, End: command.Name.End}
 					fix.newText = "!"
 					fix.title = "Use :command!"
-					return []syntaxQuickFix{fix}
+					fixes = append(fixes, fix)
 				}
 			}
+		})
+		if len(fixes) > 0 {
+			return fixes
 		}
 	case "vim/E122":
-		for index := range file.Commands {
-			command := &file.Commands[index]
+		var fixes []syntaxQuickFix
+		walkCommands(file.Commands, func(command *syntax.Command) {
+			if len(fixes) > 0 {
+				return
+			}
 			if command.Canonical == "function" && command.Function != nil && command.Bang.Start == command.Bang.End {
 				if command.Function.Name == diagnostic.Span {
 					fix.span = syntax.Span{Start: command.Name.End, End: command.Name.End}
 					fix.newText = "!"
 					fix.title = "Use :function!"
-					return []syntaxQuickFix{fix}
+					fixes = append(fixes, fix)
 				}
 			}
+		})
+		if len(fixes) > 0 {
+			return fixes
 		}
 	case "vimls/function-without-abort":
-		for index := range file.Commands {
-			command := &file.Commands[index]
+		var fixes []syntaxQuickFix
+		walkCommands(file.Commands, func(command *syntax.Command) {
+			if len(fixes) > 0 {
+				return
+			}
 			if command.Canonical == "function" && command.Function != nil && command.Name == diagnostic.Span && !strings.Contains(file.Text(command.Argument), "abort") {
 				fix.span = syntax.Span{Start: command.Argument.End, End: command.Argument.End}
 				fix.newText = " abort"
 				fix.title = "Add abort"
-				return []syntaxQuickFix{fix}
+				fixes = append(fixes, fix)
 			}
+		})
+		if len(fixes) > 0 {
+			return fixes
 		}
 	case "vimls/implicit-string-case", "vimls/implicit-pattern-case":
 		operator := file.Text(diagnostic.Span)
