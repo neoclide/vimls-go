@@ -1063,7 +1063,8 @@ func (c *testClient) recordTranscript(dir, body string) {
 func (c *testClient) formatFailure(msg string) string {
 	var sb strings.Builder
 	sb.WriteString("\n=== LSP SUBPROCESS TEST FAILURE ===\n")
-	sb.WriteString(msg + "\n")
+	sb.WriteString(msg)
+	sb.WriteByte('\n')
 	sb.WriteString("\n--- RECENT TRANSCRIPT (last frames) ---\n")
 	c.mu.Lock()
 	if len(c.transcript) == 0 {
@@ -1074,7 +1075,7 @@ func (c *testClient) formatFailure(msg string) string {
 			if len(body) > 300 {
 				body = body[:300] + "... [truncated]"
 			}
-			sb.WriteString(fmt.Sprintf("[%s] %s %s\n", entry.time.Format("15:04:05.000"), entry.dir, body))
+			fmt.Fprintf(&sb, "[%s] %s %s\n", entry.time.Format("15:04:05.000"), entry.dir, body)
 		}
 	}
 	c.mu.Unlock()
@@ -1435,26 +1436,21 @@ func TestSafeBufferConcurrentReadWrite(t *testing.T) {
 	const iterations = 500
 
 	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		workerID := i
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
-				_, _ = buf.Write([]byte(fmt.Sprintf("w%d-line%d\n", workerID, j)))
+	for workerID := range workers {
+		wg.Go(func() {
+			for j := range iterations {
+				_, _ = fmt.Fprintf(&buf, "w%d-line%d\n", workerID, j)
 			}
-		}()
+		})
 	}
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+	for range workers {
+		wg.Go(func() {
+			for range iterations {
 				_ = buf.Len()
 				_ = buf.String()
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
