@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -104,8 +105,8 @@ func run(r io.Reader, w io.Writer) error {
 			aList[i] = s.allocsPerOp
 		}
 		sort.Float64s(nsList)
-		sort.Slice(bList, func(i, j int) bool { return bList[i] < bList[j] })
-		sort.Slice(aList, func(i, j int) bool { return aList[i] < aList[j] })
+		slices.Sort(bList)
+		slices.Sort(aList)
 
 		medianNs := percentileFloat(nsList, 0.50)
 		p95Ns := percentileFloat(nsList, 0.95)
@@ -123,12 +124,8 @@ func percentileIndex(n int, p float64) int {
 		return 0
 	}
 	idx := int(math.Ceil(p*float64(n))) - 1
-	if idx < 0 {
-		idx = 0
-	}
-	if idx >= n {
-		idx = n - 1
-	}
+	idx = max(idx, 0)
+	idx = min(idx, n-1)
 	return idx
 }
 

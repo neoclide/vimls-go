@@ -1215,14 +1215,6 @@ func completionUserFunctionSnippet(file *syntax.File, name string, enabled bool)
 	return completionFunctionSnippet(name, parameters, enabled && found)
 }
 
-func completionUserMethodSnippet(file *syntax.File, name string, enabled bool) (string, bool) {
-	parameters, found := completionUserFunctionParameters(file, name)
-	if !found || len(parameters) == 0 {
-		return name, false
-	}
-	return completionFunctionSnippet(name, parameters[1:], enabled)
-}
-
 func completionUserFunctionParameters(file *syntax.File, name string) ([]string, bool) {
 	if file == nil {
 		return nil, false

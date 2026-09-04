@@ -892,17 +892,17 @@ func TestServerConcurrentColdMissSingleParseAndAnalyze(t *testing.T) {
 	documentURI := uri.MustParse("file:///concurrent-miss.vim")
 	snapshot := instance.documents.Open(documentURI.String(), 1, source)
 
-	var parseCalls int32
-	var analyzeCalls int32
+	var parseCalls atomic.Int32
+	var analyzeCalls atomic.Int32
 	leaderPaused := make(chan struct{})
 	releaseLeader := make(chan struct{})
 	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
-		atomic.AddInt32(&parseCalls, 1)
+		parseCalls.Add(1)
 		close(leaderPaused)
 		<-releaseLeader
 	}
 	instance.testHooks.beforeAnalyze = func(*syntax.File) {
-		atomic.AddInt32(&analyzeCalls, 1)
+		analyzeCalls.Add(1)
 	}
 
 	const concurrency = 10
@@ -919,11 +919,9 @@ func TestServerConcurrentColdMissSingleParseAndAnalyze(t *testing.T) {
 	analyses := make([]*analysis.FileAnalysis, concurrency)
 
 	// Launch leader first
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		files[0], analyses[0] = instance.analyzeSnapshot(snapshot)
-	}()
+	})
 
 	// Wait until leader is executing and paused
 	select {
@@ -935,11 +933,9 @@ func TestServerConcurrentColdMissSingleParseAndAnalyze(t *testing.T) {
 	// Now launch the remaining concurrency-1 followers
 	for i := 1; i < concurrency; i++ {
 		idx := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			files[idx], analyses[idx] = instance.analyzeSnapshot(snapshot)
-		}()
+		})
 	}
 
 	// Wait until all followers have explicitly entered in-flight waiting
@@ -953,14 +949,14 @@ func TestServerConcurrentColdMissSingleParseAndAnalyze(t *testing.T) {
 	close(releaseLeader)
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&parseCalls); got != 1 {
+	if got := parseCalls.Load(); got != 1 {
 		t.Fatalf("expected 1 parse call for %d concurrent requests, got %d", concurrency, got)
 	}
-	if got := atomic.LoadInt32(&analyzeCalls); got != 1 {
+	if got := analyzeCalls.Load(); got != 1 {
 		t.Fatalf("expected 1 analyze call for %d concurrent requests, got %d", concurrency, got)
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		if files[i] == nil || analyses[i] == nil {
 			t.Fatalf("goroutine %d got nil file or analysis", i)
 		}
@@ -1184,13 +1180,13 @@ func TestServerSameContentDifferentVersionReusesPureState(t *testing.T) {
 	documentURI := uri.MustParse("file:///same-content.vim")
 	s1 := instance.documents.Open(documentURI.String(), 1, source)
 
-	var parseCalls int32
-	var analyzeCalls int32
+	var parseCalls atomic.Int32
+	var analyzeCalls atomic.Int32
 	instance.testHooks.beforeParseSnapshotCacheMiss = func(*text.Snapshot) {
-		atomic.AddInt32(&parseCalls, 1)
+		parseCalls.Add(1)
 	}
 	instance.testHooks.beforeAnalyze = func(*syntax.File) {
-		atomic.AddInt32(&analyzeCalls, 1)
+		analyzeCalls.Add(1)
 	}
 
 	f1, a1 := instance.analyzeSnapshot(s1)
@@ -1204,8 +1200,8 @@ func TestServerSameContentDifferentVersionReusesPureState(t *testing.T) {
 	if f2 != f1 || a2 != a1 {
 		t.Fatalf("same content should reuse pure file and analysis: f1=%p f2=%p a1=%p a2=%p", f1, f2, a1, a2)
 	}
-	if atomic.LoadInt32(&parseCalls) != 1 || atomic.LoadInt32(&analyzeCalls) != 1 {
-		t.Fatalf("same content should not trigger second parse/analyze: parses=%d analyzes=%d", parseCalls, analyzeCalls)
+	if parseCalls.Load() != 1 || analyzeCalls.Load() != 1 {
+		t.Fatalf("same content should not trigger second parse/analyze: parses=%d analyzes=%d", parseCalls.Load(), analyzeCalls.Load())
 	}
 }
 
@@ -1213,17 +1209,15 @@ func BenchmarkConcurrentColdMiss(b *testing.B) {
 	source := "vim9script\nvar x = 1\nvar y = 2\ndef Sum(): number\n  return x + y\nenddef\n"
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		instance := New(nil, nil, io.Discard)
 		docURI := fmt.Sprintf("file:///bench-%d.vim", i)
 		snapshot := instance.documents.Open(docURI, 1, source)
 		var wg sync.WaitGroup
-		for g := 0; g < 8; g++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 8 {
+			wg.Go(func() {
 				_, _ = instance.analyzeSnapshot(snapshot)
-			}()
+			})
 		}
 		wg.Wait()
 		instance.stopAnalysis()

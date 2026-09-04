@@ -108,7 +108,7 @@ func TestAnalysisRecoveryMatrix(t *testing.T) {
 		state = state*1664525 + 1013904223
 		return int(state % uint32(len(fragments)))
 	}
-	for caseNumber := 0; caseNumber < 1200; caseNumber++ {
+	for caseNumber := range 1200 {
 		var source strings.Builder
 		source.WriteString("vim9script\n")
 		for count := 0; count < 1+caseNumber%5; count++ {

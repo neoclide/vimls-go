@@ -2,6 +2,7 @@ package syntax
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -371,8 +372,7 @@ func assertIndentEdits(t *testing.T, source string, edits []IndentEdit) {
 
 func applyIndentEdits(t *testing.T, source string, edits []IndentEdit) string {
 	t.Helper()
-	for index := len(edits) - 1; index >= 0; index-- {
-		edit := edits[index]
+	for _, edit := range slices.Backward(edits) {
 		if edit.Span.Start < 0 || edit.Span.End < edit.Span.Start || edit.Span.End > len(source) {
 			t.Fatalf("invalid edit %#v", edit)
 		}

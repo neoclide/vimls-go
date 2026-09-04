@@ -728,16 +728,14 @@ func TestDidChangeWatchedFilesBurstMergesToSingleRebuild(t *testing.T) {
 	burstDone := make(chan struct{})
 	go func() {
 		var wg sync.WaitGroup
-		for i := 0; i < 20; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 20 {
+			wg.Go(func() {
 				_ = instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
 					Changes: []protocol.FileEvent{
 						{URI: uri.File(p), Type: protocol.FileChangeTypeChanged},
 					},
 				})
-			}()
+			})
 		}
 		wg.Wait()
 		close(burstDone)

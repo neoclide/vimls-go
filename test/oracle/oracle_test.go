@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -205,8 +206,7 @@ func TestPinnedVimFormattingOracle(t *testing.T) {
 			want := runFormattingOracle(t, vim, test.source)
 			got := test.source
 			edits := syntax.IndentEdits(syntax.Parse(got), syntax.IndentOptions{TabSize: 4, InsertSpaces: true})
-			for index := len(edits) - 1; index >= 0; index-- {
-				edit := edits[index]
+			for _, edit := range slices.Backward(edits) {
 				got = got[:edit.Span.Start] + edit.NewText + got[edit.Span.End:]
 			}
 			if got != want {

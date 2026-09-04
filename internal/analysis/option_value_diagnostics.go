@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -129,12 +130,7 @@ func staticOptionAssignmentValue(file *syntax.File, expression *syntax.Expressio
 }
 
 func optionHasFlag(option vimdata.Option, flag string) bool {
-	for _, candidate := range option.Flags {
-		if candidate == flag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(option.Flags, flag)
 }
 
 // staticSetOptionNumber matches :set's option-number grammar.  Its parser

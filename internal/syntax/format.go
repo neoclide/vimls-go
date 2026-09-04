@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -286,10 +287,8 @@ func commandIndentLevel(commands []Command, blocks []Block, commandIndex int) in
 	if block.Header == commandIndex || block.End == commandIndex {
 		return level
 	}
-	for _, branch := range block.Branches {
-		if branch == commandIndex {
-			return level
-		}
+	if slices.Contains(block.Branches, commandIndex) {
+		return level
 	}
 	return level + 1
 }

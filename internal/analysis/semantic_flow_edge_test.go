@@ -14,12 +14,12 @@ func TestAnalyzeDeterministicRecoveryCombinations(t *testing.T) {
 		state = state*1103515245 + 12345
 		return int(state % uint32(len(parts)))
 	}
-	for index := 0; index < 512; index++ {
+	for index := range 512 {
 		var source strings.Builder
 		if index&1 == 0 {
 			source.WriteString("vim9script\n")
 		}
-		for count := 0; count < 9; count++ {
+		for count := range 9 {
 			source.WriteString(parts[next()])
 			if count%3 != 2 {
 				source.WriteByte(' ')

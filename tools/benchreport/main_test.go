@@ -63,7 +63,7 @@ func TestPercentileCalculations(t *testing.T) {
 	// N = 20 samples: 1.0, 2.0, ..., 20.0
 	floatVals := make([]float64, 20)
 	intVals := make([]int64, 20)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		floatVals[i] = float64(i + 1)
 		intVals[i] = int64(i + 1)
 	}

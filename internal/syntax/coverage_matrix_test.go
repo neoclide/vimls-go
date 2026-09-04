@@ -54,7 +54,7 @@ func TestCoverageCommandMatrix(t *testing.T) {
 	commands := []string{"echo", "let", "var", "def", "command", "autocmd", "syntax", "highlight", "set", "map", "global", "substitute", "function", "class", "import", "call", "execute"}
 	prefixes := []string{"", "1,2", "silent!", "keepjumps", "vertical", "legacy", "vim9cmd", "filter /x/"}
 	payloads := []string{"", " x", " x | echo y", "! x", " /x/y/ge", " {-> x}", " << EOF\nx\nEOF", " # trailing", " ++once x", " (x: number)"}
-	for index := 0; index < 1600; index++ {
+	for index := range 1600 {
 		command := commands[index%len(commands)]
 		prefix := prefixes[(index/len(commands))%len(prefixes)]
 		payload := payloads[(index/(len(commands)*len(prefixes)))%len(payloads)]
@@ -74,7 +74,7 @@ func TestCoverageCommandMatrix(t *testing.T) {
 	// corpus test rather than a fuzz target: it is fast and reproducible.
 	alphabet := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 :|\\/\"'#[]{}()<>?+-=,;\r\n\x80\xff")
 	state := uint32(0x6d2b79f5)
-	for index := 0; index < 3000; index++ {
+	for index := range 3000 {
 		bytes := make([]byte, 8+index%57)
 		for offset := range bytes {
 			state = state*1664525 + 1013904223

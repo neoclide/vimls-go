@@ -42,7 +42,7 @@ func collectConfigLeaderOrderDiagnostics(result *FileAnalysis) {
 			rawName := file.Text(command.Declaration.Name)
 			name := strings.TrimPrefix(strings.ToLower(rawName), "g:")
 			if state, ok := leaderState[name]; ok {
-				state.noteAssignment(result, file, rawName, command.Declaration.Name, command.Declaration.Initializer)
+				state.noteAssignment(result, rawName, command.Declaration.Name, command.Declaration.Initializer)
 			}
 		} else if len(command.Expressions) == 1 && command.Expressions[0].Kind == syntax.ExpressionAssignment && len(command.Expressions[0].Children) == 2 && file.Text(command.Expressions[0].Operator) == "=" {
 			assignment := command.Expressions[0]
@@ -51,7 +51,7 @@ func collectConfigLeaderOrderDiagnostics(result *FileAnalysis) {
 				rawName := file.Text(target.Span)
 				name := strings.TrimPrefix(strings.ToLower(rawName), "g:")
 				if state, ok := leaderState[name]; ok {
-					state.noteAssignment(result, file, rawName, target.Span, assignment.Children[1])
+					state.noteAssignment(result, rawName, target.Span, assignment.Children[1])
 				}
 			}
 		}
@@ -72,7 +72,7 @@ func (state *leaderOrderState) noteMapping(command *syntax.Command) {
 	state.mappings = append(state.mappings, command)
 }
 
-func (state *leaderOrderState) noteAssignment(result *FileAnalysis, file *syntax.File, targetName string, targetSpan syntax.Span, initializer *syntax.Expression) {
+func (state *leaderOrderState) noteAssignment(result *FileAnalysis, targetName string, targetSpan syntax.Span, initializer *syntax.Expression) {
 	if state.assigned {
 		return
 	}
@@ -303,7 +303,7 @@ func collectConfigLoadedGuardDiagnostics(result *FileAnalysis) {
 				continue
 			}
 		}
-		if !guardFinishesBlock(file, command, file.Commands, file.Blocks, index) {
+		if !guardFinishesBlock(command, file.Commands, file.Blocks, index) {
 			continue
 		}
 		message := "a loaded guard for " + guardName + " skips the rest of the file on a later :source; edits below may not take effect"
@@ -345,7 +345,7 @@ func loadedGuardVariable(argument string) (string, bool) {
 
 // guardFinishesBlock reports whether the then-part of the if at index directly
 // contains a :finish before any elseif/else at the same level.
-func guardFinishesBlock(file *syntax.File, guard *syntax.Command, commands []syntax.Command, blocks []syntax.Block, index int) bool {
+func guardFinishesBlock(guard *syntax.Command, commands []syntax.Command, blocks []syntax.Block, index int) bool {
 	blockIndex := guard.Block
 	if blockIndex < 0 || blockIndex >= len(blocks) {
 		return false

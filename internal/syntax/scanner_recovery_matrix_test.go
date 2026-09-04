@@ -17,12 +17,12 @@ func TestParserDeterministicRecoveryCombinations(t *testing.T) {
 		state = state*1664525 + 1013904223
 		return int(state % uint32(len(parts)))
 	}
-	for index := 0; index < 512; index++ {
+	for index := range 512 {
 		var source strings.Builder
 		if index&1 == 0 {
 			source.WriteString("vim9script\n")
 		}
-		for count := 0; count < 8; count++ {
+		for count := range 8 {
 			source.WriteString(parts[next()])
 			if count%3 != 2 {
 				source.WriteByte(' ')
@@ -182,12 +182,12 @@ func TestScannerFixedSeedRecoveryStress(t *testing.T) {
 		state ^= state << 5
 		return alphabet[state%uint32(len(alphabet))]
 	}
-	for index := 0; index < 2048; index++ {
+	for index := range 2048 {
 		var source strings.Builder
 		if index&1 == 0 {
 			source.WriteString("vim9script\n")
 		}
-		for length := 0; length < 96; length++ {
+		for range 96 {
 			source.WriteByte(next())
 		}
 		input := source.String()
@@ -217,14 +217,14 @@ func TestScannerFixedSeedCommandStress(t *testing.T) {
 		state = state*1664525 + 1013904223
 		return int(state % uint32(limit))
 	}
-	for index := 0; index < 2048; index++ {
+	for index := range 2048 {
 		var source strings.Builder
 		if index&1 == 0 {
 			source.WriteString("vim9script\n")
 		}
-		for line := 0; line < 5; line++ {
+		for range 5 {
 			source.WriteString(heads[next(len(heads))])
-			for part := 0; part < 4; part++ {
+			for range 4 {
 				source.WriteString(parts[next(len(parts))])
 			}
 			source.WriteByte('\n')
