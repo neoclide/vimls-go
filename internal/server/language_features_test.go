@@ -210,14 +210,14 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	if !hasCompletion(expressions, "value", protocol.CompletionItemKindVariable) || !hasCompletion(expressions, "abs", protocol.CompletionItemKindFunction) || hasCompletionLabel(expressions, "echo") {
 		t.Fatalf("expression completion missing context filtering")
 	}
-	resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "abs", Kind: protocol.CompletionItemKindFunction})
+	resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "abs", Kind: protocol.CompletionItemKindFunction, Data: completionResolveTargetData(completionResolveBuiltinFunction, "abs")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if detail, ok := resolved.Detail.Get(); !ok || detail == "" {
 		t.Fatalf("resolved builtin = %#v", resolved)
 	}
-	argc, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "argc", Kind: protocol.CompletionItemKindFunction})
+	argc, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "argc", Kind: protocol.CompletionItemKindFunction, Data: completionResolveTargetData(completionResolveBuiltinFunction, "argc")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 func TestCompletionResolveAddsExCommandDocumentation(t *testing.T) {
 	instance, _ := openNavigationDocument(t, text.UTF16, "echo write\n")
 	for _, label := range []string{"echo", "qall", "set"} {
-		resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindKeyword})
+		resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindKeyword, Data: completionResolveTargetData(completionResolveCommand, label)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +247,7 @@ func TestCompletionResolveAddsExCommandDocumentation(t *testing.T) {
 func TestCompletionResolveAddsUserCommandAttributeDocumentation(t *testing.T) {
 	instance, _ := openNavigationDocument(t, text.UTF16, "command! -nargs=1 Foo echo\n")
 	for _, label := range []string{"-nargs=", "-bang", "-complete=", "complete="} {
-		resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindProperty})
+		resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindProperty, Data: completionResolveTargetData(completionResolveCommandAttribute, label)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -396,16 +396,16 @@ func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 	root, runtimePath := t.TempDir(), t.TempDir()
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "default.vim"), "")
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "desert.vim"), "")
-	myDarkPath := writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "my-dark.vim"), "")
+	wildcharmPath := writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "wildcharm.vim"), "")
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "lists", "default.vim"), "")
-	source := "\" 𐐀\r\ncolorscheme my-da\r\n"
+	source := "\" 𐐀\r\ncolorscheme wildc\r\n"
 	main := writeWorkspaceFile(t, root, "main.vim", source)
 	instance := initializeWorkspaceServer(t, root)
 	instance.setRuntimePaths([]string{runtimePath})
 	instance.refreshWorkspaceResolver()
 	instance.scheduleWorkspaceRebuild()
 	instance.workspaceWG.Wait()
-	if err := os.Remove(filepath.Join(runtimePath, "colors", "my-dark.vim")); err != nil {
+	if err := os.Remove(wildcharmPath); err != nil {
 		t.Fatal(err)
 	}
 	documentURI := uri.File(main)
@@ -417,15 +417,19 @@ func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := completionItems(t, result)
-	if len(items) != 1 || items[0].Label != "my-dark" || items[0].Kind != protocol.CompletionItemKindValue {
+	if len(items) != 1 || items[0].Label != "wildcharm" || items[0].Kind != protocol.CompletionItemKindValue {
 		t.Fatalf("colorscheme completion = %#v", items)
 	}
-	if detail, ok := items[0].Detail.Get(); !ok || detail != mustWorkspaceCanonicalPath(t, myDarkPath) {
+	if detail, ok := items[0].Detail.Get(); !ok || detail != mustWorkspaceCanonicalPath(t, wildcharmPath) {
 		t.Fatalf("colorscheme detail = %q, %t", detail, ok)
 	}
 	edit, ok := items[0].TextEdit.(*protocol.TextEdit)
-	if !ok || edit.NewText != "my-dark" || edit.Range != navigationRange(1, 12, 17) {
+	if !ok || edit.NewText != "wildcharm" || edit.Range != navigationRange(1, 12, 17) {
 		t.Fatalf("colorscheme edit = %#v", items[0].TextEdit)
+	}
+	resolved, err := instance.CompletionResolve(context.Background(), &items[0])
+	if err != nil || resolved.Documentation != nil {
+		t.Fatalf("colorscheme resolve = %#v, %v", resolved, err)
 	}
 }
 

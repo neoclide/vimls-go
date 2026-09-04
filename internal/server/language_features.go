@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,6 +19,34 @@ import (
 const maxLanguageFeatureDocumentationBytes = 16 << 10
 
 const maxCompletionItems = 2000
+
+type completionResolveKind string
+
+const (
+	completionResolveBuiltinFunction  completionResolveKind = "builtin-function"
+	completionResolveOption           completionResolveKind = "option"
+	completionResolveVariable         completionResolveKind = "variable"
+	completionResolveCommand          completionResolveKind = "command"
+	completionResolveCommandAttribute completionResolveKind = "command-attribute"
+)
+
+type completionResolveTarget struct {
+	Kind completionResolveKind `json:"kind"`
+	Name string                `json:"name"`
+}
+
+func completionResolveTargetData(kind completionResolveKind, name string) []byte {
+	data, _ := json.Marshal(completionResolveTarget{Kind: kind, Name: name})
+	return data
+}
+
+func completionResolveTargetFromData(data []byte) (completionResolveTarget, bool) {
+	var target completionResolveTarget
+	if len(data) == 0 || json.Unmarshal(data, &target) != nil || target.Kind == "" || target.Name == "" {
+		return completionResolveTarget{}, false
+	}
+	return target, true
+}
 
 func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) ([]protocol.DocumentLink, error) {
 	if err := s.waitForWorkspaceIndex(ctx); err != nil {
@@ -799,6 +828,10 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 		return nil, nil
 	}
 	result := *item
+	target, ok := completionResolveTargetFromData(item.Data)
+	if !ok {
+		return &result, nil
+	}
 	applyMetadata := func(detail, documentation string) {
 		if _, set := result.Detail.Get(); !set {
 			result.Detail = protocol.NewOptional(detail)
@@ -807,25 +840,27 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 			result.Documentation = protocol.String(documentation)
 		}
 	}
-	if function, ok := vimdata.LookupFunction(item.Label); ok {
-		applyMetadata(builtinFunctionDetail(function), function.Documentation)
-		return &result, nil
-	}
-	if option, ok := vimdata.LookupOption(item.Label); ok {
-		applyMetadata(completionOptionDetail(option), option.Documentation)
-		return &result, nil
-	}
-	if variable, ok := vimdata.LookupVariable(item.Label); ok {
-		applyMetadata("variable: "+variable.Type, variable.Documentation)
-		return &result, nil
-	}
-	if command, ok := vimdata.Lookup(item.Label); ok && command.Name == item.Label && !vimdata.IsNeovimCompatCommand(command.Name) {
-		applyMetadata("Ex command", command.Documentation)
-		return &result, nil
-	}
-	if attr, ok := vimdata.LookupUserCommandAttribute(item.Label); ok {
-		applyMetadata(attr.Detail, attr.Documentation)
-		return &result, nil
+	switch target.Kind {
+	case completionResolveBuiltinFunction:
+		if function, ok := vimdata.LookupFunction(target.Name); ok {
+			applyMetadata(builtinFunctionDetail(function), function.Documentation)
+		}
+	case completionResolveOption:
+		if option, ok := vimdata.LookupOption(target.Name); ok {
+			applyMetadata(completionOptionDetail(option), option.Documentation)
+		}
+	case completionResolveVariable:
+		if variable, ok := vimdata.LookupVariable(target.Name); ok {
+			applyMetadata("variable: "+variable.Type, variable.Documentation)
+		}
+	case completionResolveCommand:
+		if command, ok := vimdata.Lookup(target.Name); ok && command.Name == target.Name && !vimdata.IsNeovimCompatCommand(command.Name) {
+			applyMetadata("Ex command", command.Documentation)
+		}
+	case completionResolveCommandAttribute:
+		if attr, ok := vimdata.LookupUserCommandAttribute(target.Name); ok {
+			applyMetadata(attr.Detail, attr.Documentation)
+		}
 	}
 	return &result, nil
 }

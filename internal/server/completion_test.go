@@ -1376,20 +1376,36 @@ func TestCompletionResolveIsStatelessAndPreservesFields(t *testing.T) {
 	if err != nil || resolved == item || resolved.Detail != item.Detail || resolved.Documentation != item.Documentation || !reflect.DeepEqual(resolved.Data, item.Data) {
 		t.Fatalf("resolve = %#v, %v", resolved, err)
 	}
-	for _, label := range []string{"abs", "&ignorecase", "v:count", "echo"} {
-		resolved, err = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label})
+	resolved, err = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "abs", Kind: protocol.CompletionItemKindFunction})
+	if err != nil || resolved.Documentation != nil {
+		t.Fatalf("label-only resolve = %#v, %v", resolved, err)
+	}
+	if _, ok := resolved.Detail.Get(); ok {
+		t.Fatalf("label-only resolve added detail: %#v", resolved)
+	}
+	for _, test := range []struct {
+		label string
+		kind  completionResolveKind
+		name  string
+	}{
+		{label: "abs", kind: completionResolveBuiltinFunction, name: "abs"},
+		{label: "&ignorecase", kind: completionResolveOption, name: "ignorecase"},
+		{label: "v:count", kind: completionResolveVariable, name: "v:count"},
+		{label: "echo", kind: completionResolveCommand, name: "echo"},
+	} {
+		resolved, err = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: test.label, Data: completionResolveTargetData(test.kind, test.name)})
 		if err != nil || resolved == nil {
-			t.Fatalf("resolve %s = %#v, %v", label, resolved, err)
+			t.Fatalf("resolve %s = %#v, %v", test.label, resolved, err)
 		}
 		detail, ok := resolved.Detail.Get()
 		if !ok || detail == "" {
-			t.Fatalf("resolve %s detail = %q, %t", label, detail, ok)
+			t.Fatalf("resolve %s detail = %q, %t", test.label, detail, ok)
 		}
 		if resolved.Documentation == nil {
-			t.Fatalf("resolve %s documentation is missing", label)
+			t.Fatalf("resolve %s documentation is missing", test.label)
 		}
 	}
-	resolved, _ = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "&ignorecase"})
+	resolved, _ = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "&ignorecase", Data: completionResolveTargetData(completionResolveOption, "ignorecase")})
 	detail, _ := resolved.Detail.Get()
 	if !strings.Contains(detail, "bool") || !strings.Contains(detail, "global") {
 		t.Fatalf("option detail = %q", detail)

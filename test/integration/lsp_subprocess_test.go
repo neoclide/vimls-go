@@ -285,7 +285,7 @@ endfunction
 	if string(completion["id"]) != "90" || !strings.Contains(string(completion["result"]), `"isIncomplete":false`) || !strings.Contains(string(completion["result"]), `"label":"Add"`) || !strings.Contains(string(completion["result"]), `"label":"abs"`) || !strings.Contains(string(completion["result"]), `"textEdit"`) {
 		t.Fatalf("completion = %s", completion)
 	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":91,"method":"completionItem/resolve","params":{"label":"abs","kind":3}}`)
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":91,"method":"completionItem/resolve","params":%s}`, completionItemJSON(t, completion, "abs")))
 	completionResolve := readJSON(t, reader)
 	if string(completionResolve["id"]) != "91" || !strings.Contains(string(completionResolve["result"]), `builtin function`) || !strings.Contains(string(completionResolve["result"]), `"documentation"`) {
 		t.Fatalf("completion resolve = %s", completionResolve)
@@ -296,7 +296,7 @@ endfunction
 	if string(commandCompletion["id"]) != "910" || !strings.Contains(string(commandCompletion["result"]), `"label":"echo"`) {
 		t.Fatalf("command completion = %s", commandCompletion)
 	}
-	writeJSON(t, writer, `{"jsonrpc":"2.0","id":913,"method":"completionItem/resolve","params":{"label":"echo","kind":14}}`)
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":913,"method":"completionItem/resolve","params":%s}`, completionItemJSON(t, commandCompletion, "echo")))
 	commandResolve := readJSON(t, reader)
 	if string(commandResolve["id"]) != "913" || !strings.Contains(string(commandResolve["result"]), `"detail":"Ex command"`) || !strings.Contains(string(commandResolve["result"]), `Echoes each {expr1}`) {
 		t.Fatalf("command resolve = %s", commandResolve)
@@ -1187,6 +1187,26 @@ func readJSON(t testHelper, target any) map[string]json.RawMessage {
 	}
 	t.Fatalf("unexpected target for readJSON: %T", target)
 	return nil
+}
+
+func completionItemJSON(t testHelper, response map[string]json.RawMessage, label string) string {
+	t.Helper()
+	var list protocol.CompletionList
+	if err := json.Unmarshal(response["result"], &list); err != nil {
+		t.Fatalf("unmarshal completion list: %v", err)
+	}
+	for _, item := range list.Items {
+		if item.Label != label {
+			continue
+		}
+		data, err := json.Marshal(item)
+		if err != nil {
+			t.Fatalf("marshal completion item %q: %v", label, err)
+		}
+		return string(data)
+	}
+	t.Fatalf("completion item %q not found", label)
+	return ""
 }
 
 func readResponse(t testHelper, target any, id string) map[string]json.RawMessage {

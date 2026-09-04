@@ -249,7 +249,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if !completionTextMatches(selection.prefix, command.Name) {
 					continue
 				}
-				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command")}
+				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command"), Data: completionResolveTargetData(completionResolveCommand, command.Name)}
 				if snippet, ok := commandBlockSnippet(command.Name, file.Dialect, canSnippet, configFile); ok {
 					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
@@ -307,7 +307,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			if !methodCall && scopePrefix == "v:" {
 				for _, variable := range vimdata.Variables() {
-					if !add(protocol.CompletionItem{Label: variable.Name, Kind: protocol.CompletionItemKindConstant, Detail: protocol.NewOptional("variable: " + variable.Type)}, 8000, completionSourceBuiltin) {
+					if !add(protocol.CompletionItem{Label: variable.Name, Kind: protocol.CompletionItemKindConstant, Detail: protocol.NewOptional("variable: " + variable.Type), Data: completionResolveTargetData(completionResolveVariable, variable.Name)}, 8000, completionSourceBuiltin) {
 						break
 					}
 				}
@@ -315,7 +315,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				selection.start--
 				selection.prefix = snapshot.Text()[selection.start:selection.cursor]
 				for _, option := range vimdata.Options() {
-					if !add(protocol.CompletionItem{Label: "&" + scopePrefix + option.Name, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option))}, 8000, completionSourceBuiltin) {
+					if !add(protocol.CompletionItem{Label: "&" + scopePrefix + option.Name, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option)), Data: completionResolveTargetData(completionResolveOption, option.Name)}, 8000, completionSourceBuiltin) {
 						break
 					}
 				}
@@ -441,7 +441,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if !completionTextMatches(selection.prefix, function.Name) {
 					continue
 				}
-				item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}
+				item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction, Data: completionResolveTargetData(completionResolveBuiltinFunction, function.Name)}
 				var (
 					snippet string
 					ok      bool
@@ -499,17 +499,17 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						continue
 					}
 					for _, form := range []string{"no" + option.Name, "inv" + option.Name} {
-						if !add(protocol.CompletionItem{Label: form, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option))}, 8000, completionSourceBuiltin) {
+						if !add(protocol.CompletionItem{Label: form, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option)), Data: completionResolveTargetData(completionResolveOption, option.Name)}, 8000, completionSourceBuiltin) {
 							break
 						}
 					}
 					continue
 				}
-				if !add(protocol.CompletionItem{Label: option.Name, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option))}, 8000, completionSourceBuiltin) {
+				if !add(protocol.CompletionItem{Label: option.Name, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option)), Data: completionResolveTargetData(completionResolveOption, option.Name)}, 8000, completionSourceBuiltin) {
 					break
 				}
 				if option.ShortName != "" {
-					if !add(protocol.CompletionItem{Label: option.ShortName, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option))}, 8000, completionSourceBuiltin) {
+					if !add(protocol.CompletionItem{Label: option.ShortName, Kind: protocol.CompletionItemKindProperty, Detail: protocol.NewOptional(completionOptionDetail(option)), Data: completionResolveTargetData(completionResolveOption, option.Name)}, 8000, completionSourceBuiltin) {
 						break
 					}
 				}
@@ -568,6 +568,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					Kind:          protocol.CompletionItemKindProperty,
 					Detail:        protocol.NewOptional(attribute.Detail),
 					Documentation: protocol.String(attribute.Documentation),
+					Data:          completionResolveTargetData(completionResolveCommandAttribute, "-"+attribute.Name),
 				}
 				if !add(item, 8000, completionSourceCommand) {
 					break
