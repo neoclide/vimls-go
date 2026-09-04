@@ -221,6 +221,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		}
 		s.mu.Lock()
 		canSnippet := s.completion.snippet
+		docsMarkdown := s.completion.docsMarkdown
 		s.mu.Unlock()
 		started := s.completionNow()
 		budgetExpired := false
@@ -259,7 +260,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
-			for _, item := range completionSnippetItems(file.Dialect, canSnippet, configFile) {
+			for _, item := range completionSnippetItems(file.Dialect, canSnippet, docsMarkdown, configFile) {
 				if !add(item, 7500, completionSourceCommand) {
 					break
 				}
@@ -413,7 +414,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						item.Detail = protocol.NewOptional(detail)
 					}
 					if function.Match.Fact.Documentation != "" {
-						item.Documentation = boundedMarkupContent(protocol.MarkupKindMarkdown, function.Match.Fact.Documentation)
+						item.Documentation = completionDocumentation(docsMarkdown, function.Match.Fact.Documentation)
 					}
 					if function.Match.Fact.Deprecated {
 						item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
@@ -711,7 +712,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				// §7 P1: user configuration files get a <Leader> mapping
 				// skeleton at the empty LHS position (no <unique>).
 				if configFile && canSnippet && mapping.LHS.Start == mapping.LHS.End && mapping.RHS.Start == mapping.RHS.End {
-					item := configMappingSkeleton()
+					item := configMappingSkeleton(docsMarkdown)
 					if completionTextMatches(selection.prefix, item.Label) && !add(item, 9000, completionSourceCommand) {
 						break
 					}

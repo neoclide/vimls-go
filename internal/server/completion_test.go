@@ -738,6 +738,22 @@ func TestCompletionPortableSnippetsAndVim9Blocks(t *testing.T) {
 	}
 }
 
+func TestCompletionSnippetDocumentationUsesPlainTextFallback(t *testing.T) {
+	items := completionSnippetItems(syntax.Legacy, true, false, false)
+	if len(items) == 0 {
+		t.Fatal("snippet completion items are empty")
+	}
+	documentation, ok := items[0].Documentation.(protocol.String)
+	if !ok || strings.Contains(string(documentation), "```") || !strings.Contains(string(documentation), "function") {
+		t.Fatalf("plain snippet documentation = %#v", items[0].Documentation)
+	}
+	mapping := configMappingSkeleton(false)
+	documentation, ok = mapping.Documentation.(protocol.String)
+	if !ok || strings.Contains(string(documentation), "```") || !strings.Contains(string(documentation), "<Leader>") {
+		t.Fatalf("plain mapping documentation = %#v", mapping.Documentation)
+	}
+}
+
 func TestCompletionFuzzyMatchesOrderedSubsequence(t *testing.T) {
 	for _, test := range []struct {
 		prefix, label string

@@ -832,12 +832,15 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 	if !ok {
 		return &result, nil
 	}
+	s.mu.Lock()
+	docsMarkdown := s.completion.docsMarkdown
+	s.mu.Unlock()
 	applyMetadata := func(detail, documentation string) {
 		if _, set := result.Detail.Get(); !set {
 			result.Detail = protocol.NewOptional(detail)
 		}
 		if result.Documentation == nil && documentation != "" {
-			result.Documentation = boundedMarkupContent(protocol.MarkupKindMarkdown, documentation)
+			result.Documentation = completionDocumentation(docsMarkdown, documentation)
 		}
 	}
 	switch target.Kind {
@@ -1370,6 +1373,18 @@ func boundedMarkupContent(kind protocol.MarkupKind, value string) *protocol.Mark
 	if kind != protocol.MarkupKindMarkdown {
 		kind = protocol.MarkupKindPlainText
 	}
+	value = boundedDocumentationText(value)
+	return &protocol.MarkupContent{Kind: kind, Value: value}
+}
+
+func completionDocumentation(markdown bool, value string) protocol.InlayHintTooltip {
+	if markdown {
+		return boundedMarkupContent(protocol.MarkupKindMarkdown, value)
+	}
+	return protocol.String(boundedDocumentationText(markdownToPlainText(value)))
+}
+
+func boundedDocumentationText(value string) string {
 	if len(value) > maxLanguageFeatureDocumentationBytes {
 		end := maxLanguageFeatureDocumentationBytes - len("…")
 		for end > 0 && !utf8.ValidString(value[:end]) {
@@ -1377,7 +1392,39 @@ func boundedMarkupContent(kind protocol.MarkupKind, value string) *protocol.Mark
 		}
 		value = value[:end] + "…"
 	}
-	return &protocol.MarkupContent{Kind: kind, Value: value}
+	return value
+}
+
+func markdownToPlainText(value string) string {
+	lines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	inCodeBlock := false
+	for index, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
+			lines[index] = ""
+			continue
+		}
+		if inCodeBlock {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "### ") {
+			line = strings.TrimPrefix(trimmed, "### ")
+		}
+		line = strings.ReplaceAll(line, "**", "")
+		lines[index] = strings.ReplaceAll(line, "`", "")
+	}
+	result := lines[:0]
+	for _, line := range lines {
+		if line == "" && (len(result) == 0 || result[len(result)-1] == "") {
+			continue
+		}
+		result = append(result, line)
+	}
+	for len(result) > 0 && result[len(result)-1] == "" {
+		result = result[:len(result)-1]
+	}
+	return strings.Join(result, "\n")
 }
 
 func declarationForExpression(result *analysis.FileAnalysis, expression *syntax.Expression) *analysis.Declaration {

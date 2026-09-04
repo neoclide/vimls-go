@@ -45,7 +45,7 @@ func vim9CompletionSnippets() []completionSnippet {
 // completionSnippetItems converts snippet templates to completion items. They
 // are only useful to snippet-capable clients; otherwise the labels are not
 // real Ex commands and selecting them would not insert useful text.
-func completionSnippetItems(dialect syntax.Dialect, enabled, configFile bool) []protocol.CompletionItem {
+func completionSnippetItems(dialect syntax.Dialect, enabled, docsMarkdown, configFile bool) []protocol.CompletionItem {
 	if !enabled {
 		return nil
 	}
@@ -60,7 +60,7 @@ func completionSnippetItems(dialect syntax.Dialect, enabled, configFile bool) []
 			Kind:             protocol.CompletionItemKindSnippet,
 			InsertText:       protocol.NewOptional(template.insertText),
 			InsertTextFormat: protocol.InsertTextFormatSnippet,
-			Documentation:    &protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: "```vim\n" + template.insertText + "\n```"},
+			Documentation:    completionDocumentation(docsMarkdown, "```vim\n"+template.insertText+"\n```"),
 		})
 	}
 	return items
@@ -70,14 +70,14 @@ func completionSnippetItems(dialect syntax.Dialect, enabled, configFile bool) []
 // files. It is offered at the mapping LHS position, deliberately without
 // <unique>, and leaves the key and the command payload as placeholders the
 // user confirms.
-func configMappingSkeleton() protocol.CompletionItem {
+func configMappingSkeleton(docsMarkdown bool) protocol.CompletionItem {
 	const insertText = "<Leader>${1:key} ${2:<Cmd>call ${3:Function}()<CR>}"
 	return protocol.CompletionItem{
 		Label:            "<Leader>",
 		Kind:             protocol.CompletionItemKindSnippet,
 		InsertText:       protocol.NewOptional(insertText),
 		InsertTextFormat: protocol.InsertTextFormatSnippet,
-		Documentation:    &protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: "```vim\n" + insertText + "\n```"},
+		Documentation:    completionDocumentation(docsMarkdown, "```vim\n"+insertText+"\n```"),
 	}
 }
 

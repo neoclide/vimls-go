@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -781,7 +780,7 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			}
 			return nil, nil
 		}
-		return s.localHoverContents(ctx, document, functionHoverContents(function.Name, function.Documentation))
+		return s.localHoverContents(ctx, document, functionHoverContents(function.Name, function.Documentation, s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown))
 	}
 	declaration := document.declaration
 	typeName, _ := hoverDeclarationType(declaration)
@@ -803,12 +802,7 @@ func optionBuildRequirement(condition string, features []string) string {
 	return ""
 }
 
-func functionHoverContents(name string, documentation string) protocol.MarkedStringSlice {
-	if documentation == "" {
-		return protocol.MarkedStringSlice{
-			&protocol.MarkedStringWithLanguage{Language: "vim", Value: name + "()"},
-		}
-	}
+func functionHoverContents(name string, documentation string, markdown bool) protocol.HoverContents {
 	lines := strings.Split(documentation, "\n")
 	var sigs []string
 	idx := 0
@@ -821,25 +815,24 @@ func functionHoverContents(name string, documentation string) protocol.MarkedStr
 			break
 		}
 	}
-	if len(sigs) == 0 {
-		return protocol.MarkedStringSlice{
-			&protocol.MarkedStringWithLanguage{Language: "vim", Value: name + "()"},
-			protocol.String(documentation),
+	signature := name + "()"
+	rest := documentation
+	if len(sigs) > 0 {
+		signature = strings.Join(sigs, "\n")
+		rest = strings.TrimSpace(strings.Join(lines[idx:], "\n"))
+	}
+	if !markdown {
+		value := signature
+		if rest != "" {
+			value += "\n\n" + markdownToPlainText(rest)
 		}
+		return boundedMarkupContent(protocol.MarkupKindPlainText, value)
 	}
 	slice := protocol.MarkedStringSlice{
-		&protocol.MarkedStringWithLanguage{Language: "vim", Value: strings.Join(sigs, "\n")},
+		&protocol.MarkedStringWithLanguage{Language: "vim", Value: signature},
 	}
-	rest := strings.TrimSpace(strings.Join(lines[idx:], "\n"))
 	if rest != "" {
-		if len(rest) > maxLanguageFeatureDocumentationBytes {
-			end := maxLanguageFeatureDocumentationBytes - len("…")
-			for end > 0 && !utf8.ValidString(rest[:end]) {
-				end--
-			}
-			rest = rest[:end] + "…"
-		}
-		slice = append(slice, protocol.String(rest))
+		slice = append(slice, protocol.String(boundedDocumentationText(rest)))
 	}
 	return slice
 }
@@ -860,7 +853,10 @@ func (s *Server) localHoverResult(ctx context.Context, document *navigationDocum
 }
 
 func (s *Server) hoverContent(value string) *protocol.MarkupContent {
-	return boundedMarkupContent(protocol.MarkupKindMarkdown, value)
+	if s.languageFeatures.hoverMarkup != protocol.MarkupKindMarkdown {
+		value = markdownToPlainText(value)
+	}
+	return boundedMarkupContent(s.languageFeatures.hoverMarkup, value)
 }
 
 func titleArticle(word string) string {

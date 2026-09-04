@@ -224,7 +224,11 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	if detail, ok := argc.Detail.Get(); !ok || detail != "builtin function (0..1 arguments): number" {
 		t.Fatalf("resolved argc = %#v", argc)
 	}
-	hasItem, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "has", Kind: protocol.CompletionItemKindFunction})
+	hasCompletion := completionItemWithLabel(expressions, "has")
+	if hasCompletion == nil {
+		t.Fatalf("has completion missing from %#v", expressions)
+	}
+	hasItem, err := instance.CompletionResolve(context.Background(), hasCompletion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,6 +726,29 @@ func TestLanguageFeatureDocumentationIsBoundedUTF8(t *testing.T) {
 	content := boundedMarkupContent(protocol.MarkupKindMarkdown, strings.Repeat("界", maxLanguageFeatureDocumentationBytes))
 	if content.Kind != protocol.MarkupKindMarkdown || len(content.Value) > maxLanguageFeatureDocumentationBytes || !utf8.ValidString(content.Value) || !strings.HasSuffix(content.Value, "…") {
 		t.Fatalf("bounded content kind=%q bytes=%d valid=%t suffix=%q", content.Kind, len(content.Value), utf8.ValidString(content.Value), content.Value[len(content.Value)-3:])
+	}
+}
+
+func TestDocumentationFallsBackToPlainText(t *testing.T) {
+	markdown := "### Heading\n\n**value** uses `code`.\n\n```vim\nlet value = 1\n```"
+	want := "Heading\n\nvalue uses code.\n\nlet value = 1"
+	if got := markdownToPlainText(markdown); got != want {
+		t.Fatalf("markdownToPlainText() = %q, want %q", got, want)
+	}
+	documentation := completionDocumentation(false, markdown)
+	plain, ok := documentation.(protocol.String)
+	if !ok || string(plain) != want {
+		t.Fatalf("plain completion documentation = %#v", documentation)
+	}
+	instance := New(nil, nil, io.Discard)
+	hover := instance.hoverContent(markdown)
+	if hover.Kind != protocol.MarkupKindPlainText || hover.Value != want {
+		t.Fatalf("plain hover documentation = %#v", hover)
+	}
+	function := functionHoverContents("Run", "Run(): number\nReturn **one** `number`.", false)
+	functionHover, ok := function.(*protocol.MarkupContent)
+	if !ok || functionHover.Kind != protocol.MarkupKindPlainText || functionHover.Value != "Run(): number\n\nReturn one number." {
+		t.Fatalf("plain function hover = %#v", function)
 	}
 }
 

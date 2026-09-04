@@ -83,8 +83,8 @@ var pvDefinitionPattern = regexp.MustCompile(`(?m)^[ \t]*#[ \t]*define[ \t]+(PV_
 var termPattern = regexp.MustCompile(`(?m)^[ \t]*p_term\("([^"]+)"\s*,\s*([A-Za-z0-9_]+)\s*\)`)
 var cStringArrayPattern = regexp.MustCompile(`(?m)\bchar\s+\*\s*(?:\(\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*\]\s*(?:\))?\s*=\s*\{`)
 var cStringMacroPattern = regexp.MustCompile(`(?m)^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+("(?:\\.|[^"])*")`)
-var simpleDefinedPattern = regexp.MustCompile(`^defined\(([A-Za-z_][A-Za-z0-9_]*)\)$`)
 var definedIdentifierPattern = regexp.MustCompile(`\bdefined\(([A-Za-z_][A-Za-z0-9_]*)\)`)
+var positiveDefinedConjunctionPattern = regexp.MustCompile(`^defined\([A-Za-z_][A-Za-z0-9_]*\)(?:\s*&&\s*defined\([A-Za-z_][A-Za-z0-9_]*\))*$`)
 var vimFeaturePattern = regexp.MustCompile(`(?m)^[ \t]*#[ \t]*(?:ifdef[ \t]+([A-Za-z_][A-Za-z0-9_]*)|if[ \t]+defined\(([A-Za-z_][A-Za-z0-9_]*)\))[ \t]*\r?\n[ \t]*"\+([^"]+)"`)
 
 func generateOptions(root, output, oracleOutput string) error {
@@ -682,17 +682,10 @@ func simplifyConditions(conditions []string) string {
 		}
 		return "0"
 	}
-	firstLeft, _, ok := splitConditionAnd(conditions[0])
-	if ok && firstLeft != "" {
-		allSame := true
-		for _, c := range conditions[1:] {
-			left, _, ok := splitConditionAnd(c)
-			if !ok || left != firstLeft {
-				allSame = false
-				break
-			}
-		}
-		if allSame {
+	if len(conditions) == 2 {
+		firstLeft, firstRight, firstOK := splitConditionAnd(conditions[0])
+		secondLeft, secondRight, secondOK := splitConditionAnd(conditions[1])
+		if firstOK && secondOK && firstLeft == secondLeft && complementaryConditions(firstRight, secondRight) {
 			return stripOuterParens(firstLeft)
 		}
 	}
@@ -726,6 +719,24 @@ func stripOuterParens(s string) string {
 		s = strings.TrimSpace(s[1 : len(s)-1])
 	}
 	return s
+}
+
+func complementaryConditions(left, right string) bool {
+	left = stripOuterParens(left)
+	right = stripOuterParens(right)
+	if negated, ok := negatedCondition(left); ok && negated == right {
+		return true
+	}
+	negated, ok := negatedCondition(right)
+	return ok && negated == left
+}
+
+func negatedCondition(condition string) (string, bool) {
+	condition = strings.TrimSpace(condition)
+	if !strings.HasPrefix(condition, "!(") || matchingCDelimiter(condition, 1, '(', ')') != len(condition)-1 {
+		return "", false
+	}
+	return stripOuterParens(condition[1:]), true
 }
 
 func optionType(flags string) (string, error) {
@@ -1434,26 +1445,27 @@ func addOptionRequiredFeatures(root string, options []option) error {
 	}
 	features := parseVimFeatures(versionSource)
 	for i := range options {
-		match := simpleDefinedPattern.FindStringSubmatch(options[i].AvailableWhen)
-		if len(match) == 2 {
-			if feature := features[match[1]]; feature != "" {
-				options[i].RequiredFeatures = []string{feature}
-			}
-			continue
-		}
-		if !strings.Contains(options[i].AvailableWhen, "||") {
-			var reqs []string
-			for _, sub := range definedIdentifierPattern.FindAllStringSubmatch(options[i].AvailableWhen, -1) {
-				if feature := features[sub[1]]; feature != "" && !slices.Contains(reqs, feature) {
-					reqs = append(reqs, feature)
-				}
-			}
-			if len(reqs) > 0 {
-				options[i].RequiredFeatures = reqs
-			}
-		}
+		options[i].RequiredFeatures = optionRequiredFeatures(options[i].AvailableWhen, features)
 	}
 	return nil
+}
+
+func optionRequiredFeatures(condition string, features map[string]string) []string {
+	condition = stripOuterParens(condition)
+	if !positiveDefinedConjunctionPattern.MatchString(condition) {
+		return nil
+	}
+	var result []string
+	for _, match := range definedIdentifierPattern.FindAllStringSubmatch(condition, -1) {
+		feature := features[match[1]]
+		if feature == "" {
+			return nil
+		}
+		if !slices.Contains(result, feature) {
+			result = append(result, feature)
+		}
+	}
+	return result
 }
 
 func parseVimFeatures(source []byte) map[string]string {
@@ -1463,7 +1475,12 @@ func parseVimFeatures(source []byte) map[string]string {
 		if macro == "" {
 			macro = string(match[2])
 		}
-		features[macro] = string(match[3])
+		feature := string(match[3])
+		if previous, ok := features[macro]; ok && previous != feature {
+			features[macro] = ""
+		} else if !ok {
+			features[macro] = feature
+		}
 	}
 	return features
 }

@@ -118,8 +118,6 @@ func TestParseOptionAvailabilitySimplifiesPartitionedBranches(t *testing.T) {
   {
 # if defined(MSWIN)
   (char_u *)"win",
-# elif defined(UNIX)
-  (char_u *)"unix",
 # else
   (char_u *)"other",
 # endif
@@ -137,6 +135,17 @@ func TestParseOptionAvailabilitySimplifiesPartitionedBranches(t *testing.T) {
 	}
 	if options[0].AvailableWhen != "defined(FEATURE_DELTA)" {
 		t.Fatalf("AvailableWhen = %q, want %q", options[0].AvailableWhen, "defined(FEATURE_DELTA)")
+	}
+}
+
+func TestSimplifyConditionsRequiresComplementaryBranches(t *testing.T) {
+	conditions := []string{
+		"(defined(FEATURE)) && (defined(PLATFORM_ONE))",
+		"(defined(FEATURE)) && (defined(PLATFORM_TWO))",
+	}
+	got := simplifyConditions(conditions)
+	if got == "defined(FEATURE)" || !strings.Contains(got, "PLATFORM_ONE") || !strings.Contains(got, "PLATFORM_TWO") {
+		t.Fatalf("simplifyConditions(%#v) = %q", conditions, got)
 	}
 }
 
@@ -201,9 +210,31 @@ func TestParseVimFeatureNames(t *testing.T) {
 #else
     "-autochdir",
 #endif
+#ifdef FEAT_EVAL
+    "+eval",
+#endif
+#ifdef FEAT_EVAL
+    "+packages",
+#endif
 `))
-	if features["FEAT_BEVAL_GUI"] != "balloon_eval" || features["FEAT_AUTOCHDIR"] != "autochdir" {
+	if features["FEAT_BEVAL_GUI"] != "balloon_eval" || features["FEAT_AUTOCHDIR"] != "autochdir" || features["FEAT_EVAL"] != "" {
 		t.Fatalf("features = %#v", features)
+	}
+}
+
+func TestOptionRequiredFeaturesRequiresCompletePositiveMapping(t *testing.T) {
+	features := map[string]string{"FEAT_ONE": "one", "FEAT_TWO": "two"}
+	if got := optionRequiredFeatures("defined(FEAT_ONE) && defined(FEAT_TWO)", features); !slices.Equal(got, []string{"one", "two"}) {
+		t.Fatalf("complete feature mapping = %#v", got)
+	}
+	for _, condition := range []string{
+		"defined(FEAT_ONE) && defined(MSWIN)",
+		"defined(FEAT_ONE) && !defined(FEAT_TWO)",
+		"defined(FEAT_ONE) || defined(FEAT_TWO)",
+	} {
+		if got := optionRequiredFeatures(condition, features); got != nil {
+			t.Errorf("optionRequiredFeatures(%q) = %#v, want nil", condition, got)
+		}
 	}
 }
 

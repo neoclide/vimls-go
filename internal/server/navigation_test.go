@@ -620,7 +620,11 @@ func TestFunctionHoverContents(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := functionHoverContents(tt.name, tt.doc)
+			contents := functionHoverContents(tt.name, tt.doc, true)
+			got, ok := contents.(protocol.MarkedStringSlice)
+			if !ok {
+				t.Fatalf("functionHoverContents = %#v", contents)
+			}
 			if len(got) != tt.wantLength {
 				t.Fatalf("functionHoverContents len = %d, want %d", len(got), tt.wantLength)
 			}
@@ -773,24 +777,35 @@ func TestHoverShowsSetCommandOptionHelp(t *testing.T) {
 }
 
 func TestHoverShowsOptionBuildRequirement(t *testing.T) {
-	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho &autochdir &ballooneval &grepprg\n")
+	source := "vim9script\necho &autochdir &ballooneval &grepprg &balloonexpr &termwintype &toolbar\n"
+	optionLine := strings.Split(source, "\n")[1]
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
 	for _, test := range []struct {
-		character uint32
-		want      string
+		name string
+		want string
 	}{
-		{character: 8, want: "build requirement: +autochdir"},
-		{character: 20, want: "build requirement: +balloon_eval"},
-		{character: 32, want: "build requirement: +quickfix"},
+		{name: "autochdir", want: "build requirement: +autochdir"},
+		{name: "ballooneval", want: "build requirement: +balloon_eval"},
+		{name: "grepprg"},
+		{name: "balloonexpr"},
+		{name: "termwintype"},
+		{name: "toolbar"},
 	} {
 		hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: test.character},
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: uint32(strings.Index(optionLine, "&"+test.name) + 1)},
 		}})
 		if err != nil || hover == nil {
 			t.Fatalf("hover = %#v, %v", hover, err)
 		}
 		content, ok := hover.Contents.(*protocol.MarkupContent)
-		if !ok || !strings.Contains(content.Value, test.want) {
+		if !ok {
+			t.Fatalf("hover content = %#v", hover.Contents)
+		}
+		if test.want != "" && !strings.Contains(content.Value, test.want) {
 			t.Fatalf("hover content = %#v, want %q", hover.Contents, test.want)
+		}
+		if test.want == "" && strings.Contains(content.Value, "build requirement:") {
+			t.Fatalf("hover content has incomplete build requirement: %q", content.Value)
 		}
 		if strings.Contains(content.Value, "defined(") {
 			t.Fatalf("hover content leaked C preprocessor condition: %q", content.Value)
@@ -940,6 +955,7 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 	mainPath := writeWorkspaceFile(t, root, "main.vim", mainSource)
 	otherPath := writeWorkspaceFile(t, root, "other.vim", "vim9script\nimport './lib.vim' as module\necho module.Run()\n")
 	instance := initializeWorkspaceServer(t, root)
+	instance.languageFeatures.hoverMarkup = protocol.MarkupKindMarkdown
 	mainURI := uri.File(mainPath)
 	indexedMainURI := canonicalTestURI(t, mainPath)
 	otherURI := canonicalTestURI(t, otherPath)
@@ -1362,6 +1378,7 @@ func TestHoverShowsUnindexedLegacyGlobalFunction(t *testing.T) {
 	source := "call MissingGlobal()\ncall missingglobal()\n"
 	mainPath := writeWorkspaceFile(t, root, "plugin.vim", source)
 	instance := initializeWorkspaceServer(t, root)
+	instance.languageFeatures.hoverMarkup = protocol.MarkupKindMarkdown
 	mainURI := uri.File(mainPath)
 	instance.documents.Open(mainURI.String(), 1, source)
 
@@ -1455,6 +1472,8 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 	vim9Path := writeWorkspaceFile(t, root, "direct.vim", "vim9script\necho api#Run()\n")
 	targetURI := canonicalTestURI(t, targetPath)
 	instance := initializeWorkspaceServer(t, root)
+	instance.languageFeatures.hoverMarkup = protocol.MarkupKindMarkdown
+	instance.completion.docsMarkdown = true
 	if err := os.Remove(targetPath); err != nil {
 		t.Fatal(err)
 	}
@@ -1933,6 +1952,8 @@ func openNavigationDocument(t *testing.T, encoding text.Encoding, source string)
 	t.Helper()
 	instance := New(nil, nil, io.Discard)
 	instance.encoding = encoding
+	instance.languageFeatures.hoverMarkup = protocol.MarkupKindMarkdown
+	instance.completion.docsMarkdown = true
 	documentURI := uri.File(mustWorkspaceCanonicalPath(t, filepath.Join(t.TempDir(), "navigation.vim")))
 	version := int32(1)
 	instance.documents.Open(documentURI.String(), version, source)
