@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -780,7 +781,7 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			}
 			return nil, nil
 		}
-		return s.localHoverResult(ctx, document, []string{formatFunctionHover(function.Name, function.Documentation)})
+		return s.localHoverContents(ctx, document, functionHoverContents(function.Name, function.Documentation))
 	}
 	declaration := document.declaration
 	typeName, _ := hoverDeclarationType(declaration)
@@ -802,9 +803,11 @@ func optionBuildRequirement(condition string, features []string) string {
 	return ""
 }
 
-func formatFunctionHover(name string, documentation string) string {
+func functionHoverContents(name string, documentation string) protocol.MarkedStringSlice {
 	if documentation == "" {
-		return fmt.Sprintf("```vim\n%s()\n```", name)
+		return protocol.MarkedStringSlice{
+			&protocol.MarkedStringWithLanguage{Language: "vim", Value: name + "()"},
+		}
 	}
 	lines := strings.Split(documentation, "\n")
 	var sigs []string
@@ -819,17 +822,29 @@ func formatFunctionHover(name string, documentation string) string {
 		}
 	}
 	if len(sigs) == 0 {
-		return documentation
+		return protocol.MarkedStringSlice{
+			&protocol.MarkedStringWithLanguage{Language: "vim", Value: name + "()"},
+			protocol.String(documentation),
+		}
 	}
-	codeBlock := "```vim\n" + strings.Join(sigs, "\n") + "\n```"
+	slice := protocol.MarkedStringSlice{
+		&protocol.MarkedStringWithLanguage{Language: "vim", Value: strings.Join(sigs, "\n")},
+	}
 	rest := strings.TrimSpace(strings.Join(lines[idx:], "\n"))
 	if rest != "" {
-		return codeBlock + "\n\n" + rest
+		if len(rest) > maxLanguageFeatureDocumentationBytes {
+			end := maxLanguageFeatureDocumentationBytes - len("…")
+			for end > 0 && !utf8.ValidString(rest[:end]) {
+				end--
+			}
+			rest = rest[:end] + "…"
+		}
+		slice = append(slice, protocol.String(rest))
 	}
-	return codeBlock
+	return slice
 }
 
-func (s *Server) localHoverResult(ctx context.Context, document *navigationDocument, lines []string) (*protocol.Hover, error) {
+func (s *Server) localHoverContents(ctx context.Context, document *navigationDocument, contents protocol.HoverContents) (*protocol.Hover, error) {
 	rangeValue, ok := protocolRange(document.snapshot, document.encoding, document.occurrence)
 	if !ok {
 		return nil, document.checkCurrent(ctx)
@@ -837,7 +852,11 @@ func (s *Server) localHoverResult(ctx context.Context, document *navigationDocum
 	if err := document.checkCurrent(ctx); err != nil {
 		return nil, err
 	}
-	return &protocol.Hover{Contents: s.hoverContent(strings.Join(lines, "\n")), Range: &rangeValue}, nil
+	return &protocol.Hover{Contents: contents, Range: &rangeValue}, nil
+}
+
+func (s *Server) localHoverResult(ctx context.Context, document *navigationDocument, lines []string) (*protocol.Hover, error) {
+	return s.localHoverContents(ctx, document, s.hoverContent(strings.Join(lines, "\n")))
 }
 
 func (s *Server) hoverContent(value string) *protocol.MarkupContent {

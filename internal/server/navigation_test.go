@@ -540,9 +540,13 @@ func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
 	if hover == nil {
 		t.Fatal("builtin hover is nil")
 	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, "```vim\nargc([{winid}])\n```") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
+	slice, ok := hover.Contents.(protocol.MarkedStringSlice)
+	if !ok || len(slice) == 0 {
 		t.Fatalf("builtin hover = %#v", hover)
+	}
+	first, ok := slice[0].(*protocol.MarkedStringWithLanguage)
+	if !ok || first.Language != "vim" || first.Value != "argc([{winid}])" {
+		t.Fatalf("builtin hover first item = %#v", slice[0])
 	}
 }
 
@@ -558,50 +562,77 @@ func TestHoverShowsBuiltinFunctionSignatureBlock(t *testing.T) {
 	if hover == nil {
 		t.Fatal("builtin hover is nil")
 	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	wantPrefix := "```vim\ngetcompletion({pat}, {type} [, {filtered}])\n```\n\nReturn a list of command-line completion matches."
-	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, wantPrefix) {
+	slice, ok := hover.Contents.(protocol.MarkedStringSlice)
+	if !ok || len(slice) != 2 {
 		t.Fatalf("builtin hover = %#v", hover)
+	}
+	first, ok := slice[0].(*protocol.MarkedStringWithLanguage)
+	if !ok || first.Language != "vim" || first.Value != "getcompletion({pat}, {type} [, {filtered}])" {
+		t.Fatalf("first = %#v", slice[0])
+	}
+	second, ok := slice[1].(protocol.String)
+	if !ok || !strings.HasPrefix(string(second), "Return a list of command-line completion matches.") {
+		t.Fatalf("second = %#v", slice[1])
 	}
 }
 
-func TestFormatFunctionHover(t *testing.T) {
+func TestFunctionHoverContents(t *testing.T) {
 	tests := []struct {
-		name string
-		doc  string
-		want string
+		name       string
+		doc        string
+		wantSig    string
+		wantDoc    string
+		wantLength int
 	}{
 		{
-			name: "getcompletion",
-			doc:  "getcompletion({pat}, {type} [, {filtered}])\nReturn a list of matches.",
-			want: "```vim\ngetcompletion({pat}, {type} [, {filtered}])\n```\n\nReturn a list of matches.",
+			name:       "getcompletion",
+			doc:        "getcompletion({pat}, {type} [, {filtered}])\nReturn a list of matches.",
+			wantSig:    "getcompletion({pat}, {type} [, {filtered}])",
+			wantDoc:    "Return a list of matches.",
+			wantLength: 2,
 		},
 		{
-			name: "cursor",
-			doc:  "cursor({lnum}, {col} [, {off}])\ncursor({list})\nPositions the cursor.",
-			want: "```vim\ncursor({lnum}, {col} [, {off}])\ncursor({list})\n```\n\nPositions the cursor.",
+			name:       "cursor",
+			doc:        "cursor({lnum}, {col} [, {off}])\ncursor({list})\nPositions the cursor.",
+			wantSig:    "cursor({lnum}, {col} [, {off}])\ncursor({list})",
+			wantDoc:    "Positions the cursor.",
+			wantLength: 2,
 		},
 		{
-			name: "empty doc",
-			doc:  "",
-			want: "```vim\nempty doc()\n```",
+			name:       "empty doc",
+			doc:        "",
+			wantSig:    "empty doc()",
+			wantLength: 1,
 		},
 		{
-			name: "obsolete without signature",
-			doc:  "Obsolete name: buffer_exists().",
-			want: "Obsolete name: buffer_exists().",
+			name:       "obsolete without signature",
+			doc:        "Obsolete name: buffer_exists().",
+			wantSig:    "obsolete without signature()",
+			wantDoc:    "Obsolete name: buffer_exists().",
+			wantLength: 2,
 		},
 		{
-			name: "signature only",
-			doc:  "signature only()",
-			want: "```vim\nsignature only()\n```",
+			name:       "signature only",
+			doc:        "signature only()",
+			wantSig:    "signature only()",
+			wantLength: 1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatFunctionHover(tt.name, tt.doc)
-			if got != tt.want {
-				t.Fatalf("formatFunctionHover(%q, %q) = %q, want %q", tt.name, tt.doc, got, tt.want)
+			got := functionHoverContents(tt.name, tt.doc)
+			if len(got) != tt.wantLength {
+				t.Fatalf("functionHoverContents len = %d, want %d", len(got), tt.wantLength)
+			}
+			first, ok := got[0].(*protocol.MarkedStringWithLanguage)
+			if !ok || first.Language != "vim" || first.Value != tt.wantSig {
+				t.Fatalf("first = %#v, want sig %q", got[0], tt.wantSig)
+			}
+			if tt.wantDoc != "" {
+				second, ok := got[1].(protocol.String)
+				if !ok || string(second) != tt.wantDoc {
+					t.Fatalf("second = %#v, want doc %q", got[1], tt.wantDoc)
+				}
 			}
 		})
 	}
@@ -629,7 +660,7 @@ func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 		{
 			name: "builtin method", source: "vim9script\n[1]->len()\n",
 			line: 1, character: 6, wantRange: navigationRange(1, 5, 8),
-			want: "```vim\nlen({expr})\n```",
+			want: "len({expr})",
 		},
 		{
 			name: "local function", source: "vim9script\ndef transform(value: number): number\n  return value\nenddef\nindent(1)->transform()\n",
@@ -645,6 +676,16 @@ func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 			}})
 			if err != nil || hover == nil || hover.Range == nil || *hover.Range != test.wantRange {
 				t.Fatalf("hover = %#v, error = %v", hover, err)
+			}
+			if slice, ok := hover.Contents.(protocol.MarkedStringSlice); ok {
+				if len(slice) == 0 {
+					t.Fatalf("empty slice")
+				}
+				first, ok := slice[0].(*protocol.MarkedStringWithLanguage)
+				if !ok || first.Language != "vim" || first.Value != test.want {
+					t.Fatalf("first item = %#v, want %s", slice[0], test.want)
+				}
+				return
 			}
 			content, ok := hover.Contents.(*protocol.MarkupContent)
 			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.want) {

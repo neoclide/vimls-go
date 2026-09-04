@@ -678,7 +678,7 @@ func TestSignatureHelpForBuiltinFunction(t *testing.T) {
 }
 
 func TestHoverAndSignatureHelpRespectDocumentationFormats(t *testing.T) {
-	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho get([], 0)\n")
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho &number get([], 0)\n")
 	capabilities := protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{
 		Hover: &protocol.HoverClientCapabilities{ContentFormat: []protocol.MarkupKind{protocol.MarkupKindMarkdown}},
 		SignatureHelp: &protocol.SignatureHelpClientCapabilities{SignatureInformation: &protocol.ClientSignatureInformationOptions{
@@ -695,11 +695,11 @@ func TestHoverAndSignatureHelpRespectDocumentationFormats(t *testing.T) {
 		t.Fatalf("hover = %#v, %v", hover, err)
 	}
 	hoverContent, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || hoverContent.Kind != protocol.MarkupKindMarkdown || !strings.Contains(hoverContent.Value, "get(") || len(hoverContent.Value) > maxLanguageFeatureDocumentationBytes {
+	if !ok || hoverContent.Kind != protocol.MarkupKindMarkdown || !strings.Contains(hoverContent.Value, "'number'") || len(hoverContent.Value) > maxLanguageFeatureDocumentationBytes {
 		t.Fatalf("hover content = %#v", hover.Contents)
 	}
 	help, err := instance.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 14},
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 22},
 	}})
 	if err != nil || help == nil || len(help.Signatures) != 1 {
 		t.Fatalf("signature help = %#v, %v", help, err)
