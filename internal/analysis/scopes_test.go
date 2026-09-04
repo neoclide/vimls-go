@@ -709,3 +709,61 @@ func referenceNames(references []*Reference) []string {
 	}
 	return result
 }
+
+// Vim v9.2.1015 src/vim9cmds.c unwinds branch locals in compile_elseif(),
+// compile_else(), compile_catch(), and compile_finally(). The conditional
+// functions and repeated x bindings reproduce runtime/syntax/2html.vim.
+func TestAnalyzeVim9BranchScopes(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\ndef F(flag: bool)\nif flag\nvar x = 1\necho x\nelseif flag\nvar x = 'two'\necho x\nelse\nvar x = true\nif flag\necho x\nendif\nendif\nenddef\n",
+		"vim9script\nif true\ndef HtmlColor(color: string): string\nreturn color\nenddef\nelse\ndef HtmlColor(color: string): string\nreturn color\nenddef\nendif\n",
+		"vim9script\ndef F()\ntry\nvar x = 1\necho x\ncatch /one/\nvar x = 'two'\necho x\ncatch\nvar x = true\necho x\nfinally\nvar x = 4\necho x\nendtry\nenddef\n",
+		"vim9script\nvar F = () => {\nif true\nvar x = 1\necho x\nelse\nvar x = 'two'\necho x\nendif\n}\n",
+	} {
+		file := syntax.Parse(source)
+		result := Analyze(file)
+		for _, diagnostic := range result.Diagnostics {
+			if diagnostic.Code == "vim/E1017" || diagnostic.Code == "vim/E1073" {
+				t.Fatalf("unexpected diagnostic %#v\n%s", diagnostic, source)
+			}
+		}
+		var previous *Declaration
+		for _, reference := range result.References {
+			if reference.Name != "x" {
+				continue
+			}
+			if reference.Declaration == nil || reference.Declaration == previous {
+				t.Fatalf("branch reference did not resolve to its own declaration: %#v\n%s", reference, source)
+			}
+			previous = reference.Declaration
+		}
+	}
+}
+
+func TestAnalyzeVim9BranchScopeBoundaries(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\ndef F(flag: bool)\nif flag\nvar x = 1\nelseif x == 1\necho x\nelse\necho x\nendif\necho x\nenddef\n",
+		"vim9script\ndef F()\ntry\nvar x = 1\ncatch\necho x\nfinally\necho x\nendtry\nenddef\n",
+	} {
+		result := Analyze(syntax.Parse(source))
+		for _, reference := range result.References {
+			if reference.Name == "x" && reference.Declaration != nil {
+				t.Fatalf("branch-local x leaked: %#v\n%s", reference, source)
+			}
+		}
+	}
+	for _, test := range []struct{ source, code string }{
+		{"vim9script\ndef F()\nif true\nelse\nvar x = 1\nvar x = 2\nendif\nenddef\n", "vim/E1017"},
+		{"vim9script\nif true\nelse\ndef HtmlColor()\nenddef\ndef HtmlColor()\nenddef\nendif\n", "vim/E1073"},
+	} {
+		count := 0
+		for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+			if diagnostic.Code == test.code {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("same-branch %s count = %d\n%s", test.code, count, test.source)
+		}
+	}
+}

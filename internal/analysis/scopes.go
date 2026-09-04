@@ -5958,23 +5958,49 @@ func collectCommandScopes(result *FileAnalysis, parent *Scope, commands []syntax
 	if result == nil || parent == nil {
 		return
 	}
-	byBlock := make(map[int]*Scope, len(blocks))
+	byBlock := make(map[int][]*Scope, len(blocks))
+	blockScope := func(block, offset int) *Scope {
+		scopes := byBlock[block]
+		for index := len(scopes) - 1; index >= 0; index-- {
+			if offset >= scopes[index].Span.Start {
+				return scopes[index]
+			}
+		}
+		return nil
+	}
 	for index, block := range blocks {
 		blockParent := parent
 		if block.Parent >= 0 {
-			if candidate := byBlock[block.Parent]; candidate != nil {
+			if candidate := blockScope(block.Parent, block.Span.Start); candidate != nil {
 				blockParent = candidate
 			}
 		}
-		scope := &Scope{Block: index, Kind: block.Kind, Span: block.Span, Parent: blockParent, CommandList: list}
-		blockParent.Children = append(blockParent.Children, scope)
-		byBlock[index] = scope
-		result.Scopes = append(result.Scopes, scope)
+		// Vim9 ends the previous branch's local scope at elseif/else and
+		// catch/finally. These regions are siblings, including for nested
+		// blocks whose parent must be the branch containing their header.
+		starts := []int{block.Span.Start}
+		if block.Header >= 0 && block.Header < len(commands) && commands[block.Header].Dialect == syntax.Vim9 {
+			for _, branch := range block.Branches {
+				if branch >= 0 && branch < len(commands) && commands[branch].Span.Start > starts[len(starts)-1] {
+					starts = append(starts, commands[branch].Span.Start)
+				}
+			}
+		}
+		for branch, start := range starts {
+			end := block.Span.End
+			if branch+1 < len(starts) {
+				end = starts[branch+1]
+			}
+			scope := &Scope{Block: index, Kind: block.Kind, Span: syntax.Span{Start: start, End: end}, Parent: blockParent, CommandList: list}
+			blockParent.Children = append(blockParent.Children, scope)
+			byBlock[index] = append(byBlock[index], scope)
+			result.Scopes = append(result.Scopes, scope)
+		}
 	}
 	for index := range commands {
 		command := &commands[index]
 		scope := parent
-		if candidate := byBlock[command.Block]; candidate != nil {
+		if candidate := blockScope(command.Block, command.Span.Start); candidate != nil {
 			scope = candidate
 		}
 		result.commandScopes[command] = scope
