@@ -696,6 +696,68 @@ func TestFunctionHoverContents(t *testing.T) {
 	}
 }
 
+func assertFunctionHoverContents(t *testing.T, hover *protocol.Hover, signature, documentation string) {
+	t.Helper()
+	contents, ok := hover.Contents.(protocol.MarkedStringSlice)
+	wantLength := 1
+	if documentation != "" {
+		wantLength = 2
+	}
+	if !ok || len(contents) != wantLength {
+		t.Fatalf("function hover = %#v", hover)
+	}
+	first, ok := contents[0].(*protocol.MarkedStringWithLanguage)
+	if !ok || first.Language != "vim" || first.Value != signature {
+		t.Fatalf("function hover signature = %#v, want %q", contents[0], signature)
+	}
+	if documentation != "" {
+		second, ok := contents[1].(protocol.String)
+		if !ok || string(second) != documentation {
+			t.Fatalf("function hover documentation = %#v, want %q", contents[1], documentation)
+		}
+	}
+}
+
+func TestHoverShowsLocalFunctionSignatureAndDocumentation(t *testing.T) {
+	source := "\" Run before Vim exits.\nfunction! s:VimLeavePre() abort\nendfunction\ncall s:VimLeavePre()\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 9},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("local function hover = %#v, %v", hover, err)
+	}
+	assertFunctionHoverContents(t, hover, "s:VimLeavePre()", "Run before Vim exits.")
+}
+
+func TestHoverShowsLocalFunctionPlaintext(t *testing.T) {
+	source := "\" Run before Vim exits.\nfunction! s:VimLeavePre() abort\nendfunction\ncall s:VimLeavePre()\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	instance.languageFeatures.hoverMarkup = protocol.MarkupKindPlainText
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 9},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("local function hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || content.Kind != protocol.MarkupKindPlainText || content.Value != "s:VimLeavePre()\n\nRun before Vim exits." {
+		t.Fatalf("plain function hover = %#v", hover.Contents)
+	}
+}
+
+func TestHoverShowsLocalVim9FunctionAndClassMethod(t *testing.T) {
+	source := "vim9script\n# Compute total.\ndef Compute(left: number, right: number = 0): number\n  return left + right\nenddef\nCompute(1)\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 5, Character: 2},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("Vim9 function hover = %#v, %v", hover, err)
+	}
+	assertFunctionHoverContents(t, hover, "Compute(left: number, right: number = 0): number", "Compute total.")
+}
+
 func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -723,7 +785,7 @@ func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 		{
 			name: "local function", source: "vim9script\ndef transform(value: number): number\n  return value\nenddef\nindent(1)->transform()\n",
 			line: 4, character: 12, wantRange: navigationRange(4, 11, 20),
-			want: "**transform** A function.",
+			want: "transform(value: number): number",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1079,10 +1141,10 @@ func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindMarkdown || content.Value != "**Run** A function.\nsignature: Run(): number\ntype: func(): number" || hover.Range == nil || *hover.Range != navigationRange(2, 17, 20) {
+	if hover.Range == nil || *hover.Range != navigationRange(2, 17, 20) {
 		t.Fatalf("cross-file hover = %#v", hover)
 	}
+	assertFunctionHoverContents(t, hover, "Run(): number", "")
 
 	unknown, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 3, Character: 19},
@@ -1367,6 +1429,7 @@ func TestCrossFileLegacyGlobalFunctionCompletionDefinitionAndHover(t *testing.T)
 	mainPath := writeWorkspaceFile(t, root, "plugin.vim", source)
 	writeWorkspaceFile(t, root, "other.vim", "call GlobalRun('y')\n")
 	instance := initializeWorkspaceServer(t, root)
+	instance.languageFeatures.hoverMarkup = protocol.MarkupKindMarkdown
 	mainURI := uri.File(mainPath)
 	instance.documents.Open(mainURI.String(), 1, source)
 
@@ -1394,10 +1457,7 @@ func TestCrossFileLegacyGlobalFunctionCompletionDefinitionAndHover(t *testing.T)
 	if err != nil || hover == nil {
 		t.Fatalf("legacy global function hover = %#v, %v", hover, err)
 	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || !strings.Contains(content.Value, "signature: GlobalRun(arg, ...)") || !strings.Contains(content.Value, "Run the indexed task.") {
-		t.Fatalf("legacy global function hover content = %#v", hover.Contents)
-	}
+	assertFunctionHoverContents(t, hover, "GlobalRun(arg, ...)", "Run the indexed task.")
 	references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: position, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
 	if err != nil || len(references) != 3 {
 		t.Fatalf("legacy global function references = %#v, %v", references, err)
@@ -1578,10 +1638,7 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 	if err != nil || hover == nil {
 		t.Fatalf("Vim9 autoload hover = %#v, %v", hover, err)
 	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || !strings.Contains(content.Value, "signature: api#Run(arg: string = 'ok'): string") || !strings.Contains(content.Value, "Return the cached result.") {
-		t.Fatalf("Vim9 autoload hover content = %#v", hover.Contents)
-	}
+	assertFunctionHoverContents(t, hover, "api#Run(arg: string = 'ok'): string", "Return the cached result.")
 	completionSource := "vim9script\necho api#R\n"
 	completionPath := writeWorkspaceFile(t, root, "completion.vim", completionSource)
 	completionURI := uri.File(completionPath)

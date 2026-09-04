@@ -1696,9 +1696,10 @@ func functionFacts(file *syntax.File) map[syntax.Span]indexedFunctionFact {
 					}
 					parameters = append(parameters, strings.Clone(label))
 				}
+				signature, _ := FormatFunctionSignature(file, name, command.Function)
 				result[command.Function.Name] = indexedFunctionFact{
-					signature:     formatIndexedFunctionSignature(file, name, command.Function),
-					documentation: leadingFunctionDocumentation(file, command),
+					signature:     signature,
+					documentation: LeadingFunctionDocumentation(file, command),
 					dialect:       command.Dialect,
 					parameters:    parameters,
 				}
@@ -1712,7 +1713,12 @@ func functionFacts(file *syntax.File) map[syntax.Span]indexedFunctionFact {
 	return result
 }
 
-func formatIndexedFunctionSignature(file *syntax.File, name string, function *syntax.Function) string {
+// FormatFunctionSignature formats a function declaration signature and returns
+// its full signature label along with individual parameter labels.
+func FormatFunctionSignature(file *syntax.File, name string, function *syntax.Function) (string, []string) {
+	if file == nil || function == nil {
+		return name + "()", nil
+	}
 	parts := make([]string, 0, len(function.Parameters))
 	for _, parameter := range function.Parameters {
 		part := file.Text(parameter.Name)
@@ -1731,14 +1737,22 @@ func formatIndexedFunctionSignature(file *syntax.File, name string, function *sy
 	if function.ReturnType != nil {
 		signature += ": " + file.Text(function.ReturnTypeSpan)
 	}
-	return signature
+	return signature, parts
 }
 
-func leadingFunctionDocumentation(file *syntax.File, command *syntax.Command) string {
+// LeadingFunctionDocumentation returns the consecutive comment lines directly
+// above a function declaration without their comment leaders.
+func LeadingFunctionDocumentation(file *syntax.File, command *syntax.Command) string {
 	if file == nil || command == nil || command.Span.Start <= 0 {
 		return ""
 	}
 	lineStart := strings.LastIndexByte(file.Source[:command.Span.Start], '\n') + 1
+	before := file.Source[lineStart:command.Span.Start]
+	for i := 0; i < len(before); i++ {
+		if before[i] != ' ' && before[i] != '\t' {
+			return ""
+		}
+	}
 	lines := make([]string, 0)
 	for lineStart > 0 {
 		lineEnd := lineStart - 1
@@ -1760,7 +1774,7 @@ func leadingFunctionDocumentation(file *syntax.File, command *syntax.Command) st
 	for left, right := 0, len(lines)-1; left < right; left, right = left+1, right-1 {
 		lines[left], lines[right] = lines[right], lines[left]
 	}
-	return strings.Join(lines, "\n")
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func indexedCommentToken(file *syntax.File, start, end int) bool {

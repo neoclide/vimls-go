@@ -734,21 +734,26 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 				if displayName == "" {
 					displayName = target.match.Fact.Name
 				}
-				_, declaration := s.analyzeWorkspaceTarget(target)
-				typeName, _ := hoverDeclarationType(declaration)
-				header := hoverDeclarationDescription(displayName, analysis.SymbolKind(target.match.Fact.Kind), typeName)
-				lines := []string{header}
-				if signature := target.match.Fact.Signature; signature != "" {
+				kind := analysis.SymbolKind(target.match.Fact.Kind)
+				signature := target.match.Fact.Signature
+				var contents protocol.HoverContents
+				if signature != "" && isFunctionSymbolKind(kind) {
 					if displayName != target.match.Fact.Name && strings.HasPrefix(signature, target.match.Fact.Name+"(") {
 						signature = displayName + signature[len(target.match.Fact.Name):]
 					}
-					lines = append(lines, "signature: "+signature)
-				}
-				if typeName != "" && typeName != "unknown" && analysis.SymbolKind(target.match.Fact.Kind) != analysis.SymbolKindVariable && analysis.SymbolKind(target.match.Fact.Kind) != analysis.SymbolKindConstant {
-					lines = append(lines, "type: "+typeName)
-				}
-				if target.match.Fact.Documentation != "" {
-					lines = append(lines, "", target.match.Fact.Documentation)
+					contents = s.signatureHover(signature, target.match.Fact.Documentation)
+				} else {
+					_, declaration := s.analyzeWorkspaceTarget(target)
+					typeName, _ := hoverDeclarationType(declaration)
+					header := hoverDeclarationDescription(displayName, kind, typeName)
+					lines := []string{header}
+					if typeName != "" && typeName != "unknown" && kind != analysis.SymbolKindVariable && kind != analysis.SymbolKindConstant {
+						lines = append(lines, "type: "+typeName)
+					}
+					if target.match.Fact.Documentation != "" {
+						lines = append(lines, "", target.match.Fact.Documentation)
+					}
+					contents = s.hoverContent(strings.Join(lines, "\n"))
 				}
 				rangeValue, valid := protocolRange(document.snapshot, document.encoding, document.occurrence)
 				if valid {
@@ -756,7 +761,7 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 						return nil, err
 					} else if current {
 						return &protocol.Hover{
-							Contents: s.hoverContent(strings.Join(lines, "\n")),
+							Contents: contents,
 							Range:    &rangeValue,
 						}, nil
 					} else if attempt == 1 {
@@ -889,12 +894,23 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			}
 			return nil, nil
 		}
-		return s.localHoverContents(ctx, document, functionHoverContents(function.Name, function.Documentation, s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown))
+		return s.localHoverContents(ctx, document, s.builtinFunctionHover(function.Name, function.Documentation))
 	}
 	declaration := document.declaration
+	if isFunctionSymbolKind(declaration.Kind) {
+		if functionCommand := functionCommandForDeclaration(document.analysis.File.Commands, declaration); functionCommand != nil {
+			signature, _ := workspace.FormatFunctionSignature(document.analysis.File, declaration.Name, functionCommand.Function)
+			documentation := workspace.LeadingFunctionDocumentation(document.analysis.File, functionCommand)
+			return s.localHoverContents(ctx, document, s.signatureHover(signature, documentation))
+		}
+	}
 	typeName, _ := hoverDeclarationType(declaration)
 	line := hoverDeclarationDescription(declaration.Name, declaration.Kind, typeName)
 	return s.localHoverResult(ctx, document, []string{line})
+}
+
+func isFunctionSymbolKind(kind analysis.SymbolKind) bool {
+	return kind == analysis.SymbolKindFunction || kind == analysis.SymbolKindMethod || kind == analysis.SymbolKindConstructor
 }
 
 func optionBuildRequirement(condition string, features []string) string {
@@ -930,18 +946,22 @@ func functionHoverContents(name string, documentation string, markdown bool) pro
 		signature = strings.Join(sigs, "\n")
 		rest = strings.TrimSpace(strings.Join(lines[idx:], "\n"))
 	}
+	return signatureHoverContents(signature, rest, markdown)
+}
+
+func signatureHoverContents(signature string, documentation string, markdown bool) protocol.HoverContents {
 	if !markdown {
 		value := signature
-		if rest != "" {
-			value += "\n\n" + markdownToPlainText(rest)
+		if documentation != "" {
+			value += "\n\n" + markdownToPlainText(documentation)
 		}
 		return boundedMarkupContent(protocol.MarkupKindPlainText, value)
 	}
 	slice := protocol.MarkedStringSlice{
-		&protocol.MarkedStringWithLanguage{Language: "vim", Value: signature},
+		&protocol.MarkedStringWithLanguage{Language: "vim", Value: boundedDocumentationText(signature)},
 	}
-	if rest != "" {
-		slice = append(slice, protocol.String(boundedDocumentationText(rest)))
+	if documentation != "" {
+		slice = append(slice, protocol.String(boundedDocumentationText(documentation)))
 	}
 	return slice
 }
@@ -959,6 +979,14 @@ func (s *Server) localHoverContents(ctx context.Context, document *navigationDoc
 
 func (s *Server) localHoverResult(ctx context.Context, document *navigationDocument, lines []string) (*protocol.Hover, error) {
 	return s.localHoverContents(ctx, document, s.hoverContent(strings.Join(lines, "\n")))
+}
+
+func (s *Server) signatureHover(signature string, documentation string) protocol.HoverContents {
+	return signatureHoverContents(signature, documentation, s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown)
+}
+
+func (s *Server) builtinFunctionHover(name string, documentation string) protocol.HoverContents {
+	return functionHoverContents(name, documentation, s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown)
 }
 
 func (s *Server) hoverContent(value string) *protocol.MarkupContent {

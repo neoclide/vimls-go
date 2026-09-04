@@ -4544,9 +4544,28 @@ func collectFuncrefVariableNameDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
+	indirectBindings := make(map[syntax.Span]bool)
+	var collectIndirectBindings func([]syntax.Command)
+	collectIndirectBindings = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if declaration := command.Declaration; declaration != nil && declaration.Target != nil &&
+				(declaration.Target.Kind == syntax.ExpressionMember || declaration.Target.Kind == syntax.ExpressionIndex || declaration.Target.Kind == syntax.ExpressionSlice) &&
+				(len(declaration.Target.Children) == 0 || !scopeDictionary(declaration.Target.Children[0])) {
+				for _, binding := range declaration.Bindings {
+					indirectBindings[binding.Name] = true
+				}
+			}
+			if command.Embedded != nil {
+				collectIndirectBindings(command.Embedded.Commands)
+			}
+		}
+	}
+	collectIndirectBindings(result.File.Commands)
 	for _, declaration := range result.Declarations {
 		if declaration == nil || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant ||
-			declaration.Type.Name != "func" && declaration.Type.Name != "partial" || funcrefVariableNameAllowed(result.File.Dialect, declaration) {
+			declaration.Type.Name != "func" && declaration.Type.Name != "partial" || indirectBindings[declaration.Span] ||
+			funcrefVariableNameAllowed(result.File.Dialect, declaration) {
 			continue
 		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{

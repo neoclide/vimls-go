@@ -909,3 +909,36 @@ func TestIndexConcurrentOperations(t *testing.T) {
 		t.Fatalf("invalid final stats: files=%d bytes=%d", index.FileCount(), index.IndexedBytes())
 	}
 }
+
+func TestFormatFunctionSignatureAndLeadingDocumentation(t *testing.T) {
+	if sig, parts := FormatFunctionSignature(nil, "foo", nil); sig != "foo()" || len(parts) != 0 {
+		t.Fatalf("nil FormatFunctionSignature = %q, %#v", sig, parts)
+	}
+	if doc := LeadingFunctionDocumentation(nil, nil); doc != "" {
+		t.Fatalf("nil LeadingFunctionDocumentation = %q", doc)
+	}
+
+	source := "\" First doc\n\" Second doc\nfunction! Legacy(arg, ...) abort\nendfunction\n"
+	file := syntax.Parse(source)
+	if len(file.Commands) == 0 || file.Commands[0].Function == nil {
+		t.Fatalf("parsed commands = %#v", file.Commands)
+	}
+	sig, parts := FormatFunctionSignature(file, "Legacy", file.Commands[0].Function)
+	if sig != "Legacy(arg, ...)" || len(parts) != 2 || parts[0] != "arg" || parts[1] != "..." {
+		t.Fatalf("Legacy signature = %q, parts = %#v", sig, parts)
+	}
+	doc := LeadingFunctionDocumentation(file, &file.Commands[0])
+	if doc != "First doc\nSecond doc" {
+		t.Fatalf("Legacy documentation = %q", doc)
+	}
+
+	// Multiple commands on preceding line should not steal comment.
+	splitSource := "\" Comment for echo\necho 1 | def Vim9(x: number = 0): number\n  return x\nenddef\n"
+	splitFile := syntax.Parse(splitSource)
+	if len(splitFile.Commands) < 2 || splitFile.Commands[1].Function == nil {
+		t.Fatalf("parsed split commands = %#v", splitFile.Commands)
+	}
+	if got := LeadingFunctionDocumentation(splitFile, &splitFile.Commands[1]); got != "" {
+		t.Fatalf("split command documentation = %q, want empty", got)
+	}
+}

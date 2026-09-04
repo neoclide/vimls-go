@@ -955,9 +955,10 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 		}
 		declaration := declarationForExpression(fileAnalysis, callable)
 		if declaration != nil {
-			function := functionForDeclaration(file.Commands, declaration)
-			if function != nil {
-				label, parameters = formatFunctionSignature(file, declaration.Name, function)
+			functionCommand := functionCommandForDeclaration(file.Commands, declaration)
+			if functionCommand != nil {
+				label, parameters = formatFunctionSignature(file, declaration.Name, functionCommand.Function)
+				documentation = workspace.LeadingFunctionDocumentation(file, functionCommand)
 			} else if declaration.Type.Name == "func" && declaration.Type.ArgumentCountKnown {
 				label, parameters = formatFunctionValueSignature(declaration.Name, declaration.Type)
 			} else {
@@ -1469,11 +1470,17 @@ func declarationForExpression(result *analysis.FileAnalysis, expression *syntax.
 	return nil
 }
 
-func functionForDeclaration(commands []syntax.Command, declaration *analysis.Declaration) *syntax.Function {
-	var found *syntax.Function
+func functionCommandForDeclaration(commands []syntax.Command, declaration *analysis.Declaration) *syntax.Command {
+	if declaration == nil {
+		return nil
+	}
+	var found *syntax.Command
 	walkCommands(commands, func(command *syntax.Command) {
-		if found == nil && command.Function != nil && command.Function.Name == declaration.Span {
-			found = command.Function
+		if found != nil {
+			return
+		}
+		if command.Function != nil && command.Function.Name == declaration.Span {
+			found = command
 		}
 	})
 	return found
@@ -1689,27 +1696,12 @@ func hasCommandModifier(command *syntax.Command, name string) bool {
 }
 
 func formatFunctionSignature(file *syntax.File, name string, function *syntax.Function) (string, []protocol.ParameterInformation) {
-	parts := make([]string, 0, len(function.Parameters))
-	parameters := make([]protocol.ParameterInformation, 0, len(function.Parameters))
-	for _, parameter := range function.Parameters {
-		label := file.Text(parameter.Name)
-		if parameter.Type != nil {
-			label += ": " + file.Text(parameter.TypeSpan)
-		}
-		if parameter.Default != nil {
-			label += " = " + file.Text(parameter.DefaultSpan)
-		}
-		if parameter.Variadic && !strings.HasPrefix(label, "...") {
-			label = "..." + label
-		}
-		parts = append(parts, label)
-		parameters = append(parameters, protocol.ParameterInformation{Label: protocol.String(label)})
+	signature, parts := workspace.FormatFunctionSignature(file, name, function)
+	parameters := make([]protocol.ParameterInformation, len(parts))
+	for index, part := range parts {
+		parameters[index] = protocol.ParameterInformation{Label: protocol.String(part)}
 	}
-	label := name + "(" + strings.Join(parts, ", ") + ")"
-	if function.ReturnType != nil {
-		label += ": " + file.Text(function.ReturnTypeSpan)
-	}
-	return label, parameters
+	return signature, parameters
 }
 
 func formatFunctionValueSignature(name string, typ analysis.ValueType) (string, []protocol.ParameterInformation) {

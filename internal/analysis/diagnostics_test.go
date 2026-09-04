@@ -4562,6 +4562,8 @@ func TestAnalyzeFuncrefVariableNameDiagnostics(t *testing.T) {
 		{name: "legacy script local", source: "let s:lower = function('len')\n"},
 		{name: "window local", source: "let w:lower = function('len')\n"},
 		{name: "autoload", source: "let package#lower = function('len')\n"},
+		{name: "dictionary index", source: "let client['start'] = function('len')\n"},
+		{name: "dictionary member", source: "let client = {}\nlet client.start = function('len')\n"},
 		{name: "class member", source: "vim9script\nclass C\n  static var handler: func\nendclass\n"},
 	}
 	for _, test := range valid {
