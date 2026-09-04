@@ -413,7 +413,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						item.Detail = protocol.NewOptional(detail)
 					}
 					if function.Match.Fact.Documentation != "" {
-						item.Documentation = protocol.String(function.Match.Fact.Documentation)
+						item.Documentation = boundedMarkupContent(protocol.MarkupKindMarkdown, function.Match.Fact.Documentation)
 					}
 					if function.Match.Fact.Deprecated {
 						item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}

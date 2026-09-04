@@ -224,6 +224,14 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	if detail, ok := argc.Detail.Get(); !ok || detail != "builtin function (0..1 arguments): number" {
 		t.Fatalf("resolved argc = %#v", argc)
 	}
+	hasItem, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "has", Kind: protocol.CompletionItemKindFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, ok := hasItem.Documentation.(*protocol.MarkupContent)
+	if !ok || doc.Kind != protocol.MarkupKindMarkdown || !strings.Contains(doc.Value, "has({feature}") {
+		t.Fatalf("has documentation = %#v", hasItem.Documentation)
+	}
 }
 
 func TestCompletionResolveAddsExCommandDocumentation(t *testing.T) {
@@ -237,8 +245,8 @@ func TestCompletionResolveAddsExCommandDocumentation(t *testing.T) {
 		if !ok || detail != "Ex command" {
 			t.Fatalf("resolve %q detail = %q, %t; item=%#v", label, detail, ok, resolved)
 		}
-		documentation, ok := resolved.Documentation.(protocol.String)
-		if !ok || strings.TrimSpace(string(documentation)) == "" {
+		documentation, ok := resolved.Documentation.(*protocol.MarkupContent)
+		if !ok || documentation.Kind != protocol.MarkupKindMarkdown || strings.TrimSpace(documentation.Value) == "" {
 			t.Fatalf("resolve %q documentation = %#v", label, resolved.Documentation)
 		}
 	}
@@ -255,8 +263,8 @@ func TestCompletionResolveAddsUserCommandAttributeDocumentation(t *testing.T) {
 		if !ok || detail == "" {
 			t.Fatalf("resolve %q detail = %q, %t; item=%#v", label, detail, ok, resolved)
 		}
-		documentation, ok := resolved.Documentation.(protocol.String)
-		if !ok || strings.TrimSpace(string(documentation)) == "" {
+		documentation, ok := resolved.Documentation.(*protocol.MarkupContent)
+		if !ok || documentation.Kind != protocol.MarkupKindMarkdown || strings.TrimSpace(documentation.Value) == "" {
 			t.Fatalf("resolve %q documentation = %#v", label, resolved.Documentation)
 		}
 	}

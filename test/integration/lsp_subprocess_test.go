@@ -267,7 +267,7 @@ endfunction
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":7,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///symbols.vim"},"position":{"line":5,"character":12}}}`)
 	hover := readJSON(t, reader)
-	if string(hover["id"]) != "7" || !strings.Contains(string(hover["result"]), `"kind":"markdown"`) || !strings.Contains(string(hover["result"]), `name: value`) || !strings.Contains(string(hover["result"]), `type: number`) {
+	if string(hover["id"]) != "7" || !strings.Contains(string(hover["result"]), `"kind":"markdown"`) || !strings.Contains(string(hover["result"]), `**value** A number variable.`) {
 		t.Fatalf("hover = %s", hover)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":8,"method":"textDocument/foldingRange","params":{"textDocument":{"uri":"file:///symbols.vim"}}}`)
@@ -303,7 +303,7 @@ endfunction
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":912,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///completion-command.vim"},"position":{"line":0,"character":1}}}`)
 	commandHover := readJSON(t, reader)
-	if string(commandHover["id"]) != "912" || !strings.Contains(string(commandHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(commandHover["result"]), `name: echo`) || !strings.Contains(string(commandHover["result"]), `Echoes each {expr1}`) {
+	if string(commandHover["id"]) != "912" || !strings.Contains(string(commandHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(commandHover["result"]), `:ec[ho]`) || !strings.Contains(string(commandHover["result"]), `Echoes each {expr1}`) {
 		t.Fatalf("command hover = %s", commandHover)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-string-hover.vim","languageId":"vim","version":1,"text":"vim9script\necho has('gui_running')\necho expand('<cfile>')\n"}}}`)
@@ -346,7 +346,7 @@ endfunction
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":925,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":5,"character":7}}}`)
 	optionHover := readJSON(t, reader)
-	if string(optionHover["id"]) != "925" || !strings.Contains(string(optionHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(optionHover["result"]), `name: number`) || !strings.Contains(string(optionHover["result"]), `Print the line number`) {
+	if string(optionHover["id"]) != "925" || !strings.Contains(string(optionHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(optionHover["result"]), `'number'`) || !strings.Contains(string(optionHover["result"]), `Print the line number`) {
 		t.Fatalf("option hover = %s", optionHover)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///class-signature.vim","languageId":"vim","version":1,"text":"vim9script\nclass Box\n  def new(value: number)\n  enddef\n  def Resize(width: number, height: number = 1): number\n    return width * height\n  enddef\nendclass\nvar box = Box.new(1)\necho box.Resize(2, 3)\n"}}}`)

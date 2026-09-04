@@ -837,7 +837,7 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 			result.Detail = protocol.NewOptional(detail)
 		}
 		if result.Documentation == nil && documentation != "" {
-			result.Documentation = protocol.String(documentation)
+			result.Documentation = boundedMarkupContent(protocol.MarkupKindMarkdown, documentation)
 		}
 	}
 	switch target.Kind {

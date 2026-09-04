@@ -1526,7 +1526,7 @@ func TestCrossFileVim9AutoloadExportUsesImportAndLegacyNames(t *testing.T) {
 	if detail, ok := items[0].Detail.Get(); !ok || detail != "api#Run(arg: string = 'ok'): string" {
 		t.Fatalf("Vim9 autoload completion detail = %#v", items[0])
 	}
-	if documentation, ok := items[0].Documentation.(protocol.String); !ok || string(documentation) != "Return the cached result." {
+	if doc, ok := items[0].Documentation.(*protocol.MarkupContent); !ok || doc.Kind != protocol.MarkupKindMarkdown || doc.Value != "Return the cached result." {
 		t.Fatalf("Vim9 autoload completion documentation = %#v", items[0].Documentation)
 	}
 }
