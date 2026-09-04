@@ -160,7 +160,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			paths, truncated := state.index.ColorSchemeCompletions(selection.prefix, maxCompletionItems, completionPathPredicate(state, excludeRuntimePath))
 			items := make(map[string]completionCandidate, len(paths))
 			for _, path := range paths {
-				items[path.Display] = completionCandidate{item: protocol.CompletionItem{Label: path.Display, Kind: protocol.CompletionItemKindValue}, score: 8500, source: completionSourceImport}
+				items[path.Display] = completionCandidate{item: protocol.CompletionItem{Label: path.Display, Kind: protocol.CompletionItemKindValue, Detail: protocol.NewOptional(path.Path)}, score: 8500, source: completionSourceImport}
 			}
 			document := navigationDocument{server: s, snapshot: snapshot}
 			current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{})

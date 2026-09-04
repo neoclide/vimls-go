@@ -396,7 +396,7 @@ func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 	root, runtimePath := t.TempDir(), t.TempDir()
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "default.vim"), "")
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "desert.vim"), "")
-	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "my-dark.vim"), "")
+	myDarkPath := writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "my-dark.vim"), "")
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "lists", "default.vim"), "")
 	source := "\" 𐐀\r\ncolorscheme my-da\r\n"
 	main := writeWorkspaceFile(t, root, "main.vim", source)
@@ -419,6 +419,9 @@ func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 	items := completionItems(t, result)
 	if len(items) != 1 || items[0].Label != "my-dark" || items[0].Kind != protocol.CompletionItemKindValue {
 		t.Fatalf("colorscheme completion = %#v", items)
+	}
+	if detail, ok := items[0].Detail.Get(); !ok || detail != mustWorkspaceCanonicalPath(t, myDarkPath) {
+		t.Fatalf("colorscheme detail = %q, %t", detail, ok)
 	}
 	edit, ok := items[0].TextEdit.(*protocol.TextEdit)
 	if !ok || edit.NewText != "my-dark" || edit.Range != navigationRange(1, 12, 17) {
