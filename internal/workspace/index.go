@@ -536,7 +536,7 @@ func (i *Index) GlobalFunctionDependents(path string) []string {
 // RuntimePathCompletions returns direct indexed children below one runtime
 // directory. Duplicate displays keep the first runtimepath entry.
 func (i *Index) RuntimePathCompletions(directory, prefix string, limit int, acceptPath ...func(string) bool) ([]PathCompletion, bool) {
-	return i.runtimePathCompletions(directory, prefix, limit, true, false, firstPathPredicate(acceptPath))
+	return i.runtimePathCompletions(directory, prefix, limit, true, false, false, firstPathPredicate(acceptPath))
 }
 
 func firstPathPredicate(predicates []func(string) bool) func(string) bool {
@@ -546,7 +546,7 @@ func firstPathPredicate(predicates []func(string) bool) func(string) bool {
 	return predicates[0]
 }
 
-func (i *Index) runtimePathCompletions(directory, prefix string, limit int, includeDirectories, includeAfter bool, acceptPath func(string) bool) ([]PathCompletion, bool) {
+func (i *Index) runtimePathCompletions(directory, prefix string, limit int, includeDirectories, includeAfter, fuzzy bool, acceptPath func(string) bool) ([]PathCompletion, bool) {
 	if limit <= 0 || strings.ContainsAny(prefix, "\x00\r\n\\") {
 		return nil, false
 	}
@@ -568,7 +568,11 @@ func (i *Index) runtimePathCompletions(directory, prefix string, limit int, incl
 			parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(relative)))
 			if parent == wantedDirectory {
 				name := filepath.Base(filepath.FromSlash(relative))
-				if strings.HasPrefix(strings.ToLower(name), namePrefixFolded) && strings.HasSuffix(name, ".vim") {
+				matches := strings.HasPrefix(strings.ToLower(name), namePrefixFolded)
+				if fuzzy {
+					matches = fuzzyTextMatches(namePrefix, strings.TrimSuffix(name, ".vim"))
+				}
+				if matches && strings.HasSuffix(name, ".vim") {
 					if acceptPath != nil && !acceptPath(path) {
 						continue
 					}
@@ -614,7 +618,7 @@ func (i *Index) runtimePathCompletions(directory, prefix string, limit int, incl
 
 // ColorSchemeCompletions returns indexed top-level colors/*.vim files.
 func (i *Index) ColorSchemeCompletions(prefix string, limit int, acceptPath ...func(string) bool) ([]PathCompletion, bool) {
-	files, incomplete := i.runtimePathCompletions("colors", prefix, limit, false, true, firstPathPredicate(acceptPath))
+	files, incomplete := i.runtimePathCompletions("colors", prefix, limit, false, true, true, firstPathPredicate(acceptPath))
 	result := files[:0]
 	for _, file := range files {
 		if file.IsDir {
@@ -624,6 +628,23 @@ func (i *Index) ColorSchemeCompletions(prefix string, limit int, acceptPath ...f
 		result = append(result, file)
 	}
 	return result, incomplete
+}
+
+func fuzzyTextMatches(pattern, text string) bool {
+	patternRunes := []rune(strings.ToLower(pattern))
+	if len(patternRunes) == 0 {
+		return true
+	}
+	patternIndex := 0
+	for _, textRune := range []rune(strings.ToLower(text)) {
+		if patternRunes[patternIndex] == textRune {
+			patternIndex++
+			if patternIndex == len(patternRunes) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (i *Index) addRuntimeFileLocked(path string) {

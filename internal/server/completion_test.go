@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -741,11 +742,11 @@ func TestCompletionFuzzyMatchesOrderedSubsequence(t *testing.T) {
 		prefix, label string
 		want          bool
 	}{
-		{prefix: "&hada", label: "&shada", want: false},
-		{prefix: "g:rp", label: "g:groupValue", want: false},
+		{prefix: "&hada", label: "&shada", want: true},
+		{prefix: "g:rp", label: "g:groupValue", want: true},
 		{prefix: "aé", label: "aéclair", want: true},
 		{prefix: "g:rp", label: "g:other", want: false},
-		{prefix: "<f", label: "<cfile>", want: false},
+		{prefix: "<f", label: "<cfile>", want: true},
 		{prefix: "<cf", label: "<cfile>", want: true},
 	} {
 		if got := completionTextMatches(test.prefix, test.label); got != test.want {
@@ -773,11 +774,19 @@ func TestCompletionFuzzyMatchesOrderedSubsequence(t *testing.T) {
 			character: 8,
 		},
 		{
-			name:      "case insensitive first letter",
+			name:      "case insensitive fuzzy",
 			source:    "vim9script\nvar groupValue = 1\necho GRP\n",
 			label:     "groupValue",
 			prefix:    "GRP",
 			line:      2,
+			character: 8,
+		},
+		{
+			name:      "fuzzy from later character",
+			source:    "vim9script\necho len\n",
+			label:     "strlen",
+			prefix:    "len",
+			line:      1,
 			character: 8,
 		},
 	}
@@ -811,20 +820,18 @@ func TestCompletionFuzzyMatchesOrderedSubsequence(t *testing.T) {
 		}
 	}
 
-	// The first typed character must match the candidate's first character.
-	// "len" is a valid prefix of the builtin len(), but must not fuzzy-match
-	// strlen() because strlen starts with 's'.
-	instance, documentURI = openNavigationDocument(t, text.UTF16, "vim9script\necho len\n")
-	result, err = instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 8},
-	}})
-	if err != nil {
-		t.Fatal(err)
+	snapshot := text.NewSnapshot("file:///ranking.vim", 1, nil, "wl")
+	candidates := map[string]completionCandidate{
+		"wl":        {item: protocol.CompletionItem{Label: "wl"}, score: 1},
+		"wl-theme":  {item: protocol.CompletionItem{Label: "wl-theme"}, score: 1},
+		"wildcharm": {item: protocol.CompletionItem{Label: "wildcharm"}, score: 10000},
 	}
-	for _, item := range completionItems(t, result) {
-		if item.Label == "strlen" {
-			t.Fatalf("fuzzy candidate with mismatched first letter returned: %#v", item)
-		}
+	ordered := instance.completionList(snapshot, text.UTF16, completionSelection{start: 0, cursor: 2, end: 2, prefix: "wl"}, candidates).Items
+	if len(ordered) != 3 {
+		t.Fatalf("completion match order = %#v", ordered)
+	}
+	if got := []string{ordered[0].Label, ordered[1].Label, ordered[2].Label}; !slices.Equal(got, []string{"wl", "wl-theme", "wildcharm"}) {
+		t.Fatalf("completion match order = %#v", got)
 	}
 
 	for _, test := range []struct {

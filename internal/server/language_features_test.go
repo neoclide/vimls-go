@@ -398,7 +398,7 @@ func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "desert.vim"), "")
 	wildcharmPath := writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "wildcharm.vim"), "")
 	writeWorkspaceFile(t, runtimePath, filepath.Join("colors", "lists", "default.vim"), "")
-	source := "\" 𐐀\r\ncolorscheme wildc\r\n"
+	source := "\" 𐐀\r\ncolorscheme wl\r\n"
 	main := writeWorkspaceFile(t, root, "main.vim", source)
 	instance := initializeWorkspaceServer(t, root)
 	instance.setRuntimePaths([]string{runtimePath})
@@ -411,7 +411,7 @@ func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 	documentURI := uri.File(main)
 	instance.documents.Open(documentURI.String(), 1, source)
 	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 17},
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 14},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -424,7 +424,7 @@ func TestCompletionReturnsRuntimeColorschemeWithPrefixEdit(t *testing.T) {
 		t.Fatalf("colorscheme detail = %q, %t", detail, ok)
 	}
 	edit, ok := items[0].TextEdit.(*protocol.TextEdit)
-	if !ok || edit.NewText != "wildcharm" || edit.Range != navigationRange(1, 12, 17) {
+	if !ok || edit.NewText != "wildcharm" || edit.Range != navigationRange(1, 12, 14) {
 		t.Fatalf("colorscheme edit = %#v", items[0].TextEdit)
 	}
 	resolved, err := instance.CompletionResolve(context.Background(), &items[0])

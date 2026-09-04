@@ -24,9 +24,10 @@ type completionSelection struct {
 }
 
 type completionCandidate struct {
-	item   protocol.CompletionItem
-	score  int
-	source completionSource
+	item       protocol.CompletionItem
+	score      int
+	source     completionSource
+	matchScore int
 }
 
 type completionSource uint8
@@ -1541,31 +1542,41 @@ func completionMemberAt(file *syntax.File, offset int) *syntax.Expression {
 }
 
 func completionTextMatches(prefix, label string) bool {
+	_, ok := completionTextMatchScore(prefix, label)
+	return ok
+}
+
+func completionTextMatchScore(prefix, label string) (int, bool) {
 	prefix, label = completionComparableText(prefix, label)
 	if prefix == "" {
-		return true
+		return 0, true
 	}
 	if label == "" {
-		return false
+		return 0, false
+	}
+	if label == prefix {
+		return 5, true
+	}
+	if strings.EqualFold(label, prefix) {
+		return 4, true
+	}
+	if strings.HasPrefix(label, prefix) {
+		return 3, true
+	}
+	if strings.HasPrefix(strings.ToLower(label), strings.ToLower(prefix)) {
+		return 2, true
 	}
 	prefixRunes := []rune(prefix)
-	labelRunes := []rune(label)
-	// The first typed character must match the candidate's first character,
-	// ignoring case. Remaining typed characters may match later as an ordered
-	// subsequence.
-	if unicode.ToLower(prefixRunes[0]) != unicode.ToLower(labelRunes[0]) {
-		return false
-	}
-	if strings.EqualFold(label, prefix) || strings.HasPrefix(strings.ToLower(label), strings.ToLower(prefix)) {
-		return true
-	}
-	prefixIndex := 1
-	for labelIndex := 1; labelIndex < len(labelRunes) && prefixIndex < len(prefixRunes); labelIndex++ {
-		if unicode.ToLower(prefixRunes[prefixIndex]) == unicode.ToLower(labelRunes[labelIndex]) {
+	prefixIndex := 0
+	for _, labelRune := range []rune(label) {
+		if unicode.ToLower(prefixRunes[prefixIndex]) == unicode.ToLower(labelRune) {
 			prefixIndex++
+			if prefixIndex == len(prefixRunes) {
+				return 1, true
+			}
 		}
 	}
-	return prefixIndex == len(prefixRunes)
+	return 0, false
 }
 
 func completionComparableText(prefix, label string) (string, string) {
@@ -1594,11 +1605,15 @@ func completionComparableText(prefix, label string) (string, string) {
 func (s *Server) completionList(snapshot *text.Snapshot, encoding text.Encoding, selection completionSelection, candidates map[string]completionCandidate) *protocol.CompletionList {
 	items := make([]completionCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if completionTextMatches(selection.prefix, candidate.item.Label) {
+		if matchScore, ok := completionTextMatchScore(selection.prefix, candidate.item.Label); ok {
+			candidate.matchScore = matchScore
 			items = append(items, candidate)
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
+		if items[i].matchScore != items[j].matchScore {
+			return items[i].matchScore > items[j].matchScore
+		}
 		if items[i].score != items[j].score {
 			return items[i].score > items[j].score
 		}

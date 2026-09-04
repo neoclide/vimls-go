@@ -565,6 +565,10 @@ func TestIndexRuntimeFileCatalogUsesPrecedenceAndUpdates(t *testing.T) {
 	if incomplete || len(colors) != 1 || colors[0].Display != "my-dark" {
 		t.Fatalf("prefixed colorscheme catalog = %#v, incomplete=%v", colors, incomplete)
 	}
+	colors, incomplete = index.ColorSchemeCompletions("md", 10)
+	if incomplete || len(colors) != 1 || colors[0].Display != "my-dark" {
+		t.Fatalf("fuzzy colorscheme catalog = %#v, incomplete=%v", colors, incomplete)
+	}
 	imports, incomplete := index.RuntimePathCompletions("import", "pkg/", 10)
 	if incomplete || len(imports) != 1 || imports[0].Display != "pkg/api.vim" || imports[0].IsDir {
 		t.Fatalf("import catalog = %#v, incomplete=%v", imports, incomplete)
