@@ -27,6 +27,7 @@ type DiagnosticDefinition struct {
 var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/autocmd-group-not-cleared", Message: "augroup does not clear existing autocommands", Severity: DiagnosticWarning},
 	{Code: "vimls/autocmd-outside-augroup", Message: "autocommand is not contained in an augroup", Severity: DiagnosticWarning},
+	{Code: "vimls/autoload-function-not-found", Message: "autoload function not found in current runtimepath", Severity: DiagnosticWarning},
 	{Code: "vimls/catch-error-message", Message: "catching human-readable error text is fragile", Severity: DiagnosticWarning},
 	{Code: "vimls/complex-autocmd", Message: "complex autocommand body; consider delegating to a function", Severity: DiagnosticHint},
 	{Code: "vimls/complex-command", Message: "complex user command body; consider delegating to a function", Severity: DiagnosticHint},
@@ -43,6 +44,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/expression-too-deep", Message: "expression nesting exceeds parser limit", Severity: DiagnosticInformation},
 	{Code: "vimls/file-too-large", Message: "file exceeds the 4 MiB analysis limit", Severity: DiagnosticWarning},
 	{Code: "vimls/function-without-abort", Message: "function does not use abort", Severity: DiagnosticHint},
+	{Code: "vimls/global-function-not-indexed", Message: "global function not found in workspace index", Severity: DiagnosticHint},
 	{Code: "vimls/global-internal-state", Message: "global variable appears to be plugin-internal state", Severity: DiagnosticHint},
 	{Code: "vimls/implicit-pattern-case", Message: "pattern match depends on 'ignorecase'", Severity: DiagnosticHint},
 	{Code: "vimls/implicit-regex-magic", Message: "pattern relies on Vim's magic setting", Severity: DiagnosticHint},

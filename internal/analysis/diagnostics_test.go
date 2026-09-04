@@ -5136,7 +5136,7 @@ func TestAnalyzeBuiltinArityDiagnostics(t *testing.T) {
 }
 
 func TestAnalyzeUnknownFunctionDiagnostics(t *testing.T) {
-	longName := "Func" + strings.Repeat("x", 196)
+	longName := "func" + strings.Repeat("x", 196)
 	tests := []struct {
 		name, source, code, message, text string
 	}{
@@ -5146,14 +5146,14 @@ func TestAnalyzeUnknownFunctionDiagnostics(t *testing.T) {
 			code:   "vim/E117", message: "Unknown function: doesnotexist", text: "doesnotexist",
 		},
 		{
-			name:   "Vim9 def",
-			source: "vim9script\ndef Test()\n  Missing()\nenddef\n",
-			code:   "vim/E117", message: "Unknown function: Missing", text: "Missing",
+			name:   "legacy script",
+			source: "call doesnotexist()\n",
+			code:   "vim/E117", message: "Unknown function: doesnotexist", text: "doesnotexist",
 		},
 		{
-			name:   "unscoped global function",
-			source: "vim9script\ndef g:ExistingGlobal()\nenddef\nExistingGlobal()\n",
-			code:   "vim/E117", message: "Unknown function: ExistingGlobal", text: "ExistingGlobal",
+			name:   "legacy function",
+			source: "function! Test() abort\n  call doesnotexist()\nendfunction\n",
+			code:   "vim/E117", message: "Unknown function: doesnotexist", text: "doesnotexist",
 		},
 		{
 			name:   "long Vim9 script call",
@@ -5184,6 +5184,7 @@ func TestAnalyzeUnknownFunctionDiagnostics(t *testing.T) {
 
 	conservative := "vim9script\n" +
 		"len([])\n" +
+		"Missing()\n" +
 		"Known()\n" +
 		"def Known()\nenddef\n" +
 		"var Dynamic: func\nDynamic()\n" +
@@ -5191,11 +5192,18 @@ func TestAnalyzeUnknownFunctionDiagnostics(t *testing.T) {
 		"plugin#Dynamic()\n" +
 		"var object: any\nobject.Dynamic()\n" +
 		"[]->Dynamic()\n" +
-		"legacy call Missing()\n"
+		"legacy call Missing()\n" +
+		"legacy call plugin#missing#Call()\n"
 	file := syntax.Parse(conservative)
 	for _, diagnostic := range Analyze(file).Diagnostics {
 		if diagnostic.Code == "vim/E117" {
 			t.Fatalf("dynamic, scoped, known, member, or legacy call reported E117: %#v; syntax diagnostics = %#v", diagnostic, file.Diagnostics)
+		}
+	}
+	legacy := syntax.Parse("call Missing()\ncall plugin#missing#Call()\n")
+	for _, diagnostic := range Analyze(legacy).Diagnostics {
+		if diagnostic.Code == "vim/E117" {
+			t.Fatalf("legacy user or autoload function reported E117: %#v; syntax diagnostics = %#v", diagnostic, legacy.Diagnostics)
 		}
 	}
 }

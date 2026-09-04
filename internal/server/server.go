@@ -96,15 +96,17 @@ type workspaceIdentity struct {
 }
 
 type workspaceAnalysisSnapshot struct {
-	identity          workspaceIdentity
-	path              string
-	graph             workspace.ImportGraphSnapshot
-	targets           map[string]importTargetSnapshot
-	roots             []string
-	indexComplete     bool
-	userCommandNames  []string
-	globalDiagnostics []syntax.Diagnostic
-	ready             bool
+	identity                 workspaceIdentity
+	path                     string
+	graph                    workspace.ImportGraphSnapshot
+	targets                  map[string]importTargetSnapshot
+	roots                    []string
+	indexComplete            bool
+	missingAutoloadFunctions map[string]bool
+	missingGlobalFunctions   map[string]bool
+	userCommandNames         []string
+	globalDiagnostics        []syntax.Diagnostic
+	ready                    bool
 }
 
 // serverTestHooks are test-only seams. Tests install them before starting the

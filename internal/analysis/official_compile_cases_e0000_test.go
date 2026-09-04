@@ -659,18 +659,8 @@ assert_equal(33, d.
 		},
 
 		// E117
-		// Vim: src/testdir/test_vim9_expr.vim:3885:113067
-		{
-			ID:   "src/testdir/test_vim9_expr.vim:3885:113067/def",
-			Code: "vim/E117",
-			Source: `def Func()
-# comment
-echo ExistingGlobal()
-#comment
-enddef
-defcompile
-`,
-		},
+		// Only lower-case direct names are retained. Upper-case names can be
+		// provided dynamically by user or plugin code and remain unknown.
 		// Vim: src/testdir/test_vim9_expr.vim:4499:130880
 		{
 			ID:   "src/testdir/test_vim9_expr.vim:4499:130880/def",
@@ -681,22 +671,6 @@ echo doesnotexist()
 #comment
 enddef
 defcompile
-`,
-		},
-		// Vim: src/testdir/test_vim9_expr.vim:3885:113067
-		{
-			ID:   "src/testdir/test_vim9_expr.vim:3885:113067/vim9-script",
-			Code: "vim/E117",
-			Source: `vim9script
-echo ExistingGlobal()
-`,
-		},
-		// Vim: src/testdir/test_vim9_expr.vim:4498:130604
-		{
-			ID:   "src/testdir/test_vim9_expr.vim:4498:130604/vim9-script",
-			Code: "vim/E117",
-			Source: `vim9script
-echo Func01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789()
 `,
 		},
 		// Vim: src/testdir/test_vim9_expr.vim:4499:130880

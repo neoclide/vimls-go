@@ -1128,6 +1128,52 @@ func TestCrossFileLegacyGlobalFunctionCompletionDefinitionAndHover(t *testing.T)
 	if err != nil || len(definition.(protocol.LocationSlice)) != 0 {
 		t.Fatalf("ambiguous global function definition = %#v, %v", definition, err)
 	}
+	hover, err = instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: position})
+	if err != nil || hover != nil {
+		t.Fatalf("ambiguous indexed global function hover = %#v, %v", hover, err)
+	}
+}
+
+func TestHoverShowsUnindexedLegacyGlobalFunction(t *testing.T) {
+	root := t.TempDir()
+	source := "call MissingGlobal()\ncall missingglobal()\n"
+	mainPath := writeWorkspaceFile(t, root, "plugin.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	mainURI := uri.File(mainPath)
+	instance.documents.Open(mainURI.String(), 1, source)
+
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Character: 9},
+	}})
+	if err != nil || hover == nil || hover.Range == nil || *hover.Range != navigationRange(0, 5, 18) {
+		t.Fatalf("missing global function hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || !strings.Contains(content.Value, "name: MissingGlobal") || !strings.Contains(content.Value, "function not found in workspace index") {
+		t.Fatalf("missing global function hover content = %#v", hover.Contents)
+	}
+
+	hover, err = instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI}, Position: protocol.Position{Line: 1, Character: 9},
+	}})
+	if err != nil || hover != nil {
+		t.Fatalf("lower-case unknown function hover = %#v, %v", hover, err)
+	}
+
+	vim9Source := "vim9script\ng:MissingGlobal()\n"
+	vim9Path := writeWorkspaceFile(t, root, "vim9-plugin.vim", vim9Source)
+	vim9URI := uri.File(vim9Path)
+	instance.documents.Open(vim9URI.String(), 1, vim9Source)
+	hover, err = instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: vim9URI}, Position: protocol.Position{Line: 1, Character: 5},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("missing Vim9 global function hover = %#v, %v", hover, err)
+	}
+	content, ok = hover.Contents.(*protocol.MarkupContent)
+	if !ok || !strings.Contains(content.Value, "name: MissingGlobal") || !strings.Contains(content.Value, "function not found in workspace index") {
+		t.Fatalf("missing Vim9 global function hover content = %#v", hover.Contents)
+	}
 }
 
 func TestCrossFileLegacyGlobalVariableDefinitionReferencesAndAmbiguity(t *testing.T) {

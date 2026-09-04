@@ -384,7 +384,7 @@ func (s *Server) computeClosedWorkspaceDiagnostics(ctx context.Context, snapshot
 		return nil, workspaceIdentity{}, false
 	}
 	s.workspaceMu.Lock()
-	workspaceSnapshot := s.workspaceAnalysisSnapshotLocked(path, file)
+	workspaceSnapshot := s.workspaceAnalysisSnapshotLocked(path, file, fileAnalysis)
 	s.workspaceMu.Unlock()
 	return s.composeDocumentDiagnostics(ctx, snapshot, file, fileAnalysis, workspaceSnapshot, disabledDiagnostics)
 }

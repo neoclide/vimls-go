@@ -6,6 +6,7 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 	want := map[string]DiagnosticSeverity{
 		"vimls/autocmd-group-not-cleared":      DiagnosticWarning,
 		"vimls/autocmd-outside-augroup":        DiagnosticWarning,
+		"vimls/autoload-function-not-found":    DiagnosticWarning,
 		"vimls/catch-error-message":            DiagnosticWarning,
 		"vimls/complex-autocmd":                DiagnosticHint,
 		"vimls/complex-command":                DiagnosticHint,
@@ -14,6 +15,7 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 		"vimls/echoerr":                        DiagnosticHint,
 		"vimls/explicit-local-scope":           DiagnosticHint,
 		"vimls/function-without-abort":         DiagnosticHint,
+		"vimls/global-function-not-indexed":    DiagnosticHint,
 		"vimls/global-internal-state":          DiagnosticHint,
 		"vimls/implicit-pattern-case":          DiagnosticHint,
 		"vimls/implicit-regex-magic":           DiagnosticHint,

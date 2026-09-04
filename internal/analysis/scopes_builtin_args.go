@@ -1122,10 +1122,10 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 	if checkTypes && callee.Kind == syntax.ExpressionIdentifier && callee.Value == "_" {
 		return
 	}
-	if checkTypes && call.Value == "" && callee.Kind == syntax.ExpressionIdentifier {
+	if call.Value == "" && callee.Kind == syntax.ExpressionIdentifier {
 		// compile_call() has a 200-byte direct-name buffer only while compiling
 		// a def. At Vim9 script level the same unresolved spelling is E117.
-		if scopeContainsDef(scope) && len(callee.Value) >= 200 {
+		if checkTypes && scopeContainsDef(scope) && len(callee.Value) >= 200 {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1011", Message: "Name too long: " + callee.Value, Span: callee.Span})
 			return
 		}
@@ -1194,6 +1194,9 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 
 func unresolvedDirectFunction(scope *Scope, callee *syntax.Expression) bool {
 	if scope == nil || callee == nil || callee.Kind != syntax.ExpressionIdentifier || callee.Value == "" || strings.ContainsAny(callee.Value, ":#&$@") {
+		return false
+	}
+	if callee.Value[0] < 'a' || callee.Value[0] > 'z' {
 		return false
 	}
 	return resolve(scope, callee.Value, callee.Span.Start, true, nil) == nil

@@ -970,7 +970,7 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 	}
 	s.workspaceMu.Lock()
 	if !ok || !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
-		snapshot := s.workspaceAnalysisSnapshotLocked("", nil)
+		snapshot := s.workspaceAnalysisSnapshotLocked("", nil, nil)
 		s.workspaceMu.Unlock()
 		return snapshot, nil
 	}
@@ -987,7 +987,7 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 			s.workspaceGraph.SetReady(true)
 		}
 		s.workspaceGraphView = s.workspaceGraph.Snapshot()
-		snapshot := s.workspaceAnalysisSnapshotLocked(path, nil)
+		snapshot := s.workspaceAnalysisSnapshotLocked(path, nil, nil)
 		dependents := s.readyWorkspaceDependentsLocked()
 		s.notifyWorkspaceIndexChangedLocked()
 		s.workspaceMu.Unlock()
@@ -996,7 +996,7 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 	sameSource, indexed := s.workspaceIndex.Source(path)
 	_, pending := s.workspacePending[path]
 	if !pending && indexed && sameSource == file.Source && s.workspaceGraphView.Has(path) {
-		snapshot := s.workspaceAnalysisSnapshotLocked(path, file)
+		snapshot := s.workspaceAnalysisSnapshotLocked(path, file, result)
 		dependents := s.readyWorkspaceDependentsLocked()
 		s.workspaceMu.Unlock()
 		return snapshot, dependents
@@ -1009,6 +1009,7 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 		delete(s.workspacePending, path)
 		s.logf("vimls: workspace index limit reached for %s: %v", path, err)
 	} else {
+		s.queueWorkspaceDependentsLocked(path)
 		facts := retainWorkspaceImportTargets(collectWorkspaceImportFacts(path, file, s.workspaceResolver, openByPath), func(target string) bool {
 			if openByPath[target] != nil {
 				return true
@@ -1036,7 +1037,7 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 		s.workspaceGraph.SetReady(true)
 	}
 	s.workspaceGraphView = s.workspaceGraph.Snapshot()
-	snapshot := s.workspaceAnalysisSnapshotLocked(path, file)
+	snapshot := s.workspaceAnalysisSnapshotLocked(path, file, result)
 	dependents := s.readyWorkspaceDependentsLocked()
 	s.notifyWorkspaceIndexChangedLocked()
 	s.workspaceMu.Unlock()
@@ -1062,7 +1063,7 @@ func (s *Server) workspaceIndexReadyLocked() bool {
 	return s.workspaceBuilt && len(s.workspacePending) == 0 && s.workspaceIndex != nil
 }
 
-func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File) workspaceAnalysisSnapshot {
+func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File, result *analysis.FileAnalysis) workspaceAnalysisSnapshot {
 	snapshot := workspaceAnalysisSnapshot{
 		identity: s.workspaceIdentityLocked(), path: path, graph: s.workspaceGraphView,
 		roots: workspaceIndexRoots(s.workspaceRoots, s.runtimePaths), ready: true,
@@ -1077,9 +1078,32 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File)
 	}
 	if s.workspaceIndexReadyLocked() {
 		snapshot.globalDiagnostics = s.workspaceIndex.GlobalNameConflictDiagnostics(path, file)
+		var references []workspace.ExternalReferenceFact
+		if file != nil {
+			if result == nil || result.File != file {
+				result = analysis.Analyze(file)
+			}
+			references = workspace.CollectExternalReferencesFromAnalysis(path, file, result)
+			for _, reference := range references {
+				if reference.Kind == workspace.ExternalReferenceGlobalFunction && reference.DirectCall && startsWithUppercaseASCII(reference.Name) && !s.workspaceIndex.HasGlobalFunction(reference.Name) {
+					if snapshot.missingGlobalFunctions == nil {
+						snapshot.missingGlobalFunctions = make(map[string]bool)
+					}
+					snapshot.missingGlobalFunctions[reference.Name] = true
+				}
+			}
+		}
 		if s.workspaceIndex.Complete() {
 			snapshot.indexComplete = true
 			snapshot.userCommandNames = s.workspaceIndex.UserCommandNames()
+			for _, reference := range references {
+				if reference.Kind == workspace.ExternalReferenceAutoload && reference.DirectCall && !s.workspaceIndex.HasAutoloadFunction(reference.Name) {
+					if snapshot.missingAutoloadFunctions == nil {
+						snapshot.missingAutoloadFunctions = make(map[string]bool)
+					}
+					snapshot.missingAutoloadFunctions[reference.Name] = true
+				}
+			}
 		}
 	}
 	imports := snapshot.graph.Imports(path)
@@ -1116,8 +1140,8 @@ func (s *Server) removeWorkspaceURI(documentURI string) {
 		s.workspaceMu.Unlock()
 		return
 	}
-	s.workspaceIndex.Remove(path)
 	s.queueWorkspaceDependentsLocked(path)
+	s.workspaceIndex.Remove(path)
 	if err := s.workspaceGraph.Replace(path, nil); err == nil {
 		s.workspaceGraph.SetReady(false)
 		s.workspaceGraphView = s.workspaceGraph.Snapshot()
@@ -1253,6 +1277,12 @@ func (s *Server) installWorkspaceRestore(restore workspaceRestore, file *syntax.
 
 func (s *Server) queueWorkspaceDependentsLocked(path string) {
 	for _, dependent := range s.workspaceGraphView.ReverseDependents(path) {
+		s.workspaceDependents[dependent] = struct{}{}
+	}
+	for _, dependent := range s.workspaceIndex.AutoloadDependents(path) {
+		s.workspaceDependents[dependent] = struct{}{}
+	}
+	for _, dependent := range s.workspaceIndex.GlobalFunctionDependents(path) {
 		s.workspaceDependents[dependent] = struct{}{}
 	}
 }

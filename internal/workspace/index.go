@@ -81,6 +81,7 @@ type ExternalReferenceFact struct {
 	Name           string
 	Span           syntax.Span
 	Kind           ExternalReferenceKind
+	DirectCall     bool
 	ImportPath     string
 	ImportAutoload bool
 }
@@ -414,6 +415,121 @@ func (i *Index) RuntimeFile(relativePath string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// HasAutoloadFunction reports whether the first matching runtimepath file
+// declares name as a legacy autoload function or a Vim9 exported function.
+func (i *Index) HasAutoloadFunction(name string) bool {
+	relativePath, ok := AutoloadPath(name)
+	if !ok {
+		return false
+	}
+	name = strings.TrimPrefix(name, "g:")
+	baseName := name[strings.LastIndexByte(name, '#')+1:]
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	for index, files := range i.runtimeFiles {
+		if i.runtimeAfter[index] {
+			continue
+		}
+		path := files[relativePath]
+		if path == "" {
+			continue
+		}
+		for _, fact := range i.files[path].facts {
+			if !fact.TopLevel || fact.Kind != analysis.SymbolKindFunction {
+				continue
+			}
+			if (fact.Dialect == syntax.Legacy && strings.TrimPrefix(fact.Name, "g:") == name) || (fact.Dialect == syntax.Vim9 && fact.Exported && fact.Name == baseName) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// AutoloadDependents returns indexed files with direct autoload calls whose
+// target is the runtime-relative file containing path.
+func (i *Index) AutoloadDependents(path string) []string {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil {
+		return nil
+	}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	relativePath := ""
+	for index, root := range i.runtimePaths {
+		if i.runtimeAfter[index] {
+			continue
+		}
+		relative, err := filepath.Rel(root, normalized)
+		if err != nil {
+			continue
+		}
+		relative, ok := cleanRuntimeRelativePath(relative)
+		if ok && strings.HasPrefix(relative, "autoload/") && strings.HasSuffix(relative, ".vim") {
+			relativePath = relative
+			break
+		}
+	}
+	if relativePath == "" {
+		return nil
+	}
+	seen := make(map[string]bool)
+	for name, references := range i.byExternalName {
+		target, ok := AutoloadPath(name)
+		if !ok || target != relativePath {
+			continue
+		}
+		for _, reference := range references {
+			if reference.Kind == ExternalReferenceAutoload && reference.DirectCall {
+				seen[reference.Path] = true
+			}
+		}
+	}
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// GlobalFunctionDependents returns indexed files with direct calls to a
+// top-level legacy global function declared by path.
+func (i *Index) GlobalFunctionDependents(path string) []string {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil {
+		return nil
+	}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	file, ok := i.files[normalized]
+	if !ok {
+		return nil
+	}
+	names := make(map[string]bool)
+	for _, fact := range file.facts {
+		name := strings.TrimPrefix(fact.Name, "g:")
+		if fact.TopLevel && fact.Dialect == syntax.Legacy && fact.Kind == analysis.SymbolKindFunction && !strings.Contains(name, "#") {
+			names[name] = true
+		}
+	}
+	seen := make(map[string]bool)
+	for name := range names {
+		for _, reference := range i.byExternalName[name] {
+			if reference.Kind == ExternalReferenceGlobalFunction && reference.DirectCall {
+				seen[reference.Path] = true
+			}
+		}
+	}
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 // RuntimePathCompletions returns direct indexed children below one runtime
@@ -924,6 +1040,28 @@ func (i *Index) Lookup(name string) []SymbolFact {
 // name. Script-local functions and autoload short names are not guessed.
 func (i *Index) GlobalFunction(name string) (SymbolMatch, bool) {
 	return i.globalSymbol(name, analysis.NameDeclarationFunction)
+}
+
+// HasGlobalFunction reports whether any indexed top-level legacy function has
+// name. Unlike GlobalFunction, ambiguity does not make an indexed name absent.
+func (i *Index) HasGlobalFunction(name string) bool {
+	name = strings.TrimPrefix(name, "g:")
+	if name == "" {
+		return false
+	}
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	for _, global := range i.byGlobalName[name] {
+		if global.Kind != analysis.NameDeclarationFunction {
+			continue
+		}
+		for _, fact := range i.files[global.Path].facts {
+			if fact.SelectionRange == global.Span && fact.TopLevel && fact.Dialect == syntax.Legacy && fact.Kind == analysis.SymbolKindFunction {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GlobalVariable returns one unambiguous top-level legacy global variable.
@@ -1613,10 +1751,25 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 	visited := make(map[*syntax.Expression]bool)
 	directCalls := make(map[syntax.Span]bool)
 	visitIndexCommands(file.Commands, visited, func(expression *syntax.Expression) {
-		if expression != nil && expression.Kind == syntax.ExpressionCall && expression.Value == "" && len(expression.Children) > 0 && expression.Children[0] != nil && expression.Children[0].Kind == syntax.ExpressionIdentifier {
-			directCalls[expression.Children[0].Span] = true
+		if expression != nil && expression.Kind == syntax.ExpressionCall && expression.Value == "" && len(expression.Children) > 0 && expression.Children[0] != nil {
+			callee := expression.Children[0]
+			if callee.Kind == syntax.ExpressionIdentifier {
+				directCalls[callee.Span] = true
+			} else if callee.Kind == syntax.ExpressionMember && callee.Value != "" && file.Text(callee.Operator) == "->" {
+				directCalls[syntax.Span{Start: callee.Span.End - len(callee.Value), End: callee.Span.End}] = true
+			}
 		}
 		if expression == nil || expression.Kind != syntax.ExpressionMember || len(expression.Children) != 1 || expression.Value == "" {
+			return
+		}
+		member := syntax.Span{Start: expression.Operator.End, End: expression.Span.End}
+		if file.Text(expression.Operator) == "->" {
+			method := syntax.Span{Start: expression.Span.End - len(expression.Value), End: expression.Span.End}
+			if _, ok := AutoloadPath(expression.Value); ok && directCalls[method] && validIndexSpan(file, method) && file.Text(method) == expression.Value {
+				facts = append(facts, ExternalReferenceFact{
+					Path: normalized, Name: strings.Clone(expression.Value), Span: method, Kind: ExternalReferenceAutoload, DirectCall: true,
+				})
+			}
 			return
 		}
 		receiver := expression.Children[0]
@@ -1643,7 +1796,6 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 			// receivers remain unknown instead of binding to a later import.
 			return
 		}
-		member := syntax.Span{Start: expression.Operator.End, End: expression.Span.End}
 		if importNode == nil || !validIndexSpan(file, member) || file.Text(member) != expression.Value || !validIndexSpan(file, importNode.PathSpan) {
 			return
 		}
@@ -1692,7 +1844,7 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 		kind := ExternalReferenceAutoload
 		if separator > 0 && separator < len(name)-1 {
 			// Autoload variables and functions both resolve by their full name.
-		} else if file.Dialect == syntax.Legacy && directCalls[reference.Span] {
+		} else if directCalls[reference.Span] && (file.Dialect == syntax.Legacy || strings.HasPrefix(reference.Name, "g:")) {
 			kind = ExternalReferenceGlobalFunction
 		} else if file.Dialect == syntax.Legacy && strings.HasPrefix(reference.Name, "g:") {
 			kind = ExternalReferenceGlobalVariable
@@ -1700,7 +1852,7 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 			continue
 		}
 		facts = append(facts, ExternalReferenceFact{
-			Path: normalized, Name: strings.Clone(name), Span: reference.Span, Kind: kind,
+			Path: normalized, Name: strings.Clone(name), Span: reference.Span, Kind: kind, DirectCall: directCalls[reference.Span],
 		})
 	}
 	sortExternalReferences(facts)

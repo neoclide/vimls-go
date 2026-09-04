@@ -84,7 +84,26 @@ func (s *Server) workspaceImportDiagnostics(snapshot workspaceAnalysisSnapshot, 
 		}
 		members = append(members, member)
 	}
-	return analysis.AnalyzeImports(loads, members)
+	diagnostics := analysis.AnalyzeImports(loads, members)
+	for _, reference := range references {
+		if reference.Kind != workspace.ExternalReferenceGlobalFunction || !reference.DirectCall || !snapshot.missingGlobalFunctions[reference.Name] {
+			continue
+		}
+		diagnostics = append(diagnostics, syntax.Diagnostic{
+			Code: "vimls/global-function-not-indexed", Message: "global function not found in workspace index: " + reference.Name, Span: reference.Span,
+		})
+	}
+	if snapshot.indexComplete {
+		for _, reference := range references {
+			if reference.Kind != workspace.ExternalReferenceAutoload || !reference.DirectCall || !snapshot.missingAutoloadFunctions[reference.Name] {
+				continue
+			}
+			diagnostics = append(diagnostics, syntax.Diagnostic{
+				Code: "vimls/autoload-function-not-found", Message: "autoload function not found in current runtimepath: " + reference.Name, Span: reference.Span,
+			})
+		}
+	}
+	return diagnostics
 }
 
 // parseImportTarget preserves the parser-cache fast path when an unchanged

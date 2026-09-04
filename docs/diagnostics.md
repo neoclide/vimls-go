@@ -62,6 +62,7 @@ the default message more specific without changing its code.
 | --- | --- | --- |
 | `vimls/autocmd-group-not-cleared` | Warning | augroup does not clear existing autocommands |
 | `vimls/autocmd-outside-augroup` | Warning | autocommand is not contained in an augroup |
+| `vimls/autoload-function-not-found` | Warning | autoload function not found in current runtimepath |
 | `vimls/catch-error-message` | Warning | catching human-readable error text is fragile |
 | `vimls/complex-autocmd` | Hint | complex autocommand body; consider delegating to a function |
 | `vimls/complex-command` | Hint | complex user command body; consider delegating to a function |
@@ -78,6 +79,7 @@ the default message more specific without changing its code.
 | `vimls/expression-too-deep` | Information | expression nesting exceeds parser limit |
 | `vimls/file-too-large` | Warning | file exceeds the 4 MiB analysis limit |
 | `vimls/function-without-abort` | Hint | function does not use abort |
+| `vimls/global-function-not-indexed` | Hint | global function not found in workspace index |
 | `vimls/global-internal-state` | Hint | global variable appears to be plugin-internal state |
 | `vimls/implicit-pattern-case` | Hint | pattern match depends on 'ignorecase' |
 | `vimls/implicit-regex-magic` | Hint | pattern relies on Vim's magic setting |

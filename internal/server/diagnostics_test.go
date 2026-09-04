@@ -210,7 +210,7 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	file := syntax.Parse("BuildP\nLocalC\nBuildProject\n")
 	currentPath := mustWorkspaceCanonicalPath(t, filepath.Join(runtimeRoot, "plugin/current.vim"))
 	instance.workspaceMu.Lock()
-	snapshot := instance.workspaceAnalysisSnapshotLocked(currentPath, file)
+	snapshot := instance.workspaceAnalysisSnapshotLocked(currentPath, file, nil)
 	instance.workspaceMu.Unlock()
 	if !snapshot.indexComplete {
 		t.Fatal("complete runtimepath index was not captured")
@@ -221,7 +221,7 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	}
 	index.SetComplete(false)
 	instance.workspaceMu.Lock()
-	snapshot = instance.workspaceAnalysisSnapshotLocked(currentPath, file)
+	snapshot = instance.workspaceAnalysisSnapshotLocked(currentPath, file, nil)
 	instance.workspaceMu.Unlock()
 	if snapshot.indexComplete || len(snapshot.userCommandNames) != 0 {
 		t.Fatalf("incomplete runtimepath index was exposed: %#v", snapshot.userCommandNames)
@@ -251,7 +251,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	variablePath := filepath.Join(runtimeRoot, "plugin/current-variable.vim")
 	variableFile := syntax.Parse("let g:Shared = 1\n")
 	instance.workspaceMu.Lock()
-	variableSnapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, variablePath), variableFile)
+	variableSnapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, variablePath), variableFile, nil)
 	instance.workspaceMu.Unlock()
 	if got := variableSnapshot.globalDiagnostics; len(got) != 1 || got[0].Code != "vim/E705" {
 		t.Fatalf("E705 diagnostics = %#v", got)
@@ -259,7 +259,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	functionPath := filepath.Join(runtimeRoot, "plugin/current-function.vim")
 	functionFile := syntax.Parse("function Other()\nendfunction\n")
 	instance.workspaceMu.Lock()
-	functionSnapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, functionPath), functionFile)
+	functionSnapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, functionPath), functionFile, nil)
 	instance.workspaceMu.Unlock()
 	if got := functionSnapshot.globalDiagnostics; len(got) != 1 || got[0].Code != "vim/E707" {
 		t.Fatalf("E707 diagnostics = %#v", got)
@@ -267,7 +267,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 
 	instance.workspaceMu.Lock()
 	instance.workspaceBuilt = false
-	variableSnapshot = instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, variablePath), variableFile)
+	variableSnapshot = instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, variablePath), variableFile, nil)
 	instance.workspaceMu.Unlock()
 	if got := variableSnapshot.globalDiagnostics; len(got) != 0 {
 		t.Fatalf("unready index produced global conflict warning: %#v", got)
@@ -275,7 +275,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	instance.workspaceMu.Lock()
 	instance.workspaceBuilt = true
 	instance.workspaceIndex.SetComplete(false)
-	snapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, functionPath), functionFile)
+	snapshot := instance.workspaceAnalysisSnapshotLocked(mustWorkspaceCanonicalPath(t, functionPath), functionFile, nil)
 	instance.workspaceMu.Unlock()
 	if snapshot.indexComplete || len(snapshot.globalDiagnostics) != 1 || snapshot.globalDiagnostics[0].Code != "vim/E707" {
 		t.Fatalf("incomplete index global snapshot = %#v", snapshot)
@@ -918,6 +918,115 @@ func TestWorkspaceIdentityCapturesCrossFileInputs(t *testing.T) {
 	}
 }
 
+func TestWorkspaceAutoloadFunctionNotFoundDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	index := workspace.NewIndex(10, 10000)
+	index.SetRuntimePaths([]string{root})
+	targetPath := filepath.Join(root, "autoload", "foo", "bar.vim")
+	if err := index.Replace(targetPath, syntax.Parse("function foo#bar#Known() abort\nendfunction\n")); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(true)
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	graph := workspace.NewImportGraph()
+	graph.SetReady(true)
+	root = mustWorkspaceCanonicalPath(t, root)
+	instance.workspaceMu.Lock()
+	instance.workspaceIndex = index
+	instance.workspaceGraph = graph
+	instance.workspaceGraphView = graph.Snapshot()
+	instance.workspaceBuilt = true
+	instance.workspaceRoots = []string{root}
+	instance.runtimePaths = []string{root}
+	instance.workspaceMu.Unlock()
+
+	tests := []struct {
+		name, source string
+	}{
+		{name: "legacy", source: "call foo#bar#Known()\ncall foo#bar#Missing()\ncall absent#api#Run()\nlet value = g:foo#bar#Value\n"},
+		{name: "Vim9", source: "vim9script\nfoo#bar#Known()\nfoo#bar#Missing()\nabsent#api#Run()\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := analysis.Analyze(file)
+			instance.workspaceMu.Lock()
+			snapshot := instance.workspaceAnalysisSnapshotLocked(filepath.Join(root, test.name+".vim"), file, result)
+			instance.workspaceMu.Unlock()
+			var got []syntax.Diagnostic
+			for _, diagnostic := range instance.workspaceImportDiagnostics(snapshot, file, result) {
+				if diagnostic.Code == "vimls/autoload-function-not-found" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 2 || file.Text(got[0].Span) != "foo#bar#Missing" || file.Text(got[1].Span) != "absent#api#Run" {
+				t.Fatalf("autoload diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+			for _, diagnostic := range got {
+				if !strings.HasSuffix(diagnostic.Message, file.Text(diagnostic.Span)) {
+					t.Fatalf("autoload diagnostic message = %q for %q", diagnostic.Message, file.Text(diagnostic.Span))
+				}
+			}
+		})
+	}
+	index.SetComplete(false)
+	file := syntax.Parse(tests[0].source)
+	result := analysis.Analyze(file)
+	instance.workspaceMu.Lock()
+	snapshot := instance.workspaceAnalysisSnapshotLocked(filepath.Join(root, "incomplete.vim"), file, result)
+	instance.workspaceMu.Unlock()
+	if diagnostics := instance.workspaceImportDiagnostics(snapshot, file, result); len(diagnostics) != 0 {
+		t.Fatalf("incomplete index diagnostics = %#v", diagnostics)
+	}
+}
+
+func TestWorkspaceGlobalFunctionNotIndexedHints(t *testing.T) {
+	root := t.TempDir()
+	knownPath := filepath.Join(root, "known.vim")
+	index := workspace.NewIndex(10, 10000)
+	if err := index.Replace(knownPath, syntax.Parse("function KnownGlobal() abort\nendfunction\n")); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(false)
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	graph := workspace.NewImportGraph()
+	graph.SetReady(true)
+	root = mustWorkspaceCanonicalPath(t, root)
+	instance.workspaceMu.Lock()
+	instance.workspaceIndex = index
+	instance.workspaceGraph = graph
+	instance.workspaceGraphView = graph.Snapshot()
+	instance.workspaceBuilt = true
+	instance.workspaceRoots = []string{root}
+	instance.workspaceMu.Unlock()
+
+	for _, test := range []struct {
+		name, source, missing string
+	}{
+		{name: "legacy", source: "call KnownGlobal()\ncall MissingGlobal()\ncall missingglobal()\n", missing: "MissingGlobal"},
+		{name: "Vim9 explicit global", source: "vim9script\ng:MissingGlobal()\n", missing: "g:MissingGlobal"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := analysis.Analyze(file)
+			instance.workspaceMu.Lock()
+			snapshot := instance.workspaceAnalysisSnapshotLocked(filepath.Join(root, test.name+".vim"), file, result)
+			instance.workspaceMu.Unlock()
+			var got []syntax.Diagnostic
+			for _, diagnostic := range instance.workspaceImportDiagnostics(snapshot, file, result) {
+				if diagnostic.Code == "vimls/global-function-not-indexed" {
+					got = append(got, diagnostic)
+				}
+			}
+			if len(got) != 1 || file.Text(got[0].Span) != test.missing || !strings.HasSuffix(got[0].Message, "MissingGlobal") {
+				t.Fatalf("global function hints = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestWorkspaceIdentityOversizedTransitionRejectsOldPublish(t *testing.T) {
 	root := t.TempDir()
 	mainPath := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "main.vim", "if true\n"))
@@ -1057,7 +1166,7 @@ func TestOpenDocumentConsumersPreservePureParserCache(t *testing.T) {
 	}
 
 	instance.workspaceMu.Lock()
-	workspaceSnapshot := instance.workspaceAnalysisSnapshotLocked(mainCanonical, mainFile)
+	workspaceSnapshot := instance.workspaceAnalysisSnapshotLocked(mainCanonical, mainFile, nil)
 	instance.workspaceMu.Unlock()
 	_ = instance.workspaceImportDiagnostics(workspaceSnapshot, mainFile, analysis.Analyze(mainFile))
 	if !workspaceSnapshot.ready {

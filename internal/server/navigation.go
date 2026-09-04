@@ -635,6 +635,14 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 			if current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}); err != nil {
 				return nil, err
 			} else if current {
+				if document.external.Kind == workspace.ExternalReferenceGlobalFunction && startsWithUppercaseASCII(document.external.Name) && (state.index == nil || !state.index.HasGlobalFunction(document.external.Name)) {
+					return s.localHoverResult(ctx, document, []string{
+						"name: " + document.external.Name,
+						"kind: function",
+						"",
+						"function not found in workspace index",
+					})
+				}
 				return nil, nil
 			} else if attempt == 1 {
 				return nil, protocol.ErrContentModified
@@ -644,6 +652,11 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 		return s.localHover(ctx, document)
 	}
 	return nil, protocol.ErrContentModified
+}
+
+func startsWithUppercaseASCII(name string) bool {
+	name = strings.TrimPrefix(name, "g:")
+	return name != "" && name[0] >= 'A' && name[0] <= 'Z'
 }
 
 func (s *Server) localHover(ctx context.Context, document *navigationDocument) (*protocol.Hover, error) {
