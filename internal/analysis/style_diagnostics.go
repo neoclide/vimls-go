@@ -254,7 +254,7 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 			appendStyleDiagnostic(result, "vimls/match-command", ":match uses shared match slots; prefer matchadd()", command.Name)
 		}
 		if command.Mapping != nil {
-			collectMappingStyleDiagnostics(result, file, command)
+			collectMappingStyleDiagnostics(result, file, command, commands, blocks, index)
 		}
 		// In user configuration files a top-level :set establishes global
 		// defaults and is not flagged; :setlocal is suggested only inside an
@@ -446,7 +446,7 @@ func visitStyleExpression(result *FileAnalysis, file *syntax.File, expression *s
 	}
 }
 
-func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command) {
+func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command, commands []syntax.Command, blocks []syntax.Block, commandIndex int) {
 	mapping := command.Mapping
 	if mapping == nil || mapping.Query || mapping.LHS.Start == mapping.LHS.End || mapping.RHS.Start == mapping.RHS.End {
 		return
@@ -474,13 +474,120 @@ func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, com
 		if strings.Contains(strings.ToLower(lhs), "<leader>") && !strings.Contains(strings.ToLower(rhs), "<plug>") {
 			appendStyleDiagnostic(result, "vimls/direct-user-keymap", "plugin-defined <leader> mapping reduces configurability; consider exposing <Plug>", mapping.LHS)
 		}
-		if !mapping.Unique && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(lhs)), "<plug>") {
+		if !mapping.Unique && !strings.HasPrefix(strings.ToLower(strings.TrimSpace(lhs)), "<plug>") && !isGuardedByMapcheck(file, commands, blocks, command, commandIndex) {
 			appendStyleDiagnostic(result, "vimls/mapping-without-unique", "mapping may overwrite an existing mapping; consider <unique>", mapping.LHS)
 		}
 	}
 	if strings.Contains(strings.ToLower(rhs), "s:") && !strings.Contains(strings.ToLower(rhs), "<sid>") {
 		appendStyleDiagnostic(result, "vimls/mapping-script-local-reference", "mapping references s: directly; use <SID> or an autoload function", mapping.RHS)
 	}
+}
+
+var mapcheckCallPattern = regexp.MustCompile(`(?i)\b(mapcheck|maparg)\s*\(`)
+
+func isGuardedByMapcheck(file *syntax.File, commands []syntax.Command, blocks []syntax.Block, command *syntax.Command, commandIndex int) bool {
+	for blockIndex := command.Block; blockIndex >= 0 && blockIndex < len(blocks); blockIndex = blocks[blockIndex].Parent {
+		block := blocks[blockIndex]
+		if block.Kind != syntax.BlockIf {
+			continue
+		}
+		if blockIfGuardsMapcheck(file, commands, block, commandIndex) {
+			return true
+		}
+	}
+	return false
+}
+
+func blockIfGuardsMapcheck(file *syntax.File, commands []syntax.Command, block syntax.Block, commandIndex int) bool {
+	if block.Header < 0 || block.Header >= len(commands) {
+		return false
+	}
+	if block.End >= 0 && block.End < len(commands) && commandIndex >= block.End {
+		return false
+	}
+	if commandIndex <= block.Header {
+		return false
+	}
+
+	branchCmdIdx := -1
+	if len(block.Branches) == 0 {
+		branchCmdIdx = block.Header
+	} else if commandIndex < block.Branches[0] {
+		branchCmdIdx = block.Header
+	} else {
+		for i := len(block.Branches) - 1; i >= 0; i-- {
+			branchIdx := block.Branches[i]
+			if branchIdx >= 0 && commandIndex > branchIdx {
+				branchCmdIdx = branchIdx
+				break
+			}
+		}
+	}
+
+	if branchCmdIdx < 0 || branchCmdIdx >= len(commands) {
+		return false
+	}
+
+	guardCmd := &commands[branchCmdIdx]
+	if guardCmd.Canonical == "if" || guardCmd.Canonical == "elseif" {
+		return commandHasMapcheck(guardCmd, file)
+	}
+	if guardCmd.Canonical == "else" {
+		if block.Header >= 0 && block.Header < len(commands) && commandHasMapcheck(&commands[block.Header], file) {
+			return true
+		}
+		for _, branchIdx := range block.Branches {
+			if branchIdx >= branchCmdIdx {
+				break
+			}
+			if branchIdx >= 0 && branchIdx < len(commands) && commandHasMapcheck(&commands[branchIdx], file) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func commandHasMapcheck(command *syntax.Command, file *syntax.File) bool {
+	if command == nil {
+		return false
+	}
+	if len(command.Expressions) > 0 {
+		for _, expr := range command.Expressions {
+			if expressionContainsMapcheck(expr) {
+				return true
+			}
+		}
+		return false
+	}
+	if command.Argument.Start < command.Argument.End {
+		return mapcheckCallPattern.MatchString(file.Text(command.Argument))
+	}
+	return false
+}
+
+func expressionContainsMapcheck(expr *syntax.Expression) bool {
+	if expr == nil {
+		return false
+	}
+	if expr.Kind == syntax.ExpressionCall {
+		if len(expr.Children) > 0 {
+			callee := expr.Children[0]
+			if callee != nil && callee.Kind == syntax.ExpressionIdentifier && isMapcheckOrMaparg(callee.Value) {
+				return true
+			}
+		}
+	}
+	for _, child := range expr.Children {
+		if expressionContainsMapcheck(child) {
+			return true
+		}
+	}
+	return false
+}
+
+func isMapcheckOrMaparg(name string) bool {
+	return strings.EqualFold(name, "mapcheck") || strings.EqualFold(name, "maparg")
 }
 
 func appendStyleDiagnostic(result *FileAnalysis, code, message string, span syntax.Span) {
