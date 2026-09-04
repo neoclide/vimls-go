@@ -433,49 +433,49 @@ endfunction
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, uri.File(workspaceMain), workspaceMainSource))
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100000,"method":"textDocument/definition","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10}}}`, uri.File(workspaceMain)))
-	crossDefinition := readJSON(t, reader)
+	crossDefinition := readResponse(t, reader, "100000")
 	if string(crossDefinition["id"]) != "100000" || !strings.Contains(string(crossDefinition["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, workspaceLib))) || !strings.Contains(string(crossDefinition["result"]), `"start":{"line":1,"character":11}`) {
 		t.Fatalf("cross-file definition = %s", crossDefinition)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100001,"method":"textDocument/references","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":10},"context":{"includeDeclaration":true}}}`, uri.File(workspaceMain)))
-	crossReferences := readJSON(t, reader)
+	crossReferences := readResponse(t, reader, "100001")
 	if string(crossReferences["id"]) != "100001" || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, workspaceLib))) || !strings.Contains(string(crossReferences["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, workspaceMain))) {
 		t.Fatalf("cross-file references = %s", crossReferences)
 	}
 	// The cursor rests on the lib.Box annotation of `var box: lib.Box`, so the
 	// type definition must land on the exported class in lib.vim.
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100050,"method":"textDocument/typeDefinition","params":{"textDocument":{"uri":%q},"position":{"line":5,"character":13}}}`, uri.File(workspaceMain)))
-	crossTypeDefinition := readJSON(t, reader)
+	crossTypeDefinition := readResponse(t, reader, "100050")
 	if string(crossTypeDefinition["id"]) != "100050" || !strings.Contains(string(crossTypeDefinition["result"]), fmt.Sprintf(`"uri":%q`, canonicalFileURI(t, workspaceLib))) || !strings.Contains(string(crossTypeDefinition["result"]), `"start":{"line":4,"character":13}`) {
 		t.Fatalf("cross-file type definition = %s", crossTypeDefinition)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100002,"method":"textDocument/documentLink","params":{"textDocument":{"uri":%q}}}`, uri.File(workspaceMain)))
-	documentLinks := readJSON(t, reader)
+	documentLinks := readResponse(t, reader, "100002")
 	if string(documentLinks["id"]) != "100002" || !strings.Contains(string(documentLinks["result"]), fmt.Sprintf(`"target":%q`, canonicalFileURI(t, workspaceLib))) {
 		t.Fatalf("document links = %s", documentLinks)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100003,"method":"textDocument/completion","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":9}}}`, uri.File(workspaceMain)))
-	memberCompletion := readJSON(t, reader)
+	memberCompletion := readResponse(t, reader, "100003")
 	if string(memberCompletion["id"]) != "100003" || !strings.Contains(string(memberCompletion["result"]), `"label":"Run"`) {
 		t.Fatalf("member completion = %s", memberCompletion)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100006,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":13}}}`, uri.File(workspaceMain)))
-	importedSignature := readJSON(t, reader)
+	importedSignature := readResponse(t, reader, "100006")
 	if string(importedSignature["id"]) != "100006" || !strings.Contains(string(importedSignature["result"]), `Run(): number`) {
 		t.Fatalf("imported signature help = %s", importedSignature)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100007,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":3,"character":18}}}`, uri.File(workspaceMain)))
-	importedConstructorSignature := readJSON(t, reader)
+	importedConstructorSignature := readResponse(t, reader, "100007")
 	if string(importedConstructorSignature["id"]) != "100007" || !strings.Contains(string(importedConstructorSignature["result"]), `new(value: number)`) {
 		t.Fatalf("imported constructor signature help = %s", importedConstructorSignature)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100008,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":4,"character":22}}}`, uri.File(workspaceMain)))
-	importedClassMethodSignature := readJSON(t, reader)
+	importedClassMethodSignature := readResponse(t, reader, "100008")
 	if string(importedClassMethodSignature["id"]) != "100008" || !strings.Contains(string(importedClassMethodSignature["result"]), `Build(name: string): Box`) {
 		t.Fatalf("imported class method signature help = %s", importedClassMethodSignature)
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":100009,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":%q},"position":{"line":6,"character":20}}}`, uri.File(workspaceMain)))
-	importedObjectMethodSignature := readJSON(t, reader)
+	importedObjectMethodSignature := readResponse(t, reader, "100009")
 	if string(importedObjectMethodSignature["id"]) != "100009" || !strings.Contains(string(importedObjectMethodSignature["result"]), `Resize(width: number, height: number = 1): number`) || !strings.Contains(string(importedObjectMethodSignature["result"]), `"activeParameter":1`) {
 		t.Fatalf("imported object method signature help = %s", importedObjectMethodSignature)
 	}
