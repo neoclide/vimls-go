@@ -38,6 +38,21 @@ const (
 	completionSourceCommand
 )
 
+// These orders follow recurring line-leading commands in coc.nvim's runtime
+// Vim scripts. They keep common commands ahead of alphabetical matches while
+// leaving local declarations at their existing, higher score.
+var legacyCommandCompletionOrder = []string{
+	"let", "if", "endif", "call", "return", "endfunction", "function", "else",
+	"for", "endfor", "execute", "elseif", "highlight", "echohl", "autocmd",
+	"setlocal", "nnoremap", "try", "endtry", "catch",
+}
+
+var vim9CommandCompletionOrder = []string{
+	"const", "if", "endif", "return", "enddef", "def", "var", "for", "endfor",
+	"else", "throw", "final", "while", "endwhile", "execute", "elseif",
+	"continue", "break", "try", "endtry", "catch",
+}
+
 func completionPathPredicate(state workspaceNavigationSnapshot, excludeRuntimePath bool) func(string) bool {
 	if !excludeRuntimePath {
 		return nil
@@ -212,6 +227,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		var completionWorkspaceState workspaceNavigationSnapshot
 		completionWorkspaceStateUsed := false
 		candidates := make(map[string]completionCandidate)
+		commandDialect := completionCommandDialectAt(file, offset)
 		add := func(item protocol.CompletionItem, score int, source completionSource) bool {
 			if ctx.Err() != nil {
 				return false
@@ -238,7 +254,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
 				}
-				if !add(item, 8000, completionSourceCommand) {
+				if !add(item, completionCommandScore(command.Name, commandDialect), completionSourceCommand) {
 					break
 				}
 			}
@@ -732,6 +748,39 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		return result, nil
 	}
 	return nil, protocol.ErrContentModified
+}
+
+func completionCommandScore(name string, dialect syntax.Dialect) int {
+	order := legacyCommandCompletionOrder
+	if dialect == syntax.Vim9 {
+		order = vim9CommandCompletionOrder
+	}
+	if index := slices.Index(order, name); index >= 0 {
+		return 9000 - index
+	}
+	return 8000
+}
+
+func completionCommandDialectAt(file *syntax.File, offset int) syntax.Dialect {
+	dialect := file.Dialect
+	spanSize := len(file.Source) + 1
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Span.Start <= offset && offset <= command.Span.End && command.Span.End-command.Span.Start < spanSize {
+			dialect = command.Dialect
+			spanSize = command.Span.End - command.Span.Start
+		}
+	})
+	if spanSize <= len(file.Source) {
+		return dialect
+	}
+	switch completionCallableBlockAt(file, offset) {
+	case syntax.BlockDef:
+		return syntax.Vim9
+	case syntax.BlockFunction:
+		return syntax.Legacy
+	default:
+		return dialect
+	}
 }
 
 func importAlias(file *syntax.File, alias string) bool {

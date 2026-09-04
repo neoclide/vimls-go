@@ -330,6 +330,34 @@ func TestCompletionVim9DefStatementHeadIncludesUserCommands(t *testing.T) {
 	}
 }
 
+func TestCompletionPreselectsCommonCommandByDialect(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		line      uint32
+		character uint32
+		want      string
+	}{
+		{name: "legacy call", source: "c\n", line: 0, character: 1, want: "call"},
+		{name: "legacy endif", source: "e\n", line: 0, character: 1, want: "endif"},
+		{name: "Vim9 const", source: "vim9script\ndef Main(): void\n  c\nenddef\n", line: 2, character: 3, want: "const"},
+		{name: "legacy function in Vim9 file", source: "vim9script\nfunction Main() abort\n  c\nendfunction\n", line: 2, character: 3, want: "call"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			instance.completion.preselect = true
+			items := completionListRequest(t, instance, documentURI, test.line, test.character).Items
+			if len(items) == 0 || items[0].Label != test.want {
+				t.Fatalf("first completion = %#v, want %q", items, test.want)
+			}
+			if preselected, ok := items[0].Preselect.Get(); !ok || !preselected {
+				t.Fatalf("%s preselect = %t, %t", items[0].Label, preselected, ok)
+			}
+		})
+	}
+}
+
 func TestCompletionFunctionAttributes(t *testing.T) {
 	tests := []struct {
 		name, source, prefix string
