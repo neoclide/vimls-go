@@ -709,6 +709,30 @@ func styleQuickFixesFor(file *syntax.File, diagnostic syntax.Diagnostic) []synta
 				return []syntaxQuickFix{fix}
 			}
 		}
+	case "vim/E174":
+		for index := range file.Commands {
+			command := &file.Commands[index]
+			if command.Canonical == "command" && command.Bang.Start == command.Bang.End {
+				if _, span, _, ok := syntax.DefinedUserCommand(file, command); ok && span == diagnostic.Span {
+					fix.span = syntax.Span{Start: command.Name.End, End: command.Name.End}
+					fix.newText = "!"
+					fix.title = "Use :command!"
+					return []syntaxQuickFix{fix}
+				}
+			}
+		}
+	case "vim/E122":
+		for index := range file.Commands {
+			command := &file.Commands[index]
+			if command.Canonical == "function" && command.Function != nil && command.Bang.Start == command.Bang.End {
+				if command.Function.Name == diagnostic.Span {
+					fix.span = syntax.Span{Start: command.Name.End, End: command.Name.End}
+					fix.newText = "!"
+					fix.title = "Use :function!"
+					return []syntaxQuickFix{fix}
+				}
+			}
+		}
 	case "vimls/function-without-abort":
 		for index := range file.Commands {
 			command := &file.Commands[index]
@@ -817,7 +841,7 @@ func clientDiagnosticCode(diagnostic protocol.Diagnostic) (string, bool) {
 
 func quickFixDiagnosticCode(code string) bool {
 	switch code {
-	case "vim/E170", "vim/E171", "vim/E475", "vim/E600", "vim/E1123", "vimls/missing-method-call", "vimls/normal-without-bang", "vimls/function-without-abort", "vimls/implicit-string-case", "vimls/implicit-pattern-case":
+	case "vim/E122", "vim/E170", "vim/E171", "vim/E174", "vim/E475", "vim/E600", "vim/E1123", "vimls/missing-method-call", "vimls/normal-without-bang", "vimls/function-without-abort", "vimls/implicit-string-case", "vimls/implicit-pattern-case":
 		return true
 	default:
 		return false

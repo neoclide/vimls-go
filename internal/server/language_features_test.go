@@ -126,7 +126,7 @@ func TestLanguageFeatureCapabilitiesAndMethods(t *testing.T) {
 	if capabilities.DocumentLinkProvider == nil || capabilities.CompletionProvider == nil || capabilities.SignatureHelpProvider == nil || capabilities.RenameProvider == nil || capabilities.SemanticTokensProvider == nil || capabilities.CodeActionProvider == nil || capabilities.InlayHintProvider == nil {
 		t.Fatalf("language capabilities = %#v", capabilities)
 	}
-	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&", "#", "<", "+", "\"", "'"}; !reflect.DeepEqual(got, want) {
+	if got, want := capabilities.CompletionProvider.TriggerCharacters, []string{".", ":", "&", "#", "<", "+", "\"", "'", "-"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("completion trigger characters = %#v, want %#v", got, want)
 	}
 	semanticOptions, ok := capabilities.SemanticTokensProvider.(*protocol.SemanticTokensOptions)
@@ -235,6 +235,24 @@ func TestCompletionResolveAddsExCommandDocumentation(t *testing.T) {
 		}
 		detail, ok := resolved.Detail.Get()
 		if !ok || detail != "Ex command" {
+			t.Fatalf("resolve %q detail = %q, %t; item=%#v", label, detail, ok, resolved)
+		}
+		documentation, ok := resolved.Documentation.(protocol.String)
+		if !ok || strings.TrimSpace(string(documentation)) == "" {
+			t.Fatalf("resolve %q documentation = %#v", label, resolved.Documentation)
+		}
+	}
+}
+
+func TestCompletionResolveAddsUserCommandAttributeDocumentation(t *testing.T) {
+	instance, _ := openNavigationDocument(t, text.UTF16, "command! -nargs=1 Foo echo\n")
+	for _, label := range []string{"-nargs=", "-bang", "-complete=", "complete="} {
+		resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindProperty})
+		if err != nil {
+			t.Fatal(err)
+		}
+		detail, ok := resolved.Detail.Get()
+		if !ok || detail == "" {
 			t.Fatalf("resolve %q detail = %q, %t; item=%#v", label, detail, ok, resolved)
 		}
 		documentation, ok := resolved.Documentation.(protocol.String)

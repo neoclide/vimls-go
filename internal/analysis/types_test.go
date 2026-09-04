@@ -119,6 +119,28 @@ func TestAnalyzeInfersContainerConcatenationTypes(t *testing.T) {
 	}
 }
 
+func TestAnalyzeInfersLegacyImplicitArgumentTypes(t *testing.T) {
+	result := Analyze(syntax.Parse("function! F(key, ...) abort\n  let values = [a:key] + a:000\n  let count = a:0\n  let first = a:firstline\n  let last = a:lastline\nendfunction\nfunction! Empty() abort\n  let rest = a:000\nendfunction\n"))
+	declarations := make(map[string]*Declaration)
+	for _, declaration := range result.Declarations {
+		declarations[declaration.Name] = declaration
+	}
+	if typ := declarations["key"].Type; !isUnknownType(typ) {
+		t.Fatalf("key type = %#v, want unknown", typ)
+	}
+	for _, name := range []string{"values", "rest"} {
+		typ := declarations[name].Type
+		if typ.Name != "list" || len(typ.Arguments) != 1 || !isUnknownType(typ.Arguments[0]) {
+			t.Fatalf("%s type = %#v, want list<unknown>", name, typ)
+		}
+	}
+	for _, name := range []string{"count", "first", "last"} {
+		if typ := declarations[name].Type; typ.Name != "number" {
+			t.Fatalf("%s type = %#v, want number", name, typ)
+		}
+	}
+}
+
 func TestAnalyzeInfersOperatorsReferencesAndFunctions(t *testing.T) {
 	source := `vim9script
 var n = 1

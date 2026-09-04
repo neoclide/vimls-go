@@ -13,7 +13,7 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 		"vimls/direct-user-keymap":             DiagnosticHint,
 		"vimls/echoerr":                        DiagnosticHint,
 		"vimls/explicit-local-scope":           DiagnosticHint,
-		"vimls/function-without-abort":         DiagnosticWarning,
+		"vimls/function-without-abort":         DiagnosticHint,
 		"vimls/global-internal-state":          DiagnosticHint,
 		"vimls/implicit-pattern-case":          DiagnosticHint,
 		"vimls/implicit-regex-magic":           DiagnosticHint,

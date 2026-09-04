@@ -446,9 +446,10 @@ func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, command
 	if result == nil || result.File == nil {
 		return
 	}
+	var severity *syntax.DiagnosticSeverity
 	if result.configFile {
-		collectConfigFunctionDuplicateDiagnostics(result, commands)
-		return
+		s := syntax.DiagnosticHint
+		severity = &s
 	}
 	for index := range commands {
 		command := &commands[index]
@@ -458,6 +459,7 @@ func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, command
 			if command.Dialect == syntax.Legacy || strings.HasPrefix(name, "g:") {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E122", Message: "Function " + name + " may already exist when this script is sourced again; add ! to replace it", Span: command.Function.Name,
+					Severity: severity,
 				})
 			}
 		}
@@ -465,38 +467,6 @@ func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, command
 			collectLegacyFunctionOverwriteRiskDiagnostics(result, command.Embedded.Commands)
 		}
 	}
-}
-
-// collectConfigFunctionDuplicateDiagnostics reports vim/E122 only for no-bang
-// legacy function definitions that are statically provable duplicates of an
-// earlier unconditional definition in the same file. Vim v9.2.1015 silently
-// replaces a function when its own script is sourced again, so the mere
-// absence of "!" is not an error in a user configuration file (§4.2).
-func collectConfigFunctionDuplicateDiagnostics(result *FileAnalysis, commands []syntax.Command) {
-	file := result.File
-	var walk func([]syntax.Command, []syntax.Block)
-	walk = func(list []syntax.Command, blocks []syntax.Block) {
-		seen := make(map[string]bool)
-		for index := range list {
-			command := &list[index]
-			if command.Canonical == "function" && command.Function != nil && emptySyntaxSpan(command.Bang) &&
-				!emptySyntaxSpan(command.Function.Name) {
-				name := file.Text(command.Function.Name)
-				if (command.Dialect == syntax.Legacy || strings.HasPrefix(name, "g:")) && unconditionalAt(list, blocks, index) {
-					if seen[name] {
-						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-							Code: "vim/E122", Message: "Function " + name + " may already exist when this script is sourced again; add ! to replace it", Span: command.Function.Name,
-						})
-					}
-					seen[name] = true
-				}
-			}
-			if command.Embedded != nil {
-				walk(command.Embedded.Commands, command.Embedded.Blocks)
-			}
-		}
-	}
-	walk(commands, file.Blocks)
 }
 
 // unconditionalAt reports whether the command at index in list runs
@@ -537,9 +507,10 @@ func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands [
 	if result == nil || result.File == nil {
 		return
 	}
+	var severity *syntax.DiagnosticSeverity
 	if result.configFile {
-		collectConfigUserCommandDuplicateDiagnostics(result, commands)
-		return
+		s := syntax.DiagnosticHint
+		severity = &s
 	}
 	for index := range commands {
 		command := &commands[index]
@@ -547,6 +518,7 @@ func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands [
 			if name, span, _, definition := syntax.DefinedUserCommand(result.File, command); definition {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
+					Severity: severity,
 				})
 			}
 		}
@@ -554,33 +526,6 @@ func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands [
 			collectUserCommandOverwriteRiskDiagnostics(result, command.Embedded.Commands)
 		}
 	}
-}
-
-// collectConfigUserCommandDuplicateDiagnostics mirrors
-// collectConfigFunctionDuplicateDiagnostics for :command definitions (§4.2).
-func collectConfigUserCommandDuplicateDiagnostics(result *FileAnalysis, commands []syntax.Command) {
-	file := result.File
-	var walk func([]syntax.Command, []syntax.Block)
-	walk = func(list []syntax.Command, blocks []syntax.Block) {
-		seen := make(map[string]bool)
-		for index := range list {
-			command := &list[index]
-			if command.Canonical == "command" && emptySyntaxSpan(command.Bang) {
-				if name, span, _, definition := syntax.DefinedUserCommand(file, command); definition && unconditionalAt(list, blocks, index) {
-					if seen[name] {
-						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-							Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
-						})
-					}
-					seen[name] = true
-				}
-			}
-			if command.Embedded != nil {
-				walk(command.Embedded.Commands, command.Embedded.Blocks)
-			}
-		}
-	}
-	walk(commands, file.Blocks)
 }
 
 // UserCommandAbbreviationDiagnostics warns when a parsed user-command call is

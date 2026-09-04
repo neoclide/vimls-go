@@ -77,7 +77,7 @@ the default message more specific without changing its code.
 | `vimls/explicit-local-scope` | Hint | use an explicit local scope for this variable |
 | `vimls/expression-too-deep` | Information | expression nesting exceeds parser limit |
 | `vimls/file-too-large` | Warning | file exceeds the 4 MiB analysis limit |
-| `vimls/function-without-abort` | Warning | function does not use abort |
+| `vimls/function-without-abort` | Hint | function does not use abort |
 | `vimls/global-internal-state` | Hint | global variable appears to be plugin-internal state |
 | `vimls/implicit-pattern-case` | Hint | pattern match depends on 'ignorecase' |
 | `vimls/implicit-regex-magic` | Hint | pattern relies on Vim's magic setting |

@@ -523,19 +523,21 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					} else if !boolAsNumber && expression.Kind == syntax.ExpressionBinary {
 						leftOperand, rightOperand := expression.Children[0], expression.Children[1]
 						containerConcat := op == "+" && left.Name == right.Name && (left.Name == "list" || left.Name == "tuple" || left.Name == "blob")
+						possibleContainerConcat := op == "+" && (isUnknownType(left) && (right.Name == "list" || right.Name == "tuple" || right.Name == "blob") ||
+							isUnknownType(right) && (left.Name == "list" || left.Name == "tuple" || left.Name == "blob"))
 						diagnostic, ok := syntax.Diagnostic{}, false
-						if !containerConcat && command.Dialect == syntax.Vim9 {
+						if !containerConcat && !possibleContainerConcat && command.Dialect == syntax.Vim9 {
 							diagnostic, ok = objectAsNumberDiagnostic(result, expressionScope, leftOperand)
 							if !ok {
 								diagnostic, ok = stringAsNumberDiagnostic(result, leftOperand)
 							}
 						}
-						if !containerConcat {
+						if !containerConcat && !possibleContainerConcat {
 							if !ok {
 								diagnostic, ok = numericConversionDiagnostic(left, leftOperand.Span)
 							}
 						}
-						if !ok && !containerConcat {
+						if !ok && !containerConcat && !possibleContainerConcat {
 							leftNumeric := left.Name == "number" || left.Name == "float"
 							if (right.Name != "list" && right.Name != "blob") || leftNumeric {
 								if command.Dialect == syntax.Vim9 {

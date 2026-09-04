@@ -531,6 +531,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 		} else if contextKind == completionContextUserCommandAttribute {
 			command, current := completionUserCommandAttributeAt(file, offset)
+			if command == nil {
+				command = completionUserCommandAt(file, offset)
+			}
 			used := make(map[string]bool)
 			if command != nil && command.UserCommand != nil {
 				for index := range command.UserCommand.Attributes {
@@ -540,33 +543,51 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 				}
 			}
-			for _, attribute := range []string{"addr=", "bang", "bar", "buffer", "complete=", "completeopt=", "count", "keepscript", "nargs=", "range", "register"} {
-				if used[strings.TrimSuffix(attribute, "=")] {
+			for _, attribute := range vimdata.UserCommandAttributes() {
+				if used[strings.TrimSuffix(attribute.Name, "=")] {
 					continue
 				}
-				if !add(protocol.CompletionItem{Label: "-" + attribute, Kind: protocol.CompletionItemKindProperty}, 8000, completionSourceCommand) {
+				item := protocol.CompletionItem{
+					Label:         "-" + attribute.Name,
+					Kind:          protocol.CompletionItemKindProperty,
+					Detail:        protocol.NewOptional(attribute.Detail),
+					Documentation: protocol.String(attribute.Documentation),
+				}
+				if !add(item, 8000, completionSourceCommand) {
 					break
 				}
 			}
 		} else if contextKind == completionContextUserCommandAttributeValue {
 			_, attribute := completionUserCommandAttributeAt(file, offset)
-			var values []string
+			var values []vimdata.CompletionValue
+			var detail string
 			if attribute != nil {
-				switch completionUserCommandAttributeName(file.Text(attribute.Name)) {
+				attrName := completionUserCommandAttributeName(file.Text(attribute.Name))
+				switch attrName {
 				case "addr":
-					values = []string{"arguments", "buffers", "lines", "loaded_buffers", "other", "quickfix", "tabs", "windows"}
+					values = vimdata.UserCommandAddrValues()
+					detail = "command address type"
 				case "complete":
 					if !strings.Contains(file.Text(attribute.Value), ",") {
-						values = []string{"arglist", "augroup", "behave", "breakpoint", "buffer", "color", "command", "compiler", "cscope", "custom", "customlist", "diff_buffer", "dir", "dir_in_path", "environment", "event", "expression", "file", "file_in_path", "filetype", "filetypecmd", "function", "help", "highlight", "history", "keymap", "locale", "mapclear", "mapping", "menu", "messages", "option", "packadd", "retab", "runtime", "scriptnames", "shellcmd", "shellcmdline", "sign", "syntax", "syntime", "tag", "tag_listfiles", "user", "var"}
+						values = vimdata.UserCommandCompleteValues()
+						detail = "command completion type"
 					}
 				case "completeopt":
-					values = []string{"escape"}
+					values = vimdata.UserCommandCompleteoptValues()
+					detail = "command completion option"
 				case "nargs":
-					values = []string{"0", "1", "_", "*", "?", "+"}
+					values = vimdata.UserCommandNargsValues()
+					detail = "command argument count"
 				}
 			}
 			for _, value := range values {
-				if !add(protocol.CompletionItem{Label: value, Kind: protocol.CompletionItemKindEnumMember}, 8000, completionSourceCommand) {
+				item := protocol.CompletionItem{
+					Label:         value.Name,
+					Kind:          protocol.CompletionItemKindEnumMember,
+					Detail:        protocol.NewOptional(detail),
+					Documentation: protocol.String(value.Documentation),
+				}
+				if !add(item, 8000, completionSourceCommand) {
 					break
 				}
 			}
@@ -978,6 +999,16 @@ func completionUserCommandAttributeAt(file *syntax.File, offset int) (*syntax.Co
 		}
 	})
 	return foundCommand, foundAttribute
+}
+
+func completionUserCommandAt(file *syntax.File, offset int) *syntax.Command {
+	var found *syntax.Command
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if found == nil && command.Canonical == "command" && command.UserCommand != nil && (spanContains(command.Span, offset) || offset == command.Span.End) {
+			found = command
+		}
+	})
+	return found
 }
 
 func completionUserCommandAttributeName(name string) string {

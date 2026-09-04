@@ -42,7 +42,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/explicit-local-scope", Message: "use an explicit local scope for this variable", Severity: DiagnosticHint},
 	{Code: "vimls/expression-too-deep", Message: "expression nesting exceeds parser limit", Severity: DiagnosticInformation},
 	{Code: "vimls/file-too-large", Message: "file exceeds the 4 MiB analysis limit", Severity: DiagnosticWarning},
-	{Code: "vimls/function-without-abort", Message: "function does not use abort", Severity: DiagnosticWarning},
+	{Code: "vimls/function-without-abort", Message: "function does not use abort", Severity: DiagnosticHint},
 	{Code: "vimls/global-internal-state", Message: "global variable appears to be plugin-internal state", Severity: DiagnosticHint},
 	{Code: "vimls/implicit-pattern-case", Message: "pattern match depends on 'ignorecase'", Severity: DiagnosticHint},
 	{Code: "vimls/implicit-regex-magic", Message: "pattern relies on Vim's magic setting", Severity: DiagnosticHint},

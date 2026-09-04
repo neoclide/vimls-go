@@ -1692,6 +1692,8 @@ func TestAnalyzeListAsNumberDiagnostics(t *testing.T) {
 		"vim9script\nvar value = false && []\n",
 		"vim9script\nvar value = 0z01 + []\n",
 		"vim9script\ndef F()\n  var value = [] - 33\nenddef\n",
+		"function! coc#_insert_keymap(key, ...) abort\n  let parts = coc#rpc#request('doInsertKeymap', [a:key] + a:000)\nendfunction\n",
+		"function! F(value) abort\n  let left = [] + a:value\n  let right = a:value + []\nendfunction\n",
 	} {
 		file := syntax.Parse(source)
 		result := Analyze(file)

@@ -51,10 +51,9 @@ habits that are intentional in a vimrc:
 - `vimls/set-vs-setlocal` is only suggested **inside buffer/window-directed
   autocommand bodies** (FileType, BufRead/BufEnter, Win*…). A top-level `:set`
   in a vimrc establishes global defaults and is not flagged.
-- `vim/E122` (function) and `vim/E174` (user command) are only reported for
-  statically provable duplicates in the same file. A single no-bang
-  definition is not an error: Vim silently replaces same-script functions and
-  commands when the file is sourced again.
+- `vim/E122` (function) and `vim/E174` (user command) are reported at **Hint**
+  level (instead of Warning) to recommend `function!` and `command!` for reload
+  safety.
 
 ### Diagnostics that are configuration-specific
 

@@ -111,4 +111,50 @@ func TestCompletionMetadataTables(t *testing.T) {
 			}
 		}
 	}
+
+	attributes := UserCommandAttributes()
+	if len(attributes) != 11 {
+		t.Fatalf("user command attributes count = %d, want 11", len(attributes))
+	}
+	for _, attr := range attributes {
+		if attr.Name == "" || attr.Detail == "" || attr.Documentation == "" {
+			t.Fatalf("incomplete attribute metadata: %#v", attr)
+		}
+		lookup, ok := LookupUserCommandAttribute(attr.Name)
+		if !ok || lookup.Name != attr.Name {
+			t.Fatalf("lookup failed for attribute %q: %#v, %t", attr.Name, lookup, ok)
+		}
+		lookupMinus, ok := LookupUserCommandAttribute("-" + attr.Name)
+		if !ok || lookupMinus.Name != attr.Name {
+			t.Fatalf("lookup with prefix failed for attribute %q: %#v, %t", attr.Name, lookupMinus, ok)
+		}
+	}
+
+	for _, valueList := range [][]CompletionValue{
+		UserCommandNargsValues(),
+		UserCommandAddrValues(),
+		UserCommandCompleteoptValues(),
+		UserCommandCompleteValues(),
+	} {
+		if len(valueList) == 0 {
+			t.Fatal("empty user command attribute value list")
+		}
+		for _, value := range valueList {
+			if value.Name == "" || value.Documentation == "" {
+				t.Fatalf("incomplete attribute value metadata: %#v", value)
+			}
+		}
+	}
+
+	val, detail, ok := LookupUserCommandAttributeValue("nargs", "+")
+	if !ok || val.Name != "+" || detail != "command argument count" || val.Documentation == "" {
+		t.Fatalf("LookupUserCommandAttributeValue nargs + = %#v, %q, %t", val, detail, ok)
+	}
+	val, detail, ok = LookupUserCommandAttributeValue("-complete", "custom")
+	if !ok || val.Name != "custom" || detail != "command completion type" || val.Documentation == "" {
+		t.Fatalf("LookupUserCommandAttributeValue complete custom = %#v, %q, %t", val, detail, ok)
+	}
+	if _, _, ok := LookupUserCommandAttributeValue("nargs", "invalid"); ok {
+		t.Fatal("LookupUserCommandAttributeValue succeeded for invalid value")
+	}
 }

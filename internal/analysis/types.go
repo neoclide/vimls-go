@@ -388,6 +388,8 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 				typ = ValueType{Name: "string"}
 			} else if variable, ok := vimdata.LookupVariable(expression.Value); ok {
 				typ = builtinVariableValueType(variable)
+			} else if implicit, ok := legacyImplicitArgumentType(scope, expression.Value); ok {
+				typ = implicit
 			} else if reference := state.references[expression.Span]; reference != nil && reference.Declaration != nil {
 				typ = reference.Declaration.Type
 			} else if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil {
@@ -647,6 +649,29 @@ func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueT
 	default:
 		return UnknownValueType
 	}
+}
+
+func legacyImplicitArgumentType(scope *Scope, name string) (ValueType, bool) {
+	if !strings.HasPrefix(name, "a:") {
+		return UnknownValueType, false
+	}
+	for current := scope; current != nil; current = current.Parent {
+		if current.Kind == syntax.BlockDef {
+			return UnknownValueType, false
+		}
+		if current.Kind != syntax.BlockFunction {
+			continue
+		}
+		switch name {
+		case "a:000":
+			return ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}, true
+		case "a:0", "a:firstline", "a:lastline":
+			return ValueType{Name: "number"}, true
+		default:
+			return UnknownValueType, false
+		}
+	}
+	return UnknownValueType, false
 }
 
 func (state *typeState) binaryType(expression *syntax.Expression, scope *Scope) ValueType {

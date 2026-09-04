@@ -275,6 +275,21 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 					return
 				}
 			}
+			nameStart := command.UserCommand.Name.Start
+			nameEnd := command.UserCommand.Name.End
+			afterCommand := command.Name.End
+			if command.Bang.Start < command.Bang.End {
+				afterCommand = command.Bang.End
+			}
+			if nameStart < nameEnd {
+				if offset > afterCommand && offset < nameStart {
+					result = completionContextUserCommandAttribute
+					return
+				}
+			} else if offset > afterCommand && offset <= command.Span.End {
+				result = completionContextUserCommandAttribute
+				return
+			}
 		}
 		if completionMappingArgumentAt(file, command, offset) {
 			result = completionContextMappingArgument
@@ -806,6 +821,11 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 	}
 	if command, ok := vimdata.Lookup(item.Label); ok && command.Name == item.Label && !vimdata.IsNeovimCompatCommand(command.Name) {
 		applyMetadata("Ex command", command.Documentation)
+		return &result, nil
+	}
+	if attr, ok := vimdata.LookupUserCommandAttribute(item.Label); ok {
+		applyMetadata(attr.Detail, attr.Documentation)
+		return &result, nil
 	}
 	return &result, nil
 }

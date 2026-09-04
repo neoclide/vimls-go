@@ -523,6 +523,22 @@ func TestCodeActionRepairsStyleDiagnostics(t *testing.T) {
 			wantNewText: []string{"!"},
 		},
 		{
+			name:        "command bang",
+			source:      "command MyCmd echo 1\n",
+			code:        "vim/E174",
+			diagnostic:  navigationRange(0, 8, 13),
+			wantTitles:  []string{"Use :command!"},
+			wantNewText: []string{"!"},
+		},
+		{
+			name:        "function bang",
+			source:      "function MyFn()\nendfunction\n",
+			code:        "vim/E122",
+			diagnostic:  navigationRange(0, 9, 13),
+			wantTitles:  []string{"Use :function!"},
+			wantNewText: []string{"!"},
+		},
+		{
 			name:        "function abort",
 			source:      "function! s:Run()\nendfunction\n",
 			code:        "vimls/function-without-abort",

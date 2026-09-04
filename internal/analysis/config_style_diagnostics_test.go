@@ -419,34 +419,46 @@ func countCode(t *testing.T, source, code string, configFile bool) int {
 	return count
 }
 
-// TestConfigFileModeRepeatSourceFunctionBang verifies §4.2 with the behavior
-// reproduced on Vim v9.2.1015: re-sourcing the same script silently replaces
-// its own functions and commands, so a single no-bang definition must not be
-// reported. A statically provable duplicate (two unconditional definitions in
-// one file) is still reported with vim/E122/vim/E174.
+// TestConfigFileModeRepeatSourceFunctionBang verifies that in user
+// configuration files, function and command definitions without "!" are
+// reported with Hint severity to suggest "!" for reload safety.
 func TestConfigFileModeRepeatSourceFunctionBang(t *testing.T) {
 	single := "function MyHelper()\nendfunction\n"
-	if got := countCode(t, single, "vim/E122", true); got != 0 {
-		t.Fatalf("config single function definition reported E122 %d times", got)
+	if got := countCode(t, single, "vim/E122", true); got != 1 {
+		t.Fatalf("config single function definition reported E122 %d times, want 1", got)
+	}
+	resFunc := AnalyzeConfigFile(syntax.Parse(single))
+	var e122Diag *syntax.Diagnostic
+	for i := range resFunc.Diagnostics {
+		if resFunc.Diagnostics[i].Code == "vim/E122" {
+			e122Diag = &resFunc.Diagnostics[i]
+		}
+	}
+	if e122Diag == nil || e122Diag.Severity == nil || *e122Diag.Severity != syntax.DiagnosticHint {
+		t.Fatalf("config single function definition expected hint severity for E122, got %#v", resFunc.Diagnostics)
 	}
 	command := "command MyCommand echo 'ok'\n"
-	if got := countCode(t, command, "vim/E174", true); got != 0 {
-		t.Fatalf("config single user command definition reported E174 %d times", got)
+	if got := countCode(t, command, "vim/E174", true); got != 1 {
+		t.Fatalf("config single user command definition reported E174 %d times, want 1", got)
+	}
+	resCmd := AnalyzeConfigFile(syntax.Parse(command))
+	if len(resCmd.Diagnostics) != 1 || resCmd.Diagnostics[0].Severity == nil || *resCmd.Diagnostics[0].Severity != syntax.DiagnosticHint {
+		t.Fatalf("config single command definition expected hint severity, got %#v", resCmd.Diagnostics)
 	}
 	duplicate := "function MyHelper()\nendfunction\nfunction MyHelper()\nendfunction\n"
-	if got := countCode(t, duplicate, "vim/E122", true); got != 1 {
-		t.Fatalf("config duplicate function definitions reported E122 %d times, want 1", got)
+	if got := countCode(t, duplicate, "vim/E122", true); got != 2 {
+		t.Fatalf("config duplicate function definitions reported E122 %d times, want 2", got)
 	}
 	duplicateCommand := "command MyCommand echo 'ok'\ncommand MyCommand echo 'nope'\n"
-	if got := countCode(t, duplicateCommand, "vim/E174", true); got != 1 {
-		t.Fatalf("config duplicate command definitions reported E174 %d times, want 1", got)
+	if got := countCode(t, duplicateCommand, "vim/E174", true); got != 2 {
+		t.Fatalf("config duplicate command definitions reported E174 %d times, want 2", got)
 	}
-	guarded := "if has('gui')\n  function MyHelper()\n  endfunction\nendif\nif has('gui')\n  function MyHelper()\n  endfunction\nendif\n"
-	if got := countCode(t, guarded, "vim/E122", true); got != 0 {
-		t.Fatalf("config conditional function definitions reported E122 %d times, want 0", got)
-	}
-	// Plugin (non-config) mode keeps the existing conservative risk warning.
+	// Plugin (non-config) mode keeps the existing conservative risk warning (nil severity defaults to Warning).
 	if got := countCode(t, single, "vim/E122", false); got != 1 {
 		t.Fatalf("plugin single function definition reported E122 %d times, want 1", got)
+	}
+	resPlugin := Analyze(syntax.Parse(single))
+	if len(resPlugin.Diagnostics) != 1 || resPlugin.Diagnostics[0].Severity != nil {
+		t.Fatalf("plugin single function definition expected default severity (warning), got %#v", resPlugin.Diagnostics)
 	}
 }

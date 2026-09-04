@@ -1127,6 +1127,30 @@ func TestCompletionCommandSpecificFiniteValues(t *testing.T) {
 			t.Errorf("user-command attribute %q missing from %#v", label, items)
 		}
 	}
+	items = commandPartCompletionItems(t, "command! -", 0, uint32(len("command! -")))
+	for _, label := range []string{"-addr=", "-bang", "-bar", "-buffer", "-complete=", "-completeopt=", "-count", "-keepscript", "-nargs=", "-range", "-register"} {
+		item := completionItemWithLabel(items, label)
+		if item == nil {
+			t.Errorf("command! - attribute %q missing from %#v", label, items)
+			continue
+		}
+		if detail, ok := item.Detail.Get(); !ok || detail == "" {
+			t.Errorf("command! - attribute %q missing detail: %#v", label, item)
+		}
+		if doc, ok := item.Documentation.(protocol.String); !ok || strings.TrimSpace(string(doc)) == "" {
+			t.Errorf("command! - attribute %q missing doc: %#v", label, item)
+		}
+	}
+	items = commandPartCompletionItems(t, "command! -nargs=+ -", 0, uint32(len("command! -nargs=+ -")))
+	if completionItemWithLabel(items, "-nargs=") != nil || completionItemWithLabel(items, "-complete=") == nil {
+		t.Fatalf("command! -nargs=+ - attributes = %#v", items)
+	}
+	complexSource := "command! -nargs=+ -complete=custom,s:GrepArgs -          Rg        :exe 'CocList grep '.<q-args>"
+	cursorAt := uint32(strings.Index(complexSource, " - ") + 2)
+	items = commandPartCompletionItems(t, complexSource, 0, cursorAt)
+	if completionItemWithLabel(items, "-nargs=") != nil || completionItemWithLabel(items, "-complete=") != nil || completionItemWithLabel(items, "-buffer") == nil {
+		t.Fatalf("inserted attribute completions = %#v", items)
+	}
 	items = commandPartCompletionItems(t, "command -bang -ba", 0, uint32(len("command -bang -ba")))
 	if completionItemWithLabel(items, "-bar") == nil || completionItemWithLabel(items, "-bang") != nil {
 		t.Fatalf("used user-command attributes = %#v", items)
@@ -1147,8 +1171,18 @@ func TestCompletionCommandSpecificFiniteValues(t *testing.T) {
 	} {
 		items = commandPartCompletionItems(t, test.source, 0, uint32(len(test.source)))
 		for _, label := range test.want {
-			if completionItemWithLabel(items, label) == nil {
+			item := completionItemWithLabel(items, label)
+			if item == nil {
 				t.Errorf("%q completion %q missing from %#v", test.source, label, items)
+				continue
+			}
+			if strings.HasPrefix(test.source, "command -") {
+				if detail, ok := item.Detail.Get(); !ok || detail == "" {
+					t.Errorf("%s item %q missing detail: %#v", test.source, label, item)
+				}
+				if doc, ok := item.Documentation.(protocol.String); !ok || strings.TrimSpace(string(doc)) == "" {
+					t.Errorf("%s item %q missing doc: %#v", test.source, label, item)
+				}
 			}
 		}
 	}

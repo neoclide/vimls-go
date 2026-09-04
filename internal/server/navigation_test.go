@@ -652,6 +652,63 @@ func TestHoverShowsHasFeatureAndExpandSpecialDocs(t *testing.T) {
 	}
 }
 
+func TestHoverShowsUserCommandAttributeAndValueDocs(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "command! -nargs=+ -bang -complete=custom,s:GrepArgs Rg :echo\n")
+	tests := []struct {
+		name      string
+		character uint32
+		prefix    string
+		fragment  string
+		wantRange protocol.Range
+	}{
+		{
+			name:      "attribute nargs",
+			character: 11, // inside "-nargs="
+			prefix:    "name: -nargs=\nkind: command argument count",
+			fragment:  "Specifies how many arguments are allowed",
+			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 9}, End: protocol.Position{Line: 0, Character: 16}},
+		},
+		{
+			name:      "attribute nargs value",
+			character: 16, // at "+"
+			prefix:    "name: +\nkind: command argument count",
+			fragment:  "Arguments must be supplied",
+			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 16}, End: protocol.Position{Line: 0, Character: 17}},
+		},
+		{
+			name:      "attribute bang",
+			character: 20, // inside "-bang"
+			prefix:    "name: -bang\nkind: command flag",
+			fragment:  "The command can take a ! modifier",
+			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 18}, End: protocol.Position{Line: 0, Character: 23}},
+		},
+		{
+			name:      "attribute complete custom value",
+			character: 35, // inside "custom"
+			prefix:    "name: custom\nkind: command completion type",
+			fragment:  "Custom completion, defined via custom,{func}",
+			wantRange: protocol.Range{Start: protocol.Position{Line: 0, Character: 34}, End: protocol.Position{Line: 0, Character: 40}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 0, Character: test.character},
+			}})
+			if err != nil || hover == nil {
+				t.Fatalf("hover = %#v, %v", hover, err)
+			}
+			if hover.Range == nil || *hover.Range != test.wantRange {
+				t.Fatalf("hover range = %#v, want %#v", hover.Range, test.wantRange)
+			}
+			content, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || content.Kind != protocol.MarkupKindPlainText || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) {
+				t.Fatalf("hover content = %#v", hover.Contents)
+			}
+		})
+	}
+}
+
 func TestCrossFileVim9ImportDefinitionDeclarationAndReferences(t *testing.T) {
 	root := t.TempDir()
 	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run(): number\n  return 1\nenddef\ndef Private()\nenddef\nexport class Box\nendclass\n")

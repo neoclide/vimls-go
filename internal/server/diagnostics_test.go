@@ -67,6 +67,9 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 	if got := protocolDiagnosticSeverity("vimls/unused-variable"); got != protocol.DiagnosticSeverityHint {
 		t.Errorf("vimls/unused-variable severity = %v, want hint", got)
 	}
+	if got := protocolDiagnosticSeverity("vimls/function-without-abort"); got != protocol.DiagnosticSeverityHint {
+		t.Errorf("vimls/function-without-abort severity = %v, want hint", got)
+	}
 	for _, definition := range syntax.VimlsDiagnosticDefinitions {
 		if got := protocolDiagnosticSeverity(definition.Code); got == protocol.DiagnosticSeverityError {
 			t.Errorf("%s severity = %v, vimls-owned diagnostics must not be errors", definition.Code, got)

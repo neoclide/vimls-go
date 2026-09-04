@@ -17,6 +17,9 @@ func collectStyleDiagnostics(result *FileAnalysis) {
 
 func onlyUnusedVariableDiagnostics(diagnostics []syntax.Diagnostic) bool {
 	for _, diagnostic := range diagnostics {
+		if diagnostic.Severity != nil && *diagnostic.Severity == syntax.DiagnosticHint {
+			continue
+		}
 		if diagnostic.Code != "vimls/unused-variable" {
 			return false
 		}

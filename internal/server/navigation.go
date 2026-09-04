@@ -141,6 +141,11 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 			}
 		}
 	}
+	if document.occurrence.Start >= document.occurrence.End {
+		if span, _, ok := userCommandAttributeHoverAt(file, offset); ok {
+			document.occurrence = span
+		}
+	}
 	return document, document.checkCurrent(ctx)
 }
 
@@ -664,6 +669,9 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			}
 			return nil, nil
 		}
+		if _, lines, ok := userCommandAttributeHoverAt(document.analysis.File, document.occurrence.Start); ok {
+			return s.localHoverResult(ctx, document, lines)
+		}
 		if option, ok := vimdata.LookupOption(name); ok {
 			lines := []string{"name: " + option.Name, "kind: option", "type: " + optionTypeName(option)}
 			if requirement := optionBuildRequirement(option.AvailableWhen, option.RequiredFeatures); requirement != "" {
@@ -773,4 +781,51 @@ func formatValueType(value analysis.ValueType) string {
 		return value.Name + "<" + strings.Join(arguments, ", ") + ">"
 	}
 	return value.Name
+}
+
+func userCommandAttributeHoverAt(file *syntax.File, offset int) (syntax.Span, []string, bool) {
+	if file == nil {
+		return syntax.Span{}, nil, false
+	}
+	_, attribute := completionUserCommandAttributeAt(file, offset)
+	if attribute == nil || !spanContains(attribute.Span, offset) {
+		return syntax.Span{}, nil, false
+	}
+	attrName := completionUserCommandAttributeName(file.Text(attribute.Name))
+	if attribute.Value.Start < attribute.Value.End && spanContains(attribute.Value, offset) {
+		valText := file.Text(attribute.Value)
+		valSpan := attribute.Value
+		if attrName == "complete" {
+			if comma := strings.IndexByte(valText, ','); comma >= 0 {
+				methodSpan := syntax.Span{Start: attribute.Value.Start, End: attribute.Value.Start + comma}
+				if spanContains(methodSpan, offset) {
+					valText = valText[:comma]
+					valSpan = methodSpan
+				}
+			}
+		}
+		if val, detail, ok := vimdata.LookupUserCommandAttributeValue(attrName, valText); ok {
+			lines := []string{"name: " + val.Name, "kind: " + detail}
+			if val.Documentation != "" {
+				lines = append(lines, "", val.Documentation)
+			}
+			return valSpan, lines, true
+		}
+	}
+	if attr, ok := vimdata.LookupUserCommandAttribute(attrName); ok {
+		attrSpan := attribute.Span
+		if attribute.Value.Start < attribute.Value.End && !spanContains(attribute.Value, offset) {
+			nameEnd := attribute.Name.End
+			if attribute.Equal.Start < attribute.Equal.End {
+				nameEnd = attribute.Equal.End
+			}
+			attrSpan = syntax.Span{Start: attribute.Span.Start, End: nameEnd}
+		}
+		lines := []string{"name: -" + attr.Name, "kind: " + attr.Detail}
+		if attr.Documentation != "" {
+			lines = append(lines, "", attr.Documentation)
+		}
+		return attrSpan, lines, true
+	}
+	return syntax.Span{}, nil, false
 }
