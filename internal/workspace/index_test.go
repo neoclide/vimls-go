@@ -243,7 +243,15 @@ func TestIndexAugroupNamesTrackReplaceAndRemove(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "first.vim")
 	second := filepath.Join(root, "second.vim")
-	if err := index.Replace(first, syntax.Parse("augroup coc_nvim\naugroup END\naugroup deleted_group\naugroup END\naugroup! deleted_group\n")); err != nil {
+	firstPath, err := normalizeIndexPath(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPath, err := normalizeIndexPath(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Replace(first, syntax.Parse("augroup coc_nvim\naugroup END\naugroup coc_nvim\naugroup END\naugroup deleted_group\naugroup END\naugroup! deleted_group\n")); err != nil {
 		t.Fatal(err)
 	}
 	if err := index.Replace(second, syntax.Parse("augroup coc_nvim\naugroup END\naugroup other_group\naugroup END\n")); err != nil {
@@ -252,15 +260,25 @@ func TestIndexAugroupNamesTrackReplaceAndRemove(t *testing.T) {
 	if got := index.AugroupNames(); len(got) != 2 || got[0] != "coc_nvim" || got[1] != "other_group" {
 		t.Fatalf("augroup names = %#v", got)
 	}
+	definitions := index.AugroupDefinitions("coc_nvim")
+	if len(definitions) != 2 || definitions[0].Fact.Path != firstPath || definitions[0].Fact.Span != (syntax.Span{Start: 8, End: 16}) || definitions[1].Fact.Path != secondPath {
+		t.Fatalf("augroup definitions = %#v", definitions)
+	}
 	if err := index.Replace(first, syntax.Parse("let value = 1\n")); err != nil {
 		t.Fatal(err)
 	}
 	if got := index.AugroupNames(); len(got) != 2 || got[0] != "coc_nvim" || got[1] != "other_group" {
 		t.Fatalf("replaced augroup names = %#v", got)
 	}
+	if definitions := index.AugroupDefinitions("coc_nvim"); len(definitions) != 1 || definitions[0].Fact.Path != secondPath {
+		t.Fatalf("replaced augroup definitions = %#v", definitions)
+	}
 	index.Remove(second)
 	if got := index.AugroupNames(); len(got) != 0 {
 		t.Fatalf("removed augroup names = %#v", got)
+	}
+	if definitions := index.AugroupDefinitions("coc_nvim"); len(definitions) != 0 {
+		t.Fatalf("removed augroup definitions = %#v", definitions)
 	}
 }
 

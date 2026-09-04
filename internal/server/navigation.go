@@ -28,6 +28,7 @@ type navigationDocument struct {
 	external          *workspace.ExternalReferenceFact
 	externalMember    string
 	externalClass     bool
+	augroupName       string
 	memberSnapshots   map[uri.URI]*text.Snapshot
 	memberTarget      syntax.Span
 	memberDefinition  syntax.Span
@@ -129,6 +130,12 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 					document.memberConstructor = member.Value == "new" && (definitionSymbol.Kind == analysis.SymbolKindClass || definitionSymbol.Kind == analysis.SymbolKindConstructor)
 				}
 			}
+		}
+	}
+	if document.occurrence.Start >= document.occurrence.End {
+		if name, span, ok := autocmdAugroupReferenceAt(file, offset); ok {
+			document.augroupName = name
+			document.occurrence = span
 		}
 	}
 	if document.occurrence.Start >= document.occurrence.End {
@@ -372,6 +379,21 @@ func (s *Server) definitionLocations(ctx context.Context, params protocol.TextDo
 		if err != nil || document == nil {
 			return protocol.LocationSlice{}, err
 		}
+		if document.augroupName != "" {
+			state := s.captureWorkspaceNavigationState()
+			locations, snapshots := document.augroupDefinitionLocations(state)
+			current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}, snapshots...)
+			if err != nil {
+				return nil, err
+			}
+			if current {
+				return locations, nil
+			}
+			if attempt == 1 {
+				return nil, protocol.ErrContentModified
+			}
+			continue
+		}
 		if document.external == nil {
 			if document.declaration == nil {
 				return protocol.LocationSlice{}, nil
@@ -414,6 +436,88 @@ func (s *Server) definitionLocations(ctx context.Context, params protocol.TextDo
 		}
 	}
 	return nil, protocol.ErrContentModified
+}
+
+func autocmdAugroupReferenceAt(file *syntax.File, offset int) (string, syntax.Span, bool) {
+	if file == nil {
+		return "", syntax.Span{}, false
+	}
+	var name string
+	var span syntax.Span
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if name != "" {
+			return
+		}
+		candidateName, candidateSpan, ok := analysis.AutocmdAugroupReference(file, command)
+		if ok && spanContains(candidateSpan, offset) {
+			name = candidateName
+			span = candidateSpan
+		}
+	})
+	return name, span, name != ""
+}
+
+func (document *navigationDocument) augroupDefinitionLocations(state workspaceNavigationSnapshot) (protocol.LocationSlice, []*text.Snapshot) {
+	openByPath := make(map[string]*text.Snapshot)
+	document.server.publishMu.Lock()
+	for _, snapshot := range document.server.documents.Snapshots() {
+		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
+		if ok && snapshot.ByteLen() <= maxFileBytes {
+			openByPath[path] = snapshot
+		}
+	}
+	document.server.publishMu.Unlock()
+
+	locations := make(protocol.LocationSlice, 0)
+	if state.index != nil {
+		for _, match := range state.index.AugroupDefinitions(document.augroupName) {
+			if openByPath[match.Fact.Path] != nil {
+				continue
+			}
+			snapshot := text.NewSnapshot(uri.File(match.Fact.Path).String(), 0, nil, match.Source)
+			if rangeValue, ok := protocolRange(snapshot, document.encoding, match.Fact.Span); ok {
+				locations = append(locations, protocol.Location{URI: uri.File(match.Fact.Path), Range: rangeValue})
+			}
+		}
+	}
+
+	checked := make([]*text.Snapshot, 0, len(openByPath))
+	currentPath, currentPathOK := workspaceURIPath(uri.URI(document.snapshot.URI()))
+	roots := workspaceIndexRoots(state.workspaceRoots, state.runtimePaths)
+	for path, snapshot := range openByPath {
+		if path != currentPath && !workspacePathInRoots(path, roots) {
+			continue
+		}
+		checked = append(checked, snapshot)
+		file := document.server.parseSnapshot(snapshot)
+		for _, definition := range analysis.CollectAugroupDefinitions(file) {
+			if definition.Name != document.augroupName {
+				continue
+			}
+			if rangeValue, ok := protocolRange(snapshot, document.encoding, definition.Span); ok {
+				locations = append(locations, protocol.Location{URI: uri.File(path), Range: rangeValue})
+			}
+		}
+	}
+	if !currentPathOK {
+		for _, definition := range analysis.CollectAugroupDefinitions(document.analysis.File) {
+			if definition.Name == document.augroupName {
+				if location, ok := document.location(definition.Span); ok {
+					locations = append(locations, location)
+				}
+			}
+		}
+	}
+	sort.SliceStable(locations, func(left, right int) bool {
+		if locations[left].URI != locations[right].URI {
+			return locations[left].URI < locations[right].URI
+		}
+		if locations[left].Range.Start.Line != locations[right].Range.Start.Line {
+			return locations[left].Range.Start.Line < locations[right].Range.Start.Line
+		}
+		return locations[left].Range.Start.Character < locations[right].Range.Start.Character
+	})
+	return locations, checked
 }
 
 func (s *Server) Declaration(ctx context.Context, params *protocol.DeclarationParams) (protocol.DeclarationResult, error) {

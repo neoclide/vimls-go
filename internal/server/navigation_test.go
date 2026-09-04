@@ -116,6 +116,60 @@ func TestDocumentNavigation(t *testing.T) {
 	}
 }
 
+func TestAutocmdAugroupDefinition(t *testing.T) {
+	source := "augroup coc_nvim\naugroup END\nautocmd! coc_nvim\nautocmd coc_nvim BufEnter * echo 1\nautocmd! missing_group\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	textDocument := protocol.TextDocumentIdentifier{URI: documentURI}
+	for _, position := range []protocol.Position{{Line: 2, Character: 12}, {Line: 3, Character: 11}} {
+		definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: textDocument,
+			Position:     position,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		locations := definition.(protocol.LocationSlice)
+		if len(locations) != 1 || locations[0].URI != documentURI || locations[0].Range != navigationRange(0, 8, 16) {
+			t.Fatalf("augroup definition at %#v = %#v", position, definition)
+		}
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: textDocument,
+		Position:     protocol.Position{Line: 4, Character: 12},
+	}})
+	if err != nil || len(definition.(protocol.LocationSlice)) != 0 {
+		t.Fatalf("missing augroup definition = %#v, %v", definition, err)
+	}
+}
+
+func TestAutocmdAugroupDefinitionUsesWorkspaceAndOpenTarget(t *testing.T) {
+	root := t.TempDir()
+	targetPath := writeWorkspaceFile(t, root, "groups.vim", "augroup coc_nvim\naugroup END\n")
+	mainSource := "vim9script\nautocmd! coc_nvim\n"
+	mainPath := writeWorkspaceFile(t, root, "main.vim", mainSource)
+	instance := initializeWorkspaceServer(t, root)
+	mainURI := uri.File(mainPath)
+	instance.documents.Open(mainURI.String(), 1, mainSource)
+	position := protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: mainURI},
+		Position:     protocol.Position{Line: 1, Character: 12},
+	}
+	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	locations := definition.(protocol.LocationSlice)
+	if err != nil || len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(0, 8, 16) {
+		t.Fatalf("workspace augroup definition = %#v, %v", definition, err)
+	}
+
+	targetURI := uri.File(targetPath)
+	openSource := "echo 1\naugroup coc_nvim\naugroup END\n"
+	instance.documents.Open(targetURI.String(), 1, openSource)
+	definition, err = instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+	locations = definition.(protocol.LocationSlice)
+	if err != nil || len(locations) != 1 || locations[0].URI != canonicalTestURI(t, targetPath) || locations[0].Range != navigationRange(1, 8, 16) {
+		t.Fatalf("open augroup definition = %#v, %v", definition, err)
+	}
+}
+
 func TestLegacyScriptLocalPrefixNavigation(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "function! s:Run()\nendfunction\ncall s:Run()\ncall <SID>Run()\n")
 	position := protocol.TextDocumentPositionParams{

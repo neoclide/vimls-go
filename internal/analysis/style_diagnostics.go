@@ -18,13 +18,20 @@ func collectStyleDiagnostics(result *FileAnalysis) {
 	result.Diagnostics = SuppressKnownAugroupEventDiagnostics(result.File, result.Diagnostics, nil)
 }
 
-// CollectAugroupNames returns every statically named :augroup definition.
-// Dynamic :execute forms are intentionally absent.
-func CollectAugroupNames(file *syntax.File) []string {
+// AugroupDefinition is a statically named :augroup definition that remains
+// active after replaying direct definitions and deletions in one file.
+type AugroupDefinition struct {
+	Name string
+	Span syntax.Span
+}
+
+// CollectAugroupDefinitions returns the active statically named :augroup
+// definitions. Dynamic :execute forms are intentionally absent.
+func CollectAugroupDefinitions(file *syntax.File) []AugroupDefinition {
 	if file == nil {
 		return nil
 	}
-	seen := make(map[string]bool)
+	active := make(map[string]AugroupDefinition)
 	var collect func([]syntax.Command)
 	collect = func(commands []syntax.Command) {
 		for index := range commands {
@@ -33,9 +40,10 @@ func CollectAugroupNames(file *syntax.File) []string {
 				name := strings.TrimSpace(file.Text(command.Augroup))
 				if name != "" && !strings.EqualFold(name, "END") {
 					if command.Bang.Start < command.Bang.End {
-						delete(seen, name)
-					} else {
-						seen[strings.Clone(name)] = true
+						delete(active, name)
+					} else if _, exists := active[name]; !exists {
+						name = strings.Clone(name)
+						active[name] = AugroupDefinition{Name: name, Span: command.Augroup}
 					}
 				}
 			}
@@ -45,12 +53,48 @@ func CollectAugroupNames(file *syntax.File) []string {
 		}
 	}
 	collect(file.Commands)
-	result := make([]string, 0, len(seen))
-	for name := range seen {
-		result = append(result, name)
+	result := make([]AugroupDefinition, 0, len(active))
+	for _, definition := range active {
+		result = append(result, definition)
 	}
-	sort.Strings(result)
+	sort.Slice(result, func(left, right int) bool {
+		return result[left].Name < result[right].Name
+	})
 	return result
+}
+
+// CollectAugroupNames returns every active statically named augroup in
+// bytewise name order.
+func CollectAugroupNames(file *syntax.File) []string {
+	definitions := CollectAugroupDefinitions(file)
+	names := make([]string, len(definitions))
+	for index, definition := range definitions {
+		names[index] = definition.Name
+	}
+	return names
+}
+
+// AutocmdAugroupReference returns the statically identifiable augroup
+// reference in command. A single query or clear argument is retained by the
+// parser as an event because only the mutable augroup table can disambiguate
+// it; callers must confirm that the returned name is a known group.
+func AutocmdAugroupReference(file *syntax.File, command *syntax.Command) (string, syntax.Span, bool) {
+	if file == nil || command == nil || command.Autocmd == nil {
+		return "", syntax.Span{}, false
+	}
+	autocmd := command.Autocmd
+	span := autocmd.Group
+	if span.Start == span.End && len(autocmd.Events) == 1 && autocmd.Pattern.Start == autocmd.Pattern.End &&
+		(autocmd.Operation == syntax.AutocmdQuery || autocmd.Operation == syntax.AutocmdClear) {
+		span = autocmd.Events[0]
+		if strings.TrimSpace(file.Text(command.Argument)) != file.Text(span) {
+			return "", syntax.Span{}, false
+		}
+	}
+	if span.Start >= span.End {
+		return "", syntax.Span{}, false
+	}
+	return file.Text(span), span, true
 }
 
 // SuppressKnownAugroupEventDiagnostics resolves the ambiguous
@@ -76,12 +120,8 @@ func SuppressKnownAugroupEventDiagnostics(file *syntax.File, diagnostics []synta
 	collect = func(commands []syntax.Command) {
 		for index := range commands {
 			command := &commands[index]
-			autocmd := command.Autocmd
-			if autocmd != nil && autocmd.Group.Start == autocmd.Group.End && len(autocmd.Events) == 1 && autocmd.Pattern.Start == autocmd.Pattern.End &&
-				(autocmd.Operation == syntax.AutocmdQuery || autocmd.Operation == syntax.AutocmdClear) {
-				span := autocmd.Events[0]
-				name := strings.TrimSpace(file.Text(span))
-				if len(name) > 0 && name[0] >= 'a' && name[0] <= 'z' && known[name] && strings.TrimSpace(file.Text(command.Argument)) == name {
+			if name, span, ok := AutocmdAugroupReference(file, command); ok && command.Autocmd.Group.Start == command.Autocmd.Group.End {
+				if name != "" && name[0] >= 'a' && name[0] <= 'z' && known[name] {
 					groupSpans[span] = true
 				}
 			}
