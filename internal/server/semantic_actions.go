@@ -461,6 +461,12 @@ func collectExpressionSemanticFacts(file *syntax.File, expression *syntax.Expres
 			}
 			*facts = append(*facts, semanticFact{span: callee.Span, tokenType: semanticFunction, modifiers: modifiers, priority: 1})
 		case syntax.ExpressionMember:
+			// Arrow callees are classified when the member expression itself is
+			// visited below. Avoid emitting the same function fact twice while
+			// retaining the call-specific Method classification for dot members.
+			if file.Text(callee.Operator) == "->" {
+				break
+			}
 			if member, ok := expressionMemberSpan(callee); ok {
 				*facts = append(*facts, semanticFact{span: member, tokenType: semanticMethod, priority: 1})
 			}
@@ -468,7 +474,15 @@ func collectExpressionSemanticFacts(file *syntax.File, expression *syntax.Expres
 	}
 	if expression.Kind == syntax.ExpressionMember {
 		if member, ok := expressionMemberSpan(expression); ok {
-			*facts = append(*facts, semanticFact{span: member, tokenType: semanticProperty, priority: 1})
+			tokenType := uint32(semanticProperty)
+			modifiers := uint32(0)
+			if file.Text(expression.Operator) == "->" {
+				tokenType = semanticFunction
+				if function, ok := vimdata.LookupFunction(expression.Value); ok && function.MethodArgument > 0 {
+					modifiers = semanticDefaultLibrary
+				}
+			}
+			*facts = append(*facts, semanticFact{span: member, tokenType: tokenType, modifiers: modifiers, priority: 1})
 		}
 	}
 	if expression.Kind != syntax.ExpressionIdentifier {

@@ -230,6 +230,192 @@ func TestCompletionFunctionSnippetEscapesAndDefaultIsPlain(t *testing.T) {
 	}
 }
 
+func TestCompletionFunctionAtCallableCommandStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		line      uint32
+		character uint32
+		want      bool
+	}{
+		{
+			name:      "Vim9 def without call",
+			source:    "vim9script\nexport def Tabpage_ids(): void\n  for nr in range(1, tabpagenr('$'))\n    if gettabvar(nr, '__coc_tid', -1) == -1\n      settabvar(nr, '__coc_tid', tab_id)\n      T\n      tab_id += 1\n    endif\n  endfor\nenddef\n",
+			line:      5,
+			character: 7,
+			want:      true,
+		},
+		{
+			name:      "legacy function without call",
+			source:    "vim9script\nexport def Tabpage_ids(): void\nenddef\nexport function Eval(expr) abort\n  T\nendfunction\n",
+			line:      4,
+			character: 3,
+			want:      false,
+		},
+		{
+			name:      "legacy function with call",
+			source:    "vim9script\nexport def Tabpage_ids(): void\nenddef\nexport function Eval(expr) abort\n  call T\nendfunction\n",
+			line:      4,
+			character: 8,
+			want:      true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			items := completionListRequest(t, instance, documentURI, test.line, test.character).Items
+			if got := hasCompletion(items, "Tabpage_ids", protocol.CompletionItemKindFunction); got != test.want {
+				t.Fatalf("Tabpage_ids completion = %t, want %t; items = %#v", got, test.want, items)
+			}
+		})
+	}
+}
+
+func TestCompletionVim9DefStatementHeadIncludesCommandsAndFunctions(t *testing.T) {
+	tests := []struct {
+		prefix, function string
+	}{
+		{"", "flattennew"},
+		{"f", "flattennew"},
+		{"fl", "flattennew"},
+		{"flat", "flattennew"},
+		{"v", "values"},
+		{"val", "values"},
+		{"g", "get"},
+	}
+	for _, test := range tests {
+		t.Run("prefix "+test.prefix, func(t *testing.T) {
+			source := "vim9script\nexport def GetNamespaceTypes(ns: number): list<string>\n  if ns == -1\n    return values({})->flattennew(1)\n  endif\n  " + test.prefix + "\nenddef\n"
+			instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+			items := completionListRequest(t, instance, documentURI, 5, uint32(len("  ")+len(test.prefix))).Items
+			if !hasCompletion(items, test.function, protocol.CompletionItemKindFunction) {
+				t.Fatalf("%s completion missing for prefix %q; items = %#v", test.function, test.prefix, items)
+			}
+			if test.prefix == "" && !hasCompletion(items, "return", protocol.CompletionItemKindKeyword) {
+				t.Fatalf("return command missing at empty statement head; items = %#v", items)
+			}
+		})
+	}
+}
+
+func TestCompletionVim9DefStatementHeadIncludesUserCommands(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "plugin/commands.vim", "command! RunThing echo 1\n")
+	instance := newRootedServer(t, root)
+	source := "vim9script\ndef Main(): void\n  Ru\nenddef\n"
+	documentURI := uri.File(filepath.Join(root, "main.vim"))
+	instance.documents.Open(documentURI.String(), 1, source)
+	items := completionListRequest(t, instance, documentURI, 2, uint32(len("  Ru"))).Items
+	if !hasCompletion(items, "RunThing", protocol.CompletionItemKindFunction) {
+		t.Fatalf("user command completion missing in Vim9 def statement context: %#v", items)
+	}
+}
+
+func TestCompletionBuiltinFunctionsAfterMethodArrow(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		line      uint32
+		character uint32
+		start     uint32
+	}{
+		{"empty prefix", "vim9script\ndef GetNamespaceTypes(): list<string>\n  return values({})->\nenddef\n", 2, uint32(len("  return values({})->")), uint32(len("  return values({})->"))},
+		{"partial prefix", "vim9script\ndef GetNamespaceTypes(): list<string>\n  return values({})->flat\nenddef\n", 2, uint32(len("  return values({})->flat")), uint32(len("  return values({})->"))},
+		{"space recovery", "vim9script\ndef GetNamespaceTypes(): list<string>\n  return values({})->  flat\nenddef\n", 2, uint32(len("  return values({})->  flat")), uint32(len("  return values({})->  "))},
+		{"continuation before arrow", "vim9script\ndef GetNamespaceTypes(): list<string>\n  return values({})\n    ->flat\nenddef\n", 3, uint32(len("    ->flat")), uint32(len("    ->"))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := test.source
+			instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+			instance.completion.snippet = true
+			items := completionListRequest(t, instance, documentURI, test.line, test.character).Items
+			item := completionItemWithLabel(items, "flattennew")
+			if item == nil || item.Kind != protocol.CompletionItemKindFunction {
+				t.Fatalf("flattennew completion = %#v; items = %#v", item, items)
+			}
+			if edit := completionMainEditFromItem(*item); edit.text != "flattennew()$0" {
+				t.Fatalf("flattennew edit = %q", edit.text)
+			} else if edit.replace.Start != (protocol.Position{Line: test.line, Character: test.start}) {
+				t.Fatalf("flattennew edit start = %#v, want line %d character %d", edit.replace.Start, test.line, test.start)
+			}
+			if hasCompletion(items, "argc", protocol.CompletionItemKindFunction) {
+				t.Fatalf("non-method builtin argc was offered: %#v", items)
+			}
+		})
+	}
+}
+
+func TestCompletionMethodArrowQualifiedFunctionNames(t *testing.T) {
+	tests := []struct {
+		name, source, label string
+		line                uint32
+		character           uint32
+	}{
+		{
+			name:      "script local",
+			source:    "vim9script\ndef s:AddOne(value: number): number\n  return value + 1\nenddef\ndef Main(): number\n  return 1->s:A\nenddef\n",
+			label:     "s:AddOne",
+			line:      5,
+			character: uint32(len("  return 1->s:A")),
+		},
+		{
+			name:      "autoload",
+			source:    "function! foo#bar#Transform(items) abort\n  return a:items\nendfunction\necho []->foo#bar#Tra\n",
+			label:     "foo#bar#Transform",
+			line:      3,
+			character: uint32(len("echo []->foo#bar#Tra")),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			items := completionListRequest(t, instance, documentURI, test.line, test.character).Items
+			item := completionItemWithLabel(items, test.label)
+			if item == nil || item.Kind != protocol.CompletionItemKindFunction {
+				t.Fatalf("%s completion missing; items = %#v", test.label, items)
+			}
+			edit := completionMainEditFromItem(*item)
+			if edit.text != test.label || edit.replace.End != (protocol.Position{Line: test.line, Character: test.character}) {
+				t.Fatalf("%s completion edit = %#v", test.label, edit)
+			}
+			wantStart := test.character - uint32(len("s:A"))
+			if test.name == "autoload" {
+				wantStart = test.character - uint32(len("foo#bar#Tra"))
+			}
+			if edit.replace.Start != (protocol.Position{Line: test.line, Character: wantStart}) {
+				t.Fatalf("%s completion edit start = %#v, want character %d", test.label, edit.replace.Start, wantStart)
+			}
+		})
+	}
+}
+
+func TestCompletionMethodArrowExcludesLocalZeroArgumentFunction(t *testing.T) {
+	source := "vim9script\ndef NoArgs(): void\nenddef\ndef WithArg(value: any): void\nenddef\ndef Main(): void\n  []->\nenddef\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	items := completionListRequest(t, instance, documentURI, 6, uint32(len("  []->"))).Items
+	if hasCompletion(items, "NoArgs", protocol.CompletionItemKindFunction) {
+		t.Fatalf("zero-argument function was offered as a method: %#v", items)
+	}
+	if !hasCompletion(items, "WithArg", protocol.CompletionItemKindFunction) {
+		t.Fatalf("method-compatible local function missing: %#v", items)
+	}
+}
+
+func TestCompletionUserFunctionAfterMethodArrow(t *testing.T) {
+	source := "vim9script\ndef Transform(items: list<any>, depth: number): list<any>\n  return items\nenddef\ndef Main(): list<any>\n  return values({})->Tra\nenddef\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	instance.completion.snippet = true
+	items := completionListRequest(t, instance, documentURI, 5, uint32(len("  return values({})->Tra"))).Items
+	item := completionItemWithLabel(items, "Transform")
+	if item == nil || item.Kind != protocol.CompletionItemKindFunction {
+		t.Fatalf("Transform completion = %#v; items = %#v", item, items)
+	}
+	if edit := completionMainEditFromItem(*item); edit.text != "Transform(${1:depth})$0" {
+		t.Fatalf("Transform edit = %q", edit.text)
+	}
+}
+
 func TestCompletionIndexedFunctionSnippets(t *testing.T) {
 	root := t.TempDir()
 	runtimePath := t.TempDir()

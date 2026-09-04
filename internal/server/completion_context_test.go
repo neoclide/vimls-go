@@ -17,6 +17,16 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		{"augroup Pro", "Pro", completionContextAugroup}, {"command -co", "-co", completionContextUserCommandAttribute}, {"command -nargs=", "-nargs=", completionContextUserCommandAttributeValue},
 		{"command Build echo -nargs=", "-nargs=", completionContextExpression}, {"augroup One extra", "extra", completionContextExpression},
 		{":", ":", completionContextCommand},
+		{"vim9script\ndef Run()\n  \nenddef", "Run()\n  ", completionContextVim9Statement},
+		{"vim9script\ndef Run()\n  T\nenddef", "T", completionContextVim9Statement},
+		{"vim9script\ndef Run()\n  f\nenddef", "f", completionContextVim9Statement},
+		{"vim9script\nfunction Run()\n  T\nendfunction", "T", completionContextCommand},
+		{"vim9script\ndef Run()\n  return values({})->\nenddef", "->", completionContextMethod},
+		{"vim9script\ndef Run()\n  return values({})->flat\nenddef", "flat", completionContextMethod},
+		{"vim9script\ndef Run()\n  return values({})->  flat\nenddef", "flat", completionContextMethod},
+		{"vim9script\ndef Run()\n  return values({})\n    ->flat\nenddef", "flat", completionContextMethod},
+		{"vim9script\ndef Run()\n  return 1->s:A\nenddef", "s:A", completionContextMethod},
+		{"vim9script\ndef Run()\n  return []->foo#bar#Tra\nenddef", "foo#bar#Tra", completionContextMethod},
 		{"nmap <bu", "<bu", completionContextMappingArgument}, {"nmap <buffer> <si", "<si", completionContextMappingArgument},
 		{"highlight Normal cte", "cte", completionContextHighlightKey}, {"highlight Normal cterm=bo", "bo", completionContextHighlightValue}, {"highlight Normal cterm=bold,un", "un", completionContextHighlightValue},
 		{"highlight Normal cterm = under", "under", completionContextHighlightValue},
@@ -41,6 +51,23 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		}
 		if got := completionContextAt(file, offset); got != test.want {
 			t.Errorf("%q at %q = %d, want %d", test.source, test.at, got, test.want)
+		}
+	}
+}
+
+func TestCompletionMethodContextRequiresArrowExpression(t *testing.T) {
+	for _, test := range []struct {
+		source, at string
+	}{
+		{"s/foo/->", "->"},
+		{"Unknown ->", "->"},
+		{"echo '->", "->"},
+		{"vim9script\ndef Run()\n  return values({})->\n  flat\nenddef", "flat"},
+	} {
+		file := syntax.Parse(test.source)
+		offset := strings.Index(test.source, test.at) + len(test.at)
+		if got := completionContextAt(file, offset); got == completionContextMethod {
+			t.Errorf("%q unexpectedly returned method context", test.source)
 		}
 	}
 }

@@ -84,6 +84,8 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			selection = completionColorschemeSelection(snapshot.Text(), offset)
 		case completionContextHasFeature, completionContextExpandSpecial:
 			selection = completionBuiltinStringSelection(file, offset, contextKind)
+		case completionContextMethod:
+			selection = completionMethodSelection(file, offset)
 		}
 		if contextKind == completionContextImportPath {
 			selection = completionImportPathSelection(snapshot.Text(), offset)
@@ -226,6 +228,41 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			return true
 		}
+		addCommandCandidates := func() {
+			for _, command := range vimdata.Commands() {
+				if !completionTextMatches(selection.prefix, command.Name) {
+					continue
+				}
+				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command")}
+				if snippet, ok := commandBlockSnippet(command.Name, file.Dialect, canSnippet, configFile); ok {
+					item.InsertText = protocol.NewOptional(snippet)
+					item.InsertTextFormat = protocol.InsertTextFormatSnippet
+				}
+				if !add(item, 8000, completionSourceCommand) {
+					break
+				}
+			}
+			for _, item := range completionSnippetItems(file.Dialect, canSnippet, configFile) {
+				if !add(item, 7500, completionSourceCommand) {
+					break
+				}
+			}
+			userCommandState := s.captureWorkspaceNavigationState()
+			s.workspaceMu.Lock()
+			if s.workspaceIndexReadyLocked() && s.workspaceIndex.Complete() {
+				for _, name := range s.workspaceIndex.UserCommandCompletionNames(completionPathPredicate(userCommandState, excludeRuntimePath)) {
+					if !completionTextMatches(selection.prefix, name) {
+						continue
+					}
+					if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindFunction, Detail: protocol.NewOptional("user command")}, 7500, completionSourceCommand) {
+						break
+					}
+				}
+			} else {
+				workspaceIncomplete = true
+			}
+			s.workspaceMu.Unlock()
+		}
 		if contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
 			values := vimdata.HasFeatures()
 			detail := "has() feature"
@@ -244,14 +281,15 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
-		} else if contextKind == completionContextExpression {
+		} else if contextKind == completionContextExpression || contextKind == completionContextMethod || contextKind == completionContextVim9Statement {
+			methodCall := contextKind == completionContextMethod
 			scopePrefix := completionScopePrefixAt(snapshot.Text(), selection.start)
 			insideCallable := completionInsideCallable(analysisResult, offset)
-			if scopePrefix != "" {
+			if !methodCall && scopePrefix != "" {
 				selection.start -= 2
 				selection.prefix = snapshot.Text()[selection.start:selection.cursor]
 			}
-			if scopePrefix == "v:" {
+			if !methodCall && scopePrefix == "v:" {
 				for _, variable := range vimdata.Variables() {
 					if !add(protocol.CompletionItem{Label: variable.Name, Kind: protocol.CompletionItemKindConstant, Detail: protocol.NewOptional("variable: " + variable.Type)}, 8000, completionSourceBuiltin) {
 						break
@@ -268,12 +306,24 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			for _, visible := range visibleCompletionDeclarations(analysisResult, offset) {
 				declaration := visible.declaration
+				if methodCall && declaration.Kind != analysis.SymbolKindFunction {
+					continue
+				}
 				label := completionDeclarationLabel(declaration, analysisResult.Root, file.Dialect, scopePrefix)
 				if label == "" {
 					continue
 				}
+				if methodCall {
+					if parameters, found := completionUserFunctionParameters(file, label); found && len(parameters) == 0 {
+						continue
+					}
+				}
 				item := protocol.CompletionItem{Label: label, Kind: completionSymbolKind(declaration.Kind)}
-				if snippet, ok := completionUserFunctionSnippet(file, label, canSnippet); ok {
+				snippet, ok := completionUserFunctionSnippet(file, label, canSnippet)
+				if methodCall {
+					snippet, ok = completionUserMethodSnippet(file, label, canSnippet)
+				}
+				if ok {
 					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
 					item.FilterText = protocol.NewOptional(label)
@@ -318,13 +368,20 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}, file.Dialect == syntax.Legacy, maxCompletionItems, completionPathPredicate(completionWorkspaceState, excludeRuntimePath))
 				workspaceIncomplete = workspaceIncomplete || incomplete
 				for _, function := range functions {
+					if methodCall && len(function.Parameters) == 0 {
+						continue
+					}
 					label := labelPrefix + function.Name
 					detail := function.Match.Fact.Signature
 					if detail != "" && label != function.Match.Fact.Name && strings.HasPrefix(detail, function.Match.Fact.Name+"(") {
 						detail = label + detail[len(function.Match.Fact.Name):]
 					}
 					item := protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindFunction}
-					if snippet, ok := completionFunctionSnippet(label, function.Parameters, canSnippet); ok {
+					parameters := function.Parameters
+					if methodCall {
+						parameters = parameters[1:]
+					}
+					if snippet, ok := completionFunctionSnippet(label, parameters, canSnippet); ok {
 						item.InsertText = protocol.NewOptional(snippet)
 						item.InsertTextFormat = protocol.InsertTextFormatSnippet
 						item.FilterText = protocol.NewOptional(label)
@@ -342,7 +399,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						break
 					}
 				}
-				if file.Dialect == syntax.Legacy && (scopePrefix == "g:" || !insideCallable) {
+				if !methodCall && file.Dialect == syntax.Legacy && (scopePrefix == "g:" || !insideCallable) {
 					documentPath, _ := workspaceURIPath(uri.URI(snapshot.URI()))
 					variables, variablesIncomplete := completionWorkspaceState.index.GlobalVariableCompletionsMatching(func(name string) bool {
 						return completionTextMatches(workspacePrefix, name)
@@ -356,11 +413,18 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 			for _, function := range vimdata.BuiltinFunctions() {
+				if methodCall && function.MethodArgument == 0 {
+					continue
+				}
 				if !completionTextMatches(selection.prefix, function.Name) {
 					continue
 				}
 				item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction}
-				if snippet, ok := completionBuiltinFunctionSnippet(function, canSnippet); ok {
+				snippet, ok := completionBuiltinFunctionSnippet(function, canSnippet)
+				if methodCall {
+					snippet, ok = completionBuiltinMethodSnippet(function, canSnippet)
+				}
+				if ok {
 					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
 					item.FilterText = protocol.NewOptional(function.Name)
@@ -581,39 +645,10 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 		} else {
-			for _, command := range vimdata.Commands() {
-				if !completionTextMatches(selection.prefix, command.Name) {
-					continue
-				}
-				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command")}
-				if snippet, ok := commandBlockSnippet(command.Name, file.Dialect, canSnippet, configFile); ok {
-					item.InsertText = protocol.NewOptional(snippet)
-					item.InsertTextFormat = protocol.InsertTextFormatSnippet
-				}
-				if !add(item, 8000, completionSourceCommand) {
-					break
-				}
-			}
-			for _, item := range completionSnippetItems(file.Dialect, canSnippet, configFile) {
-				if !add(item, 7500, completionSourceCommand) {
-					break
-				}
-			}
-			userCommandState := s.captureWorkspaceNavigationState()
-			s.workspaceMu.Lock()
-			if s.workspaceIndexReadyLocked() && s.workspaceIndex.Complete() {
-				for _, name := range s.workspaceIndex.UserCommandCompletionNames(completionPathPredicate(userCommandState, excludeRuntimePath)) {
-					if !completionTextMatches(selection.prefix, name) {
-						continue
-					}
-					if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindFunction, Detail: protocol.NewOptional("user command")}, 7500, completionSourceCommand) {
-						break
-					}
-				}
-			} else {
-				workspaceIncomplete = true
-			}
-			s.workspaceMu.Unlock()
+			addCommandCandidates()
+		}
+		if contextKind == completionContextVim9Statement {
+			addCommandCandidates()
 		}
 		if ctx.Err() != nil {
 			return nil, protocol.ErrRequestCancelled
@@ -720,6 +755,15 @@ func completionSelectionAt(source string, cursor int) completionSelection {
 	}
 	selection.prefix = source[selection.start:cursor]
 	return selection
+}
+
+func completionMethodSelection(file *syntax.File, cursor int) completionSelection {
+	selection := completionSelectionAt(file.Source, cursor)
+	span, ok := completionMethodCallableSpanAt(file, cursor)
+	if !ok || span.Start < 0 || span.Start > cursor || cursor > span.End || span.End > len(file.Source) {
+		return selection
+	}
+	return completionSelection{start: span.Start, cursor: cursor, end: span.End, prefix: file.Source[span.Start:cursor]}
 }
 
 func completionCommandPartSelection(file *syntax.File, cursor int, contextKind completionContext) completionSelection {
@@ -1102,8 +1146,21 @@ func completionFunctionSnippet(name string, parameters []string, enabled bool) (
 }
 
 func completionUserFunctionSnippet(file *syntax.File, name string, enabled bool) (string, bool) {
-	if !enabled || file == nil {
+	parameters, found := completionUserFunctionParameters(file, name)
+	return completionFunctionSnippet(name, parameters, enabled && found)
+}
+
+func completionUserMethodSnippet(file *syntax.File, name string, enabled bool) (string, bool) {
+	parameters, found := completionUserFunctionParameters(file, name)
+	if !found || len(parameters) == 0 {
 		return name, false
+	}
+	return completionFunctionSnippet(name, parameters[1:], enabled)
+}
+
+func completionUserFunctionParameters(file *syntax.File, name string) ([]string, bool) {
+	if file == nil {
+		return nil, false
 	}
 	var parameters []string
 	found := false
@@ -1122,24 +1179,39 @@ func completionUserFunctionSnippet(file *syntax.File, name string, enabled bool)
 			}
 		}
 	})
-	return completionFunctionSnippet(name, parameters, found)
+	return parameters, found
 }
 
 func completionBuiltinFunctionSnippet(function vimdata.BuiltinFunction, enabled bool) (string, bool) {
 	_, parameters := formatBuiltinFunctionSignature(function)
-	labels := make([]string, 0, function.MinArgs)
+	labels := completionRequiredParameterLabels(parameters, function.MinArgs)
+	return completionFunctionSnippet(function.Name, labels, enabled)
+}
+
+func completionBuiltinMethodSnippet(function vimdata.BuiltinFunction, enabled bool) (string, bool) {
+	_, parameters := formatBuiltinMethodSignature(function)
+	required := function.MinArgs - 1
+	if beforeReceiver := function.MethodArgument - 1; required < beforeReceiver {
+		required = beforeReceiver
+	}
+	labels := completionRequiredParameterLabels(parameters, required)
+	return completionFunctionSnippet(function.Name, labels, enabled)
+}
+
+func completionRequiredParameterLabels(parameters []protocol.ParameterInformation, required int) []string {
+	labels := make([]string, 0, required)
 	for _, parameter := range parameters {
-		if len(labels) == function.MinArgs {
+		if len(labels) == required {
 			break
 		}
 		if label, ok := parameter.Label.(protocol.String); ok {
 			labels = append(labels, string(label))
 		}
 	}
-	for len(labels) < function.MinArgs {
+	for len(labels) < required {
 		labels = append(labels, fmt.Sprintf("arg%d", len(labels)+1))
 	}
-	return completionFunctionSnippet(function.Name, labels, enabled)
+	return labels
 }
 
 func completionCandidates(items protocol.CompletionItemSlice, score int, source completionSource) map[string]completionCandidate {

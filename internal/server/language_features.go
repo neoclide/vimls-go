@@ -174,6 +174,7 @@ const (
 	completionContextNone completionContext = iota
 	completionContextCommand
 	completionContextExpression
+	completionContextVim9Statement
 	completionContextModifier
 	completionContextSetOption
 	completionContextSetOperator
@@ -193,6 +194,7 @@ const (
 	completionContextColorscheme
 	completionContextImportPath
 	completionContextMember
+	completionContextMethod
 	completionContextMappingArgument
 	completionContextHasFeature
 	completionContextExpandSpecial
@@ -223,6 +225,9 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 	})
 	if rejected {
 		return completionContextNone
+	}
+	if _, ok := completionMethodCallableSpanAt(file, offset); ok {
+		return completionContextMethod
 	}
 	result := completionContextNone
 	walkCommands(file.Commands, func(command *syntax.Command) {
@@ -351,6 +356,14 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 			return
 		}
 		if command.Span.Start <= offset && offset <= command.Name.End {
+			switch completionCallableBlockAt(file, offset) {
+			case syntax.BlockDef:
+				result = completionContextVim9Statement
+				return
+			case syntax.BlockFunction:
+				result = completionContextCommand
+				return
+			}
 			result = completionContextCommand
 			return
 		}
@@ -375,9 +388,34 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 	lineStart := strings.LastIndexByte(file.Source[:offset], '\n') + 1
 	linePrefix := strings.TrimSpace(file.Source[lineStart:offset])
 	if linePrefix == "" || linePrefix == ":" {
+		if completionCallableBlockAt(file, offset) == syntax.BlockDef {
+			return completionContextVim9Statement
+		}
 		return completionContextCommand
 	}
 	return completionContextNone
+}
+
+func completionCallableBlockAt(file *syntax.File, offset int) syntax.BlockKind {
+	if file == nil {
+		return ""
+	}
+	bestDepth := -1
+	var bestKind syntax.BlockKind
+	for index, block := range file.Blocks {
+		if block.Kind != syntax.BlockDef && block.Kind != syntax.BlockFunction || offset < block.Span.Start || offset > block.Span.End {
+			continue
+		}
+		depth := 0
+		for parent := index; parent >= 0 && parent < len(file.Blocks); parent = file.Blocks[parent].Parent {
+			depth++
+		}
+		if depth > bestDepth {
+			bestDepth = depth
+			bestKind = block.Kind
+		}
+	}
+	return bestKind
 }
 
 func completionBuiltinStringAt(file *syntax.File, offset int) (completionContext, *syntax.Expression) {
@@ -582,6 +620,64 @@ func memberExpressionAt(expression *syntax.Expression, offset int) *syntax.Expre
 		return expression
 	}
 	return nil
+}
+
+func completionMethodCallableSpanAt(file *syntax.File, offset int) (syntax.Span, bool) {
+	if file == nil || offset < 0 || offset > len(file.Source) {
+		return syntax.Span{}, false
+	}
+	found := false
+	var result syntax.Span
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		walkCommandExpressions(command, func(expression *syntax.Expression) {
+			span, ok := completionMethodCallableSpan(file, expression, offset)
+			if ok && (!found || span.End-span.Start < result.End-result.Start) {
+				found = true
+				result = span
+			}
+		})
+	})
+	return result, found
+}
+
+func completionMethodCallableSpan(file *syntax.File, expression *syntax.Expression, offset int) (syntax.Span, bool) {
+	if expression == nil {
+		return syntax.Span{}, false
+	}
+	if expression.Kind == syntax.ExpressionMember && file.Text(expression.Operator) == "->" {
+		if span, ok := expressionMemberSpan(expression); ok && span.Start <= offset && offset <= span.End {
+			return span, true
+		}
+	}
+	if expression.Kind != syntax.ExpressionCall || expression.Value != "->" || len(expression.Children) == 0 {
+		return syntax.Span{}, false
+	}
+	callable := expression.Children[0]
+	if callable == nil {
+		return syntax.Span{}, false
+	}
+	if callable.Kind == syntax.ExpressionMissing {
+		if expression.Operator.End <= offset && completionHorizontalSpace(file.Source, expression.Operator.End, offset) {
+			return syntax.Span{Start: offset, End: offset}, true
+		}
+		return syntax.Span{}, false
+	}
+	if callable.Kind == syntax.ExpressionIdentifier && callable.Span.Start <= offset && offset <= callable.Span.End {
+		return callable.Span, true
+	}
+	return syntax.Span{}, false
+}
+
+func completionHorizontalSpace(source string, start, end int) bool {
+	if start < 0 || end < start || end > len(source) {
+		return false
+	}
+	for _, character := range source[start:end] {
+		if character != ' ' && character != '\t' && character != '\r' {
+			return false
+		}
+	}
+	return true
 }
 
 func completionAggregateAt(file *syntax.File, offset int) bool {

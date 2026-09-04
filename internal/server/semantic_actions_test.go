@@ -289,6 +289,27 @@ func TestSemanticTokensClassifyLegacyNamesAndPinnedBuiltins(t *testing.T) {
 	assertSemanticToken(t, tokens.Data, 6, 12, semanticFunction, semanticReadonly)
 }
 
+func TestSemanticTokensClassifyBuiltinMethodCallAsFunction(t *testing.T) {
+	source := "vim9script\necho values({})->flattennew(1)\n"
+	file := syntax.Parse(source)
+	span := syntax.Span{Start: len("vim9script\necho values({})->"), End: len("vim9script\necho values({})->flattennew")}
+	count := 0
+	for _, fact := range collectSemanticFacts(file, nil) {
+		if fact.span == span {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("flattennew semantic fact count = %d, want 1", count)
+	}
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSemanticToken(t, tokens.Data, 1, uint32(len("echo values({})->")), semanticFunction, semanticDefaultLibrary)
+}
+
 func TestSemanticTokensClassifyVim9DeclarationsAndProvenModifiers(t *testing.T) {
 	source := "vim9script\nimport './mod.vim' as mod\nclass Thing\n  static final Value = 1\n  static def Build(arg: number)\n    echo arg\n  enddef\nendclass\n# @deprecated\nconst old = 1\necho old\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
