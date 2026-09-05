@@ -520,7 +520,21 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		}
 	case syntax.ExpressionIndex, syntax.ExpressionSlice:
 		if len(expression.Children) > 0 {
-			typ = indexedType(state.infer(expression.Children[0], scope))
+			base := state.infer(expression.Children[0], scope)
+			if expression.Kind == syntax.ExpressionIndex {
+				typ = indexedType(base)
+			} else {
+				switch base.Name {
+				case "list", "string", "blob":
+					typ = base
+				case "tuple":
+					// Bounds may be dynamic; do not retain the original tuple's
+					// element positions or cardinality for an arbitrary slice.
+					typ = ValueType{Name: "tuple"}
+				default:
+					typ = unknown
+				}
+			}
 			for _, index := range expression.Children[1:] {
 				state.infer(index, scope)
 			}

@@ -49,6 +49,34 @@ var hexadecimal = 0xDEAD
 	}
 }
 
+func TestSliceTypesPreserveContainers(t *testing.T) {
+	for _, test := range []struct{ expression, name, element string }{
+		{"values[0 : 1]", "list", "number"},
+		{"values[:]", "list", "number"},
+		{"values[-2 :]", "list", "number"},
+		{"values[2 : 1]", "list", "number"},
+		{"values[0]", "number", ""},
+		{"('abc')[0 : 1]", "string", ""},
+		{"(0z0102)[0 : 1]", "blob", ""},
+		{"(1, 'two')[0 : 0]", "tuple", ""},
+	} {
+		t.Run(test.expression, func(t *testing.T) {
+			result := Analyze(syntax.Parse("vim9script\nvar values = [1, 2, 3]\nvar result = " + test.expression + "\n"))
+			for _, declaration := range result.Declarations {
+				if declaration.Name != "result" {
+					continue
+				}
+				typ := declaration.Type
+				if typ.Name != test.name || test.element != "" && (len(typ.Arguments) != 1 || typ.Arguments[0].Name != test.element) {
+					t.Fatalf("type=%#v", typ)
+				}
+				return
+			}
+			t.Fatal("missing result declaration")
+		})
+	}
+}
+
 func TestAnalyzeInfersShiftAndDestructuredElementTypes(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar shifted = 8 << 1\nvar [count, label] = [1, 'one']\nconst winid = win_getid()\nconst [row, col] = win_screenpos(winid)\n"))
 	declarations := make(map[string]*Declaration)

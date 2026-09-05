@@ -11,8 +11,8 @@
 | F03 | 已提交 | `d98cef0`；见下方验证 |
 | F04 | 已提交 | `49639ca`；见下方验证 |
 | F05 | 已提交 | `008adf7` |
-| F06 | 已修复 | `fix(server): resolve imports across all workspace roots` |
-| F07 | 待修复 | |
+| F06 | 已提交 | `2cabe15` |
+| F07 | 已修复 | `fix(analysis): preserve container types for slices` |
 | F08 | 待修复 | |
 | F09 | 待修复 | |
 | F10 | 待修复 | |
@@ -60,3 +60,7 @@
 ## F06
 
 server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根、安全边界及 runtimepath 顺序。回归覆盖第二根的实际 Definition、相对/绝对 import 和根外拒绝。`go test ./internal/server ./internal/workspace -run 'Test.*(MultipleRoots|Resolver|Runtimepath)' -count=1 -timeout 60s`、全量 test、vet、make、gofmt/gopls 均通过。
+
+## F07
+
+索引与切片采用不同类型规则；list/string/blob 切片保留容器类型，tuple 的动态切片保留容器但不假定原来的元素位置/长度。覆盖完整、负数、省略界限、空切片及单元素索引对照。固定 v9.2.1015 的审计 oracle 再次通过（退出 0、v:errors/messages 为空）；定向类型测试、全量 test、vet、make、gofmt/gopls 均通过。
