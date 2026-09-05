@@ -235,7 +235,7 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 					}
 					continue
 				}
-				return &protocol.WorkspaceEdit{DocumentChanges: documentChanges}, nil
+				return s.clientWorkspaceEdit(documentChanges)
 			}
 		}
 		if document.declaration == nil || document.external != nil {
@@ -276,15 +276,41 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 		if versioned {
 			versionPointer = &version
 		}
-		return &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{&protocol.TextDocumentEdit{
+		return s.clientWorkspaceEdit([]protocol.DocumentChange{&protocol.TextDocumentEdit{
 			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
 				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: params.TextDocument.URI},
 				Version:                versionPointer,
 			},
 			Edits: edits,
-		}}}, nil
+		}})
 	}
 	return nil, protocol.ErrContentModified
+}
+
+// All current callers create plain text edits. Reject any future operation
+// that cannot be represented by the client's unversioned fallback.
+func (s *Server) clientWorkspaceEdit(documentChanges []protocol.DocumentChange) (*protocol.WorkspaceEdit, error) {
+	s.mu.Lock()
+	supported := s.documentChangesSupport
+	s.mu.Unlock()
+	if supported {
+		return &protocol.WorkspaceEdit{DocumentChanges: documentChanges}, nil
+	}
+	changes := make(map[uri.URI][]protocol.TextEdit, len(documentChanges))
+	for _, change := range documentChanges {
+		document, ok := change.(*protocol.TextDocumentEdit)
+		if !ok {
+			return nil, jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "client does not support this workspace edit")
+		}
+		for _, edit := range document.Edits {
+			plain, ok := edit.(*protocol.TextEdit)
+			if !ok {
+				return nil, jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "client does not support this text edit")
+			}
+			changes[document.TextDocument.URI] = append(changes[document.TextDocument.URI], *plain)
+		}
+	}
+	return &protocol.WorkspaceEdit{Changes: changes}, nil
 }
 
 func unsafeRenameError() error {

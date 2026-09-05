@@ -630,19 +630,19 @@ func (s *Server) CodeAction(ctx context.Context, params *protocol.CodeActionPara
 		}
 		preferred := fix.preferred
 		edit := &protocol.TextEdit{Range: editRange, NewText: fix.newText}
+		workspaceEdit, err := s.clientWorkspaceEdit([]protocol.DocumentChange{&protocol.TextDocumentEdit{
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{TextDocumentIdentifier: params.TextDocument, Version: versionPointer},
+			Edits:        []protocol.TextDocumentEditElement{edit},
+		}})
+		if err != nil {
+			return nil, err
+		}
 		action := &protocol.CodeAction{
 			Title:       fix.title,
 			Kind:        &kind,
 			Diagnostics: []protocol.Diagnostic{fix.clientDiagnostic},
 			IsPreferred: &preferred,
-			Edit: &protocol.WorkspaceEdit{DocumentChanges: []protocol.DocumentChange{&protocol.TextDocumentEdit{
-				TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-					TextDocumentIdentifier: params.TextDocument,
-					Version:                versionPointer,
-				},
-				Edits: []protocol.TextDocumentEditElement{edit},
-			},
-			}},
+			Edit:        workspaceEdit,
 		}
 		actions = append(actions, action)
 	}

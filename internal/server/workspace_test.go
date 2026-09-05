@@ -2423,8 +2423,10 @@ func initializeWorkspaceServer(t *testing.T, root string) *Server {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	rootURI := uri.File(root)
+	documentChanges := true
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
 		RootURI:               &rootURI,
+		Capabilities:          protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{WorkspaceEdit: &protocol.WorkspaceEditClientCapabilities{DocumentChanges: &documentChanges}}},
 		InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`)),
 	}); err != nil {
 		t.Fatal(err)

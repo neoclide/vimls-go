@@ -49,7 +49,7 @@ func TestMissingDocumentRequestMatrix(t *testing.T) {
 	if got, err := s.PrepareCallHierarchy(ctx, &protocol.CallHierarchyPrepareParams{TextDocumentPositionParams: pos}); err != nil || len(got) != 0 {
 		t.Errorf("call hierarchy = %#v, %v", got, err)
 	}
-	if got, err := s.DocumentSymbol(ctx, &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || len(got.(protocol.DocumentSymbolSlice)) != 0 {
+	if got, err := s.DocumentSymbol(ctx, &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || len(got.(protocol.SymbolInformationSlice)) != 0 {
 		t.Errorf("symbols = %#v, %v", got, err)
 	}
 	if got, err := s.FoldingRanges(ctx, &protocol.FoldingRangeParams{TextDocument: protocol.TextDocumentIdentifier{URI: u}}); err != nil || len(got) != 0 {

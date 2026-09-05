@@ -18,8 +18,8 @@
 | F10 | 已提交 | `63d69b2` |
 | F11 | 已提交 | `5afb246` |
 | F12 | 已提交 | `3b59a34` |
-| F13 | 已修复 | `fix(text): clamp LSP characters beyond line endings` |
-| F14 | 待修复 | |
+| F13 | 已提交 | `5d6d26c` |
+| F14 | 已修复 | `fix(server): honor edit and document symbol client capabilities` |
 | F15 | 待修复 | |
 | F16 | 待修复 | |
 
@@ -88,3 +88,7 @@ server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根�
 ## F13
 
 依据 [LSP 3.18 Position](https://raw.githubusercontent.com/microsoft/language-server-protocol/gh-pages/_specifications/lsp/3.18/types/position.md)，将超出行长的 character 收敛到行尾；保持负值、无效行、UTF-8/UTF-16 字符内部位置拒绝。覆盖三种编码、空行、BOM、组合/星界字符、CRLF 和 didChange 同批次连续编辑/version 更新。旧测试中把行尾外位置当非法的断言改为实际非法行/代理对内部位置，round-trip 矩阵明确收敛结果。定向测试、全量 test、vet、make、gofmt/gopls 均通过。
+
+## F14
+
+Initialize 记录 documentChanges 与 hierarchicalDocumentSymbolSupport。本地/跨文件 Rename 及 CodeAction 共用能力转换；未支持时仅返回 Changes，支持时保留版本化编辑；未来无法降级的操作明确拒绝而不静默丢失。DocumentSymbol 未支持层级时扁平化为带 URI/range/containerName 的 SymbolInformation。新增能力缺省/false/true 矩阵，检查实际 JSON 字段、版本与嵌套容器；既有高级能力测试显式声明对应能力。定向测试、全量 test、vet、make、gofmt/gopls 均通过（原有 MarkedString 兼容性测试的 deprecated 提示保留）。

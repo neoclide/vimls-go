@@ -869,7 +869,8 @@ func TestServerSkipsAnalysisForOversizedDocument(t *testing.T) {
 func TestDocumentSymbolsUseCurrentSnapshotAndUTF16Ranges(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	defer instance.stopAnalysis()
-	initialize, err := instance.Initialize(context.Background(), &protocol.InitializeParams{})
+	hierarchical := true
+	initialize, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{DocumentSymbol: &protocol.DocumentSymbolClientCapabilities{HierarchicalDocumentSymbolSupport: &hierarchical}}}})
 	if err != nil || initialize.Capabilities.DocumentSymbolProvider == nil {
 		t.Fatalf("initialize = %#v, error = %v", initialize, err)
 	}

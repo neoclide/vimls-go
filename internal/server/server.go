@@ -205,6 +205,8 @@ type Server struct {
 	published                   map[string]publishedDiagnosticsState
 	pullDiagnosticResults       map[string]pullDiagnosticResult
 	workspaceDiagnosticReported map[string]string // publishMu; retained until removal is acknowledged
+	documentChangesSupport      bool
+	hierarchicalSymbolsSupport  bool
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult
 	nextSemanticTokenResultID   uint64
@@ -571,6 +573,8 @@ func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams
 	s.semanticTokensRefreshSupport = semanticTokensRefreshSupport
 	s.inlayHintRefreshSupport = inlayHintRefreshSupport
 	s.codeLensRefreshSupport = codeLensRefreshSupport
+	s.documentChangesSupport = params.Capabilities.Workspace != nil && params.Capabilities.Workspace.WorkspaceEdit != nil && params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges != nil && *params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges
+	s.hierarchicalSymbolsSupport = params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.DocumentSymbol != nil && params.Capabilities.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport != nil && *params.Capabilities.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport
 	s.mu.Unlock()
 	s.workspaceMu.Lock()
 	s.workspaceDelay = defaultWorkspaceRebuildDebounce
@@ -938,20 +942,23 @@ func (s *Server) IsConfigFile(path string) bool {
 }
 
 func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (protocol.DocumentSymbolResult, error) {
+	s.mu.Lock()
+	encoding, hierarchical := s.encoding, s.hierarchicalSymbolsSupport
+	s.mu.Unlock()
 	documentURI := params.TextDocument.URI.String()
 	s.publishMu.Lock()
 	snapshot, ok := s.documents.Snapshot(documentURI)
 	s.publishMu.Unlock()
 	if !ok || snapshot.ByteLen() > maxFileBytes {
+		if !hierarchical {
+			return protocol.SymbolInformationSlice{}, nil
+		}
 		return protocol.DocumentSymbolSlice{}, nil
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, protocol.ErrRequestCancelled
 	}
 	file := s.parseSnapshot(snapshot)
-	s.mu.Lock()
-	encoding := s.encoding
-	s.mu.Unlock()
 	result := make(protocol.DocumentSymbolSlice, 0)
 	for _, symbol := range analysis.CollectSymbols(file) {
 		if converted, valid := documentSymbol(snapshot, encoding, symbol); valid {
@@ -964,6 +971,21 @@ func (s *Server) DocumentSymbol(ctx context.Context, params *protocol.DocumentSy
 	current, currentOK := s.documents.Snapshot(documentURI)
 	if !currentOK || current != snapshot {
 		return nil, protocol.ErrContentModified
+	}
+	if !hierarchical {
+		flat := make(protocol.SymbolInformationSlice, 0, len(result))
+		var appendSymbols func([]protocol.DocumentSymbol, *string)
+		appendSymbols = func(symbols []protocol.DocumentSymbol, container *string) {
+			for _, symbol := range symbols {
+				flat = append(flat, protocol.SymbolInformation{
+					BaseSymbolInformation: protocol.BaseSymbolInformation{Name: symbol.Name, Kind: symbol.Kind, Tags: symbol.Tags, ContainerName: container},
+					Location:              protocol.Location{URI: params.TextDocument.URI, Range: symbol.Range},
+				})
+				appendSymbols(symbol.Children, &symbol.Name)
+			}
+		}
+		appendSymbols(result, nil)
+		return flat, nil
 	}
 	return result, nil
 }

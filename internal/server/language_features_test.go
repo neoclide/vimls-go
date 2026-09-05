@@ -61,7 +61,9 @@ func TestDocumentLinkReturnsOnlyStaticResolvedFiles(t *testing.T) {
 func TestDeprecatedVim9DeclarationsReachLanguageFeatures(t *testing.T) {
 	source := "vim9script\n# deprecated use NewValue\nvar OldValue = 1\n# @DEPRECATED use NewFunc\ndef OldFunc()\nenddef\necho OldValue\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	hierarchical := true
 	capabilities := protocol.ClientCapabilities{TextDocument: &protocol.TextDocumentClientCapabilities{
+		DocumentSymbol: &protocol.DocumentSymbolClientCapabilities{HierarchicalDocumentSymbolSupport: &hierarchical},
 		Completion: &protocol.CompletionClientCapabilities{CompletionItem: &protocol.ClientCompletionItemOptions{
 			TagSupport: protocol.CompletionItemTagOptions{ValueSet: []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}},
 		}},

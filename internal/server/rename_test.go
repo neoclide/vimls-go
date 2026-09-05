@@ -5,12 +5,72 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+func TestClientEditAndSymbolCapabilityFallbacks(t *testing.T) {
+	for _, setting := range []string{"omitted", "false", "true"} {
+		t.Run(setting, func(t *testing.T) {
+			instance := New(nil, nil, nil)
+			t.Cleanup(instance.stopAnalysis)
+			var capabilities protocol.ClientCapabilities
+			if setting != "omitted" {
+				value := setting == "true"
+				capabilities.Workspace = &protocol.WorkspaceClientCapabilities{WorkspaceEdit: &protocol.WorkspaceEditClientCapabilities{DocumentChanges: &value}}
+				capabilities.TextDocument = &protocol.TextDocumentClientCapabilities{DocumentSymbol: &protocol.DocumentSymbolClientCapabilities{HierarchicalDocumentSymbolSupport: &value}}
+			}
+			if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: capabilities, InitializationOptions: protocol.LSPAny([]byte(`{"runtimepath":[]}`))}); err != nil {
+				t.Fatal(err)
+			}
+			checkEdit := func(edit *protocol.WorkspaceEdit) {
+				t.Helper()
+				encoded, err := protocol.Marshal(edit)
+				if err != nil || strings.Contains(string(encoded), `"documentChanges"`) != (setting == "true") || strings.Contains(string(encoded), `"changes"`) != (setting != "true") {
+					t.Fatalf("workspace edit wire = %s, %v", encoded, err)
+				}
+				if setting == "true" {
+					document := edit.DocumentChanges[0].(*protocol.TextDocumentEdit)
+					if document.TextDocument.Version == nil || *document.TextDocument.Version != 7 {
+						t.Fatalf("version = %#v", document.TextDocument.Version)
+					}
+				}
+			}
+			documentURI := uri.File(filepath.Join(t.TempDir(), "capabilities.vim"))
+			instance.documents.Open(documentURI.String(), 7, "vim9script\nvar value = 1\necho value\n")
+			edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 7}}, NewName: "renamed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkEdit(edit)
+			instance.documents.Open(documentURI.String(), 7, "vim9script\nif true\n  echo 'x'\n")
+			actions, err := instance.CodeAction(context.Background(), &protocol.CodeActionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Range: navigationRange(1, 0, 2), Context: protocol.CodeActionContext{Diagnostics: []protocol.Diagnostic{{Range: navigationRange(1, 0, 2), Code: protocol.String("vim/E171")}}}})
+			if err != nil || len(actions) != 1 {
+				t.Fatalf("actions = %#v, %v", actions, err)
+			}
+			checkEdit(actions[0].(*protocol.CodeAction).Edit)
+			instance.documents.Open(documentURI.String(), 7, "vim9script\nclass Widget\n  var value: number\nendclass\n")
+			symbols, err := instance.DocumentSymbol(context.Background(), &protocol.DocumentSymbolParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := protocol.Marshal(symbols)
+			if err != nil || strings.Contains(string(encoded), `"location"`) != (setting != "true") || strings.Contains(string(encoded), `"selectionRange"`) != (setting == "true") {
+				t.Fatalf("symbol wire = %s, %v", encoded, err)
+			}
+			if setting != "true" {
+				flat := symbols.(protocol.SymbolInformationSlice)
+				if len(flat) != 2 || flat[1].ContainerName == nil || *flat[1].ContainerName != "Widget" || flat[1].Location.URI != documentURI || flat[1].Location.Range.Start.Line != 2 {
+					t.Fatalf("flat symbols = %#v", flat)
+				}
+			}
+		})
+	}
+}
 
 func TestPrepareRenameAndRenameBoundSymbol(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value = 1\necho value\nvalue += 1\n")

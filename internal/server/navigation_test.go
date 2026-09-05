@@ -2063,6 +2063,8 @@ func openNavigationDocument(t *testing.T, encoding text.Encoding, source string)
 	t.Helper()
 	instance := New(nil, nil, io.Discard)
 	instance.encoding = encoding
+	instance.documentChangesSupport = true
+	instance.hierarchicalSymbolsSupport = true
 	instance.languageFeatures.hoverMarkup = protocol.MarkupKindMarkdown
 	instance.completion.docsMarkdown = true
 	documentURI := uri.File(mustWorkspaceCanonicalPath(t, filepath.Join(t.TempDir(), "navigation.vim")))
