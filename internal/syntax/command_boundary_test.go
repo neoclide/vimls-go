@@ -592,6 +592,27 @@ enddef
 	assertFileSpans(t, file)
 }
 
+func TestVim9AutoloadCallWithDigitsAndUnderscores(t *testing.T) {
+	for _, name := range []string{"modula2#SetDialect", "foo_bar2#nested3#Run", "win2#Run"} {
+		file := Parse("vim9script\ndef Test()\n  " + name + "(1) | echo 2\nenddef\n")
+		if len(file.Diagnostics) != 0 || len(file.Commands) != 5 {
+			t.Fatalf("%s: %#v", name, file.Diagnostics)
+		}
+		call := file.Commands[2]
+		if call.Kind != CommandExpression || len(call.Expressions) != 1 || call.Expressions[0].Kind != ExpressionCall || call.Expressions[0].Children[0].Value != name {
+			t.Fatalf("%s: call lost: %#v", name, call)
+		}
+		if file.Commands[3].Canonical != "echo" {
+			t.Fatal("following command lost")
+		}
+		assertFileSpans(t, file)
+		legacy := Parse(name + "(1)\n")
+		if legacy.Commands[0].Kind == CommandExpression {
+			t.Fatal("legacy implicit call incorrectly enabled")
+		}
+	}
+}
+
 func TestVim9BuiltinFunctionCallIsNotCommand(t *testing.T) {
 	source := `vim9script
 def AddProp(lnum: number, colStart: number, bufnr: number, type: string, propId: number, colEnd: number)

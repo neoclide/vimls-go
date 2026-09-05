@@ -15,7 +15,7 @@
 | FP05 | CTRL-V 引用 | 待修复 |
 | FP06 | 修饰符与地址 | 待修复 |
 | FP07 | new +cmd | 待修复 |
-| FP08 | 数字 autoload 名称 | 待修复 |
+| FP08 | 数字 autoload 名称 | 已修复：正反回归及全量门禁通过 |
 | FP09 | 逻辑操作数 | 待修复 |
 | FP10 | map 容器约束 | 待修复 |
 | FP11 | 解构丢弃占位符 | 待修复 |
@@ -34,6 +34,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP08：完整标识符后的 # 调用识别支持数字／下划线；检查 AST、字节范围、后续命令及 legacy 不开启隐式调用。TestVim9AutoloadCallWithDigitsAndUnderscores 与全量 go test / go vet / make 通过。模板排除提交为 a767677。
 
 原始 errors.txt、classification.json、source-manifest.json 保留为基线，不覆盖。
 

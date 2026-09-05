@@ -1461,14 +1461,15 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			nameExpression = false
 		}
 		expressionAtCommandStart := dialect == Vim9 && (looksLikeVim9SigilExpression(file.Source, nameStart, end) || nameExpression)
-		if dialect == Vim9 && !expressionAtCommandStart && nameEnd < end && file.Source[nameEnd] == '#' {
+		if dialect == Vim9 && !expressionAtCommandStart && expressionNameEnd < end && file.Source[expressionNameEnd] == '#' {
 			// Autoload function calls use # in the name and are expressions even
-			// though the Ex command scanner stops at the first #.
-			callStart := nameEnd
+			// though the Ex command scanner can stop before digits or underscores
+			// preceding the first # (e.g. modula2#SetDialect).
+			callStart := expressionNameEnd
 			for callStart < end && (isVimIdentifierByte(file.Source[callStart]) || file.Source[callStart] == '#') {
 				callStart++
 			}
-			if callStart > nameEnd && callStart < end && file.Source[callStart] == '(' {
+			if callStart > expressionNameEnd && callStart < end && file.Source[callStart] == '(' {
 				expressionAtCommandStart = true
 			}
 		}
