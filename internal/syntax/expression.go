@@ -1136,6 +1136,11 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 			}
 			p.advance()
 			if p.dialect == Vim9 && p.current().text == ")" {
+				// A final comma followed by whitespace is permitted; it does not
+				// introduce another argument. Preserve the no-space error below.
+				if after := comma.span.End - p.base; after < len(p.source) && isExpressionSpace(p.source[after]) {
+					break
+				}
 				children = append(children, &Expression{Kind: ExpressionMissing, Span: comma.span})
 				if !commaDiagnostic {
 					p.diagnostics = append(p.diagnostics, Diagnostic{

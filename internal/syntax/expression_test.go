@@ -17,6 +17,35 @@ func expressionTokens(source string, base int, dialect Dialect, scriptVersion ui
 	}
 }
 
+func TestVim9CallTrailingCommaWhitespace(t *testing.T) {
+	for _, space := range []string{" ", "\t", "\n", "\r\n"} {
+		source := "Func(1," + space + ")"
+		expression, diagnostics := (Vim9ExpressionParser{}).Parse(source)
+		if len(diagnostics) != 0 || expression.Kind != ExpressionCall || len(expression.Children) != 2 {
+			t.Fatalf("%q: expression %#v, diagnostics %#v", source, expression, diagnostics)
+		}
+		file := Parse("vim9script\n" + source + "\necho 2\n")
+		if len(file.Diagnostics) != 0 || len(file.Commands) != 3 || file.Commands[2].Canonical != "echo" {
+			t.Fatalf("source recovery: %#v", file)
+		}
+		assertFileSpans(t, file)
+	}
+	for _, test := range []struct{ source, code string }{
+		{"Func(1,)", "vim/E1069"},
+		{"Func(1 , 2)", "vim/E1068"},
+		{"Func(1,,)", "vim/E15"},
+	} {
+		_, diagnostics := (Vim9ExpressionParser{}).Parse(test.source)
+		found := false
+		for _, d := range diagnostics {
+			found = found || d.Code == test.code
+		}
+		if !found {
+			t.Fatalf("%q: missing %s: %#v", test.source, test.code, diagnostics)
+		}
+	}
+}
+
 func TestExpressionLexerTokenGolden(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -784,6 +813,10 @@ func TestTooManyFunctionArgumentsDiagnostic(t *testing.T) {
 			name:   "Vim9 call",
 			source: "vim9script\nvar value = min(" + strings.TrimSuffix(strings.Repeat("1, ", 21), ", ") + ")\nvar after = 1\n",
 		},
+		{
+			name:   "Vim9 call with legal final comma",
+			source: "vim9script\nvar value = min(" + strings.Repeat("1, ", 21) + ")\nvar after = 1\n",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			file := Parse(test.source)
@@ -818,7 +851,7 @@ func TestTooManyFunctionArgumentsDiagnostic(t *testing.T) {
 		t.Fatalf("20-argument call unexpectedly received E740: %#v", valid.Diagnostics)
 	}
 
-	malformed := Parse("vim9script\nvar value = min(" + strings.Repeat("1, ", 21) + ")\n")
+	malformed := Parse("vim9script\nvar value = min(" + strings.Repeat("1, ", 20) + "1,)\n")
 	if hasDiagnostic(malformed, "vim/E740") {
 		t.Fatalf("malformed call unexpectedly received E740: %#v", malformed.Diagnostics)
 	}
