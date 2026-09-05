@@ -21,7 +21,7 @@ Its grammar and metadata ceiling supports Vim syntax through **v9.2.1015**, cove
 - **Dual-Dialect Support**: Independent root parsers for Legacy Vim script and Vim9 script with contextual dialect switching (`vim9script`, `legacy`, `vim9cmd`, `scriptversion`).
 - **Safe Static Analysis**: Untrusted workspace files and scripts are analyzed safely without sourcing or evaluating code.
 - **Fast & Lightweight**: Single standalone binary with low memory footprint, incremental document synchronization, and background analysis.
-- **Runtimepath & Workspace Aware**: Discovers and indexes host Vim runtime roots, plugins, autoload scripts, imports, syntax files, and color schemes.
+- **Runtimepath & Workspace Aware**: Indexes workspace Vim files and recursive `plugin`, `autoload`, and `import` scripts from external runtime roots. External `colors/*.vim` files provide names/paths only; other external runtime subtrees are not scanned.
 
 ---
 
@@ -46,7 +46,9 @@ Its grammar and metadata ceiling supports Vim syntax through **v9.2.1015**, cove
 
 ### Option 1: Download Pre-built Binaries (Recommended)
 
-Pre-built binaries for multiple operating systems and architectures are published on the [GitHub Releases](https://github.com/neoclide/vimls-go/releases) page:
+Published builds, when available, appear on the [GitHub Releases](https://github.com/neoclide/vimls-go/releases) page. `v1.0.0-rc.1` is currently a local candidate, not a published release; see [candidate evidence](docs/release-candidate.md) and [support limitations](docs/language-support.md).
+
+The archive naming contract is:
 
 | Operating System | Architecture | Archive Name |
 | --- | --- | --- |
@@ -62,8 +64,9 @@ Pre-built binaries for multiple operating systems and architectures are publishe
 #### Linux / macOS Quick Install Example:
 
 ```sh
-# Download the archive matching your platform from Releases:
-curl -fsSL -o vimls.tar.gz https://github.com/neoclide/vimls-go/releases/latest/download/vimls-v0.1.0-linux-amd64.tar.gz
+# Select an actually published tag and the archive matching your platform:
+release_tag=vX.Y.Z
+curl -fsSL -o vimls.tar.gz "https://github.com/neoclide/vimls-go/releases/download/${release_tag}/vimls-${release_tag}-linux-amd64.tar.gz"
 
 # Extract the binary:
 tar -xzf vimls.tar.gz

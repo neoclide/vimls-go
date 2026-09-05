@@ -41,8 +41,10 @@ func TestReleaseAssetsPreserveDownloadContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(documents) < 3 {
-		t.Fatal("README and both licenses are required")
+	for _, required := range []string{"README.md", "CHANGELOG.md", "docs/language-support.md", "LICENSES/MIT.txt", "LICENSES/VIM.txt"} {
+		if !slices.ContainsFunc(documents, func(document archiveEntry) bool { return document.name == required }) {
+			t.Fatalf("release is missing %s", required)
+		}
 	}
 	output := t.TempDir()
 	stamp := time.Unix(1700000000, 0).UTC()
@@ -152,5 +154,8 @@ func TestReleaseAssetsPreserveDownloadContract(t *testing.T) {
 	workflow, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "release.yml"))
 	if err != nil || !bytes.Contains(workflow, []byte("go run -mod=readonly ./tools/release")) || bytes.Contains(workflow, []byte("TARGETS=(")) {
 		t.Fatalf("workflow is not using the tested packager: %v", err)
+	}
+	if !bytes.Contains(workflow, []byte("prerelease: ${{ contains(github.ref_name, '-') }}")) {
+		t.Fatal("prerelease tags must not publish stable releases")
 	}
 }

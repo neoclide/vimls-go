@@ -17,6 +17,9 @@ No remote write, tag, or publication is authorized by this work.
 - Oracle: `/usr/local/bin/vim`, Vim 9.2, patches 1–1015; patch 1016 absent.
 - Client: vim-lsp `e10d186452743beb7b43d2b3427020832f930c2b`.
 - `go test -json -count=1 ./...`, `go vet ./...`, `make`: pass.
+  The JSON run records 6,031 passing test/subtest events across 17 tested
+  packages, three explicit skips, and zero failures. These are events, not
+  6,031 independent top-level tests. The oracle skips are run separately below.
 - `VIM_EXECUTABLE=/usr/local/bin/vim go test -v -count=1 ./test/oracle`: pass.
 - `make client-smoke VIM_EXECUTABLE=/usr/local/bin/vim`: pass; both dialects
   observe their expected diagnostic, apply indentation, shut down, and report
@@ -55,8 +58,13 @@ locally in `d473ee4`. Native Windows and all candidate-SHA CI results remain
 pending. Local race/coverage were intentionally not run; historical green
 jobs cannot close the new candidate gates.
 
-## P3 queue
+## P3 progress
 
-Bounded fuzzing, baseline-comparable performance, current vulnerability scan,
-release notes, twice-built reproducible archives and unpacked-binary/client
-smoke are pending. Each result will be recorded here before handoff.
+`govulncheck@v1.1.4 ./...` reports **No vulnerabilities found** on the local Go
+1.27 toolchain. CHANGELOG and packaged support/license documents are added;
+the release workflow now marks hyphenated prerelease tags as prereleases.
+No workflow was triggered. Full tests, vet and build pass for these changes.
+
+Bounded fuzzing, baseline-comparable performance, twice-built reproducible
+archives and unpacked-binary/client smoke are in progress. Their results will
+be recorded here before handoff.

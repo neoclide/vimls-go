@@ -218,8 +218,8 @@ lexer fuzz target remains planned. Required properties:
 - Applying valid incremental edits matches full-text replacement.
 - Position round trips are stable at valid character boundaries.
 
-PR checks replay the committed seeds and `testdata/fuzz` corpus. A future
-scheduled lane will run bounded live fuzzing; every discovered input must remain
+PR checks replay the committed seeds and `testdata/fuzz` corpus. The scheduled
+lane runs bounded live fuzzing; every discovered crash input must remain
 under the owning package's `testdata/fuzz` directory as a regression case.
 
 ### Vim oracle

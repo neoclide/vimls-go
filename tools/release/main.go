@@ -79,7 +79,7 @@ func buildBinary(version string, target releaseTarget) ([]byte, error) {
 }
 
 func releaseDocuments(root string) ([]archiveEntry, error) {
-	names := []string{"README.md"}
+	names := []string{"README.md", "CHANGELOG.md", "docs/language-support.md"}
 	licenses, err := os.ReadDir(filepath.Join(root, "LICENSES"))
 	if err != nil {
 		return nil, err

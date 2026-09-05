@@ -14,7 +14,7 @@ blocker unless explicitly included in the 1.0 contract.
 | P1 | Reconcile coverage ledger with owned behavior | Reviewed parser/semantic evidence separately; all local ledger links resolve. Tuple and mapping TODOs now have direct analysis/oracle evidence; explicit deferred scope remains unchanged. |
 | P2 | Required LSP surface and stdio/client acceptance | Capability/handler/test mapping reviewed; added UTF-16 overlay/edit stdio+TCP assertions and unpacked-binary test support. Uncached full tests, vet, build, exact Vim oracle and pinned client smoke pass locally. |
 | P3 | Fuzz, performance, vulnerability and reproducible archives | Pending candidate validation. |
-| P3 | Release notes and final evidence | Pending; no release is authorized. |
+| P3 | Release notes and final evidence | CHANGELOG and packaged support/license documents added; prerelease tags retain prerelease status. Local evidence is in release-candidate.md; archive verification and final gates pending. No release is authorized. |
 
 M0–M6 have implemented surfaces within the stated conservative contract; the
 M3–M4 P1 evidence gaps are closed. M7 remains open until the candidate has all required platform and
