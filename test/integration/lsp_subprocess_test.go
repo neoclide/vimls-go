@@ -26,6 +26,17 @@ import (
 var vimlsBinary string
 
 func TestMain(m *testing.M) {
+	// Release acceptance must exercise the unpacked artifact, not silently
+	// rebuild a different binary. Ordinary tests keep their clean source build.
+	if supplied := os.Getenv("VIMLS_TEST_BINARY"); supplied != "" {
+		var err error
+		vimlsBinary, err = filepath.Abs(supplied)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid VIMLS_TEST_BINARY: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(m.Run())
+	}
 	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to get repository root: %v\n", err)
@@ -843,7 +854,11 @@ func TestVersionSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version failed: %v, output: %s", err, output)
 	}
-	if string(output) != "vimls dev\n" {
+	expected := "dev"
+	if os.Getenv("VIMLS_TEST_BINARY") != "" && os.Getenv("VIMLS_TEST_VERSION") != "" {
+		expected = os.Getenv("VIMLS_TEST_VERSION")
+	}
+	if string(output) != "vimls "+expected+"\n" {
 		t.Fatalf("version output = %q", output)
 	}
 }
@@ -1363,11 +1378,50 @@ func runSharedEditingScenario(t *testing.T, client *testClient, workspaceRoot st
 
 	docPath := filepath.Join(workspaceRoot, "shared.vim")
 	docURI := uri.File(docPath).String()
+	if err := os.WriteFile(docPath, []byte("vim9script\nvar diskOnly = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":"vim9script\nvar sharedVal: number = 'err'\n"}}}`, docURI))
 	readPublishedDiagnostic(t, client, docURI, "vim/E1012")
 
 	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":%q,"version":2},"contentChanges":[{"text":"vim9script\nvar sharedVal: number = 42\necho sharedVal\n"}]}}`, docURI))
 	readPublishedDiagnostic(t, client, docURI, "")
+
+	// UTF-16 positions after an astral character and a combining sequence must
+	// survive navigation, rename and a ranged edit of the unsaved disk overlay.
+	unicodeSource := "vim9script\nvar sharedVal = 42\necho '😀é' .. sharedVal\n"
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":%q,"version":3},"contentChanges":[{"text":%q}]}}`, docURI, unicodeSource))
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":30,"method":"textDocument/definition","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":16}}}`, docURI))
+	definition := readResponse(t, client, "30")
+	var locations []protocol.Location
+	if json.Unmarshal(definition["result"], &locations) != nil || len(locations) != 1 || locations[0].Range.Start.Line != 1 || locations[0].Range.Start.Character != 4 {
+		t.Fatalf("Unicode overlay definition = %s", definition)
+	}
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":31,"method":"textDocument/rename","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":16},"newName":"renamed"}}`, docURI))
+	rename := readResponse(t, client, "31")
+	var edit struct {
+		Changes map[string][]protocol.TextEdit `json:"changes"`
+	}
+	if json.Unmarshal(rename["result"], &edit) != nil || len(edit.Changes) != 1 || len(edit.Changes[docURI]) != 2 {
+		t.Fatalf("Unicode overlay rename = %s", rename)
+	}
+	for _, change := range edit.Changes[docURI] {
+		wantStart := uint32(4)
+		if change.Range.Start.Line == 2 {
+			wantStart = 15
+		} else if change.Range.Start.Line != 1 {
+			t.Fatalf("unexpected rename line: %#v", change)
+		}
+		if change.NewText != "renamed" || change.Range.Start.Character != wantStart || change.Range.End.Character != wantStart+9 {
+			t.Fatalf("Unicode rename range = %#v", change)
+		}
+	}
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":%q,"version":4},"contentChanges":[{"range":{"start":{"line":2,"character":6},"end":{"line":2,"character":10}},"text":"x"}]}}`, docURI))
+	writeJSON(t, client, fmt.Sprintf(`{"jsonrpc":"2.0","id":32,"method":"textDocument/references","params":{"textDocument":{"uri":%q},"position":{"line":2,"character":13},"context":{"includeDeclaration":false}}}`, docURI))
+	references := readResponse(t, client, "32")
+	if json.Unmarshal(references["result"], &locations) != nil || len(locations) != 1 || locations[0].Range.Start.Line != 2 || locations[0].Range.Start.Character != 12 || locations[0].Range.End.Character != 21 {
+		t.Fatalf("Unicode ranged edit references = %s", references)
+	}
 
 	writeJSON(t, client, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
 	shutdown := readResponse(t, client, "2")

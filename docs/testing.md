@@ -39,6 +39,23 @@ The legacy runtime assertions also prove that indexed signatures and leading
 comments reach completion/hover and that autoload definitions retain their
 runtimepath source location.
 
+`TestStdioSharedScenario` and `TestTCPSubprocess` also verify an unsaved disk
+overlay containing an astral character and combining sequence: definition,
+exact UTF-16 rename ranges, then a ranged edit and updated reference ranges.
+Cancellation and stale publication/edit branches remain deterministic package
+tests using hooks, rather than timing-dependent subprocess races.
+
+For release acceptance, test the unpacked host executable without rebuilding it:
+
+```sh
+VIMLS_TEST_BINARY=/absolute/path/to/unpacked/vimls \
+  VIMLS_TEST_VERSION=v1.0.0-rc.1 go test -count=1 ./test/integration
+```
+
+Without `VIMLS_TEST_BINARY`, integration tests build current source and require
+the development version `dev`. A release version is injected by the packager;
+the production default must not be changed to make an archive check pass.
+
 Mixed-dialect, incomplete-input, Unicode, workspace, and fuzz regression cases
 currently live beside their owning Go packages. Dedicated shared fixture and
 Vim-oracle directories should be introduced only when real cross-package cases

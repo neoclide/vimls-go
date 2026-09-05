@@ -12,7 +12,7 @@ blocker unless explicitly included in the 1.0 contract.
 | P1 | Direct legacy tuple semantics | Direct tests and exact v9.2.1015 oracle pass; fixed-index inference, literal cardinality and adjacent literal mutation now covered. Dynamic cases remain unknown. |
 | P1 | Mapping result policy | Implemented literal E976/E729 only; pinned source and both dialect oracles cover accepted conversions. Deferred variable/call results stay unknown. |
 | P1 | Reconcile coverage ledger with owned behavior | Reviewed parser/semantic evidence separately; all local ledger links resolve. Tuple and mapping TODOs now have direct analysis/oracle evidence; explicit deferred scope remains unchanged. |
-| P2 | Required LSP surface and stdio/client acceptance | Pending candidate validation. |
+| P2 | Required LSP surface and stdio/client acceptance | Capability/handler/test mapping reviewed; added UTF-16 overlay/edit stdio+TCP assertions and unpacked-binary test support. Uncached full tests, vet, build, exact Vim oracle and pinned client smoke pass locally. |
 | P3 | Fuzz, performance, vulnerability and reproducible archives | Pending candidate validation. |
 | P3 | Release notes and final evidence | Pending; no release is authorized. |
 
