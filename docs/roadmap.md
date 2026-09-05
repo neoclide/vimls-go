@@ -31,6 +31,15 @@ External runtimepath discovery parses recursive `plugin`, `autoload`, and
 inside workspace folders use ordinary workspace discovery once. Other
 external runtime trees and dynamic source targets are not chased.
 
+Workspace/runtimepath scheduling: workspace indexing has its own progress and
+installation phase. External roots scan with bounded directory concurrency and
+per-directory log messages. Runtimepath updates coalesce over 100ms, finish an
+active batch before applying the latest pending list, and preserve retained
+analysis facts across workspace rebuilds. Each installation uses capability-
+gated diagnostic, semantic-token, inlay-hint and complete-index Code Lens refresh.
+Regression evidence lives in `runtimepath_worker_test.go` and
+`runtimepath_lifecycle_test.go`.
+
 ## Definition of done
 
 Version 1.0 is complete only when the language-support contract is covered
@@ -233,10 +242,11 @@ copy initializers, imported factory returns, same-block direct assignments, and
 statically typed container extraction. Safe same-file/static-import rename, full semantic tokens,
 inferred-type inlay hints, and the deterministic missing-block-end quick fix
 are also implemented. Hover and signature content honor the client's ordered Markdown/plain-text
-preferences and are bounded safely at UTF-8 boundaries. Ex commands (including
-abbreviations), options, and predefined variables reuse pinned Vim help;
-builtin function prose comes only from the current runtimepath. The Ex-command
-generator records matching help provenance alongside command facts. The stdio
+preferences and are bounded safely at UTF-8 boundaries. Options and predefined
+variables reuse pinned Vim help; builtin function and Ex command prose (including
+abbreviated command hover and completion resolve) comes only from the current
+runtimepath help worker. The Ex-command generator retains command keys, names
+and parser flags without embedding help text. The stdio
 subprocess test exercises completion, resolve, hover, and the implemented
 signature-help wire contracts.
 

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -23,6 +24,8 @@ import (
 )
 
 const defaultWorkspaceRebuildDebounce = 100 * time.Millisecond
+const defaultRuntimepathDebounce = 100 * time.Millisecond
+const runtimepathScanWorkers = 4
 const workspaceIndexWaitTimeout = 5 * time.Second
 const workspaceProgressCreateTimeout = 100 * time.Millisecond
 const workspaceProgressNotificationTimeout = 100 * time.Millisecond
@@ -55,6 +58,53 @@ func (s *Server) discoverRuntimePathFilesContext(ctx context.Context, root strin
 		return result, truncated, err
 	}
 	return workspace.DiscoverRuntimePathFilesContext(ctx, root, limit)
+}
+
+type runtimeRootDiscovery struct {
+	files     workspace.RuntimePathFiles
+	truncated bool
+	err       error
+}
+
+// Keep filesystem concurrency bounded and preserve runtimepath order when
+// consuming results, so scheduling cannot change precedence or capacity limits.
+func (s *Server) discoverRuntimeRoots(ctx context.Context, roots []string, limit int) []runtimeRootDiscovery {
+	results := make([]runtimeRootDiscovery, len(roots))
+	jobs := make(chan int, len(roots))
+	for index := range roots {
+		jobs <- index
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	for range min(runtimepathScanWorkers, len(roots)) {
+		workers.Go(func() {
+			for index := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				started := time.Now()
+				result := &results[index]
+				result.files, result.truncated, result.err = s.discoverRuntimePathFilesContext(ctx, roots[index], limit)
+				if ctx.Err() != nil {
+					return
+				}
+				s.mu.Lock()
+				client := s.client
+				s.mu.Unlock()
+				if client != nil {
+					message := fmt.Sprintf("vimls: scanned runtimepath %s: %d Vim files, %d colors, %s", roots[index], len(result.files.Sources), len(result.files.Colors), time.Since(started).Round(time.Millisecond))
+					if result.err != nil {
+						message += ": " + result.err.Error()
+					}
+					logCtx, cancel := context.WithTimeout(ctx, time.Second)
+					_ = client.LogMessage(logCtx, &protocol.LogMessageParams{Type: protocol.MessageTypeLog, Message: message})
+					cancel()
+				}
+			}
+		})
+	}
+	workers.Wait()
+	return results
 }
 
 func workspaceRootsFromInitialize(params *protocol.InitializeParams) []string {
@@ -291,11 +341,16 @@ func (s *Server) workspaceIndexWorker() {
 			hook(openSnapshots)
 		}
 
-		progress := s.startWorkspaceIndexProgress()
+		var progress *workspaceProgressSession
+		if len(workspaceRoots) > 0 {
+			progress = s.startWorkspaceIndexProgress()
+		}
 		progressReporting := progress != nil
-		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, workspaceRoots, runtimePaths, resolver, openSnapshots, func(root string) {
+		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, workspaceRoots, nil, resolver, openSnapshots, func(root string) {
 			progressReporting = s.reportWorkspaceIndexProgress(progress, progressReporting, root)
 		})
+		workspaceRoots = normalizeWorkspaceRoots(workspaceRoots)
+		runtimePaths = normalizeWorkspaceRoots(runtimePaths)
 		s.workspaceMu.Lock()
 		if s.analysisStopped || s.analysisContext.Err() != nil {
 			s.finishWorkspaceRebuildLocked()
@@ -305,9 +360,11 @@ func (s *Server) workspaceIndexWorker() {
 		}
 		s.workspaceMu.Unlock()
 
+		s.runtimepathRunMu.Lock()
 		s.publishMu.Lock()
 		if !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
 			s.publishMu.Unlock()
+			s.runtimepathRunMu.Unlock()
 			s.finishWorkspaceIndexProgress(progress)
 			s.resetWorkspaceRebuildTimer(timer)
 			continue
@@ -317,16 +374,66 @@ func (s *Server) workspaceIndexWorker() {
 			s.finishWorkspaceRebuildLocked()
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
+			s.runtimepathRunMu.Unlock()
 			s.finishWorkspaceIndexProgress(progress)
 			return
 		}
 		if revision != s.workspaceRevision {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
+			s.runtimepathRunMu.Unlock()
 			s.finishWorkspaceIndexProgress(progress)
 			s.resetWorkspaceRebuildTimer(timer)
 			continue
 		}
+		// Preserve external runtime facts without reading or parsing their source.
+		searchPaths := runtimePaths
+		if len(searchPaths) == 0 {
+			searchPaths = workspaceRoots
+		}
+		index.SetRuntimePaths(searchPaths)
+		if len(s.runtimepathIndexedPaths) > 0 && !s.workspaceIndex.Complete() {
+			index.SetComplete(false)
+		}
+		retained := make(map[string]struct{}, len(s.workspaceFiles))
+		for path := range s.workspaceFiles {
+			retained[path] = struct{}{}
+		}
+		for _, snapshot := range openSnapshots {
+			if path, ok := workspaceURIPath(uri.URI(snapshot.URI())); ok {
+				retained[path] = struct{}{}
+			}
+		}
+		retainedPaths := make([]string, 0, len(retained))
+		for path := range retained {
+			retainedPaths = append(retainedPaths, path)
+		}
+		sort.Strings(retainedPaths)
+		for _, path := range retainedPaths {
+			if workspacePathInRoots(path, workspaceRoots) || !runtimePathSourceInRoots(path, runtimePaths) {
+				continue
+			}
+			if err := index.CopyFileFrom(s.workspaceIndex, path); err != nil {
+				index.SetComplete(false)
+				continue
+			}
+			if _, exists := index.Source(path); exists {
+				if _, disk := s.workspaceFiles[path]; disk {
+					diskFiles[path] = struct{}{}
+				}
+				_ = graph.Replace(path, s.workspaceGraphView.Imports(path))
+			}
+		}
+		index.CopyRuntimeCatalogFrom(s.workspaceIndex)
+		// Roots newly excluded from the workspace need runtime discovery now.
+		keptRoots := s.runtimepathIndexedPaths[:0]
+		for _, root := range s.runtimepathIndexedPaths {
+			if !workspacePathInRoots(root, s.runtimepathWorkspaceRoots) || workspacePathInRoots(root, workspaceRoots) {
+				keptRoots = append(keptRoots, root)
+			}
+		}
+		s.runtimepathIndexedPaths = keptRoots
+		s.runtimepathWorkspaceRoots = append([]string(nil), workspaceRoots...)
 		graph.AdvanceRevision(s.workspaceGraphView.Revision())
 		s.workspaceIndex = index
 		s.workspaceGraph = graph
@@ -340,6 +447,7 @@ func (s *Server) workspaceIndexWorker() {
 		s.finishWorkspaceRebuildLocked()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
+		s.runtimepathRunMu.Unlock()
 		s.scheduleWorkspaceRefresh(indexComplete)
 		s.finishWorkspaceIndexProgress(progress)
 		for _, warning := range warnings {
@@ -348,6 +456,7 @@ func (s *Server) workspaceIndexWorker() {
 		for _, snapshot := range openSnapshots {
 			s.startAnalysis(snapshot.URI())
 		}
+		_ = s.changeRuntimepath(s.analysisContext, &DidChangeRuntimepathParams{}, true)
 		return
 	}
 }
@@ -491,14 +600,14 @@ func (s *Server) workspaceProgressCallTimeout(fallback time.Duration) time.Durat
 	return fallback
 }
 
-// reportWorkspaceIndexProgress identifies a runtime root at the discovery
+// reportWorkspaceIndexProgress identifies a workspace folder at the discovery
 // boundary. It is called outside workspace mutexes and does not affect index
 // completion when a client cannot receive a notification.
 func (s *Server) reportWorkspaceIndexProgress(session *workspaceProgressSession, started bool, root string) bool {
 	if !started || !s.workspaceProgressEnabled() {
 		return false
 	}
-	message := fmt.Sprintf("Discovering runtime path %s", root)
+	message := fmt.Sprintf("Discovering workspace folder %s", root)
 	value, err := protocol.Marshal(&protocol.WorkDoneProgressReport{Kind: "report", Message: &message})
 	if err != nil {
 		s.logf("vimls: encode workspace index progress report: %v", err)
@@ -613,13 +722,13 @@ func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
 }
 
 // buildWorkspaceIndex reports up to workspaceProgressReportLimit configured
-// runtime roots immediately before discovering their files. Parsing remains
+// workspace roots immediately before discovering their files. Parsing remains
 // batched after discovery, so reports identify discovery roots rather than
 // individual files.
 func (s *Server) buildWorkspaceIndex(ctx context.Context, workspaceRoots, runtimePaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot, progress ...func(string)) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
-	var reportRuntimeRoot func(string)
+	var reportWorkspaceRoot func(string)
 	if len(progress) > 0 {
-		reportRuntimeRoot = progress[0]
+		reportWorkspaceRoot = progress[0]
 	}
 	index := newWorkspaceIndex()
 	canonicalWorkspaceRoots := normalizeWorkspaceRoots(workspaceRoots)
@@ -656,7 +765,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, workspaceRoots, runtim
 	oversizedOpen := make(map[string]struct{})
 	discoveredRecoverable := make(map[string]struct{})
 	var warnings []string
-	reportedRuntimeRoots := 0
+	reportedWorkspaceRoots := 0
 	for _, root := range roots {
 		if ctx.Err() != nil {
 			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
@@ -669,9 +778,9 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, workspaceRoots, runtim
 			warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
 			break
 		}
-		if runtimeRoot && reportRuntimeRoot != nil && reportedRuntimeRoots < workspaceProgressReportLimit {
-			reportRuntimeRoot(root)
-			reportedRuntimeRoots++
+		if !externalRuntimeRoot && reportWorkspaceRoot != nil && reportedWorkspaceRoots < workspaceProgressReportLimit {
+			reportWorkspaceRoot(root)
+			reportedWorkspaceRoots++
 		}
 		var files []string
 		var truncated bool
@@ -1426,39 +1535,67 @@ func (s *Server) runtimepathHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 }
 
 func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRuntimepathParams) error {
+	return s.changeRuntimepath(ctx, params, false)
+}
+
+func (s *Server) changeRuntimepath(ctx context.Context, params *DidChangeRuntimepathParams, reconcile bool) error {
 	if params == nil {
 		return nil
 	}
 	s.workspaceMu.Lock()
+	if reconcile && len(s.runtimePaths) == 0 && len(s.runtimepathIndexedPaths) == 0 {
+		s.workspaceMu.Unlock()
+		return nil
+	}
 	if s.analysisStopped || s.analysisContext.Err() != nil || ctx.Err() != nil {
 		s.workspaceMu.Unlock()
 		return nil
 	}
-	// Reserve input order before releasing the connection read loop. Even a
-	// no-op newer update supersedes an older, still-running discovery.
-	if s.runtimepathCancel != nil {
-		s.runtimepathCancel()
+	// Reserve input order before releasing the JSON-RPC read loop. Pending
+	// updates coalesce; an active batch is never canceled by a newer update.
+	if !reconcile {
+		s.runtimepathGeneration++
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	s.runtimepathCancel = cancel
-	s.runtimepathGeneration++
 	generation := s.runtimepathGeneration
 	s.runtimepathWG.Add(1)
 	s.workspaceMu.Unlock()
 	defer s.runtimepathWG.Done()
-	defer cancel()
 	jsonrpc2.Async(ctx)
-	paths := usableRuntimePaths(params.Runtimepath)
-	for range 2 {
+	ctx, cancel := s.workspaceOperationContext(ctx)
+	defer cancel()
+	if !reconcile {
+		timer := time.NewTimer(defaultRuntimepathDebounce)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timer.C:
+		}
+	}
+	s.runtimepathRunMu.Lock()
+	defer s.runtimepathRunMu.Unlock()
+	s.workspaceMu.Lock()
+	current := reconcile || generation == s.runtimepathGeneration
+	paths := append([]string(nil), s.runtimePaths...)
+	s.workspaceMu.Unlock()
+	if !current || ctx.Err() != nil {
+		return nil
+	}
+	if !reconcile {
+		paths = usableRuntimePaths(params.Runtimepath)
+	} else {
+		paths = usableRuntimePaths(paths)
+	}
+	for ctx.Err() == nil {
 		s.publishMu.Lock()
 		s.workspaceMu.Lock()
-		if generation != s.runtimepathGeneration || s.analysisContext.Err() != nil || ctx.Err() != nil {
+		if s.analysisContext.Err() != nil || ctx.Err() != nil {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
 			return nil
 		}
-		oldPaths := append([]string(nil), s.runtimePaths...)
-		if slices.Equal(oldPaths, paths) {
+		oldPaths := append([]string(nil), s.runtimepathIndexedPaths...)
+		if slices.Equal(oldPaths, paths) && slices.Equal(s.runtimePaths, paths) && (!reconcile || len(paths) == 0) {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
 			return nil
@@ -1475,23 +1612,11 @@ func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRunt
 			}
 			return nil
 		}
-	}
-	// Repeated document/index churn must not lose a notification's intent.
-	// Fall back to the existing rebuild worker, which validates fresh overlays.
-	s.publishMu.Lock()
-	s.workspaceMu.Lock()
-	current := generation == s.runtimepathGeneration && s.analysisContext.Err() == nil && ctx.Err() == nil
-	if current {
-		s.runtimePaths = append([]string(nil), paths...)
-		s.updateRuntimeHelpLocked()
-		s.workspaceResolver = nil
-		s.resetWorkspaceGraphLocked()
-		s.workspaceRevision++
-	}
-	s.workspaceMu.Unlock()
-	s.publishMu.Unlock()
-	if current {
-		s.scheduleWorkspaceRebuild()
+		// Retry only this delta after overlay churn; never rescan the workspace.
+		select {
+		case <-ctx.Done():
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	return nil
 }
@@ -1510,15 +1635,15 @@ func (s *Server) workspaceOperationContext(ctx context.Context) (context.Context
 	}
 }
 
-func remainingWorkspaceIndexCapacity(index *workspace.Index, workspaceFiles map[string]struct{}, openByPath map[string]*text.Snapshot, activeRoots []string, maxFiles, maxBytes int) (files, bytes int) {
+func remainingWorkspaceIndexCapacity(index *workspace.Index, workspaceFiles map[string]struct{}, openByPath map[string]*text.Snapshot, retain func(string) bool, maxFiles, maxBytes int) (files, bytes int) {
 	removed := make(map[string]struct{}, len(workspaceFiles)+len(openByPath))
 	for path := range workspaceFiles {
-		if !workspacePathInRoots(path, activeRoots) {
+		if !retain(path) {
 			removed[path] = struct{}{}
 		}
 	}
 	for path := range openByPath {
-		if !workspacePathInRoots(path, activeRoots) {
+		if !retain(path) {
 			removed[path] = struct{}{}
 		}
 	}
@@ -1544,9 +1669,10 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	oldGraph := s.workspaceGraphView
 	index := s.workspaceIndex
 	identity := s.workspaceIdentityLocked()
-	generation := s.runtimepathGeneration
-	workspaceRoots := append([]string(nil), s.workspaceRoots...)
-	activeRoots := workspaceIndexRoots(s.workspaceRoots, newPaths)
+	workspaceRoots := normalizeWorkspaceRoots(s.workspaceRoots)
+	retain := func(path string) bool {
+		return workspacePathInRoots(path, workspaceRoots) || runtimePathSourceInRoots(path, newPaths)
+	}
 	allOpenByPath := make(map[string]*text.Snapshot, len(openSnapshots))
 	openByPath := make(map[string]*text.Snapshot, len(openSnapshots))
 	for _, snapshot := range openSnapshots {
@@ -1555,7 +1681,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 			continue
 		}
 		allOpenByPath[path] = snapshot
-		if workspacePathInRoots(path, activeRoots) {
+		if retain(path) {
 			openByPath[path] = snapshot
 		}
 	}
@@ -1563,7 +1689,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	// Calculate how many bytes and files will be freed by removing files
 	// belonging to deleted runtime paths. This ensures the capacity budget
 	// accurately credits freed space when swapping runtime paths.
-	remainingFiles, remainingBytes := remainingWorkspaceIndexCapacity(index, s.workspaceFiles, allOpenByPath, activeRoots, maxWorkspaceFiles, maxIndexBytes)
+	remainingFiles, remainingBytes := remainingWorkspaceIndexCapacity(index, s.workspaceFiles, allOpenByPath, retain, maxWorkspaceFiles, maxIndexBytes)
 
 	complete := index.Complete()
 	indexedSources := make(map[string]string, len(s.workspaceFiles)+len(allOpenByPath))
@@ -1599,73 +1725,88 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	newPathsToIndex := make([]string, 0)
 	newSources := make([]string, 0)
 	newDiskFiles := make([]bool, 0)
+	var addedRoots []string
 	for _, root := range newPaths {
-		if _, retained := oldSet[root]; retained {
-			continue
+		if _, retained := oldSet[root]; !retained && !workspacePathInRoots(root, workspaceRoots) {
+			addedRoots = append(addedRoots, root)
 		}
-		if workspacePathInRoots(root, workspaceRoots) {
-			continue
-		}
-		if remainingBytes <= 0 {
+	}
+	for rootStart := 0; rootStart < len(addedRoots); rootStart += runtimepathScanWorkers {
+		if remainingBytes <= 0 || remainingFiles <= len(newPathsToIndex) {
 			complete = false
 			break
 		}
-		remaining := remainingFiles - len(newPathsToIndex)
-		if remaining <= 0 {
-			complete = false
-			break
-		}
-		runtimeFiles, truncated, err := s.discoverRuntimePathFilesContext(ctx, root, remaining)
-		files := runtimeFiles.Sources
-		runtimeColors = append(runtimeColors, runtimeFiles.Colors...)
-		if ctx.Err() != nil {
-			return false
-		}
-		if err != nil {
-			// Runtimepath roots are client-owned optional inputs. Treat a root
-			// that disappears or becomes unreadable as absent without a warning.
-			continue
-		}
-		if truncated {
-			complete = false
-		}
-		for _, path := range files {
-			if _, seen := discovered[path]; seen {
+		rootEnd := min(rootStart+runtimepathScanWorkers, len(addedRoots))
+		rootResults := s.discoverRuntimeRoots(ctx, addedRoots[rootStart:rootEnd], remainingFiles-len(newPathsToIndex))
+		for _, result := range rootResults {
+			if remainingBytes <= 0 {
+				complete = false
+				break
+			}
+			remaining := remainingFiles - len(newPathsToIndex)
+			if remaining <= 0 {
+				complete = false
+				break
+			}
+			runtimeFiles, truncated, err := result.files, result.truncated, result.err
+			files := runtimeFiles.Sources
+			runtimeColors = append(runtimeColors, runtimeFiles.Colors...)
+			if ctx.Err() != nil {
+				return false
+			}
+			if err != nil {
+				// Runtimepath roots are client-owned optional inputs. Treat a root
+				// that disappears or becomes unreadable as absent without a warning.
 				continue
 			}
-			discovered[path] = struct{}{}
-			if _, indexed := indexedSources[path]; indexed {
-				continue
+			if truncated {
+				complete = false
 			}
-			var source string
-			diskFile := false
-			if snapshot := openByPath[path]; snapshot != nil {
-				source = snapshot.Text()
-				if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
+			for _, path := range files {
+				if workspacePathInRoots(path, workspaceRoots) {
+					continue
+				}
+				if len(newPathsToIndex) >= remainingFiles {
+					complete = false
+					break
+				}
+				if _, seen := discovered[path]; seen {
+					continue
+				}
+				discovered[path] = struct{}{}
+				if _, indexed := indexedSources[path]; indexed {
+					continue
+				}
+				var source string
+				diskFile := false
+				if snapshot := openByPath[path]; snapshot != nil {
+					source = snapshot.Text()
+					if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
+						diskFile = true
+					}
+				} else {
+					content, ok := readRegularWorkspaceFile(path, maxFileBytes)
+					if !ok {
+						complete = false
+						continue
+					}
+					source = string(content)
 					diskFile = true
 				}
-			} else {
-				content, ok := readRegularWorkspaceFile(path, maxFileBytes)
-				if !ok {
+				if len(source) > maxFileBytes {
 					complete = false
 					continue
 				}
-				source = string(content)
-				diskFile = true
+				if len(source) > remainingBytes {
+					complete = false
+					remainingBytes = 0
+					break
+				}
+				remainingBytes -= len(source)
+				newPathsToIndex = append(newPathsToIndex, path)
+				newSources = append(newSources, source)
+				newDiskFiles = append(newDiskFiles, diskFile)
 			}
-			if len(source) > maxFileBytes {
-				complete = false
-				continue
-			}
-			if len(source) > remainingBytes {
-				complete = false
-				remainingBytes = 0
-				break
-			}
-			remainingBytes -= len(source)
-			newPathsToIndex = append(newPathsToIndex, path)
-			newSources = append(newSources, source)
-			newDiskFiles = append(newDiskFiles, diskFile)
 		}
 	}
 	if ctx.Err() != nil {
@@ -1680,7 +1821,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	}
 	resolvedFacts := make(map[string][]workspace.ImportFact, len(indexedSources)+len(parsed))
 	for path := range indexedSources {
-		if workspacePathInRoots(path, activeRoots) {
+		if retain(path) {
 			resolvedFacts[path] = oldGraph.Imports(path)
 		}
 	}
@@ -1701,13 +1842,19 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	s.publishMu.Lock()
 	s.workspaceMu.Lock()
 	locked = true
-	if ctx.Err() != nil || s.analysisStopped || s.analysisContext.Err() != nil || generation != s.runtimepathGeneration || !s.workspaceIdentityCurrentLocked(identity) || !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
+	if ctx.Err() != nil || s.analysisStopped || s.analysisContext.Err() != nil || !s.workspaceIdentityCurrentLocked(identity) || !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
 		return false
 	}
 	s.runtimePaths = append([]string(nil), newPaths...)
+	s.runtimepathIndexedPaths = append([]string(nil), newPaths...)
+	s.runtimepathWorkspaceRoots = append([]string(nil), workspaceRoots...)
 	s.updateRuntimeHelpLocked()
 	s.workspaceResolver = resolver
-	s.workspaceIndex.SetRuntimePaths(newPaths)
+	searchPaths := newPaths
+	if len(searchPaths) == 0 {
+		searchPaths = workspaceRoots
+	}
+	s.workspaceIndex.SetRuntimePaths(searchPaths)
 	for _, path := range runtimeColors {
 		if workspacePathInRoots(path, workspaceRoots) {
 			continue
@@ -1717,7 +1864,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 		}
 	}
 	for path := range s.workspaceFiles {
-		if workspacePathInRoots(path, activeRoots) {
+		if retain(path) {
 			continue
 		}
 		s.workspaceIndex.Remove(path)
@@ -1726,7 +1873,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	// Open snapshots with no disk backing are not in workspaceFiles. They must
 	// disappear with a removed root just like ordinary indexed files.
 	for path := range allOpenByPath {
-		if workspacePathInRoots(path, activeRoots) {
+		if retain(path) {
 			continue
 		}
 		s.workspaceIndex.Remove(path)

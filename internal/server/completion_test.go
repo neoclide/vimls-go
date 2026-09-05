@@ -1501,7 +1501,7 @@ func TestCompletionResolveIsStatelessAndPreservesFields(t *testing.T) {
 		{label: "abs", kind: completionResolveBuiltinFunction, name: "abs"},
 		{label: "&ignorecase", kind: completionResolveOption, name: "ignorecase", documentation: true},
 		{label: "v:count", kind: completionResolveVariable, name: "v:count", documentation: true},
-		{label: "echo", kind: completionResolveCommand, name: "echo", documentation: true},
+		{label: "echo", kind: completionResolveCommand, name: "echo"},
 	} {
 		resolved, err = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: test.label, Data: completionResolveTargetData(test.kind, test.name)})
 		if err != nil || resolved == nil {

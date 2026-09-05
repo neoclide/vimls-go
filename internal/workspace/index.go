@@ -239,9 +239,11 @@ func (i *Index) SetRuntimePaths(paths []string) {
 		i.addRuntimeFileLocked(path)
 	}
 	for path := range i.runtimeCatalog {
-		if !i.addRuntimeFileLocked(path) {
+		if !i.runtimeColorPathLocked(path) {
 			delete(i.runtimeCatalog, path)
+			continue
 		}
+		i.addRuntimeFileLocked(path)
 	}
 	i.mu.Unlock()
 }
@@ -261,6 +263,36 @@ func (i *Index) AddRuntimePathFile(path string) error {
 	i.runtimeCatalog[normalized] = struct{}{}
 	i.addRuntimeFileLocked(normalized)
 	return nil
+}
+
+// CopyRuntimeCatalogFrom retains path-only entries that belong to this index's
+// runtime roots, without rediscovering them on a workspace rebuild.
+func (i *Index) CopyRuntimeCatalogFrom(source *Index) {
+	source.mu.RLock()
+	paths := make([]string, 0, len(source.runtimeCatalog))
+	for path := range source.runtimeCatalog {
+		paths = append(paths, path)
+	}
+	source.mu.RUnlock()
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for _, path := range paths {
+		if i.runtimeColorPathLocked(path) && i.addRuntimeFileLocked(path) {
+			if i.runtimeCatalog == nil {
+				i.runtimeCatalog = make(map[string]struct{})
+			}
+			i.runtimeCatalog[path] = struct{}{}
+		}
+	}
+}
+
+func (i *Index) runtimeColorPathLocked(path string) bool {
+	for _, root := range i.runtimePaths {
+		if IsRuntimePathColorPath(root, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewIndex creates a workspace symbol index with file-count and source-byte
@@ -330,6 +362,25 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	aliases := CollectTypeAliasFacts(normalized, file)
 	calls := CollectCallFactsFromAnalysis(normalized, file, result)
 	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, augroups: augroups, globals: globals, types: types, aliases: aliases, calls: calls}
+	return i.replaceIndexedFile(normalized, indexed)
+}
+
+// CopyFileFrom reuses immutable analysis facts when rebuilding another part
+// of the index. No source is read or parsed. Missing files are ignored.
+func (i *Index) CopyFileFrom(source *Index, path string) error {
+	source.mu.RLock()
+	file, ok := source.files[path]
+	source.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	return i.replaceIndexedFile(path, file)
+}
+
+func (i *Index) replaceIndexedFile(normalized string, indexed indexedFile) error {
+	facts, references, commands := indexed.facts, indexed.references, indexed.commands
+	augroups, globals := indexed.augroups, indexed.globals
+	types, aliases, calls := indexed.types, indexed.aliases, indexed.calls
 
 	i.mu.Lock()
 	defer i.mu.Unlock()

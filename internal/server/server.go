@@ -144,6 +144,7 @@ type serverTestHooks struct {
 // Server mutexes use a partial, not total, lock order. When multiple Server
 // mutexes are held, acquire them only in these directions:
 //
+//	runtimepathRunMu -> publishMu
 //	publishMu -> mu
 //	publishMu -> workspaceMu -> analysisMu
 //	publishMu -> analysisMu
@@ -222,7 +223,9 @@ type Server struct {
 	workspaceRoots              []string
 	runtimePaths                []string
 	runtimepathGeneration       uint64
-	runtimepathCancel           context.CancelFunc
+	runtimepathRunMu            sync.Mutex // serializes runtime batches and workspace installation
+	runtimepathIndexedPaths     []string
+	runtimepathWorkspaceRoots   []string
 	runtimepathWG               sync.WaitGroup
 	runtimeHelp                 map[string]vimhelp.SymbolDocumentation
 	runtimeHelpRoots            map[string][]string

@@ -109,34 +109,3 @@ func TestToMarkdownEndsExampleAtUnindentedProse(t *testing.T) {
 		t.Fatalf("Markdown =\n%s", markdown)
 	}
 }
-
-func TestExtractSharesTableDocumentationAcrossVariants(t *testing.T) {
-	source := []byte(`:first {arg}		|mode-1|	*:first*
-:second {arg}		|mode-2|	*:second*
-:third {arg}		|mode-3|	*:third*
-	Shared table documentation for all modes.
-	Second paragraph.
-
-:other				*:other*
-	Other documentation.
-`)
-	docs, err := ExtractCommands("test.txt", source, []string{":first", ":second", ":third", ":other"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{":first", ":second", ":third"} {
-		doc := docs[name].Markdown
-		if !strings.Contains(doc, name+" {arg}") {
-			t.Errorf("%s missing header: %q", name, doc)
-		}
-		if !strings.Contains(doc, "Shared table documentation for all modes.") {
-			t.Errorf("%s missing shared prose: %q", name, doc)
-		}
-	}
-	if strings.Contains(docs[":first"].Markdown, ":second") {
-		t.Errorf(":first should not contain :second header: %q", docs[":first"].Markdown)
-	}
-	if strings.Contains(docs[":other"].Markdown, "Shared table documentation") {
-		t.Errorf(":other should not contain shared prose: %q", docs[":other"].Markdown)
-	}
-}

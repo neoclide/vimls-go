@@ -662,21 +662,6 @@ func TestHoverDistinguishesBuiltinFunctionFromSameNamedExCommand(t *testing.T) {
 	}
 }
 
-func TestHoverKeepsAppendExCommandDocumentation(t *testing.T) {
-	instance, documentURI := openNavigationDocument(t, text.UTF16, "append\ntext\n.\n")
-	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
-		Position:     protocol.Position{Character: 2},
-	}})
-	if err != nil || hover == nil {
-		t.Fatalf("hover = %#v, %v", hover, err)
-	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || !strings.HasPrefix(content.Value, ":{range}a[ppend][!]") {
-		t.Fatalf("append command hover = %#v", hover.Contents)
-	}
-}
-
 func assertFunctionHoverContents(t *testing.T, hover *protocol.Hover, signature, documentation string) {
 	t.Helper()
 	contents, ok := hover.Contents.(protocol.MarkedStringSlice)
@@ -845,7 +830,7 @@ func TestHoverShowsSetCommandOptionHelp(t *testing.T) {
 		prefix    string
 		fragment  string
 	}{
-		{name: "set command", line: 0, character: 1, prefix: ":se[t]", fragment: "Show all options that differ from their default value"},
+		{name: "set command", line: 0, character: 1, prefix: "**set**", fragment: "An Ex command."},
 		{name: "backspace", line: 0, character: 5, prefix: "'backspace' 'bs'", fragment: "Influences the working of <BS>"},
 		{name: "nonumber prefix", line: 0, character: 17, prefix: "'number' 'nu'", fragment: "Print the line number"},
 		{name: "nonumber name", line: 0, character: 20, prefix: "'number' 'nu'", fragment: "Print the line number"},
@@ -926,37 +911,6 @@ func TestOptionBuildRequirementFormatting(t *testing.T) {
 		if got := optionBuildRequirement(tt.condition, tt.features); got != tt.want {
 			t.Errorf("optionBuildRequirement(%q, %v) = %q, want %q", tt.condition, tt.features, got, tt.want)
 		}
-	}
-}
-
-func TestHoverShowsPinnedExCommandHelpForAbbreviation(t *testing.T) {
-	instance, documentURI := openNavigationDocument(t, text.UTF16, "ec 'value'\n")
-	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Character: 1},
-	}})
-	if err != nil || hover == nil {
-		t.Fatalf("hover = %#v, %v", hover, err)
-	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, ":ec[ho]") || !strings.Contains(content.Value, "Echoes each {expr1}") || len(content.Value) > maxLanguageFeatureDocumentationBytes {
-		t.Fatalf("hover content = %#v", hover.Contents)
-	}
-	if strings.Contains(content.Value, "An Ex command") {
-		t.Fatalf("hover content still has redundant Ex command description: %q", content.Value)
-	}
-}
-
-func TestHoverShowsColorschemeCommandHelp(t *testing.T) {
-	instance, documentURI := openNavigationDocument(t, text.UTF16, "colorscheme desert\n")
-	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
-		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Character: 4},
-	}})
-	if err != nil || hover == nil {
-		t.Fatalf("hover = %#v, %v", hover, err)
-	}
-	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, ":colo[rscheme]") || strings.Contains(content.Value, "An Ex command") {
-		t.Fatalf("hover content = %#v", hover.Contents)
 	}
 }
 
@@ -2085,10 +2039,7 @@ func TestHoverKeymapDetails(t *testing.T) {
 			character: 2,
 			wantRange: navigationRange(0, 0, 8),
 			contains: []string{
-				":vn[oremap] {lhs} {rhs}",
-				"`mapmode-v`",
-				"Map the key sequence {lhs} to {rhs} for the modes",
-				"Disallow mapping of",
+				"**vnoremap** An Ex command.",
 			},
 		},
 		{

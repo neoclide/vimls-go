@@ -420,3 +420,34 @@ func TestRuntimeHelpRetainsInFlightParseWhenAddingOrReorderingRoots(t *testing.T
 		t.Fatal("in-flight root was reparsed or reordered precedence was lost")
 	}
 }
+
+func TestBuiltinCommandHoverUsesOnlyRuntimeHelp(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "doc/commands.txt", "*:append*\nRuntime append command help.\n*append()*\nUnrelated function help.\n*:echo*\nRuntime echo command help.\n*:colorscheme*\nRuntime colorscheme command help.\n")
+	for _, tc := range []struct{ source, needle, name string }{
+		{"append\ntext\n.\n", "append", "append"},
+		{"ec 'value'\n", "ec", "echo"},
+		{"colorscheme desert\n", "colorscheme", "colorscheme"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, tc.source)
+			t.Cleanup(instance.stopAnalysis)
+			before := runtimeHelpHover(t, instance, documentURI, tc.needle)
+			content, ok := before.Contents.(*protocol.MarkupContent)
+			if !ok || content.Value != "**"+tc.name+"** An Ex command." {
+				t.Fatalf("embedded command documentation: %#v", before)
+			}
+			instance.setRuntimePaths([]string{root})
+			instance.runtimeHelpWG.Wait()
+			after := runtimeHelpHover(t, instance, documentURI, tc.needle)
+			sections, ok := after.Contents.(protocol.MarkedStringSlice)
+			if !ok || len(sections) != 2 {
+				t.Fatalf("hover sections = %#v", after)
+			}
+			body := fmt.Sprint(after.Contents)
+			if strings.Count(body, "Runtime "+tc.name+" command help.") != 1 || strings.Contains(body, "Unrelated function help.") || !strings.Contains(body, "commands.txt:") {
+				t.Fatalf("command help = %s", body)
+			}
+		})
+	}
+}

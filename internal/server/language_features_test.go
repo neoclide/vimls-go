@@ -241,18 +241,33 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 
 func TestCompletionResolveAddsExCommandDocumentation(t *testing.T) {
 	instance, _ := openNavigationDocument(t, text.UTF16, "echo write\n")
-	for _, label := range []string{"echo", "qall", "set"} {
-		resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindKeyword, Data: completionResolveTargetData(completionResolveCommand, label)})
-		if err != nil {
-			t.Fatal(err)
+	t.Cleanup(instance.stopAnalysis)
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "doc/commands.txt", "*:echo*\nRuntime echo help.\n*:qall*\nRuntime qall help.\n*:set*\nRuntime set help.\n")
+	for _, loaded := range []bool{false, true} {
+		if loaded {
+			instance.setRuntimePaths([]string{root})
+			instance.runtimeHelpWG.Wait()
 		}
-		detail, ok := resolved.Detail.Get()
-		if !ok || detail != "Ex command" {
-			t.Fatalf("resolve %q detail = %q, %t; item=%#v", label, detail, ok, resolved)
-		}
-		documentation, ok := resolved.Documentation.(*protocol.MarkupContent)
-		if !ok || documentation.Kind != protocol.MarkupKindMarkdown || strings.TrimSpace(documentation.Value) == "" {
-			t.Fatalf("resolve %q documentation = %#v", label, resolved.Documentation)
+		for _, label := range []string{"echo", "qall", "set"} {
+			resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: label, Kind: protocol.CompletionItemKindKeyword, Data: completionResolveTargetData(completionResolveCommand, label)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			detail, ok := resolved.Detail.Get()
+			if !ok || detail != "Ex command" {
+				t.Fatalf("resolve %q detail = %q", label, detail)
+			}
+			if !loaded {
+				if resolved.Documentation != nil {
+					t.Fatalf("embedded command documentation: %#v", resolved.Documentation)
+				}
+				continue
+			}
+			documentation, ok := resolved.Documentation.(*protocol.MarkupContent)
+			if !ok || documentation.Kind != protocol.MarkupKindMarkdown || !strings.Contains(documentation.Value, "Runtime "+label+" help.") {
+				t.Fatalf("resolve %q documentation = %#v", label, resolved.Documentation)
+			}
 		}
 	}
 }

@@ -65,7 +65,20 @@ work-done token and sends `$/progress` `begin` and `end` notifications for each
 full workspace index rebuild. The progress begins when the debounced scan
 actually starts, not while changes are still being coalesced. Incremental
 open-document indexing does not create progress. Clients that do not advertise
-the capability receive no progress traffic.
+the capability receive no progress traffic. Reports name workspace folders only;
+progress ends after their index is installed, before external runtimepath work.
+Runtimepath roots outside workspace folders are scanned with at most four
+goroutines. Each completed directory scan sends `window/logMessage` with its
+path, file counts and elapsed scan time. Contained runtime roots are handled
+by workspace discovery only.
+
+After each workspace or runtimepath index installation, the server requests
+`workspace/diagnostic/refresh` (pull-diagnostic clients only),
+`workspace/semanticTokens/refresh`, `workspace/inlayHint/refresh`, and, when the
+index is complete, `workspace/codeLens/refresh`. Each request requires the
+corresponding client `refreshSupport` capability. Push-diagnostic clients get
+updated diagnostics through reanalysis. Hover, completion and navigation use
+the new index on their next request.
 
 ## Workspace settings
 
@@ -202,7 +215,12 @@ This is a server request handled by vimls-go, not an LSP built-in method:
 ```
 
 The request succeeds with JSON `null`. Notifications with the same method stay
-supported for existing clients. The ordered runtime roots are atomically
+supported for existing clients. Updates use a 100ms debounce; only the latest
+pending list is processed. A newer update does not cancel an active runtimepath
+batch: that batch finishes before the next debounced update starts. Explicit
+request cancellation and shutdown still cancel their work. Workspace rebuilds
+reuse retained external runtime analysis facts and colorscheme paths.
+The ordered runtime roots are atomically
 replaced after canonicalization and de-duplication; invalid, missing,
 non-directory, and unreadable roots are silently dropped. A no-op changes
 nothing. Reordering only updates runtime lookup precedence and import
@@ -211,7 +229,8 @@ removed roots discard only files outside every workspace or retained runtime
 root. File watchers cover workspace roots only; runtimepath changes do not
 refresh watcher registration or trigger a watcher rebuild. Runtimepath files
 change when the client sends this request (or an explicit watched-file event).
-Discovery and read failures inside runtime roots are skipped silently as absent.
+Discovery and read failures inside runtime roots are skipped as absent;
+directory discovery errors are included in the scan log.
 Send an empty array to disable runtime indexing and clear runtime help.
 
 Global variable/function, autoload and complete `<Plug>(name)` mapping help from

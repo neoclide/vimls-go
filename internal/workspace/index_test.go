@@ -238,6 +238,36 @@ func TestIndexUserCommandNamesTrackReplaceAndRemove(t *testing.T) {
 	}
 }
 
+func TestIndexCopiedRuntimeFactsSurviveIndependentReplacement(t *testing.T) {
+	root, err := CanonicalPath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "plugin", "test.vim")
+	original, copied := NewIndex(10, 10000), NewIndex(10, 10000)
+	source := "command! Original echo 1\nfunction! GlobalRun(arg)\nendfunction\n"
+	if err := original.Replace(path, syntax.Parse(source)); err != nil {
+		t.Fatal(err)
+	}
+	if err := copied.CopyFileFrom(original, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := original.Replace(path, syntax.Parse("command! Changed echo 2\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := copied.Source(path); !ok || got != source || !copied.HasGlobalFunction("GlobalRun") {
+		t.Fatalf("copied facts changed: %q", got)
+	}
+	copied.Remove(path)
+	if names := original.UserCommandNames(); len(names) != 1 || names[0] != "Changed" {
+		t.Fatalf("copy removal changed original: %v", names)
+	}
+	limited := NewIndex(1, 1)
+	if err := limited.CopyFileFrom(original, path); err != ErrIndexLimit || limited.FileCount() != 0 {
+		t.Fatalf("copy bypassed capacity: %v", err)
+	}
+}
+
 func TestIndexAugroupNamesTrackReplaceAndRemove(t *testing.T) {
 	index := NewIndex(10, 10000)
 	root := t.TempDir()

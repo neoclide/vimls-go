@@ -873,9 +873,6 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** A function.", name), "", "function not found"})
 		}
 		if command, ok := exCommandAt(document.analysis.File, document.occurrence); ok && !vimdata.IsNeovimCompatCommand(command.Name) {
-			if command.Documentation != "" {
-				return s.localHoverResult(ctx, document, []string{command.Documentation})
-			}
 			return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** An Ex command.", command.Name)})
 		}
 		return nil, nil

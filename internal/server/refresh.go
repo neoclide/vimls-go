@@ -1,5 +1,10 @@
 package server
 
+// Both workspace and runtimepath installations change cross-file name/type
+// resolution (diagnostics, semantic tokens and inlay hints) and reference/
+// implementation counts (Code Lens). Each sender checks client capabilities;
+// diagnostic refresh additionally requires pull diagnostics. Hover, completion
+// and navigation read the new index on their next request and have no refresh.
 // Call only after installing workspace data, without holding server locks.
 func (s *Server) scheduleWorkspaceRefresh(indexComplete bool) {
 	s.scheduleDiagnosticRefresh()

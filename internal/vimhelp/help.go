@@ -54,16 +54,6 @@ type boundary struct {
 // Extract selects target help tags from one runtime help file. Multiple target
 // tags on the same heading line share the same Markdown entry.
 func Extract(sourceName string, source []byte, targets []string) (map[string]Documentation, error) {
-	return extractHelp(sourceName, source, targets, false)
-}
-
-// ExtractCommands selects target help tags for Ex commands, attaching shared
-// explanation prose following command definition tables to each variant in the table.
-func ExtractCommands(sourceName string, source []byte, targets []string) (map[string]Documentation, error) {
-	return extractHelp(sourceName, source, targets, true)
-}
-
-func extractHelp(sourceName string, source []byte, targets []string, shareTableProse bool) (map[string]Documentation, error) {
 	targetSet := make(map[string]bool, len(targets))
 	for _, target := range targets {
 		if target == "" || targetSet[target] {
@@ -120,34 +110,7 @@ func extractHelp(sourceName string, source []byte, targets []string, shareTableP
 		current := boundaries[index]
 		end := boundaryEnd(lines, boundaries, index)
 
-		var markdown string
-		if shareTableProse && index+1 < len(boundaries) && end-current.line <= 2 &&
-			!hasBlankLine(lines, current.line, end) &&
-			!hasIndentedProse(lines, current.line+1, end) {
-			tailIndex := index
-			for k := index + 1; k < len(boundaries); k++ {
-				if boundaries[k].line-boundaries[k-1].line > 2 ||
-					hasBlankLine(lines, boundaries[k-1].line, boundaries[k].line) {
-					break
-				}
-				tailEnd := boundaryEnd(lines, boundaries, k)
-				if hasIndentedProse(lines, boundaries[k].line+1, tailEnd) {
-					tailIndex = k
-					break
-				}
-			}
-			if tailIndex > index {
-				tailEnd := boundaryEnd(lines, boundaries, tailIndex)
-				header := lines[current.line]
-				shared := lines[boundaries[tailIndex].line+1 : tailEnd]
-				merged := append([]string{header}, shared...)
-				markdown = ToMarkdown(strings.Join(merged, "\n"))
-			}
-		}
-
-		if markdown == "" {
-			markdown = ToMarkdown(strings.Join(lines[current.line:end], "\n"))
-		}
+		markdown := ToMarkdown(strings.Join(lines[current.line:end], "\n"))
 		if markdown == "" {
 			return nil, fmt.Errorf("Vim help tags %s have empty documentation in %s", strings.Join(current.tags, ", "), sourceName)
 		}
@@ -171,29 +134,6 @@ func boundaryEnd(lines []string, boundaries []boundary, index int) int {
 		}
 	}
 	return end
-}
-
-func hasIndentedProse(lines []string, start, end int) bool {
-	for line := start; line < end; line++ {
-		original := lines[line]
-		trimmed := strings.TrimSpace(original)
-		if trimmed == "" {
-			continue
-		}
-		if (strings.HasPrefix(original, " ") || strings.HasPrefix(original, "\t")) && !strings.HasPrefix(trimmed, ":") {
-			return true
-		}
-	}
-	return false
-}
-
-func hasBlankLine(lines []string, start, end int) bool {
-	for line := start; line < end; line++ {
-		if strings.TrimSpace(lines[line]) == "" {
-			return true
-		}
-	}
-	return false
 }
 
 // ToMarkdown converts the small set of Vim help markup used by generated

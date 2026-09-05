@@ -304,7 +304,7 @@ func TestVimWatcherRegistrationHonorsClientCapabilities(t *testing.T) {
 
 func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
 	runtimeRoot := t.TempDir()
-	instance, writer, _ := runtimepathTestSession(t)
+	instance, writer, reader := runtimepathTestSession(t)
 	started := make(chan struct{})
 	instance.testHooks.discoverWorkspaceFiles = func(context.Context, string, int) ([]string, bool, error) {
 		close(started)
@@ -312,6 +312,10 @@ func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
 	}
 	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot))
 	waitForServerRace(t, started, "runtimepath notification")
+	message := readFrame(t, reader)
+	if string(message["method"]) != `"window/logMessage"` {
+		t.Fatalf("runtime scan notification = %v", message)
+	}
 	instance.runtimepathWG.Wait()
 	instance.workspaceMu.Lock()
 	paths := append([]string(nil), instance.runtimePaths...)
@@ -327,6 +331,9 @@ func TestRuntimepathCustomRequestDispatchesNullResult(t *testing.T) {
 	_, writer, reader := runtimepathTestSession(t)
 	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot))
 	message := readFrame(t, reader)
+	if string(message["method"]) == `"window/logMessage"` {
+		message = readFrame(t, reader)
+	}
 	if idNumber(t, message) != 2 || string(message["result"]) != "null" {
 		t.Fatalf("request response = %#v", message)
 	}
@@ -1868,7 +1875,7 @@ func TestWorkspaceIndexProgressReportFailureStillEnds(t *testing.T) {
 	}
 }
 
-func TestWorkspaceIndexProgressReportsBoundedRuntimeRoots(t *testing.T) {
+func TestWorkspaceIndexProgressReportsBoundedWorkspaceRoots(t *testing.T) {
 	roots := make([]string, workspaceProgressReportLimit+1)
 	for index := range roots {
 		roots[index] = t.TempDir()
@@ -1876,7 +1883,7 @@ func TestWorkspaceIndexProgressReportsBoundedRuntimeRoots(t *testing.T) {
 	reported := make([]string, 0, workspaceProgressReportLimit)
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
-	instance.buildWorkspaceIndex(context.Background(), nil, roots, nil, nil, func(root string) {
+	instance.buildWorkspaceIndex(context.Background(), roots, nil, nil, nil, func(root string) {
 		reported = append(reported, root)
 	})
 	if len(reported) != workspaceProgressReportLimit {
@@ -2045,13 +2052,13 @@ func TestWorkspaceIndexProgressReportDoesNotArriveAfterEnd(t *testing.T) {
 	}
 }
 
-func TestWorkspaceIndexDiscoveryHonorsCancellationBeforeRuntimeRoot(t *testing.T) {
+func TestWorkspaceIndexDiscoveryHonorsCancellationBeforeWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceFile(t, root, "plugin/cancel.vim", "vim9script\nvar Cancelled = 1\n")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	instance := New(nil, nil, io.Discard)
-	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(ctx, nil, []string{root}, nil, nil, func(string) {
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(ctx, []string{root}, nil, nil, nil, func(string) {
 		cancel()
 	})
 	if index.FileCount() != 0 || graph.Snapshot().Ready() || len(diskFiles) != 0 || len(warnings) != 0 {
@@ -2688,7 +2695,7 @@ func TestRemainingWorkspaceIndexCapacityCreditsRemovedOpenFileAtLimit(t *testing
 	}
 	workspaceFiles := map[string]struct{}{diskPath: {}}
 	openByPath := map[string]*text.Snapshot{diskPath: nil, openPath: nil}
-	files, bytes := remainingWorkspaceIndexCapacity(index, workspaceFiles, openByPath, []string{activeRoot}, 2, len(diskSource)+len(openSource))
+	files, bytes := remainingWorkspaceIndexCapacity(index, workspaceFiles, openByPath, func(path string) bool { return workspacePathInRoots(path, []string{activeRoot}) }, 2, len(diskSource)+len(openSource))
 	if files != 1 || bytes != len(openSource) {
 		t.Fatalf("remaining capacity = %d files, %d bytes, want 1 file, %d bytes", files, bytes, len(openSource))
 	}

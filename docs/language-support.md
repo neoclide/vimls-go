@@ -12,13 +12,21 @@ completion metadata. It also reads `doc/*.txt` in the background for global
 variable, global function, autoload function and named `<Plug>` mapping hover
 documentation. Other runtime subtrees are not scanned.
 
+Workspace folder parsing and external runtimepath parsing run in separate
+phases. Workspace parsing reports work-done progress; external directory scans
+use up to four goroutines and log each completed directory. Runtimepath changes
+are debounced for 100ms and processed serially, reusing retained directories and
+removing data no longer owned by any active root. Both phases trigger supported
+diagnostic, semantic-token and inlay-hint refresh requests after installation;
+Code Lens refresh additionally requires a complete index.
+
 ## Available features
 
 | Feature | Support |
 | --- | --- |
 | Diagnostics | Syntax errors, unresolved names, invalid calls, imports and statically provable Vim9 type errors. Capable clients use document and workspace pull diagnostics; legacy clients use push diagnostics. |
 | Completion | Commands, variables, functions, options, events, mappings, highlight and syntax groups, imports, members, autoload names, color schemes and other context-specific values. Built-in resolve documentation comes from the current runtimepath cache. |
-| Hover | Symbol kind, type, signature, source comments and pinned Vim help for Ex commands, options and predefined variables, followed by a separate runtime help document when available. Built-in function prose comes only from the current runtimepath. Variables with semantic information show a type, including `unknown` and explicit Vim9 `any`. |
+| Hover | Symbol kind, type, signature, source comments and pinned Vim help for options and predefined variables, followed by a separate runtime help document when available. Built-in function and Ex command prose comes only from the current runtimepath help worker, including completion documentation. Variables with semantic information show a type, including `unknown` and explicit Vim9 `any`. |
 | Signature help | Built-in functions and statically resolved user functions, imported functions, function values, methods and constructors. Built-in signatures remain pinned; their prose comes from the current runtimepath cache. |
 | Navigation | Definition, declaration, type definition, references, document highlights and document links for statically resolved local, imported, global and autoload symbols. |
 | Hierarchies and implementations | Direct type supertypes/subtypes, interface and abstract-class implementations, compatible member providers, and incoming/outgoing calls for statically resolved named callables. |

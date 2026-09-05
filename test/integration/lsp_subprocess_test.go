@@ -126,7 +126,7 @@ endfunction
 	if err := os.MkdirAll(filepath.Join(runtimeRoot, "doc"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	builtinHelp := "abs({expr}) *abs()*\nReturn the absolute value.\nget({list}, {idx} [, {default}]) *get()*\nReturn an item from a list.\n"
+	builtinHelp := "abs({expr}) *abs()*\nReturn the absolute value.\nget({list}, {idx} [, {default}]) *get()*\nReturn an item from a list.\n*:echo*\nRuntime echo command help.\n"
 	if err := os.WriteFile(filepath.Join(runtimeRoot, "doc", "builtin.txt"), []byte(builtinHelp), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -327,12 +327,12 @@ endfunction
 	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":913,"method":"completionItem/resolve","params":%s}`, completionItemJSON(t, commandCompletion, "echo")))
 	commandResolve := readJSON(t, reader)
-	if string(commandResolve["id"]) != "913" || !strings.Contains(string(commandResolve["result"]), `"detail":"Ex command"`) || !strings.Contains(string(commandResolve["result"]), `Echoes each {expr1}`) {
+	if string(commandResolve["id"]) != "913" || !strings.Contains(string(commandResolve["result"]), `"detail":"Ex command"`) || !strings.Contains(string(commandResolve["result"]), `Runtime echo command help.`) {
 		t.Fatalf("command resolve = %s", commandResolve)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":912,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///completion-command.vim"},"position":{"line":0,"character":1}}}`)
 	commandHover := readJSON(t, reader)
-	if string(commandHover["id"]) != "912" || !strings.Contains(string(commandHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(commandHover["result"]), `:ec[ho]`) || !strings.Contains(string(commandHover["result"]), `Echoes each {expr1}`) {
+	if string(commandHover["id"]) != "912" || strings.Count(string(commandHover["result"]), `Runtime echo command help.`) != 1 || !strings.Contains(string(commandHover["result"]), `builtin.txt:5`) {
 		t.Fatalf("command hover = %s", commandHover)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-string-hover.vim","languageId":"vim","version":1,"text":"vim9script\necho has('gui_running')\necho expand('<cfile>')\n"}}}`)
@@ -424,6 +424,12 @@ endfunction
 		t.Fatalf("runtimepath symbols = %s", runtimeSymbols)
 	}
 	legacyMain := "let g:result = RuntimeGlobal(1)\necho acme#Format('x')\n"
+	// Workspace symbols becoming ready no longer implies external runtime
+	// parsing has finished. Await a runtimepath request before runtime queries.
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":99989,"method":"vimls/didChangeRuntimepath","params":{"runtimepath":[%q]}}`, runtimeRoot))
+	if response := readResponse(t, reader, "99989"); string(response["result"]) != "null" {
+		t.Fatalf("runtimepath readiness = %s", response)
+	}
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///legacy-main.vim","languageId":"vim","version":1,"text":%q}}}`, legacyMain))
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99990,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///legacy-main.vim"},"position":{"line":1,"character":10}}}`)
 	legacyDefinition := readResponse(t, reader, "99990")
@@ -1162,25 +1168,32 @@ func (c *testClient) readTimeout(d time.Duration, waitingFor string) map[string]
 		ctxDone = c.lifetimeCtx.Done()
 	}
 
-	select {
-	case res := <-c.readChan:
-		if res.err != nil {
-			c.failf("read failed while waiting for %s: %v", waitingFor, res.err)
+	for {
+		select {
+		case res := <-c.readChan:
+			if res.err != nil {
+				c.failf("read failed while waiting for %s: %v", waitingFor, res.err)
+				return nil
+			}
+			c.recordTranscript("<-", string(res.body))
+			var msg map[string]json.RawMessage
+			if err := json.Unmarshal(res.body, &msg); err != nil {
+				c.failf("unmarshal frame failed while waiting for %s: %v, raw: %q", waitingFor, err, res.body)
+				return nil
+			}
+			// Directory scan logs are asynchronous and remain in the transcript;
+			// they are not responses to the feature request being asserted.
+			if string(msg["method"]) == `"window/logMessage"` {
+				continue
+			}
+			return msg
+		case <-timer:
+			c.failf("timed out after %v waiting for %s", d, waitingFor)
+			return nil
+		case <-ctxDone:
+			c.failf("subprocess lifetime context canceled while waiting for %s: %v", waitingFor, c.lifetimeCtx.Err())
 			return nil
 		}
-		c.recordTranscript("<-", string(res.body))
-		var msg map[string]json.RawMessage
-		if err := json.Unmarshal(res.body, &msg); err != nil {
-			c.failf("unmarshal frame failed while waiting for %s: %v, raw: %q", waitingFor, err, res.body)
-			return nil
-		}
-		return msg
-	case <-timer:
-		c.failf("timed out after %v waiting for %s", d, waitingFor)
-		return nil
-	case <-ctxDone:
-		c.failf("subprocess lifetime context canceled while waiting for %s: %v", waitingFor, c.lifetimeCtx.Err())
-		return nil
 	}
 }
 

@@ -114,7 +114,7 @@ func TestRuntimepathWireShutdownCancelsDiscovery(t *testing.T) {
 	}
 }
 
-func TestRuntimepathDeltaNewerNoopSupersedesDiscovery(t *testing.T) {
+func TestRuntimepathDeltaNewerEmptyUpdateWaitsForDiscovery(t *testing.T) {
 	s := initializeWorkspaceServer(t, t.TempDir())
 	started, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -129,11 +129,20 @@ func TestRuntimepathDeltaNewerNoopSupersedesDiscovery(t *testing.T) {
 		done <- s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{t.TempDir()}})
 	}()
 	waitForServerRace(t, started, "older runtimepath discovery")
-	if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{}}); err != nil {
-		t.Fatal(err)
+	newer := make(chan error, 1)
+	go func() {
+		newer <- s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{}})
+	}()
+	select {
+	case err := <-newer:
+		t.Fatalf("newer update completed before active batch: %v", err)
+	case <-time.After(150 * time.Millisecond):
 	}
 	once.Do(func() { close(release) })
 	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-newer; err != nil {
 		t.Fatal(err)
 	}
 	if len(s.runtimePaths) != 0 {

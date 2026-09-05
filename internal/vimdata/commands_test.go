@@ -1,7 +1,6 @@
 package vimdata
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -73,16 +72,12 @@ func TestCommandTableContracts(t *testing.T) {
 		if got != command {
 			t.Fatalf("Lookup(%q) = %#v, want %#v", command.Name, got, command)
 		}
-		if command.Name != "{" && command.Name != "}" && (command.Documentation == "" || command.DocumentationSource == "") {
-			t.Fatalf("Lookup(%q) has empty documentation: %#v", command.Name, command)
-		}
+
 	}
 	if CommandVimTag != "v9.2.1015" || CommandVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" {
 		t.Fatalf("command provenance = %s %s", CommandVimTag, CommandVimCommit)
 	}
-	if command, _ := Lookup(":ec"); command.Name != "echo" || !strings.Contains(command.Documentation, "Echoes each {expr1}") || command.DocumentationSource != "eval.txt" {
-		t.Fatalf("echo documentation = %#v", command)
-	}
+
 }
 
 func TestCommandsReturnsOrderedCopy(t *testing.T) {
