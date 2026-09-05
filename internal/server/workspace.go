@@ -920,11 +920,10 @@ func workspacePathResolver(workspaceRoots, runtimePaths []string) *workspace.Pat
 	if len(searchPaths) == 0 {
 		searchPaths = workspaceRoots
 	}
-	for _, root := range append(append([]string(nil), workspaceRoots...), searchPaths...) {
-		resolver, err := workspace.NewPathResolver(root, searchPaths)
-		if err == nil {
-			return resolver
-		}
+	roots := append(append([]string(nil), workspaceRoots...), searchPaths...)
+	resolver, err := workspace.NewPathResolverForRoots(roots, searchPaths)
+	if err == nil {
+		return resolver
 	}
 	return nil
 }

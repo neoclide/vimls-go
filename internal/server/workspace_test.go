@@ -98,6 +98,34 @@ func TestRuntimepathInitializationAndNotificationReplaceIndex(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMultipleRootsWithRuntimepathImports(t *testing.T) {
+	first, second, runtimeRoot := t.TempDir(), t.TempDir(), t.TempDir()
+	library := writeWorkspaceFile(t, second, "lib.vim", "vim9script\nexport var value = 1\n")
+	source := "vim9script\nimport './lib.vim' as lib\necho lib.value\n"
+	main := writeWorkspaceFile(t, second, "main.vim", source)
+	s := initializeWorkspaceServer(t, first)
+	s.setWorkspaceRoots([]string{first, second})
+	s.setRuntimePaths([]string{runtimeRoot})
+	s.scheduleWorkspaceRebuild()
+	s.workspaceWG.Wait()
+	documentURI := uri.File(main)
+	s.documents.Open(documentURI.String(), 1, source)
+	result, err := s.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 10}}})
+	locations, ok := result.(protocol.LocationSlice)
+	if err != nil || !ok || len(locations) != 1 || !sameWorkspacePath(locations[0].URI.FsPath(), mustWorkspaceCanonicalPath(t, library)) {
+		t.Fatalf("second-root definition = %#v, %v", result, err)
+	}
+	for _, spelling := range []string{"'./lib.vim'", "'" + library + "'"} {
+		if resolved := s.workspaceResolver.ResolveImportPath(main, spelling, false); resolved.Path == "" {
+			t.Fatalf("import %s unresolved", spelling)
+		}
+	}
+	outside := writeWorkspaceFile(t, t.TempDir(), "outside.vim", "vim9script\n")
+	if resolved := s.workspaceResolver.ResolveImportPath(main, "'"+outside+"'", false); resolved.Path != "" {
+		t.Fatal("escaped workspace roots")
+	}
+}
+
 func TestWorkspaceSymbolsExcludeRuntimepathOnlyFiles(t *testing.T) {
 	runtimeRoot := t.TempDir()
 	workspaceRoot := filepath.Join(runtimeRoot, "project")
