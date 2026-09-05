@@ -11711,6 +11711,10 @@ func TestAnalyzeE1538MoreTargetsThanTupleItems(t *testing.T) {
 			name:   "assignment",
 			source: "vim9script\nvar v1: string\nvar v2: string\nvar v3: string\n[v1, v2, v3] = ('a', 'b')\nvar after = 1\n",
 		},
+		{
+			name:   "legacy literal",
+			source: "function F()\n  let [v1, v2, v3] = ('a', 'b')\nendfunction\nlet after = 1\n",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -11734,7 +11738,6 @@ func TestAnalyzeE1538MoreTargetsThanTupleItems(t *testing.T) {
 		"vim9script\ndef F()\n  var [v1, v2, v3] = ('a', 'b')\nenddef\n",
 		"vim9script\nvar [v1, v2, v3] = ['a', 'b']\n",
 		"vim9script\nvar values: tuple<string, string>\nvar [v1, v2, v3] = values\n",
-		"function F()\n  let [v1, v2, v3] = ('a', 'b')\nendfunction\n",
 	} {
 		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
 			if diagnostic.Code == "vim/E1538" {

@@ -38,6 +38,10 @@ language rules.
   undecoded mapping key notation likewise receive only conservative diagnostics.
 - Document, range, multi-range and on-type formatting adjust indentation only;
   they do not rewrite expressions, spacing, wrapping or embedded languages.
+- Legacy tuples have direct type/reference, fixed-index, destructuring and loop
+  analysis. Slice arity and nonliteral destructuring cardinality remain unknown;
+  legacy tuple mutation errors require adjacent literal assignments, not merely
+  a stored type that dynamic execution could invalidate.
 - Rename is offered only when every affected symbol can be resolved safely.
   Autoload function rename and other namespace-changing edits are rejected.
 - Code actions are limited to a few unambiguous syntax repairs; there is no

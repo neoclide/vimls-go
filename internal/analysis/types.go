@@ -540,6 +540,16 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			base := state.infer(expression.Children[0], scope)
 			if expression.Kind == syntax.ExpressionIndex {
 				typ = indexedType(base)
+				if base.Name == "tuple" && !base.Variadic && len(expression.Children) == 2 {
+					if index, ok := staticTupleIndex(expression.Children[1]); ok {
+						if index < 0 {
+							index += len(base.Arguments)
+						}
+						if index >= 0 && index < len(base.Arguments) {
+							typ = base.Arguments[index]
+						}
+					}
+				}
 			} else {
 				switch base.Name {
 				case "list", "string", "blob":

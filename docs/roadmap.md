@@ -9,7 +9,8 @@ blocker unless explicitly included in the 1.0 contract.
 | Priority | Work | Status / evidence |
 | --- | --- | --- |
 | P0 | Windows path identity and diagnosticscan canonical output | Fixed; uncached full tests, vet and build pass locally. Native Windows CI remains pending (baseline failure: run 33961022065). |
-| P1 | Direct legacy tuple semantics and mapping result policy | Pending pinned-source and oracle validation. |
+| P1 | Direct legacy tuple semantics | Direct tests and exact v9.2.1015 oracle pass; fixed-index inference, literal cardinality and adjacent literal mutation now covered. Dynamic cases remain unknown. |
+| P1 | Mapping result policy | Pending pinned-source and oracle validation. |
 | P1 | Reconcile coverage ledger with owned behavior | Pending; deferred scope remains explicit. |
 | P2 | Required LSP surface and stdio/client acceptance | Pending candidate validation. |
 | P3 | Fuzz, performance, vulnerability and reproducible archives | Pending candidate validation. |

@@ -82,6 +82,58 @@ func immediateLegacyNumberMemberDiagnostic(file *syntax.File, previous, current 
 	}, true
 }
 
+// Only adjacent assignments prove a legacy receiver's value: a stored type
+// fact alone cannot rule out intervening dynamic replacement. Follow literal
+// tuple indexes, never mutable containers or runtime-computed indexes.
+func immediateLegacyTupleMutationDiagnostic(previous, current *syntax.Command) (syntax.Diagnostic, bool) {
+	if previous == nil || current == nil || previous.Dialect != syntax.Legacy || current.Dialect != syntax.Legacy ||
+		previous.Declaration == nil || previous.Declaration.Target == nil || previous.Declaration.Initializer == nil ||
+		previous.Declaration.Target.Kind != syntax.ExpressionIdentifier {
+		return syntax.Diagnostic{}, false
+	}
+	if current.Declaration != nil && expressionContainsMissing(current.Declaration.Initializer) {
+		return syntax.Diagnostic{}, false
+	}
+	target := directAssignmentTarget(current)
+	if target == nil || target.Kind != syntax.ExpressionIndex || len(target.Children) != 2 || expressionContainsMissing(target) {
+		return syntax.Diagnostic{}, false
+	}
+	var literalReceiver func(*syntax.Expression) *syntax.Expression
+	literalReceiver = func(expression *syntax.Expression) *syntax.Expression {
+		if expression == nil {
+			return nil
+		}
+		if expression.Kind == syntax.ExpressionIdentifier && expression.Value == previous.Declaration.Target.Value {
+			return previous.Declaration.Initializer
+		}
+		if expression.Kind == syntax.ExpressionIndex && len(expression.Children) == 2 {
+			receiver := literalReceiver(expression.Children[0])
+			index, ok := staticTupleIndex(expression.Children[1])
+			if receiver != nil && receiver.Kind == syntax.ExpressionTuple && ok {
+				if index < 0 {
+					index += len(receiver.Children)
+				}
+				if index >= 0 && index < len(receiver.Children) {
+					return receiver.Children[index]
+				}
+			}
+		}
+		return nil
+	}
+	index, ok := staticTupleIndex(target.Children[1])
+	receiver := literalReceiver(target.Children[0])
+	if !ok || receiver == nil || receiver.Kind != syntax.ExpressionTuple || expressionContainsMissing(receiver) {
+		return syntax.Diagnostic{}, false
+	}
+	if index < 0 {
+		index += len(receiver.Children)
+	}
+	if index < 0 || index >= len(receiver.Children) {
+		return syntax.Diagnostic{}, false
+	}
+	return syntax.Diagnostic{Code: "vim/E1532", Message: "Cannot modify a tuple", Span: target.Span}, true
+}
+
 func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous, current *syntax.Command) (syntax.Diagnostic, bool) {
 	if result == nil || result.File == nil || scope == nil || previous == nil || current == nil {
 		return syntax.Diagnostic{}, false
@@ -227,6 +279,10 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			clear(recentGlobalAssignments)
 		}
 		if previousScope == scope {
+			if diagnostic, ok := immediateLegacyTupleMutationDiagnostic(previous, command); ok &&
+				!syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) && !syntaxDiagnosticOverlaps(result.Diagnostics, diagnostic.Span) {
+				result.Diagnostics = append(result.Diagnostics, diagnostic)
+			}
 			if diagnostic, ok := immediateLegacyNumberMemberDiagnostic(result.File, previous, command); ok &&
 				!syntaxDiagnosticOverlaps(result.File.Diagnostics, diagnostic.Span) {
 				blocked := false

@@ -5291,13 +5291,18 @@ func collectLegacyListCardinalityDiagnostics(result *FileAnalysis, commands []sy
 }
 
 func appendLegacyListCardinalityDiagnostic(result *FileAnalysis, target, rhs *syntax.Expression) {
-	if result == nil || result.File == nil || target == nil || rhs == nil || rhs.Kind != syntax.ExpressionList ||
+	if result == nil || result.File == nil || target == nil || rhs == nil || (rhs.Kind != syntax.ExpressionList && rhs.Kind != syntax.ExpressionTuple) ||
 		expressionContainsMissing(target) || expressionContainsMissing(rhs) {
 		return
 	}
 	fixed := len(target.Children)
-	if strings.Contains(result.File.Text(target.Span), ";") {
+	rest := strings.Contains(result.File.Text(target.Span), ";")
+	if rest {
 		fixed--
+	}
+	if rhs.Kind == syntax.ExpressionTuple {
+		appendVim9CardinalityDiagnostic(result, fixed, rest, rhs, false)
+		return
 	}
 	if len(rhs.Children) < fixed {
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
