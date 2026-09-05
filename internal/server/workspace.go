@@ -1807,7 +1807,13 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 		if !workspacePathInRoots(path, roots) {
 			continue
 		}
-		ext := strings.ToLower(filepath.Ext(path))
+		_, selected := index.Source(path) // Discovery may have canonicalized a .vim symlink.
+		for _, root := range roots {
+			if workspace.IsVimSourcePath(root, path) {
+				selected = true
+				break
+			}
+		}
 		if event.Type != protocol.FileChangeTypeDeleted {
 			info, err := os.Stat(path)
 			if err == nil && info.IsDir() {
@@ -1816,11 +1822,11 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 			if err == nil && !info.Mode().IsRegular() {
 				return false
 			}
-			if ext != ".vim" {
+			if !selected {
 				continue
 			}
 		} else {
-			if ext != ".vim" {
+			if !selected {
 				return false
 			}
 		}
@@ -2062,10 +2068,11 @@ func vimFileWatchers(roots []string, relative bool) []protocol.FileSystemWatcher
 		return nil
 	}
 	watchers := make([]protocol.FileSystemWatcher, 0, len(roots))
+	filePattern := workspace.VimFileWatchPattern()
 	for _, root := range roots {
-		var pattern protocol.GlobPattern = protocol.Pattern(filepath.ToSlash(filepath.Join(root, "**", "*.vim")))
+		var pattern protocol.GlobPattern = protocol.Pattern(filepath.ToSlash(filepath.Join(root, filePattern)))
 		if relative {
-			pattern = &protocol.RelativePattern{BaseURI: protocol.URI(uri.File(root)), Pattern: protocol.Pattern("**/*.vim")}
+			pattern = &protocol.RelativePattern{BaseURI: protocol.URI(uri.File(root)), Pattern: protocol.Pattern(filePattern)}
 		}
 		watchers = append(watchers, protocol.FileSystemWatcher{GlobPattern: pattern, Kind: kind})
 	}

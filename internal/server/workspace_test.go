@@ -126,6 +126,39 @@ func TestWorkspaceMultipleRootsWithRuntimepathImports(t *testing.T) {
 	}
 }
 
+func TestWatchedFilesMatchDiscoveredSourceNames(t *testing.T) {
+	for _, name := range []string{".vimrc", "_vimrc", ".gvimrc", "plain.vim", "plugin/extensionless", "pack/demo/start/demo/autoload/extensionless"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeWorkspaceFile(t, root, name, "let oldValue = 1\n")
+			s := initializeWorkspaceServer(t, root)
+			canonical := mustWorkspaceCanonicalPath(t, path)
+			for _, event := range []protocol.FileChangeType{protocol.FileChangeTypeChanged, protocol.FileChangeTypeDeleted, protocol.FileChangeTypeCreated} {
+				var err error
+				if event == protocol.FileChangeTypeDeleted {
+					err = os.Remove(path)
+				} else {
+					err = os.WriteFile(path, []byte("let newValue = 2\n"), 0o600)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !s.applyWatchedFileChanges(context.Background(), []protocol.FileEvent{{URI: uri.File(path), Type: event}}) {
+					t.Fatal("unexpected rebuild fallback")
+				}
+				content, indexed := s.workspaceIndex.Source(canonical)
+				if event == protocol.FileChangeTypeDeleted {
+					if indexed {
+						t.Fatal("deleted file retained")
+					}
+				} else if !indexed || content != "let newValue = 2\n" {
+					t.Fatalf("index=%q", content)
+				}
+			}
+		})
+	}
+}
+
 func TestWorkspaceSymbolsExcludeRuntimepathOnlyFiles(t *testing.T) {
 	runtimeRoot := t.TempDir()
 	workspaceRoot := filepath.Join(runtimeRoot, "project")
@@ -243,7 +276,7 @@ func TestVimWatcherRegistrationHonorsClientCapabilities(t *testing.T) {
 	}
 
 	watchers := vimFileWatchers([]string{root}, false)
-	wantPattern := protocol.Pattern(filepath.ToSlash(filepath.Join(root, "**", "*.vim")))
+	wantPattern := protocol.Pattern(filepath.ToSlash(filepath.Join(root, workspace.VimFileWatchPattern())))
 	if len(watchers) != 1 || watchers[0].GlobPattern != wantPattern {
 		t.Fatalf("absolute watcher = %#v, want %q", watchers, wantPattern)
 	}
@@ -2594,7 +2627,7 @@ func assertWatchRegistration(t *testing.T, params *protocol.RegistrationParams, 
 	wantRoots := normalizeWorkspaceRoots(roots)
 	for index, root := range wantRoots {
 		pattern, ok := options.Watchers[index].GlobPattern.(*protocol.RelativePattern)
-		if !ok || pattern.BaseURI != protocol.URI(uri.File(root)) || pattern.Pattern != protocol.Pattern("**/*.vim") || options.Watchers[index].Kind != kind {
+		if !ok || pattern.BaseURI != protocol.URI(uri.File(root)) || pattern.Pattern != protocol.Pattern(workspace.VimFileWatchPattern()) || options.Watchers[index].Kind != kind {
 			t.Fatalf("watcher %d = %#v", index, options.Watchers[index])
 		}
 	}

@@ -14,8 +14,8 @@
 | F06 | 已提交 | `2cabe15` |
 | F07 | 已提交 | `96793cf` |
 | F08 | 已提交 | `bffc03f` |
-| F09 | 已修复 | `fix(server): discard superseded configuration responses` |
-| F10 | 待修复 | |
+| F09 | 已提交 | `832d562` |
+| F10 | 已修复 | `fix(workspace): align file watchers with discovered Vim sources` |
 | F11 | 待修复 | |
 | F12 | 待修复 | |
 | F13 | 待修复 | |
@@ -72,3 +72,7 @@ server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根�
 ## F09
 
 配置 pull 在释放输入循环前保留更新序号；pull 响应和 push 应用通过同一互斥/序号检查，新 push、新 pull 或生命周期取消后旧响应不再生效。覆盖旧 pull→新 push、两个 pull 反序完成、shutdown 后旧响应；Configuration 定向测试、全量 test、vet、make、gofmt 与 gopls CLI（补查新文件 metadata）均通过。
+
+## F10
+
+监听 glob 从发现阶段的配置文件名/runtime 目录集合生成；增量事件复用发现阶段的源码选择规则，并保留已经索引的符号链接规范目标。runtime 子树监听允许无扩展名文件，事件处理仍过滤无关文件。覆盖根配置文件、普通 Vim 文件及嵌套 runtime 无扩展名文件的修改/删除/创建，以及绝对/相对 watcher 注册。Watched/Watch/Discover 定向测试、全量 test、vet、make、gofmt/gopls 均通过。

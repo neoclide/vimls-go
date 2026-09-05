@@ -296,6 +296,56 @@ func isVimFile(relative, name string, underRuntimeDirectory bool) bool {
 	return strings.HasSuffix(name, ".vim")
 }
 
+// IsVimSourcePath applies discovery's lexical source selection to a file event.
+// File type and symlink safety are checked separately by the caller.
+func IsVimSourcePath(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return false
+	}
+	parts := strings.Split(relative, string(filepath.Separator))
+	for index, part := range parts {
+		if _, skip := vcsMetadataNames[part]; skip {
+			return false
+		}
+		if part == "node_modules" && index < len(parts)-1 {
+			return false
+		}
+	}
+	return isVimFile(relative, filepath.Base(path), hasVimRuntimeDirectory(relative))
+}
+
+// VimFileWatchPattern covers discovery's source names. Runtime subtrees are
+// watched broadly enough for extensionless files; event selection filters them.
+func VimFileWatchPattern() string {
+	literal := func(name string) string {
+		if !caseInsensitiveFS {
+			return name
+		}
+		var result strings.Builder
+		for _, c := range name {
+			if c >= 'a' && c <= 'z' {
+				result.WriteByte('[')
+				result.WriteRune(c)
+				result.WriteRune(c - 'a' + 'A')
+				result.WriteByte(']')
+			} else {
+				result.WriteRune(c)
+			}
+		}
+		return result.String()
+	}
+	patterns := []string{"**/*." + literal("vim")}
+	for name := range vimConfigNames {
+		patterns = append(patterns, literal(name))
+	}
+	for name := range vimRuntimeDirectories {
+		patterns = append(patterns, "**/"+literal(name)+"/**")
+	}
+	sort.Strings(patterns)
+	return "{" + strings.Join(patterns, ",") + "}"
+}
+
 func pathWithin(root, path string) bool {
 	relative, err := filepath.Rel(root, path)
 	if err != nil {
