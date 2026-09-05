@@ -67,6 +67,62 @@ func TestDidChangeWatchedFilesFIFOReplacesRegularFileClearsStaleFacts(t *testing
 	}
 }
 
+func TestWorkspaceReadEntrypointsRejectFIFO(t *testing.T) {
+	for _, entry := range []string{"restore", "diagnostics", "runtimepath-source", "runtimepath-root"} {
+		t.Run(entry, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeWorkspaceFile(t, root, "current.vim", "let value = 1\n")
+			s := initializeWorkspaceServer(t, root)
+			documentURI := uri.File(path)
+			if entry == "restore" {
+				s.documents.Open(documentURI.String(), 1, "let overlay = 2\n")
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// Also release a blocking regression before server cleanup joins work.
+			t.Cleanup(func() {
+				if writer, err := os.OpenFile(path, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+					_ = writer.Close()
+				}
+			})
+			runtimeRoot := t.TempDir()
+			if entry == "runtimepath-source" {
+				// Simulate a discovered regular file replaced before the read.
+				s.testHooks.discoverWorkspaceFiles = func(context.Context, string, int) ([]string, bool, error) {
+					return []string{path}, false, nil
+				}
+				s.workspaceIndex.Remove(mustWorkspaceCanonicalPath(t, path))
+			}
+			done := make(chan error, 1)
+			go func() {
+				switch entry {
+				case "restore":
+					done <- s.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+				case "diagnostics":
+					_, err := s.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{})
+					done <- err
+				case "runtimepath-source":
+					done <- s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot}})
+				case "runtimepath-root":
+					done <- s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{path}})
+				}
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("filesystem entrypoint blocked on FIFO")
+			}
+		})
+	}
+}
+
 func TestDidChangeWatchedFilesTOCTOUFIFODoesNotBlock(t *testing.T) {
 	root := t.TempDir()
 	probePath := filepath.Join(root, "probe.fifo")

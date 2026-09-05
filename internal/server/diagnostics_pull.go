@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -194,8 +193,8 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 		stale := false
 		for _, document := range documents {
 			if !document.open {
-				content, err := os.ReadFile(document.path)
-				if err != nil { // Files can disappear after index installation.
+				content, ok := readRegularWorkspaceFile(document.path, maxFileBytes)
+				if !ok { // Files can disappear, grow or change type after installation.
 					continue
 				}
 				document.snapshot = text.NewSnapshot(uri.File(document.path).String(), 0, nil, string(content))

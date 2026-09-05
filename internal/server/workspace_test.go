@@ -722,6 +722,53 @@ func TestOversizedWorkspaceDocumentIsNotIndexedAndEvictsPriorAST(t *testing.T) {
 	}
 }
 
+func TestReadRegularWorkspaceFileBoundaries(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "bounded.vim", "1234")
+	for _, limit := range []int64{0, 3, 4, 5} {
+		content, ok := readRegularWorkspaceFile(path, limit)
+		if ok != (limit >= 4) || ok && string(content) != "1234" || !ok && content != nil {
+			t.Fatalf("limit=%d content=%q ok=%v", limit, content, ok)
+		}
+	}
+	for _, invalid := range []string{root, filepath.Join(root, "missing")} {
+		if _, ok := readRegularWorkspaceFile(invalid, 4); ok {
+			t.Fatalf("accepted non-file %s", invalid)
+		}
+	}
+}
+
+func TestWorkspaceReadEntrypointsRejectOversizedFile(t *testing.T) {
+	root := t.TempDir()
+	path := writeWorkspaceFile(t, root, "grown.vim", "let value = 1\n")
+	s := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(path)
+	s.documents.Open(documentURI.String(), 1, "let overlay = 2\n")
+	if err := os.Truncate(path, maxFileBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.workspaceIndex.Source(mustWorkspaceCanonicalPath(t, path)); ok {
+		t.Fatal("close restored an oversized file")
+	}
+	if _, err := s.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{}); err != nil {
+		t.Fatal(err)
+	}
+	runtimeRoot := t.TempDir()
+	runtimeFile := writeWorkspaceFile(t, runtimeRoot, "large.vim", "")
+	if err := os.Truncate(runtimeFile, maxFileBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.workspaceIndex.Source(mustWorkspaceCanonicalPath(t, runtimeFile)); ok || s.workspaceIndex.Complete() {
+		t.Fatal("oversized runtime file was indexed or reported complete")
+	}
+}
+
 func TestOversizedWorkspaceSaveEvictsPriorAST(t *testing.T) {
 	root := t.TempDir()
 	path := mustWorkspaceCanonicalPath(t, writeWorkspaceFile(t, root, "save.vim", "let g:diskValue = 1\n"))

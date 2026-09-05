@@ -143,8 +143,13 @@ func usableRuntimePaths(paths []string) []string {
 	paths = normalizeRuntimePaths(paths)
 	result := make([]string, 0, len(paths))
 	for _, path := range paths {
-		directory, err := os.Open(path)
+		directory, err := openNonBlockingFile(path)
 		if err != nil {
+			continue
+		}
+		info, err := directory.Stat()
+		if err != nil || !info.IsDir() {
+			_ = directory.Close()
 			continue
 		}
 		_, readErr := directory.ReadDir(1)
@@ -1189,7 +1194,7 @@ func (s *Server) restoreWorkspaceDocument(documentURI string) {
 	var file *syntax.File
 	if !restore.knownDiskFile {
 		file = nil
-	} else if content, err := os.ReadFile(restore.path); err == nil && len(content) <= maxFileBytes {
+	} else if content, ok := readRegularWorkspaceFile(restore.path, maxFileBytes); ok {
 		file = syntax.Parse(string(content))
 	}
 	dependents := s.installWorkspaceRestore(restore, file)
@@ -1573,8 +1578,9 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 					diskFile = true
 				}
 			} else {
-				content, readErr := os.ReadFile(path)
-				if readErr != nil {
+				content, ok := readRegularWorkspaceFile(path, maxFileBytes)
+				if !ok {
+					complete = false
 					continue
 				}
 				source = string(content)
