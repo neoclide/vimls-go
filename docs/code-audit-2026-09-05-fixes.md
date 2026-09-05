@@ -98,3 +98,9 @@ Initialize 记录 documentChanges 与 hierarchicalDocumentSymbolSupport。本地
 benchreport 增加 baseline 比较模式，要求两侧同工作负载、至少五样本及分配指标；时间 median/p95 超 15%、分配中位数超 20%、completion 达到 100ms 返回失败，空/坏样本不再成功。scheduled lane 同 runner/toolchain 比较 HEAD^ 与 HEAD，保留原始输出、提交 ID 和比较报告；没有自动更新基线或豁免。文档明确样本均值的 p95 不是逐请求尾延迟，并区分父提交 CI 检查与固定 release runner 的批准基线。
 
 验证：比较器正常/阈值边界、time/p95/bytes/alloc 回归、零分配、缺样本/工作负载/指标、坏输入、completion 预算测试；全量 test、vet、make、gofmt 与 gopls CLI 均通过（MCP 返回了已修改测试的陈旧诊断，以 CLI/编译复核）。未运行整套性能基准或远端 CI；本机没有 actionlint。
+
+## 最终集成复核补充
+
+最终 `go test -count=1 ./...` 揭示子进程集成测试仍断言旧 watcher glob，并未声明其要求的版本化编辑/层级符号能力。此前 `go test ./...` 返回的 integration 缓存不能验证 TestMain 动态编译的服务器源码。已更新测试客户端契约，并令 make test 与 Windows CI 测试禁用结果缓存；该补充单独提交，不混入 F16 发布修复。
+
+验证：`go test -count=1 ./test/integration -run TestLSPSubprocess -timeout 60s`、`go test -count=1 ./...`、vet、make、gofmt、gopls CLI、YAML 语法检查均通过。F10/F14 的真实子进程验证以这次无缓存结果为准，前面的缓存成功不应解读为独立集成验证。
