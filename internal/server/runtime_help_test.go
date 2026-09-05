@@ -360,7 +360,7 @@ func TestRuntimeHelpCrossFileHoverRetainsSourceComments(t *testing.T) {
 		t.Fatal("missing external function hover")
 	}
 	sections, ok := hover.Contents.(protocol.MarkedStringSlice)
-	if !ok || len(sections) != 3 || sections[1] != protocol.String("Source function comment.") || !strings.Contains(fmt.Sprint(sections[2]), "Help-file function description.") {
+	if !ok || len(sections) != 2 || !strings.Contains(fmt.Sprint(sections[0]), "Source function comment.") || !strings.Contains(fmt.Sprint(sections[1]), "Help-file function description.") {
 		t.Fatalf("cross-file hover = %#v", hover.Contents)
 	}
 	s.documents.Open(documentURI.String(), 2, "vim9script\nvar Ref = demo#Run\n")
@@ -449,5 +449,37 @@ func TestBuiltinCommandHoverUsesOnlyRuntimeHelp(t *testing.T) {
 				t.Fatalf("command help = %s", body)
 			}
 		})
+	}
+}
+
+func TestPlugMappingNameHoverOmitsPrefixDocumentation(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "doc/refactor.txt", "*<Plug>(coc-refactor)*\nRefactor the current symbol.\n")
+	for _, source := range []string{
+		"nmap <silent> <leader>rf <Plug>(coc-refactor)\n",
+		"nmap <Plug>(coc-refactor) :echo 1<CR>\n",
+	} {
+		s, documentURI := openNavigationDocument(t, text.UTF16, source)
+		if hover := runtimeHelpHover(t, s, documentURI, "refactor"); hover != nil {
+			t.Fatalf("mapping without runtime docs inherited prefix hover: %#v", hover)
+		}
+		s.setRuntimePaths([]string{root})
+		s.runtimeHelpWG.Wait()
+		hover := runtimeHelpHover(t, s, documentURI, "refactor")
+		if hover == nil {
+			t.Fatal("missing mapping documentation")
+		}
+		sections, ok := hover.Contents.(protocol.MarkedStringSlice)
+		if !ok || len(sections) != 1 || !strings.Contains(fmt.Sprint(sections[0]), "Refactor the current symbol.") {
+			t.Fatalf("mapping hover = %#v, want only runtime documentation", hover.Contents)
+		}
+		prefix := runtimeHelpHover(t, s, documentURI, "Plug")
+		if prefix == nil || !strings.Contains(fmt.Sprint(prefix.Contents), "A special key name for internal mappings") || strings.Contains(fmt.Sprint(prefix.Contents), "Refactor the current symbol.") {
+			t.Fatalf("prefix hover = %#v", prefix)
+		}
+		start := uint32(strings.Index(source, "<Plug>"))
+		if prefix.Range == nil || *prefix.Range != navigationRange(0, start, start+6) {
+			t.Fatalf("prefix hover range = %#v", prefix.Range)
+		}
 	}
 }

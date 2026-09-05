@@ -22,6 +22,13 @@ candidate success from the older green run 33969555293 (`871bddb`) or reuse the
 historical candidate's performance/archive results. Local repair and validation
 do not publish a release; push and tagging remain separate actions.
 
+Function signature hovers now use `MarkupContent` instead of deprecated
+`MarkedStringWithLanguage`; Markdown code blocks preserve Vim highlighting
+and plain-text clients retain readable signatures and documentation.
+
+Named `<Plug>` mapping hover now shows only its runtime help. The generic
+`<Plug>` explanation appears only when hovering the prefix itself.
+
 Explicit script-local calls now report E117 when their same-file function is
 missing, including `:call <SID>Name()<CR>` mapping bodies. `<SID>` retains its
 script namespace highlighting even without a declaration; the missing-name

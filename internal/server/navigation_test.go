@@ -595,14 +595,7 @@ func TestHoverShowsStructuredBuiltinReturnType(t *testing.T) {
 	if hover == nil {
 		t.Fatal("builtin hover is nil")
 	}
-	slice, ok := hover.Contents.(protocol.MarkedStringSlice)
-	if !ok || len(slice) == 0 {
-		t.Fatalf("builtin hover = %#v", hover)
-	}
-	first, ok := slice[0].(*protocol.MarkedStringWithLanguage)
-	if !ok || first.Language != "vim" || first.Value != "argc([{winid}])" {
-		t.Fatalf("builtin hover first item = %#v", slice[0])
-	}
+	assertFunctionHoverContents(t, hover, "argc([{winid}])", "")
 }
 
 func TestHoverShowsStructuredBuiltinFunctionSignature(t *testing.T) {
@@ -617,14 +610,7 @@ func TestHoverShowsStructuredBuiltinFunctionSignature(t *testing.T) {
 	if hover == nil {
 		t.Fatal("builtin hover is nil")
 	}
-	slice, ok := hover.Contents.(protocol.MarkedStringSlice)
-	if !ok || len(slice) != 1 {
-		t.Fatalf("builtin hover = %#v", hover)
-	}
-	first, ok := slice[0].(*protocol.MarkedStringWithLanguage)
-	if !ok || first.Language != "vim" || first.Value != "getcompletion({pat}, {type} [, {filtered}])" {
-		t.Fatalf("first = %#v", slice[0])
-	}
+	assertFunctionHoverContents(t, hover, "getcompletion({pat}, {type} [, {filtered}])", "")
 }
 
 func TestHoverDistinguishesBuiltinFunctionFromSameNamedExCommand(t *testing.T) {
@@ -644,8 +630,8 @@ func TestHoverDistinguishesBuiltinFunctionFromSameNamedExCommand(t *testing.T) {
 		if !ok || len(sections) != 2 {
 			t.Fatalf("source %q hover = %#v", source, hover)
 		}
-		signature, ok := sections[0].(*protocol.MarkedStringWithLanguage)
-		if !ok || signature.Value != "append({lnum}, {text})" {
+		signature, ok := sections[0].(protocol.String)
+		if !ok || signature != protocol.String("```vim\nappend({lnum}, {text})\n```") {
 			t.Fatalf("source %q signature = %#v", source, sections[0])
 		}
 		if body := fmt.Sprint(sections[1]); !strings.Contains(body, "Runtime append function help.") || strings.Contains(body, ":{range}a[ppend]") {
@@ -665,23 +651,13 @@ func TestHoverDistinguishesBuiltinFunctionFromSameNamedExCommand(t *testing.T) {
 
 func assertFunctionHoverContents(t *testing.T, hover *protocol.Hover, signature, documentation string) {
 	t.Helper()
-	contents, ok := hover.Contents.(protocol.MarkedStringSlice)
-	wantLength := 1
+	contents, ok := hover.Contents.(*protocol.MarkupContent)
+	want := "```vim\n" + signature + "\n```"
 	if documentation != "" {
-		wantLength = 2
+		want += "\n\n" + documentation
 	}
-	if !ok || len(contents) != wantLength {
-		t.Fatalf("function hover = %#v", hover)
-	}
-	first, ok := contents[0].(*protocol.MarkedStringWithLanguage)
-	if !ok || first.Language != "vim" || first.Value != signature {
-		t.Fatalf("function hover signature = %#v, want %q", contents[0], signature)
-	}
-	if documentation != "" {
-		second, ok := contents[1].(protocol.String)
-		if !ok || string(second) != documentation {
-			t.Fatalf("function hover documentation = %#v, want %q", contents[1], documentation)
-		}
+	if !ok || contents.Kind != protocol.MarkupKindMarkdown || contents.Value != want {
+		t.Fatalf("function hover = %#v, want markdown %q", hover.Contents, want)
 	}
 }
 
@@ -747,12 +723,12 @@ func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 		{
 			name: "builtin method", source: "vim9script\n[1]->len()\n",
 			line: 1, character: 6, wantRange: navigationRange(1, 5, 8),
-			want: "len({expr})",
+			want: "```vim\nlen({expr})\n```",
 		},
 		{
 			name: "local function", source: "vim9script\ndef transform(value: number): number\n  return value\nenddef\nindent(1)->transform()\n",
 			line: 4, character: 12, wantRange: navigationRange(4, 11, 20),
-			want: "transform(value: number): number",
+			want: "```vim\ntransform(value: number): number\n```",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -763,16 +739,6 @@ func TestHoverHandlesArrowFunctionNames(t *testing.T) {
 			}})
 			if err != nil || hover == nil || hover.Range == nil || *hover.Range != test.wantRange {
 				t.Fatalf("hover = %#v, error = %v", hover, err)
-			}
-			if slice, ok := hover.Contents.(protocol.MarkedStringSlice); ok {
-				if len(slice) == 0 {
-					t.Fatalf("empty slice")
-				}
-				first, ok := slice[0].(*protocol.MarkedStringWithLanguage)
-				if !ok || first.Language != "vim" || first.Value != test.want {
-					t.Fatalf("first item = %#v, want %s", slice[0], test.want)
-				}
-				return
 			}
 			content, ok := hover.Contents.(*protocol.MarkupContent)
 			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.want) {
@@ -2053,9 +2019,9 @@ func TestHoverKeymapDetails(t *testing.T) {
 			},
 		},
 		{
-			name:      "complete <Plug> mapping",
+			name:      "<Plug> prefix",
 			character: 20,
-			wantRange: navigationRange(0, 18, 51),
+			wantRange: navigationRange(0, 18, 24),
 			contains: []string{
 				"**<Plug>** A special key name for internal mappings.",
 				"not to be matched with any key sequence",

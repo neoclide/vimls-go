@@ -351,8 +351,6 @@ func (s *Server) appendRuntimeHelp(document *navigationDocument, contents protoc
 		sections = append(sections, protocol.String(current.Value))
 	case protocol.String:
 		sections = append(sections, current)
-	case *protocol.MarkedStringWithLanguage:
-		sections = append(sections, current)
 	}
 	return append(sections, protocol.String(boundedDocumentationText(help)))
 }

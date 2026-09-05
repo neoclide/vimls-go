@@ -18,7 +18,13 @@ workspace folders it parses recursive `plugin`, `autoload`, and `import` Vim
 scripts; top-level `colors/*.vim` files provide only colorscheme name/path
 completion metadata. It also reads `doc/*.txt` in the background for global
 variable, global function, autoload function and named `<Plug>` mapping hover
-documentation. Other runtime subtrees are not scanned.
+documentation. Hovering a named mapping shows its runtime documentation only;
+the generic `<Plug>` explanation is limited to the `<Plug>` prefix. Other
+runtime subtrees are not scanned.
+
+Function signature hovers use `MarkupContent` with a Vim Markdown code block
+and source documentation, or plain text according to client capabilities.
+Runtime help remains an additional documentation section.
 
 Workspace folder parsing and external runtimepath parsing run in separate
 phases. Workspace parsing reports work-done progress; external directory scans

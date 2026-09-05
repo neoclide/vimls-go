@@ -833,7 +833,7 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		if _, lines, ok := userCommandAttributeHoverAt(document.analysis.File, document.occurrence.Start); ok {
 			return s.localHoverResult(ctx, document, lines)
 		}
-		if _, lines, ok := mappingHoverAt(document.analysis.File, document.occurrence.Start); ok {
+		if span, lines, ok := mappingHoverAt(document.analysis.File, document.occurrence.Start); ok && span == document.occurrence {
 			return s.localHoverResult(ctx, document, lines)
 		}
 		if option, ok := vimdata.LookupOption(name); ok {
@@ -1002,13 +1002,15 @@ func signatureHoverContents(signature string, documentation string, markdown boo
 		}
 		return boundedMarkupContent(protocol.MarkupKindPlainText, value)
 	}
-	slice := protocol.MarkedStringSlice{
-		&protocol.MarkedStringWithLanguage{Language: "vim", Value: boundedDocumentationText(signature)},
+	fence := "```"
+	for strings.Contains(signature, fence) {
+		fence += "`"
 	}
+	value := fence + "vim\n" + signature + "\n" + fence
 	if documentation != "" {
-		slice = append(slice, protocol.String(boundedDocumentationText(documentation)))
+		value += "\n\n" + documentation
 	}
-	return slice
+	return boundedMarkupContent(protocol.MarkupKindMarkdown, value)
 }
 
 func (s *Server) localHoverContents(ctx context.Context, document *navigationDocument, contents protocol.HoverContents) (*protocol.Hover, error) {
@@ -1211,9 +1213,14 @@ func mappingHoverAt(file *syntax.File, offset int) (syntax.Span, []string, bool)
 		for _, span := range []syntax.Span{mapping.LHS, mapping.RHS} {
 			if spanContains(span, offset) {
 				if plugSpan, ok := mappingPlugAt(file.Source, span, offset); ok {
-					item, _ := vimdata.LookupMappingItem("<Plug>")
 					foundSpan = plugSpan
-					foundLines = formatMappingItemHover(item)
+					// The prefix describes key notation; the parenthesized name
+					// identifies a separate runtime help tag.
+					if offset < plugSpan.Start+len("<Plug>") {
+						item, _ := vimdata.LookupMappingItem("<Plug>")
+						foundSpan.End = plugSpan.Start + len("<Plug>")
+						foundLines = formatMappingItemHover(item)
+					}
 					found = true
 					return
 				}
