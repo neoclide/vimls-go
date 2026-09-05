@@ -3,11 +3,13 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1024,6 +1026,7 @@ func TestWorkspaceAutoloadFunctionNotFoundDiagnostics(t *testing.T) {
 	instance.workspaceBuilt = true
 	instance.workspaceRoots = []string{root}
 	instance.runtimePaths = []string{root}
+	instance.runtimepathIndexedPaths = []string{root}
 	instance.workspaceMu.Unlock()
 
 	tests := []struct {
@@ -1077,7 +1080,7 @@ func TestWorkspaceGlobalFunctionNotIndexedHints(t *testing.T) {
 	if err := index.Replace(vim9KnownPath, syntax.Parse("vim9script\ndef g:KnownVim9Global()\nenddef\n")); err != nil {
 		t.Fatal(err)
 	}
-	index.SetComplete(false)
+	index.SetComplete(true)
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	graph := workspace.NewImportGraph()
@@ -2155,5 +2158,117 @@ func TestE492OccurrenceSeverity(t *testing.T) {
 	}
 	if diagnosticProtocolSeverity(syntax.Diagnostic{Code: "vim/E492"}) != protocol.DiagnosticSeverityError {
 		t.Fatal("syntax E492 must remain an error")
+	}
+}
+
+func TestMissingNamesWaitForWorkspaceAndRuntimepath(t *testing.T) {
+	root := mustWorkspaceCanonicalPath(t, t.TempDir())
+	runtimeRoot := mustWorkspaceCanonicalPath(t, t.TempDir())
+	for _, test := range []struct {
+		name                string
+		configure           func(*Server)
+		functions, commands bool
+	}{
+		{name: "workspace building", configure: func(s *Server) { s.workspaceRunning = true }},
+		{name: "workspace not built", configure: func(s *Server) { s.workspaceBuilt = false }},
+		{name: "runtimepath not parsed", configure: func(s *Server) { s.runtimepathIndexedPaths = nil }},
+		{name: "pending source", configure: func(s *Server) { s.workspacePending["pending.vim"] = struct{}{} }},
+		{name: "incomplete index", configure: func(s *Server) { s.workspaceIndex.SetComplete(false) }},
+		{name: "runtime help loading", configure: func(s *Server) { s.runtimeHelpRunning = true }, functions: true},
+		{name: "all parsed", functions: true, commands: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance := New(nil, nil, io.Discard)
+			t.Cleanup(instance.stopAnalysis)
+			instance.workspaceRoots = []string{root}
+			instance.runtimePaths = []string{runtimeRoot}
+			instance.runtimepathIndexedPaths = []string{runtimeRoot}
+			instance.workspaceBuilt = true
+			instance.workspaceIndex.SetComplete(true)
+			instance.workspaceGraph.SetReady(true)
+			instance.workspaceGraphView = instance.workspaceGraph.Snapshot()
+			if test.configure != nil {
+				test.configure(instance)
+			}
+			source := "vim9script\nmissinglocal()\ng:MissingGlobal()\npkg#Missing()\nMissingCommand\necho missingVariable\n"
+			file := syntax.Parse(source)
+			result := analysis.Analyze(file)
+			path := filepath.Join(root, "main.vim")
+			instance.workspaceMu.Lock()
+			captured := instance.workspaceAnalysisSnapshotLocked(path, file, result)
+			instance.workspaceMu.Unlock()
+			document := text.NewSnapshot(uri.File(path).String(), 1, nil, source)
+			composed, _, ok := instance.composeDocumentDiagnostics(context.Background(), document, file, result, captured, nil)
+			if !ok {
+				t.Fatal("composition failed")
+			}
+			codes := make(map[string]bool)
+			for _, diagnostic := range composed.Diagnostics {
+				codes[diagnostic.Code] = true
+			}
+			for _, code := range []string{"vim/E117", "vimls/global-function-not-indexed", "vimls/autoload-function-not-found"} {
+				if codes[code] != test.functions {
+					t.Errorf("%s present = %v, want %v; diagnostics = %#v", code, codes[code], test.functions, composed.Diagnostics)
+				}
+			}
+			if codes["vim/E492"] != test.commands {
+				t.Errorf("command diagnostic present = %v, want %v", codes["vim/E492"], test.commands)
+			}
+			if !codes["vim/E121"] {
+				t.Error("unrelated local diagnostic was suppressed")
+			}
+		})
+	}
+}
+
+func TestMissingNameDiagnosticsRefreshAfterRuntimepathScan(t *testing.T) {
+	root := mustWorkspaceCanonicalPath(t, t.TempDir())
+	runtimeRoot := mustWorkspaceCanonicalPath(t, t.TempDir())
+	runtimeFile := writeWorkspaceFile(t, runtimeRoot, "plugin/known.vim", "command! KnownCommand echo 1\nfunction KnownGlobal()\nendfunction\n")
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	published := make(chan *protocol.PublishDiagnosticsParams, 16)
+	instance.client = &diagnosticClient{published: published}
+	instance.setWorkspaceRoots([]string{root})
+	instance.setRuntimePaths([]string{runtimeRoot})
+	started, release := make(chan struct{}), make(chan struct{})
+	var once, startOnce sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	instance.testHooks.discoverWorkspaceFiles = func(ctx context.Context, path string, limit int) ([]string, bool, error) {
+		if path == runtimeRoot {
+			startOnce.Do(func() { close(started) })
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return []string{runtimeFile}, false, ctx.Err()
+		}
+		return workspace.DiscoverFilesContext(ctx, path, limit)
+	}
+	instance.scheduleWorkspaceRebuild()
+	waitForServerRace(t, started, "runtimepath scan")
+	documentURI := uri.File(filepath.Join(root, "main.vim"))
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: "vim9script\nmissinglocal()\ng:KnownGlobal()\ng:MissingGlobal()\nKnownCommand\nMissingCommand\necho missingVariable\n",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	before := waitForDiagnosticsForURI(t, published, documentURI)
+	if len(before.Diagnostics) != 1 || before.Diagnostics[0].Code != protocol.String("vim/E121") {
+		t.Fatalf("diagnostics during runtime scan = %#v", before.Diagnostics)
+	}
+	once.Do(func() { close(release) })
+	for {
+		after := waitForDiagnosticsForURI(t, published, documentURI)
+		codes := make(map[string]bool)
+		for _, diagnostic := range after.Diagnostics {
+			codes[fmt.Sprint(diagnostic.Code)] = true
+			if strings.Contains(fmt.Sprint(diagnostic.Message), "Known") {
+				t.Fatalf("indexed name diagnosed: %#v", diagnostic)
+			}
+		}
+		if codes["vim/E117"] && codes["vimls/global-function-not-indexed"] && codes["vim/E492"] && codes["vim/E121"] {
+			break
+		}
 	}
 }

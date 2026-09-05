@@ -1233,6 +1233,12 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File,
 		identity: s.workspaceIdentityLocked(), path: path, graph: s.workspaceGraphView,
 		roots: workspaceIndexRoots(s.workspaceRoots, s.runtimePaths), ready: true,
 	}
+	// Workspace installation precedes runtimepath reconciliation. A complete
+	// workspace-only index cannot prove that an external name is missing.
+	snapshot.functionDiagnosticsReady = !s.workspaceRunning &&
+		((len(snapshot.roots) == 0 && !s.workspaceBuilt) ||
+			(s.workspaceIndexReadyLocked() && snapshot.graph.Ready() &&
+				s.workspaceIndex.Complete() && slices.Equal(s.runtimePaths, s.runtimepathIndexedPaths)))
 	if path == "" || !workspacePathInRoots(path, snapshot.roots) {
 		return snapshot
 	}
@@ -1255,7 +1261,7 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File,
 			}
 			references = workspace.CollectExternalReferencesFromAnalysis(path, file, result)
 			for _, reference := range references {
-				if reference.Kind == workspace.ExternalReferenceGlobalFunction && reference.DirectCall && startsWithUppercaseASCII(reference.Name) && !s.workspaceIndex.HasGlobalFunction(reference.Name) {
+				if reference.Kind == workspace.ExternalReferenceGlobalFunction && reference.DirectCall && snapshot.functionDiagnosticsReady && startsWithUppercaseASCII(reference.Name) && !s.workspaceIndex.HasGlobalFunction(reference.Name) {
 					if snapshot.missingGlobalFunctions == nil {
 						snapshot.missingGlobalFunctions = make(map[string]bool)
 					}
@@ -1263,7 +1269,7 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File,
 				}
 			}
 		}
-		if s.workspaceIndex.Complete() {
+		if snapshot.functionDiagnosticsReady {
 			snapshot.indexComplete = true
 			snapshot.userCommandNames = s.workspaceIndex.UserCommandNames()
 			snapshot.userCommandsReady = !s.runtimeHelpRunning

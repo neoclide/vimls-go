@@ -267,6 +267,12 @@ callable, or a same-file function declaration. Scoped calls such as
 legacy Vim script calls remain `unknown` because their target may be supplied
 dynamically.
 
+The server defers E117, global-function-not-indexed hints and autoload-function-not-found
+warnings until both workspace and runtimepath source indexes are complete.
+Workspace installation alone is insufficient while runtimepath scanning is pending.
+Index installation recomputes open-document diagnostics; unrelated local diagnostics
+remain available during indexing.
+
 A direct function name of 200 bytes or more has a context-specific result.
 Compiling it inside a Vim9 `def` produces E1011, while the same unresolved call
 at Vim9 script level produces E117. The analyzer preserves this distinction.
@@ -544,7 +550,7 @@ that omitted `var`, the lowercase declaration-like `notexist:repl` form, and
 the pinned builtin-command forms `ka`, `:1ka`, and `mode 4`. Arbitrary unknown
 legacy commands and dynamically executed strings remain opaque. Capitalized
 user-command calls are checked separately after the workspace/runtime source
-index is complete and runtime help collection has finished. An exact name from
+indexes are both complete and runtime help collection has finished. An exact name from
 an explicit `:command` definition or an Ex-command help tag (such as
 `*:CocRestart*`) is accepted; known abbreviations retain the E464 warning.
 Otherwise E492 is reported as a **warning** on the command name, because

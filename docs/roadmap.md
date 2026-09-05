@@ -22,6 +22,11 @@ candidate success from the older green run 33969555293 (`871bddb`) or reuse the
 historical candidate's performance/archive results. Local repair and validation
 do not publish a release; push and tagging remain separate actions.
 
+Missing-function diagnostics (E117, global and autoload functions) now wait for
+both workspace and runtimepath source indexing to complete. The interval between
+workspace installation and runtimepath reconciliation also defers missing-command
+warnings; completing indexing recomputes open-document diagnostics.
+
 Unknown uppercase user commands now receive an E492 warning only after the
 source index is complete and runtime help has loaded. Source definitions and
 Ex-command help tags both establish known names; existing E492 parser errors

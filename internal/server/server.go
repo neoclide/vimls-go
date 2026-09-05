@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"runtime"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -107,6 +108,7 @@ type workspaceAnalysisSnapshot struct {
 	missingGlobalFunctions   map[string]bool
 	userCommandNames         []string
 	userCommandsReady        bool
+	functionDiagnosticsReady bool
 	augroupNames             []string
 	globalDiagnostics        []syntax.Diagnostic
 	ready                    bool
@@ -1294,6 +1296,11 @@ func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.
 		analysis.CombinedDiagnostics(file, &versionedAnalysis),
 		workspaceSnapshot.augroupNames,
 	)
+	if !workspaceSnapshot.functionDiagnosticsReady {
+		file.Diagnostics = slices.DeleteFunc(file.Diagnostics, func(diagnostic syntax.Diagnostic) bool {
+			return diagnostic.Code == "vim/E117"
+		})
+	}
 	file.Diagnostics = append(file.Diagnostics, s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)...)
 	if workspaceSnapshot.userCommandsReady {
 		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandDiagnostics(file, workspaceSnapshot.userCommandNames)...)
