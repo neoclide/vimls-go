@@ -407,6 +407,49 @@ func TestAnalyzeOrdinaryMappingDoesNotCreateReferences(t *testing.T) {
 	}
 }
 
+func TestMappingResultConversionBoundary(t *testing.T) {
+	// Pinned map.c:eval_map_expr -> eval.c:typval2string ->
+	// typval.c:tv_get_string_buf_chk_strict. Mapping results are not
+	// String-only; runtime replacement makes nonliteral results unknown.
+	for _, prefix := range []string{"", "vim9script\n"} {
+		for _, test := range []struct{ expression, code string }{
+			{"'text'", ""}, {"42", ""}, {"1.5", ""}, {"v:true", ""},
+			{"[1, 2]", ""}, {"{'key': 1}", ""}, {"(1, 'two')", ""},
+			{"0z01", "vim/E976"}, {"(0z01)", "vim/E976"},
+			{"g:runtime_result", ""}, {"GetResult()", ""},
+		} {
+			source := prefix + "inoremap <unique> <expr> <F5> " + test.expression + "\n"
+			file := syntax.Parse(source)
+			diagnostics := CombinedDiagnostics(file, Analyze(file))
+			if test.code == "" && len(diagnostics) == 0 {
+				continue
+			}
+			if len(diagnostics) != 1 || diagnostics[0].Code != test.code || file.Text(diagnostics[0].Span) != "0z01" {
+				t.Errorf("%s: diagnostics = %#v, want %q", source, diagnostics, test.code)
+			}
+		}
+	}
+	for _, source := range []string{
+		"inoremap <unique> <expr> <F5> {-> 'text'}\n",
+		"vim9script\ninoremap <unique> <expr> <F5> () => 'text'\n",
+	} {
+		file := syntax.Parse(source)
+		diagnostics := CombinedDiagnostics(file, Analyze(file))
+		if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E729" {
+			t.Errorf("%s: diagnostics = %#v, want E729", source, diagnostics)
+		}
+	}
+	for _, source := range []string{
+		"inoremap <unique> <F5> 0z01\n",
+		"let g:runtime_result = 0z01\ninoremap <unique> <expr> <F5> g:runtime_result\n",
+	} {
+		file := syntax.Parse(source)
+		if diagnostics := CombinedDiagnostics(file, Analyze(file)); len(diagnostics) != 0 {
+			t.Errorf("%s: unexpected diagnostics = %#v", source, diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeMappingExprLambdaParameterScope(t *testing.T) {
 	source := "let outer = 1\nnmap <expr> lhs {item -> item + outer}\n"
 	result := Analyze(syntax.Parse(source))

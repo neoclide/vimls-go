@@ -42,6 +42,9 @@ language rules.
   analysis. Slice arity and nonliteral destructuring cardinality remain unknown;
   legacy tuple mutation errors require adjacent literal assignments, not merely
   a stored type that dynamic execution could invalidate.
+- Expression mappings use Vim's result-to-string conversion, not a String-only
+  constraint. Literal Blob and lambda results are diagnosed; variable and call
+  results remain unknown because mappings execute later.
 - Rename is offered only when every affected symbol can be resolved safely.
   Autoload function rename and other namespace-changing edits are rejected.
 - Code actions are limited to a few unambiguous syntax repairs; there is no

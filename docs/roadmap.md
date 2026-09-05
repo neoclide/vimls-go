@@ -10,14 +10,14 @@ blocker unless explicitly included in the 1.0 contract.
 | --- | --- | --- |
 | P0 | Windows path identity and diagnosticscan canonical output | Fixed; uncached full tests, vet and build pass locally. Native Windows CI remains pending (baseline failure: run 33961022065). |
 | P1 | Direct legacy tuple semantics | Direct tests and exact v9.2.1015 oracle pass; fixed-index inference, literal cardinality and adjacent literal mutation now covered. Dynamic cases remain unknown. |
-| P1 | Mapping result policy | Pending pinned-source and oracle validation. |
-| P1 | Reconcile coverage ledger with owned behavior | Pending; deferred scope remains explicit. |
+| P1 | Mapping result policy | Implemented literal E976/E729 only; pinned source and both dialect oracles cover accepted conversions. Deferred variable/call results stay unknown. |
+| P1 | Reconcile coverage ledger with owned behavior | Reviewed parser/semantic evidence separately; all local ledger links resolve. Tuple and mapping TODOs now have direct analysis/oracle evidence; explicit deferred scope remains unchanged. |
 | P2 | Required LSP surface and stdio/client acceptance | Pending candidate validation. |
 | P3 | Fuzz, performance, vulnerability and reproducible archives | Pending candidate validation. |
 | P3 | Release notes and final evidence | Pending; no release is authorized. |
 
-M0–M2 and M5–M6 have implemented surfaces; M3–M4 still need the P1 evidence
-review. M7 remains open until the candidate has all required platform and
+M0–M6 have implemented surfaces within the stated conservative contract; the
+M3–M4 P1 evidence gaps are closed. M7 remains open until the candidate has all required platform and
 release evidence. Local validation uses focused tests, uncached full tests,
 vet, build and pinned Vim smoke. Race and 90% coverage are checked through CI.
 

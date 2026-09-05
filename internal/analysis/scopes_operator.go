@@ -864,6 +864,28 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 		if command.Declaration != nil {
 			walk(command.Declaration.Initializer, scope)
 		}
+		if command.Mapping != nil {
+			// Vim v9.2.1015 map.c:eval_map_expr uses eval_to_string,
+			// which stringifies containers and accepts numbers and floats.
+			// Only literal Blob/Funcref results are rejected here. Stored
+			// variable and function types may change before a mapping runs.
+			expression := command.Mapping.RHSExpression
+			for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+				expression = expression.Children[0]
+			}
+			if expression != nil && !expressionContainsMissing(expression) {
+				typ := ValueType{}
+				switch expression.Kind {
+				case syntax.ExpressionBlob:
+					typ.Name = "blob"
+				case syntax.ExpressionLambda:
+					typ.Name = "func"
+				}
+				if diagnostic, ok := stringConversionDiagnostic(typ, expression.Span); ok {
+					result.Diagnostics = append(result.Diagnostics, diagnostic)
+				}
+			}
+		}
 		if command.Embedded != nil {
 			collectOperatorDiagnostics(result, command.Embedded.Commands, scope)
 		}
