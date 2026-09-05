@@ -11,7 +11,7 @@
 | FP01 | 初始化作用域 | 待修复 |
 | FP02 | 用户命令 args | 待修复 |
 | FP03 | 函数与变量命名空间 | 待修复 |
-| FP04 | 局部字典方法 | 待修复 |
+| FP04 | 局部字典方法 | 已修复：正反回归及全量门禁通过 |
 | FP05 | CTRL-V 引用 | 待修复 |
 | FP06 | 修饰符与地址 | 待修复 |
 | FP07 | new +cmd | 待修复 |
@@ -35,4 +35,6 @@
 
 ## 验证与提交记录
 
-待逐项补充。原始 errors.txt、classification.json、source-manifest.json 保留为基线，不覆盖。
+原始 errors.txt、classification.json、source-manifest.json 保留为基线，不覆盖。
+
+- FP04：允许 legacy 有效命名空间字典方法，保留 E884 非法函数名与 E1182 Vim9 字典限制；TestLegacyScopedDictionaryMethodNames、全量 go test / go vet / make 通过。gopls MCP 仅报告已知 benchreport/release 缓存诊断，未报告本次文件错误。

@@ -2,6 +2,27 @@ package syntax
 
 import "testing"
 
+// FP04: Vim v9.2.1015 accepts dictionary methods on local scoped variables.
+func TestLegacyScopedDictionaryMethodNames(t *testing.T) {
+	for _, name := range []string{"l:popup.close", "a:popup.close", "b:popup.close", "w:popup.close", "t:popup.close", "s:popup.close", "g:popup.close"} {
+		file := Parse("function! Test(popup)\nfunction! " + name + "() abort dict\nreturn 1\nendfunction\nendfunction\n")
+		if len(file.Diagnostics) != 0 {
+			t.Fatalf("%s: %#v", name, file.Diagnostics)
+		}
+		if file.Commands[1].Function == nil || file.Text(file.Commands[1].Function.Name) != name {
+			t.Fatalf("dictionary method name lost: %#v", file.Commands[1])
+		}
+	}
+	for _, name := range []string{"l:Func", "x:popup.close", "l:popup.bad:close"} {
+		if file := Parse("function! " + name + "()\nendfunction\n"); !hasDiagnostic(file, "vim/E884") {
+			t.Fatalf("%s: expected E884: %#v", name, file.Diagnostics)
+		}
+	}
+	if file := Parse("vim9script\ndef g:popup.Close()\nenddef\n"); !hasDiagnostic(file, "vim/E1182") {
+		t.Fatalf("Vim9 dictionary restriction lost: %#v", file.Diagnostics)
+	}
+}
+
 func TestFunctionMissingOpeningParenthesisDiagnostic(t *testing.T) {
 	for _, test := range []struct {
 		name, source, message, span string

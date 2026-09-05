@@ -85,7 +85,10 @@ func parseFunctionSignature(file *File, command *Command) {
 		})
 	}
 	unqualifiedName := name
-	if strings.HasPrefix(unqualifiedName, "s:") || strings.HasPrefix(unqualifiedName, "g:") {
+	// A legacy dictionary function's namespace belongs to the dictionary.
+	dictionaryNamespace := !vim9Context && len(name) > 2 && name[1] == ':' &&
+		strings.ContainsRune("abglstvw", rune(name[0])) && strings.Contains(name[2:], ".")
+	if dictionaryNamespace || strings.HasPrefix(unqualifiedName, "s:") || strings.HasPrefix(unqualifiedName, "g:") {
 		unqualifiedName = unqualifiedName[2:]
 	}
 	if !nestedDefNamespace && !vim9ScriptNamespace && strings.Contains(unqualifiedName, ":") {
