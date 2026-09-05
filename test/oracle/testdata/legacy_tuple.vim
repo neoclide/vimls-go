@@ -18,6 +18,12 @@ let s:mutable = ([1], {'key': 2})
 let s:mutable[0][0] = 3
 let s:mutable[1].key = 4
 call assert_equal(([3], {'key': 4}), s:mutable)
+" Legacy tuple += raises E734. Ignoring it leaves the original tuple intact;
+" the attempted RHS must not be treated as its new whole value.
+let s:extended = ([1],)
+silent! let s:extended += ((2,),)
+let s:extended[0][0] = 3
+call assert_equal(([3],), s:extended)
 for [s:command, s:code] in [
       \ ['let s:pair[0] = 3', 'E1532:'],
       \ ['let [s:only] = s:pair', 'E1537:'],

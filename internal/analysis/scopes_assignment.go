@@ -87,11 +87,15 @@ func immediateLegacyNumberMemberDiagnostic(file *syntax.File, previous, current 
 // tuple indexes, never mutable containers or runtime-computed indexes.
 func immediateLegacyTupleMutationDiagnostic(previous, current *syntax.Command) (syntax.Diagnostic, bool) {
 	if previous == nil || current == nil || previous.Dialect != syntax.Legacy || current.Dialect != syntax.Legacy ||
+		previous.Canonical != "let" || current.Canonical != "let" || current.Declaration == nil ||
 		previous.Declaration == nil || previous.Declaration.Target == nil || previous.Declaration.Initializer == nil ||
-		previous.Declaration.Target.Kind != syntax.ExpressionIdentifier {
+		previous.Declaration.Target.Kind != syntax.ExpressionIdentifier ||
+		previous.Declaration.Assignment.End-previous.Declaration.Assignment.Start != 1 ||
+		current.Declaration.Assignment.End-current.Declaration.Assignment.Start != 1 ||
+		len(previous.Modifiers) != 0 || !staticTupleInitializer(previous.Declaration.Initializer) {
 		return syntax.Diagnostic{}, false
 	}
-	if current.Declaration != nil && expressionContainsMissing(current.Declaration.Initializer) {
+	if expressionContainsMissing(current.Declaration.Initializer) {
 		return syntax.Diagnostic{}, false
 	}
 	target := directAssignmentTarget(current)
@@ -132,6 +136,25 @@ func immediateLegacyTupleMutationDiagnostic(previous, current *syntax.Command) (
 		return syntax.Diagnostic{}, false
 	}
 	return syntax.Diagnostic{Code: "vim/E1532", Message: "Cannot modify a tuple", Span: target.Span}, true
+}
+
+func staticTupleInitializer(expression *syntax.Expression) bool {
+	if expression == nil {
+		return false
+	}
+	switch expression.Kind {
+	case syntax.ExpressionNumber, syntax.ExpressionString, syntax.ExpressionBlob:
+		return true
+	case syntax.ExpressionTuple, syntax.ExpressionList, syntax.ExpressionDictionary, syntax.ExpressionParenthesized:
+		for _, child := range expression.Children {
+			if !staticTupleInitializer(child) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func immediateLockedItemDiagnostic(result *FileAnalysis, scope *Scope, previous, current *syntax.Command) (syntax.Diagnostic, bool) {

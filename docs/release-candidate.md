@@ -60,6 +60,13 @@ jobs cannot close the new candidate gates.
 
 ## P3 progress
 
+Adversarial review tightened legacy tuple mutation evidence to plain adjacent
+`let ... =` assignments with static literal contents. In pinned Vim, tuple
+`+=` raises E734; `silent!` can ignore that failure and retain a mutable nested
+list. The analyzer must not infer the attempted RHS as a successfully assigned
+tuple. A direct negative analysis test and the pinned oracle cover this case.
+Full tests, vet, build and the complete oracle pass after the guard refinement.
+
 `govulncheck@v1.1.4 ./...` reports **No vulnerabilities found** on the local Go
 1.27 toolchain. CHANGELOG and packaged support/license documents are added;
 the release workflow now marks hyphenated prerelease tags as prereleases.
