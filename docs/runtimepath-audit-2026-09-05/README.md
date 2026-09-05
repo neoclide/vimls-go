@@ -72,26 +72,23 @@ XPTemplate 在 XPT 命令处收集模板并结束当前 source，再由解析器
 
 从仓库根执行；命令会覆盖对应证据文件，需要保留快照时应改用新输出路径。
 
-后续修复执行中，经用户确认，扫描器增加了可选的模板文件排除方式：
+后续修复执行中，经用户确认，扫描器直接忽略文件名以 `.xpt.vim` 结尾的 XPTemplate 文件（大小写不敏感），不需要参数：
 
 ```sh
 go run ./tools/diagnosticscan \
   -runtimepath "$(paste -sd, docs/runtimepath-audit-2026-09-05/roots.txt)" \
-  -exclude '*.xpt.vim' \
-  -output docs/runtimepath-audit-2026-09-05/errors-after-template-exclusion.txt
+  -output docs/runtimepath-audit-2026-09-05/errors-after-default-template-skip.txt
 ```
 
-`-exclude` 使用 Go `filepath.Match` 的文件名 glob，匹配每个文件的 basename，在所有子目录生效；可以重复传入多个规则。它不是路径 glob，不提供递归 `**` 语义。请给通配符加引号，避免 shell 提前展开。空规则和非法 glob 返回退出码 2，且不会打开输出文件。未指定参数时默认行为不变。
+先前的 `-exclude` 参数已移除。固定规则只匹配文件名，不会跳过仅父目录名以 `.xpt.vim` 结尾的普通 Vim 文件。
 
-排除文件不参与解析或诊断，摘要单独报告去重后的排除文件数；语言服务器不受此参数影响。排除意味着该文件中的其他真实错误也不会扫描，不等于已经支持其模板语言。
+模板文件不参与解析、诊断或扫描文件计数；仅修改扫描工具，语言服务器行为不变。跳过意味着该文件中的其他真实错误也不会扫描，不等于已经支持其模板语言。
 
-下面是不加排除规则的原始基线重跑方式：
+最新复扫：2980 个文件、63 条诊断，其中仍有 35 条已确认误报（11 类），其余 28 条非误报全部保留，无新增诊断。原始 53 条误报已消除 18 条，模板 5 条另行跳过。详细进度见 [fixes.md](fixes.md)。原始 `errors.txt` 和旧中间快照保留不覆盖；原始未排除模板的行为需使用基线提交才能复现。
+
+精简 oracle 案例可独立重跑（下面命令会覆盖原 oracle 证据，请按需改用新输出路径）：
 
 ```sh
-go run ./tools/diagnosticscan \
-  -runtimepath "$(paste -sd, docs/runtimepath-audit-2026-09-05/roots.txt)" \
-  -output docs/runtimepath-audit-2026-09-05/errors.txt
-
 go run ./docs/runtimepath-audit-2026-09-05/oracle_runner.go
 
 go run ./tools/diagnosticscan \

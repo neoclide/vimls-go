@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,9 +31,9 @@ func TestRunReportsOnlyErrorsAndDeduplicatesRuntimepath(t *testing.T) {
 	}
 }
 
-func TestRunExcludeBasenamePatterns(t *testing.T) {
+func TestRunIgnoresXPTemplateFiles(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"ftplugin/scala.xpt.vim", "nested/other.xpt.vim", "plugin/normal.vim", "plugin/skip.vim"} {
+	for _, name := range []string{"ftplugin/scala.xpt.vim", "nested/other.XPT.VIM", "plugin/normal.vim", "directory.xpt.vim/normal.vim"} {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -43,54 +42,30 @@ func TestRunExcludeBasenamePatterns(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, test := range []struct {
-		name                     string
-		patterns                 []string
-		wantErrors, wantExcluded int
-	}{
-		{"default", nil, 4, 0},
-		{"templates", []string{"*.xpt.vim"}, 2, 2},
-		{"repeat", []string{"*.xpt.vim", "skip.vim"}, 1, 3},
-		{"overlap", []string{"*.xpt.vim", "scala.xpt.vim"}, 2, 2},
-		{"all", []string{"*.vim"}, 0, 4},
-		{"unmatched", []string{"absent.vim"}, 4, 0},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			args := []string{"-runtimepath", root + "," + root}
-			for _, pattern := range test.patterns {
-				args = append(args, "-exclude", pattern)
-			}
-			var stdout, stderr bytes.Buffer
-			if code := run(args, &stdout, &stderr); code != 0 {
-				t.Fatalf("exit %d: %s", code, &stderr)
-			}
-			if got := strings.Count(stdout.String(), "vim/E119"); got != test.wantErrors {
-				t.Fatalf("errors = %d, want %d: %s", got, test.wantErrors, &stdout)
-			}
-			if len(test.patterns) > 0 && !strings.Contains(stderr.String(), fmt.Sprintf("excluded %d files", test.wantExcluded)) {
-				t.Fatalf("exclusion count: %s", &stderr)
-			}
-			if test.name == "templates" && (!strings.Contains(stdout.String(), "normal.vim") || strings.Contains(stdout.String(), ".xpt.vim")) {
-				t.Fatalf("wrong files excluded: %s", &stdout)
-			}
-		})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-runtimepath", root + "," + root}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, &stderr)
+	}
+	if got := stdout.String(); strings.Count(got, "vim/E119") != 2 || strings.Contains(got, "scala.xpt.vim") || strings.Contains(got, "other.XPT.VIM") {
+		t.Fatalf("wrong files scanned: %s", got)
+	}
+	if !strings.Contains(stderr.String(), "scanned 1 roots, 2 files, found 2 errors") {
+		t.Fatalf("stderr = %s", &stderr)
 	}
 }
 
-func TestRunRejectsInvalidExcludeBeforeOpeningOutput(t *testing.T) {
+func TestRunRejectsRemovedExcludeOption(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "existing.txt")
-	for _, pattern := range []string{"[", ""} {
-		if err := os.WriteFile(output, []byte("keep"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		var stdout, stderr bytes.Buffer
-		if code := run([]string{"-runtimepath", t.TempDir(), "-output", output, "-exclude", pattern}, &stdout, &stderr); code != 2 {
-			t.Fatalf("exit = %d, stderr = %s", code, &stderr)
-		}
-		data, err := os.ReadFile(output)
-		if err != nil || string(data) != "keep" {
-			t.Fatalf("output changed: %q, %v", data, err)
-		}
+	if err := os.WriteFile(output, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-runtimepath", t.TempDir(), "-output", output, "-exclude", "*.xpt.vim"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit = %d, stderr = %s", code, &stderr)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil || string(data) != "keep" {
+		t.Fatalf("output changed: %q, %v", data, err)
 	}
 }
 
@@ -108,12 +83,12 @@ func TestIsErrorDiagnostic(t *testing.T) {
 }
 
 func TestIsVimSourcePath(t *testing.T) {
-	for _, path := range []string{"plugin/foo.vim", ".vimrc", "vimrc"} {
+	for _, path := range []string{"plugin/foo.vim", ".vimrc", "vimrc", "template.xpt.vim/normal.vim", "xpt.vim", "test.xpt.vim.extra.vim"} {
 		if !isVimSourcePath(path) {
 			t.Fatalf("isVimSourcePath(%q) = false", path)
 		}
 	}
-	for _, path := range []string{"autoload/vimtex/complete/acro", "doc/tags", "LICENSE"} {
+	for _, path := range []string{"autoload/vimtex/complete/acro", "doc/tags", "LICENSE", "scala.xpt.vim", "nested/scala.XPT.VIM", ".xpt.vim"} {
 		if isVimSourcePath(path) {
 			t.Fatalf("isVimSourcePath(%q) = true", path)
 		}

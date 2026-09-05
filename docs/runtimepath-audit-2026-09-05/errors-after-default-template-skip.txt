@@ -1,0 +1,63 @@
+/Users/chemzqm/.vim/autoload/coc/t.vim:86:36: vim/E1167 Argument name shadows existing variable: cmd
+/Users/chemzqm/.vim/autoload/x.vim:59:36: vim/E1167 Argument name shadows existing variable: cmd
+/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/rust.vim/compiler/cargo.vim:19:43: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/rust.vim/compiler/rustc.vim:18:43: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-elixir/compiler/credo.vim:7:43: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-elixir/compiler/exunit.vim:7:41: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-elixir/compiler/mix.vim:7:43: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-javascript/compiler/eslint.vim:12:42: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/swift.vim/compiler/swift.vim:17:43: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/typescript-vim/compiler/typescript.vim:15:42: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/bundle/vim-fugitive/autoload/fugitive.vim:484:62: vim/E729 Using a Funcref as a String
+/Users/chemzqm/.vim/bundle/vim-fugitive/autoload/fugitive.vim:2078:21: vim/E729 Using a Funcref as a String
+/Users/chemzqm/.vim/bundle/vim-fugitive/autoload/fugitive.vim:2084:21: vim/E729 Using a Funcref as a String
+/Users/chemzqm/.vim/bundle/vim-fugitive/autoload/fugitive.vim:2105:60: vim/E729 Using a Funcref as a String
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/10/legacy.vim:24:3: vim/E492 Not an editor command: account.  Thus in
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/10/legacy.vim:25:3: vim/E492 Not an editor command: parenthesis match.  When included
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/10/legacy.vim:26:3: vim/E492 Not an editor command: backslashes, which is Vi compatible.
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/16/any.vim:5:26: vim/E114 Missing double quote
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:16:15: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:21:11: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:25:5: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:27:33: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:29:5: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/parts.vim:7:1: vim/E588 :endwhile without :while
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/parts.vim:4:3: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/tabs.vim:9:5: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/tabs.vim:14:3: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-scala/compiler/sbt.vim:14:41: vim/E518 Unknown option: <args>
+/Users/chemzqm/.vim/sessions/coc-list.vim:66:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/sessions/mini.vim:65:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/sessions/python.vim:61:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/sessions/someroject-rust.vim:73:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/view/~=+.vim=+vimrc=+unite.vim=1.vim:79:10: vim/E518 Unknown option: macmeta
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:48: vim/E518 Unknown option: \ buftype=nofile
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:73: vim/E518 Unknown option: \ noswapfile
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:94: vim/E518 Unknown option: \ wrap
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:101: vim/E518 Unknown option: [Document]
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:31:12: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:48:10: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:53:10: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:58:10: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:84:10: vim/E119 Not enough arguments for function: s:report_error
+/usr/local/share/vim/vim92/autoload/dist/vimindent.vim:180:7: vim/E1012 Type mismatch; expected list<string> but got string
+/usr/local/share/vim/vim92/autoload/dist/vimindent.vim:262:11: vim/E1012 Type mismatch; expected list<string> but got string
+/usr/local/share/vim/vim92/ftplugin/java.vim:404:50: vim/E1012 Type mismatch; expected func but got list<any>
+/usr/local/share/vim/vim92/ftplugin/lua.vim:149:5: vim/E1073 Name already defined: s:LuaFold
+/usr/local/share/vim/vim92/ftplugin/man.vim:50:53: vim/E518 Unknown option: Bar
+/usr/local/share/vim/vim92/ftplugin/man.vim:51:4: vim/E518 Unknown option: <Bar>
+/usr/local/share/vim/vim92/import/dist/vimhighlight.vim:118:35: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, number>
+/usr/local/share/vim/vim92/indent/hare.vim:331:45: vim/E1167 Argument name shadows existing variable: n
+/usr/local/share/vim/vim92/indent/sml.vim:153:3: vim/E492 Not an editor command: cursor(lnum,1)
+/usr/local/share/vim/vim92/pack/dist/opt/cfilter/plugin/cfilter.vim:69:33: vim/E119 Not enough arguments for function: Qf_filter
+/usr/local/share/vim/vim92/pack/dist/opt/cfilter/plugin/cfilter.vim:70:33: vim/E119 Not enough arguments for function: Qf_filter
+/usr/local/share/vim/vim92/pack/dist/opt/comment/autoload/comment.vim:15:15: vim/E1012 Type mismatch; expected string but got func<any>
+/usr/local/share/vim/vim92/pack/dist/opt/editorconfig/plugin/editorconfig.vim:104:9: vim/E492 Not an editor command: setbufvar(a:bufnr, '&shellslash', 0)
+/usr/local/share/vim/vim92/pack/dist/opt/editorconfig/plugin/editorconfig.vim:111:9: vim/E492 Not an editor command: setbufvar(a:bufnr, '&shellslash', s:old_shellslash)
+/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim:579:51: vim/E1012 Type mismatch; expected string but got list<any>
+/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim:857:19: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, dict<any>>
+/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim:1127:44: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, number>
+/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim:1247:19: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, string>
+/usr/local/share/vim/vim92/pack/dist/opt/netrw/autoload/netrw.vim:9304:17: vim/E46 Cannot change read-only variable "a:newdir"
+/usr/local/share/vim/vim92/pack/dist/opt/netrw/autoload/netrw.vim:9308:17: vim/E46 Cannot change read-only variable "a:newdir"
+/usr/local/share/vim/vim92/syntax/2html.vim:1114:78: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, any>

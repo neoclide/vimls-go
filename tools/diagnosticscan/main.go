@@ -34,17 +34,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	runtimepath := flags.String("runtimepath", "", "comma-separated Vim runtimepath")
 	outputPath := flags.String("output", "", "write diagnostics to this file instead of stdout")
-	var excludes []string
-	flags.Func("exclude", "exclude a file basename glob (filepath.Match syntax; repeatable)", func(pattern string) error {
-		if pattern == "" {
-			return fmt.Errorf("exclude pattern must not be empty")
-		}
-		if _, err := filepath.Match(pattern, ""); err != nil {
-			return err
-		}
-		excludes = append(excludes, pattern)
-		return nil
-	})
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -71,20 +60,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	paths := make([]string, 0, len(files))
-	excluded := 0
 	for path := range files {
-		skip := false
-		for _, pattern := range excludes {
-			// Patterns are validated before discovering files or opening output.
-			if matched, _ := filepath.Match(pattern, filepath.Base(path)); matched {
-				skip = true
-				break
-			}
-		}
-		if skip {
-			excluded++
-			continue
-		}
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
@@ -137,9 +113,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(output, "%s:%d:%d: %s %s\n", item.path, item.line, item.character, item.code, item.message)
 	}
 	fmt.Fprintf(stderr, "diagnosticscan: scanned %d roots, %d files, found %d errors\n", len(roots), len(paths), len(findings))
-	if len(excludes) > 0 {
-		fmt.Fprintf(stderr, "diagnosticscan: excluded %d files by basename pattern\n", excluded)
-	}
 	if failed {
 		return 2
 	}
@@ -147,6 +120,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func isVimSourcePath(path string) bool {
+	// XPTemplate files contain template bodies, not standalone Vim scripts.
+	if strings.HasSuffix(strings.ToLower(filepath.Base(path)), ".xpt.vim") {
+		return false
+	}
 	if strings.EqualFold(filepath.Ext(path), ".vim") {
 		return true
 	}
