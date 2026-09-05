@@ -13,8 +13,8 @@
 | F05 | 已提交 | `008adf7` |
 | F06 | 已提交 | `2cabe15` |
 | F07 | 已提交 | `96793cf` |
-| F08 | 已修复 | `fix(analysis): respect function ownership in return inference` |
-| F09 | 待修复 | |
+| F08 | 已提交 | `bffc03f` |
+| F09 | 已修复 | `fix(server): discard superseded configuration responses` |
 | F10 | 待修复 | |
 | F11 | 待修复 | |
 | F12 | 待修复 | |
@@ -68,3 +68,7 @@ server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根�
 ## F08
 
 返回推断使用已有函数 scope 的范围及最近 callable 所有者，跳过嵌套函数的返回和结束标记。legacy 无返回及裸 return 推断为 number，Vim9 void 保持独立。覆盖嵌套函数、无返回、裸 return、条件块及调用表达式类型；类型定向测试、全量 test、vet、make、gofmt/gopls 均通过；固定版本 oracle 已在本轮验证 Outer 返回 42、legacy 默认返回 0。未引入新的控制流求解器。
+
+## F09
+
+配置 pull 在释放输入循环前保留更新序号；pull 响应和 push 应用通过同一互斥/序号检查，新 push、新 pull 或生命周期取消后旧响应不再生效。覆盖旧 pull→新 push、两个 pull 反序完成、shutdown 后旧响应；Configuration 定向测试、全量 test、vet、make、gofmt 与 gopls CLI（补查新文件 metadata）均通过。

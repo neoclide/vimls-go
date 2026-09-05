@@ -211,6 +211,8 @@ type Server struct {
 	diagnosticRefreshGeneration uint64
 	diagnosticRefreshRunning    bool
 	workspaceMu                 sync.Mutex
+	configurationMu             sync.Mutex
+	configurationGeneration     uint64
 	workspaceRoots              []string
 	runtimePaths                []string
 	runtimepathGeneration       uint64
@@ -832,6 +834,10 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 	}
 	// Configuration is a server-to-client request. Release the connection read
 	// loop first so it can receive the client's response while this handler waits.
+	s.configurationMu.Lock()
+	s.configurationGeneration++
+	generation := s.configurationGeneration
+	s.configurationMu.Unlock()
 	jsonrpc2.Async(ctx)
 	section := "vim"
 	values, err := client.Configuration(ctx, &protocol.ConfigurationParams{Items: []protocol.ConfigurationItem{{Section: &section}}})
@@ -841,10 +847,22 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 	if len(values) == 0 {
 		return nil
 	}
-	return s.applyWorkspaceConfiguration(ctx, []byte(values[0]))
+	return s.applyWorkspaceConfigurationGeneration(ctx, []byte(values[0]), generation)
 }
 
 func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
+	return s.applyWorkspaceConfigurationGeneration(ctx, settings, 0)
+}
+
+func (s *Server) applyWorkspaceConfigurationGeneration(ctx context.Context, settings []byte, generation uint64) error {
+	s.configurationMu.Lock()
+	defer s.configurationMu.Unlock()
+	if ctx.Err() != nil || s.analysisContext.Err() != nil || generation != 0 && generation != s.configurationGeneration {
+		return nil
+	}
+	if generation == 0 {
+		s.configurationGeneration++
+	}
 	s.mu.Lock()
 	excludeRuntimePath, excludeRuntimePathWarning := excludeRuntimePathFromSettings(settings, s.excludeRuntimePathCompletions)
 	s.excludeRuntimePathCompletions = excludeRuntimePath
