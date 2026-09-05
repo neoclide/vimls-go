@@ -7,9 +7,9 @@
 | 项目 | 状态 | 验证与提交 |
 | --- | --- | --- |
 | F01 | 已提交 | `82cba9b`；见下方验证 |
-| F02 | 已修复 | `fix(server): bound disk reads across workspace entrypoints`；见下方验证 |
-| F03 | 进行中 | 重命名后的声明、引用绑定与冲突检查 |
-| F04 | 待修复 | |
+| F02 | 已提交 | `2f368b7`；见下方验证 |
+| F03 | 已修复 | `fix(server): reject rename collisions and binding changes`；见下方验证 |
+| F04 | 进行中 | 关闭文件的磁盘内容与索引一致性 |
 | F05 | 待修复 | |
 | F06 | 待修复 | |
 | F07 | 待修复 | |
@@ -36,3 +36,11 @@
 关闭文档恢复、runtimepath 新源码和 workspace diagnostics 使用现有非阻塞/普通文件/LimitReader 上限读取；runtimepath 根也以非阻塞打开后的句柄检查目录类型。无法完整读入 runtimepath 源码时标记索引不完整，避免把遗漏当成完整结果。
 
 验证：四个读取入口 FIFO 复现改为有界成功返回，另覆盖已有文件被替换、精确读取上界及关闭/runtimepath 超限文件；`go test ./internal/server -run 'Test(WorkspaceReadEntrypoints|ReadRegularWorkspaceFile|Runtimepath|DidChangeWatchedFiles.*FIFO)' -count=1 -timeout 60s`、`go test ./...`、`go vet ./...`、`make`、gofmt/gopls 均通过。FIFO 测试保留 Unix 构建约束，未声称中断任意网络文件系统的内核 I/O。
+
+## F03
+
+生成编辑前对拟修改文本重新解析/分析，验证声明身份、所有本地引用的目标绑定、同作用域新冲突和新增 Vim 编译错误；另检查未参与编辑的文件中的已索引全局名字冲突。编辑后源码大小在构造文本之前受限，位置映射使用有序编辑的前缀偏移与二分查找，避免按引用数乘编辑数扫描。
+
+新增同名声明、嵌套捕获、参数、保留字、函数大小写、未解析引用捕获、legacy 脚本函数覆盖及跨文件全局冲突测试；保留独立函数作用域允许同名的正例。原有接口/类成员、跨文件 import、`s:`/`<SID>` 与编码测试通过。
+
+验证：`go test ./internal/server -run 'Test.*Rename' -count=1 -timeout 60s`、`go test ./...`、`go vet ./...`、`make`、gofmt/gopls、diff check 均通过。动态绑定仍沿既有保守拒绝路径处理，不声称能证明任意 Vim 动态重构安全。

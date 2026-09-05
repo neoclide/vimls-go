@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/neoclide/vimls-go/internal/analysis"
+	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
@@ -180,7 +182,7 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 					return nil, unsafeRenameError()
 				}
 			} else {
-				if !validRenameReplacement(target.match.Fact.Name, params.NewName) {
+				if !validRenameReplacement(target.match.Fact.Name, params.NewName) || renameGlobalConflict(state, target, params.NewName) {
 					current, err := document.workspaceNavigationCurrent(ctx, state, target)
 					if err != nil {
 						return nil, err
@@ -263,6 +265,9 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 			}
 			return left.Start.Character < right.Start.Character
 		})
+		if err := validateRenameBindings(ctx, document.snapshot, document.encoding, edits); err != nil {
+			return nil, err
+		}
 		if err := document.checkCurrent(ctx); err != nil {
 			return nil, err
 		}
@@ -284,6 +289,129 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 
 func unsafeRenameError() error {
 	return jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "symbol cannot be renamed safely")
+}
+
+func renameGlobalConflict(state workspaceNavigationSnapshot, target workspaceNavigationTarget, newName string) bool {
+	fact := target.match.Fact
+	_, scriptLocal := serverScriptLocalName(fact.Name)
+	global := strings.HasPrefix(fact.Name, "g:") || fact.Dialect == syntax.Legacy && fact.TopLevel && !scriptLocal
+	if !global || fact.Name == newName || state.index == nil {
+		return false
+	}
+	return len(state.index.GlobalNameFacts(strings.TrimPrefix(newName, "g:"))) != 0
+}
+
+// Validate the proposed text without mutating document/index state. Checking all
+// references also detects capture of occurrences that are not being renamed.
+func validateRenameBindings(ctx context.Context, snapshot *text.Snapshot, encoding text.Encoding, edits []protocol.TextDocumentEditElement) error {
+	if ctx.Err() != nil {
+		return protocol.ErrRequestCancelled
+	}
+	type replacement struct {
+		span syntax.Span
+		text string
+	}
+	changes := make([]replacement, 0, len(edits))
+	newSize := snapshot.ByteLen()
+	for _, element := range edits {
+		edit, ok := element.(*protocol.TextEdit)
+		if !ok {
+			return unsafeRenameError()
+		}
+		start, startErr := snapshot.Offset(fromProtocolPosition(edit.Range.Start), encoding)
+		end, endErr := snapshot.Offset(fromProtocolPosition(edit.Range.End), encoding)
+		if startErr != nil || endErr != nil || end < start {
+			return unsafeRenameError()
+		}
+		newSize += len(edit.NewText) - (end - start)
+		if newSize > maxFileBytes {
+			return unsafeRenameError()
+		}
+		changes = append(changes, replacement{syntax.Span{Start: start, End: end}, edit.NewText})
+	}
+	sort.Slice(changes, func(i, j int) bool { return changes[i].span.Start < changes[j].span.Start })
+	var source strings.Builder
+	previous := 0
+	shifts := make([]int, len(changes)+1)
+	for index, change := range changes {
+		if change.span.Start < previous {
+			return unsafeRenameError()
+		}
+		source.WriteString(snapshot.Text()[previous:change.span.Start])
+		source.WriteString(change.text)
+		previous = change.span.End
+		shifts[index+1] = shifts[index] + len(change.text) - (change.span.End - change.span.Start)
+	}
+	source.WriteString(snapshot.Text()[previous:])
+	if source.Len() > maxFileBytes {
+		return unsafeRenameError()
+	}
+	mapOffset := func(offset int) int {
+		index := sort.Search(len(changes), func(i int) bool { return changes[i].span.End > offset })
+		return offset + shifts[index]
+	}
+	mapSpan := func(span syntax.Span) syntax.Span {
+		return syntax.Span{Start: mapOffset(span.Start), End: mapOffset(span.End)}
+	}
+	beforeFile, afterFile := syntax.Parse(snapshot.Text()), syntax.Parse(source.String())
+	before, after := analysis.Analyze(beforeFile), analysis.Analyze(afterFile)
+	if ctx.Err() != nil {
+		return protocol.ErrRequestCancelled
+	}
+	if len(before.Declarations) != len(after.Declarations) || len(before.References) != len(after.References) {
+		return unsafeRenameError()
+	}
+	declarations := make(map[syntax.Span]*analysis.Declaration, len(after.Declarations))
+	for _, declaration := range after.Declarations {
+		declarations[declaration.Span] = declaration
+	}
+	type declarationKey struct {
+		scope *analysis.Scope
+		name  string
+	}
+	seen := make(map[declarationKey]*analysis.Declaration)
+	for _, declaration := range before.Declarations {
+		renamed := declarations[mapSpan(declaration.Span)]
+		if renamed == nil || renamed.Kind != declaration.Kind {
+			return unsafeRenameError()
+		}
+		name := renamed.Name
+		if suffix, ok := serverScriptLocalName(name); ok {
+			name = "s:" + suffix
+		}
+		key := declarationKey{renamed.Scope, name}
+		if other := seen[key]; other != nil && other.Name != declaration.Name {
+			return unsafeRenameError()
+		}
+		seen[key] = declaration
+	}
+	references := make(map[syntax.Span]*analysis.Reference, len(after.References))
+	for _, reference := range after.References {
+		references[reference.Span] = reference
+	}
+	for _, reference := range before.References {
+		renamed := references[mapSpan(reference.Span)]
+		if renamed == nil || (reference.Declaration == nil) != (renamed.Declaration == nil) {
+			return unsafeRenameError()
+		}
+		if reference.Declaration != nil && mapSpan(reference.Declaration.Span) != renamed.Declaration.Span {
+			return unsafeRenameError()
+		}
+	}
+	type diagnosticKey struct {
+		code string
+		span syntax.Span
+	}
+	existing := make(map[diagnosticKey]bool)
+	for _, diagnostic := range analysis.CombinedDiagnostics(beforeFile, before) {
+		existing[diagnosticKey{diagnostic.Code, mapSpan(diagnostic.Span)}] = true
+	}
+	for _, diagnostic := range analysis.CombinedDiagnostics(afterFile, after) {
+		if strings.HasPrefix(diagnostic.Code, "vim/") && !existing[diagnosticKey{diagnostic.Code, diagnostic.Span}] {
+			return unsafeRenameError()
+		}
+	}
+	return nil
 }
 
 func validRenameReplacement(oldName, newName string) bool {
@@ -383,6 +511,9 @@ func (s *Server) renameEdits(ctx context.Context, workspaceState workspaceNaviga
 	changes := make([]protocol.DocumentChange, 0, len(uris))
 	for _, documentURI := range uris {
 		state := states[documentURI]
+		if err := validateRenameBindings(ctx, state.snapshot, encoding, state.edits); err != nil {
+			return nil, openSnapshots, err
+		}
 		sort.Slice(state.edits, func(i, j int) bool {
 			left := state.edits[i].(*protocol.TextEdit).Range.Start
 			right := state.edits[j].(*protocol.TextEdit).Range.Start

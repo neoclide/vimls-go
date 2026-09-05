@@ -136,6 +136,54 @@ func TestRenameRejectsNamespaceChanges(t *testing.T) {
 	}
 }
 
+func TestRenameRejectsBindingConflicts(t *testing.T) {
+	for _, test := range []struct {
+		name, source, replacement string
+		position                  protocol.Position
+	}{
+		{"same scope", "vim9script\nvar first = 1\nvar other = 2\necho first + other\n", "other", protocol.Position{Line: 1, Character: 5}},
+		{"legacy overwrite without references", "function! s:First()\nendfunction\nfunction! s:Other()\nendfunction\n", "s:Other", protocol.Position{Line: 0, Character: 13}},
+		{"nested capture", "vim9script\nvar first = 1\ndef Run()\n  var other = 2\n  echo first + other\nenddef\n", "other", protocol.Position{Line: 1, Character: 5}},
+		{"parameter conflict", "vim9script\ndef Run(other: number)\n  var first = 1\n  echo first + other\nenddef\n", "other", protocol.Position{Line: 2, Character: 7}},
+		{"reserved name", "vim9script\nvar first = 1\necho first\n", "true", protocol.Position{Line: 1, Character: 5}},
+		{"function capitalization", "vim9script\ndef Run()\nenddef\nRun()\n", "lowercase", protocol.Position{Line: 1, Character: 5}},
+		{"capture existing unresolved use", "function! Run()\n  let first = 1\n  echo other\n  echo first\nendfunction\n", "other", protocol.Position{Line: 1, Character: 7}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			t.Cleanup(s.stopAnalysis)
+			edit, err := s.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position}, NewName: test.replacement})
+			if err == nil || edit != nil {
+				t.Fatalf("unsafe rename accepted: edit=%#v err=%v", edit, err)
+			}
+		})
+	}
+}
+
+func TestRenameAllowsSameNameInSeparateFunctionScopes(t *testing.T) {
+	source := "function! First()\n  let first = 1\n  echo first\nendfunction\nfunction! Second()\n  let other = 2\n  echo other\nendfunction\n"
+	s, documentURI := openNavigationDocument(t, text.UTF16, source)
+	t.Cleanup(s.stopAnalysis)
+	edit, err := s.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 7}}, NewName: "other"})
+	if err != nil || edit == nil {
+		t.Fatalf("independent scope rejected: %#v %v", edit, err)
+	}
+}
+
+func TestRenameRejectsGlobalCollisionInUneditedFile(t *testing.T) {
+	root := t.TempDir()
+	source := "function! First()\nendfunction\ncall First()\n"
+	path := writeWorkspaceFile(t, root, "first.vim", source)
+	writeWorkspaceFile(t, root, "other.vim", "function! Other()\nendfunction\n")
+	s := initializeWorkspaceServer(t, root)
+	documentURI := uri.File(path)
+	s.documents.Open(documentURI.String(), 1, source)
+	edit, err := s.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 0, Character: 12}}, NewName: "Other"})
+	if err == nil || edit != nil {
+		t.Fatalf("global collision accepted: %#v %v", edit, err)
+	}
+}
+
 func TestRenameLegacyScriptLocalPrefixesPreservesSpelling(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "function! s:Run()\nendfunction\ncall s:Run()\ncall <SID>Run()\n")
 	params := protocol.TextDocumentPositionParams{
