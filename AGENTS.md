@@ -114,7 +114,7 @@ packages in advance of the milestone that needs them.
   exists, the default gate is:
 
       gofmt -w <changed-go-files>
-      go test ./...
+      go test -count=1 ./...
       go vet ./...
 
 - Do not run race tests or collect coverage unless the user or the task's
@@ -175,9 +175,12 @@ read-only and ask the primary agent for a corrected brief.
 - Prefer gopls semantic rename over search-and-replace for Go identifiers.
 - After modifying a Go file, request gopls diagnostics for that file.
 - Use gopls results as development guidance, not as a replacement for tests.
+- Disable test-result caching for final validation: integration tests build the
+  server subprocess dynamically, so their Go cache does not track all server
+  source changes. Use `go test -count=1 ./...` or `make test`.
 - Before completion, run:
   - gofmt on modified Go files
-  - go test ./...
+  - go test -count=1 ./...
   - go vet ./...
   - make
 - If the repository defines narrower validation commands, run those as well.

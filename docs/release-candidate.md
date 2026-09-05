@@ -1,11 +1,129 @@
 # Release-candidate evidence
 
+## Current v0.1.0 acceptance — 2026-09-05
+
+The first release target is **v0.1.0**. The local archive validation label is
+`v0.1.0-rc.1`; neither is a published release or tag. Production source is
+`4fb39e4365b8fe7e710f7582e4944237644f788f`, with an uncommitted integration-test
+repair and release-documentation updates. This is working-tree acceptance,
+not evidence for a clean final release commit. The previous `549c5b7` record
+below is historical and must not be used to certify the current candidate.
+
+### CI repair and remaining remote gates
+
+[Run 33973871423](https://github.com/neoclide/vimls-go/actions/runs/33973871423)
+tested `4fb39e4` and failed. Linux/macOS tests and coverage encountered the
+obsolete single-document option-hover assertion. Windows encountered
+`ContentModified` because workspace-symbol readiness did not imply that the
+separate runtimepath indexing phase had completed. Vulnerability and Vim
+oracle/client jobs passed on that source.
+
+The local repair asserts the two option-hover documents and the full
+`nonumber` range, and awaits the runtimepath request before index-backed
+hierarchy queries. It preserves the server's stale-snapshot rejection.
+`TestLSPSubprocess` passed **20 uncached repetitions**. Final validation now
+explicitly disables Go test-result caching: integration tests dynamically build
+the server, whose changes are not all tracked by the test cache.
+
+Native Windows plus Linux/macOS CI, including race and the 90% coverage gate,
+remain pending for the repaired commit. Local race/coverage were not rerun.
+No push, workflow dispatch, tag or publication was performed. An older green
+CI run cannot close these gates.
+
+### Current local checks
+
+Host toolchain: `go1.27.0 darwin/amd64`. CI uses Go 1.26.x; local results do not
+substitute for that toolchain/platform matrix. Oracle: `/usr/local/bin/vim`,
+Vim 9.2 patches 1–1015, with patch 1016 absent.
+
+| Check | Result |
+| --- | --- |
+| `go test -mod=readonly -count=1 -json ./...` | Pass: 6,106 passing test/subtest events across 18 tested packages, zero failures. The optional parser triage is skipped; oracle tests skipped here are run separately below. |
+| `go test -mod=readonly ./test/integration -run '^TestLSPSubprocess$' -count=20` | Pass |
+| `make format-check vet build` | Pass |
+| `gopls check test/integration/lsp_subprocess_test.go` | Pass |
+| `make oracle VIM_EXECUTABLE=/usr/local/bin/vim` | Pass |
+| `make client-smoke VIM_EXECUTABLE=/usr/local/bin/vim` | Pass: both dialects receive the expected diagnostic, format, shut down and exit with `v:errors=[]`. |
+
+Raw current output is in ignored `.test-tools/rc-0.1-refresh/`: `tests.json`,
+`build-vet.txt`, `gopls.txt`, `oracle.txt` and `client-smoke.txt`. These summaries
+remain useful when local logs are unavailable. Test/subtest events are not a
+count of independent top-level tests.
+
+### Current performance comparison
+
+Compared historical candidate `549c5b7` with the current working tree on the
+same host/toolchain, using `GOMAXPROCS=4`, `-benchtime=10x`, `-count=5` and the
+existing ParseLargeFile, CompletionLatency, RuntimepathIndexing,
+ReverseDependentReanalysis and WorkspaceRebuild benchmarks. The unchanged
+benchreport budgets are 15% median/p95 time, 20% bytes/allocations and 100 ms
+completion latency.
+
+The first pair exceeded time budgets for completion and indexing/reanalysis.
+A second pair in reverse execution order passed all budgets without changing
+source, workload, baseline or thresholds. This is a noisy local result, not a
+claim that the first regression report passed. Both rounds are retained as
+`benchmark-{baseline,current,report}.txt` and
+`benchmark-{baseline,current,report}-confirm.txt` in the current output folder.
+
+| Workload | Confirmation median | Confirmation p95 |
+| --- | ---: | ---: |
+| Parse legacy 100 KiB / 1 MiB | 1.43 / 35.27 ms | 1.54 / 36.27 ms |
+| Parse Vim9 100 KiB / 1 MiB | 1.99 / 22.06 ms | 2.16 / 22.49 ms |
+| Completion 1 KiB / 100 KiB | 0.181 / 0.180 ms | 0.199 / 0.187 ms |
+| Workspace rebuild | 33.00 ms | 33.69 ms |
+| Runtimepath indexing | 81.64 ms | 84.87 ms |
+| Reverse-dependent reanalysis | 37.50 ms | 37.71 ms |
+
+These indexing benchmarks do not measure runtime-help extraction separately.
+The historical fuzz runs below have not been refreshed for current source.
+
+### Current archives and clean-install acceptance
+
+Built twice with separate `build-one` / `build-two` output directories under
+`.test-tools/rc-0.1-refresh/`:
+
+```sh
+GOMAXPROCS=4 go run -mod=readonly ./tools/release \
+  -version v0.1.0-rc.1 -epoch 1788620670 \
+  -output-dir .test-tools/rc-0.1-refresh/build-one
+```
+
+All **16 assets** (eight executables and eight archives) are byte-identical
+between builds and match their SHA-256 manifest. All eight archives contain
+exactly the expected executable, README, current 0.1 CHANGELOG, support
+contract and two license files; packaged documents match the working tree.
+
+- Checksum manifest SHA-256:
+  `720b009746e64b97bd53b58d71f4bb211faa5c737e5a20dde27946c3f9b699b8`.
+- Unpacked Darwin/amd64 executable SHA-256:
+  `ef355432af413b956af1257c2d985fe266f3166ca84d95c7a960a1606ecdb766`.
+- Integration-test file SHA-256 identifying the local repair:
+  `2995b192d2dc641bdaf7d77e620a8e31d3e1e5c5c81bb4ac47bc7a783a59e8ba`.
+
+The unpacked host executable reports `vimls v0.1.0-rc.1`. Build metadata records
+Go 1.27.0, `CGO_ENABLED=0`, revision `4fb39e4` and **`vcs.modified=true`**.
+These are reproducible local validation artifacts, not final release assets.
+A clean final commit still needs its own build and acceptance.
+
+The unpacked binary passed all **11 integration tests** using
+`VIMLS_TEST_BINARY` and `VIMLS_TEST_VERSION=v0.1.0-rc.1`, then passed the pinned
+Vim/vim-lsp smoke with `VIMLS_BINARY` pointing to it. Both dialects produced the
+expected diagnostic and indentation edit; shutdown responded, the process
+exited, and `v:errors=[]`. Other architectures were cross-built, not executed.
+Logs: `archive-validation.txt`, `archive-integration.json`, `archive-client.txt`.
+
+## Historical acceptance — source 549c5b7
+
+Everything below, including its former 1.0 candidate label, hashes and gate
+status, describes the earlier source only. It is retained for provenance.
+
 Date: 2026-09-05. Candidate label: `v1.0.0-rc.1` (local validation only;
 not a tag or published release). Baseline: `a0381ea`.
 Final candidate source: `549c5b7bbed567a7369c78d73f0eaa7f682f691d`.
 The subsequent evidence-only commit is not the archive source SHA.
 
-## Scope and remaining gates
+### Scope and remaining gates
 
 The release contract is [language-support.md](language-support.md), with
 parser and semantic evidence kept separate in [syntax-coverage.md](syntax-coverage.md).
@@ -13,7 +131,7 @@ Explicit deferred features remain deferred. P0–P3 local gates pass; M7 is not
 closed until the exact candidate passes native Windows and CI race/coverage.
 No remote write, tag, or publication is authorized by this work.
 
-## Local environment and commands
+### Local environment and commands
 
 - Host: Darwin 25.5.0, x86_64; Go `go1.27.0 darwin/amd64`.
 - Oracle: `/usr/local/bin/vim`, Vim 9.2, patches 1–1015; patch 1016 absent.
@@ -31,7 +149,7 @@ No remote write, tag, or publication is authorized by this work.
   `oracle-final.txt`, `client-smoke.txt`). This document retains conclusions even
   when local artifacts are unavailable.
 
-## Required LSP evidence
+### Required LSP evidence
 
 Initialization capability shapes are tested in
 `internal/server/initialize_capability_matrix_test.go`; the implementation is
@@ -51,7 +169,7 @@ Concurrency branches use package hooks/barriers. Subprocess timing alone is
 not evidence that a stale branch was reached. Unpacked archives can now use
 the same integration suite via `VIMLS_TEST_BINARY` and `VIMLS_TEST_VERSION`.
 
-## Remote evidence
+### Remote evidence
 
 [Baseline CI run 33961022065](https://github.com/neoclide/vimls-go/actions/runs/33961022065)
 is for **a0381ea**, not this candidate. Linux/macOS test+race+vet+build,
@@ -61,7 +179,7 @@ locally in `d473ee4`. Native Windows and all candidate-SHA CI results remain
 pending. Local race/coverage were intentionally not run; historical green
 jobs cannot close the new candidate gates.
 
-## P3 progress
+### P3 progress
 
 Adversarial review tightened legacy tuple mutation evidence to plain adjacent
 `let ... =` assignments with static literal contents. In pinned Vim, tuple
@@ -75,7 +193,7 @@ Full tests, vet, build and the complete oracle pass after the guard refinement.
 the release workflow now marks hyphenated prerelease tags as prereleases.
 No workflow was triggered. Full tests, vet and build pass for these changes.
 
-### Bounded fuzzing
+#### Bounded fuzzing
 
 Eight targets passed with `-run '^$' -fuzz '^TARGET$' -fuzztime 30s -parallel 4`.
 No crash input was found. Framing/text/parser implementations did not change
@@ -93,7 +211,7 @@ the last analysis guard refinement; this is not a substitute for semantic tests.
 | syntax / FuzzVim9TypeNeverPanics | 875,702 |
 | server / FuzzCompletionContext | 264,917; final rerun 334,302 |
 
-### Performance
+#### Performance
 
 Runner: the host above, Intel i7-9750H @ 2.60GHz, `GOMAXPROCS=4`, Go 1.27.0.
 Baseline `a0381ea` and candidate `549c5b7` use the unchanged fixed workloads from
@@ -129,7 +247,7 @@ increase is reverse reanalysis, 54,124 -> 55,085 (+1.78%). Completion stays well
 below 100 ms. These results are specific to this recorded host/toolchain, not
 a promise about all clients or a replacement for candidate CI.
 
-### Reproducible archives and clean-install acceptance
+#### Reproducible archives and clean-install acceptance
 
 From the clean final source, ran twice with separate ignored output directories:
 

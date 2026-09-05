@@ -176,6 +176,12 @@ endfunction
 			t.Fatalf("workspace symbols = %s", workspaceSymbols)
 		}
 	}
+	// Workspace symbols becoming ready no longer implies external runtime
+	// parsing has finished. Await a runtimepath request before index-backed queries.
+	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":99989,"method":"vimls/didChangeRuntimepath","params":{"runtimepath":[%q]}}`, runtimeRoot))
+	if response := readResponse(t, reader, "99989"); string(response["result"]) != "null" {
+		t.Fatalf("runtimepath readiness = %s", response)
+	}
 	hierarchyURI := canonicalFileURI(t, hierarchyPath)
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"vim","version":1,"text":%q}}}`, hierarchyURI, hierarchySource))
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":20,"method":"textDocument/implementation","params":{"textDocument":{"uri":%q},"position":{"line":1,"character":10}}}`, hierarchyURI))
@@ -375,7 +381,17 @@ endfunction
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":925,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":5,"character":7}}}`)
 	optionHover := readJSON(t, reader)
-	if string(optionHover["id"]) != "925" || !strings.Contains(string(optionHover["result"]), `"kind":"markdown"`) || !strings.Contains(string(optionHover["result"]), `'number'`) || !strings.Contains(string(optionHover["result"]), `Print the line number`) {
+	var optionResult struct {
+		Contents []string       `json:"contents"`
+		Range    protocol.Range `json:"range"`
+	}
+	if err := json.Unmarshal(optionHover["result"], &optionResult); err != nil {
+		t.Fatalf("option hover is not separate Markdown documents: %s, %v", optionHover, err)
+	}
+	if string(optionHover["id"]) != "925" || len(optionResult.Contents) != 2 ||
+		optionResult.Contents[0] != "'number' 'nu' boolean (default off)\nScope: **local to window**" ||
+		!strings.HasPrefix(optionResult.Contents[1], "Print the line number") ||
+		optionResult.Range != (protocol.Range{Start: protocol.Position{Line: 5, Character: 5}, End: protocol.Position{Line: 5, Character: 12}}) {
 		t.Fatalf("option hover = %s", optionHover)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///class-signature.vim","languageId":"vim","version":1,"text":"vim9script\nclass Box\n  def new(value: number)\n  enddef\n  def Resize(width: number, height: number = 1): number\n    return width * height\n  enddef\nendclass\nvar box = Box.new(1)\necho box.Resize(2, 3)\n"}}}`)
@@ -424,12 +440,7 @@ endfunction
 		t.Fatalf("runtimepath symbols = %s", runtimeSymbols)
 	}
 	legacyMain := "let g:result = RuntimeGlobal(1)\necho acme#Format('x')\n"
-	// Workspace symbols becoming ready no longer implies external runtime
-	// parsing has finished. Await a runtimepath request before runtime queries.
-	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":99989,"method":"vimls/didChangeRuntimepath","params":{"runtimepath":[%q]}}`, runtimeRoot))
-	if response := readResponse(t, reader, "99989"); string(response["result"]) != "null" {
-		t.Fatalf("runtimepath readiness = %s", response)
-	}
+
 	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///legacy-main.vim","languageId":"vim","version":1,"text":%q}}}`, legacyMain))
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99990,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///legacy-main.vim"},"position":{"line":1,"character":10}}}`)
 	legacyDefinition := readResponse(t, reader, "99990")

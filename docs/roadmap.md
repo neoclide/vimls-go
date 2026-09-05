@@ -1,30 +1,26 @@
 # Delivery roadmap
 
-## Release-candidate work ledger (2026-09-05)
+## v0.1.0 release work ledger (2026-09-05)
 
-Baseline: `a0381ea`. Each implementation slice is tested and committed locally.
-Publishing and tags are separate actions. A deferred feature is not a release
-blocker unless explicitly included in the 1.0 contract.
+The first-release target is `v0.1.0`; the 1.0 sections below retain the longer-term
+language contract. Current production source is `4fb39e4`. The current local
+acceptance includes the integration-test corrections documented in
+[release-candidate.md](release-candidate.md); the old `549c5b7` acceptance and
+archive checksums are historical and do not certify this source.
 
 | Priority | Work | Status / evidence |
 | --- | --- | --- |
-| P0 | Windows path identity and diagnosticscan canonical output | Fixed; uncached full tests, vet and build pass locally. Native Windows CI remains pending (baseline failure: run 33961022065). |
-| P1 | Direct legacy tuple semantics | Direct tests and exact v9.2.1015 oracle pass; fixed-index inference, literal cardinality and adjacent literal mutation now covered. Dynamic cases remain unknown. |
-| P1 | Mapping result policy | Implemented literal E976/E729 only; pinned source and both dialect oracles cover accepted conversions. Deferred variable/call results stay unknown. |
-| P1 | Reconcile coverage ledger with owned behavior | Reviewed parser/semantic evidence separately; all local ledger links resolve. Tuple and mapping TODOs now have direct analysis/oracle evidence; explicit deferred scope remains unchanged. |
-| P2 | Required LSP surface and stdio/client acceptance | Capability/handler/test mapping reviewed; added UTF-16 overlay/edit stdio+TCP assertions and unpacked-binary test support. Uncached full tests, vet, build, exact Vim oracle and pinned client smoke pass locally. |
-| P3 | Fuzz, performance, vulnerability and reproducible archives | Local gates pass: 8 bounded fuzz targets, same-runner benchmark confirmation, zero reported vulnerabilities, 16 byte-identical twice-built assets, unpacked stdio and Vim client smoke. Candidate source: 549c5b7. |
-| P3 | Release notes and final evidence | CHANGELOG, packaged support/license documents and prerelease status are ready. Exact hashes, initial benchmark noise, confirmation, commands and remaining CI gates are recorded in [release-candidate.md](release-candidate.md). No release is authorized. |
+| P0 | Current CI integration failures | Fixed locally: option hover asserts two documents and full `nonumber` range; runtime indexing is awaited before hierarchy requests. `TestLSPSubprocess` passed 20 uncached repetitions. |
+| P0 | Candidate-SHA platform CI | Run 33973871423 failed on Linux/macOS/Windows integration tests; coverage stopped at the same failing test. Vulnerability and Vim oracle/client jobs passed. The repaired source still needs a new remote CI run. |
+| P1 | Language and LSP scope | M0–M6 surfaces remain implemented within the conservative contract. Legacy tuple/mapping oracle evidence and explicit deferred features remain applicable. |
+| P2 | Current local acceptance | Fresh uncached full tests, vet and build pass; exact commands and current oracle/client/archive/performance results are recorded in release-candidate.md. |
+| P3 | Release documentation | README and CHANGELOG target 0.1.0, describe optional Vim discovery, and reflect runtime help plus semantic-token updates. |
 
-M0–M6 have implemented surfaces within the stated conservative contract; the
-M3–M4 P1 evidence gaps are closed. M7 remains open until the candidate has all required platform and
-release evidence. Local validation uses focused tests, uncached full tests,
-vet, build and pinned Vim smoke. Race and 90% coverage are checked through CI.
-
-Local candidate acceptance is complete at `549c5b7`; the following evidence-only
-commit does not change the validated source. Native Windows and current-candidate
-Linux/macOS CI race/coverage remain pending. Historical CI for `a0381ea` is not
-candidate evidence. Push, tag and publication require separate authorization.
+M7 remains open until the **repaired candidate** has native Windows and
+Linux/macOS CI results, including race and the 90% coverage gate. Do not infer
+candidate success from the older green run 33969555293 (`871bddb`) or reuse the
+historical candidate's performance/archive results. Local repair and validation
+do not publish a release; push and tagging remain separate actions.
 
 Heredoc semantic highlighting now marks header flags and delimiters as
 `special`, preserving opaque literal bodies and source spans across logical
@@ -294,7 +290,7 @@ and interface methods. Lenses resolve lazily against the current document and
 complete workspace index. Clickable navigation depends on client support for
 `editor.action.showReferences`.
 
-## M7: compatibility, performance, and 1.0 release
+## M7: compatibility, performance, and release readiness
 
 Deliver:
 

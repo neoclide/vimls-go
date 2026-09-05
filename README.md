@@ -10,7 +10,7 @@
 
 `vimls-go` is a fast, lightweight, and safe Language Server Protocol (LSP) server for **Legacy Vim script** and **Vim9 script**, written in Go.
 
-It analyzes Vim scripts entirely through static analysis without executing user code, starting a Vim instance, or requiring Vim to be installed at runtime.
+It analyzes Vim scripts through static analysis without executing user code. If no usable runtimepath is supplied at initialization, it optionally starts a clean Vim process to discover default runtime directories; discovery failures are silent and Vim is not required for core analysis.
 
 Its grammar and metadata ceiling supports Vim syntax through **v9.2.1015**, covering both modern Vim9 script language features (classes, interfaces, types, enums) and classic Legacy Vim script idioms with backwards compatibility.
 
@@ -31,7 +31,7 @@ Its grammar and metadata ceiling supports Vim syntax through **v9.2.1015**, cove
 | --- | --- |
 | **Diagnostics** | • Syntax and structural error detection with resilient error recovery.<br>• Unresolved identifier detection (`E117`, `E121`, `E1001`, `E1089`).<br>• Statically provable Vim9 type errors and immutable variable re-assignment checks.<br>• Unused Vim9 variables and deprecated reference hints (`unnecessary`, `deprecated` tags). |
 | **Code Completion** | Context-aware completion with detail and documentation for:<br>• Ex commands and user commands<br>• Built-in and user-defined functions<br>• Scope variables (`g:`, `b:`, `w:`, `t:`, `s:`, `v:`, local/Vim9 variables)<br>• Options (`:set`, `&opt`)<br>• Autocommand events and groups (`:autocmd`)<br>• Key mappings (`:map`, `<silent>`, `<expr>`, keycodes like `<CR>`, `<Leader>`)<br>• Syntax and highlight groups<br>• Imports, exported members, and object/class members<br>• Autoload functions and color schemes |
-| **Hover & Docs** | Shows symbol kinds, inferred types, signatures, doc comments, and embedded official Vim help tags and documentation. |
+| **Hover & Docs** | Shows symbol kinds, inferred types, signatures, doc comments and runtime help. Built-in function and command prose comes from runtimepath; option metadata and prose appear as separate hover documents. |
 | **Signature Help** | Parameter lists, active parameter highlighting, and documentation for built-in functions, user-defined functions, imported callables, methods, and class constructors. |
 | **Navigation** | • **Go to Definition** & **Declaration** across local scopes, imports, autoload functions, and workspace files.<br>• **Find References** across open buffers and indexed workspace files.<br>• **Document Highlights** (read/write occurrences within the current file).<br>• **Document Links** for imported file targets. |
 | **Type & Call Hierarchy** | • **Type Hierarchy**: Class/interface inheritance and implementation relationships (`supertypes` / `subtypes`).<br>• **Go to Implementation**: Resolves interfaces and abstract class members to concrete implementations.<br>• **Call Hierarchy**: Incoming and outgoing call hierarchies for statically resolved named callables. |
@@ -46,7 +46,7 @@ Its grammar and metadata ceiling supports Vim syntax through **v9.2.1015**, cove
 
 ### Option 1: Download Pre-built Binaries (Recommended)
 
-Published builds, when available, appear on the [GitHub Releases](https://github.com/neoclide/vimls-go/releases) page. `v1.0.0-rc.1` is currently a local candidate, not a published release; see [candidate evidence](docs/release-candidate.md) and [support limitations](docs/language-support.md).
+Published builds, when available, appear on the [GitHub Releases](https://github.com/neoclide/vimls-go/releases) page. `v0.1.0` is the first-release target, not a published release; see [candidate evidence](docs/release-candidate.md) and [support limitations](docs/language-support.md).
 
 The archive naming contract is:
 
