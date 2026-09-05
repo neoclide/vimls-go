@@ -15,6 +15,8 @@ const (
 	FileArgument
 	Exportable
 	AllowNonWhite
+	AllowCommandArgument
+	AllowArgumentOptions
 )
 
 // Command describes one built-in Ex command from the pinned Vim baseline.

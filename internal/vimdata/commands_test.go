@@ -48,7 +48,8 @@ func TestCommandTableContracts(t *testing.T) {
 	}{
 		{name: "def", want: AllowBang | ExactInVim9 | Exportable},
 		{name: "function", want: AllowBang | Exportable},
-		{name: "read", want: AllowBang | FileArgument | AllowBar},
+		{name: "read", want: AllowBang | FileArgument | AllowBar | AllowArgumentOptions},
+		{name: "new", want: AllowBang | FileArgument | AllowBar | AllowCommandArgument | AllowArgumentOptions},
 		{name: "sort", want: AllowBang | NoTrailingComment},
 		{name: "vim9script", want: 0},
 		{name: "vim9cmd", want: NeedArgument | NoTrailingComment},

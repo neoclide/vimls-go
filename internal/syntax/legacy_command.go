@@ -10,6 +10,7 @@ import (
 // consumers.  It deliberately does not share comment or expression-boundary
 // rules with Vim9 script.
 func scanLegacyCommandArgument(source string, start, end int, metadata vimdata.Command, parsed *Command) (int, Span, Span, *expressionBoundary) {
+	start = skipFileCommandPrefix(source, start, end, metadata, parsed)
 	scriptVersion := uint8(1)
 	if parsed != nil && parsed.ScriptVersion != 0 {
 		scriptVersion = parsed.ScriptVersion

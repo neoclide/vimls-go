@@ -14,7 +14,7 @@
 | FP04 | 局部字典方法 | 已修复：正反回归及全量门禁通过 |
 | FP05 | CTRL-V 引用 | 已修复：字节夹具及全量门禁通过 |
 | FP06 | 修饰符与地址 | 已修复：正反回归及全量门禁通过 |
-| FP07 | new +cmd | 待修复 |
+| FP07 | new +cmd | 已修复：边界、源码位置及全量门禁通过 |
 | FP08 | 数字 autoload 名称 | 已修复：正反回归及全量门禁通过 |
 | FP09 | 逻辑操作数 | 已修复：正反回归及全量门禁通过 |
 | FP10 | map 容器约束 | 待修复 |
@@ -34,6 +34,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP07：从固定 Vim v9.2.1015 生成 EX_CMDARG/EX_ARGOPT 元数据，在两种根解析器中先越过 ++opt / +cmd 再扫描外层分隔符；保留原始 Argument 字节，不执行、不展开 +cmd 正文。覆盖 new/edit/split/buffer/next、转义空白、内外 bar、中文、裸 + 以及不适用命令/过滤器前缀。TestFilePlusCommandBoundary、TestFileCommandPrefixFilterBoundaries、全量 go test / go vet / make、metadata-check、gofmt、gopls、diff 检查通过。更新语言支持边界和 roadmap；原 oracle 保留实际 new +cmd 行为证据。正文保守处理提交 178d228。
 
 - FP02/FP14/FP16：只在用户命令正文中识别有限占位符，set 的独立静态选项及占位符前可证明的实参类型仍检查；不对未展开正文推断总实参数量。映射中含未解码尖括号记法的嵌入正文保守处理，AST/引用保留，不影响映射头部、普通映射调用和相邻命令。不做完整模板展开或按键解码。TestUnexpandedCommandBodyDiagnostics、原静态实参反例、全量 go test / go vet / make、gofmt、gopls、diff 检查通过。FP03 提交 9475c18。
 - 复扫 `errors-after-body-fixes.txt`：2980 文件、39 条诊断。与原路径/行列/代码/消息精确比对，仅剩 FP07 的 4 条及 FP10/FP15 的 7 条误报；原 28 条非误报全部保留，无新增。原先缺失的 vimfiles/after 仍使扫描退出 2，其他目录扫描完成。

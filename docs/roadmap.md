@@ -7,6 +7,11 @@ through the pinned Vim v9.2.1015 ceiling, the required LSP features work through
 the real stdio server, and all release gates pass. Parser acceptance alone is
 not language-server completion.
 
+Runtimepath audit follow-up (2026-09-05): track each independent false-positive
+repair and validation in `runtimepath-audit-2026-09-05/fixes.md`. File-command
+prefix boundaries are supported; expanding escaped `+cmd`, user-command
+templates and mapping key notation into source-mapped code remains deferred.
+
 ## M0: repository and protocol foundation
 
 Deliver:

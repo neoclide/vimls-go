@@ -11,6 +11,7 @@ import (
 // logical operators, assignments and automatic continuation are not legacy
 // Ex argument rules and stay in this parser.
 func scanVim9CommandArgument(source string, start, end int, metadata vimdata.Command, parsed *Command) (int, Span, Span, *expressionBoundary) {
+	start = skipFileCommandPrefix(source, start, end, metadata, parsed)
 	if globalCommand(metadata.Name) {
 		argumentEnd := scanGlobalCommandArgument(source, start, end)
 		if parsed != nil && (parsed.TypedName == "g" || parsed.TypedName == "v") {

@@ -6375,6 +6375,32 @@ func vim9ScopeColon(source string, index int) bool {
 	return index == 1 || !isExpressionLetter(source[index-2]) && !isExpressionDigit(source[index-2]) && source[index-2] != '_'
 }
 
+// Vim v9.2.1015 ex_docmd.c consumes ++opt and +cmd before separate_nextcmd().
+// Keep their original bytes in Command.Argument, but scan outer separators
+// only after the prefix. The escaped +cmd payload remains opaque.
+func skipFileCommandPrefix(source string, start, end int, metadata vimdata.Command, parsed *Command) int {
+	prefixEnd := start
+	for start < end && source[start] == '+' {
+		option := start+1 < end && source[start+1] == '+' && metadata.Flags&vimdata.AllowArgumentOptions != 0
+		if !option && (metadata.Flags&vimdata.AllowCommandArgument == 0 || metadata.Name == "read" && parsed != nil && parsed.Bang.Start < parsed.Bang.End) {
+			break
+		}
+		position := start + 1
+		for position < end && !isExpressionSpace(source[position]) {
+			if source[position] == '\\' && position+1 < end {
+				position++
+			}
+			position++
+		}
+		start = skipSpace(source, position, end)
+		prefixEnd = position
+		if !option {
+			break
+		}
+	}
+	return prefixEnd
+}
+
 // scanSourceArgumentEnd follows :source's EX_FILE1 command-line grammar.
 // Its argument is a filename, not an expression: single quotes never group,
 // and a double quote starts a comment only in legacy script. Backslash and

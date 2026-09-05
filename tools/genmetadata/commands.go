@@ -149,6 +149,10 @@ func generatedFlagExpression(value []byte) string {
 			selected = append(selected, "Exportable")
 		case "EX_NONWHITE_OK":
 			selected = append(selected, "AllowNonWhite")
+		case "EX_CMDARG":
+			selected = append(selected, "AllowCommandArgument")
+		case "EX_ARGOPT":
+			selected = append(selected, "AllowArgumentOptions")
 		}
 	}
 	if len(selected) == 0 {

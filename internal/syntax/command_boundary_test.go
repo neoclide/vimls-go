@@ -3,7 +3,60 @@ package syntax
 import (
 	"strings"
 	"testing"
+
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
+
+func TestFilePlusCommandBoundary(t *testing.T) {
+	for _, prefix := range []string{"", "vim9script\n"} {
+		for _, test := range []struct{ command, argument string }{
+			{"new", `+setlocal\ previewwindow|setlocal\ buftype=nofile|setlocal\ noswapfile|setlocal\ wrap [Document]`},
+			{"edit", `++enc=utf-8 ++ff=unix +setlocal\ ts=2|setlocal\ sw=2 name.vim`},
+			{"split", `+echo\ '字|符' name.vim`},
+			{"buffer", `+echo\ 1|echo\ 2 1`},
+			{"next", `+setlocal\ nowrap name.vim`},
+			{"new", `+ name.vim`},
+			{"new", `+`},
+		} {
+			t.Run(prefix+test.command+test.argument, func(t *testing.T) {
+				source := prefix + "keepalt " + test.command + " " + test.argument + " | echo 123\n"
+				file := Parse(source)
+				commands := file.Commands
+				if prefix != "" {
+					commands = commands[1:]
+				}
+				if len(file.Diagnostics) != 0 || len(commands) != 2 || commands[0].Canonical != test.command || commands[1].Canonical != "echo" {
+					t.Fatalf("commands = %#v; diagnostics = %#v", commands, file.Diagnostics)
+				}
+				if file.Text(commands[0].Argument) != test.argument || file.Text(commands[1].Argument) != "123" || commands[1].Name.Start != strings.LastIndex(source, "echo") {
+					t.Fatalf("original spans lost: %#v", commands)
+				}
+			})
+		}
+	}
+}
+
+func TestFileCommandPrefixFilterBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		command, source string
+		bang            bool
+		want            int
+	}{
+		{"read", "+echo\\ 1|echo\\ 2", true, 0},
+		{"read", "!echo +foo|cat", false, 0},
+		{"write", "!echo +foo|cat", false, 0},
+		{"echo", "+foo|echo 2", false, 0},
+	} {
+		metadata, _ := vimdata.Lookup(test.command)
+		parsed := &Command{}
+		if test.bang {
+			parsed.Bang = Span{Start: 1, End: 2}
+		}
+		if got := skipFileCommandPrefix(test.source, 0, len(test.source), metadata, parsed); got != test.want {
+			t.Fatalf("%s prefix ends at %d, want %d", test.command, got, test.want)
+		}
+	}
+}
 
 func TestLegacyCommandBoundaryOneExpressionCommentsAndBars(t *testing.T) {
 	file := (LegacyParser{}).Parse("if !s:f() \" comment | not a command\n" +

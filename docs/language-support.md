@@ -30,6 +30,10 @@ language rules.
 
 ## Current limitations
 
+- File-command `++opt` and `+cmd` prefixes preserve their original source spans
+  and outer command boundaries. Escaped `+cmd` payloads remain opaque; they are
+  not decoded or checked as standalone commands. User-command replacements and
+  undecoded mapping key notation likewise receive only conservative diagnostics.
 - Document, range, multi-range and on-type formatting adjust indentation only;
   they do not rewrite expressions, spacing, wrapping or embedded languages.
 - Rename is offered only when every affected symbol can be resolved safely.

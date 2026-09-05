@@ -24,4 +24,7 @@ EXCMD(CMD_beta, "beta", ex_beta,
 	if got := generatedFlagExpression([]byte("EX_EXTRA")); got != "0" {
 		t.Fatalf("unselected flags = %q", got)
 	}
+	if got := generatedFlagExpression([]byte("EX_CMDARG | EX_ARGOPT")); got != "AllowCommandArgument | AllowArgumentOptions" {
+		t.Fatalf("file prefix flags = %q", got)
+	}
 }
