@@ -312,9 +312,16 @@ func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
 	}
 	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot))
 	waitForServerRace(t, started, "runtimepath notification")
-	message := readFrame(t, reader)
-	if string(message["method"]) != `"window/logMessage"` {
-		t.Fatalf("runtime scan notification = %v", message)
+	// Consume notifications through the final runtimepath timing summary:
+	// this session's synchronous pipe requires the client to read notifications.
+	for {
+		message := readFrame(t, reader)
+		if string(message["method"]) != `"window/logMessage"` {
+			t.Fatalf("runtime scan notification = %v", message)
+		}
+		if strings.Contains(string(message["params"]), "scanned runtimepath; total elapsed ") {
+			break
+		}
 	}
 	instance.runtimepathWG.Wait()
 	instance.workspaceMu.Lock()
@@ -331,7 +338,7 @@ func TestRuntimepathCustomRequestDispatchesNullResult(t *testing.T) {
 	_, writer, reader := runtimepathTestSession(t)
 	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot))
 	message := readFrame(t, reader)
-	if string(message["method"]) == `"window/logMessage"` {
+	for string(message["method"]) == `"window/logMessage"` {
 		message = readFrame(t, reader)
 	}
 	if idNumber(t, message) != 2 || string(message["result"]) != "null" {

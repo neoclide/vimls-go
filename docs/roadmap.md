@@ -72,7 +72,9 @@ external runtime trees and dynamic source targets are not chased.
 
 Workspace/runtimepath scheduling: workspace indexing has its own progress and
 installation phase. External roots scan with bounded directory concurrency and
-one `window/logMessage` reporting total elapsed time per discovery batch.
+a `window/logMessage` for each directory without individual timings, followed
+by one total elapsed time for the entire update across all directory batches,
+source reads, analysis and index installation (excluding debounce and queue time).
 The help worker likewise logs total elapsed time once after scanning all pending
 roots. Runtimepath updates coalesce over 100ms, finish an
 active batch before applying the latest pending list, and preserve retained

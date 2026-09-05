@@ -69,7 +69,6 @@ type runtimeRootDiscovery struct {
 // Keep filesystem concurrency bounded and preserve runtimepath order when
 // consuming results, so scheduling cannot change precedence or capacity limits.
 func (s *Server) discoverRuntimeRoots(ctx context.Context, roots []string, limit int) []runtimeRootDiscovery {
-	started := time.Now()
 	results := make([]runtimeRootDiscovery, len(roots))
 	jobs := make(chan int, len(roots))
 	for index := range roots {
@@ -85,35 +84,29 @@ func (s *Server) discoverRuntimeRoots(ctx context.Context, roots []string, limit
 				}
 				result := &results[index]
 				result.files, result.truncated, result.err = s.discoverRuntimePathFilesContext(ctx, roots[index], limit)
+				message := fmt.Sprintf("scanned runtimepath %s: %d Vim files, %d colors", roots[index], len(result.files.Sources), len(result.files.Colors))
+				if result.err != nil {
+					message += ": " + result.err.Error()
+				}
+				s.logScanMessage(ctx, message)
 			}
 		})
 	}
 	workers.Wait()
-	if len(roots) > 0 {
-		sources, colors := 0, 0
-		var failures []string
-		for index, result := range results {
-			sources += len(result.files.Sources)
-			colors += len(result.files.Colors)
-			if result.err != nil {
-				failures = append(failures, roots[index]+": "+result.err.Error())
-			}
-		}
-		message := fmt.Sprintf("scanned runtimepath: %d roots, %d Vim files, %d colors", len(roots), sources, colors)
-		if len(failures) > 0 {
-			message += "; " + strings.Join(failures, "; ")
-		}
-		s.logScanDuration(ctx, message, started)
-	}
+
 	return results
 }
 
 // logScanDuration reports wall-clock time once after a complete scan batch.
 func (s *Server) logScanDuration(ctx context.Context, message string, started time.Time) {
+	elapsed := time.Since(started).Round(time.Millisecond)
+	s.logScanMessage(ctx, fmt.Sprintf("%s; total elapsed %s", message, elapsed))
+}
+
+func (s *Server) logScanMessage(ctx context.Context, message string) {
 	if ctx.Err() != nil {
 		return
 	}
-	elapsed := time.Since(started).Round(time.Millisecond)
 	s.mu.Lock()
 	client := s.client
 	s.mu.Unlock()
@@ -123,7 +116,7 @@ func (s *Server) logScanDuration(ctx context.Context, message string, started ti
 	logCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	_ = client.LogMessage(logCtx, &protocol.LogMessageParams{
-		Type: protocol.MessageTypeLog, Message: fmt.Sprintf("vimls: %s; total elapsed %s", message, elapsed),
+		Type: protocol.MessageTypeLog, Message: "vimls: " + message,
 	})
 }
 
@@ -1623,6 +1616,9 @@ func (s *Server) changeRuntimepath(ctx context.Context, params *DidChangeRuntime
 	} else {
 		paths = usableRuntimePaths(paths)
 	}
+	// Measure the entire update, across all directory batches and analysis,
+	// excluding debounce/queue time. Runtime help has its own asynchronous timer.
+	started := time.Now()
 	for ctx.Err() == nil {
 		s.publishMu.Lock()
 		s.workspaceMu.Lock()
@@ -1643,6 +1639,7 @@ func (s *Server) changeRuntimepath(ctx context.Context, params *DidChangeRuntime
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
 		if applied {
+			s.logScanDuration(ctx, "scanned runtimepath", started)
 			s.scheduleWorkspaceRefresh(indexComplete)
 			for _, snapshot := range openSnapshots {
 				s.startAnalysis(snapshot.URI())

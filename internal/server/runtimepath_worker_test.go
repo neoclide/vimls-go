@@ -115,11 +115,8 @@ func TestWorkspaceAndRuntimepathHaveSeparateProgressAndRefresh(t *testing.T) {
 	defer client.mu.Unlock()
 	runtimeLogs := 0
 	for _, message := range client.logs {
-		if strings.Contains(message, "scanned runtimepath:") {
+		if strings.Contains(message, "scanned runtimepath; total elapsed ") {
 			runtimeLogs++
-			if !strings.Contains(message, "1 roots, 1 Vim files, 0 colors; total elapsed ") {
-				t.Fatalf("runtime log = %s", message)
-			}
 		}
 	}
 	if runtimeLogs != 1 {
