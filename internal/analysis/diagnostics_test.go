@@ -2416,6 +2416,44 @@ func TestAnalyzeFlattenVim9Diagnostics(t *testing.T) {
 	}
 }
 
+func TestLegacyFunctionDeletionBeforeDef(t *testing.T) {
+	for _, test := range []struct {
+		name, between string
+		conflict      bool
+	}{
+		{"direct deletion", "delfunction! s:Handler\n", false},
+		{"SID alias", "delfunction! <SID>Handler\n", false},
+		{"no deletion", "", true},
+		{"different function", "delfunction! s:Other\n", true},
+		{"deferred deletion", "function Delete()\ndelfunction! s:Handler\nendfunction\n", true},
+		{"conditional deletion is unknown", "if g:condition\ndelfunction! s:Handler\nendif\n", false},
+		{"recreated legacy function", "delfunction! s:Handler\nfunction s:Handler()\nendfunction\n", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse("function s:Handler()\nendfunction\n" + test.between + "def s:Handler()\nenddef\n")
+			found := false
+			for _, diagnostic := range CombinedDiagnostics(file, Analyze(file)) {
+				if diagnostic.Code == "vim/E1073" {
+					found = true
+				}
+			}
+			if found != test.conflict {
+				t.Fatalf("E1073 = %v, want %v", found, test.conflict)
+			}
+		})
+	}
+	file := syntax.Parse("vim9script\ndef Handler()\nenddef\ndelfunction Handler\ndef Handler()\nenddef\n")
+	found := false
+	for _, diagnostic := range CombinedDiagnostics(file, Analyze(file)) {
+		if diagnostic.Code == "vim/E1084" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("Vim9 function deletion must retain E1084")
+	}
+}
+
 func TestTypedForDestructuringDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, params, body, code, span string }{
 		{"dynamic pairs", "pairs: list<list<any>>", "for [paths: list<string>, Action: func: any] in pairs\necho paths Action()\nendfor", "", ""},

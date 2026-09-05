@@ -4916,12 +4916,38 @@ func collectVim9NameAlreadyDefinedDiagnostics(result *FileAnalysis, commands []s
 		}
 	}
 	collect(commands)
+	// A script-level deletion invalidates proof that an old legacy function
+	// still exists, including conditional deletions whose branch is unknown.
+	// Deletions in deferred function bodies do not affect this source sequence.
+	var deletions []*syntax.Expression
+	for index := range result.File.Commands {
+		command := &result.File.Commands[index]
+		if command.Canonical == "delfunction" && !syntax.CommandInsideFunction(command, result.File.Blocks) {
+			for _, target := range command.Targets {
+				if target != nil && target.Kind == syntax.ExpressionIdentifier {
+					deletions = append(deletions, target)
+				}
+			}
+		}
+	}
 	for _, declaration := range result.Declarations {
 		if declaration == nil || declaration.Scope == nil || !eligible[declaration.Span] {
 			continue
 		}
 		if existing := resolve(declaration.Scope, declaration.Name, declaration.Span.Start, false, nil); existing != nil &&
 			!(declaration.Scope == result.Root && functionSymbolKind(declaration.Kind) && !functionSymbolKind(existing.Kind)) {
+			deleted := false
+			if existing.Scope == result.Root && functionSymbolKind(existing.Kind) && !eligible[existing.Span] {
+				for _, target := range deletions {
+					if existing.Span.End < target.Span.Start && target.Span.End < declaration.Span.Start && resolvedNameEqual(target.Value, existing.Name) {
+						deleted = true
+						break
+					}
+				}
+			}
+			if deleted {
+				continue
+			}
 			code := "vim/E1073"
 			message := "Name already defined: " + declaration.Name
 			if declaration.Kind == SymbolKindImport && existing.Kind != SymbolKindImport && !functionSymbolKind(existing.Kind) && declaration.Scope == result.Root {

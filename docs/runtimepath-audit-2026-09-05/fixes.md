@@ -20,7 +20,7 @@
 | FP10 | map 容器约束 | 待修复 |
 | FP11 | 解构丢弃占位符 | 已修复：声明、符号及全量门禁通过 |
 | FP12 | 循环解构类型 | 已修复：正反回归及全量门禁通过 |
-| FP13 | 删除后重定义 | 待修复 |
+| FP13 | 删除后重定义 | 已修复：正反回归及全量门禁通过 |
 | FP14 | 映射正文诊断 | 待修复 |
 | FP15 | map 回调 | 待修复 |
 | FP16 | 引用参数占位符 | 待修复 |
@@ -34,6 +34,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP13：先前的 legacy 函数在后续 def 前被脚本级 delfunction 删除，不再误报 E1073；条件删除按不可证明冲突处理，未调用函数体内的删除不算已执行。覆盖 SID 别名、不同函数、重新创建旧函数、未删除反例，并保留 Vim9 的 E1084。TestLegacyFunctionDeletionBeforeDef、全量 go test / go vet / make、gofmt、diff 检查通过；原 oracle 保留删除后重定义的 Vim 9.2.1015 成功证据。FP01 提交 2a58913。
 
 - FP01：初始化表达式及 for 迭代表达式中尚不可见的声明目标，不再导致 lambda 参数 E1167/E1168；已有外层变量、后续初始化表达式仍保持遮蔽检查。测试同时检查 lambda 引用绑定参数；本地 Vim 9.2.1015 验证脚本/局部自身初始化合法及已有局部变量 E1167。TestInitializerLambdaParametersDoNotShadowTargets、原引用回归、全量 go test / go vet / make、gofmt、diff 检查通过。FP12 提交 c593cd6。
 
