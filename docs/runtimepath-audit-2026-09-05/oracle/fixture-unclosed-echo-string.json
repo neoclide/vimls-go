@@ -1,1 +1,0 @@
-{"patch1016":0,"messages":"","version":902,"errors":[],"exception":"Vim(echomsg):E114: Missing double quote: \" CURSOR","throwpoint":"command line..script /Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/driver.vim[7]../Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/fixture-unclosed-echo-string.vim, line 1","patch1015":1}
