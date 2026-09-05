@@ -2,7 +2,7 @@
 
 基线：521b0bd17e6869e82fc88becbf904b1cfed39769。执行批准的 18 类修复方案。
 
-边界：XPTemplate 5 条不处理；不修改插件、官方 Vim 或旧会话；动态正文只检查可证明部分，不执行用户代码，不全局禁用错误码。保留无关删除改动，只做本地提交。
+边界：XPTemplate 不做语言支持；用户后续批准通过扫描器通用 `-exclude '*.xpt.vim'` 跳过模板文件。不修改插件、官方 Vim 或旧会话；动态正文只检查可证明部分，不执行用户代码，不全局禁用错误码。保留无关删除改动，只做本地提交。
 
 每个独立根因：正反回归 → gofmt / gopls → go test ./... / go vet ./... / make → 本地提交。共享根因可以合并 FP 编号。源码位置、引用和类型检查不得以简单压低总数代替。
 
@@ -38,3 +38,7 @@
 原始 errors.txt、classification.json、source-manifest.json 保留为基线，不覆盖。
 
 - FP04：允许 legacy 有效命名空间字典方法，保留 E884 非法函数名与 E1182 Vim9 字典限制；TestLegacyScopedDictionaryMethodNames、全量 go test / go vet / make 通过。gopls MCP 仅报告已知 benchreport/release 缓存诊断，未报告本次文件错误。
+
+- `a81dde1`：FP04 修复提交；`73b6467`：原始审计证据与修复记录提交。
+- 模板排除：新增可重复的 `-exclude` basename glob，仅影响扫描工具；默认不排除。测试覆盖默认行为、子目录模板、多个规则、重叠规则去重、全部排除、无匹配和非法规则不覆盖输出文件。
+- 模板排除验证：全量 go test / go vet / make 通过。实际 runtimepath 复扫 2980 文件，排除 1 个 scala.xpt.vim，剩余 76 条错误，恰为原始 86 条减去 FP04 的 5 条及模板的 5 条。原有缺失 vimfiles/after 导致扫描程序退出 2，不影响其他根目录结果。快照：errors-after-template-exclusion.txt。

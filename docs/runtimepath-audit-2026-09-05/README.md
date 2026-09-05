@@ -72,6 +72,21 @@ XPTemplate 在 XPT 命令处收集模板并结束当前 source，再由解析器
 
 从仓库根执行；命令会覆盖对应证据文件，需要保留快照时应改用新输出路径。
 
+后续修复执行中，经用户确认，扫描器增加了可选的模板文件排除方式：
+
+```sh
+go run ./tools/diagnosticscan \
+  -runtimepath "$(paste -sd, docs/runtimepath-audit-2026-09-05/roots.txt)" \
+  -exclude '*.xpt.vim' \
+  -output docs/runtimepath-audit-2026-09-05/errors-after-template-exclusion.txt
+```
+
+`-exclude` 使用 Go `filepath.Match` 的文件名 glob，匹配每个文件的 basename，在所有子目录生效；可以重复传入多个规则。它不是路径 glob，不提供递归 `**` 语义。请给通配符加引号，避免 shell 提前展开。空规则和非法 glob 返回退出码 2，且不会打开输出文件。未指定参数时默认行为不变。
+
+排除文件不参与解析或诊断，摘要单独报告去重后的排除文件数；语言服务器不受此参数影响。排除意味着该文件中的其他真实错误也不会扫描，不等于已经支持其模板语言。
+
+下面是不加排除规则的原始基线重跑方式：
+
 ```sh
 go run ./tools/diagnosticscan \
   -runtimepath "$(paste -sd, docs/runtimepath-audit-2026-09-05/roots.txt)" \
