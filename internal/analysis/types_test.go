@@ -6,6 +6,28 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+func TestCompiledLogicalNumberConversions(t *testing.T) {
+	for _, test := range []struct {
+		expression string
+		mismatch   bool
+	}{
+		{"n && true", false}, {"get(g:, 'test', 0) && true", false},
+		{"1 && true", false}, {"0 || true", false},
+		{"false && 2", false}, {"true || (2 && true)", false},
+		{"2 && true", true}, {"true && 2", true}, {"n && []", true},
+	} {
+		file := syntax.Parse("vim9script\ndef Test(n: number): bool\nreturn " + test.expression + "\nenddef\n")
+		result := Analyze(file)
+		found := false
+		for _, diagnostic := range CombinedDiagnostics(file, result) {
+			found = found || diagnostic.Code == "vim/E1012"
+		}
+		if found != test.mismatch {
+			t.Fatalf("%s: %#v", test.expression, result.Diagnostics)
+		}
+	}
+}
+
 func TestAnalyzeInfersVim9LiteralAndContainerTypes(t *testing.T) {
 	source := `vim9script
 var numberValue = 1

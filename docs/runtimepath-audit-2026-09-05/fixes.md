@@ -16,7 +16,7 @@
 | FP06 | 修饰符与地址 | 已修复：正反回归及全量门禁通过 |
 | FP07 | new +cmd | 待修复 |
 | FP08 | 数字 autoload 名称 | 已修复：正反回归及全量门禁通过 |
-| FP09 | 逻辑操作数 | 待修复 |
+| FP09 | 逻辑操作数 | 已修复：正反回归及全量门禁通过 |
 | FP10 | map 容器约束 | 待修复 |
 | FP11 | 解构丢弃占位符 | 待修复 |
 | FP12 | 循环解构类型 | 待修复 |
@@ -34,6 +34,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP09：number 变量／调用保留运行时布尔转换，已知非 0/1 字面量保留 E1012，静态短路右侧不产生类型错误。新增最小 Vim 验证及 TestCompiledLogicalNumberConversions；全量 go test / go vet / make 通过。FP05 提交 17b04bd。
 
 - FP05：独立 CTRL-V 引用的 UTF-8 字节不再误吞后续反斜杠；保留原始 Value span、普通空格选项分隔及后续命令。TestSetSessionQuotedUTF8Bytes、原有 set 测试、全量 go test / go vet / make 通过。FP18 提交 0cf3959。
 

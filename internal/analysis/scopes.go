@@ -5483,6 +5483,10 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 	}
 	if expression.Kind == syntax.ExpressionBinary && (expression.Value == "&&" || expression.Value == "||") && scopeUsesDefTypeRules(scope) {
 		collectLogicalTypeMismatchDiagnostic(result, expression)
+		if logicalRightOperandIsSkipped(expression) {
+			collectAssignmentTypeMismatchDiagnostics(result, scope, expression.Children[0])
+			return
+		}
 	}
 	if expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice {
 		collectIndexTypeMismatchDiagnostic(result, scope, expression)
@@ -5670,10 +5674,20 @@ func collectLogicalTypeMismatchDiagnostic(result *FileAnalysis, expression *synt
 	if len(expression.Children) < 2 {
 		return
 	}
-	for _, operand := range expression.Children[:2] {
+	for index, operand := range expression.Children[:2] {
+		if index == 1 && logicalRightOperandIsSkipped(expression) {
+			break
+		}
 		actual := result.TypeOf(operand)
 		if isUnknownType(actual) || actual.Name == "bool" {
 			continue
+		}
+		if actual.Name == "number" {
+			// Variables and calls are checked by Vim at runtime. A known
+			// literal other than 0/1 is a compiled type error instead.
+			if value, known := staticNumberValue(operand); !known || value == 0 || value == 1 {
+				continue
+			}
 		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 			Code: "vim/E1012", Message: "Type mismatch; expected bool but got " + valueTypeDisplay(actual), Span: operand.Span,

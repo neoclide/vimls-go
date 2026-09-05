@@ -182,6 +182,26 @@ func numberAsBoolDiagnostic(expression *syntax.Expression) (syntax.Diagnostic, b
 	}, true
 }
 
+func logicalRightOperandIsSkipped(expression *syntax.Expression) bool {
+	if expression == nil || len(expression.Children) < 2 {
+		return false
+	}
+	left := expression.Children[0]
+	for left != nil && left.Kind == syntax.ExpressionParenthesized && len(left.Children) == 1 {
+		left = left.Children[0]
+	}
+	value, known := staticNumberValue(left)
+	if left != nil && left.Kind == syntax.ExpressionIdentifier {
+		switch left.Value {
+		case "true", "v:true":
+			value, known = 1, true
+		case "false", "v:false":
+			value, known = 0, true
+		}
+	}
+	return known && (expression.Value == "&&" && value == 0 || expression.Value == "||" && value == 1)
+}
+
 func logicalRightOperandIsEvaluated(expression *syntax.Expression) bool {
 	if expression == nil || expression.Kind != syntax.ExpressionBinary || len(expression.Children) < 2 {
 		return false
