@@ -726,7 +726,7 @@ func TestHoverAndSignatureHelpRespectDocumentationFormats(t *testing.T) {
 	if err != nil || hover == nil {
 		t.Fatalf("hover = %#v, %v", hover, err)
 	}
-	hoverContent, ok := hover.Contents.(*protocol.MarkupContent)
+	hoverContent, ok := joinedHoverMarkdown(hover.Contents)
 	if !ok || hoverContent.Kind != protocol.MarkupKindMarkdown || !strings.Contains(hoverContent.Value, "'number'") || len(hoverContent.Value) > maxLanguageFeatureDocumentationBytes {
 		t.Fatalf("hover content = %#v", hover.Contents)
 	}

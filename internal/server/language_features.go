@@ -881,7 +881,7 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 		}
 	case completionResolveOption:
 		if option, ok := vimdata.LookupOption(target.Name); ok {
-			applyMetadata(completionOptionDetail(option), option.Documentation)
+			applyMetadata(completionOptionDetail(option), optionDocumentation(option))
 		}
 	case completionResolveVariable:
 		if variable, ok := vimdata.LookupVariable(target.Name); ok {

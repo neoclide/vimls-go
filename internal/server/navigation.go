@@ -28,6 +28,7 @@ type navigationDocument struct {
 	external          *workspace.ExternalReferenceFact
 	externalMember    string
 	externalClass     bool
+	optionName        string
 	augroupName       string
 	memberSnapshots   map[uri.URI]*text.Snapshot
 	memberTarget      syntax.Span
@@ -157,7 +158,8 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 				}
 				if spanContains(matchSpan, offset) {
 					if _, ok := vimdata.LookupOption(file.Text(option.Name)); ok {
-						document.occurrence = option.Name
+						document.occurrence = matchSpan
+						document.optionName = file.Text(option.Name)
 						return
 					}
 				}
@@ -804,6 +806,9 @@ func startsWithUppercaseASCII(name string) bool {
 func (s *Server) localHover(ctx context.Context, document *navigationDocument) (*protocol.Hover, error) {
 	if document.declaration == nil {
 		name := document.analysis.File.Text(document.occurrence)
+		if document.optionName != "" {
+			name = document.optionName
+		}
 		if contextKind, _ := completionBuiltinStringAt(document.analysis.File, document.occurrence.Start); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
 			var values []vimdata.CompletionValue
 			var header string
@@ -832,26 +837,15 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			return s.localHoverResult(ctx, document, lines)
 		}
 		if option, ok := vimdata.LookupOption(name); ok {
-			var lines []string
-			if requirement := optionBuildRequirement(option.AvailableWhen, option.RequiredFeatures); requirement != "" {
-				lines = append(lines, "build requirement: "+requirement)
+			documentation := optionDocumentation(option)
+			header, body, split := strings.Cut(documentation, "\n\n")
+			if split && s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown {
+				return s.localHoverContents(ctx, document, protocol.MarkedStringSlice{
+					protocol.String(boundedDocumentationText(header)),
+					protocol.String(boundedDocumentationText(body)),
+				})
 			}
-			if option.Documentation != "" {
-				if len(lines) > 0 {
-					lines = append(lines, "")
-				}
-				lines = append(lines, option.Documentation)
-			} else {
-				optType := optionTypeName(option)
-				var header string
-				if optType != "" {
-					header = fmt.Sprintf("**%s** %s %s option.", option.Name, titleArticle(optType), optType)
-				} else {
-					header = fmt.Sprintf("**%s** An option.", option.Name)
-				}
-				lines = append([]string{header}, lines...)
-			}
-			return s.localHoverResult(ctx, document, lines)
+			return s.localHoverContents(ctx, document, s.hoverContent(documentation))
 		}
 		if variable, ok := vimdata.LookupVariable(name); ok {
 			if variable.Documentation != "" {
@@ -936,6 +930,54 @@ func builtinFunctionAt(file *syntax.File, span syntax.Span) (vimdata.BuiltinFunc
 
 func isFunctionSymbolKind(kind analysis.SymbolKind) bool {
 	return kind == analysis.SymbolKindFunction || kind == analysis.SymbolKindMethod || kind == analysis.SymbolKindConstructor
+}
+
+// Keep option metadata together before the help prose. Preserve defaults and
+// platform-specific notes from the pinned help instead of reconstructing them.
+func optionDocumentation(option vimdata.Option) string {
+	requirement := optionBuildRequirement(option.AvailableWhen, option.RequiredFeatures)
+	lines := strings.Split(option.Documentation, "\n")
+	for index, line := range lines {
+		if line != "global" && !strings.HasPrefix(line, "global or local to ") && !strings.HasPrefix(line, "local to ") {
+			continue
+		}
+		header := strings.Join(lines[:index], " ")
+		prefix, defaults, hasDefaults := strings.Cut(header, "(")
+		header = strings.Join(strings.Fields(prefix), " ")
+		if hasDefaults {
+			header += " (" + defaults
+		}
+		scope, reference, hasReference := strings.Cut(line, " `")
+		metadata := "Scope: **" + scope + "**"
+		if hasReference {
+			metadata += " `" + reference
+		}
+		if requirement != "" {
+			metadata += " build requirement: " + requirement
+		}
+		body := strings.TrimSpace(strings.Join(lines[index+1:], "\n"))
+		if strings.HasPrefix(body, "{") && requirement != "" {
+			if note, rest, found := strings.Cut(body, "}"); found {
+				normalized := strings.Join(strings.Fields(strings.ReplaceAll(note+"}", "`", "")), " ")
+				if normalized == "{not available when compiled without the "+requirement+" feature}" ||
+					normalized == "{only available when compiled with the "+requirement+" feature}" {
+					body = strings.TrimSpace(rest)
+				}
+			}
+		}
+		return strings.TrimSpace(header + "\n" + metadata + "\n\n" + body)
+	}
+	documentation := option.Documentation
+	if documentation == "" {
+		documentation = fmt.Sprintf("**%s** An option.", option.Name)
+		if optType := optionTypeName(option); optType != "" {
+			documentation = fmt.Sprintf("**%s** %s %s option.", option.Name, titleArticle(optType), optType)
+		}
+	}
+	if requirement != "" {
+		documentation += "\n\nbuild requirement: " + requirement
+	}
+	return documentation
 }
 
 func optionBuildRequirement(condition string, features []string) string {

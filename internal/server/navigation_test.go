@@ -14,6 +14,7 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -799,7 +800,7 @@ func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
 			if err != nil || hover == nil {
 				t.Fatalf("hover = %#v, %v", hover, err)
 			}
-			content, ok := hover.Contents.(*protocol.MarkupContent)
+			content, ok := joinedHoverMarkdown(hover.Contents)
 			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) || len(content.Value) > maxLanguageFeatureDocumentationBytes {
 				t.Fatalf("hover content = %#v", hover.Contents)
 			}
@@ -847,7 +848,7 @@ func TestHoverShowsSetCommandOptionHelp(t *testing.T) {
 			if err != nil || hover == nil {
 				t.Fatalf("hover = %#v, %v", hover, err)
 			}
-			content, ok := hover.Contents.(*protocol.MarkupContent)
+			content, ok := joinedHoverMarkdown(hover.Contents)
 			if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.HasPrefix(content.Value, test.prefix) || !strings.Contains(content.Value, test.fragment) {
 				t.Fatalf("hover content = %#v", hover.Contents)
 			}
@@ -879,7 +880,7 @@ func TestHoverShowsOptionBuildRequirement(t *testing.T) {
 		if err != nil || hover == nil {
 			t.Fatalf("hover = %#v, %v", hover, err)
 		}
-		content, ok := hover.Contents.(*protocol.MarkupContent)
+		content, ok := joinedHoverMarkdown(hover.Contents)
 		if !ok {
 			t.Fatalf("hover content = %#v", hover.Contents)
 		}
@@ -2081,5 +2082,115 @@ func TestHoverKeymapDetails(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOptionDocumentationMetadataParagraph(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "set hlsearch\n")
+	t.Cleanup(instance.stopAnalysis)
+	hover := runtimeHelpHover(t, instance, documentURI, "hlsearch")
+	sections, ok := hover.Contents.(protocol.MarkedStringSlice)
+	if !ok || len(sections) != 2 {
+		t.Fatalf("want two separate option documents, got %#v", hover.Contents)
+	}
+	if header, ok := sections[0].(protocol.String); !ok || string(header) != "'hlsearch' 'hls' boolean (default off)\nScope: **global** build requirement: +extra_search" {
+		t.Fatalf("option header = %#v", sections[0])
+	}
+	if body, ok := sections[1].(protocol.String); !ok || !strings.HasPrefix(string(body), "When there is a previous search pattern") {
+		t.Fatalf("option body = %#v", sections[1])
+	}
+	content, ok := joinedHoverMarkdown(hover.Contents)
+	want := "'hlsearch' 'hls' boolean (default off)\nScope: **global** build requirement: +extra_search\n\nWhen there is a previous search pattern"
+	if !ok || !strings.HasPrefix(content.Value, want) || strings.Contains(content.Value, "{not available when compiled") {
+		t.Fatalf("option hover = %#v", hover)
+	}
+	resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "hlsearch", Data: completionResolveTargetData(completionResolveOption, "hlsearch")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs, ok := resolved.Documentation.(*protocol.MarkupContent)
+	if !ok || docs.Value != content.Value {
+		t.Fatalf("completion documentation = %#v, hover = %#v", resolved.Documentation, content)
+	}
+	instance.languageFeatures.hoverMarkup = protocol.MarkupKindPlainText
+	plain := runtimeHelpHover(t, instance, documentURI, "hlsearch").Contents.(*protocol.MarkupContent)
+	if !strings.Contains(plain.Value, "Scope: global build requirement: +extra_search\n\n") || strings.Contains(plain.Value, "**") {
+		t.Fatalf("plaintext option = %#v", plain)
+	}
+}
+
+func TestOptionDocumentationPreservesDefaultsAndSpecificRequirements(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+	}{
+		{"tabstop", "'tabstop' 'ts' number (default 8)\nScope: **local to buffer**\n\nDefines"},
+		{"autoread", "Scope: **global or local to buffer** `global-local`\n\n"},
+		{"backspace", "'backspace' 'bs' string (Vim default: \"indent,eol,start\", Vi default:  \"\")\nScope: **global**\n\n"},
+		{"termwintype", "{only available when compiled with the `terminal`\nfeature on MS-Windows}"},
+	} {
+		option, ok := vimdata.LookupOption(tc.name)
+		if !ok {
+			t.Fatal(tc.name)
+		}
+		if got := optionDocumentation(option); !strings.Contains(got, tc.want) {
+			t.Fatalf("%s documentation missing %q: %s", tc.name, tc.want, got)
+		}
+	}
+}
+
+// joinedHoverMarkdown lets mixed option/variable/command tests check text;
+// TestOptionDocumentationMetadataParagraph separately checks document boundaries.
+func joinedHoverMarkdown(contents protocol.HoverContents) (*protocol.MarkupContent, bool) {
+	if content, ok := contents.(*protocol.MarkupContent); ok {
+		return content, true
+	}
+	sections, ok := contents.(protocol.MarkedStringSlice)
+	if !ok {
+		return nil, false
+	}
+	var parts []string
+	for _, section := range sections {
+		value, ok := section.(protocol.String)
+		if !ok {
+			return nil, false
+		}
+		parts = append(parts, string(value))
+	}
+	return &protocol.MarkupContent{Kind: protocol.MarkupKindMarkdown, Value: strings.Join(parts, "\n\n")}, true
+}
+
+func TestSetOptionPrefixIsPartOfHoverAndSemanticToken(t *testing.T) {
+	for _, option := range []string{"noruler", "noru", "invruler", "ruler"} {
+		source := "set " + option + "\n"
+		instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+		t.Cleanup(instance.stopAnalysis)
+		for offset := 4; offset < 4+len(option); offset++ {
+			hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Character: uint32(offset)},
+			}})
+			if err != nil || hover == nil || hover.Range == nil || *hover.Range != navigationRange(0, 4, uint32(4+len(option))) {
+				t.Fatalf("%s offset %d hover = %#v, error = %v", option, offset, hover, err)
+			}
+			content, ok := joinedHoverMarkdown(hover.Contents)
+			if !ok || !strings.HasPrefix(content.Value, "'ruler' 'ru'") {
+				t.Fatalf("%s hover = %#v", option, hover)
+			}
+		}
+		tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, token := range decodeSemanticTokens(tokens.Data) {
+			if token[0] == 0 && token[1] >= 4 {
+				if found || token != [5]uint32{0, 4, uint32(len(option)), semanticVariable, semanticDefaultLibrary} {
+					t.Fatalf("%s unexpected option token = %#v", option, token)
+				}
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s missing option token", option)
+		}
 	}
 }

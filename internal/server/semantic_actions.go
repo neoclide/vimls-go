@@ -314,7 +314,11 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 		if command.Set != nil {
 			for _, option := range command.Set.Options {
 				if _, ok := vimdata.LookupOption(file.Text(option.Name)); ok {
-					facts = append(facts, semanticFact{span: option.Name, tokenType: semanticVariable, modifiers: semanticDefaultLibrary, priority: 2})
+					span := option.Name
+					if option.Prefix.Start < option.Prefix.End {
+						span.Start = option.Prefix.Start
+					}
+					facts = append(facts, semanticFact{span: span, tokenType: semanticVariable, modifiers: semanticDefaultLibrary, priority: 2})
 				}
 			}
 		}
