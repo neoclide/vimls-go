@@ -105,18 +105,7 @@ it uses the legacy root parser.
 
 ### 1. coc.nvim
 
-Add to your `coc-settings.json` (open with `:CocConfig`):
-
-```json
-{
-  "languageserver": {
-    "vimls": {
-      "command": "vimls",
-      "filetypes": ["vim"]
-    }
-  }
-}
-```
+Run command `:CocInstall coc-vimls`.
 
 ### 2. Neovim (nvim-lspconfig / Built-in LSP)
 
