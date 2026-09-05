@@ -1,0 +1,49 @@
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/command-args-expansion.vim:1:39: vim/E518 Unknown option: <args>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/counterexample-vim9-delete.vim:5:14: vim/E1084 Cannot delete Vim9 script function LuaFold
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/counterexample-vim9-delete.vim:6:5: vim/E1073 Name already defined: LuaFold
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/delete-then-redefine-function.vim:5:5: vim/E1073 Name already defined: s:LuaFold
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/fixture-help-text.vim:1:1: vim/E492 Not an editor command: account. Thus in
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/fixture-top-level-return.vim:1:1: vim/E133 :return not inside a function
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/fixture-unclosed-echo-string.vim:1:20: vim/E114 Missing double quote
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/fixture-unmatched-endwhile.vim:1:1: vim/E588 :endwhile without :while
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/function-variable-separate-namespaces.vim:10:16: vim/E729 Using a Funcref as a String
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/initializer-lambda-shadow.vim:4:34: vim/E1167 Argument name shadows existing variable: cmd
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/legacy-call-without-call.vim:3:3: vim/E492 Not an editor command: cursor(lnum,1)
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/legacy-readonly-argument.vim:2:7: vim/E46 Cannot change read-only variable "a:newdir"
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/legacy-setbufvar-without-call.vim:2:3: vim/E492 Not an editor command: setbufvar(a:bufnr, '&shellslash', 0)
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/local-dictionary-method.vim:3:13: vim/E884 Function name cannot contain a colon: l:matcher.get_entry
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/local-dictionary-method.vim:8:12: vim/E884 Function name cannot contain a colon: l:popup.close
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/logical-expression-bool.vim:6:10: vim/E1012 Type mismatch; expected bool but got number
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/logical-expression-bool.vim:9:10: vim/E1012 Type mismatch; expected bool but got number
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/loop-initializer-lambda-shadow.vim:5:41: vim/E1167 Argument name shadows existing variable: n
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/map-changing-container-value-type.vim:3:9: vim/E1012 Type mismatch; expected list<string> but got string
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/map-changing-container-value-type.vim:12:9: vim/E1012 Type mismatch; expected list<string> but got string
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/map-funcref-arguments.vim:3:51: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, number>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/map-funcref-arguments.vim:5:44: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, dict<any>>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/map-funcref-arguments.vim:7:33: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, number>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/map-funcref-arguments.vim:10:51: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, string>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/map-funcref-arguments.vim:12:40: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, any>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/mapping-bar-payload.vim:1:49: vim/E518 Unknown option: Bar
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/mapping-bar-payload.vim:2:9: vim/E518 Unknown option: <Bar>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/new-plus-command-payload.vim:1:46: vim/E518 Unknown option: \ buftype=nofile
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/new-plus-command-payload.vim:1:71: vim/E518 Unknown option: \ noswapfile
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/new-plus-command-payload.vim:1:92: vim/E518 Unknown option: \ wrap
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/new-plus-command-payload.vim:1:99: vim/E518 Unknown option: [Document]
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/operatorfunc-lambda.vim:3:13: vim/E1012 Type mismatch; expected string but got func<any>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/repeated-destructuring-ignore.vim:3:38: vim/E1017 Variable already declared: _
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/repeated-destructuring-ignore.vim:3:41: vim/E1017 Variable already declared: _
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/required-health-argument.vim:4:6: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/session-fillchars-msgsep.vim:1:20: vim/E474 Invalid argument
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/session-listchars-40.vim:1:32: vim/E518 Unknown option: ,trail:â€¢,extends:#,nbsp:.
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/session-listchars-43.vim:1:32: vim/E518 Unknown option: ,trail:â€¢,extends:#,nbsp:.
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/session-listchars-45.vim:1:32: vim/E518 Unknown option: ,trail:â€¢,extends:#,nbsp:.
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/session-listchars-47.vim:1:32: vim/E518 Unknown option: ,trail:â€¢,extends:#,nbsp:.
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/session-modifier-address.vim:3:1: vim/E1082 command modifier without command
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/typed-loop-destructuring.vim:9:51: vim/E1012 Type mismatch; expected func but got list<any>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/typed-loop-destructuring.vim:13:45: vim/E1012 Type mismatch; expected string but got list<any>
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/view-macmeta.vim:1:10: vim/E518 Unknown option: macmeta
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/vim9-autoload-call.vim:3:1: vim/E476 Invalid command: modula2#SetDialect('test', 'mod')
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/vim9-autoload-call.vim:4:1: vim/E476 Invalid command: modula2#SetDialect('test')
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/vim9-command-quoted-args.vim:6:33: vim/E119 Not enough arguments for function: Qf_filter
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/vim9-command-quoted-args.vim:7:33: vim/E119 Not enough arguments for function: Qf_filter
+/Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/vim9-trailing-comma.vim:4:15: vim/E1069 white space required after ','

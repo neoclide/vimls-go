@@ -1,0 +1,1 @@
+{"patch1016":0,"messages":"","version":902,"errors":[],"exception":"Vim(return):E133: :return not inside a function","throwpoint":"command line..script /Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/driver.vim[7]../Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/fixture-top-level-return.vim, line 1","patch1015":1}
