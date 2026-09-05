@@ -229,6 +229,145 @@ func DiscoverFilesContext(ctx context.Context, root string, limit int) (files []
 	return files, false, nil
 }
 
+// RuntimePathFiles separates scripts that should be parsed from colorscheme
+// files that only need to be retained for completion.
+type RuntimePathFiles struct {
+	Sources []string
+	Colors  []string
+}
+
+// DiscoverRuntimePathFiles returns the statically useful part of an external
+// runtimepath root. plugin, autoload, and import are recursive. Colors contain
+// only direct *.vim children and are catalogued separately so they need not be
+// parsed merely to provide :colorscheme completion.
+func DiscoverRuntimePathFiles(root string, limit int) (RuntimePathFiles, bool, error) {
+	return DiscoverRuntimePathFilesContext(context.Background(), root, limit)
+}
+
+// DiscoverRuntimePathFilesContext is DiscoverRuntimePathFiles with
+// cancellation checks.
+func DiscoverRuntimePathFilesContext(ctx context.Context, root string, limit int) (RuntimePathFiles, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return RuntimePathFiles{}, false, err
+	}
+	absoluteRoot, err := filepath.Abs(root)
+	if err != nil {
+		return RuntimePathFiles{}, false, fmt.Errorf("resolve runtimepath root %q: %w", root, err)
+	}
+	absoluteRoot = filepath.Clean(absoluteRoot)
+	if canonicalRoot, canonicalErr := canonicalPath(absoluteRoot); canonicalErr == nil {
+		if _, ignored := ignoredDiscoveryRoots()[canonicalRoot]; ignored {
+			return RuntimePathFiles{}, false, nil
+		}
+	}
+	rootInfo, err := os.Lstat(absoluteRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return RuntimePathFiles{}, false, nil
+		}
+		return RuntimePathFiles{}, false, fmt.Errorf("stat runtimepath root %q: %w", absoluteRoot, err)
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		return RuntimePathFiles{}, false, fmt.Errorf("runtimepath root %q must not be a symlink", absoluteRoot)
+	}
+	if !rootInfo.IsDir() {
+		return RuntimePathFiles{}, false, fmt.Errorf("runtimepath root %q is not a directory", absoluteRoot)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(absoluteRoot)
+	if err != nil {
+		return RuntimePathFiles{}, false, fmt.Errorf("resolve runtimepath root %q: %w", absoluteRoot, err)
+	}
+	resolvedRoot = filepath.Clean(resolvedRoot)
+
+	var result RuntimePathFiles
+	for _, directory := range []string{"plugin", "autoload", "import"} {
+		if err := ctx.Err(); err != nil {
+			return RuntimePathFiles{}, false, err
+		}
+		directoryPath := filepath.Join(absoluteRoot, directory)
+		info, statErr := os.Lstat(directoryPath)
+		if statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) || errors.Is(statErr, os.ErrPermission) {
+				continue
+			}
+			return RuntimePathFiles{}, false, fmt.Errorf("stat runtimepath directory %q: %w", directoryPath, statErr)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		files, _, discoverErr := DiscoverFilesContext(ctx, directoryPath, 0)
+		if discoverErr != nil {
+			return RuntimePathFiles{}, false, discoverErr
+		}
+		for _, path := range files {
+			if strings.EqualFold(filepath.Ext(path), ".vim") {
+				result.Sources = append(result.Sources, path)
+			}
+		}
+	}
+
+	colorsPath := filepath.Join(absoluteRoot, "colors")
+	entries, readErr := os.ReadDir(colorsPath)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) && !errors.Is(readErr, os.ErrPermission) {
+		return RuntimePathFiles{}, false, fmt.Errorf("read runtimepath directory %q: %w", colorsPath, readErr)
+	}
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return RuntimePathFiles{}, false, err
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".vim") {
+			continue
+		}
+		path := filepath.Join(colorsPath, entry.Name())
+		info, infoErr := os.Stat(path)
+		if infoErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		canonical, canonicalErr := CanonicalPath(path)
+		if canonicalErr == nil && pathWithin(resolvedRoot, canonical) {
+			result.Colors = append(result.Colors, canonical)
+		}
+	}
+	result.Sources = uniqueSorted(result.Sources)
+	result.Colors = uniqueSorted(result.Colors)
+	if limit > 0 && len(result.Sources) > limit {
+		result.Sources = result.Sources[:limit]
+		return result, true, nil
+	}
+	return result, false, nil
+}
+
+// IsRuntimePathSourcePath reports whether path is one of the source locations
+// selected by DiscoverRuntimePathFiles.
+func IsRuntimePathSourcePath(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) < 2 || !strings.EqualFold(filepath.Ext(parts[len(parts)-1]), ".vim") {
+		return false
+	}
+	switch strings.ToLower(parts[0]) {
+	case "plugin":
+		return true
+	case "autoload", "import":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsRuntimePathColorPath reports whether path is a direct colors/*.vim child.
+func IsRuntimePathColorPath(root, path string) bool {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	return len(parts) == 2 && strings.EqualFold(parts[0], "colors") && strings.EqualFold(filepath.Ext(parts[1]), ".vim")
+}
+
 func ignoredDiscoveryRoots() map[string]struct{} {
 	roots := make(map[string]struct{}, 2)
 	candidates := []string{os.TempDir()}

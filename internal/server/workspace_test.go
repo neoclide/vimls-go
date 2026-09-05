@@ -864,7 +864,7 @@ func TestWorkspaceReadEntrypointsRejectOversizedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimeRoot := t.TempDir()
-	runtimeFile := writeWorkspaceFile(t, runtimeRoot, "large.vim", "")
+	runtimeFile := writeWorkspaceFile(t, runtimeRoot, "plugin/large.vim", "")
 	if err := os.Truncate(runtimeFile, maxFileBytes+1); err != nil {
 		t.Fatal(err)
 	}
@@ -1859,16 +1859,37 @@ func TestWorkspaceIndexProgressReportsBoundedRuntimeRoots(t *testing.T) {
 	reported := make([]string, 0, workspaceProgressReportLimit)
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
-	instance.buildWorkspaceIndex(context.Background(), roots, roots, nil, nil, func(root string) {
+	instance.buildWorkspaceIndex(context.Background(), nil, roots, nil, nil, func(root string) {
 		reported = append(reported, root)
 	})
 	if len(reported) != workspaceProgressReportLimit {
 		t.Fatalf("runtime root reports = %d, want %d", len(reported), workspaceProgressReportLimit)
 	}
 	for index, root := range reported {
-		if root != roots[index] {
-			t.Fatalf("runtime root report %d = %q, want %q", index, root, roots[index])
+		if root != mustWorkspaceCanonicalPath(t, roots[index]) {
+			t.Fatalf("runtime root report %d = %q, want canonical %q", index, root, roots[index])
 		}
+	}
+}
+
+func TestWorkspaceIndexScansContainedRuntimepathOnceAsWorkspace(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	runtimeRoot := filepath.Join(workspaceRoot, "runtime")
+	path := writeWorkspaceFile(t, runtimeRoot, "syntax/full-scan.vim", "let g:WorkspaceRuntime = 1\n")
+	canonicalWorkspace := mustWorkspaceCanonicalPath(t, workspaceRoot)
+	canonicalRuntime := mustWorkspaceCanonicalPath(t, runtimeRoot)
+	calls := make(map[string]int)
+	instance := New(nil, nil, io.Discard)
+	instance.testHooks.discoverWorkspaceFiles = func(ctx context.Context, root string, limit int) ([]string, bool, error) {
+		calls[root]++
+		return workspace.DiscoverFilesContext(ctx, root, limit)
+	}
+	index, _, _, warnings := instance.buildWorkspaceIndex(context.Background(), []string{canonicalWorkspace}, []string{canonicalRuntime}, workspacePathResolver([]string{canonicalWorkspace}, []string{canonicalRuntime}), nil)
+	if len(warnings) != 0 || calls[canonicalWorkspace] != 1 || calls[canonicalRuntime] != 0 {
+		t.Fatalf("contained runtimepath discovery calls=%#v warnings=%#v", calls, warnings)
+	}
+	if _, ok := index.Source(mustWorkspaceCanonicalPath(t, path)); !ok {
+		t.Fatal("workspace-contained runtimepath did not use full workspace discovery")
 	}
 }
 
@@ -2013,7 +2034,7 @@ func TestWorkspaceIndexDiscoveryHonorsCancellationBeforeRuntimeRoot(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	instance := New(nil, nil, io.Discard)
-	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(ctx, []string{root}, []string{root}, nil, nil, func(string) {
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(ctx, nil, []string{root}, nil, nil, func(string) {
 		cancel()
 	})
 	if index.FileCount() != 0 || graph.Snapshot().Ready() || len(diskFiles) != 0 || len(warnings) != 0 {
@@ -2319,7 +2340,7 @@ func BenchmarkRuntimepathIndexing(b *testing.B) {
 			filename := fmt.Sprintf("file-%03d.vim", fileNumber)
 			content := fmt.Sprintf("function! BenchmarkRoot%dFunc%d(value)\n  return a:value\nendfunction\n", rootNumber, fileNumber)
 			if fileNumber%2 != 0 {
-				directory = "autoload/benchmark"
+				directory = "autoload"
 				filename = fmt.Sprintf("file_%03d.vim", fileNumber)
 				content = fmt.Sprintf("function! benchmark#file_%03d#Func(value)\n  return a:value\nendfunction\n", fileNumber)
 			}
@@ -2338,10 +2359,9 @@ func BenchmarkRuntimepathIndexing(b *testing.B) {
 		}
 		runtimePaths = append(runtimePaths, canonical)
 	}
-	roots := workspaceIndexRoots(nil, runtimePaths)
 	resolver := workspacePathResolver(nil, runtimePaths)
 	instance := New(nil, nil, io.Discard)
-	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(context.Background(), roots, runtimePaths, resolver, nil)
+	index, graph, diskFiles, warnings := instance.buildWorkspaceIndex(context.Background(), nil, runtimePaths, resolver, nil)
 	if len(diskFiles) != 256 || index.FileCount() != 256 || !index.Complete() || !graph.Snapshot().Ready() || len(warnings) != 0 {
 		b.Fatalf("runtimepath preflight: disk=%d index=%d complete=%t ready=%t warnings=%#v", len(diskFiles), index.FileCount(), index.Complete(), graph.Snapshot().Ready(), warnings)
 	}
@@ -2349,7 +2369,7 @@ func BenchmarkRuntimepathIndexing(b *testing.B) {
 	b.SetBytes(int64(totalBytes))
 	b.ResetTimer()
 	for b.Loop() {
-		instance.buildWorkspaceIndex(context.Background(), roots, runtimePaths, resolver, nil)
+		instance.buildWorkspaceIndex(context.Background(), nil, runtimePaths, resolver, nil)
 	}
 }
 

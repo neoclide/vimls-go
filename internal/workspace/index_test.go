@@ -641,6 +641,28 @@ func TestIndexRuntimeFileCatalogUsesPrecedenceAndUpdates(t *testing.T) {
 	}
 }
 
+func TestIndexRuntimePathFileDoesNotIndexSource(t *testing.T) {
+	root := t.TempDir()
+	color := filepath.Join(root, "colors", "metadata-only.vim")
+	index := NewIndex(1, 1)
+	index.SetRuntimePaths([]string{root})
+	if err := index.AddRuntimePathFile(color); err != nil {
+		t.Fatal(err)
+	}
+	index.SetComplete(true)
+	colors, incomplete := index.ColorSchemeCompletions("metadata", 10)
+	if incomplete || len(colors) != 1 || colors[0].Display != "metadata-only" || colors[0].Path != mustResolverCanonical(t, color) {
+		t.Fatalf("metadata-only colors = %#v, incomplete=%v", colors, incomplete)
+	}
+	if index.FileCount() != 0 || index.IndexedBytes() != 0 {
+		t.Fatalf("metadata-only path consumed source index: files=%d bytes=%d", index.FileCount(), index.IndexedBytes())
+	}
+	index.SetRuntimePaths(nil)
+	if colors, _ := index.ColorSchemeCompletions("", 10); len(colors) != 0 {
+		t.Fatalf("removed runtime root retained colors = %#v", colors)
+	}
+}
+
 func TestIndexFunctionCompletionsRecordSignaturesCommentsAndVim9AutoloadNames(t *testing.T) {
 	root := t.TempDir()
 	index := NewIndex(10, 10000)

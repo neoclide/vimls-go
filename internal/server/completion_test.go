@@ -25,9 +25,10 @@ var benchmarkCompletionResult protocol.CompletionResult
 func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 	root := t.TempDir()
 	runtimePath := filepath.Join(t.TempDir(), "runtime")
+	colorPath := filepath.Join(runtimePath, "colors", "dark.vim")
 	for path := range map[string]struct{}{
 		filepath.Join(runtimePath, "import", "pkg", "alpha.vim"): {},
-		filepath.Join(runtimePath, "colors", "dark.vim"):         {},
+		colorPath: {},
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -54,6 +55,9 @@ func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	instance.workspaceWG.Wait()
+	if _, indexed := instance.workspaceIndex.Source(mustWorkspaceCanonicalPath(t, colorPath)); indexed {
+		t.Fatal("external colorscheme was parsed into the source index")
+	}
 	source := "vim9script\nimport 'pkg/al' as pkg\ncolorscheme dar\n"
 	documentURI := uri.File(filepath.Join(root, "main.vim"))
 	instance.documents.Open(documentURI.String(), 1, source)

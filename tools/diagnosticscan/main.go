@@ -1,5 +1,7 @@
-// Command diagnosticscan reports error-level vimls-go diagnostics for Vim
-// scripts found below a comma-separated runtimepath.
+// Command diagnosticscan reports error-level vimls-go diagnostics for
+// plugin/**/*.vim, autoload/**/*.vim, and import/**/*.vim scripts found below
+// a comma-separated runtimepath. Colors and other runtime subtrees are not
+// analyzed.
 package main
 
 import (
@@ -46,13 +48,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	files := make(map[string]struct{})
 	failed := false
 	for _, root := range roots {
-		discovered, _, err := workspace.DiscoverFiles(root, 0)
+		discovered, _, err := workspace.DiscoverRuntimePathFiles(root, 0)
 		if err != nil {
 			fmt.Fprintf(stderr, "diagnosticscan: %v\n", err)
 			failed = true
 			continue
 		}
-		for _, path := range discovered {
+		for _, path := range discovered.Sources {
 			if isVimSourcePath(path) {
 				files[path] = struct{}{}
 			}

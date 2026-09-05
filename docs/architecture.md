@@ -141,6 +141,12 @@ no Vim process and uses no environment fallback; an explicit empty runtimepath
 also disables this lookup. Canonical realpath keys deduplicate aliased roots and
 files without changing runtime lookup precedence. The server never scans the
 entire machine.
+Runtime roots outside workspace folders use a smaller discovery contract:
+`plugin/**/*.vim`, `autoload/**/*.vim`, and `import/**/*.vim` are parsed, while
+direct `colors/*.vim` children are retained as name/path completion metadata
+without parsing. Other runtime subtrees, including `after/plugin`, are skipped.
+Workspace-folder discovery remains unchanged, and dynamic `:source` targets
+that static parsing cannot identify are intentionally not chased.
 The language client owns filesystem watching: after initialization the server
 dynamically registers `**/*.vim` watchers below workspace roots when supported,
 and consumes the resulting `workspace/didChangeWatchedFiles` notifications.

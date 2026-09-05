@@ -159,6 +159,14 @@ endif
 | --- | --- | --- | --- |
 | `runtimepath` | `string[]` | *Auto-discovered* | Custom array of ordered runtime paths. An explicit empty array `[]` disables runtime indexing. |
 
+Runtimepath roots outside the current workspace folders are intentionally
+scanned narrowly: `plugin/**/*.vim`, `autoload/**/*.vim`, and
+`import/**/*.vim` are parsed for public APIs and documentation. Direct
+`colors/*.vim` children contribute only their colorscheme name and canonical
+path for completion. Other runtime files, including `after/plugin`, are not
+indexed unless they are inside a workspace folder; dynamically sourced files
+may therefore remain undiscovered.
+
 ## Workspace Settings
 
 Clients that advertise `textDocument.diagnostic` use document pull diagnostics;

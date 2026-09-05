@@ -33,7 +33,7 @@ func TestRunReportsOnlyErrorsAndDeduplicatesRuntimepath(t *testing.T) {
 
 func TestRunIgnoresXPTemplateFiles(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"ftplugin/scala.xpt.vim", "nested/other.XPT.VIM", "plugin/normal.vim", "directory.xpt.vim/normal.vim"} {
+	for _, name := range []string{"plugin/scala.xpt.vim", "plugin/nested/other.XPT.VIM", "plugin/normal.vim", "plugin/directory.xpt.vim/normal.vim"} {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -50,6 +50,38 @@ func TestRunIgnoresXPTemplateFiles(t *testing.T) {
 		t.Fatalf("wrong files scanned: %s", got)
 	}
 	if !strings.Contains(stderr.String(), "scanned 1 roots, 2 files, found 2 errors") {
+		t.Fatalf("stderr = %s", &stderr)
+	}
+}
+
+func TestRunUsesExternalRuntimePathLayout(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"plugin/top.vim", "plugin/nested/deep.vim", "autoload/top.vim", "import/top.vim",
+		"autoload/nested/ignored.vim", "import/nested/ignored.vim", "colors/bad.vim",
+		"ftplugin/ignored.vim", "syntax/ignored.vim", "root.vim",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("call len()\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-runtimepath", root}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, &stderr)
+	}
+	if strings.Count(stdout.String(), "vim/E119") != 6 {
+		t.Fatalf("wrong files scanned: %s", &stdout)
+	}
+	for _, name := range []string{"colors/bad.vim", "ftplugin/ignored.vim", "syntax/ignored.vim", "root.vim"} {
+		if strings.Contains(stdout.String(), name) {
+			t.Fatalf("unexpected %q in output: %s", name, &stdout)
+		}
+	}
+	if !strings.Contains(stderr.String(), "scanned 1 roots, 6 files, found 6 errors") {
 		t.Fatalf("stderr = %s", &stderr)
 	}
 }

@@ -5,8 +5,10 @@ Vim v9.2.1015. Syntax added after v9.2.1015 is not supported until the project
 updates its pinned Vim version.
 
 The server analyzes source files without starting Vim or executing Vim script.
-It works with workspace files and configured `runtimepath` files, including
-plugins, autoload scripts, imports, syntax files and color schemes.
+It works with workspace files and configured `runtimepath` files. Outside
+workspace folders it parses recursive `plugin`, `autoload`, and `import` Vim
+scripts; top-level `colors/*.vim` files provide only colorscheme name/path
+completion metadata. Other runtime subtrees are not scanned.
 
 ## Available features
 
@@ -44,6 +46,8 @@ language rules.
   mutable runtimepath state and dynamically formed names cannot always be
   resolved. The server returns no result or keeps the type `unknown` instead of
   guessing.
+- Dynamically sourced runtime files are not discovered unless they also match
+  the external runtimepath layout above or are inside a workspace folder.
 - Call hierarchy excludes lambdas and deferred mapping, autocommand and user
   command bodies. Type aliases are followed only when they resolve uniquely to
   a class, interface or enum.

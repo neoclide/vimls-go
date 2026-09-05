@@ -144,7 +144,7 @@ func TestRuntimepathDeltaNewerNoopSupersedesDiscovery(t *testing.T) {
 func TestRuntimepathDeltaRetriesNewOpenSnapshot(t *testing.T) {
 	s := initializeWorkspaceServer(t, t.TempDir())
 	root := t.TempDir()
-	path := writeWorkspaceFile(t, root, "new.vim", "let disk = 1\n")
+	path := writeWorkspaceFile(t, root, "plugin/new.vim", "let disk = 1\n")
 	started, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	t.Cleanup(func() { once.Do(func() { close(release) }) })

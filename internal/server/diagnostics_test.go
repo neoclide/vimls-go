@@ -198,8 +198,8 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	writeWorkspaceFile(t, runtimeRoot, "after/plugin/local.vim", "command! LocalCommand echo 'local'\n")
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
-	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{runtimeRoot}, []string{runtimeRoot}, workspacePathResolver(nil, []string{runtimeRoot}), nil)
-	if len(warnings) != 0 || !index.Complete() || index.FileCount() != 2 {
+	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), nil, []string{runtimeRoot}, workspacePathResolver(nil, []string{runtimeRoot}), nil)
+	if len(warnings) != 0 || !index.Complete() || index.FileCount() != 1 {
 		t.Fatalf("runtimepath index: files=%d complete=%v warnings=%#v", index.FileCount(), index.Complete(), warnings)
 	}
 	instance.workspaceMu.Lock()
@@ -220,7 +220,7 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 		t.Fatal("complete runtimepath index was not captured")
 	}
 	diagnostics := analysis.UserCommandAbbreviationDiagnostics(file, snapshot.userCommandNames)
-	if len(diagnostics) != 2 || file.Text(diagnostics[0].Span) != "BuildP" || file.Text(diagnostics[1].Span) != "LocalC" {
+	if len(diagnostics) != 1 || file.Text(diagnostics[0].Span) != "BuildP" {
 		t.Fatalf("E464 diagnostics = %#v", diagnostics)
 	}
 	index.SetComplete(false)
@@ -266,7 +266,7 @@ func TestE705E707DiagnosticsUseInitialGlobalNameIndex(t *testing.T) {
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
 	canonicalRuntimeRoot := mustWorkspaceCanonicalPath(t, runtimeRoot)
-	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), []string{canonicalRuntimeRoot}, []string{canonicalRuntimeRoot}, workspacePathResolver(nil, []string{canonicalRuntimeRoot}), nil)
+	index, graph, files, warnings := instance.buildWorkspaceIndex(context.Background(), nil, []string{canonicalRuntimeRoot}, workspacePathResolver(nil, []string{canonicalRuntimeRoot}), nil)
 	if len(warnings) != 0 || index.FileCount() != 2 {
 		t.Fatalf("runtimepath index: files=%d warnings=%#v", index.FileCount(), warnings)
 	}

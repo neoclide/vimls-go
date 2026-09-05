@@ -40,6 +40,23 @@ func (s *Server) discoverWorkspaceFilesContext(ctx context.Context, root string,
 	return workspace.DiscoverFilesContext(ctx, root, limit)
 }
 
+func (s *Server) discoverRuntimePathFilesContext(ctx context.Context, root string, limit int) (workspace.RuntimePathFiles, bool, error) {
+	if hook := s.testHooks.discoverWorkspaceFiles; hook != nil {
+		files, truncated, err := hook(ctx, root, limit)
+		var result workspace.RuntimePathFiles
+		for _, path := range files {
+			if workspace.IsRuntimePathColorPath(root, path) {
+				result.Colors = append(result.Colors, path)
+			} else {
+				// Test hooks provide an already-selected deterministic file set.
+				result.Sources = append(result.Sources, path)
+			}
+		}
+		return result, truncated, err
+	}
+	return workspace.DiscoverRuntimePathFilesContext(ctx, root, limit)
+}
+
 func workspaceRootsFromInitialize(params *protocol.InitializeParams) []string {
 	if params == nil {
 		return nil
@@ -265,7 +282,6 @@ func (s *Server) workspaceIndexWorker() {
 		runtimePaths := append([]string(nil), s.runtimePaths...)
 		resolver := s.workspaceResolver
 		s.workspaceMu.Unlock()
-		roots := workspaceIndexRoots(workspaceRoots, runtimePaths)
 		if resolver == nil {
 			resolver = workspacePathResolver(workspaceRoots, runtimePaths)
 		}
@@ -276,7 +292,7 @@ func (s *Server) workspaceIndexWorker() {
 
 		progress := s.startWorkspaceIndexProgress()
 		progressReporting := progress != nil
-		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, roots, runtimePaths, resolver, openSnapshots, func(root string) {
+		index, graph, diskFiles, warnings := s.buildWorkspaceIndex(s.analysisContext, workspaceRoots, runtimePaths, resolver, openSnapshots, func(root string) {
 			progressReporting = s.reportWorkspaceIndexProgress(progress, progressReporting, root)
 		})
 		s.workspaceMu.Lock()
@@ -599,12 +615,25 @@ func workspaceSnapshotsCurrent(current, indexed []*text.Snapshot) bool {
 // runtime roots immediately before discovering their files. Parsing remains
 // batched after discovery, so reports identify discovery roots rather than
 // individual files.
-func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot, progress ...func(string)) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
+func (s *Server) buildWorkspaceIndex(ctx context.Context, workspaceRoots, runtimePaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot, progress ...func(string)) (*workspace.Index, *workspace.ImportGraph, map[string]struct{}, []string) {
 	var reportRuntimeRoot func(string)
 	if len(progress) > 0 {
 		reportRuntimeRoot = progress[0]
 	}
 	index := newWorkspaceIndex()
+	canonicalWorkspaceRoots := normalizeWorkspaceRoots(workspaceRoots)
+	runtimePaths = normalizeWorkspaceRoots(runtimePaths)
+	roots := append([]string(nil), canonicalWorkspaceRoots...)
+	for _, root := range runtimePaths {
+		if !workspacePathInRoots(root, canonicalWorkspaceRoots) {
+			roots = append(roots, root)
+		}
+	}
+	for _, root := range workspaceRoots {
+		if _, err := workspace.CanonicalPath(root); err != nil {
+			roots = append(roots, root)
+		}
+	}
 	searchPaths := runtimePaths
 	if len(searchPaths) == 0 {
 		searchPaths = roots
@@ -620,6 +649,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 	complete := true
 
 	paths := make([]string, 0)
+	var runtimeColors []string
 	seen := make(map[string]struct{})
 	openByPath := make(map[string]*text.Snapshot, len(openSnapshots))
 	oversizedOpen := make(map[string]struct{})
@@ -631,6 +661,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
 		runtimeRoot := slices.Contains(runtimePaths, root)
+		externalRuntimeRoot := runtimeRoot && !workspacePathInRoots(root, canonicalWorkspaceRoots)
 		remaining := maxWorkspaceFiles - len(paths)
 		if remaining <= 0 {
 			complete = false
@@ -641,7 +672,16 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			reportRuntimeRoot(root)
 			reportedRuntimeRoots++
 		}
-		files, truncated, err := s.discoverWorkspaceFilesContext(ctx, root, remaining)
+		var files []string
+		var truncated bool
+		var err error
+		if externalRuntimeRoot {
+			discovered, wasTruncated, discoverErr := s.discoverRuntimePathFilesContext(ctx, root, remaining)
+			files, truncated, err = discovered.Sources, wasTruncated, discoverErr
+			runtimeColors = append(runtimeColors, discovered.Colors...)
+		} else {
+			files, truncated, err = s.discoverWorkspaceFilesContext(ctx, root, remaining)
+		}
 		if ctx.Err() != nil {
 			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
@@ -678,6 +718,9 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 	for _, snapshot := range openSnapshots {
 		path, ok := workspaceURIPath(uri.URI(snapshot.URI()))
 		if !ok || !workspacePathInRoots(path, roots) {
+			continue
+		}
+		if !workspacePathInRoots(path, canonicalWorkspaceRoots) && !runtimePathSourceInRoots(path, runtimePaths) {
 			continue
 		}
 		if snapshot.ByteLen() > maxFileBytes {
@@ -790,6 +833,9 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 				warnings = appendWarning(warnings, "vimls: workspace file limit reached; additional files were omitted")
 				break
 			}
+			if !workspacePathInRoots(path, canonicalWorkspaceRoots) && !runtimePathSourceInRoots(path, runtimePaths) {
+				continue
+			}
 			source, diskFile, ok := readSource(path)
 			if !ok {
 				if !workspacePathInRoots(path, runtimePaths) {
@@ -851,6 +897,14 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, roots, runtimePaths []
 			index.Remove(path)
 			delete(indexed, path)
 			delete(diskFiles, path)
+		}
+	}
+	for _, path := range runtimeColors {
+		if workspacePathInRoots(path, canonicalWorkspaceRoots) {
+			continue
+		}
+		if err := index.AddRuntimePathFile(path); err != nil {
+			complete = false
 		}
 	}
 	index.SetComplete(complete)
@@ -934,6 +988,15 @@ func workspacePathInRoots(path string, roots []string) bool {
 	for _, root := range roots {
 		relative, err := filepath.Rel(root, path)
 		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimePathSourceInRoots(path string, roots []string) bool {
+	for _, root := range roots {
+		if workspace.IsRuntimePathSourcePath(root, path) {
 			return true
 		}
 	}
@@ -1530,11 +1593,15 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 		oldSet[path] = struct{}{}
 	}
 	discovered := make(map[string]struct{})
+	var runtimeColors []string
 	newPathsToIndex := make([]string, 0)
 	newSources := make([]string, 0)
 	newDiskFiles := make([]bool, 0)
 	for _, root := range newPaths {
 		if _, retained := oldSet[root]; retained {
+			continue
+		}
+		if workspacePathInRoots(root, workspaceRoots) {
 			continue
 		}
 		if remainingBytes <= 0 {
@@ -1546,7 +1613,9 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 			complete = false
 			break
 		}
-		files, truncated, err := s.discoverWorkspaceFilesContext(ctx, root, remaining)
+		runtimeFiles, truncated, err := s.discoverRuntimePathFilesContext(ctx, root, remaining)
+		files := runtimeFiles.Sources
+		runtimeColors = append(runtimeColors, runtimeFiles.Colors...)
 		if ctx.Err() != nil {
 			return false
 		}
@@ -1636,6 +1705,14 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	s.runtimePaths = append([]string(nil), newPaths...)
 	s.workspaceResolver = resolver
 	s.workspaceIndex.SetRuntimePaths(newPaths)
+	for _, path := range runtimeColors {
+		if workspacePathInRoots(path, workspaceRoots) {
+			continue
+		}
+		if s.workspaceIndex.AddRuntimePathFile(path) != nil {
+			complete = false
+		}
+	}
 	for path := range s.workspaceFiles {
 		if workspacePathInRoots(path, activeRoots) {
 			continue
@@ -1785,7 +1862,9 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 	complete := index != nil && index.Complete()
 	pendingCount := len(s.workspacePending)
 	rebuilding := s.workspaceRunning
-	roots := workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)
+	workspaceRoots := append([]string(nil), s.workspaceRoots...)
+	runtimePaths := append([]string(nil), s.runtimePaths...)
+	roots := workspaceIndexRoots(workspaceRoots, runtimePaths)
 	hasMissing := s.workspaceGraph != nil && s.workspaceGraph.HasMissingImports()
 	s.workspaceMu.Unlock()
 
@@ -1805,10 +1884,20 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 			continue
 		}
 		_, selected := index.Source(path) // Discovery may have canonicalized a .vim symlink.
-		for _, root := range roots {
-			if workspace.IsVimSourcePath(root, path) {
-				selected = true
-				break
+		if workspacePathInRoots(path, workspaceRoots) {
+			for _, root := range workspaceRoots {
+				if workspace.IsVimSourcePath(root, path) {
+					selected = true
+					break
+				}
+			}
+		} else if runtimePathSourceInRoots(path, runtimePaths) {
+			selected = true
+		} else {
+			for _, root := range runtimePaths {
+				if workspace.IsRuntimePathColorPath(root, path) {
+					return false
+				}
 			}
 		}
 		if event.Type != protocol.FileChangeTypeDeleted {

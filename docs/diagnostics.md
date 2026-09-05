@@ -485,11 +485,12 @@ command uses E492 there, while `call Name (` uses E1068 for the whitespace
 before the argument list. The parser keeps that context distinction instead
 of treating E476 as a generic unknown-command code.
 
-The builtin Ex command table is complete for the pinned Vim release. A complete
-user-command table, however, requires parsing every Vim file on runtimepath and
-publishing the result as an immutable workspace snapshot. Until that exists,
-capitalized candidates such as `Print` and `CallMe (` remain opaque and do not
-produce E476 or E492.
+The builtin Ex command table is complete for the pinned Vim release. The
+user-command table comes from the immutable workspace snapshot and the
+statically indexed external runtime sources (`plugin`, `autoload`, and
+`import`). Commands declared only in other or dynamically sourced runtime files
+remain unknown, so capitalized candidates such as `Print` and `CallMe (` stay
+opaque and do not produce E476 or E492.
 
 Representative source evidence:
 
@@ -541,8 +542,8 @@ user-command registry. Current Vim9 support covers a complete typed assignment
 that omitted `var`, the lowercase declaration-like `notexist:repl` form, and
 the pinned builtin-command forms `ka`, `:1ka`, and `mode 4`. Arbitrary unknown
 legacy commands, dynamically executed strings, and capitalized command
-candidates remain opaque. They can be classified only after every Vim file on
-runtimepath has contributed to an immutable user-command snapshot.
+candidates remain opaque. They can be classified only when the declaring file
+has contributed to the immutable workspace/runtime source snapshot.
 
 Representative source evidence:
 

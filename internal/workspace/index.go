@@ -205,6 +205,7 @@ type Index struct {
 	runtimePaths        []string
 	runtimeAfter        []bool
 	runtimeFiles        []map[string]string
+	runtimeCatalog      map[string]struct{}
 	complete            bool
 	relationOverflow    map[string]bool
 }
@@ -237,7 +238,29 @@ func (i *Index) SetRuntimePaths(paths []string) {
 	for path := range i.files {
 		i.addRuntimeFileLocked(path)
 	}
+	for path := range i.runtimeCatalog {
+		if !i.addRuntimeFileLocked(path) {
+			delete(i.runtimeCatalog, path)
+		}
+	}
 	i.mu.Unlock()
+}
+
+// AddRuntimePathFile adds a path-only runtime file to the completion catalog.
+// It does not parse, analyze, or count the file as a workspace source.
+func (i *Index) AddRuntimePathFile(path string) error {
+	normalized, err := normalizeIndexPath(path)
+	if err != nil {
+		return err
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.runtimeCatalog == nil {
+		i.runtimeCatalog = make(map[string]struct{})
+	}
+	i.runtimeCatalog[normalized] = struct{}{}
+	i.addRuntimeFileLocked(normalized)
+	return nil
 }
 
 // NewIndex creates a workspace symbol index with file-count and source-byte
@@ -669,7 +692,8 @@ func fuzzyTextMatches(pattern, text string) bool {
 	return false
 }
 
-func (i *Index) addRuntimeFileLocked(path string) {
+func (i *Index) addRuntimeFileLocked(path string) bool {
+	added := false
 	for index, root := range i.runtimePaths {
 		if !pathWithinOrEqual(root, path) {
 			continue
@@ -677,8 +701,10 @@ func (i *Index) addRuntimeFileLocked(path string) {
 		relative, err := filepath.Rel(root, path)
 		if err == nil && relative != "." {
 			i.runtimeFiles[index][filepath.ToSlash(relative)] = path
+			added = true
 		}
 	}
+	return added
 }
 
 func (i *Index) removeRuntimeFileLocked(path string) {

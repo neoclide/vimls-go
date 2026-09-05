@@ -140,6 +140,54 @@ func TestDiscoverFilesContextHonorsCancelledDeadline(t *testing.T) {
 	}
 }
 
+func TestDiscoverRuntimePathFilesUsesNarrowLayout(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{
+		"plugin/top.vim", "plugin/nested/deep.vim",
+		"autoload/top.vim", "autoload/nested/deep.vim",
+		"import/top.vim", "import/nested/deep.vim",
+		"colors/dark.vim", "colors/nested/deep.vim",
+		"ftplugin/ignored.vim", "syntax/ignored.vim", "root.vim",
+	} {
+		writeDiscoveryFile(t, filepath.Join(root, name), "echo 'x'\n")
+	}
+	writeDiscoveryFile(t, filepath.Join(root, "plugin", "extensionless"), "echo 'x'\n")
+
+	files, truncated, err := DiscoverRuntimePathFiles(root, 0)
+	if err != nil || truncated {
+		t.Fatalf("DiscoverRuntimePathFiles = %#v, %v, %v", files, truncated, err)
+	}
+	for _, name := range []string{"plugin/top.vim", "plugin/nested/deep.vim", "autoload/top.vim", "autoload/nested/deep.vim", "import/top.vim", "import/nested/deep.vim"} {
+		if !containsPath(files.Sources, filepath.Join(root, name)) {
+			t.Fatalf("missing source %q in %#v", name, files.Sources)
+		}
+	}
+	for _, name := range []string{"colors/dark.vim", "ftplugin/ignored.vim", "syntax/ignored.vim", "root.vim", "plugin/extensionless"} {
+		if containsPath(files.Sources, filepath.Join(root, name)) {
+			t.Fatalf("unexpected source %q in %#v", name, files.Sources)
+		}
+	}
+	if len(files.Colors) != 1 || !containsPath(files.Colors, filepath.Join(root, "colors", "dark.vim")) {
+		t.Fatalf("colors = %#v", files.Colors)
+	}
+	if !IsRuntimePathSourcePath(root, filepath.Join(root, "plugin", "nested", "deep.vim")) ||
+		!IsRuntimePathSourcePath(root, filepath.Join(root, "autoload", "nested", "deep.vim")) ||
+		!IsRuntimePathColorPath(root, filepath.Join(root, "colors", "dark.vim")) {
+		t.Fatal("runtimepath lexical classification disagrees with discovery")
+	}
+}
+
+func TestDiscoverRuntimePathFilesLimitsSourcesWithoutDroppingColors(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"plugin/a.vim", "plugin/b.vim", "colors/dark.vim"} {
+		writeDiscoveryFile(t, filepath.Join(root, name), "echo 'x'\n")
+	}
+	files, truncated, err := DiscoverRuntimePathFiles(root, 1)
+	if err != nil || !truncated || len(files.Sources) != 1 || len(files.Colors) != 1 {
+		t.Fatalf("DiscoverRuntimePathFiles limited = %#v, %v, %v", files, truncated, err)
+	}
+}
+
 func TestDiscoverFilesRejectsSymlinkRoot(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks are not portable on Windows")
