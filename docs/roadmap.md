@@ -13,13 +13,18 @@ blocker unless explicitly included in the 1.0 contract.
 | P1 | Mapping result policy | Implemented literal E976/E729 only; pinned source and both dialect oracles cover accepted conversions. Deferred variable/call results stay unknown. |
 | P1 | Reconcile coverage ledger with owned behavior | Reviewed parser/semantic evidence separately; all local ledger links resolve. Tuple and mapping TODOs now have direct analysis/oracle evidence; explicit deferred scope remains unchanged. |
 | P2 | Required LSP surface and stdio/client acceptance | Capability/handler/test mapping reviewed; added UTF-16 overlay/edit stdio+TCP assertions and unpacked-binary test support. Uncached full tests, vet, build, exact Vim oracle and pinned client smoke pass locally. |
-| P3 | Fuzz, performance, vulnerability and reproducible archives | Pending candidate validation. |
-| P3 | Release notes and final evidence | CHANGELOG and packaged support/license documents added; prerelease tags retain prerelease status. Local evidence is in release-candidate.md; archive verification and final gates pending. No release is authorized. |
+| P3 | Fuzz, performance, vulnerability and reproducible archives | Local gates pass: 8 bounded fuzz targets, same-runner benchmark confirmation, zero reported vulnerabilities, 16 byte-identical twice-built assets, unpacked stdio and Vim client smoke. Candidate source: 549c5b7. |
+| P3 | Release notes and final evidence | CHANGELOG, packaged support/license documents and prerelease status are ready. Exact hashes, initial benchmark noise, confirmation, commands and remaining CI gates are recorded in [release-candidate.md](release-candidate.md). No release is authorized. |
 
 M0–M6 have implemented surfaces within the stated conservative contract; the
 M3–M4 P1 evidence gaps are closed. M7 remains open until the candidate has all required platform and
 release evidence. Local validation uses focused tests, uncached full tests,
 vet, build and pinned Vim smoke. Race and 90% coverage are checked through CI.
+
+Local candidate acceptance is complete at `549c5b7`; the following evidence-only
+commit does not change the validated source. Native Windows and current-candidate
+Linux/macOS CI race/coverage remain pending. Historical CI for `a0381ea` is not
+candidate evidence. Push, tag and publication require separate authorization.
 
 External runtimepath discovery parses recursive `plugin`, `autoload`, and
 `import` Vim scripts; `colors/*.vim` contributes only completion paths. Roots
@@ -304,7 +309,7 @@ Windows on amd64 and arm64 through `tools/release`, with SHA-256 checksums.
 Embedded-language delegation, general pretty-printing and nonstandard client
 extensions are post-1.0 unless real client validation shows one is required for
 a usable baseline. The implemented Formatting contract is documented in
-[Formatting research](formatting-research.md).
+[language-support contract](language-support.md).
 
 ## Planning gates
 

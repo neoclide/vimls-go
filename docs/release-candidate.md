@@ -2,12 +2,14 @@
 
 Date: 2026-09-05. Candidate label: `v1.0.0-rc.1` (local validation only;
 not a tag or published release). Baseline: `a0381ea`.
+Final candidate source: `549c5b7bbed567a7369c78d73f0eaa7f682f691d`.
+The subsequent evidence-only commit is not the archive source SHA.
 
 ## Scope and remaining gates
 
 The release contract is [language-support.md](language-support.md), with
 parser and semantic evidence kept separate in [syntax-coverage.md](syntax-coverage.md).
-Explicit deferred features remain deferred. P0–P2 local tests pass; M7 is not
+Explicit deferred features remain deferred. P0–P3 local gates pass; M7 is not
 closed until the exact candidate passes native Windows and CI race/coverage.
 No remote write, tag, or publication is authorized by this work.
 
@@ -17,15 +19,16 @@ No remote write, tag, or publication is authorized by this work.
 - Oracle: `/usr/local/bin/vim`, Vim 9.2, patches 1–1015; patch 1016 absent.
 - Client: vim-lsp `e10d186452743beb7b43d2b3427020832f930c2b`.
 - `go test -json -count=1 ./...`, `go vet ./...`, `make`: pass.
-  The JSON run records 6,031 passing test/subtest events across 17 tested
+  The final JSON run records 6,034 passing test/subtest events across 17 tested
   packages, three explicit skips, and zero failures. These are events, not
-  6,031 independent top-level tests. The oracle skips are run separately below.
+  6,034 independent top-level tests. The two oracle skips are run separately
+  below; the third is the opt-in official parser failure-triage report.
 - `VIM_EXECUTABLE=/usr/local/bin/vim go test -v -count=1 ./test/oracle`: pass.
 - `make client-smoke VIM_EXECUTABLE=/usr/local/bin/vim`: pass; both dialects
   observe their expected diagnostic, apply indentation, shut down, and report
   `v:errors=[]`.
-- Raw local output: ignored `.test-tools/rc-2026-09-05/` (`tests.json`,
-  `oracle.txt`, `client-smoke.txt`). This document retains conclusions even
+- Raw local output: ignored `.test-tools/rc-2026-09-05/` (`tests-final.json`,
+  `oracle-final.txt`, `client-smoke.txt`). This document retains conclusions even
   when local artifacts are unavailable.
 
 ## Required LSP evidence
@@ -72,6 +75,106 @@ Full tests, vet, build and the complete oracle pass after the guard refinement.
 the release workflow now marks hyphenated prerelease tags as prereleases.
 No workflow was triggered. Full tests, vet and build pass for these changes.
 
-Bounded fuzzing, baseline-comparable performance, twice-built reproducible
-archives and unpacked-binary/client smoke are in progress. Their results will
-be recorded here before handoff.
+### Bounded fuzzing
+
+Eight targets passed with `-run '^$' -fuzz '^TARGET$' -fuzztime 30s -parallel 4`.
+No crash input was found. Framing/text/parser implementations did not change
+after these runs. Completion-context fuzzing was repeated on final source after
+the last analysis guard refinement; this is not a substitute for semantic tests.
+
+| Package / target | Executions |
+| --- | ---: |
+| jsonrpc / FuzzReader | 635,228 |
+| text / FuzzPositionRoundTrip | 3,078,581 |
+| text / FuzzApplyChanges | 442,081 |
+| syntax / FuzzFileParsersNeverPanic | 304,587 |
+| syntax / FuzzLegacyExpressionNeverPanics | 714,917 |
+| syntax / FuzzVim9ExpressionNeverPanics | 742,601 |
+| syntax / FuzzVim9TypeNeverPanics | 875,702 |
+| server / FuzzCompletionContext | 264,917; final rerun 334,302 |
+
+### Performance
+
+Runner: the host above, Intel i7-9750H @ 2.60GHz, `GOMAXPROCS=4`, Go 1.27.0.
+Baseline `a0381ea` and candidate `549c5b7` use the unchanged fixed workloads from
+[testing.md](testing.md): `-benchmem -benchtime=10x -count=5`. Other local
+validation jobs were stopped before measurement. Each round records five
+samples per workload on each side; p95 is a percentile of sample means, not
+individual request latency.
+
+The first baseline-then-candidate round failed the 15% time gate for completion
+1 KiB median (172.33 -> 205.17 us) and 100 KiB p95 (205.62 -> 266.37 us).
+All other metrics passed. A second full paired round, candidate then baseline,
+passed the unchanged gate for every workload. No baseline, workload, threshold,
+or allocation budget was reset; no stable regression was confirmed. Both raw
+rounds and reports are retained as `benchmark-{baseline,current,report}.txt`
+and `benchmark-{baseline,current,report}-confirm.txt`.
+
+Confirmation results:
+
+| Workload | Candidate median | Candidate p95 | Median delta | p95 delta |
+| --- | ---: | ---: | ---: | ---: |
+| Parse legacy 100 KiB | 1.388 ms | 1.809 ms | -0.07% | +1.80% |
+| Parse legacy 1 MiB | 37.028 ms | 38.527 ms | +2.49% | +4.03% |
+| Parse Vim9 100 KiB | 2.005 ms | 2.082 ms | -2.97% | -3.84% |
+| Parse Vim9 1 MiB | 23.236 ms | 24.316 ms | +0.78% | -0.24% |
+| Completion 1 KiB | 0.182 ms | 0.230 ms | +3.08% | +2.81% |
+| Completion 100 KiB | 0.177 ms | 0.229 ms | -0.02% | +9.08% |
+| Workspace rebuild | 34.485 ms | 35.043 ms | +1.57% | -0.57% |
+| Runtimepath indexing | 86.470 ms | 87.905 ms | -1.87% | -8.36% |
+| Reverse-dependent reanalysis | 40.433 ms | 42.189 ms | -2.97% | -5.54% |
+
+All confirmed allocation/byte changes are below 20%; the largest allocation
+increase is reverse reanalysis, 54,124 -> 55,085 (+1.78%). Completion stays well
+below 100 ms. These results are specific to this recorded host/toolchain, not
+a promise about all clients or a replacement for candidate CI.
+
+### Reproducible archives and clean-install acceptance
+
+From the clean final source, ran twice with separate ignored output directories:
+
+```sh
+GOMAXPROCS=4 go run -mod=readonly ./tools/release \
+  -version v1.0.0-rc.1 -epoch 1788606487 \
+  -output-dir .test-tools/rc-2026-09-05/final-one
+# Repeat the identical command with final-two.
+```
+
+Both builds produced byte-identical checksums for **all 16 assets**: eight raw
+executables and eight archives. `shasum -a 256 -c checksums.txt` passed for all
+assets. All eight archives have exactly the expected executable, CHANGELOG,
+README, support contract and two license files; every packaged document was
+compared byte-for-byte with the source. Archive mode/timestamp determinism is
+also tested by the packager tests. Preliminary `build-one`/`build-two` artifacts
+are superseded by `final-one`/`final-two` and are not the candidate.
+
+| Archive suffix (prefix `vimls-v1.0.0-rc.1-`) | SHA-256 |
+| --- | --- |
+| darwin-amd64.tar.gz | `92ce854e93bf589bb8e30b563c86787744660f28c6b140de285a17cddd074e3e` |
+| darwin-arm64.tar.gz | `b62f06bafbb25068340756aa4859cec0574a1c7dc21198415c04ac773f2bbeb8` |
+| freebsd-amd64.tar.gz | `889ff72c299ed280cd83a8a5b342b1cb969afc08e694e71ddfe13b7e2d907fc9` |
+| linux-amd64.tar.gz | `a3034279a294cf6720f8b12e2d8eabc28d5e9d57783be2de60c9f30488ae0352` |
+| linux-arm64.tar.gz | `0deea9a7f38eeba111750bb4fb73f385557f9fc1692515b11490c884d47a335e` |
+| linux-armv7.tar.gz | `9caebec465a4fe847f63a693f6a87a372f67930f6445de81b85b32ada9cd25cc` |
+| windows-amd64.zip | `b364e2722d6d2da04cc3631e6aeed8ff73411421da4f1e9c5e1f477cac4dcb18` |
+| windows-arm64.zip | `f13eb1de189aa1d82757a051f61b21cd188e2e29472386f4018aa66b0a602f9b` |
+
+The complete 16-entry checksum manifest hashes to
+`df028a9c87ba3475fbc5b9649655e8b2ec1d6049027f928552337f80b1eb5c88`.
+The unpacked host executable hashes to
+`51bd711cebf614a61138363e12444290d84ee00014c2a7310053fcc5c03b0614`.
+`go version -m` confirms Go 1.27.0, `CGO_ENABLED=0`, the final source revision,
+and `vcs.modified=false`; `--version` prints `vimls v1.0.0-rc.1`.
+
+The unpacked host binary passed **all 11 integration tests** using the documented
+`VIMLS_TEST_BINARY`/`VIMLS_TEST_VERSION` override, with zero failures. The pinned
+Vim/vim-lsp smoke was run again with `VIMLS_BINARY` set to that unpacked binary:
+both expected diagnostics, both indentation edits, shutdown response, exited
+status and `v:errors=[]` passed. Raw records are `archive-integration.json` and
+`archive-client.txt`. Other architectures were cross-built, not executed.
+
+Windows/amd64 server, diagnosticscan and integration test binaries also compile
+with `GOOS=windows GOARCH=amd64 go test -c`. This does **not** close the native
+Windows execution gate. No tag, push, release, or remote workflow dispatch was
+performed. Finishing M7 requires separate authorization to deliver the candidate
+for native/current-SHA CI, then recording those results.
