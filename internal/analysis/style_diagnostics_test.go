@@ -477,3 +477,48 @@ autocmd! removed_group
 		t.Fatalf("unknown-autocmd-event spans = %#v, want %#v; diagnostics = %#v", got, want, result.Diagnostics)
 	}
 }
+
+// Vim v9.2.1015 runtime/doc/eval.txt (:catch) documents /.*/ as catch-all
+// and recommends error codes instead of locale-dependent error messages.
+func TestCatchErrorMessageDiagnostic(t *testing.T) {
+	for _, dialect := range []string{"", "vim9script\n"} {
+		for _, tc := range []struct {
+			clause string
+			warn   bool
+		}{
+			{"catch", false},
+			{"catch /.*/", false},
+			{"catch #.*#", false},
+			{"catch /^.*$/", false},
+			{"catch /.*/ \" catch everything", false},
+			{"catch /E31/", false},
+			{"catch /E1/", false},
+			{"catch /E117/", false},
+			{"catch /E1234/", false},
+			{"catch /^Vim\\%((\\S\\+)\\)\\=:E31:/", false},
+			{"catch /Unknown function/", true},
+			{"catch /E/", true},
+		} {
+			t.Run(dialect+tc.clause, func(t *testing.T) {
+				clause := tc.clause
+				if dialect != "" {
+					clause = strings.ReplaceAll(clause, "\" catch", "# catch")
+				}
+				file := syntax.Parse(dialect + "try\n" + clause + "\nendtry\n")
+				if len(file.Diagnostics) != 0 {
+					t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+				}
+				result := Analyze(file)
+				found := false
+				for _, diagnostic := range result.Diagnostics {
+					if diagnostic.Code == "vimls/catch-error-message" {
+						found = true
+					}
+				}
+				if found != tc.warn {
+					t.Fatalf("catch warning = %t, want %t; diagnostics = %#v", found, tc.warn, result.Diagnostics)
+				}
+			})
+		}
+	}
+}

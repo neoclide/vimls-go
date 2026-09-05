@@ -63,7 +63,7 @@ the default message more specific without changing its code.
 | `vimls/autocmd-group-not-cleared` | Warning | augroup does not clear existing autocommands |
 | `vimls/autocmd-outside-augroup` | Warning | autocommand is not contained in an augroup |
 | `vimls/autoload-function-not-found` | Warning | autoload function not found in current runtimepath |
-| `vimls/catch-error-message` | Warning | catching human-readable error text is fragile |
+| `vimls/catch-error-message` | Warning | catching human-readable error text is fragile; catch-all patterns and Vim error codes are exempt |
 | `vimls/complex-autocmd` | Hint | complex autocommand body; consider delegating to a function |
 | `vimls/complex-command` | Hint | complex user command body; consider delegating to a function |
 | `vimls/config-loaded-guard` | Hint | a loaded guard skips the rest of the file on a later `:source`; edits below may not take effect |

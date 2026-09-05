@@ -382,7 +382,7 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 				appendStyleDiagnostic(result, "vimls/function-without-abort", "function does not use abort", command.Name)
 			}
 		}
-		if command.Canonical == "catch" && strings.TrimSpace(file.Text(command.Argument)) != "" && !hasVimErrorCode(file.Text(command.Argument)) {
+		if command.Canonical == "catch" && catchUsesErrorMessage(file.Text(command.Argument)) {
 			appendStyleDiagnostic(result, "vimls/catch-error-message", "catching human-readable error text is fragile; prefer a Vim error code", command.Argument)
 		}
 		if command.Canonical == "echoerr" {
@@ -744,14 +744,31 @@ func appendStyleDiagnostic(result *FileAnalysis, code, message string, span synt
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
 }
 
-func hasVimErrorCode(source string) bool {
-	for index := 0; index < len(source); index++ {
-		if source[index] != 'E' || index+3 >= len(source) || source[index+1] < '0' || source[index+1] > '9' || source[index+2] < '0' || source[index+2] > '9' || source[index+3] < '0' || source[index+3] > '9' {
+// Catch-all patterns and error codes do not depend on localized error text.
+func catchUsesErrorMessage(source string) bool {
+	pattern := strings.TrimSpace(source)
+	// The argument can retain a trailing comment. Inspect only the delimited
+	// pattern so comments cannot turn catch-all into a text match.
+	for index := 1; index < len(pattern); index++ {
+		if pattern[index] == '\\' {
+			index++
 			continue
 		}
-		return true
+		if pattern[index] == pattern[0] {
+			pattern = pattern[1:index]
+			break
+		}
 	}
-	return false
+	switch pattern {
+	case "", ".*", "^.*", ".*$", "^.*$":
+		return false
+	}
+	for index := 0; index+1 < len(pattern); index++ {
+		if pattern[index] == 'E' && pattern[index+1] >= '0' && pattern[index+1] <= '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func commandComplexity(body string) int {
