@@ -6,6 +6,39 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+func TestFunctionValuedOptionAssignments(t *testing.T) {
+	for _, option := range []string{"completefunc", "findfunc", "imactivatefunc", "imstatusfunc", "omnifunc", "operatorfunc", "quickfixtextfunc", "tagfunc", "thesaurusfunc", "opfunc", "l:omnifunc", "g:opfunc"} {
+		t.Run(option, func(t *testing.T) {
+			file := syntax.Parse("vim9script\ndef Assign()\n  &" + option + " = (_) => {\nreturn\n}\n  var name: string = &" + option + "\n  echo name\nenddef\n")
+			if diagnostics := CombinedDiagnostics(file, Analyze(file)); len(diagnostics) != 0 {
+				t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+			}
+		})
+	}
+	for _, test := range []struct {
+		name, source string
+		wantMismatch bool
+	}{
+		{"named function", "def Handler(value: string)\nenddef\ndef Assign()\n&opfunc = Handler\nenddef\n", false},
+		{"ordinary string option", "def Assign()\n&filetype = (_) => {\nreturn\n}\nenddef\n", true},
+		{"lambda body still checked", "def Assign()\n&opfunc = (_) => {\nvar value: number = 'bad'\n}\nenddef\n", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse("vim9script\n" + test.source)
+			diagnostics := CombinedDiagnostics(file, Analyze(file))
+			found := false
+			for _, diagnostic := range diagnostics {
+				if diagnostic.Code == "vim/E1012" {
+					found = true
+				}
+			}
+			if found != test.wantMismatch || (!test.wantMismatch && len(diagnostics) != 0) {
+				t.Fatalf("diagnostics = %#v, want mismatch %v", diagnostics, test.wantMismatch)
+			}
+		})
+	}
+}
+
 func TestOptionValueDiagnostics(t *testing.T) {
 	tests := []struct {
 		name    string

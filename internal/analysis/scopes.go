@@ -5541,7 +5541,9 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 					result.Diagnostics = append(result.Diagnostics, diagnostic)
 					return
 				}
-				appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
+				if target.Kind != syntax.ExpressionIdentifier || !optionAcceptsFunction(target.Value) || result.TypeOf(expression.Children[1]).Name != "func" {
+					appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
+				}
 			}
 		}
 	}

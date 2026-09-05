@@ -9,6 +9,23 @@ import (
 	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
+// Vim v9.2.1015 options.txt, option-value-function: assignment converts the
+// function reference to its name; reading the option still returns a string.
+func optionAcceptsFunction(name string) bool {
+	if !strings.HasPrefix(name, "&") {
+		return false
+	}
+	option, ok := vimdata.LookupOption(name)
+	if !ok {
+		return false
+	}
+	switch option.Name {
+	case "completefunc", "findfunc", "imactivatefunc", "imstatusfunc", "omnifunc", "operatorfunc", "quickfixtextfunc", "tagfunc", "thesaurusfunc":
+		return true
+	}
+	return false
+}
+
 func appendSetOptionValueDiagnostic(result *FileAnalysis, file *syntax.File, command *syntax.Command, item syntax.SetOption) {
 	if result == nil || file == nil || file.Text(item.Prefix) != "" {
 		return

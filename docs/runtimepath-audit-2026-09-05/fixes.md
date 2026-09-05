@@ -24,7 +24,7 @@
 | FP14 | 映射正文诊断 | 待修复 |
 | FP15 | map 回调 | 待修复 |
 | FP16 | 引用参数占位符 | 待修复 |
-| FP17 | 函数型选项 | 待修复 |
+| FP17 | 函数型选项 | 已修复：正反回归及全量门禁通过 |
 | FP18 | 参数尾随逗号 | 已修复：正反回归及全量门禁通过 |
 
 ## 研究阶段补充
@@ -34,6 +34,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP17：按 Vim v9.2.1015 options.txt 的 option-value-function，仅允许 9 个函数型选项接受 Funcref/lambda，读取仍为 string；覆盖别名、局部/全局前缀、命名函数、普通字符串选项反例及 lambda 正文类型检查。TestFunctionValuedOptionAssignments、gofmt、全量 go test / go vet / make、diff 检查通过；gopls 仅有已记录的无关缓存错误。真实 Vim 9.2.1015 验证 opfunc lambda 成功、filetype lambda 报 E1012。另发现数字 opfunc 在 Vim 报 E921（当前分析器仍报 E1012），属于错误码精度后续项，不计入本次已确认误报修复。
 
 - 默认模板跳过：移除 `-exclude` 及通用 glob 逻辑，在扫描文件筛选中直接忽略 `.xpt.vim` 后缀（大小写不敏感）；仅影响扫描器。回归覆盖默认跳过嵌套模板、保留普通文件及同名目录下的 Vim 文件、拒绝旧参数且不覆盖输出。gofmt、扫描器测试、全量 go test ./...、go vet ./...、make、git diff --check 通过；gopls 未报告本次文件错误，仅保留已知 benchreport/release 缓存错误。
 - 最新复扫快照：`errors-after-default-template-skip.txt`。53 个去重根目录中扫描 2980 个文件，63 条诊断；原有 `/usr/local/share/vim/vimfiles/after` 不存在，扫描程序退出 2，其他根目录扫描完成。按完整路径、行列、错误码及消息逐条比对原始 classification.json，无新增诊断；已消除 18 条误报（7 类）及跳过 5 条模板诊断。35 条误报仍未修复，不能宣称全部完成。28 条非误报全部保留（13 条测试夹具非法片段、5 条旧会话兼容错误、10 条条件性真实错误）。
