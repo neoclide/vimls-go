@@ -30,6 +30,29 @@ func waitForServerRace(t *testing.T, event <-chan struct{}, name string) {
 	}
 }
 
+func TestDidChangeClampsCharactersPastLineEnd(t *testing.T) {
+	for _, encoding := range []text.Encoding{text.UTF8, text.UTF16, text.UTF32} {
+		t.Run(string(encoding), func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, encoding, "vim9script\r\nvar value = '𐐀é'\r\n")
+			t.Cleanup(instance.stopAnalysis)
+			if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+				TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+				ContentChanges: []protocol.TextDocumentContentChangeEvent{
+					&protocol.TextDocumentContentChangePartial{Range: navigationRange(1, 0, 1000), Text: "var value = 2"},
+					&protocol.TextDocumentContentChangePartial{Range: navigationRange(1, 1000, 1000), Text: " + 1"},
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, _ := instance.documents.Snapshot(documentURI.String())
+			version, _ := snapshot.Version()
+			if version != 2 || snapshot.Text() != "vim9script\r\nvar value = 2 + 1\r\n" {
+				t.Fatalf("version = %d, source = %q", version, snapshot.Text())
+			}
+		})
+	}
+}
+
 func TestServerDocumentSynchronization(t *testing.T) {
 	input := encodeFrames(t,
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"general":{"positionEncodings":["utf-8","utf-16"]}}}}`,

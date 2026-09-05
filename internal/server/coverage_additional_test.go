@@ -159,7 +159,7 @@ func TestLanguageFeaturesRejectInvalidUTF16PositionsWithoutAdjacentResults(t *te
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
 	invalid := protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
-		Position:     protocol.Position{Line: 1, Character: 100},
+		Position:     protocol.Position{Line: 1, Character: 14}, // Inside the astral character's UTF-16 pair.
 	}
 
 	if result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: invalid}); err != nil || len(completionItems(t, result)) != 0 {

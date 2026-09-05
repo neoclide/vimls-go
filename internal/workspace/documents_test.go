@@ -71,7 +71,7 @@ func TestDocumentsRejectStaleInvalidAndMissingChanges(t *testing.T) {
 	if _, _, err := documents.Save("missing", nil); !errors.Is(err, ErrDocumentNotOpen) {
 		t.Fatalf("missing save error = %v", err)
 	}
-	if _, _, err := documents.Change("u", 5, text.UTF16, []text.Change{{Range: &text.Range{Start: text.Position{Character: 9}}}}); !errors.Is(err, text.ErrInvalidPosition) {
+	if _, _, err := documents.Change("u", 5, text.UTF16, []text.Change{{Range: &text.Range{Start: text.Position{Line: 1}}}}); !errors.Is(err, text.ErrInvalidPosition) {
 		t.Fatalf("invalid change error = %v", err)
 	}
 	snapshot, _ := documents.Snapshot("u")

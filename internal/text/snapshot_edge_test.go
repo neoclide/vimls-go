@@ -18,7 +18,11 @@ func TestSnapshotEncodingBoundaryMatrix(t *testing.T) {
 				continue
 			}
 			got, err := snapshot.Position(offset, encoding)
-			if err != nil || got != position {
+			want := position
+			if encoding == UTF32 && position == (Position{1, 4}) {
+				want.Character = 3 // The request was clamped to the three-rune line.
+			}
+			if err != nil || got != want {
 				t.Errorf("%s %#v => %d => %#v, %v", encoding, position, offset, got, err)
 			}
 		}

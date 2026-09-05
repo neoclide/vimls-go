@@ -189,10 +189,9 @@ func encodedOffset(content string, character int, encoding Encoding) (int, error
 		units += width
 		offset += size
 	}
-	if units == character {
-		return len(content), nil
-	}
-	return 0, ErrInvalidPosition
+	// LSP character offsets beyond the line are clamped to its end. Positions
+	// inside an encoded rune were rejected above, not rounded to a boundary.
+	return len(content), nil
 }
 
 func encodedLengthAt(content string, byteOffset int, encoding Encoding) (int, error) {

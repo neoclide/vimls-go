@@ -160,7 +160,6 @@ func TestSnapshotRejectsInvalidPositions(t *testing.T) {
 		{name: "negative line", position: Position{Line: -1}, encoding: UTF16},
 		{name: "missing line", position: Position{Line: 3}, encoding: UTF16},
 		{name: "negative character", position: Position{Character: -1}, encoding: UTF16},
-		{name: "past end", position: Position{Character: 4}, encoding: UTF16},
 		{name: "middle utf8", position: Position{Character: 2}, encoding: UTF8},
 		{name: "middle utf16", position: Position{Character: 2}, encoding: UTF16},
 		{name: "unknown encoding", position: Position{}, encoding: "unknown"},
@@ -179,6 +178,20 @@ func TestSnapshotRejectsInvalidPositions(t *testing.T) {
 	}
 	if _, err := snapshot.Position(0, "unknown"); !errors.Is(err, ErrInvalidEncoding) {
 		t.Fatalf("unknown encoding error = %v", err)
+	}
+}
+
+func TestSnapshotClampsCharactersPastLineEnd(t *testing.T) {
+	for _, encoding := range []Encoding{UTF8, UTF16, UTF32} {
+		for _, content := range []string{"", "a𐐀e\u0301", "\ufeffa𐐀e\u0301\r\nlast\n"} {
+			snapshot := NewSnapshot("u", 1, nil, content)
+			for line, indexed := range snapshot.lines {
+				offset, err := snapshot.Offset(Position{Line: line, Character: 1000}, encoding)
+				if err != nil || offset != indexed.end {
+					t.Fatalf("%s %q line %d: offset %d, %v, want %d", encoding, content, line, offset, err, indexed.end)
+				}
+			}
+		}
 	}
 }
 
@@ -231,7 +244,7 @@ func TestApplyChangesRejectsInvalidRanges(t *testing.T) {
 	if !errors.Is(err, ErrInvalidRange) {
 		t.Fatalf("reversed range error = %v", err)
 	}
-	_, err = ApplyChanges(snapshot, 2, nil, UTF16, []Change{{Range: &Range{Start: Position{Character: 4}}}})
+	_, err = ApplyChanges(snapshot, 2, nil, UTF16, []Change{{Range: &Range{Start: Position{Line: 1}}}})
 	if !errors.Is(err, ErrInvalidPosition) {
 		t.Fatalf("invalid range error = %v", err)
 	}
