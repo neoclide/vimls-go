@@ -1,186 +1,135 @@
 # vimls-go agent guide
 
-## Mission
+## Scope and source of truth
 
-Build a Go language server for legacy Vim script and Vim9 script. The current
-grammar and metadata ceiling is Vim v9.2.1015: earlier syntax remains supported,
-while syntax introduced after that tag is unsupported until the pin advances.
-Legacy Vim script and Vim9 script have independent root parsers. Cross-dialect
-constructs are retained with loose recovery and are not errors merely because
-they mix dialects; exhaustive support for `def` in a legacy-root file and
-`function` in a Vim9-root file is deferred.
+Build a Go language server for legacy Vim script and Vim9 script, with grammar
+and metadata pinned to **Vim v9.2.1015**. Later syntax is unsupported until the
+pin advances. The current contracts are [language support](docs/language-support.md),
+[diagnostics](docs/diagnostics.md), [configuration](docs/configuration.md) and
+[roadmap](docs/roadmap.md). Read the parts relevant to the task.
 
-## First principles
+Resolve version-sensitive behavior in this order:
 
-- Start from observable Vim and LSP behavior. Do not copy assumptions from an
-  existing language server without verifying them.
-- Prefer the smallest direct implementation. Do not add Manager, Service,
-  Factory, Strategy, Protocol, Adapter, Coordinator, Provider, Resolver, or
-  Registry layers unless current code has multiple real implementations or
-  callers that need them.
-- Modify an existing package before creating a new package. Introduce an
-  interface only at a real substitution boundary.
-- Use Go for production code, test harnesses, generators, and repository tools.
-  Vimscript is allowed as curated fixture/oracle input, and shell is acceptable
-  only for small CI and test orchestration.
-- Do not execute user Vim scripts during normal language-server analysis.
+1. Pinned Vim source and tests, especially `src/testdir/test_vim9_*.vim`,
+   `test_vimscript.vim` and Ex command definitions.
+2. Matching runtime help: `vim9.txt`, `vim9class.txt`, `eval.txt`, `usr_41.txt`,
+   `repeat.txt` and the affected command/option's help.
+3. LSP 3.18 and JSON-RPC 2.0 specifications for protocol behavior.
+4. Curated, side-effect-free reproductions with a clean supported Vim executable.
 
-## Sources of truth
+The official checkout `/Users/chemzqm/lib/vim` is read-only for this project.
+Inspect its status, preserve local changes and read the exact tag; its HEAD may
+be newer. Record Vim version/patch level for oracle evidence. Never generalize
+behavior observed outside the pin into an unconditional language rule.
 
-Use these sources in descending order:
+## Language and analysis invariants
 
-1. The source and tests for the applicable Vim release, especially
-   `src/testdir/test_vim9_*.vim`, `src/testdir/test_vimscript.vim`, and Ex command
-   definitions.
-2. The matching Vim runtime help, especially `vim9.txt`, `vim9class.txt`,
-   `eval.txt`, `usr_41.txt`, and `repeat.txt`.
-3. LSP 3.18 and JSON-RPC 2.0 specifications.
-4. Reproductions made with a clean supported Vim executable.
+- Legacy and Vim9 have independent root parsers, sharing neutral syntax and Ex
+  command data. Cross-dialect constructs recover loosely without errors merely
+  for mixing dialects; exhaustive `def` in a legacy root and `function` in a
+  Vim9 root remain deferred.
+- Dialect is contextual: `vim9script`, `def`, `function`, `vim9cmd`, `legacy`
+  and `scriptversion` affect parsing. `vim9cmd` and `legacy` apply only to the
+  following command, not persistent parser mode.
+- Parse ranges, modifiers, abbreviations, bang, separators, comments,
+  continuations, heredocs and embedded payloads contextually. Preserve byte
+  spans and trivia. A line split or regex-only parser is insufficient.
+- Keep incomplete and unknown commands as opaque recoverable syntax. Unknown
+  uppercase user commands may receive the documented E492 warning after source
+  indexing and runtime help are ready; explicit command definitions and Ex-command
+  help tags both establish known names. This is not a parser error.
+- Keep dynamic legacy semantics conservative: use `unknown` when proof is
+  unavailable. Preserve documented warning policies rather than silently
+  converting uncertain runtime behavior into hard errors.
+- Do not source or execute user Vim scripts during analysis. Optional clean Vim
+  default-runtimepath discovery is allowed as documented; it loads no user
+  configuration/plugins and fails silently.
 
-The local official Vim checkout is `/Users/chemzqm/lib/vim`. Treat it as
-read-only unless a task explicitly targets that repository. Inspect its status
-before use, preserve all local changes, and query the exact release tag needed;
-its current HEAD may be newer than vimls-go's configured target.
+## Package and runtime boundaries
 
-Record the Vim version and patch level for version-sensitive behavior. Never
-turn behavior observed outside the pinned Vim tag into an unconditional rule.
+| Package | Owns |
+| --- | --- |
+| `internal/jsonrpc` | Framing and JSON-RPC request lifecycle |
+| `internal/text` | Immutable snapshots and line/position indexes |
+| `internal/syntax` | Dialect-aware tokens, AST, parsing and recovery |
+| `internal/analysis` | Scopes, symbols, references, types and diagnostics |
+| `internal/workspace` | File discovery, imports and indexes |
+| `internal/server` | Capability handlers composing these packages |
 
-## Language invariants
+- Dependencies point from server toward smaller packages. Syntax/analysis must
+  not depend on transport or process state. Avoid empty packages and speculative
+  layers; use existing packages and types first.
+- Use pinned `go.lsp.dev/protocol` wire types. Byte-to-client-position conversion
+  belongs in server/text; do not add a parallel `internal/lsp` layer.
+- Keep stdout for LSP frames and logs on stderr. Advertise only implemented
+  capabilities; preserve required unknown fields and standard JSON-RPC errors.
+- Results belong to immutable URI/version/content and consumed index snapshots.
+  Validate identity at installation/publication; stale work must not overwrite
+  newer results. Test cancellation, shutdown and refresh ordering with barriers.
+- Keep workspace and external runtimepath indexing separate. Retain unchanged
+  runtime facts during rebuilds; exclude runtime-only symbols at query time.
+  Refresh only supported client capabilities whose consumed data changed.
+- Use Go for production, generators and repository tools. Vimscript is permitted
+  for curated fixtures/oracles; shell for small CI/test orchestration. Pin
+  dependencies and add them only for a concrete current benefit, never `@latest`.
 
-- Treat legacy Vim script and Vim9 script as related languages with independent
-  root parsers that share Ex commands and neutral syntax data where useful.
-- Dialect is contextual: `vim9script`, `def`, `function`, `vim9cmd`, `legacy`,
-  and `scriptversion` can change the applicable rules. `vim9cmd` and `legacy`
-  affect only their following command; they are not persistent parser modes.
-- Do not emit a diagnostic solely because a file contains a cross-dialect
-  construct. Complete parsing and semantics for `def` in a legacy-root file and
-  `function` in a Vim9-root file remain a TODO, not a 1.0 coverage matrix.
-- Parse command ranges, modifiers, abbreviations, bang, separators, comments,
-  continuations, heredocs, and embedded command payloads contextually. A line
-  split or regular-expression-only parser is not sufficient.
-- Preserve byte spans and trivia in syntax data. Convert positions to the
-  client's negotiated LSP encoding only at the document/protocol boundary.
-- Recover from incomplete input and retain unknown commands as opaque syntax.
-  User-defined or future commands are not syntax errors merely because the
-  server does not know them.
-- Keep legacy semantic diagnostics conservative. If dynamic behavior prevents
-  proof, return `unknown` instead of inventing an error.
+## Go development and validation
 
-## Architecture boundaries
+- For Go symbol/reference/caller discovery, start with available gopls MCP tools
+  before broad text searches. Prefer semantic rename. Request diagnostics after
+  Go edits; use compiler/tests as final evidence. If MCP has stale overlays,
+  use `gopls check <files>` and focused `rg` rather than fixing nonexistent errors.
+- Add focused tests beside the owning package; shared fixtures go in `testdata/`.
+  Accepted syntax needs a positive fixture; diagnostics/recovery need negative
+  or incomplete fixtures. Test shared context mechanisms without duplicating
+  every form across dialect/version combinations.
+- For text changes, cover ordered edits, bytes/runes/UTF-16, CRLF/BOM, combining
+  characters and astral characters. Parser/framing fuzz targets must not panic,
+  hang or grow memory without bound; retain discovered crashes in the corpus.
+- Migrate official compile diagnostics one code at a time in the owning
+  `internal/analysis/official_compile_cases_e*_test.go`, with readable Vim source,
+  provenance and inline assertions. Retain licensing/provenance for all corpora.
+- Run focused checks while editing. For Go or behavior changes, run the final
+  gate once after integration:
 
-- `internal/jsonrpc`: message framing and JSON-RPC request lifecycle only.
-- `internal/text`: immutable document snapshots and line/position indexes.
-- `internal/syntax`: dialect-aware tokens, AST, parser, and recovery.
-- `internal/analysis`: scopes, symbols, references, types, and diagnostics.
-- `internal/workspace`: open documents, file discovery, imports, and indexes.
-- `internal/server`: capability handlers that compose the packages above.
+  ```sh
+  gofmt -w <changed-go-files>
+  go test -count=1 ./...
+  go vet ./...
+  make
+  ```
 
-LSP wire types come from the pinned `go.lsp.dev/protocol` dependency. Position
-encoding conversion stays at the `internal/server` and `internal/text`
-boundary; do not create an empty `internal/lsp` package in advance.
+- Disable test-result caching: integration tests build the server subprocess,
+  so Go's test cache does not track all server source changes. `make test` also
+  uses `-count=1`. After passing, rerun checks only for relevant new changes or
+  unresolved failures; a status request or commit alone does not require reruns.
+- Documentation/instruction-only changes need content, links and `git diff --check`,
+  not Go tests. CI/release changes need focused workflow/packaging validation;
+  exercise tag/push automation against a temporary local remote, not GitHub.
+- Run oracle, real-client or generator checks when the changed contract needs
+  them; commands are in [testing](docs/testing.md). Oracle output must record
+  `v:errors`, `:messages`, exit status and Vim version/patch level.
+- Do not run race tests or collect coverage unless the user or task validation
+  explicitly requests them. Do not launch broad fuzz/corpus/benchmark campaigns
+  for unrelated changes. Performance claims need a recorded comparable workload.
 
-Dependencies point from `server` toward the smaller packages; syntax and
-analysis must not depend on transport or process state. Do not create empty
-packages in advance of the milestone that needs them.
+## Delegation and handoff
 
-## Implementation rules
+When delegation is permitted, split only bounded independent tasks. Available
+roles may cover Vim research, syntax/analysis, server/workspace or read-only QA;
+use only roles actually exposed in the session, not assumed agent names.
 
-- Keep stdout reserved for LSP frames; write logs to stderr.
-- Every analysis result belongs to an immutable document URI/version snapshot.
-  A stale result must never overwrite diagnostics for a newer version.
-- Apply incremental changes in order and test byte, rune, UTF-16, CRLF, BOM,
-  combining-character, and astral-character boundaries.
-- Advertise only implemented LSP capabilities.
-- Preserve unknown JSON fields where the protocol requires forward
-  compatibility, and return standard JSON-RPC errors for invalid requests.
-- Add dependencies only when their current value exceeds the maintenance and
-  supply-chain cost. Pin accepted dependencies; never use `@latest` in builds.
+Write-agent briefs must include **Goal**, **Allowed paths**, **Forbidden paths**,
+**Required behavior** and **Validation**. Resolve unclear ownership before edits.
+Agents share a worktree: preserve others' edits and compare changed paths with
+the brief before handoff. Do not run concurrent writers in the same package or
+across shared `testdata/`, `cmd/`, `go.mod`, generated files or integration fixtures.
+The primary agent owns shared contracts, configuration, integration and final
+validation; workers report missing contracts rather than expanding scope.
 
-## Testing and validation
-
-- Put focused tests beside their Go package and shared language fixtures under
-  `testdata/`.
-- Every accepted syntax form needs a positive fixture; every diagnostic or
-  recovery rule needs a negative or incomplete fixture.
-- Do not repeat every syntax form across mixed-dialect, incomplete-input, and
-  version contexts. Use official per-form evidence plus focused tests for each
-  shared recovery or context-switching mechanism.
-- Use the official Vim test suite and runtime scripts as a corpus, but retain
-  provenance and do not copy incompatible licensed content into generated
-  artifacts without review.
-- A clean Vim process is a test oracle only for curated, side-effect-free test
-  inputs. Record `v:errors`, `:messages`, exit status, version, and patch level.
-- Before handoff, run the checks relevant to the change. Once the Go module
-  exists, the default gate is:
-
-      gofmt -w <changed-go-files>
-      go test -count=1 ./...
-      go vet ./...
-
-- Do not run race tests or collect coverage unless the user or the task's
-  validation requirements explicitly request them.
-- Parser and framing fuzz targets must never panic, hang, or grow memory without
-  bound. Add every discovered crash input to the permanent corpus.
-
-## Delegation
-
-Use project agents only for bounded tasks with clear inputs and ownership.
-Read-only review may depend on an integrated diff; concurrent write tasks must
-have disjoint owned paths:
-
-- `language_researcher`: read-only Vim behavior and version research.
-- `language_worker`: lexer, parser, AST, semantic analysis, and their tests.
-- `server_worker`: text snapshots, workspace, JSON-RPC/LSP, server handlers,
-  and their tests.
-- `qa_reviewer`: read-only adversarial review and release evidence.
-
-Migrate official compile diagnostics one error code at a time. Keep readable
-Vim source, provenance, and inline assertions in the owning
-`internal/analysis/official_compile_cases_e*_test.go` file. When the pinned Vim
-release changes, add supported codes directly instead of batch-generating a
-compile-case artifact.
-
-The primary agent owns integration, public contracts, cross-package changes,
-planning documents, configuration, and final validation. Give write agents an
-approved task brief with explicit allowed and forbidden paths; require them to
-compare changed paths with that brief before handoff. Do not have two agents
-edit the same package at once.
-Do not run write agents concurrently when they touch shared `testdata/`, `cmd/`,
-`go.mod`, generated files, or integration fixtures. Workers must report missing
-contracts instead of silently expanding scope.
-
-Every write-agent task brief must contain these headings:
-
-- `Goal`: one bounded observable outcome.
-- `Allowed paths`: exact files or directories the agent may change.
-- `Forbidden paths`: shared contracts/configuration it must not change.
-- `Required behavior`: the frozen contract and failure semantics.
-- `Validation`: exact commands and expected evidence.
-
-If either path list is missing or ambiguous, a write agent must remain
-read-only and ask the primary agent for a corrected brief.
-
-## Change discipline
-
-- Inspect `git status` before editing and preserve unrelated work.
-- Keep commits milestone-scoped; stage only intended files.
-- A local commit does not authorize push, release, issue closure, or PR creation.
-- Update the roadmap and language-support contract when a milestone changes what
-  the server actually supports.
-
-## Go development workflow
-
-- For Go code, use the gopls MCP tools before broad text searches when
-  locating symbols, references, implementations, diagnostics, or callers.
-- Prefer gopls semantic rename over search-and-replace for Go identifiers.
-- After modifying a Go file, request gopls diagnostics for that file.
-- Use gopls results as development guidance, not as a replacement for tests.
-- Disable test-result caching for final validation: integration tests build the
-  server subprocess dynamically, so their Go cache does not track all server
-  source changes. Use `go test -count=1 ./...` or `make test`.
-- Before completion, run:
-  - gofmt on modified Go files
-  - go test -count=1 ./...
-  - go vet ./...
-  - make
-- If the repository defines narrower validation commands, run those as well.
+Update affected public contracts and the roadmap when supported behavior changes.
+Keep historical release evidence tied to its recorded source; current results
+must identify their commit or working-tree changes. `make release VERSION=...`
+creates and pushes a tag, triggering public publication, so running it requires
+that release authorization. Follow global commit/push boundaries and stage only
+requested changes.
