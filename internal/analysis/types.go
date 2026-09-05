@@ -906,11 +906,11 @@ func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueT
 		return arguments[2]
 	}
 	switch function.ReturnHelper {
-	case "ret_copy", "ret_first_arg", "ret_extend", "ret_slice":
+	case "ret_first_arg", "ret_extend", "ret_slice":
 		if len(arguments) > 0 {
 			return arguments[0]
 		}
-	case "ret_first_cont":
+	case "ret_copy", "ret_first_cont":
 		if len(arguments) > 0 {
 			first := arguments[0]
 			if first.Name == "list" || first.Name == "dict" {

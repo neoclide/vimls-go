@@ -572,6 +572,11 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 					}
 					if checker == "arg_map_func" && !scopeContainsDef(scope) {
 						expected.functionReturn = nil
+					} else if checker == "arg_map_func" && len(arguments) > 0 {
+						constraint := containerDeclaredType(result, arguments[0])
+						if (constraint.Name == "list" || constraint.Name == "dict") && len(constraint.Arguments) > 0 {
+							expected.functionReturn = &constraint.Arguments[0]
+						}
 					}
 					if builtin.Name == "digraph_setlist" && index == 0 && dialect == syntax.Vim9 {
 						invalid, knownList := digraphSetlistArgumentInvalid(result, argument, actual[index])
@@ -978,11 +983,47 @@ func builtinArgumentDiagnostic(checker string, index int, actual []ValueType, sp
 	}, true
 }
 
+// Vim keeps a container's current element type separate from the declared
+// mutation constraint (evalfunc.c type2_T). Fresh literals and selected builtin
+// results can change element type in map(); binding a typed variable cannot.
+func containerDeclaredType(result *FileAnalysis, expression *syntax.Expression) ValueType {
+	if expression == nil {
+		return UnknownValueType
+	}
+	for expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	current := result.TypeOf(expression)
+	if current.Name != "list" && current.Name != "dict" {
+		return current
+	}
+	relaxed := false
+	switch expression.Kind {
+	case syntax.ExpressionList, syntax.ExpressionDictionary, syntax.ExpressionSlice:
+		relaxed = true
+	case syntax.ExpressionCall:
+		if builtin, arguments, ok := builtinCallArguments(result.File, expression); ok {
+			switch builtin.ReturnHelper {
+			case "ret_first_arg", "ret_extend":
+				if len(arguments) > 0 {
+					return containerDeclaredType(result, arguments[0])
+				}
+			case "ret_copy", "ret_slice", "ret_first_cont", "ret_list_number", "ret_list_string", "ret_list_dict_any", "ret_list_items", "ret_list_string_items", "ret_list_regionpos", "ret_getline", "ret_job_info":
+				relaxed = true
+			}
+		}
+	}
+	if relaxed {
+		current.Arguments = []ValueType{UnknownValueType}
+	}
+	return current
+}
+
 func collectMapCallbackReturnTypeDiagnostic(result *FileAnalysis, scope *Scope, builtin vimdata.BuiltinFunction, arguments []*syntax.Expression, actual []ValueType) {
 	if result == nil || scopeContainsDef(scope) || builtin.Name != "map" || len(arguments) < 2 || len(actual) < 2 {
 		return
 	}
-	container, callback := actual[0], actual[1]
+	container, callback := containerDeclaredType(result, arguments[0]), actual[1]
 	if (container.Name != "list" && container.Name != "dict") || len(container.Arguments) == 0 || callback.Name != "func" || callback.Return == nil {
 		return
 	}

@@ -77,14 +77,14 @@ XPTemplate 在 XPT 命令处收集模板并结束当前 source，再由解析器
 ```sh
 go run ./tools/diagnosticscan \
   -runtimepath "$(paste -sd, docs/runtimepath-audit-2026-09-05/roots.txt)" \
-  -output docs/runtimepath-audit-2026-09-05/errors-after-default-template-skip.txt
+  -output docs/runtimepath-audit-2026-09-05/errors-after-all-fixes.txt
 ```
 
 先前的 `-exclude` 参数已移除。固定规则只匹配文件名，不会跳过仅父目录名以 `.xpt.vim` 结尾的普通 Vim 文件。
 
 模板文件不参与解析、诊断或扫描文件计数；仅修改扫描工具，语言服务器行为不变。跳过意味着该文件中的其他真实错误也不会扫描，不等于已经支持其模板语言。
 
-最新复扫：2980 个文件、63 条诊断，其中仍有 35 条已确认误报（11 类），其余 28 条非误报全部保留，无新增诊断。原始 53 条误报已消除 18 条，模板 5 条另行跳过。详细进度见 [fixes.md](fixes.md)。原始 `errors.txt` 和旧中间快照保留不覆盖；原始未排除模板的行为需使用基线提交才能复现。
+最终复扫：2980 个文件、28 条诊断。原始清单的 53 条已确认误报（18 类）全部消除，模板 5 条默认跳过；其余 28 条非误报全部保留，无新增诊断。原报告 46 个文件的 SHA256 全部仍匹配。原本缺失的 vimfiles/after 仍导致扫描退出 2，其他根目录扫描完成。详细验证和支持边界见 [fixes.md](fixes.md)。原始 `errors.txt` 和旧中间快照保留不覆盖；原始未排除模板的行为需使用基线提交才能复现。结论针对本次审计清单，不是任意输入均无误报的保证。
 
 精简 oracle 案例可独立重跑（下面命令会覆盖原 oracle 证据，请按需改用新输出路径）：
 

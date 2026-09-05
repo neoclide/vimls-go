@@ -2416,6 +2416,49 @@ func TestAnalyzeFlattenVim9Diagnostics(t *testing.T) {
 	}
 }
 
+func TestMapContainerMutationConstraints(t *testing.T) {
+	for _, test := range []struct{ name, body, code string }{
+		{"literal", "echo map([1], (_, n: number) => string(n))", ""},
+		{"dict literal", "echo map({'x': [1]}, (_, values: list<number>) => string(values))", ""},
+		{"range", "echo range(2)->map((_, n: number) => string(n))", ""},
+		{"copy", "var values: list<number> = [1]\necho copy(values)->map((_, n: number) => string(n))", ""},
+		{"slice", "var values: list<number> = [1]\necho values[:]->map((_, n: number) => string(n))", ""},
+		{"filter fresh result", "echo range(2)->filter((_, n: number) => n > 0)->map((_, n: number) => string(n))", ""},
+		{"mapnew does not mutate typed input", "var values: list<number> = [1]\necho mapnew(values, (_, n: number) => string(n))", ""},
+		{"const mutation", "const values = [1]\necho map(values, (_, n: number) => n)", "vim/E1307"},
+		{"typed variable", "var values: list<number> = [1]\necho map(values, (_, n: number) => string(n))", "vim/E1013"},
+		{"inferred variable", "var values = [1]\necho map(values, (_, n: number) => string(n))", "vim/E1013"},
+		{"alias", "var values: list<number> = [1]\nvar alias = values\necho map(alias, (_, n: number) => string(n))", "vim/E1013"},
+		{"filter typed variable", "var values: list<number> = [1]\necho values->filter((_, n: number) => n > 0)->map((_, n: number) => string(n))", "vim/E1013"},
+		{"wrong parameter", "echo range(2)->map((_, n: string) => n)", "vim/E1013"},
+		{"wrong arity", "echo range(2)->map((n: number) => n)", "vim/E176"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse("vim9script\ndef Test()\n" + test.body + "\nenddef\n")
+			var got []syntax.Diagnostic
+			for _, diagnostic := range CombinedDiagnostics(file, Analyze(file)) {
+				if strings.HasPrefix(diagnostic.Code, "vim/E") {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.code == "" && len(got) != 0 || test.code != "" && (len(got) != 1 || got[0].Code != test.code) {
+				t.Fatalf("diagnostics = %#v, want %s", got, test.code)
+			}
+		})
+	}
+	for _, source := range []string{
+		"vim9script\nconst values = {'x': [1]}->map((_, value: list<number>) => string(value))\necho values\n",
+		"vim9script\nvar values: list<number> = [1]\necho copy(values)->map((_, n: number) => string(n))\n",
+	} {
+		file := syntax.Parse(source)
+		for _, diagnostic := range CombinedDiagnostics(file, Analyze(file)) {
+			if diagnostic.Code == "vim/E1012" || diagnostic.Code == "vim/E1013" {
+				t.Fatalf("script-level transient rejected: %#v", diagnostic)
+			}
+		}
+	}
+}
+
 func TestUnexpandedCommandBodyDiagnostics(t *testing.T) {
 	for _, test := range []struct{ name, source, code, span string }{
 		{"command args", "command! -nargs=* CompilerSet setlocal <args>\n", "", ""},

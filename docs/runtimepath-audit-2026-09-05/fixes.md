@@ -6,6 +6,17 @@
 
 每个独立根因：正反回归 → gofmt / gopls → go test ./... / go vet ./... / make → 本地提交。共享根因可以合并 FP 编号。源码位置、引用和类型检查不得以简单压低总数代替。
 
+## 最终复扫结论
+
+原始清单的 53 条已确认误报（18 类）已全部消除，XPTemplate 的 5 条默认跳过。
+最新结果保存在 [errors-after-all-fixes.txt](errors-after-all-fixes.txt)：2980 文件、28 条诊断。
+按路径、行、列、错误码、消息与原始 classification.json 精确比对：剩余已确认误报 0，新增诊断 0，原有非误报消失 0。
+原 source-manifest.json 中 46 个报告文件的 SHA256 全部仍匹配，数量下降不是修改插件源码造成的。
+
+剩余 28 条是 13 条非法测试夹具、5 条旧会话兼容错误和 10 条条件性真实错误；没有为了清零而禁用它们。
+53 个去重 runtimepath 根目录中的 `/usr/local/share/vim/vimfiles/after` 原本不存在，扫描程序因此退出 2，其余根目录扫描完成。
+这个结论只针对已审计清单，不表示任意 Vim 脚本都不存在误报。FP17 探针发现的 E921/E1012 错误码精度差异仍作为后续项记录。
+
 | 编号 | 工作项 | 状态 |
 |---|---|---|
 | FP01 | 初始化作用域 | 已修复：作用域、引用及全量门禁通过 |
@@ -17,12 +28,12 @@
 | FP07 | new +cmd | 已修复：边界、源码位置及全量门禁通过 |
 | FP08 | 数字 autoload 名称 | 已修复：正反回归及全量门禁通过 |
 | FP09 | 逻辑操作数 | 已修复：正反回归及全量门禁通过 |
-| FP10 | map 容器约束 | 待修复 |
+| FP10 | map 容器约束 | 已修复：类型来源、正反回归及全量门禁通过 |
 | FP11 | 解构丢弃占位符 | 已修复：声明、符号及全量门禁通过 |
 | FP12 | 循环解构类型 | 已修复：正反回归及全量门禁通过 |
 | FP13 | 删除后重定义 | 已修复：正反回归及全量门禁通过 |
 | FP14 | 映射正文诊断 | 已修复：局部保守检查及全量门禁通过 |
-| FP15 | map 回调 | 待修复 |
+| FP15 | map 回调 | 已修复：类型来源、正反回归及全量门禁通过 |
 | FP16 | 引用参数占位符 | 已修复：局部保守检查及全量门禁通过 |
 | FP17 | 函数型选项 | 已修复：正反回归及全量门禁通过 |
 | FP18 | 参数尾随逗号 | 已修复：正反回归及全量门禁通过 |
@@ -34,6 +45,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP10/FP15：分开使用当前容器元素类型和声明的修改约束；临时字面量、固定版本中声明为 list<any> 的内建返回值、copy 和切片允许合法 map 转换，变量（包括推断类型及别名）保留约束；filter/extend 等保留输入约束。ret_copy 同时按 Vim 源码放宽当前列表/字典元素事实。TestMapContainerMutationConstraints 覆盖 compiled/script、字面量、range/copy/slice/filter、显式/推断/别名变量、错误参数、错误参数数量、mapnew 和 const 修改。Vim 9.2.1015 实测 range/copy/slice 转换成功，推断类型变量及错误回调参数仍报 E1013。全量 go test / go vet / make、gofmt、gopls、diff 检查通过。FP07 提交 a4a70b4；最终完整快照见上文。
 
 - FP07：从固定 Vim v9.2.1015 生成 EX_CMDARG/EX_ARGOPT 元数据，在两种根解析器中先越过 ++opt / +cmd 再扫描外层分隔符；保留原始 Argument 字节，不执行、不展开 +cmd 正文。覆盖 new/edit/split/buffer/next、转义空白、内外 bar、中文、裸 + 以及不适用命令/过滤器前缀。TestFilePlusCommandBoundary、TestFileCommandPrefixFilterBoundaries、全量 go test / go vet / make、metadata-check、gofmt、gopls、diff 检查通过。更新语言支持边界和 roadmap；原 oracle 保留实际 new +cmd 行为证据。正文保守处理提交 178d228。
 
@@ -51,9 +64,9 @@
 - FP17：按 Vim v9.2.1015 options.txt 的 option-value-function，仅允许 9 个函数型选项接受 Funcref/lambda，读取仍为 string；覆盖别名、局部/全局前缀、命名函数、普通字符串选项反例及 lambda 正文类型检查。TestFunctionValuedOptionAssignments、gofmt、全量 go test / go vet / make、diff 检查通过；gopls 仅有已记录的无关缓存错误。真实 Vim 9.2.1015 验证 opfunc lambda 成功、filetype lambda 报 E1012。另发现数字 opfunc 在 Vim 报 E921（当前分析器仍报 E1012），属于错误码精度后续项，不计入本次已确认误报修复。
 
 - 默认模板跳过：移除 `-exclude` 及通用 glob 逻辑，在扫描文件筛选中直接忽略 `.xpt.vim` 后缀（大小写不敏感）；仅影响扫描器。回归覆盖默认跳过嵌套模板、保留普通文件及同名目录下的 Vim 文件、拒绝旧参数且不覆盖输出。gofmt、扫描器测试、全量 go test ./...、go vet ./...、make、git diff --check 通过；gopls 未报告本次文件错误，仅保留已知 benchreport/release 缓存错误。
-- 最新复扫快照：`errors-after-default-template-skip.txt`。53 个去重根目录中扫描 2980 个文件，63 条诊断；原有 `/usr/local/share/vim/vimfiles/after` 不存在，扫描程序退出 2，其他根目录扫描完成。按完整路径、行列、错误码及消息逐条比对原始 classification.json，无新增诊断；已消除 18 条误报（7 类）及跳过 5 条模板诊断。35 条误报仍未修复，不能宣称全部完成。28 条非误报全部保留（13 条测试夹具非法片段、5 条旧会话兼容错误、10 条条件性真实错误）。
+- 默认模板跳过阶段快照：`errors-after-default-template-skip.txt`。53 个去重根目录中扫描 2980 个文件，63 条诊断；原有 `/usr/local/share/vim/vimfiles/after` 不存在，扫描程序退出 2，其他根目录扫描完成。按完整路径、行列、错误码及消息逐条比对原始 classification.json，无新增诊断；当时已消除 18 条误报（7 类）及跳过 5 条模板诊断，尚余 35 条误报。28 条非误报全部保留（13 条测试夹具非法片段、5 条旧会话兼容错误、10 条条件性真实错误）。
 
-| 剩余误报 | 数量 |
+| 模板跳过阶段的剩余误报（历史快照，现已全部修复） | 数量 |
 |---|---:|
 | FP01 初始化作用域 | 3 |
 | FP02 用户命令 args | 9 |
