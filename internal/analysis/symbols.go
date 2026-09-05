@@ -120,6 +120,9 @@ func collectSymbolsInList(file *syntax.File, commands []syntax.Command, blocks [
 
 		if command.Declaration != nil {
 			for _, binding := range command.Declaration.Bindings {
+				if ignoredDestructuringBinding(file, command, binding.Name) {
+					continue
+				}
 				symbol := declarationSymbol(file, command, binding)
 				if symbol != nil {
 					appendNestedSymbol(roots, commandContainer, symbol)

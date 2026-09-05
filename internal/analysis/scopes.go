@@ -6242,6 +6242,9 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 			kind = SymbolKindConstant
 		}
 		for _, binding := range command.Declaration.Bindings {
+			if ignoredDestructuringBinding(file, command, binding.Name) {
+				continue
+			}
 			declaration := addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
 			if declaration != nil {
 				declaration.Deprecated = hasDeprecatedComment(file, command)
@@ -6259,6 +6262,9 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 			kind = SymbolKindConstant
 		}
 		for _, binding := range command.For.Bindings {
+			if ignoredDestructuringBinding(file, command, binding.Name) {
+				continue
+			}
 			declaration := addDeclaration(result, commandScope, file, binding.Name, kind, mutable)
 			if declaration != nil {
 				declaration.unusedCandidate = command.Dialect == syntax.Vim9 && unusedVariableScope(commandScope)
@@ -6268,6 +6274,17 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 	for _, value := range command.EnumValues {
 		addDeclaration(result, commandScope, file, value.Name, SymbolKindEnumMember, false)
 	}
+}
+
+func ignoredDestructuringBinding(file *syntax.File, command *syntax.Command, name syntax.Span) bool {
+	if command.Dialect != syntax.Vim9 || file.Text(name) != "_" {
+		return false
+	}
+	if forLoopDestructures(file, command) {
+		return true
+	}
+	return command.Declaration != nil && command.Declaration.Target != nil &&
+		(command.Declaration.Target.Kind == syntax.ExpressionList || command.Declaration.Target.Kind == syntax.ExpressionTuple)
 }
 
 func unusedVariableScope(scope *Scope) bool {

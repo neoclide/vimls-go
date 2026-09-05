@@ -6,6 +6,45 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+func TestVim9DestructuringDiscardsAreNotDeclarations(t *testing.T) {
+	file := syntax.Parse("vim9script\ndef Test()\nconst [_, row, col, _, _] = [0, 1, 2, 3, 4]\nfor [_, value, _] in [[0, 1, 2]]\necho value\nendfor\necho row col\nenddef\n")
+	result := Analyze(file)
+	for _, d := range result.Declarations {
+		if d.Name == "_" {
+			t.Fatalf("discard became declaration: %#v", d)
+		}
+	}
+	for _, d := range CombinedDiagnostics(file, result) {
+		if d.Code == "vim/E1017" || d.Code == "vim/E1181" {
+			t.Fatalf("valid unpack: %#v", d)
+		}
+	}
+	var checkSymbols func([]*Symbol)
+	checkSymbols = func(symbols []*Symbol) {
+		for _, symbol := range symbols {
+			if symbol.Name == "_" {
+				t.Fatal("discard became document symbol")
+			}
+			checkSymbols(symbol.Children)
+		}
+	}
+	checkSymbols(CollectSymbols(file))
+	for _, source := range []string{"vim9script\nvar _ = 1\n", "vim9script\necho _\n"} {
+		f := syntax.Parse(source)
+		found := false
+		for _, d := range CombinedDiagnostics(f, Analyze(f)) {
+			found = found || d.Code == "vim/E1181"
+		}
+		if !found {
+			t.Fatalf("invalid underscore accepted: %s", source)
+		}
+	}
+	legacy := Analyze(syntax.Parse("let [_, value] = [0, 1]\necho _\n"))
+	if len(legacy.Declarations) != 2 {
+		t.Fatalf("legacy underscore lost: %#v", legacy.Declarations)
+	}
+}
+
 func TestAnalyzeNestedShadowingAndControlScopes(t *testing.T) {
 	source := `function Outer(value)
   let outer = value
