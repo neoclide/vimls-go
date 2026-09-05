@@ -1785,6 +1785,7 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 	s.workspaceMu.Lock()
 	built := s.workspaceBuilt
 	index := s.workspaceIndex
+	identity := s.workspaceIdentityLocked()
 	complete := index != nil && index.Complete()
 	pendingCount := len(s.workspacePending)
 	rebuilding := s.workspaceRunning
@@ -1873,9 +1874,15 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 					s.publishMu.Unlock()
 					continue
 				}
+				if !s.watchedFileInstallCurrent(ctx, identity) {
+					s.publishMu.Unlock()
+					return false
+				}
 				_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), nil, nil)
 				s.workspaceMu.Lock()
 				delete(s.workspaceFiles, path)
+				s.workspaceRevision++
+				identity = s.workspaceIdentityLocked()
 				s.workspaceMu.Unlock()
 				s.publishMu.Unlock()
 				allDependents = append(allDependents, deps...)
@@ -1889,15 +1896,24 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 		}
 
 		if info.Size() > maxFileBytes {
+			if hook := s.testHooks.beforeWatchedFileInstall; hook != nil {
+				hook(path)
+			}
 			s.publishMu.Lock()
 			_, _, open = s.openWorkspaceSnapshotLocked(path)
 			if open {
 				s.publishMu.Unlock()
 				continue
 			}
+			if !s.watchedFileInstallCurrent(ctx, identity) {
+				s.publishMu.Unlock()
+				return false
+			}
 			_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), nil, nil)
 			s.workspaceMu.Lock()
 			s.workspaceFiles[path] = struct{}{}
+			s.workspaceRevision++
+			identity = s.workspaceIdentityLocked()
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
 			allDependents = append(allDependents, deps...)
@@ -1942,9 +1958,15 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 			s.publishMu.Unlock()
 			continue
 		}
+		if !s.watchedFileInstallCurrent(ctx, identity) {
+			s.publishMu.Unlock()
+			return false
+		}
 		_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), file, fileAnalysis)
 		s.workspaceMu.Lock()
 		s.workspaceFiles[path] = struct{}{}
+		s.workspaceRevision++
+		identity = s.workspaceIdentityLocked()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
 		allDependents = append(allDependents, deps...)
@@ -1961,6 +1983,14 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 		s.startWorkspaceDependents(allDependents)
 	}
 	return true
+}
+
+// The caller holds publishMu through the subsequent install. Advancing the
+// revision after installation also invalidates a rebuild started in between.
+func (s *Server) watchedFileInstallCurrent(ctx context.Context, identity workspaceIdentity) bool {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	return ctx.Err() == nil && s.analysisContext.Err() == nil && !s.workspaceRunning && s.workspaceIdentityCurrentLocked(identity)
 }
 
 func (s *Server) scheduleFileWatchRegistration() {

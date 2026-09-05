@@ -738,6 +738,52 @@ func TestReadRegularWorkspaceFileBoundaries(t *testing.T) {
 	}
 }
 
+func TestWatchedFileDeltaRejectsNewerRebuild(t *testing.T) {
+	for _, action := range []string{"change", "delete", "oversized"} {
+		t.Run(action, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeWorkspaceFile(t, root, "lib.vim", "function Initial()\nendfunction\n")
+			s := initializeWorkspaceServer(t, root)
+			var err error
+			event := protocol.FileChangeTypeChanged
+			switch action {
+			case "change":
+				err = os.WriteFile(path, []byte("function OldEvent()\nendfunction\n"), 0o600)
+			case "delete":
+				event = protocol.FileChangeTypeDeleted
+				err = os.Remove(path)
+			case "oversized":
+				err = os.Truncate(path, maxFileBytes+1)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			paused, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			t.Cleanup(func() { once.Do(func() { close(release) }) })
+			s.testHooks.beforeWatchedFileInstall = func(string) { close(paused); <-release }
+			done := make(chan bool, 1)
+			go func() {
+				done <- s.applyWatchedFileChanges(context.Background(), []protocol.FileEvent{{URI: uri.File(path), Type: event}})
+			}()
+			waitForServerRace(t, paused, "watched-file installation")
+			latest := "function Latest()\nendfunction\n"
+			if err := os.WriteFile(path, []byte(latest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			s.scheduleWorkspaceRebuild()
+			s.workspaceWG.Wait()
+			once.Do(func() { close(release) })
+			if <-done {
+				t.Fatal("stale delta accepted")
+			}
+			if got, _ := s.workspaceIndex.Source(mustWorkspaceCanonicalPath(t, path)); got != latest {
+				t.Fatalf("new index overwritten: %q", got)
+			}
+		})
+	}
+}
+
 func TestWorkspaceReadEntrypointsRejectOversizedFile(t *testing.T) {
 	root := t.TempDir()
 	path := writeWorkspaceFile(t, root, "grown.vim", "let value = 1\n")
