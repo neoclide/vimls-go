@@ -19,7 +19,7 @@
 | FP09 | 逻辑操作数 | 已修复：正反回归及全量门禁通过 |
 | FP10 | map 容器约束 | 待修复 |
 | FP11 | 解构丢弃占位符 | 已修复：声明、符号及全量门禁通过 |
-| FP12 | 循环解构类型 | 待修复 |
+| FP12 | 循环解构类型 | 已修复：正反回归及全量门禁通过 |
 | FP13 | 删除后重定义 | 待修复 |
 | FP14 | 映射正文诊断 | 待修复 |
 | FP15 | map 回调 | 待修复 |
@@ -34,6 +34,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP12：循环解构按成员位置检查，不再把整行 list 类型与单个绑定比较；字面量逐行检查，保留后续行真实不匹配及 E710/E711，动态 any 保持保守。TestTypedForDestructuringDiagnostics 覆盖 typed pairs、rest、discard、错误成员/后续行/已知类型容器及普通循环。Vim 9.2.1015 正反探针验证合法 typed pairs/rest 和错误成员 E1163；全量 go test / go vet / make、gofmt、diff 检查通过。FP17 提交 9430267。
 
 - FP17：按 Vim v9.2.1015 options.txt 的 option-value-function，仅允许 9 个函数型选项接受 Funcref/lambda，读取仍为 string；覆盖别名、局部/全局前缀、命名函数、普通字符串选项反例及 lambda 正文类型检查。TestFunctionValuedOptionAssignments、gofmt、全量 go test / go vet / make、diff 检查通过；gopls 仅有已记录的无关缓存错误。真实 Vim 9.2.1015 验证 opfunc lambda 成功、filetype lambda 报 E1012。另发现数字 opfunc 在 Vim 报 E921（当前分析器仍报 E1012），属于错误码精度后续项，不计入本次已确认误报修复。
 

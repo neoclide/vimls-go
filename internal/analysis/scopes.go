@@ -5443,15 +5443,43 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 		}
 	}
 	actual := indexedType(result.TypeOf(loop.Iterable))
-	for _, binding := range loop.Bindings {
+	destructures := forLoopDestructures(result.File, command)
+	for index, binding := range loop.Bindings {
 		expected := convertSyntaxType(binding.ParsedType)
-		if isUnknownType(expected) || assignmentTypesCompatible(expected, actual) {
+		if isUnknownType(expected) || ignoredDestructuringBinding(result.File, command, binding.Name) {
 			continue
 		}
-		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-			Code: "vim/E1012", Message: "Type mismatch; expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: loop.Iterable.Span,
-		})
-		return
+		rows := []*syntax.Expression{nil}
+		if destructures && (loop.Iterable.Kind == syntax.ExpressionList || loop.Iterable.Kind == syntax.ExpressionTuple) {
+			rows = loop.Iterable.Children
+		}
+		for _, row := range rows {
+			member := actual
+			span := loop.Iterable.Span
+			if destructures {
+				member = destructuredValueType(actual, index, binding.Rest)
+				if row != nil {
+					member = destructuredValueType(result.TypeOf(row), index, binding.Rest)
+					span = row.Span
+					if !binding.Rest && (row.Kind == syntax.ExpressionList || row.Kind == syntax.ExpressionTuple) && index < len(row.Children) {
+						member = result.TypeOf(row.Children[index])
+						span = row.Children[index].Span
+					}
+				}
+			}
+			if isUnknownType(member) || assignmentTypesCompatible(expected, member) {
+				continue
+			}
+			diagnostic := syntax.Diagnostic{
+				Code: "vim/E1012", Message: "Type mismatch; expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(member), Span: span,
+			}
+			if destructures {
+				diagnostic.Code = "vim/E1163"
+				diagnostic.Message = "Variable " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(member)
+			}
+			result.Diagnostics = append(result.Diagnostics, diagnostic)
+			return
+		}
 	}
 }
 

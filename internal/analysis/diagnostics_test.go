@@ -2416,6 +2416,32 @@ func TestAnalyzeFlattenVim9Diagnostics(t *testing.T) {
 	}
 }
 
+func TestTypedForDestructuringDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, params, body, code, span string }{
+		{"dynamic pairs", "pairs: list<list<any>>", "for [paths: list<string>, Action: func: any] in pairs\necho paths Action()\nendfor", "", ""},
+		{"literal pairs", "", "for [key: string, value: number] in [['x', 1], ['y', 2]]\necho key value\nendfor", "", ""},
+		{"rest", "", "for [key: string; values: list<number>] in [['x', 1, 2]]\necho key values\nendfor", "", ""},
+		{"discard", "", "for [_, value: number] in [['x', 1]]\necho value\nendfor", "", ""},
+		{"wrong member", "", "for [key: string, value: number] in [['x', 'bad']]\necho key value\nendfor", "vim/E1163", "'bad'"},
+		{"wrong later row", "", "for [key: string, value: number] in [['x', 1], ['y', 'bad']]\necho key value\nendfor", "vim/E1163", "'bad'"},
+		{"typed rows", "pairs: list<list<number>>", "for [key: string, value: number] in pairs\necho key value\nendfor", "vim/E1163", "pairs"},
+		{"ordinary loop", "", "for value: string in [1]\necho value\nendfor", "vim/E1012", "[1]"},
+		{"short row", "", "for [key: string, value: number] in [['x']]\necho key value\nendfor", "vim/E711", "['x']"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse("vim9script\ndef Test(" + test.params + ")\n" + test.body + "\nenddef\n")
+			diagnostics := CombinedDiagnostics(file, Analyze(file))
+			if test.code == "" {
+				if len(diagnostics) != 0 {
+					t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+				}
+			} else if len(diagnostics) != 1 || diagnostics[0].Code != test.code || file.Text(diagnostics[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want %s on %q", diagnostics, test.code, test.span)
+			}
+		})
+	}
+}
+
 func TestAnalyzeDestructuringElementTypeDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, span, message string
