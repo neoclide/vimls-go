@@ -471,9 +471,9 @@ Inventory: **462 supported** (252 full and 210 partial) and **7 explicitly unsup
 ### E492: Not an editor command
 
 - **Completeness**: Partial
-- **Overview**: Not an editor command in recognized Vim9-invalid forms
-- **Implementation and tests**: internal/syntax/scanner.go; scanner_test.go:435
-- **Static-analysis boundary**: Unknown/user-defined commands remain opaque by invariant; only unambiguous malformed forms are reported.
+- **Overview**: Not an editor command; malformed Vim9 forms are errors, unresolved uppercase user commands are warnings.
+- **Implementation and tests**: internal/syntax/scanner.go; internal/analysis/scopes.go; TestUnknownUserCommandWarning; TestUnknownCommandDiagnosticsWaitForRuntimeHelp.
+- **Static-analysis boundary**: The source index must be complete and runtime help collection finished. Explicit command definitions and Ex-command help tags count as known names; dynamic-only definitions can still cause a warning. Unknown command bodies remain opaque syntax.
 
 ### E518: Unknown option
 

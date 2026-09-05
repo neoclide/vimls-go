@@ -205,7 +205,7 @@ Diagnostic categories have stable default severities:
 | --- | --- | --- |
 | Parser and structural errors | error | configurable by exact code |
 | Unresolved function, variable, import alias, or autoload name (`E117`, `E121`, `E1001`, `E1089`) | warning | configurable by exact code |
-| Runtime-dependent or cross-file conflict warnings (`E122`, `E174`, `E464`, `E705`, `E707`) | warning | configurable by exact code |
+| Runtime-dependent or cross-file conflict warnings (`E122`, `E174`, `E464`, unknown-user-command `E492`, `E705`, `E707`) | warning | configurable by exact code |
 | Unused Vim9 variables | hint with the LSP `unnecessary` tag | configurable by exact code |
 | Deprecated Vim9 references | hint with the LSP `deprecated` tag | configurable by exact code |
 

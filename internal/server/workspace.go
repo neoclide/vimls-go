@@ -1266,6 +1266,17 @@ func (s *Server) workspaceAnalysisSnapshotLocked(path string, file *syntax.File,
 		if s.workspaceIndex.Complete() {
 			snapshot.indexComplete = true
 			snapshot.userCommandNames = s.workspaceIndex.UserCommandNames()
+			snapshot.userCommandsReady = !s.runtimeHelpRunning
+			if s.runtimeHelpRunning {
+				s.runtimeHelpNeedsRefresh = true
+			}
+			for _, docs := range s.runtimeHelpFiles {
+				for _, doc := range docs {
+					if doc.Kind == "Ex command" {
+						snapshot.userCommandNames = append(snapshot.userCommandNames, strings.TrimPrefix(doc.Name, ":"))
+					}
+				}
+			}
 			for _, reference := range references {
 				if reference.Kind == workspace.ExternalReferenceAutoload && reference.DirectCall && !s.workspaceIndex.HasAutoloadFunction(reference.Name) {
 					if snapshot.missingAutoloadFunctions == nil {

@@ -61,6 +61,9 @@ still in preparation; see [candidate validation](docs/release-candidate.md).
 - Complete `<Plug>(name)` expressions are recognized for hover.
 - Heredoc flags and opening/closing markers use the `special` semantic token;
   literal payloads remain opaque.
+- Unknown uppercase user commands produce an E492 warning after indexing and
+  help loading complete. Explicit command definitions and Ex-command help tags
+  both count as known names.
 - Legacy user-command positions retain command classification in completion,
   semantic tokens and hover.
 - Catch-all patterns and Vim error codes such as `E31` do not trigger the

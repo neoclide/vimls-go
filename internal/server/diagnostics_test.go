@@ -219,15 +219,15 @@ func TestE464DiagnosticsUseCompleteRuntimepathCommandIndex(t *testing.T) {
 	if !snapshot.indexComplete {
 		t.Fatal("complete runtimepath index was not captured")
 	}
-	diagnostics := analysis.UserCommandAbbreviationDiagnostics(file, snapshot.userCommandNames)
-	if len(diagnostics) != 1 || file.Text(diagnostics[0].Span) != "BuildP" {
+	diagnostics := analysis.UserCommandDiagnostics(file, snapshot.userCommandNames)
+	if len(diagnostics) != 2 || file.Text(diagnostics[0].Span) != "BuildP" || diagnostics[1].Code != "vim/E492" || file.Text(diagnostics[1].Span) != "LocalC" {
 		t.Fatalf("E464 diagnostics = %#v", diagnostics)
 	}
 	index.SetComplete(false)
 	instance.workspaceMu.Lock()
 	snapshot = instance.workspaceAnalysisSnapshotLocked(currentPath, file, nil)
 	instance.workspaceMu.Unlock()
-	if snapshot.indexComplete || len(snapshot.userCommandNames) != 0 {
+	if snapshot.indexComplete || snapshot.userCommandsReady || len(snapshot.userCommandNames) != 0 {
 		t.Fatalf("incomplete runtimepath index was exposed: %#v", snapshot.userCommandNames)
 	}
 }
@@ -2087,5 +2087,73 @@ func TestUnknownOptionInGuiOrNvimGuardProtocolSeverity(t *testing.T) {
 	}
 	if e518Diags[1].Severity != protocol.DiagnosticSeverityError {
 		t.Errorf("unguarded option severity = %v, want error (%v)", e518Diags[1].Severity, protocol.DiagnosticSeverityError)
+	}
+}
+
+func TestUnknownCommandDiagnosticsWaitForRuntimeHelp(t *testing.T) {
+	root, runtimeRoot := t.TempDir(), t.TempDir()
+	source := "DocCommand\nMissingCommand\nDefinedCommand\n"
+	path := writeWorkspaceFile(t, root, "main.vim", source)
+	writeWorkspaceFile(t, root, "commands.vim", "command! DefinedCommand echo 1\n")
+	writeWorkspaceFile(t, runtimeRoot, "doc/plugin.txt", "*:DocCommand*\nA documented command.\n*MissingCommand()*\nFunction help must not define an Ex command.\n")
+	s, published := initializeWorkspaceDiagnosticServer(t, root)
+	started, release := make(chan struct{}), make(chan struct{})
+	var released atomic.Bool
+	t.Cleanup(func() {
+		if released.CompareAndSwap(false, true) {
+			close(release)
+		}
+	})
+	s.testHooks.beforeRuntimeHelpRead = func(ctx context.Context, _ string) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	waitForServerRace(t, started, "runtime help read")
+	documentURI := uri.File(path)
+	finished := installAnalysisFinishedHook(s)
+	if err := s.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("analysis did not finish while help was loading")
+	}
+	select {
+	case before := <-published:
+		t.Fatalf("unexpected diagnostics before help ready: %#v", before.Diagnostics)
+	default:
+	}
+	if released.CompareAndSwap(false, true) {
+		close(release)
+	}
+	s.runtimeHelpWG.Wait()
+	after := waitForDiagnosticsForURI(t, published, documentURI)
+	if len(after.Diagnostics) != 1 || after.Diagnostics[0].Code != protocol.String("vim/E492") || after.Diagnostics[0].Severity != protocol.DiagnosticSeverityWarning || after.Diagnostics[0].Range != (protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 14}}) {
+		t.Fatalf("help-ready diagnostics = %#v", after.Diagnostics)
+	}
+	// Removing the help root invalidates its command definition as well.
+	if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	after = waitForDiagnosticsForURI(t, published, documentURI)
+	if len(after.Diagnostics) != 2 || after.Diagnostics[0].Code != protocol.String("vim/E492") || after.Diagnostics[0].Range.Start.Line != 0 {
+		t.Fatalf("removed help diagnostics = %#v", after.Diagnostics)
+	}
+}
+
+func TestE492OccurrenceSeverity(t *testing.T) {
+	warning := syntax.DiagnosticWarning
+	if diagnosticProtocolSeverity(syntax.Diagnostic{Code: "vim/E492", Severity: &warning}) != protocol.DiagnosticSeverityWarning {
+		t.Fatal("unknown command must be a warning")
+	}
+	if diagnosticProtocolSeverity(syntax.Diagnostic{Code: "vim/E492"}) != protocol.DiagnosticSeverityError {
+		t.Fatal("syntax E492 must remain an error")
 	}
 }

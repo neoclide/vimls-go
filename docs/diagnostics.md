@@ -488,9 +488,10 @@ of treating E476 as a generic unknown-command code.
 The builtin Ex command table is complete for the pinned Vim release. The
 user-command table comes from the immutable workspace snapshot and the
 statically indexed external runtime sources (`plugin`, `autoload`, and
-`import`). Commands declared only in other or dynamically sourced runtime files
-remain unknown, so capitalized candidates such as `Print` and `CallMe (` stay
-opaque and do not produce E476 or E492.
+`import`). Runtime help Ex-command tags also contribute known names. Capitalized
+command candidates remain opaque syntax; after the source index and help
+catalog are ready, unresolved user commands receive an E492 warning. Builtin
+commands such as `Print` are not affected.
 
 Representative source evidence:
 
@@ -541,9 +542,17 @@ The parser reports E492 only for source shapes that do not require the mutable
 user-command registry. Current Vim9 support covers a complete typed assignment
 that omitted `var`, the lowercase declaration-like `notexist:repl` form, and
 the pinned builtin-command forms `ka`, `:1ka`, and `mode 4`. Arbitrary unknown
-legacy commands, dynamically executed strings, and capitalized command
-candidates remain opaque. They can be classified only when the declaring file
-has contributed to the immutable workspace/runtime source snapshot.
+legacy commands and dynamically executed strings remain opaque. Capitalized
+user-command calls are checked separately after the workspace/runtime source
+index is complete and runtime help collection has finished. An exact name from
+an explicit `:command` definition or an Ex-command help tag (such as
+`*:CocRestart*`) is accepted; known abbreviations retain the E464 warning.
+Otherwise E492 is reported as a **warning** on the command name, because
+dynamic command creation may still make it available at runtime. Help completion
+refreshes diagnostics, and removing a help root removes its known commands.
+This warning can be disabled with `diagnostic.disabled: ["vim/E492"]`; the
+same setting also disables parser E492 errors. Parser E492 occurrences retain
+error severity by default.
 
 Representative source evidence:
 
@@ -553,6 +562,8 @@ Representative source evidence:
   from compiled E476 for `notexist:repl`.
 - `src/testdir/test_vim9_script.vim:4832-4841,4878-4881` covers the pinned
   invalid command forms and their E476/E492 context split.
+- `src/testdir/test_usercommands.vim`, `Test_CmdUndefined`, verifies E492 for
+  missing commands and successful command creation by `CmdUndefined`.
 - `runtime/doc/message.txt:797-801` defines E492 after builtin and user-command
   lookup fails.
 

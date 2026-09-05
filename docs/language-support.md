@@ -78,6 +78,10 @@ language rules.
   mutable runtimepath state and dynamically formed names cannot always be
   resolved. The server returns no result or keeps the type `unknown` instead of
   guessing.
+- Unresolved uppercase user commands receive an E492 warning after source
+  indexing and runtime help loading complete. Explicit definitions and
+  Ex-command help tags count as known commands; dynamic-only definitions may
+  still warn. This does not turn unknown commands into parser errors.
 - Dynamically sourced runtime files are not discovered unless they also match
   the external runtimepath layout above or are inside a workspace folder.
 - Call hierarchy excludes lambdas and deferred mapping, autocommand and user

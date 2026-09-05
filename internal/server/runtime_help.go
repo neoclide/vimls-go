@@ -57,6 +57,7 @@ func (s *Server) updateRuntimeHelpLocked() {
 func (s *Server) collectRuntimeHelpWorker() {
 	defer s.runtimeHelpWG.Done()
 	for {
+		s.publishMu.Lock()
 		s.workspaceMu.Lock()
 		root := ""
 		for _, candidate := range s.runtimePaths {
@@ -68,7 +69,22 @@ func (s *Server) collectRuntimeHelpWorker() {
 		if root == "" || s.analysisContext.Err() != nil {
 			s.runtimeHelpRunning = false
 			s.runtimeHelpRoot, s.runtimeHelpCancel = "", nil
+			refresh := s.runtimeHelpNeedsRefresh && !s.analysisStopped && s.analysisContext.Err() == nil
+			s.runtimeHelpNeedsRefresh = false
+			if refresh {
+				// Command diagnostics now consume the completed help catalog.
+				// Invalidate results captured while that catalog was still loading.
+				s.workspaceRevision++
+				s.notifyWorkspaceIndexChangedLocked()
+			}
 			s.workspaceMu.Unlock()
+			s.publishMu.Unlock()
+			if refresh {
+				s.scheduleDiagnosticRefresh()
+				for _, snapshot := range s.documents.Snapshots() {
+					s.startAnalysis(snapshot.URI())
+				}
+			}
 			return
 		}
 		ctx, cancel := context.WithCancel(s.analysisContext)
@@ -78,6 +94,7 @@ func (s *Server) collectRuntimeHelpWorker() {
 			files[path] = docs
 		}
 		s.workspaceMu.Unlock()
+		s.publishMu.Unlock()
 		directories := make(map[string][]string)
 		loaded := s.collectRuntimeHelp(ctx, []string{root}, directories, files)
 		s.workspaceMu.Lock()

@@ -529,10 +529,10 @@ func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands [
 	}
 }
 
-// UserCommandAbbreviationDiagnostics warns when a parsed user-command call is
-// a proper prefix of a full name from the complete runtimepath command index.
+// UserCommandDiagnostics warns about abbreviated or unknown user-command calls
+// against the complete workspace/runtimepath command index.
 // Exact matches always win, matching Vim's user-command lookup rule.
-func UserCommandAbbreviationDiagnostics(file *syntax.File, indexedNames []string) []syntax.Diagnostic {
+func UserCommandDiagnostics(file *syntax.File, indexedNames []string) []syntax.Diagnostic {
 	if file == nil {
 		return nil
 	}
@@ -555,22 +555,28 @@ func UserCommandAbbreviationDiagnostics(file *syntax.File, indexedNames []string
 		}
 	}
 	collectDefinitions(file.Commands)
-	if len(names) == 0 {
-		return nil
-	}
 	diagnostics := make([]syntax.Diagnostic, 0)
 	var diagnose func([]syntax.Command)
 	diagnose = func(commands []syntax.Command) {
 		for index := range commands {
 			command := &commands[index]
 			if command.Kind == syntax.CommandUser && !names[command.TypedName] {
+				matched := false
 				for name := range names {
 					if len(command.TypedName) < len(name) && strings.HasPrefix(name, command.TypedName) {
 						diagnostics = append(diagnostics, syntax.Diagnostic{
 							Code: "vim/E464", Message: "User-defined command " + command.TypedName + " is abbreviated; use the full command name to avoid ambiguity", Span: command.Name,
 						})
+						matched = true
 						break
 					}
+				}
+				if !matched {
+					severity := syntax.DiagnosticWarning
+					diagnostics = append(diagnostics, syntax.Diagnostic{
+						Code: "vim/E492", Message: "Not an editor command: " + command.TypedName,
+						Span: command.Name, Severity: &severity,
+					})
 				}
 			}
 			if command.Embedded != nil {

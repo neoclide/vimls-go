@@ -106,6 +106,7 @@ type workspaceAnalysisSnapshot struct {
 	missingAutoloadFunctions map[string]bool
 	missingGlobalFunctions   map[string]bool
 	userCommandNames         []string
+	userCommandsReady        bool
 	augroupNames             []string
 	globalDiagnostics        []syntax.Diagnostic
 	ready                    bool
@@ -231,6 +232,7 @@ type Server struct {
 	runtimeHelpRoots            map[string][]string
 	runtimeHelpFiles            map[string][]vimhelp.SymbolDocumentation
 	runtimeHelpRunning          bool
+	runtimeHelpNeedsRefresh     bool
 	runtimeHelpRoot             string
 	runtimeHelpCancel           context.CancelFunc
 	runtimeHelpWG               sync.WaitGroup
@@ -1293,8 +1295,8 @@ func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.
 		workspaceSnapshot.augroupNames,
 	)
 	file.Diagnostics = append(file.Diagnostics, s.workspaceImportDiagnostics(workspaceSnapshot, file, fileAnalysis)...)
-	if workspaceSnapshot.indexComplete {
-		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandAbbreviationDiagnostics(file, workspaceSnapshot.userCommandNames)...)
+	if workspaceSnapshot.userCommandsReady {
+		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandDiagnostics(file, workspaceSnapshot.userCommandNames)...)
 	}
 	file.Diagnostics = append(file.Diagnostics, workspaceSnapshot.globalDiagnostics...)
 	file.Diagnostics = filterDisabledDiagnostics(file.Diagnostics, disabledDiagnostics)

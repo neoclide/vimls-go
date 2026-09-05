@@ -10961,7 +10961,7 @@ func TestAnalyzeE174UserCommandOverwriteRiskWarning(t *testing.T) {
 	}
 }
 
-func TestE464UserCommandAbbreviationDiagnostics(t *testing.T) {
+func TestE464UserCommandDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source, span string
 		indexed            []string
@@ -10973,13 +10973,12 @@ func TestE464UserCommandAbbreviationDiagnostics(t *testing.T) {
 		{"nested invocation", "function F()\n  BuildP\nendfunction\n", "BuildP", []string{"BuildProject"}, 1},
 		{"ambiguous prefix warns once", "Ren\n", "Ren", []string{"Rename", "Renumber"}, 1},
 		{"exact full name wins", "Build\n", "", []string{"Build", "BuildMore"}, 0},
-		{"unknown external command", "External\n", "", []string{"BuildProject"}, 0},
 		{"builtin command", "Print\n", "", []string{"PrintMore"}, 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			file := syntax.Parse(test.source)
-			got := UserCommandAbbreviationDiagnostics(file, test.indexed)
+			got := UserCommandDiagnostics(file, test.indexed)
 			if len(got) != test.want {
 				t.Fatalf("E464 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
 			}
@@ -12762,5 +12761,42 @@ func TestAnalyzeE1431AbstractSuperMethodCall(t *testing.T) {
 				t.Fatalf("guard source reported E1431: %#v\n%s", diagnostic, source)
 			}
 		}
+	}
+}
+
+// Vim v9.2.1015 src/testdir/test_usercommands.vim Test_CmdUndefined and
+// runtime/doc/message.txt: E492 follows failed Ex/user-command lookup.
+func TestUnknownUserCommandWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name, source string
+		known        []string
+		want         string
+	}{
+		{"empty index", "MissingCommand\n", nil, "MissingCommand"},
+		{"other command", "MissingCommand! value\n", []string{"KnownCommand"}, "MissingCommand"},
+		{"legacy function", "function! F()\n  CocRestart\nendfunction\n", nil, "CocRestart"},
+		{"vim9 command", "vim9script\nMissingCommand\n", nil, "MissingCommand"},
+		{"embedded command", "autocmd BufEnter * MissingCommand\n", nil, "MissingCommand"},
+		{"later definition", "KnownCommand\ncommand! KnownCommand echo 1\n", nil, ""},
+		{"indexed definition", "KnownCommand\n", []string{"KnownCommand"}, ""},
+		{"builtin uppercase", "Print\n", nil, ""},
+		{"lowercase", "unknowncommand\n", nil, ""},
+		{"vim9 function call", "vim9script\nMissingFunction()\n", nil, ""},
+		{"execute string", "execute 'MissingCommand'\n", nil, ""},
+		{"heredoc", "let lines =<< END\nMissingCommand\nEND\n", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := syntax.Parse(tc.source)
+			got := UserCommandDiagnostics(file, tc.known)
+			if tc.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("unexpected diagnostics: %#v", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].Code != "vim/E492" || got[0].Message != "Not an editor command: "+tc.want || file.Text(got[0].Span) != tc.want || got[0].Severity == nil || *got[0].Severity != syntax.DiagnosticWarning {
+				t.Fatalf("diagnostics = %#v", got)
+			}
+		})
 	}
 }
