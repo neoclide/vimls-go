@@ -2416,6 +2416,36 @@ func TestAnalyzeFlattenVim9Diagnostics(t *testing.T) {
 	}
 }
 
+func TestUnexpandedCommandBodyDiagnostics(t *testing.T) {
+	for _, test := range []struct{ name, source, code, span string }{
+		{"command args", "command! -nargs=* CompilerSet setlocal <args>\n", "", ""},
+		{"quoted args", "vim9script\ndef Filter(qf: bool, pattern: string, bang: string)\necho qf pattern bang\nenddef\ncommand! -nargs=+ -bang FilterCmd Filter(true, <q-args>, <q-bang>)\n", "", ""},
+		{"mapping keys", "nnoremap <buffer> M :setl ma<Bar>%s/x/y/g\n\\ <Bar>setl noma<CR>\n", "", ""},
+		{"ordinary option", "setlocal <args>\n", "vim/E518", "<args>"},
+		{"unrecognized replacement", "command! Test setlocal <notargs>\n", "vim/E518", "<notargs>"},
+		{"static option beside args", "command! -nargs=* Test setlocal bogus <args>\n", "vim/E518", "bogus"},
+		{"static value beside args", "command! -nargs=* Test setlocal bg=bad <args>\n", "vim/E474", "bad"},
+		{"following command", "command! -nargs=* Test setlocal <args> | call len()\n", "vim/E119", "len"},
+		{"literal body call", "command! Test call len()\n", "vim/E119", "len"},
+		{"ordinary following mapping", "nnoremap M :setl ma<Bar>setl noma<CR>\ncall len()\n", "vim/E119", "len"},
+		{"plain mapping body", "nnoremap M :call len()<CR>\n", "vim/E119", "len"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range CombinedDiagnostics(file, result) {
+				if strings.HasPrefix(diagnostic.Code, "vim/E") {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.code == "" && len(got) != 0 || test.code != "" && (len(got) != 1 || got[0].Code != test.code || file.Text(got[0].Span) != test.span) {
+				t.Fatalf("diagnostics = %#v, want %s on %q", got, test.code, test.span)
+			}
+		})
+	}
+}
+
 func TestLegacyFunctionDeletionBeforeDef(t *testing.T) {
 	for _, test := range []struct {
 		name, between string

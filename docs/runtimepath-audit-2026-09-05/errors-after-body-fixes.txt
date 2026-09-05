@@ -1,0 +1,39 @@
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/10/legacy.vim:24:3: vim/E492 Not an editor command: account.  Thus in
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/10/legacy.vim:25:3: vim/E492 Not an editor command: parenthesis match.  When included
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/10/legacy.vim:26:3: vim/E492 Not an editor command: backslashes, which is Vi compatible.
+/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/16/any.vim:5:26: vim/E114 Missing double quote
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:16:15: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:21:11: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:25:5: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:27:33: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/forwhile.vim:29:5: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/parts.vim:7:1: vim/E588 :endwhile without :while
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/parts.vim:4:3: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/tabs.vim:9:5: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/tabs.vim:14:3: vim/E133 :return not inside a function
+/Users/chemzqm/.vim/sessions/coc-list.vim:66:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/sessions/mini.vim:65:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/sessions/python.vim:61:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/sessions/someroject-rust.vim:73:20: vim/E474 Invalid argument
+/Users/chemzqm/.vim/view/~=+.vim=+vimrc=+unite.vim=1.vim:79:10: vim/E518 Unknown option: macmeta
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:48: vim/E518 Unknown option: \ buftype=nofile
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:73: vim/E518 Unknown option: \ noswapfile
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:94: vim/E518 Unknown option: \ wrap
+/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim:175:101: vim/E518 Unknown option: [Document]
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:31:12: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:48:10: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:53:10: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:58:10: vim/E119 Not enough arguments for function: s:report_error
+/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim:84:10: vim/E119 Not enough arguments for function: s:report_error
+/usr/local/share/vim/vim92/autoload/dist/vimindent.vim:180:7: vim/E1012 Type mismatch; expected list<string> but got string
+/usr/local/share/vim/vim92/autoload/dist/vimindent.vim:262:11: vim/E1012 Type mismatch; expected list<string> but got string
+/usr/local/share/vim/vim92/import/dist/vimhighlight.vim:118:35: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, number>
+/usr/local/share/vim/vim92/indent/sml.vim:153:3: vim/E492 Not an editor command: cursor(lnum,1)
+/usr/local/share/vim/vim92/pack/dist/opt/editorconfig/plugin/editorconfig.vim:104:9: vim/E492 Not an editor command: setbufvar(a:bufnr, '&shellslash', 0)
+/usr/local/share/vim/vim92/pack/dist/opt/editorconfig/plugin/editorconfig.vim:111:9: vim/E492 Not an editor command: setbufvar(a:bufnr, '&shellslash', s:old_shellslash)
+/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim:857:19: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, dict<any>>
+/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim:1127:44: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, number>
+/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim:1247:19: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, string>
+/usr/local/share/vim/vim92/pack/dist/opt/netrw/autoload/netrw.vim:9304:17: vim/E46 Cannot change read-only variable "a:newdir"
+/usr/local/share/vim/vim92/pack/dist/opt/netrw/autoload/netrw.vim:9308:17: vim/E46 Cannot change read-only variable "a:newdir"
+/usr/local/share/vim/vim92/syntax/2html.vim:1114:78: vim/E1013 Argument 2: type mismatch, expected string or function but got func<any, any>

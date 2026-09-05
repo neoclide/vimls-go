@@ -238,6 +238,7 @@ func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
 		collectConfigDuplicateMappingDiagnostics(result)
 		collectConfigLoadedGuardDiagnostics(result)
 	}
+	suppressUnexpandedBodyDiagnostics(result)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
 		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
 	})
@@ -3437,6 +3438,86 @@ func aggregateEndSpan(file *syntax.File, command *syntax.Command) syntax.Span {
 		return command.Name
 	}
 	return syntax.Span{}
+}
+
+// Expansion can change expression arity and even command boundaries. Retain
+// the raw AST for navigation, but do not diagnose unexpanded payloads as Vim.
+func suppressUnexpandedBodyDiagnostics(result *FileAnalysis) {
+	var opaque []syntax.Span
+	var uncertainArity []syntax.Span
+	replacements := func(span syntax.Span) []syntax.Span {
+		var spans []syntax.Span
+		for offset := span.Start; offset < span.End; offset++ {
+			if result.File.Source[offset] != '<' {
+				continue
+			}
+			close := strings.IndexByte(result.File.Source[offset:span.End], '>')
+			if close < 0 {
+				break
+			}
+			if syntax.IsUserCommandReplacementAt(result.File.Source, offset, span.End) {
+				spans = append(spans, syntax.Span{Start: offset, End: offset + close + 1})
+			}
+			offset += close
+		}
+		return spans
+	}
+	var collect func([]syntax.Command, bool)
+	collect = func(commands []syntax.Command, userBody bool) {
+		for index := range commands {
+			command := &commands[index]
+			if userBody {
+				spans := replacements(command.Argument)
+				if command.Set != nil {
+					// Static options in the same command remain independently
+					// checkable, even when another item is replaced at invocation.
+					opaque = append(opaque, spans...)
+				} else if len(spans) > 0 {
+					// Earlier literal arguments retain their known positions/types;
+					// later arguments and total arity depend on expansion.
+					opaque = append(opaque, syntax.Span{Start: spans[0].Start, End: command.Span.End})
+					uncertainArity = append(uncertainArity, command.Span)
+				}
+			}
+			if command.Embedded != nil {
+				if command.Mapping != nil && strings.Contains(result.File.Text(command.Embedded.Span), "<") {
+					// Key notation is not decoded into a source-mapped view yet.
+					// Mapping headers and ordinary neighbouring commands stay checked.
+					opaque = append(opaque, command.Embedded.Span)
+				} else {
+					collect(command.Embedded.Commands, userBody || command.Canonical == "command")
+				}
+			}
+		}
+	}
+	collect(result.File.Commands, false)
+	if len(opaque) == 0 {
+		return
+	}
+	suppressed := func(diagnostic syntax.Diagnostic) bool {
+		if diagnostic.Code == "vim/E119" || diagnostic.Code == "vim/E118" || diagnostic.Code == "vim/E740" {
+			for _, span := range uncertainArity {
+				if span.Start <= diagnostic.Span.Start && diagnostic.Span.End <= span.End {
+					return true
+				}
+			}
+		}
+		for _, span := range opaque {
+			if span.Start <= diagnostic.Span.Start && diagnostic.Span.End <= span.End {
+				return true
+			}
+		}
+		return false
+	}
+	result.Diagnostics = slices.DeleteFunc(result.Diagnostics, suppressed)
+	for _, diagnostic := range result.File.Diagnostics {
+		if suppressed(diagnostic) {
+			if result.suppressedSyntaxDiagnostics == nil {
+				result.suppressedSyntaxDiagnostics = make(map[syntax.Diagnostic]bool)
+			}
+			result.suppressedSyntaxDiagnostics[diagnostic] = true
+		}
+	}
 }
 
 // CombinedDiagnostics returns parser and semantic diagnostics with the narrow
