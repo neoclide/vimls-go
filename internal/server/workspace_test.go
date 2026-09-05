@@ -126,6 +126,23 @@ func TestWorkspaceMultipleRootsWithRuntimepathImports(t *testing.T) {
 	}
 }
 
+func TestWorkspacePathIdentityAfterURIRoundTrip(t *testing.T) {
+	path := writeWorkspaceFile(t, t.TempDir(), "space dir/file.vim", "")
+	canonical := mustWorkspaceCanonicalPath(t, path)
+	if !sameWorkspacePath(uri.File(canonical).FsPath(), canonical) {
+		t.Fatal("URI round trip changed filesystem identity")
+	}
+	if sameWorkspacePath(canonical, canonical+".other") {
+		t.Fatal("distinct files share filesystem identity")
+	}
+	if runtime.GOOS == "windows" {
+		if !sameWorkspacePath(`C:\work\space dir\file.vim`, `c:\work\space dir\file.vim`) ||
+			sameWorkspacePath(`C:\work\file.vim`, `D:\work\file.vim`) {
+			t.Fatal("Windows volume identity mismatch")
+		}
+	}
+}
+
 func TestWatchedFilesMatchDiscoveredSourceNames(t *testing.T) {
 	for _, name := range []string{".vimrc", "_vimrc", ".gvimrc", "plain.vim", "plugin/extensionless", "pack/demo/start/demo/autoload/extensionless"} {
 		t.Run(name, func(t *testing.T) {

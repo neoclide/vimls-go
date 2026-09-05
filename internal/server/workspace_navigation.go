@@ -589,7 +589,10 @@ func workspaceAutoloadPath(path, root string) (string, bool) {
 }
 
 func sameWorkspacePath(left, right string) bool {
-	return filepath.Clean(left) == filepath.Clean(right)
+	// Rel follows the host filesystem's path rules, including Windows drive
+	// casing after a file URI round trip.
+	relative, err := filepath.Rel(left, right)
+	return err == nil && relative == "."
 }
 
 func deduplicateLocations(locations []protocol.Location) []protocol.Location {

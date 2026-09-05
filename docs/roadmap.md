@@ -1,5 +1,30 @@
 # Delivery roadmap
 
+## Release-candidate work ledger (2026-09-05)
+
+Baseline: `a0381ea`. Each implementation slice is tested and committed locally.
+Publishing and tags are separate actions. A deferred feature is not a release
+blocker unless explicitly included in the 1.0 contract.
+
+| Priority | Work | Status / evidence |
+| --- | --- | --- |
+| P0 | Windows path identity and diagnosticscan canonical output | Fixed; uncached full tests, vet and build pass locally. Native Windows CI remains pending (baseline failure: run 33961022065). |
+| P1 | Direct legacy tuple semantics and mapping result policy | Pending pinned-source and oracle validation. |
+| P1 | Reconcile coverage ledger with owned behavior | Pending; deferred scope remains explicit. |
+| P2 | Required LSP surface and stdio/client acceptance | Pending candidate validation. |
+| P3 | Fuzz, performance, vulnerability and reproducible archives | Pending candidate validation. |
+| P3 | Release notes and final evidence | Pending; no release is authorized. |
+
+M0–M2 and M5–M6 have implemented surfaces; M3–M4 still need the P1 evidence
+review. M7 remains open until the candidate has all required platform and
+release evidence. Local validation uses focused tests, uncached full tests,
+vet, build and pinned Vim smoke. Race and 90% coverage are checked through CI.
+
+External runtimepath discovery parses recursive `plugin`, `autoload`, and
+`import` Vim scripts; `colors/*.vim` contributes only completion paths. Roots
+inside workspace folders use ordinary workspace discovery once. Other
+external runtime trees and dynamic source targets are not chased.
+
 ## Definition of done
 
 Version 1.0 is complete only when the language-support contract is covered

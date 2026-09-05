@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/workspace"
 )
 
 func TestRunReportsOnlyErrorsAndDeduplicatesRuntimepath(t *testing.T) {
@@ -23,7 +24,11 @@ func TestRunReportsOnlyErrorsAndDeduplicatesRuntimepath(t *testing.T) {
 	if code := run([]string{"-runtimepath", root + "," + root}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run exit = %d, stderr = %q", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, path+":1:6: vim/E119") || strings.Count(got, path) != 1 {
+	canonical, err := workspace.CanonicalPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); !strings.Contains(got, canonical+":1:6: vim/E119") || strings.Count(got, canonical) != 1 {
 		t.Fatalf("stdout = %q", got)
 	}
 	if got := stderr.String(); !strings.Contains(got, "scanned 1 roots, 1 files, found 1 errors") {
