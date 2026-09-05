@@ -398,3 +398,30 @@ func TestOfficialHeredocAssignmentIgnoresStringContents(t *testing.T) {
 		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
 	}
 }
+
+func TestHeredocHeaderSourceSpans(t *testing.T) {
+	for _, source := range []string{
+		"let value =<< trim END\n  payload\nEND\n",
+		"vim9script\nconst value =<< trim eval END\n  payload\nEND\n",
+		"vim9script\nconst value =<<\n    \\ trim END\n  payload\nEND\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) > 0 {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		var found bool
+		for _, command := range file.Commands {
+			if command.Heredoc == nil {
+				continue
+			}
+			found = true
+			header := file.Text(command.Heredoc.Header)
+			if !strings.Contains(header, "trim") || !strings.HasSuffix(header, "END") {
+				t.Fatalf("header = %q in %q", header, source)
+			}
+		}
+		if !found {
+			t.Fatalf("no heredoc in %q", source)
+		}
+	}
+}

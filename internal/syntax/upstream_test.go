@@ -92,6 +92,7 @@ func assertFileSpansAt(t *testing.T, file *File, origin string) {
 			assertExpressionSpans(t, file, origin, target)
 		}
 		if command.Heredoc != nil {
+			check("heredoc header", command.Heredoc.Header)
 			check("heredoc body", command.Heredoc.Body)
 			check("heredoc end marker", command.Heredoc.EndMarker)
 		}

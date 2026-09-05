@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -1075,5 +1076,50 @@ func TestSemanticTokensRangeDoesNotTouchDeltaRegistry(t *testing.T) {
 	instance.publishMu.Unlock()
 	if installed {
 		t.Fatal("range request installed a delta registry entry")
+	}
+}
+
+func TestHeredocHeaderAndEndMarkerSemanticTokens(t *testing.T) {
+	for _, source := range []string{
+		"const call_function =<< trim END\n  function! coc#api#call(method, args) abort\n    return coc#api#Call(a:method, a:args)\n  endfunction\nEND\n",
+		"vim9script\n  const call_function =<< trim END\r\n    function! Payload()\r\n    endfunction\r\n  END\r\n",
+		"let value =<< trim eval END\n  opaque payload\nEND\n",
+		"let value =<< trim END\n  incomplete payload\n",
+	} {
+		instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+		t.Cleanup(instance.stopAnalysis)
+		result, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(source, "\n")
+		var specials []string
+		for _, token := range decodeSemanticTokens(result.Data) {
+			line := lines[token[0]]
+			value := line[token[1] : token[1]+token[2]]
+			if strings.Contains(line, "function!") || strings.Contains(line, "return ") || strings.Contains(line, "endfunction") || strings.Contains(line, "payload") {
+				t.Fatalf("heredoc payload received token %q in %q", value, source)
+			}
+			if token[3] == semanticSpecial {
+				if token[4] != 0 {
+					t.Fatalf("special token modifiers = %d", token[4])
+				}
+				specials = append(specials, value)
+			}
+		}
+		want := []string{"trim"}
+		if strings.Contains(source, "trim eval") {
+			want = append(want, "eval")
+		}
+		want = append(want, "END")
+		if !strings.Contains(source, "incomplete") {
+			want = append(want, "END")
+		}
+		if !reflect.DeepEqual(specials, want) {
+			t.Fatalf("specials = %#v, want %#v in %q", specials, want, source)
+		}
+		if semanticTokenTypes[semanticSpecial] != "special" {
+			t.Fatal("special token missing from advertised legend")
+		}
 	}
 }

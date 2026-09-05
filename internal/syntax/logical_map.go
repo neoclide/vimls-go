@@ -275,6 +275,7 @@ func (mapper *logicalSpanMapper) command(command *Command) {
 	}
 	mapper.commandDetails(command)
 	if command.Heredoc != nil {
+		command.Heredoc.Header = mapper.optional(command.Heredoc.Header)
 		command.Heredoc.Body = mapper.optional(command.Heredoc.Body)
 		command.Heredoc.EndMarker = mapper.optional(command.Heredoc.EndMarker)
 	}

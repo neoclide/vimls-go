@@ -14,7 +14,7 @@ import (
 )
 
 var semanticTokenTypes = []string{
-	"comment", "keyword", "modifier", "variable", "function", "method", "class", "interface", "enum", "enumMember", "type", "property", "namespace", "parameter",
+	"comment", "keyword", "modifier", "variable", "function", "method", "class", "interface", "enum", "enumMember", "type", "property", "namespace", "parameter", "special",
 }
 
 var semanticTokenModifiers = []string{"declaration", "readonly", "deprecated", "static", "defaultLibrary"}
@@ -34,6 +34,7 @@ const (
 	semanticProperty
 	semanticNamespace
 	semanticParameter
+	semanticSpecial
 )
 
 const (
@@ -309,6 +310,22 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 			}
 			for _, span := range command.Aggregate.Implements {
 				facts = append(facts, semanticFact{span: span, tokenType: semanticTypeName, priority: 1})
+			}
+		}
+		if heredoc := command.Heredoc; heredoc != nil {
+			// Header spans come from the parser; never scan the opaque payload.
+			for _, region := range []syntax.Span{heredoc.Header, heredoc.EndMarker} {
+				source := file.Text(region)
+				offset := region.Start
+				for _, word := range strings.Fields(source) {
+					index := strings.Index(source, word)
+					start := offset + index
+					if word == "trim" || word == "eval" || word == heredoc.Marker {
+						facts = append(facts, semanticFact{span: syntax.Span{Start: start, End: start + len(word)}, tokenType: semanticSpecial, priority: 2})
+					}
+					offset = start + len(word)
+					source = source[index+len(word):]
+				}
 			}
 		}
 		if command.Set != nil {

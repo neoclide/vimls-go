@@ -488,6 +488,7 @@ type Import struct {
 }
 
 type Heredoc struct {
+	Header     Span // trim/eval flags and explicit opening marker
 	Marker     string
 	Trim       bool
 	Eval       bool

@@ -2233,6 +2233,7 @@ func detectHeredoc(file *File, command *Command) bool {
 	}
 
 	position := skipSpace(argument, suffixOffset, len(argument))
+	headerStart := position
 	trim := false
 	eval := false
 	for position < len(argument) {
@@ -2252,7 +2253,7 @@ func detectHeredoc(file *File, command *Command) bool {
 			})
 			return false
 		}
-		command.Heredoc = &Heredoc{Marker: ".", Trim: trim, Eval: eval}
+		command.Heredoc = &Heredoc{Header: Span{Start: command.Argument.Start + headerStart, End: command.Argument.Start + position}, Marker: ".", Trim: trim, Eval: eval}
 		return true
 	}
 	markerStart := position
@@ -2271,7 +2272,7 @@ func detectHeredoc(file *File, command *Command) bool {
 		// The header is still a heredoc even though Vim rejects its trailing
 		// characters.  Keep the marker so the physical body and END marker are
 		// consumed, while preventing the normal RHS parser from adding cascades.
-		command.Heredoc = &Heredoc{Marker: marker, Trim: trim, Eval: eval}
+		command.Heredoc = &Heredoc{Header: Span{Start: command.Argument.Start + headerStart, End: command.Argument.Start + position}, Marker: marker, Trim: trim, Eval: eval}
 		command.detailsOpaque = true
 		return true
 	}
@@ -2281,7 +2282,7 @@ func detectHeredoc(file *File, command *Command) bool {
 		})
 		return false
 	}
-	command.Heredoc = &Heredoc{Marker: marker, Trim: trim, Eval: eval}
+	command.Heredoc = &Heredoc{Header: Span{Start: command.Argument.Start + headerStart, End: command.Argument.Start + position}, Marker: marker, Trim: trim, Eval: eval}
 	return true
 }
 

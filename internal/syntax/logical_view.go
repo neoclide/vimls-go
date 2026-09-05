@@ -363,6 +363,11 @@ func mapCommandHeader(view *logicalView, command *Command) {
 	command.Bang = mapOptionalLogicalSpan(view, command.Bang)
 	command.Count = mapOptionalLogicalSpan(view, command.Count)
 	command.Argument = view.mapSpan(command.Argument)
+	if command.Heredoc != nil {
+		heredoc := *command.Heredoc
+		heredoc.Header = mapOptionalLogicalSpan(view, heredoc.Header)
+		command.Heredoc = &heredoc
+	}
 	for index := range command.Modifiers {
 		modifier := &command.Modifiers[index]
 		modifier.Span = view.mapSpan(modifier.Span)

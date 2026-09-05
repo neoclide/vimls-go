@@ -1928,6 +1928,7 @@ func (s *lambdaRebaseState) command(command *Command, source string, offset int)
 		}
 	}
 	if command.Heredoc != nil {
+		command.Heredoc.Header = shiftLambdaOptionalSpan(command.Heredoc.Header, offset)
 		command.Heredoc.Body = shiftLambdaOptionalSpan(command.Heredoc.Body, offset)
 		command.Heredoc.EndMarker = shiftLambdaOptionalSpan(command.Heredoc.EndMarker, offset)
 	}

@@ -26,6 +26,10 @@ commit does not change the validated source. Native Windows and current-candidat
 Linux/macOS CI race/coverage remain pending. Historical CI for `a0381ea` is not
 candidate evidence. Push, tag and publication require separate authorization.
 
+Heredoc semantic highlighting now marks header flags and delimiters as
+`special`, preserving opaque literal bodies and source spans across logical
+line mapping.
+
 Default runtimepath discovery now queries `vim` on `PATH` with
 `globpath(&runtimepath, '', 0, 1)` serialized as JSON, instead of guessing an
 installation directory. Empty initialization values use this fallback; missing

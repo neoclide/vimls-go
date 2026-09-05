@@ -1,5 +1,8 @@
 # Language server features
 
+Heredoc header flags (`trim` and `eval`) and opening/closing markers use the
+custom `special` semantic token type. Literal heredoc payload remains opaque.
+
 At initialization, an empty or unusable runtimepath falls back to a bounded Vim
 subprocess using `json_encode(globpath(&runtimepath, '', 0, 1))`. Discovery skips
 vimrc, plugins and viminfo; failures are silent. Explicit runtimepath updates
