@@ -54,6 +54,32 @@ Legacy and Vim9 files may use the same workspace. The server understands
 `vim9script`, `scriptversion`, `vim9cmd` and `legacy` when choosing the relevant
 language rules.
 
+## Expressions in mappings
+
+Besides `<expr>` mappings and direct Ex bodies, mapping RHS syntax recognizes
+these interactive expression prompts using the containing script's dialect:
+
+| Prompt | Context |
+| --- | --- |
+| `<C-R>=`, `<C-R><C-R>=`, `<C-R><C-O>=` | Insert and command-line modes |
+| `<C-R><C-P>=` | Insert mode; in command-line mode `<C-R><C-P>` inserts a path |
+| `<C-\>e` | Command-line expression replacing the current command line |
+| `"=`, `@=` | Normal-mode expression register selection or execution |
+
+Explicit leading mode transitions such as `:`, `/`, `?`, `i`, and insert-mode
+`<C-O>:` are recognized. `<C-O>` alone runs one Normal command; `<C-O>=` is
+an indent operator, not an expression prompt. Other unknown Normal commands
+remain opaque rather than guessing their resulting mode.
+
+Prompt expressions retain source ranges and support function/reference analysis,
+semantic highlighting, hover, navigation, completion and signature help.
+Multiple prompts, incomplete expressions and Enter aliases are recognized.
+Cancelled prompts and payloads containing undecoded editing keys remain opaque;
+evaluated values are never executed or parsed as generated commands. The static Ex
+command head before a register prompt (for example `:edit <C-R>=...`) retains
+command hover and semantic highlighting through the shared command parser;
+its dynamic arguments remain opaque.
+
 ## Current limitations
 
 - Runtime help is extracted from global symbol and complete `<Plug>(name)` help

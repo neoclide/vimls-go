@@ -4019,7 +4019,8 @@ func parseMapping(file *File, command *Command, depth int) {
 		mapping.Query = true
 	}
 	command.Mapping = mapping
-	if body, ok := mappingCommandBodySpan(file.Source, mapping); ok {
+	hasPrompt := parseMappingRegisterExpressions(file, command)
+	if body, ok := mappingCommandBodySpan(file.Source, command, hasPrompt); ok {
 		diagnostics := len(file.Diagnostics)
 		command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
 		// Mapping key notation is decoded only when the mapping executes. The
@@ -4031,7 +4032,8 @@ func parseMapping(file *File, command *Command, depth int) {
 
 // mappingCommandBodySpan recognizes only mapping forms that directly execute
 // an Ex command. Other RHS key sequences remain opaque.
-func mappingCommandBodySpan(source string, mapping *Mapping) (Span, bool) {
+func mappingCommandBodySpan(source string, command *Command, hasPrompt bool) (Span, bool) {
+	mapping := command.Mapping
 	if mapping == nil || mapping.Expr || mapping.Abbreviation || mapping.RHS.Start >= mapping.RHS.End {
 		return Span{}, false
 	}
@@ -4048,6 +4050,30 @@ func mappingCommandBodySpan(source string, mapping *Mapping) (Span, bool) {
 		// Other key notation changes how Vim constructs or executes the command
 		// line and cannot be parsed directly from the stored RHS bytes.
 		return Span{}, false
+	}
+	if hasPrompt {
+		// Parse the static command prefix with the usual embedded-command
+		// parser. Register prompts supply dynamic text; other editing keys
+		// can replace the command itself, so do not infer syntax across them.
+		for position := start; position < end; {
+			key, size := mappingExpressionKeyAt(source, position, end)
+			if len(key) > 1 || source[position] < ' ' && !isSpace(source[position]) {
+				if key != "<c-r>" {
+					return Span{}, false
+				}
+				prefix := &File{Source: source, Dialect: command.Dialect}
+				scanCommands(prefix, start, position, command.Dialect)
+				if len(prefix.Commands) != 1 || prefix.Commands[0].Name.Start == prefix.Commands[0].Name.End || prefix.Commands[0].Name.End >= position {
+					return Span{}, false
+				}
+				head := prefix.Commands[0]
+				// The dynamic argument list cannot establish call arity or types.
+				// Reuse the scanner's command head boundary, including modifiers.
+				end = max(head.Name.End, head.Bang.End)
+				break
+			}
+			position += size
+		}
 	}
 	for position := start; position+len("<CR>") <= end; position++ {
 		if strings.EqualFold(source[position:position+len("<CR>")], "<CR>") {

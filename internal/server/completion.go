@@ -86,6 +86,14 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		contextKind := completionContextAt(file, offset)
 		selection := completionSelectionAt(snapshot.Text(), offset)
 		switch contextKind {
+		case completionContextExpression, completionContextMember:
+			walkCommands(file.Commands, func(command *syntax.Command) {
+				if expression := mappingExpressionAt(command, offset); expression != nil && selection.start < expression.Span.Start {
+					// <C-\>e has no separator between its prompt key and name.
+					selection.start = expression.Span.Start
+					selection.prefix = snapshot.Text()[selection.start:offset]
+				}
+			})
 		case completionContextMappingArgument:
 			selection = completionMappingArgumentSelection(snapshot.Text(), offset)
 		case completionContextSetOperator, completionContextSetValue, completionContextUserCommandAttribute, completionContextUserCommandAttributeValue:

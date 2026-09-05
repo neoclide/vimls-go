@@ -260,7 +260,7 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		if mappingCommandBody {
 			noteEmbeddedCommandBody(command.Dialect, command.Embedded.Span.End-command.Embedded.Span.Start)
 		}
-		if command.Heredoc != nil && (spanContains(command.Heredoc.Body, offset) || offset == command.Heredoc.Body.End) || command.TextBody != nil && (spanContains(command.TextBody.Body, offset) || offset == command.TextBody.Body.End) || command.Keymap != nil && (spanContains(command.Keymap.Body, offset) || offset == command.Keymap.Body.End) || command.Mapping != nil && (spanContains(command.Mapping.RHS, offset) || offset == command.Mapping.RHS.End) && !mappingCommandBody {
+		if command.Heredoc != nil && (spanContains(command.Heredoc.Body, offset) || offset == command.Heredoc.Body.End) || command.TextBody != nil && (spanContains(command.TextBody.Body, offset) || offset == command.TextBody.Body.End) || command.Keymap != nil && (spanContains(command.Keymap.Body, offset) || offset == command.Keymap.Body.End) || command.Mapping != nil && (spanContains(command.Mapping.RHS, offset) || offset == command.Mapping.RHS.End) && !mappingCommandBody && mappingExpressionAt(command, offset) == nil {
 			rejected = true
 		}
 		walkCommandExpressions(command, func(expression *syntax.Expression) {
@@ -342,6 +342,12 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		}
 		if command.Mapping != nil && command.Argument.Start <= offset && offset <= command.Argument.End {
 			result = completionContextNone
+			if expression := mappingExpressionAt(command, offset); expression != nil {
+				result = completionContextExpression
+				if memberExpressionAt(expression, offset) != nil {
+					result = completionContextMember
+				}
+			}
 			return
 		}
 		if command.Import != nil && command.Import.Path != nil && command.Import.Path.Kind == syntax.ExpressionString &&
@@ -651,6 +657,23 @@ func completionHighlightAttributeAt(command *syntax.Command, offset int, value b
 
 func isCompletionSpace(character byte) bool {
 	return character == ' ' || character == '\t' || character == '\n' || character == '\r'
+}
+
+// mappingExpressionAt distinguishes parsed expression prompts from the opaque
+// key sequence around them. End positions include an unfinished completion.
+func mappingExpressionAt(command *syntax.Command, offset int) *syntax.Expression {
+	if command.Mapping == nil {
+		return nil
+	}
+	for _, expression := range command.Expressions {
+		if expression != nil && expression.Span.Start <= offset && offset <= expression.Span.End {
+			return expression
+		}
+	}
+	if expression := command.Mapping.RHSExpression; expression != nil && expression.Span.Start <= offset && offset <= expression.Span.End {
+		return expression
+	}
+	return nil
 }
 
 func completionMappingArgumentAt(file *syntax.File, command *syntax.Command, offset int) bool {

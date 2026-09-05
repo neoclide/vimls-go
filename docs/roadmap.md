@@ -22,6 +22,16 @@ candidate success from the older green run 33969555293 (`871bddb`) or reuse the
 historical candidate's performance/archive results. Local repair and validation
 do not publish a release; push and tagging remain separate actions.
 
+Mapping expression prompts now enter the shared expression AST: `<C-R>=`,
+literal/fixed-indent register variants, command-line `<C-\>e`, and Normal
+`"=`/`@=`. Mode-specific parsing preserves raw mapping text and source ranges;
+function features work inside the prompt without interpreting generated commands.
+Static Ex command heads before register prompts use the existing embedded
+command parser, retaining hover and semantic highlighting for `:vs`, `:tabe`
+and other commands.
+Pinned Vim v9.2.1015 help and the mapping-expression-register oracle cover these
+entry forms; `<C-O>=` and command-line `<C-R><C-P>=` remain non-expression input.
+
 Function signature hovers now use `MarkupContent` instead of deprecated
 `MarkedStringWithLanguage`; Markdown code blocks preserve Vim highlighting
 and plain-text clients retain readable signatures and documentation.

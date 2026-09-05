@@ -263,7 +263,8 @@ Vim uses E117 for a direct function call whose name cannot be found. The
 language server checks unscoped lowercase calls and explicit script-local calls
 (`s:Name()` and `<SID>Name()`) against builtins, lexical callables and same-file
 function declarations. Script-local declarations may appear after the call.
-The same check applies to parsed mapping command bodies and `<expr>` mappings.
+The same check applies to parsed mapping command bodies, `<expr>` mappings and
+recognized interactive expression prompts such as `<C-R>=...<CR>`.
 For `nmap <leader>sr :call <SID>SessionReload()<CR>`, a missing declaration
 produces `Unknown function: s:SessionReload` on `SessionReload`; `<SID>` is a
 script namespace prefix, not part of the function identifier. Other undecoded

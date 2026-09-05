@@ -398,6 +398,7 @@ type Mapping struct {
 	RHS Span
 	// RHSExpression is populated only for <expr> mappings. RHS remains the
 	// authoritative raw span so callers can preserve Vim's exact mapping text.
+	// Expression-register payloads (<C-R>=...<CR>) use Command.Expressions.
 	RHSExpression *Expression
 	Query         bool
 	Clear         bool
