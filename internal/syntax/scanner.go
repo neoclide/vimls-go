@@ -1303,7 +1303,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				start = skipSpaceToken(file, start, end)
 			}
 		}
-		missingVim9ModifierCommand := !invalidModifierRange && baseDialect == Vim9 && len(parsedModifiers) > 0 && (start >= end || start < end && isCommentStart(file.Source, start, start, end, Vim9, vimdata.Command{}))
+		// A bare address is itself an operation, including after a modifier.
+		missingVim9ModifierCommand := !invalidModifierRange && commandRange.Start == commandRange.End && baseDialect == Vim9 && len(parsedModifiers) > 0 && (start >= end || start < end && isCommentStart(file.Source, start, start, end, Vim9, vimdata.Command{}))
 		missingVim9cmd := false
 		if !invalidModifierRange && len(parsedModifiers) > 0 && parsedModifiers[len(parsedModifiers)-1].Name == "vim9cmd" {
 			missingVim9cmd = start >= end || start < end && (file.Source[start] == '|' || isCommentStart(file.Source, start, start, end, baseDialect, vimdata.Command{}))

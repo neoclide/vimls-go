@@ -128,6 +128,14 @@ func TestVim9CommandModifierRequiresCommand(t *testing.T) {
 		diagnostic bool
 	}{
 		{
+			name: "modifier with address", source: "vim9script\nkeepjumps :3\necho 1\n",
+			parse: func(source string) *File { return Parse(source) },
+		},
+		{
+			name: "modifier with address and comment", source: "vim9script\nkeepjumps :3 # here\necho 1\n",
+			parse: func(source string) *File { return Parse(source) },
+		},
+		{
 			name:       "def physical line end",
 			source:     "def Func()\nleftabove\nvar after = 1\nenddef\n",
 			parse:      func(source string) *File { return Parse(source) },
