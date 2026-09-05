@@ -10,7 +10,7 @@ The supported `initializationOptions` object is:
 
 | Option | Type | Default | Behavior |
 | --- | --- | --- | --- |
-| `runtimepath` | string array | host Vim runtime discovery | Ordered runtime roots. An explicit empty array disables runtime indexing. Invalid, missing, unreadable, and duplicate realpaths are omitted. |
+| `runtimepath` | string array | Vim runtimepath discovery | Ordered runtime roots. If no usable roots remain at initialization, query Vim for its default runtimepath. Invalid, missing, unreadable, and duplicate realpaths are omitted. |
 | `configFiles` | string array | `[]` | Absolute glob patterns or paths for files treated as user configuration files (e.g. `["~/.vimrc", "~/.config/nvim/**/*.vim"]`). Supports `*`, `**`, and `~/`. Non-absolute patterns are ignored. Files outside runtime directories (`plugin/`, `autoload/`, etc.) or named `vimrc`/`init.vim` are treated as config files by default. |
 
 A complete initialization fragment is:
@@ -45,6 +45,23 @@ A complete initialization fragment is:
 Use URI-encoded absolute `file:` URIs for workspace folders and absolute
 filesystem paths for runtimepath. `workspaceFolders` takes precedence over the
 deprecated `rootUri` and `rootPath` initialize fields.
+
+When initialization supplies no usable runtimepath (including an omitted value
+or an empty array), the server looks up `vim` on `PATH` and runs:
+
+```sh
+vim -u NORC --noplugin -i NONE -es -V1 \
+  --cmd "echo json_encode(globpath(&runtimepath, '', 0, 1))|q"
+```
+
+`globpath()` returns an array with wildcard expansion, so paths containing
+commas or spaces are preserved through JSON. The server captures both output
+streams privately; with these flags Vim writes the JSON to stderr.
+`-u NORC --noplugin` avoids loading vimrc files and plugins, and `-i NONE`
+disables viminfo reads/writes. Discovery has a two-second timeout and a 64 KiB
+output limit. Missing Vim, command failure, timeout, or invalid output silently
+leaves runtimepath empty. Usable explicit client roots take precedence. This
+replaces guessing runtime directories from conventional installation paths.
 
 `configFiles` specifies absolute patterns for files treated as user configuration
 files rather than plugin scripts. Patterns must be absolute (or start with `~/`);
@@ -231,7 +248,8 @@ refresh watcher registration or trigger a watcher rebuild. Runtimepath files
 change when the client sends this request (or an explicit watched-file event).
 Discovery and read failures inside runtime roots are skipped as absent;
 directory discovery errors are included in the scan log.
-Send an empty array to disable runtime indexing and clear runtime help.
+After initialization, send an empty array to disable runtime indexing and clear
+runtime help. This explicit update does not rerun default Vim discovery.
 
 Global variable/function, autoload and complete `<Plug>(name)` mapping help from
 each root's `doc/*.txt` is loaded into memory by one background goroutine. Runtimepath changes reuse

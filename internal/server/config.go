@@ -1,14 +1,13 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"maps"
 	"os"
-	"path/filepath"
-	"runtime"
+	"os/exec"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -156,97 +155,43 @@ func normalizeRuntimePaths(paths []string) []string {
 	return result
 }
 
-func defaultRuntimePaths() []string {
-	return firstInstalledVimRuntimePaths(vimInstallCandidates(runtime.GOOS))
-}
+const defaultRuntimepathTimeout = 2 * time.Second
+const maxRuntimepathOutputBytes = 64 << 10
 
-// vimInstallCandidates returns conventional installation locations in
-// precedence order. Discovery uses only the first candidate containing a Vim
-// runtime; paths from different installations are never combined.
-func vimInstallCandidates(goos string) []string {
-	switch goos {
-	case "windows":
-		roots := make([]string, 0, 3)
-		for _, variable := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
-			if value := strings.TrimSpace(os.Getenv(variable)); value != "" {
-				roots = append(roots, filepath.Join(value, "Vim"))
-			}
-		}
-		if drive := strings.TrimSpace(os.Getenv("SystemDrive")); drive != "" {
-			roots = append(roots, filepath.Join(drive+string(filepath.Separator), "Vim"))
-		}
-		return roots
-	case "darwin":
-		return []string{
-			"/usr/local/share/vim",
-			"/opt/homebrew/share/vim",
-			"/usr/share/vim",
-			"/Applications/MacVim.app/Contents/Resources/vim/runtime",
-		}
-	default:
-		return []string{"/usr/local/share/vim", "/usr/share/vim"}
+// Vim writes :echo to stderr in silent Ex mode with verbosity enabled. Capture
+// both streams privately so warnings and failures cannot corrupt LSP stdout.
+func defaultRuntimePaths(ctx context.Context) []string {
+	ctx, cancel := context.WithTimeout(ctx, defaultRuntimepathTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, "vim", "-u", "NORC", "--noplugin", "-i", "NONE", "-es", "-V1",
+		"--cmd", "echo json_encode(globpath(&runtimepath, '', 0, 1))|q")
+	command.WaitDelay = 100 * time.Millisecond
+	var output runtimepathCommandOutput
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Run(); err != nil || ctx.Err() != nil || output.overflow {
+		return nil
 	}
-}
-
-func firstInstalledVimRuntimePaths(candidates []string) []string {
-	for _, installRoot := range candidates {
-		canonicalRoot, err := workspace.CanonicalPath(installRoot)
-		if err != nil {
-			continue
-		}
-		installRoot = canonicalRoot
-		if isInstalledVimRuntime(installRoot) {
-			return []string{installRoot}
-		}
-		entries, err := os.ReadDir(installRoot)
-		if err != nil {
-			// Default discovery is best-effort. Missing and unreadable install
-			// locations must not make language-server initialization fail.
-			continue
-		}
-		type versionDirectory struct {
-			version int
-			path    string
-		}
-		versions := make([]versionDirectory, 0)
-		for _, entry := range entries {
-			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "vim") {
-				continue
-			}
-			version, err := strconv.Atoi(strings.TrimPrefix(entry.Name(), "vim"))
-			if err != nil || version < 1 {
-				continue
-			}
-			path := filepath.Join(installRoot, entry.Name())
-			if isInstalledVimRuntime(path) {
-				versions = append(versions, versionDirectory{version: version, path: path})
-			}
-		}
-		if len(versions) == 0 {
-			continue
-		}
-		sort.Slice(versions, func(left, right int) bool { return versions[left].version > versions[right].version })
-		paths := make([]string, 0, 3)
-		vimfiles := filepath.Join(installRoot, "vimfiles")
-		if isDirectory(vimfiles) {
-			paths = append(paths, vimfiles)
-		}
-		paths = append(paths, versions[0].path)
-		if after := filepath.Join(vimfiles, "after"); isDirectory(after) {
-			paths = append(paths, after)
-		}
-		return normalizeRuntimePaths(paths)
+	var paths []string
+	if json.Unmarshal(bytes.TrimSpace(output.buffer.Bytes()), &paths) != nil {
+		return nil
 	}
-	return nil
+	return usableRuntimePaths(paths)
 }
 
-func isInstalledVimRuntime(path string) bool {
-	return isDirectory(path) && isDirectory(filepath.Join(path, "doc")) && isDirectory(filepath.Join(path, "syntax"))
+// Keep draining excessive command output while bounding retained memory; the
+// command deadline also bounds a process that never stops writing.
+type runtimepathCommandOutput struct {
+	buffer   bytes.Buffer
+	overflow bool
 }
 
-func isDirectory(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+func (output *runtimepathCommandOutput) Write(data []byte) (int, error) {
+	remaining := maxRuntimepathOutputBytes - output.buffer.Len()
+	if len(data) > remaining {
+		output.overflow = true
+	}
+	_, _ = output.buffer.Write(data[:min(len(data), remaining)])
+	return len(data), nil
 }
 
 // workspaceSettingsObject decodes a workspace-settings payload. Clients either

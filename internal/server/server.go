@@ -533,16 +533,16 @@ func implementedMethod(method string) bool {
 	}
 }
 
-func (s *Server) Initialize(_ context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
+func (s *Server) Initialize(ctx context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
 	encoding, protocolEncoding := negotiatePositionEncoding(params.Capabilities.General)
 	openClose := true
 	includeText := true
 	changeKind := protocol.TextDocumentSyncKindIncremental
-	runtimePaths, runtimepathConfigured, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
-	if !runtimepathConfigured {
-		runtimePaths = defaultRuntimePaths()
-	}
+	runtimePaths, _, runtimepathWarning := runtimepathFromOptions([]byte(params.InitializationOptions))
 	runtimePaths = usableRuntimePaths(runtimePaths)
+	if len(runtimePaths) == 0 {
+		runtimePaths = defaultRuntimePaths(ctx)
+	}
 	configFiles, _, configFilesWarning := configFilesFromOptions([]byte(params.InitializationOptions))
 	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration

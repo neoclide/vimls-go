@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,6 +17,63 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+// Keep initialization tests independent of the machine's Vim installation.
+// A copy of this test executable handles the exact Vim discovery invocation.
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "-u" {
+		want := []string{"-u", "NORC", "--noplugin", "-i", "NONE", "-es", "-V1", "--cmd", "echo json_encode(globpath(&runtimepath, '', 0, 1))|q"}
+		if !reflect.DeepEqual(os.Args[1:], want) {
+			os.Exit(2)
+		}
+		if trace := os.Getenv("VIMLS_TEST_RTP_TRACE"); trace != "" {
+			_ = os.WriteFile(trace, []byte("invoked"), 0o600)
+		}
+		switch os.Getenv("VIMLS_TEST_RTP_MODE") {
+		case "exit":
+			_, _ = fmt.Fprintln(os.Stderr, "Vim failed")
+			os.Exit(1)
+		case "invalid":
+			_, _ = fmt.Fprint(os.Stderr, "[broken")
+		case "oversize":
+			_, _ = fmt.Fprint(os.Stderr, strings.Repeat(" ", maxRuntimepathOutputBytes)+"[]")
+		case "timeout":
+			time.Sleep(10 * time.Second)
+		default:
+			value := os.Getenv("VIMLS_TEST_RTP_OUTPUT")
+			if value == "" {
+				value = "[]"
+			}
+			_, _ = fmt.Fprint(os.Stderr, value)
+		}
+		os.Exit(0)
+	}
+	directory, err := os.MkdirTemp("", "vimls-test-vim-")
+	if err != nil {
+		panic(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	data, err := os.ReadFile(executable)
+	if err != nil {
+		panic(err)
+	}
+	name := "vim"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(directory, name), data, 0o700); err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH")); err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(directory)
+	os.Exit(code)
+}
 
 func TestCompletionCapabilitiesFromClient(t *testing.T) {
 	enabled := true
@@ -154,75 +213,78 @@ func TestRuntimepathFromOptions(t *testing.T) {
 	}
 }
 
-func TestDefaultRuntimePathsUseOneInstallationAndItsNewestVersion(t *testing.T) {
-	first := t.TempDir()
-	second := t.TempDir()
-	for _, path := range []string{
-		filepath.Join(first, "vimfiles", "after"),
-		filepath.Join(first, "vim91", "doc"), filepath.Join(first, "vim91", "syntax"),
-		filepath.Join(first, "vim92", "doc"), filepath.Join(first, "vim92", "syntax"),
-		filepath.Join(second, "vim99", "doc"), filepath.Join(second, "vim99", "syntax"),
-	} {
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	firstReal, _ := filepath.EvalSymlinks(first)
-	want := []string{
-		filepath.Join(firstReal, "vimfiles"),
-		filepath.Join(firstReal, "vim92"),
-		filepath.Join(firstReal, "vimfiles", "after"),
-	}
-	if got := firstInstalledVimRuntimePaths([]string{filepath.Join(first, "missing"), first, second}); !reflect.DeepEqual(got, want) {
-		t.Fatalf("default runtimepath = %#v, want %#v", got, want)
-	}
-	direct := filepath.Join(t.TempDir(), "runtime")
-	for _, name := range []string{"doc", "syntax"} {
-		if err := os.MkdirAll(filepath.Join(direct, name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	directReal, _ := filepath.EvalSymlinks(direct)
-	if got := firstInstalledVimRuntimePaths([]string{direct}); !reflect.DeepEqual(got, []string{directReal}) {
-		t.Fatalf("direct runtimepath = %#v", got)
-	}
-}
-
-func TestVimInstallCandidatesCoverPlatformConventions(t *testing.T) {
-	t.Setenv("ProgramFiles", `C:\\Program Files`)
-	t.Setenv("ProgramFiles(x86)", `C:\\Program Files (x86)`)
-	t.Setenv("SystemDrive", "D:")
-	windows := vimInstallCandidates("windows")
-	if len(windows) != 3 || !strings.Contains(windows[0], "Program Files") || !strings.Contains(windows[2], "Vim") {
-		t.Fatalf("windows candidates = %#v", windows)
-	}
-	if got := vimInstallCandidates("darwin"); len(got) != 4 {
-		t.Fatalf("darwin candidates = %#v", got)
-	}
-	if got := vimInstallCandidates("linux"); len(got) != 2 {
-		t.Fatalf("unix candidates = %#v", got)
-	}
-}
-
-func TestDefaultRuntimePathsSkipUnreadableCandidate(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix directory permissions are not portable to Windows")
-	}
-	unreadable := t.TempDir()
-	if err := os.Chmod(unreadable, 0); err != nil {
+func TestDefaultRuntimePathsFromVimJSON(t *testing.T) {
+	root := t.TempDir()
+	comma := filepath.Join(root, "with,comma and spaces")
+	if err := os.Mkdir(comma, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
+	data, err := json.Marshal([]string{comma, root, comma, filepath.Join(root, "missing")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIMLS_TEST_RTP_OUTPUT", "\r\n"+string(data)+"\r\n")
+	expected := []string{mustWorkspaceCanonicalPath(t, comma), mustWorkspaceCanonicalPath(t, root)}
+	if got := defaultRuntimePaths(context.Background()); !reflect.DeepEqual(got, expected) {
+		t.Fatalf("runtimepath = %#v, want %#v", got, expected)
+	}
+}
 
-	installed := t.TempDir()
-	for _, name := range []string{"doc", "syntax"} {
-		if err := os.MkdirAll(filepath.Join(installed, name), 0o700); err != nil {
+func TestDefaultRuntimePathsFailSilently(t *testing.T) {
+	for _, mode := range []string{"exit", "invalid", "oversize", "timeout", "missing", "canceled"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("VIMLS_TEST_RTP_MODE", mode)
+			if mode == "missing" {
+				t.Setenv("PATH", t.TempDir())
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if mode == "canceled" {
+				cancel()
+			}
+			started := time.Now()
+			if paths := defaultRuntimePaths(ctx); len(paths) != 0 {
+				t.Fatalf("failure returned %#v", paths)
+			}
+			if time.Since(started) > defaultRuntimepathTimeout+time.Second {
+				t.Fatal("runtimepath command did not respect deadline")
+			}
+		})
+	}
+}
+
+func TestInitializeDefaultRuntimePaths(t *testing.T) {
+	root := t.TempDir()
+	data, err := json.Marshal([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIMLS_TEST_RTP_OUTPUT", string(data))
+	for _, options := range []string{"{}", "{\"runtimepath\":[]}", "{\"runtimepath\":[\"/missing-vimls-runtime\"]}"} {
+		s := New(nil, nil, io.Discard)
+		t.Cleanup(s.stopAnalysis)
+		if _, err := s.Initialize(context.Background(), &protocol.InitializeParams{InitializationOptions: []byte(options)}); err != nil {
 			t.Fatal(err)
 		}
+		if !reflect.DeepEqual(s.runtimePaths, []string{mustWorkspaceCanonicalPath(t, root)}) {
+			t.Fatalf("initialize %s runtimepath = %#v", options, s.runtimePaths)
+		}
 	}
-	installedReal, _ := filepath.EvalSymlinks(installed)
-	if got := firstInstalledVimRuntimePaths([]string{unreadable, installed}); !reflect.DeepEqual(got, []string{installedReal}) {
-		t.Fatalf("default runtimepath = %#v, want only %#v", got, installed)
+	// A usable client value takes precedence and does not invoke Vim.
+	trace := filepath.Join(t.TempDir(), "invoked")
+	t.Setenv("VIMLS_TEST_RTP_TRACE", trace)
+	explicit := t.TempDir()
+	options, _ := json.Marshal(map[string]any{"runtimepath": []string{explicit}})
+	s := New(nil, nil, io.Discard)
+	t.Cleanup(s.stopAnalysis)
+	if _, err := s.Initialize(context.Background(), &protocol.InitializeParams{InitializationOptions: options}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(s.runtimePaths, []string{mustWorkspaceCanonicalPath(t, explicit)}) {
+		t.Fatalf("explicit runtimepath = %#v", s.runtimePaths)
+	}
+	if _, err := os.Stat(trace); !os.IsNotExist(err) {
+		t.Fatalf("explicit runtimepath invoked Vim: %v", err)
 	}
 }
 

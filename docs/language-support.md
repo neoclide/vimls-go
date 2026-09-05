@@ -1,5 +1,10 @@
 # Language server features
 
+At initialization, an empty or unusable runtimepath falls back to a bounded Vim
+subprocess using `json_encode(globpath(&runtimepath, '', 0, 1))`. Discovery skips
+vimrc, plugins and viminfo; failures are silent. Explicit runtimepath updates
+remain authoritative, including an empty update that clears the runtime index.
+
 vimls-go supports Legacy Vim script and Vim9 script from Vim 9.1 through
 Vim v9.2.1015. Syntax added after v9.2.1015 is not supported until the project
 updates its pinned Vim version.
