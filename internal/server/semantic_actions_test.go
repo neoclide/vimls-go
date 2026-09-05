@@ -298,8 +298,8 @@ func TestSemanticTokensClassifyLegacyNamesAndPinnedBuiltins(t *testing.T) {
 	assertSemanticToken(t, tokens.Data, 1, 22, semanticNamespace, 0)
 	assertSemanticTokenHasModifiers(t, tokens.Data, 1, 24, semanticVariable, semanticDefaultLibrary)
 	assertSemanticToken(t, tokens.Data, 1, 32, semanticFunction, semanticDefaultLibrary)
-	assertSemanticToken(t, tokens.Data, 2, 9, semanticFunction, semanticDeclaration)
-	assertSemanticToken(t, tokens.Data, 3, 0, semanticFunction, 0)
+	assertSemanticToken(t, tokens.Data, 2, 9, semanticKeyword, semanticDeclaration)
+	assertSemanticToken(t, tokens.Data, 3, 0, semanticKeyword, 0)
 	assertSemanticToken(t, tokens.Data, 4, 10, semanticNamespace, 0)
 	assertSemanticToken(t, tokens.Data, 4, 12, semanticFunction, semanticDeclaration|semanticReadonly)
 	assertSemanticToken(t, tokens.Data, 4, 16, semanticParameter, semanticDeclaration)
@@ -307,6 +307,27 @@ func TestSemanticTokensClassifyLegacyNamesAndPinnedBuiltins(t *testing.T) {
 	assertSemanticToken(t, tokens.Data, 5, 9, semanticParameter, 0)
 	assertSemanticToken(t, tokens.Data, 6, 7, semanticNamespace, 0)
 	assertSemanticToken(t, tokens.Data, 6, 12, semanticFunction, semanticReadonly)
+}
+
+func TestSemanticTokensDistinguishLegacyUserCommandFromVim9FunctionCall(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		source    string
+		line      uint32
+		tokenType uint32
+	}{
+		{name: "legacy user command", source: "function! s:AddStrict() abort\n  CocRestart\nendfunction\n", line: 1, tokenType: semanticKeyword},
+		{name: "Vim9 function call", source: "vim9script\ndef AddStrict(): void\n  CocRestart()\nenddef\n", line: 2, tokenType: semanticFunction},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertSemanticToken(t, tokens.Data, test.line, 2, test.tokenType, 0)
+		})
+	}
 }
 
 func TestSemanticTokensClassifyMappingCommandBody(t *testing.T) {

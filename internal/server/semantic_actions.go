@@ -273,7 +273,7 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 			}
 		}
 		if command.UserCommand != nil && command.UserCommand.Name.End > command.UserCommand.Name.Start {
-			facts = append(facts, semanticFact{span: command.UserCommand.Name, tokenType: semanticFunction, modifiers: semanticDeclaration, priority: 3})
+			facts = append(facts, semanticFact{span: command.UserCommand.Name, tokenType: semanticKeyword, modifiers: semanticDeclaration, priority: 3})
 		}
 		if command.Function != nil {
 			for _, parameter := range command.Function.TypeParameters {
@@ -398,9 +398,6 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 }
 
 func semanticCommandFact(span syntax.Span, kind syntax.CommandKind) semanticFact {
-	if kind == syntax.CommandUser {
-		return semanticFact{span: span, tokenType: semanticFunction, priority: 1}
-	}
 	modifiers := uint32(0)
 	if kind == syntax.CommandBuiltin || kind == syntax.CommandBlockStart || kind == syntax.CommandBlockEnd {
 		modifiers = semanticDefaultLibrary

@@ -154,6 +154,9 @@ func TestCompletionExcludesRuntimePathOnlyItemsButKeepsWorkspaceItems(t *testing
 	if items := complete("echo Runtime\n", protocol.Position{Line: 0, Character: 12}); !hasCompletionLabel(items, "RuntimeOnly") {
 		t.Fatalf("default runtime completion = %#v", items)
 	}
+	if items := complete("Runtime\n", protocol.Position{Line: 0, Character: 7}); !hasCompletion(items, "RuntimeCommand", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("runtime user command completion missing or misclassified = %#v", items)
+	}
 	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"suggest":{"excludeRuntimePath":true}}}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +177,9 @@ func TestCompletionExcludesRuntimePathOnlyItemsButKeepsWorkspaceItems(t *testing
 	}
 	if items := complete("echo Runtime\n", protocol.Position{Line: 0, Character: 12}); !hasCompletionLabel(items, "RuntimeOnly") {
 		t.Fatalf("empty settings did not restore runtime completion = %#v", items)
+	}
+	if items := complete("Runtime\n", protocol.Position{Line: 0, Character: 7}); !hasCompletion(items, "RuntimeCommand", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("empty settings did not restore runtime command completion = %#v", items)
 	}
 }
 
@@ -389,16 +395,25 @@ func TestCompletionVim9DefStatementHeadIncludesCommandsAndFunctions(t *testing.T
 	}
 }
 
-func TestCompletionVim9DefStatementHeadIncludesUserCommands(t *testing.T) {
+func TestCompletionStatementHeadIncludesUserCommandsAsKeywords(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceFile(t, root, "plugin/commands.vim", "command! RunThing echo 1\n")
 	instance := newRootedServer(t, root)
-	source := "vim9script\ndef Main(): void\n  Ru\nenddef\n"
-	documentURI := uri.File(filepath.Join(root, "main.vim"))
-	instance.documents.Open(documentURI.String(), 1, source)
-	items := completionListRequest(t, instance, documentURI, 2, uint32(len("  Ru"))).Items
-	if !hasCompletion(items, "RunThing", protocol.CompletionItemKindFunction) {
-		t.Fatalf("user command completion missing in Vim9 def statement context: %#v", items)
+	for _, test := range []struct {
+		name, source string
+		line         uint32
+	}{
+		{name: "legacy function", source: "function! s:Main() abort\n  Ru\nendfunction\n", line: 1},
+		{name: "Vim9 def", source: "vim9script\ndef Main(): void\n  Ru\nenddef\n", line: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			documentURI := uri.File(filepath.Join(root, strings.ReplaceAll(test.name, " ", "-")+".vim"))
+			instance.documents.Open(documentURI.String(), 1, test.source)
+			items := completionListRequest(t, instance, documentURI, test.line, uint32(len("  Ru"))).Items
+			if !hasCompletion(items, "RunThing", protocol.CompletionItemKindKeyword) {
+				t.Fatalf("user command completion missing or misclassified: %#v", items)
+			}
+		})
 	}
 }
 
