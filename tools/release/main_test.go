@@ -159,3 +159,31 @@ func TestReleaseAssetsPreserveDownloadContract(t *testing.T) {
 		t.Fatal("prerelease tags must not publish stable releases")
 	}
 }
+
+func TestReleaseNotesSelectExactVersion(t *testing.T) {
+	changelog := "# Changelog\n\n## v0.2.0\nNewer.\n\n## v0.1.0 — unreleased\n\nInitial release.\n\n### Features\n- [Support](docs/language-support.md)\n\n## v0.0.1\nOlder.\n"
+	want := "Initial release.\n\n### Features\n- [Support](https://github.com/neoclide/vimls-go/blob/v0.1.0/docs/language-support.md)\n"
+	for _, input := range []string{changelog, strings.ReplaceAll(changelog, "\n", "\r\n")} {
+		got, err := releaseNotes(input, "v0.1.0")
+		if err != nil || got != want {
+			t.Fatalf("releaseNotes = %q, %v; want %q", got, err, want)
+		}
+	}
+	if got, err := releaseNotes("## v0.1.0-rc.1\nCandidate.\n", "v0.1.0-rc.1"); err != nil || got != "Candidate.\n" {
+		t.Fatalf("prerelease notes = %q, %v", got, err)
+	}
+}
+
+func TestReleaseNotesRejectMissingEmptyOrDuplicateVersion(t *testing.T) {
+	for _, input := range []string{
+		"# Changelog\n",
+		"## v0.1.01\nWrong version.\n",
+		"## v0.1.0-rc.1\nNot the stable version.\n",
+		"## v0.1.0\n\n## v0.0.1\nOlder.\n",
+		"## v0.1.0\nOne.\n## v0.1.0 — 2026-09-06\nTwo.\n",
+	} {
+		if _, err := releaseNotes(input, "v0.1.0"); err == nil {
+			t.Fatalf("accepted invalid changelog %q", input)
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -34,6 +35,7 @@ func main() {
 	version := flag.String("version", "", "release tag, for example v1.0.0")
 	epoch := flag.Int64("epoch", 0, "SOURCE_DATE_EPOCH timestamp")
 	output := flag.String("output-dir", "dist", "archive output directory")
+	notesOutput := flag.String("notes-output", "", "optional destination for this version's CHANGELOG release notes")
 	flag.Parse()
 	if !regexp.MustCompile(`^v[0-9][0-9A-Za-z.+-]*$`).MatchString(*version) || *epoch <= 0 {
 		fatalf("-version vX.Y.Z and a positive -epoch are required")
@@ -45,6 +47,19 @@ func main() {
 	documents, err := releaseDocuments(".")
 	if err != nil {
 		fatalf("%v", err)
+	}
+	if *notesOutput != "" {
+		for _, document := range documents {
+			if document.name == "CHANGELOG.md" {
+				notes, err := releaseNotes(string(document.data), *version)
+				if err != nil {
+					fatalf("%v", err)
+				}
+				if err := os.WriteFile(*notesOutput, []byte(notes), 0o644); err != nil {
+					fatalf("%v", err)
+				}
+			}
+		}
 	}
 	var assets []string
 	for _, target := range targets {
@@ -61,6 +76,36 @@ func main() {
 	if err := writeChecksums(filepath.Join(*output, "checksums.txt"), assets); err != nil {
 		fatalf("%v", err)
 	}
+}
+
+// releaseNotes selects an exact version from our "## vX.Y.Z" changelog format.
+// Date/status suffixes on the heading are not part of the published notes.
+func releaseNotes(changelog, version string) (string, error) {
+	var body []string
+	found, selected := false, false
+	for _, line := range strings.Split(strings.ReplaceAll(changelog, "\r\n", "\n"), "\n") {
+		if strings.HasPrefix(line, "## ") {
+			fields := strings.Fields(line)
+			selected = len(fields) > 1 && fields[1] == version
+			if selected {
+				if found {
+					return "", fmt.Errorf("duplicate CHANGELOG section for %s", version)
+				}
+				found = true
+			}
+			continue
+		}
+		if selected {
+			body = append(body, line)
+		}
+	}
+	notes := strings.TrimSpace(strings.Join(body, "\n"))
+	if !found || notes == "" {
+		return "", fmt.Errorf("missing or empty CHANGELOG section for %s", version)
+	}
+	// Repository-relative documentation links need an explicit tag on a Release page.
+	notes = strings.ReplaceAll(notes, "](docs/", "](https://github.com/neoclide/vimls-go/blob/"+version+"/docs/")
+	return notes + "\n", nil
 }
 
 func buildBinary(version string, target releaseTarget) ([]byte, error) {

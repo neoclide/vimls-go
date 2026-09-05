@@ -1,9 +1,3 @@
-# Project-local Codex configuration is intentionally versioned.
-!.codex/
-!.codex/config.toml
-!.codex/agents/
-!.codex/agents/*.toml
-
 /bin/
 /coverage.out
 /.test-tools/

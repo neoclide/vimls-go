@@ -427,6 +427,14 @@ generate assets locally with:
 go run ./tools/release -version vX.Y.Z -epoch "$(git log -1 --format=%ct)"
 ```
 
+The release workflow writes assets and notes under `$RUNNER_TEMP`, keeping
+generated files outside the checkout so they do not set `vcs.modified=true`.
+`-notes-output <path>` extracts the exact `## vX.Y.Z` section from CHANGELOG.md
+(heading date/status suffixes are allowed), excluding other versions. Missing,
+empty or duplicate sections fail the build; prerelease tags require their own
+matching section. Documentation links in the notes point to the released tag.
+The upload step fails if its asset glob matches no files.
+
 A release report records exact Go and Vim versions, commands, test counts,
 race/fuzz duration, benchmark runner and deltas, supported capabilities,
 remaining limitations, binary hashes, and smoke-tested client configurations.

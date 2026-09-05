@@ -3,8 +3,8 @@
 ## v0.1.0 — unreleased
 
 Initial release of vimls-go, a language server for Legacy Vim script and Vim9
-script. Syntax and metadata are pinned through Vim v9.2.1015. This release is
-still in preparation; see [candidate validation](docs/release-candidate.md).
+script. Syntax and metadata are pinned through Vim v9.2.1015. See
+[candidate validation](docs/release-candidate.md) for validation evidence.
 
 ### Language support
 

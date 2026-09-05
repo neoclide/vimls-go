@@ -26,44 +26,32 @@ jobs:
 
       - name: Determine release version
         id: vars
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG="${{ github.ref_name }}"
-          if [[ ! "$TAG" =~ ^v ]]; then
-            TAG="v${TAG}"
-          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Generate release notes from git log
-        run: |
-          TAG="${{ github.ref_name }}"
-          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
-          if [ -n "$PREV_TAG" ]; then
-            RANGE="${PREV_TAG}..${TAG}"
-          else
-            RANGE="${TAG}"
-          fi
-          echo "## Changes" > release_notes.md
-          git log "$RANGE" --format="* %s (%h)" --no-merges -n 30 >> release_notes.md
 
       - name: Run checks and tests
         run: |
           go vet -mod=readonly ./...
           go test -mod=readonly -count=1 ./...
 
-      - name: Build executable binaries and archives
+      - name: Build binaries, archives and CHANGELOG release notes
         env:
           TAG: ${{ steps.vars.outputs.tag }}
         run: |
           set -euo pipefail
-          go run -mod=readonly ./tools/release -version "$TAG" -epoch "$(git log -1 --format=%ct)" -output-dir dist
+          go run -mod=readonly ./tools/release -version "$TAG" -epoch "$(git log -1 --format=%ct)" \
+            -output-dir "$RUNNER_TEMP/vimls-dist" -notes-output "$RUNNER_TEMP/vimls-release-notes.md"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: ${{ github.ref_name }}
-          body_path: release_notes.md
+          body_path: ${{ runner.temp }}/vimls-release-notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
           files: |
-            dist/*
+            ${{ runner.temp }}/vimls-dist/*
