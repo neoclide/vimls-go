@@ -33,9 +33,12 @@ func TestLookupFunctionMetadata(t *testing.T) {
 	if function, ok := LookupFunction("copy"); !ok || function.ReturnHelper != "ret_copy" {
 		t.Fatalf("copy return metadata = %#v, %v", function, ok)
 	}
+	if function, ok := LookupFunction("escape"); !ok || function.Signature != "escape({string}, {chars})" {
+		t.Fatalf("escape signature metadata = %#v, %v", function, ok)
+	}
 	for _, test := range tests {
 		function, ok := LookupFunction(test.name)
-		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType || len(function.ArgumentChecks) != test.checkCount || function.ArgumentChecks[0] != test.firstCheck || function.ArgumentChecks[len(function.ArgumentChecks)-1] != test.lastCheck || function.Documentation == "" || function.DocumentationSource == "" {
+		if !ok || function.Name != test.name || function.MinArgs != test.min || function.MaxArgs != test.max || function.ReturnType != test.returnType || len(function.ArgumentChecks) != test.checkCount || function.ArgumentChecks[0] != test.firstCheck || function.ArgumentChecks[len(function.ArgumentChecks)-1] != test.lastCheck {
 			t.Fatalf("LookupFunction(%q) = %#v, %v", test.name, function, ok)
 		}
 	}
@@ -52,9 +55,6 @@ func TestLookupFunctionMetadata(t *testing.T) {
 	for index, function := range builtinFunctions {
 		if function.Name == "" {
 			t.Fatalf("builtinFunctions[%d] has empty name", index)
-		}
-		if function.Documentation == "" || function.DocumentationSource == "" {
-			t.Fatalf("%s documentation/source = %q/%q", function.Name, function.Documentation, function.DocumentationSource)
 		}
 		if index > 0 && function.Name <= builtinFunctions[index-1].Name {
 			t.Fatalf("builtinFunctions unsorted at %d: %q, %q", index-1, builtinFunctions[index-1].Name, function.Name)

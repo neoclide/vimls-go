@@ -212,7 +212,29 @@ root. File watchers cover workspace roots only; runtimepath changes do not
 refresh watcher registration or trigger a watcher rebuild. Runtimepath files
 change when the client sends this request (or an explicit watched-file event).
 Discovery and read failures inside runtime roots are skipped silently as absent.
-Send an empty array to disable runtime indexing.
+Send an empty array to disable runtime indexing and clear runtime help.
+
+Global variable/function, autoload and complete `<Plug>(name)` mapping help from
+each root's `doc/*.txt` is loaded into memory by one background goroutine. Runtimepath changes reuse
+completed and in-flight work for retained roots, read only added roots, discard
+removed roots, and apply the new ordering to duplicate help names. The first
+nonempty entry in runtimepath/file/line order wins. No-op updates perform no
+help I/O. Retained help files are not polled or watched; remove/re-add the root
+or restart to reload them.
+
+Hover, built-in completion resolve and built-in signature help only look up this
+cache and never read or parse help files. Hover appends runtime help after the
+existing signature/comment documentation as a separate Markdown item; plaintext
+clients receive a separated plaintext section. While loading, requests return
+whatever documentation is already available. New roots become available as
+their scans finish. Removal takes effect immediately.
+
+Unreadable, non-UTF-8, oversized or failed help files are skipped and logged;
+an unexpected parser panic is isolated to that file. The scan continues and
+shutdown cancels and joins the worker. Help collection accepts regular files up
+to 16 MiB each, at most 20,000 cached files, and conservatively accounts for at
+most 256 MiB of cached entry text and overhead. It executes no Vim scripts and
+does not depend on generated `tags` files.
 
 Standard `workspace/didChangeWorkspaceFolders` changes workspace roots.
 Standard `workspace/didChangeWatchedFiles` changes indexed `.vim` files after

@@ -26,14 +26,13 @@ const (
 // BuiltinFunction describes one builtin function from the pinned Vim source.
 // MaxArgs is -1 for Vim's variadic functions (f_max_argc == VARGS).
 type BuiltinFunction struct {
-	Name                string
-	MinArgs             int
-	MaxArgs             int
-	MethodArgument      int // one-based receiver position; zero disables method syntax
-	ReturnType          FunctionReturnType
-	ReturnHelper        string // exact evalfunc.c ret_* helper
-	Documentation       string
-	DocumentationSource string
+	Name           string
+	Signature      string // exact help signature lines without prose
+	MinArgs        int
+	MaxArgs        int
+	MethodArgument int // one-based receiver position; zero disables method syntax
+	ReturnType     FunctionReturnType
+	ReturnHelper   string // exact evalfunc.c ret_* helper
 	// ArgumentChecks preserves Vim's evalfunc.c checker names in argument
 	// order. A nil slice means Vim has no static checker for this function.
 	ArgumentChecks []string

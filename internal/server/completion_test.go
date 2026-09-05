@@ -1478,14 +1478,15 @@ func TestCompletionResolveIsStatelessAndPreservesFields(t *testing.T) {
 		t.Fatalf("label-only resolve added detail: %#v", resolved)
 	}
 	for _, test := range []struct {
-		label string
-		kind  completionResolveKind
-		name  string
+		label         string
+		kind          completionResolveKind
+		name          string
+		documentation bool
 	}{
 		{label: "abs", kind: completionResolveBuiltinFunction, name: "abs"},
-		{label: "&ignorecase", kind: completionResolveOption, name: "ignorecase"},
-		{label: "v:count", kind: completionResolveVariable, name: "v:count"},
-		{label: "echo", kind: completionResolveCommand, name: "echo"},
+		{label: "&ignorecase", kind: completionResolveOption, name: "ignorecase", documentation: true},
+		{label: "v:count", kind: completionResolveVariable, name: "v:count", documentation: true},
+		{label: "echo", kind: completionResolveCommand, name: "echo", documentation: true},
 	} {
 		resolved, err = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: test.label, Data: completionResolveTargetData(test.kind, test.name)})
 		if err != nil || resolved == nil {
@@ -1495,8 +1496,11 @@ func TestCompletionResolveIsStatelessAndPreservesFields(t *testing.T) {
 		if !ok || detail == "" {
 			t.Fatalf("resolve %s detail = %q, %t", test.label, detail, ok)
 		}
-		if resolved.Documentation == nil {
+		if test.documentation && resolved.Documentation == nil {
 			t.Fatalf("resolve %s documentation is missing", test.label)
+		}
+		if !test.documentation && resolved.Documentation != nil {
+			t.Fatalf("resolve %s documentation = %#v", test.label, resolved.Documentation)
 		}
 	}
 	resolved, _ = instance.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "&ignorecase", Data: completionResolveTargetData(completionResolveOption, "ignorecase")})

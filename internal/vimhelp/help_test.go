@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestToMarkdownPreservesAngleBracketExamples(t *testing.T) {
+	source := "Example: >html\n  <meta>\n  <C-D>\n  <>\n  <\nFollowing prose."
+	want := "Example:\n```html\n  <meta>\n  <C-D>\n  <>\n```\n\nFollowing prose."
+	if got := ToMarkdown(source); got != want {
+		t.Fatalf("Markdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownTabIndentedGreaterThanIsNotExampleStart(t *testing.T) {
+	// v9.2.1015 runtime/syntax/help.vim permits a space, not a tab,
+	// before the marker. options.txt uses tab-indented > as literal text.
+	if got := ToMarkdown("Display:\n\t>\n\t<>\nFollowing prose."); strings.Contains(got, "```") {
+		t.Fatalf("spurious example: %s", got)
+	}
+}
+
 func TestParseTags(t *testing.T) {
 	tags, err := ParseTags([]byte("foo()\tbuiltin.txt\t/*foo()*\n'bar'\toptions.txt\t/*'bar'*\n"))
 	if err != nil {

@@ -582,7 +582,7 @@ func TestHoverShowsVim9HeredocListStringType(t *testing.T) {
 	}
 }
 
-func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
+func TestHoverShowsStructuredBuiltinReturnType(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho argc()\n")
 	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
@@ -604,7 +604,7 @@ func TestHoverShowsPinnedBuiltinReturnType(t *testing.T) {
 	}
 }
 
-func TestHoverShowsBuiltinFunctionSignatureBlock(t *testing.T) {
+func TestHoverShowsStructuredBuiltinFunctionSignature(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\necho getcompletion('c', 'color')\n")
 	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
@@ -617,82 +617,12 @@ func TestHoverShowsBuiltinFunctionSignatureBlock(t *testing.T) {
 		t.Fatal("builtin hover is nil")
 	}
 	slice, ok := hover.Contents.(protocol.MarkedStringSlice)
-	if !ok || len(slice) != 2 {
+	if !ok || len(slice) != 1 {
 		t.Fatalf("builtin hover = %#v", hover)
 	}
 	first, ok := slice[0].(*protocol.MarkedStringWithLanguage)
 	if !ok || first.Language != "vim" || first.Value != "getcompletion({pat}, {type} [, {filtered}])" {
 		t.Fatalf("first = %#v", slice[0])
-	}
-	second, ok := slice[1].(protocol.String)
-	if !ok || !strings.HasPrefix(string(second), "Return a list of command-line completion matches.") {
-		t.Fatalf("second = %#v", slice[1])
-	}
-}
-
-func TestFunctionHoverContents(t *testing.T) {
-	tests := []struct {
-		name       string
-		doc        string
-		wantSig    string
-		wantDoc    string
-		wantLength int
-	}{
-		{
-			name:       "getcompletion",
-			doc:        "getcompletion({pat}, {type} [, {filtered}])\nReturn a list of matches.",
-			wantSig:    "getcompletion({pat}, {type} [, {filtered}])",
-			wantDoc:    "Return a list of matches.",
-			wantLength: 2,
-		},
-		{
-			name:       "cursor",
-			doc:        "cursor({lnum}, {col} [, {off}])\ncursor({list})\nPositions the cursor.",
-			wantSig:    "cursor({lnum}, {col} [, {off}])\ncursor({list})",
-			wantDoc:    "Positions the cursor.",
-			wantLength: 2,
-		},
-		{
-			name:       "empty doc",
-			doc:        "",
-			wantSig:    "empty doc()",
-			wantLength: 1,
-		},
-		{
-			name:       "obsolete without signature",
-			doc:        "Obsolete name: buffer_exists().",
-			wantSig:    "obsolete without signature()",
-			wantDoc:    "Obsolete name: buffer_exists().",
-			wantLength: 2,
-		},
-		{
-			name:       "signature only",
-			doc:        "signature only()",
-			wantSig:    "signature only()",
-			wantLength: 1,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			contents := functionHoverContents(tt.name, tt.doc, true)
-			got, ok := contents.(protocol.MarkedStringSlice)
-			if !ok {
-				t.Fatalf("functionHoverContents = %#v", contents)
-			}
-			if len(got) != tt.wantLength {
-				t.Fatalf("functionHoverContents len = %d, want %d", len(got), tt.wantLength)
-			}
-			first, ok := got[0].(*protocol.MarkedStringWithLanguage)
-			if !ok || first.Language != "vim" || first.Value != tt.wantSig {
-				t.Fatalf("first = %#v, want sig %q", got[0], tt.wantSig)
-			}
-			if tt.wantDoc != "" {
-				second, ok := got[1].(protocol.String)
-				if !ok || string(second) != tt.wantDoc {
-					t.Fatalf("second = %#v, want doc %q", got[1], tt.wantDoc)
-				}
-			}
-		})
 	}
 }
 
@@ -2120,9 +2050,9 @@ func TestHoverKeymapDetails(t *testing.T) {
 			},
 		},
 		{
-			name:      "mapping special key <Plug>",
+			name:      "complete <Plug> mapping",
 			character: 20,
-			wantRange: navigationRange(0, 18, 24),
+			wantRange: navigationRange(0, 18, 51),
 			contains: []string{
 				"**<Plug>** A special key name for internal mappings.",
 				"not to be matched with any key sequence",

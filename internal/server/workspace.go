@@ -195,6 +195,7 @@ func (s *Server) setRuntimePaths(paths []string) {
 	defer s.publishMu.Unlock()
 	s.workspaceMu.Lock()
 	s.runtimePaths = append([]string(nil), paths...)
+	s.updateRuntimeHelpLocked()
 	s.workspaceResolver = nil
 	s.resetWorkspaceGraphLocked()
 	s.workspaceRevision++
@@ -1482,6 +1483,7 @@ func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRunt
 	current := generation == s.runtimepathGeneration && s.analysisContext.Err() == nil && ctx.Err() == nil
 	if current {
 		s.runtimePaths = append([]string(nil), paths...)
+		s.updateRuntimeHelpLocked()
 		s.workspaceResolver = nil
 		s.resetWorkspaceGraphLocked()
 		s.workspaceRevision++
@@ -1703,6 +1705,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 		return false
 	}
 	s.runtimePaths = append([]string(nil), newPaths...)
+	s.updateRuntimeHelpLocked()
 	s.workspaceResolver = resolver
 	s.workspaceIndex.SetRuntimePaths(newPaths)
 	for _, path := range runtimeColors {

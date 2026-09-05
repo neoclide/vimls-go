@@ -14,6 +14,54 @@ import (
 
 var caseInsensitiveFS = runtime.GOOS == "windows"
 
+// DiscoverRuntimeHelpFiles returns canonical, regular doc/*.txt files in root
+// order and filename order. It does not recurse or require generated tags.
+func DiscoverRuntimeHelpFiles(ctx context.Context, roots []string) ([]string, []string, error) {
+	var paths, warnings []string
+	seen := make(map[string]bool)
+	for _, root := range roots {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if _, err := os.Stat(root); err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: %v", root, err))
+			continue
+		}
+		dir := filepath.Join(root, "doc")
+		entries, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: %v", dir, err))
+			continue
+		}
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".txt") {
+				continue
+			}
+			path, err := filepath.EvalSymlinks(filepath.Join(dir, entry.Name()))
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s: %v", entry.Name(), err))
+				continue
+			}
+			info, err := os.Stat(path)
+			if err != nil || !info.Mode().IsRegular() {
+				warnings = append(warnings, fmt.Sprintf("%s: not a readable regular help file", path))
+				continue
+			}
+			if !seen[path] {
+				paths = append(paths, path)
+				seen[path] = true
+			}
+		}
+	}
+	return paths, warnings, nil
+}
+
 var errDiscoveryLimit = errors.New("workspace file discovery limit reached")
 
 var vimRuntimeDirectories = map[string]struct{}{

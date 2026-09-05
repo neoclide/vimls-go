@@ -41,7 +41,7 @@ metadata-check:
 	cmp internal/vimdata/options_generated.go "$$metadata_tmp/options_generated.go"; \
 	cmp internal/vimdata/options_set_generated.vim "$$metadata_tmp/options_set_generated.vim"; \
 	cmp internal/vimdata/variables_generated.go "$$metadata_tmp/variables_generated.go"
-	$(GO) test $(GO_MOD) ./internal/vimdata ./tools/genmetadata ./tools/internal/vimhelp
+	$(GO) test $(GO_MOD) ./internal/vimdata ./tools/genmetadata ./internal/vimhelp
 
 oracle:
 	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim v9.2.1015 binary" >&2; exit 1)

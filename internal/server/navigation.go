@@ -761,7 +761,7 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 						return nil, err
 					} else if current {
 						return &protocol.Hover{
-							Contents: contents,
+							Contents: s.appendRuntimeHelp(document, contents, kind),
 							Range:    &rangeValue,
 						}, nil
 					} else if attempt == 1 {
@@ -781,13 +781,17 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 						"function not found in workspace index",
 					})
 				}
-				return nil, nil
+				return s.localHoverContents(ctx, document, nil)
 			} else if attempt == 1 {
 				return nil, protocol.ErrContentModified
 			}
 			continue
 		}
-		return s.localHover(ctx, document)
+		hover, err := s.localHover(ctx, document)
+		if hover != nil || err != nil {
+			return hover, err
+		}
+		return s.localHoverContents(ctx, document, nil)
 	}
 	return nil, protocol.ErrContentModified
 }
@@ -894,7 +898,7 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			}
 			return nil, nil
 		}
-		return s.localHoverContents(ctx, document, s.builtinFunctionHover(function.Name, function.Documentation))
+		return s.localHoverContents(ctx, document, s.builtinFunctionHover(function))
 	}
 	declaration := document.declaration
 	if isFunctionSymbolKind(declaration.Kind) {
@@ -927,28 +931,6 @@ func optionBuildRequirement(condition string, features []string) string {
 	return ""
 }
 
-func functionHoverContents(name string, documentation string, markdown bool) protocol.HoverContents {
-	lines := strings.Split(documentation, "\n")
-	var sigs []string
-	idx := 0
-	for idx < len(lines) {
-		trimmed := strings.TrimSpace(lines[idx])
-		if strings.HasPrefix(trimmed, name+"(") {
-			sigs = append(sigs, trimmed)
-			idx++
-		} else {
-			break
-		}
-	}
-	signature := name + "()"
-	rest := documentation
-	if len(sigs) > 0 {
-		signature = strings.Join(sigs, "\n")
-		rest = strings.TrimSpace(strings.Join(lines[idx:], "\n"))
-	}
-	return signatureHoverContents(signature, rest, markdown)
-}
-
 func signatureHoverContents(signature string, documentation string, markdown bool) protocol.HoverContents {
 	if !markdown {
 		value := signature
@@ -974,6 +956,10 @@ func (s *Server) localHoverContents(ctx context.Context, document *navigationDoc
 	if err := document.checkCurrent(ctx); err != nil {
 		return nil, err
 	}
+	contents = s.appendRuntimeHelp(document, contents, "")
+	if contents == nil {
+		return nil, nil
+	}
 	return &protocol.Hover{Contents: contents, Range: &rangeValue}, nil
 }
 
@@ -985,8 +971,12 @@ func (s *Server) signatureHover(signature string, documentation string) protocol
 	return signatureHoverContents(signature, documentation, s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown)
 }
 
-func (s *Server) builtinFunctionHover(name string, documentation string) protocol.HoverContents {
-	return functionHoverContents(name, documentation, s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown)
+func (s *Server) builtinFunctionHover(function vimdata.BuiltinFunction) protocol.HoverContents {
+	signature := function.Signature
+	if signature == "" {
+		signature, _ = formatBuiltinFunctionSignature(function)
+	}
+	return s.signatureHover(signature, "")
 }
 
 func (s *Server) hoverContent(value string) *protocol.MarkupContent {
@@ -1157,6 +1147,13 @@ func mappingHoverAt(file *syntax.File, offset int) (syntax.Span, []string, bool)
 		}
 		for _, span := range []syntax.Span{mapping.LHS, mapping.RHS} {
 			if spanContains(span, offset) {
+				if plugSpan, ok := mappingPlugAt(file.Source, span, offset); ok {
+					item, _ := vimdata.LookupMappingItem("<Plug>")
+					foundSpan = plugSpan
+					foundLines = formatMappingItemHover(item)
+					found = true
+					return
+				}
 				if keySpan, keyText, ok := mappingKeyAt(file.Source, span, offset); ok {
 					if item, ok := vimdata.LookupMappingItem(keyText); ok {
 						foundSpan = keySpan
@@ -1177,6 +1174,30 @@ func formatMappingItemHover(item vimdata.MappingItem) []string {
 		lines = append(lines, "", item.Documentation)
 	}
 	return lines
+}
+
+func mappingPlugAt(source string, container syntax.Span, offset int) (syntax.Span, bool) {
+	if container.Start < 0 || container.End > len(source) || offset < container.Start || offset >= container.End {
+		return syntax.Span{}, false
+	}
+	for start := container.Start; start < container.End; start++ {
+		if start+len("<Plug>(") > container.End || !strings.EqualFold(source[start:start+len("<Plug>(")], "<Plug>(") {
+			continue
+		}
+		end := start + len("<Plug>(")
+		for end < container.End && source[end] != ')' && !strings.ContainsRune(" \t\r\n(", rune(source[end])) {
+			end++
+		}
+		if end == start+len("<Plug>(") || end >= container.End || source[end] != ')' {
+			continue
+		}
+		span := syntax.Span{Start: start, End: end + 1}
+		if spanContains(span, offset) {
+			return span, true
+		}
+		start = end
+	}
+	return syntax.Span{}, false
 }
 
 func mappingKeyAt(source string, container syntax.Span, offset int) (syntax.Span, string, bool) {

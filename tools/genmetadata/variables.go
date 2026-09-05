@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/neoclide/vimls-go/tools/internal/vimhelp"
+	"github.com/neoclide/vimls-go/internal/vimhelp"
 )
 
 var variablePattern = regexp.MustCompile(`\{VV_NAME\("([^"]+)",\s*(VAR_[A-Z]+)\),\s*([^,]+),\s*([^}]+)\}`)

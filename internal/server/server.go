@@ -17,6 +17,7 @@ import (
 	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/vimhelp"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
@@ -131,6 +132,8 @@ type serverTestHooks struct {
 	beforeWatchedFileProcess func(string)
 	beforeWatchedFileRead    func(string)
 	beforeWatchedFileInstall func(string)
+	beforeRuntimeHelpRead    func(context.Context, string)
+	beforeRuntimeHelpParse   func(string)
 
 	beforeWorkspaceIdentityCheck func()
 	discoverWorkspaceFiles       func(context.Context, string, int) ([]string, bool, error)
@@ -221,6 +224,13 @@ type Server struct {
 	runtimepathGeneration       uint64
 	runtimepathCancel           context.CancelFunc
 	runtimepathWG               sync.WaitGroup
+	runtimeHelp                 map[string]vimhelp.SymbolDocumentation
+	runtimeHelpRoots            map[string][]string
+	runtimeHelpFiles            map[string][]vimhelp.SymbolDocumentation
+	runtimeHelpRunning          bool
+	runtimeHelpRoot             string
+	runtimeHelpCancel           context.CancelFunc
+	runtimeHelpWG               sync.WaitGroup
 	workspaceIndex              *workspace.Index
 	workspaceGraph              *workspace.ImportGraph
 	workspaceGraphView          workspace.ImportGraphSnapshot
@@ -1845,6 +1855,7 @@ func (s *Server) stopAnalysis() {
 		}
 		s.workspaceWG.Wait()
 		s.runtimepathWG.Wait()
+		s.runtimeHelpWG.Wait()
 		waitGroupAddBarrier(&s.watchMu)
 		s.watchWG.Wait()
 	})

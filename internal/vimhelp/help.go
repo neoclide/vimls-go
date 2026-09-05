@@ -1,5 +1,5 @@
-// Package vimhelp extracts selected entries from Vim runtime help and converts
-// their lightweight help markup to Markdown for generated language data.
+// Package vimhelp extracts entries from Vim runtime help and converts their
+// lightweight help markup to Markdown for runtime and generated documentation.
 package vimhelp
 
 import (
@@ -13,7 +13,7 @@ import (
 var (
 	helpDefinition = regexp.MustCompile(`\*[^*[:space:]]+\*`)
 	helpLink       = regexp.MustCompile(`\|([^|\r\n]+)\|`)
-	exampleStart   = regexp.MustCompile(`(?:^|[[:space:]])>([A-Za-z0-9_-]*)$`)
+	exampleStart   = regexp.MustCompile(`(?:^| )>([A-Za-z0-9_-]*)$`)
 )
 
 // Documentation is one generated Markdown help entry and its Vim runtime help
@@ -207,7 +207,7 @@ func ToMarkdown(source string) string {
 		line := strings.TrimRight(original, " \t\r")
 		if inExample {
 			trimmedLeft := strings.TrimLeft(line, " \t")
-			if strings.HasPrefix(trimmedLeft, "<") {
+			if exampleEndMarker(line) {
 				output = append(output, "```")
 				inExample = false
 				line = strings.TrimPrefix(trimmedLeft, "<")
@@ -222,13 +222,14 @@ func ToMarkdown(source string) string {
 
 		line = helpDefinition.ReplaceAllString(line, "")
 		line = helpLink.ReplaceAllString(line, "`$1`")
+		exampleLine := line
 		line = strings.TrimSpace(line)
 		if line == "" {
 			output = append(output, "")
 			continue
 		}
-		if match := exampleStart.FindStringSubmatch(line); match != nil {
-			marker := match[0]
+		if match := exampleStart.FindStringSubmatch(exampleLine); match != nil {
+			marker := strings.TrimSpace(match[0])
 			line = strings.TrimSpace(strings.TrimSuffix(line, marker))
 			if line != "" {
 				output = append(output, line)
@@ -267,4 +268,14 @@ func ToMarkdown(source string) string {
 		compacted = compacted[:len(compacted)-1]
 	}
 	return strings.Join(compacted, "\n")
+}
+
+func exampleEndMarker(line string) bool {
+	// Preserve indented <tag> and <key> examples. Accept a standalone
+	// indented marker too, as used by Vim's own options.txt documentation.
+	if strings.HasPrefix(line, "<") {
+		return true
+	}
+	trimmed := strings.TrimLeft(line, " \t")
+	return trimmed == "<" || strings.HasPrefix(trimmed, "< ") || strings.HasPrefix(trimmed, "<\t")
 }

@@ -234,9 +234,8 @@ func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, ok := hasItem.Documentation.(*protocol.MarkupContent)
-	if !ok || doc.Kind != protocol.MarkupKindMarkdown || !strings.Contains(doc.Value, "has({feature}") {
-		t.Fatalf("has documentation = %#v", hasItem.Documentation)
+	if hasItem.Documentation != nil {
+		t.Fatalf("builtin documentation without runtimepath = %#v", hasItem.Documentation)
 	}
 }
 
@@ -702,6 +701,10 @@ func TestHoverAndSignatureHelpRespectDocumentationFormats(t *testing.T) {
 	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{Capabilities: capabilities}); err != nil {
 		t.Fatal(err)
 	}
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "doc/builtin.txt", "get({object}, {key} [, {default}]) *get()*\nReturn runtime help.\n")
+	instance.setRuntimePaths([]string{root})
+	instance.runtimeHelpWG.Wait()
 	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: 7},
 	}})
@@ -719,7 +722,7 @@ func TestHoverAndSignatureHelpRespectDocumentationFormats(t *testing.T) {
 		t.Fatalf("signature help = %#v, %v", help, err)
 	}
 	documentation, ok := help.Signatures[0].Documentation.(*protocol.MarkupContent)
-	if !ok || documentation.Kind != protocol.MarkupKindPlainText || !strings.Contains(documentation.Value, "get(") || len(documentation.Value) > maxLanguageFeatureDocumentationBytes {
+	if !ok || documentation.Kind != protocol.MarkupKindPlainText || !strings.Contains(documentation.Value, "Return runtime help.") || len(documentation.Value) > maxLanguageFeatureDocumentationBytes {
 		t.Fatalf("signature documentation = %#v", help.Signatures[0].Documentation)
 	}
 }
@@ -747,7 +750,7 @@ func TestDocumentationFallsBackToPlainText(t *testing.T) {
 	if hover.Kind != protocol.MarkupKindPlainText || hover.Value != want {
 		t.Fatalf("plain hover documentation = %#v", hover)
 	}
-	function := functionHoverContents("Run", "Run(): number\nReturn **one** `number`.", false)
+	function := signatureHoverContents("Run(): number", "Return **one** `number`.", false)
 	functionHover, ok := function.(*protocol.MarkupContent)
 	if !ok || functionHover.Kind != protocol.MarkupKindPlainText || functionHover.Value != "Run(): number\n\nReturn one number." {
 		t.Fatalf("plain function hover = %#v", function)

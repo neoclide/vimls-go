@@ -877,7 +877,7 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 	switch target.Kind {
 	case completionResolveBuiltinFunction:
 		if function, ok := vimdata.LookupFunction(target.Name); ok {
-			applyMetadata(builtinFunctionDetail(function), function.Documentation)
+			applyMetadata(builtinFunctionDetail(function), s.runtimeHelpMarkdown(function.Name))
 		}
 	case completionResolveOption:
 		if option, ok := vimdata.LookupOption(target.Name); ok {
@@ -970,7 +970,7 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 				return nil, s.structureCurrent(ctx, snapshot)
 			}
 			label, parameters = formatBuiltinFunctionSignature(function)
-			documentation = function.Documentation
+			documentation = s.runtimeHelpMarkdown(function.Name)
 		}
 	case syntax.ExpressionMember:
 		operator := file.Text(callable.Operator)
@@ -996,7 +996,7 @@ func (s *Server) SignatureHelp(ctx context.Context, params *protocol.SignatureHe
 			return nil, s.structureCurrent(ctx, snapshot)
 		}
 		label, parameters = formatBuiltinMethodSignature(function)
-		documentation = function.Documentation
+		documentation = s.runtimeHelpMarkdown(function.Name)
 	default:
 		return nil, s.structureCurrent(ctx, snapshot)
 	}
@@ -1725,16 +1725,7 @@ func formatFunctionValueSignature(name string, typ analysis.ValueType) (string, 
 }
 
 func formatBuiltinFunctionSignature(function vimdata.BuiltinFunction) (string, []protocol.ParameterInformation) {
-	label := ""
-	for line := range strings.SplitSeq(function.Documentation, "\n") {
-		if strings.HasPrefix(line, function.Name+"(") && strings.HasSuffix(line, ")") {
-			label = line
-			continue
-		}
-		if label != "" {
-			break
-		}
-	}
+	label := function.Signature
 	if label == "" {
 		count := function.MaxArgs
 		if count < 0 {

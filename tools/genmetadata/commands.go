@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/neoclide/vimls-go/tools/internal/vimhelp"
+	"github.com/neoclide/vimls-go/internal/vimhelp"
 )
 
 var commandPattern = regexp.MustCompile(`(?s)EXCMD\(CMD_[^,]+,\s*"([^"]+)",\s*[^,]+,\s*(?://[^\n]*\n\s*)?([A-Z0-9_|\s]+),\s*ADDR_[A-Z0-9_]+\s*\)`) //nolint:lll

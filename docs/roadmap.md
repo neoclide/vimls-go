@@ -140,6 +140,16 @@ behavior remains intentionally unknown.
 
 ## M5: navigation and workspace index
 
+Runtime help addition (2026-09-05): one background goroutine extracts global
+variable/function, autoload and complete `<Plug>(name)` mapping help from
+runtimepath `doc/*.txt`. Hover appends
+the cached help as a separate document without waiting or doing help I/O.
+Runtimepath deltas retain completed/in-flight work for retained roots, parse
+only additions, remove discarded roots immediately, and update duplicate
+precedence on reorder. Per-file read/parse failures, including parser panics,
+are isolated. Shutdown joins the worker. Deterministic tests cover incremental
+reads, in-flight updates, hover content/scope, cancellation and failure recovery.
+
 Deliver:
 
 - Document/workspace symbols, hover, definition, declaration, references,
@@ -222,10 +232,10 @@ local imported-type propagation also covers type aliases, local returns, and
 copy initializers, imported factory returns, same-block direct assignments, and
 statically typed container extraction. Safe same-file/static-import rename, full semantic tokens,
 inferred-type inlay hints, and the deterministic missing-block-end quick fix
-are also implemented. Hover and builtin signature documentation honor the
-client's ordered Markdown/plain-text preferences, are bounded safely at UTF-8
-boundaries, and reuse pinned Vim help for builtin functions, Ex commands
-(including abbreviations), options, and predefined variables. The Ex-command
+are also implemented. Hover and signature content honor the client's ordered Markdown/plain-text
+preferences and are bounded safely at UTF-8 boundaries. Ex commands (including
+abbreviations), options, and predefined variables reuse pinned Vim help;
+builtin function prose comes only from the current runtimepath. The Ex-command
 generator records matching help provenance alongside command facts. The stdio
 subprocess test exercises completion, resolve, hover, and the implemented
 signature-help wire contracts.
