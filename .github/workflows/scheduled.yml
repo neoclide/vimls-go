@@ -54,27 +54,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26.x"
       - name: Run benchmark regression lane (count=5)
         run: |
+          set -euo pipefail
           mkdir -p artifacts
+          benchmark_pattern='^(BenchmarkParseLargeFile|BenchmarkCompletionLatency|BenchmarkRuntimepathIndexing|BenchmarkReverseDependentReanalysis|BenchmarkWorkspaceRebuild)$'
+          baseline_dir=$(mktemp -d "$RUNNER_TEMP/vimls-benchmark.XXXXXX")
+          git worktree add --detach "$baseline_dir" HEAD^
           echo "=== Environment ===" > artifacts/benchmark_report.txt
           go version >> artifacts/benchmark_report.txt
           uname -a >> artifacts/benchmark_report.txt
           echo "GOMAXPROCS=${GOMAXPROCS:-$(nproc)}" >> artifacts/benchmark_report.txt
           echo "" >> artifacts/benchmark_report.txt
+          git rev-parse HEAD HEAD^ >> artifacts/benchmark_report.txt
+          (cd "$baseline_dir" && go test -mod=readonly ./internal/syntax ./internal/server -run '^$' \
+            -bench "$benchmark_pattern" -benchmem -benchtime=10x -count=5) | tee artifacts/benchmark_baseline.txt
           echo "=== Raw Benchmark Output (count=5) ===" >> artifacts/benchmark_report.txt
           go test -mod=readonly ./internal/syntax ./internal/server -run '^$' \
-            -bench '^(BenchmarkParseLargeFile|BenchmarkCompletionLatency|BenchmarkRuntimepathIndexing|BenchmarkReverseDependentReanalysis|BenchmarkWorkspaceRebuild)$' \
-            -benchmem -benchtime=10x -count=5 | tee -a artifacts/benchmark_report.txt
+            -bench "$benchmark_pattern" \
+            -benchmem -benchtime=10x -count=5 | tee artifacts/benchmark_current.txt
           echo "" >> artifacts/benchmark_report.txt
-          go run ./tools/benchreport -input artifacts/benchmark_report.txt | tee -a artifacts/benchmark_report.txt
+          go run ./tools/benchreport -input artifacts/benchmark_current.txt -baseline artifacts/benchmark_baseline.txt 2>&1 | tee -a artifacts/benchmark_report.txt
       - name: Upload benchmark report artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-report
-          path: artifacts/benchmark_report.txt
+          path: artifacts/benchmark_*.txt
           if-no-files-found: ignore

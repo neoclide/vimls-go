@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -100,7 +102,7 @@ BenchmarkParseLargeFile-8         	      10	  14234567 ns/op	 5000000 B/op	   12
 BenchmarkParseLargeFile-8         	      10	  16234567 ns/op	 5000000 B/op	   12000 allocs/op
 `
 	var out bytes.Buffer
-	err := run(strings.NewReader(rawInput), &out)
+	err := runWithBaseline(strings.NewReader(rawInput), nil, &out)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,19 +118,49 @@ BenchmarkParseLargeFile-8         	      10	  16234567 ns/op	 5000000 B/op	   12
 
 func TestRunNoSamples(t *testing.T) {
 	var out bytes.Buffer
-	err := run(strings.NewReader("some unrelated text\nPASS\n"), &out)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := runWithBaseline(strings.NewReader("some unrelated text\nPASS\n"), nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "no benchmark samples") {
+		t.Fatalf("missing samples error = %v", err)
 	}
-	if !strings.Contains(out.String(), "No benchmark samples found.") {
-		t.Fatalf("expected 'No benchmark samples found.', got: %s", out.String())
+}
+
+func TestRegressionGate(t *testing.T) {
+	input := func(name string, count int, ns float64, bytes, allocations int) string {
+		return strings.Repeat(fmt.Sprintf("%s-8 10 %.2f ns/op %d B/op %d allocs/op\n", name, ns, bytes, allocations), count)
+	}
+	base := input("BenchmarkParseLargeFile", 5, 100, 100, 10)
+	for _, test := range []struct {
+		name, current, baseline string
+		fail                    bool
+	}{
+		{"unchanged", base, base, false},
+		{"threshold", input("BenchmarkParseLargeFile", 5, 115, 120, 12), base, false},
+		{"time", input("BenchmarkParseLargeFile", 5, 116, 100, 10), base, true},
+		{"bytes", input("BenchmarkParseLargeFile", 5, 100, 121, 10), base, true},
+		{"allocations", input("BenchmarkParseLargeFile", 5, 100, 100, 13), base, true},
+		{"p95", base + input("BenchmarkParseLargeFile", 1, 1000, 100, 10), base, true},
+		{"missing samples", input("BenchmarkParseLargeFile", 4, 100, 100, 10), base, true},
+		{"missing workload", input("BenchmarkOther", 5, 100, 100, 10), base, true},
+		{"empty baseline", base, "PASS\n", true},
+		{"empty current", "PASS\n", base, true},
+		{"malformed sample", base + "BenchmarkParseLargeFile broken\n", base, true},
+		{"missing allocation metrics", strings.Repeat("BenchmarkParseLargeFile-8 10 100 ns/op\n", 5), base, true},
+		{"completion budget", input("BenchmarkCompletionLatency/small", 5, 100e6, 0, 0), input("BenchmarkCompletionLatency/small", 5, 100e6, 0, 0), true},
+		{"zero allocation baseline", input("BenchmarkParseLargeFile", 5, 100, 1, 1), input("BenchmarkParseLargeFile", 5, 100, 0, 0), true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := runWithBaseline(strings.NewReader(test.current), strings.NewReader(test.baseline), io.Discard)
+			if (err != nil) != test.fail {
+				t.Fatalf("error = %v, want failure %v", err, test.fail)
+			}
+		})
 	}
 }
 
 func TestRunScannerError(t *testing.T) {
 	var out bytes.Buffer
 	errReader := iotest.ErrReader(errors.New("simulated read failure"))
-	err := run(errReader, &out)
+	err := runWithBaseline(errReader, nil, &out)
 	if err == nil {
 		t.Fatal("expected scanner error, got nil")
 	}

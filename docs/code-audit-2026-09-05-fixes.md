@@ -19,8 +19,8 @@
 | F11 | 已提交 | `5afb246` |
 | F12 | 已提交 | `3b59a34` |
 | F13 | 已提交 | `5d6d26c` |
-| F14 | 已修复 | `fix(server): honor edit and document symbol client capabilities` |
-| F15 | 待修复 | |
+| F14 | 已提交 | `029f315` |
+| F15 | 已修复 | `fix(ci): enforce benchmark comparison budgets` |
 | F16 | 待修复 | |
 
 ## F01
@@ -92,3 +92,9 @@ server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根�
 ## F14
 
 Initialize 记录 documentChanges 与 hierarchicalDocumentSymbolSupport。本地/跨文件 Rename 及 CodeAction 共用能力转换；未支持时仅返回 Changes，支持时保留版本化编辑；未来无法降级的操作明确拒绝而不静默丢失。DocumentSymbol 未支持层级时扁平化为带 URI/range/containerName 的 SymbolInformation。新增能力缺省/false/true 矩阵，检查实际 JSON 字段、版本与嵌套容器；既有高级能力测试显式声明对应能力。定向测试、全量 test、vet、make、gofmt/gopls 均通过（原有 MarkedString 兼容性测试的 deprecated 提示保留）。
+
+## F15
+
+benchreport 增加 baseline 比较模式，要求两侧同工作负载、至少五样本及分配指标；时间 median/p95 超 15%、分配中位数超 20%、completion 达到 100ms 返回失败，空/坏样本不再成功。scheduled lane 同 runner/toolchain 比较 HEAD^ 与 HEAD，保留原始输出、提交 ID 和比较报告；没有自动更新基线或豁免。文档明确样本均值的 p95 不是逐请求尾延迟，并区分父提交 CI 检查与固定 release runner 的批准基线。
+
+验证：比较器正常/阈值边界、time/p95/bytes/alloc 回归、零分配、缺样本/工作负载/指标、坏输入、completion 预算测试；全量 test、vet、make、gofmt 与 gopls CLI 均通过（MCP 返回了已修改测试的陈旧诊断，以 CLI/编译复核）。未运行整套性能基准或远端 CI；本机没有 actionlint。

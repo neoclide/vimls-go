@@ -376,6 +376,19 @@ go test -mod=readonly -run TestLSPSubprocess ./test/integration
 Scheduled lanes add bounded live fuzzing and benchmark regression checks via
 `.github/workflows/scheduled.yml`.
 
+The benchmark lane measures `HEAD^` and `HEAD` on the same runner/toolchain,
+retains both raw outputs and commit IDs, then runs
+`go run ./tools/benchreport -input current.txt -baseline baseline.txt`.
+The gate requires matching workloads and at least five samples per workload;
+it fails for time median/p95 growth above 15%, median bytes/allocations growth
+above 20%, or completion time at/above 100 ms. Empty/malformed input is not a
+successful report. Workload additions/removals require explicit baseline review.
+P95 here is the nearest-rank percentile of benchmark sample means, not a
+per-request latency distribution. This parent-commit CI check detects local
+regressions; it does not replace a pinned release-runner comparison against an
+approved release baseline, and noisy failures need confirmation before attributing
+them to code. No automatic waiver or baseline update is performed.
+
 ## Release evidence
 
 Pushing a `v*` tag runs `tools/release`, which builds CGO-free amd64 and arm64
