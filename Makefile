@@ -3,8 +3,10 @@ GO_MOD ?= -mod=readonly
 TEST_PARALLEL ?= 4
 COVERAGE_MIN ?= 90
 VIM_EXECUTABLE ?= vim
+RELEASE_REMOTE ?= origin
+export VERSION RELEASE_REMOTE
 
-.PHONY: build check clean client-smoke client-tools coverage format-check metadata-check metadata-refresh oracle race test vet
+.PHONY: build check clean client-smoke client-tools coverage format-check metadata-check metadata-refresh oracle race release test vet
 
 build:
 	mkdir -p bin
@@ -70,3 +72,22 @@ coverage:
 	$(GO) run $(GO_MOD) ./tools/covercheck -profile coverage.out -min $(COVERAGE_MIN)
 
 check: format-check test race vet coverage build
+
+# Push only the release tag; GitHub Actions builds and publishes its commit.
+release:
+	@set -eu; \
+	release_tag="$${VERSION:-}"; \
+	case "$$release_tag" in v*) ;; *) release_tag="v$$release_tag" ;; esac; \
+	printf '%s\n' "$$release_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$$' || \
+	  { echo 'Usage: make release VERSION=0.1.0 [RELEASE_REMOTE=origin]' >&2; exit 1; }; \
+	test -z "$$(git status --porcelain)" || \
+	  { echo 'Commit or stash working-tree changes before releasing.' >&2; exit 1; }; \
+	git remote get-url "$$RELEASE_REMOTE" >/dev/null; \
+	if git show-ref --verify --quiet "refs/tags/$$release_tag"; then \
+	  test "$$(git cat-file -t "refs/tags/$$release_tag")" = tag && \
+	  test "$$(git rev-parse "refs/tags/$$release_tag^{commit}")" = "$$(git rev-parse HEAD)" || \
+	    { echo "$$release_tag must be an annotated tag at HEAD; it will not be replaced." >&2; exit 1; }; \
+	else \
+	  git tag -a "$$release_tag" -m "Release $$release_tag"; \
+	fi; \
+	git push "$$RELEASE_REMOTE" "refs/tags/$$release_tag:refs/tags/$$release_tag"

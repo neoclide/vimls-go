@@ -412,6 +412,13 @@ them to code. No automatic waiver or baseline update is performed.
 
 ## Release evidence
 
+After committing release changes and completing validation, create and push an
+annotated tag with `make release VERSION=0.1.0` (`v0.1.0` is also accepted).
+Use `RELEASE_REMOTE=<name>` to override `origin`. This pushes only the tag and
+triggers the public GitHub Release workflow. The working tree must be clean.
+An existing annotated tag at HEAD is reused so a failed push can be retried;
+lightweight tags and tags pointing elsewhere are rejected, never moved.
+
 Pushing a `v*` tag runs `tools/release`, the single build/packaging implementation.
 It builds CGO-free amd64 and arm64 binaries for Linux, macOS and Windows,
 plus Linux armv7 and FreeBSD amd64, with `-trimpath`, stripped debug data,
