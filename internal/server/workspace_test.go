@@ -226,18 +226,15 @@ func TestVimWatcherRegistrationHonorsClientCapabilities(t *testing.T) {
 
 func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
 	runtimeRoot := t.TempDir()
-	input := encodeFrames(t,
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}`,
-		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot),
-		`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`,
-		`{"jsonrpc":"2.0","method":"exit"}`,
-	)
-	var output bytes.Buffer
-	instance := New(&input, &output, io.Discard)
-	if code := instance.Run(context.Background()); code != 0 {
-		t.Fatalf("exit code = %d", code)
+	instance, writer, _ := runtimepathTestSession(t)
+	started := make(chan struct{})
+	instance.testHooks.discoverWorkspaceFiles = func(context.Context, string, int) ([]string, bool, error) {
+		close(started)
+		return nil, false, nil
 	}
+	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot))
+	waitForServerRace(t, started, "runtimepath notification")
+	instance.runtimepathWG.Wait()
 	instance.workspaceMu.Lock()
 	paths := append([]string(nil), instance.runtimePaths...)
 	instance.workspaceMu.Unlock()
@@ -249,20 +246,11 @@ func TestRuntimepathCustomNotificationDispatch(t *testing.T) {
 
 func TestRuntimepathCustomRequestDispatchesNullResult(t *testing.T) {
 	runtimeRoot := t.TempDir()
-	input := encodeFrames(t,
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"initializationOptions":{"runtimepath":[]}}}`,
-		`{"jsonrpc":"2.0","method":"initialized","params":{}}`,
-		fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot),
-		`{"jsonrpc":"2.0","id":3,"method":"shutdown"}`,
-		`{"jsonrpc":"2.0","method":"exit"}`,
-	)
-	var output bytes.Buffer
-	if code := New(&input, &output, io.Discard).Run(context.Background()); code != 0 {
-		t.Fatalf("exit code = %d", code)
-	}
-	messages := decodeFrames(t, &output)
-	if len(messages) != 3 || idNumber(t, messages[1]) != 2 || string(messages[1]["result"]) != "null" {
-		t.Fatalf("request response = %#v", messages)
+	_, writer, reader := runtimepathTestSession(t)
+	writeFrame(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":%q,"params":{"runtimepath":[%q]}}`, MethodDidChangeRuntimepath, runtimeRoot))
+	message := readFrame(t, reader)
+	if idNumber(t, message) != 2 || string(message["result"]) != "null" {
+		t.Fatalf("request response = %#v", message)
 	}
 }
 

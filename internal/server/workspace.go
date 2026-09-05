@@ -1345,29 +1345,87 @@ func (s *Server) DidChangeWorkspaceFolders(ctx context.Context, params *protocol
 	return nil
 }
 
+func (s *Server) runtimepathHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
+	return func(ctx context.Context, request *jsonrpc2.Request) (any, error) {
+		if request.Method() != MethodDidChangeRuntimepath {
+			return next(ctx, request)
+		}
+		var params *DidChangeRuntimepathParams
+		if err := protocol.Unmarshal(request.Params(), &params); err != nil {
+			return nil, jsonrpc2.ErrInvalidParams
+		}
+		err := s.DidChangeRuntimepath(ctx, params)
+		if ctx.Err() != nil {
+			return nil, protocol.ErrRequestCancelled
+		}
+		return nil, err
+	}
+}
+
 func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRuntimepathParams) error {
 	if params == nil {
 		return nil
 	}
-	paths := usableRuntimePaths(params.Runtimepath)
-	s.publishMu.Lock()
 	s.workspaceMu.Lock()
-	oldPaths := append([]string(nil), s.runtimePaths...)
-	if slices.Equal(oldPaths, paths) {
+	if s.analysisStopped || s.analysisContext.Err() != nil || ctx.Err() != nil {
 		s.workspaceMu.Unlock()
-		s.publishMu.Unlock()
 		return nil
 	}
-	workspaceRoots := append([]string(nil), s.workspaceRoots...)
-	resolver := workspacePathResolver(workspaceRoots, paths)
-	openSnapshots := s.documents.Snapshots()
-	applied := s.applyRuntimepathDeltaLocked(ctx, oldPaths, paths, resolver, openSnapshots)
+	// Reserve input order before releasing the connection read loop. Even a
+	// no-op newer update supersedes an older, still-running discovery.
+	if s.runtimepathCancel != nil {
+		s.runtimepathCancel()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	s.runtimepathCancel = cancel
+	s.runtimepathGeneration++
+	generation := s.runtimepathGeneration
+	s.runtimepathWG.Add(1)
+	s.workspaceMu.Unlock()
+	defer s.runtimepathWG.Done()
+	defer cancel()
+	jsonrpc2.Async(ctx)
+	paths := usableRuntimePaths(params.Runtimepath)
+	for range 2 {
+		s.publishMu.Lock()
+		s.workspaceMu.Lock()
+		if generation != s.runtimepathGeneration || s.analysisContext.Err() != nil || ctx.Err() != nil {
+			s.workspaceMu.Unlock()
+			s.publishMu.Unlock()
+			return nil
+		}
+		oldPaths := append([]string(nil), s.runtimePaths...)
+		if slices.Equal(oldPaths, paths) {
+			s.workspaceMu.Unlock()
+			s.publishMu.Unlock()
+			return nil
+		}
+		openSnapshots := s.documents.Snapshots()
+		applied := s.applyRuntimepathDeltaLocked(ctx, oldPaths, paths, openSnapshots)
+		s.workspaceMu.Unlock()
+		s.publishMu.Unlock()
+		if applied {
+			for _, snapshot := range openSnapshots {
+				s.startAnalysis(snapshot.URI())
+			}
+			return nil
+		}
+	}
+	// Repeated document/index churn must not lose a notification's intent.
+	// Fall back to the existing rebuild worker, which validates fresh overlays.
+	s.publishMu.Lock()
+	s.workspaceMu.Lock()
+	current := generation == s.runtimepathGeneration && s.analysisContext.Err() == nil && ctx.Err() == nil
+	if current {
+		s.runtimePaths = append([]string(nil), paths...)
+		s.workspaceResolver = nil
+		s.resetWorkspaceGraphLocked()
+		s.workspaceRevision++
+	}
 	s.workspaceMu.Unlock()
 	s.publishMu.Unlock()
-	if applied {
-		for _, snapshot := range openSnapshots {
-			s.startAnalysis(snapshot.URI())
-		}
+	if current {
+		s.scheduleWorkspaceRebuild()
 	}
 	return nil
 }
@@ -1411,7 +1469,7 @@ func remainingWorkspaceIndexCapacity(index *workspace.Index, workspaceFiles map[
 
 // applyRuntimepathDeltaLocked updates the existing index rather than starting
 // another complete workspace scan. The caller holds publishMu and workspaceMu.
-func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newPaths []string, resolver *workspace.PathResolver, openSnapshots []*text.Snapshot) bool {
+func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newPaths []string, openSnapshots []*text.Snapshot) bool {
 	ctx, cancel := s.workspaceOperationContext(ctx)
 	defer cancel()
 	if ctx.Err() != nil || s.analysisStopped || s.analysisContext.Err() != nil {
@@ -1419,6 +1477,9 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	}
 	oldGraph := s.workspaceGraphView
 	index := s.workspaceIndex
+	identity := s.workspaceIdentityLocked()
+	generation := s.runtimepathGeneration
+	workspaceRoots := append([]string(nil), s.workspaceRoots...)
 	activeRoots := workspaceIndexRoots(s.workspaceRoots, newPaths)
 	allOpenByPath := make(map[string]*text.Snapshot, len(openSnapshots))
 	openByPath := make(map[string]*text.Snapshot, len(openSnapshots))
@@ -1438,25 +1499,36 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	// accurately credits freed space when swapping runtime paths.
 	remainingFiles, remainingBytes := remainingWorkspaceIndexCapacity(index, s.workspaceFiles, allOpenByPath, activeRoots, maxWorkspaceFiles, maxIndexBytes)
 
-	// Filesystem traversal and batch analysis can block. Release workspaceMu
-	// while they run so lifecycle cancellation can acquire it and cancel this
-	// operation. publishMu remains held, preserving the document snapshot used
-	// to construct this delta.
+	complete := index.Complete()
+	indexedSources := make(map[string]string, len(s.workspaceFiles)+len(allOpenByPath))
+	for path := range s.workspaceFiles {
+		if source, ok := index.Source(path); ok {
+			indexedSources[path] = source
+		}
+	}
+	for path := range allOpenByPath {
+		if source, ok := index.Source(path); ok {
+			indexedSources[path] = source
+		}
+	}
+	// Discovery, source reads, parsing and import resolution use captured inputs.
+	// Revalidate both workspace identity and open overlays before installation.
 	s.workspaceMu.Unlock()
+	s.publishMu.Unlock()
 	locked := false
 	defer func() {
 		if !locked {
+			s.publishMu.Lock()
 			s.workspaceMu.Lock()
 		}
 	}()
 
-	complete := index.Complete()
+	resolver := workspacePathResolver(workspaceRoots, newPaths)
 	oldSet := make(map[string]struct{}, len(oldPaths))
 	for _, path := range oldPaths {
 		oldSet[path] = struct{}{}
 	}
 	discovered := make(map[string]struct{})
-	indexedAdded := make(map[string]struct{})
 	newPathsToIndex := make([]string, 0)
 	newSources := make([]string, 0)
 	newDiskFiles := make([]bool, 0)
@@ -1490,7 +1562,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 				continue
 			}
 			discovered[path] = struct{}{}
-			if _, indexed := index.Source(path); indexed {
+			if _, indexed := indexedSources[path]; indexed {
 				continue
 			}
 			var source string
@@ -1533,11 +1605,30 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 			return false
 		}
 	}
+	resolvedFacts := make(map[string][]workspace.ImportFact, len(indexedSources)+len(parsed))
+	for path := range indexedSources {
+		if workspacePathInRoots(path, activeRoots) {
+			resolvedFacts[path] = oldGraph.Imports(path)
+		}
+	}
+	for position, item := range parsed {
+		if item.File != nil {
+			path := newPathsToIndex[position]
+			resolvedFacts[path] = collectWorkspaceImportFacts(path, item.File, resolver, openByPath)
+		}
+	}
+	for path, facts := range resolvedFacts {
+		if ctx.Err() != nil {
+			return false
+		}
+		resolvedFacts[path] = resolveRuntimepathImportFacts(path, facts, resolver, openByPath, resolvedFacts)
+	}
 	// Discovery and analysis must both complete before any workspace state is
 	// changed, so a canceled runtimepath request leaves the current index live.
+	s.publishMu.Lock()
 	s.workspaceMu.Lock()
 	locked = true
-	if ctx.Err() != nil || s.analysisStopped || s.analysisContext.Err() != nil || s.workspaceIndex != index {
+	if ctx.Err() != nil || s.analysisStopped || s.analysisContext.Err() != nil || generation != s.runtimepathGeneration || !s.workspaceIdentityCurrentLocked(identity) || !workspaceSnapshotsCurrent(s.documents.Snapshots(), openSnapshots) {
 		return false
 	}
 	s.runtimePaths = append([]string(nil), newPaths...)
@@ -1563,7 +1654,6 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 			complete = false
 			continue
 		}
-		indexedAdded[newPathsToIndex[position]] = struct{}{}
 		if newDiskFiles[position] {
 			s.workspaceFiles[newPathsToIndex[position]] = struct{}{}
 		}
@@ -1587,13 +1677,13 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	}
 	sort.Strings(pathsToGraph)
 	for _, path := range pathsToGraph {
-		facts := oldGraph.Imports(path)
-		if _, newlyIndexed := indexedAdded[path]; newlyIndexed {
-			if source, ok := s.workspaceIndex.Source(path); ok {
-				facts = collectWorkspaceImportFacts(path, syntax.Parse(source), resolver, openByPath)
+		facts := retainWorkspaceImportTargets(resolvedFacts[path], func(target string) bool {
+			if openByPath[target] != nil {
+				return true
 			}
-		}
-		facts = resolveRuntimepathImportFacts(path, facts, resolver, openByPath, s.workspaceIndex)
+			_, ok := s.workspaceIndex.Source(target)
+			return ok
+		})
 		if err := graph.Replace(path, facts); err != nil {
 			complete = false
 			s.workspaceIndex.Remove(path)
@@ -1613,7 +1703,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	return true
 }
 
-func resolveRuntimepathImportFacts(importer string, facts []workspace.ImportFact, resolver *workspace.PathResolver, openByPath map[string]*text.Snapshot, index *workspace.Index) []workspace.ImportFact {
+func resolveRuntimepathImportFacts(importer string, facts []workspace.ImportFact, resolver *workspace.PathResolver, openByPath map[string]*text.Snapshot, indexed map[string][]workspace.ImportFact) []workspace.ImportFact {
 	for position := range facts {
 		fact := &facts[position]
 		resolution := workspace.PathResolution{Dynamic: true}
@@ -1637,7 +1727,7 @@ func resolveRuntimepathImportFacts(importer string, facts []workspace.ImportFact
 		if openByPath[target] != nil {
 			return true
 		}
-		_, ok := index.Source(target)
+		_, ok := indexed[target]
 		return ok
 	})
 }

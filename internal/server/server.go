@@ -213,6 +213,9 @@ type Server struct {
 	workspaceMu                 sync.Mutex
 	workspaceRoots              []string
 	runtimePaths                []string
+	runtimepathGeneration       uint64
+	runtimepathCancel           context.CancelFunc
+	runtimepathWG               sync.WaitGroup
 	workspaceIndex              *workspace.Index
 	workspaceGraph              *workspace.ImportGraph
 	workspaceGraphView          workspace.ImportGraphSnapshot
@@ -304,7 +307,7 @@ func (s *Server) Run(ctx context.Context) int {
 	s.client = protocol.ClientDispatcher(conn)
 	s.mu.Unlock()
 	ctx = protocol.WithClient(ctx, s.client)
-	handler := s.lifecycleHandler(s.cancellationHandler(protocol.ServerHandler(s, jsonrpc2.MethodNotFoundHandler)))
+	handler := s.lifecycleHandler(s.cancellationHandler(s.runtimepathHandler(protocol.ServerHandler(s, jsonrpc2.MethodNotFoundHandler))))
 	conn.Go(ctx, handler)
 
 	select {
@@ -368,7 +371,7 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 		}
 		// Register first so a following $/cancelRequest cannot be handled before this request.
 		// Keep lifecycle calls ordered: later input may depend on initialize or shutdown completing.
-		if request.Method() != protocol.MethodInitialize && request.Method() != protocol.MethodShutdown {
+		if request.Method() != protocol.MethodInitialize && request.Method() != protocol.MethodShutdown && request.Method() != MethodDidChangeRuntimepath {
 			jsonrpc2.Async(ctx)
 		}
 		defer func() {
@@ -440,13 +443,6 @@ func (s *Server) lifecycleHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 		}
 		if method == protocol.MethodInitialized && len(request.Params()) == 0 {
 			return nil, s.Initialized(ctx, &protocol.InitializedParams{})
-		}
-		if method == MethodDidChangeRuntimepath {
-			var params *DidChangeRuntimepathParams
-			if err := protocol.Unmarshal(request.Params(), &params); err != nil {
-				return nil, jsonrpc2.ErrInvalidParams
-			}
-			return nil, s.DidChangeRuntimepath(ctx, params)
 		}
 		if !implementedMethod(method) {
 			if request.IsCall() {
@@ -1807,6 +1803,7 @@ func (s *Server) stopAnalysis() {
 			hook()
 		}
 		s.workspaceWG.Wait()
+		s.runtimepathWG.Wait()
 		waitGroupAddBarrier(&s.watchMu)
 		s.watchWG.Wait()
 	})
