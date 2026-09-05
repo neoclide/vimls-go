@@ -69,6 +69,7 @@ type runtimeRootDiscovery struct {
 // Keep filesystem concurrency bounded and preserve runtimepath order when
 // consuming results, so scheduling cannot change precedence or capacity limits.
 func (s *Server) discoverRuntimeRoots(ctx context.Context, roots []string, limit int) []runtimeRootDiscovery {
+	started := time.Now()
 	results := make([]runtimeRootDiscovery, len(roots))
 	jobs := make(chan int, len(roots))
 	for index := range roots {
@@ -82,29 +83,48 @@ func (s *Server) discoverRuntimeRoots(ctx context.Context, roots []string, limit
 				if ctx.Err() != nil {
 					return
 				}
-				started := time.Now()
 				result := &results[index]
 				result.files, result.truncated, result.err = s.discoverRuntimePathFilesContext(ctx, roots[index], limit)
-				if ctx.Err() != nil {
-					return
-				}
-				s.mu.Lock()
-				client := s.client
-				s.mu.Unlock()
-				if client != nil {
-					message := fmt.Sprintf("vimls: scanned runtimepath %s: %d Vim files, %d colors, %s", roots[index], len(result.files.Sources), len(result.files.Colors), time.Since(started).Round(time.Millisecond))
-					if result.err != nil {
-						message += ": " + result.err.Error()
-					}
-					logCtx, cancel := context.WithTimeout(ctx, time.Second)
-					_ = client.LogMessage(logCtx, &protocol.LogMessageParams{Type: protocol.MessageTypeLog, Message: message})
-					cancel()
-				}
 			}
 		})
 	}
 	workers.Wait()
+	if len(roots) > 0 {
+		sources, colors := 0, 0
+		var failures []string
+		for index, result := range results {
+			sources += len(result.files.Sources)
+			colors += len(result.files.Colors)
+			if result.err != nil {
+				failures = append(failures, roots[index]+": "+result.err.Error())
+			}
+		}
+		message := fmt.Sprintf("scanned runtimepath: %d roots, %d Vim files, %d colors", len(roots), sources, colors)
+		if len(failures) > 0 {
+			message += "; " + strings.Join(failures, "; ")
+		}
+		s.logScanDuration(ctx, message, started)
+	}
 	return results
+}
+
+// logScanDuration reports wall-clock time once after a complete scan batch.
+func (s *Server) logScanDuration(ctx context.Context, message string, started time.Time) {
+	if ctx.Err() != nil {
+		return
+	}
+	elapsed := time.Since(started).Round(time.Millisecond)
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+	if client == nil {
+		return
+	}
+	logCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_ = client.LogMessage(logCtx, &protocol.LogMessageParams{
+		Type: protocol.MessageTypeLog, Message: fmt.Sprintf("vimls: %s; total elapsed %s", message, elapsed),
+	})
 }
 
 func workspaceRootsFromInitialize(params *protocol.InitializeParams) []string {

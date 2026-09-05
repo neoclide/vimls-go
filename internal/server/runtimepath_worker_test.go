@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"io"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/workspace"
@@ -111,7 +113,16 @@ func TestWorkspaceAndRuntimepathHaveSeparateProgressAndRefresh(t *testing.T) {
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if len(client.logs) != 1 || !strings.Contains(client.logs[0], mustWorkspaceCanonicalPath(t, external)) {
+	runtimeLogs := 0
+	for _, message := range client.logs {
+		if strings.Contains(message, "scanned runtimepath:") {
+			runtimeLogs++
+			if !strings.Contains(message, "1 roots, 1 Vim files, 0 colors; total elapsed ") {
+				t.Fatalf("runtime log = %s", message)
+			}
+		}
+	}
+	if runtimeLogs != 1 {
 		t.Fatalf("runtime logs = %v", client.logs)
 	}
 }
@@ -181,44 +192,48 @@ func TestRuntimepathScansRootsConcurrentlyAndRetainsFactsOnWorkspaceRebuild(t *t
 }
 
 func TestRuntimepathDebouncesBurst(t *testing.T) {
-	s := initializeWorkspaceServer(t, t.TempDir())
-	scanned := make(chan string, 5)
-	s.testHooks.discoverWorkspaceFiles = func(_ context.Context, root string, _ int) ([]string, bool, error) {
-		scanned <- root
-		return nil, false, nil
+	// Filesystem setup must not consume the debounce window. Fake time makes
+	// request spacing independent of filesystem speed and CI scheduling.
+	roots := make([]string, 5)
+	for index := range roots {
+		roots[index] = mustWorkspaceCanonicalPath(t, t.TempDir())
 	}
-	var wg sync.WaitGroup
-	last := ""
-	for range 5 {
-		root := t.TempDir()
-		last = mustWorkspaceCanonicalPath(t, root)
-		s.workspaceMu.Lock()
-		generation := s.runtimepathGeneration
-		s.workspaceMu.Unlock()
-		wg.Go(func() {
-			_ = s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{root}})
-		})
-		deadline := time.Now().Add(time.Second)
-		for {
-			s.workspaceMu.Lock()
-			accepted := s.runtimepathGeneration > generation
-			s.workspaceMu.Unlock()
-			if accepted {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatal("runtimepath input not accepted")
-			}
-			time.Sleep(time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		s := New(nil, nil, io.Discard)
+		t.Cleanup(s.stopAnalysis)
+		scanned := make(chan string, len(roots))
+		s.testHooks.discoverWorkspaceFiles = func(_ context.Context, root string, _ int) ([]string, bool, error) {
+			scanned <- root
+			return nil, false, nil
 		}
-	}
-	wg.Wait()
-	if !slices.Equal(s.runtimePaths, []string{last}) {
-		t.Fatalf("latest runtimepath = %v", s.runtimePaths)
-	}
-	if len(scanned) != 1 || <-scanned != last {
-		t.Fatal("burst scanned superseded roots")
-	}
+		var wg sync.WaitGroup
+		for index, root := range roots {
+			if index > 0 {
+				time.Sleep(defaultRuntimepathDebounce / 4)
+			}
+			wg.Go(func() {
+				if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{root}}); err != nil {
+					t.Errorf("runtimepath update: %v", err)
+				}
+			})
+			// Ensure input is accepted and its timer is waiting before advancing.
+			synctest.Wait()
+		}
+		time.Sleep(defaultRuntimepathDebounce - time.Nanosecond)
+		synctest.Wait()
+		if len(scanned) != 0 {
+			t.Fatal("runtimepath scanned before the latest debounce expired")
+		}
+		time.Sleep(time.Nanosecond)
+		wg.Wait()
+		last := roots[len(roots)-1]
+		if !slices.Equal(s.runtimePaths, []string{last}) {
+			t.Fatalf("latest runtimepath = %v", s.runtimePaths)
+		}
+		if len(scanned) != 1 || <-scanned != last {
+			t.Fatal("burst scanned superseded roots")
+		}
+	})
 }
 
 func TestRuntimepathDirectoryMovedOutOfWorkspaceIsScanned(t *testing.T) {

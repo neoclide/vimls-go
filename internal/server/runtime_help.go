@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -56,6 +57,8 @@ func (s *Server) updateRuntimeHelpLocked() {
 // a retained root is loading does not cancel or restart that root's parse.
 func (s *Server) collectRuntimeHelpWorker() {
 	defer s.runtimeHelpWG.Done()
+	started := time.Now()
+	defer func() { s.logScanDuration(s.analysisContext, "scanned runtime help", started) }()
 	for {
 		s.publishMu.Lock()
 		s.workspaceMu.Lock()
