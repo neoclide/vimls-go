@@ -8,9 +8,9 @@
 | --- | --- | --- |
 | F01 | 已提交 | `82cba9b`；见下方验证 |
 | F02 | 已提交 | `2f368b7`；见下方验证 |
-| F03 | 已修复 | `fix(server): reject rename collisions and binding changes`；见下方验证 |
-| F04 | 进行中 | 关闭文件的磁盘内容与索引一致性 |
-| F05 | 待修复 | |
+| F03 | 已提交 | `d98cef0`；见下方验证 |
+| F04 | 已修复 | `fix(server): reject stale closed-file rename edits`；见下方验证 |
+| F05 | 进行中 | 文件监听结果安装前重新验证索引身份 |
 | F06 | 待修复 | |
 | F07 | 待修复 | |
 | F08 | 待修复 | |
@@ -44,3 +44,9 @@
 新增同名声明、嵌套捕获、参数、保留字、函数大小写、未解析引用捕获、legacy 脚本函数覆盖及跨文件全局冲突测试；保留独立函数作用域允许同名的正例。原有接口/类成员、跨文件 import、`s:`/`<SID>` 与编码测试通过。
 
 验证：`go test ./internal/server -run 'Test.*Rename' -count=1 -timeout 60s`、`go test ./...`、`go vet ./...`、`make`、gofmt/gopls、diff check 均通过。动态绑定仍沿既有保守拒绝路径处理，不声称能证明任意 Vim 动态重构安全。
+
+## F04
+
+关闭文件在生成 range 前、编辑验证后均通过受限读取与计算所用的索引文本精确比较；不一致返回 ContentModified，不返回部分编辑。文件已删除且无法解析目标时沿原有安全拒绝路径返回错误。打开文件继续使用已捕获的 overlay/version，不以磁盘变更覆盖编辑器内容。
+
+验证：插入行、删除、文件超限、磁盘已改变但打开 overlay 有效，以及原有跨文件/编码 Rename 测试；`go test ./internal/server -run 'Test.*Rename' -count=1 -timeout 60s`、`go test ./...`、`go vet ./...`、`make`、gofmt/gopls、diff check 均通过。最终检查之后的外部磁盘写入仍不是服务器能原子锁住的客户端编辑事务，未作此保证。

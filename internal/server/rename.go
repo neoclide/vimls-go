@@ -463,9 +463,10 @@ func serverScriptLocalName(name string) (string, bool) {
 
 func (s *Server) renameEdits(ctx context.Context, workspaceState workspaceNavigationSnapshot, capturedSnapshots map[uri.URI]*text.Snapshot, encoding text.Encoding, oldName, newName string, locations []protocol.Location) ([]protocol.DocumentChange, []*text.Snapshot, error) {
 	type documentState struct {
-		uri      uri.URI
-		snapshot *text.Snapshot
-		edits    []protocol.TextDocumentEditElement
+		uri        uri.URI
+		snapshot   *text.Snapshot
+		edits      []protocol.TextDocumentEditElement
+		closedPath string
 	}
 	states := make(map[uri.URI]*documentState)
 	openSnapshots := make([]*text.Snapshot, 0)
@@ -487,7 +488,11 @@ func (s *Server) renameEdits(ctx context.Context, workspaceState workspaceNaviga
 				if !ok {
 					return nil, openSnapshots, unsafeRenameError()
 				}
-				state = &documentState{uri: location.URI, snapshot: text.NewSnapshot(location.URI.String(), 0, nil, source)}
+				content, readable := readRegularWorkspaceFile(path, maxFileBytes)
+				if !readable || string(content) != source {
+					return nil, openSnapshots, protocol.ErrContentModified
+				}
+				state = &documentState{uri: location.URI, snapshot: text.NewSnapshot(location.URI.String(), 0, nil, source), closedPath: path}
 			}
 			states[location.URI] = state
 		}
@@ -513,6 +518,14 @@ func (s *Server) renameEdits(ctx context.Context, workspaceState workspaceNaviga
 		state := states[documentURI]
 		if err := validateRenameBindings(ctx, state.snapshot, encoding, state.edits); err != nil {
 			return nil, openSnapshots, err
+		}
+		// Recheck after collecting references and validating the proposed text.
+		// Closed files have no client version to reject an already-stale range.
+		if state.closedPath != "" {
+			content, readable := readRegularWorkspaceFile(state.closedPath, maxFileBytes)
+			if !readable || string(content) != state.snapshot.Text() {
+				return nil, openSnapshots, protocol.ErrContentModified
+			}
 		}
 		sort.Slice(state.edits, func(i, j int) bool {
 			left := state.edits[i].(*protocol.TextEdit).Range.Start

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -90,6 +91,44 @@ func TestRenameStaticImportAcrossClosedAndOpenDocuments(t *testing.T) {
 				t.Fatalf("edit = %#v", textEdit)
 			}
 		}
+	}
+}
+
+func TestRenameRejectsStaleClosedFile(t *testing.T) {
+	for _, change := range []string{"insert line", "delete", "grow", "open overlay"} {
+		t.Run(change, func(t *testing.T) {
+			root := t.TempDir()
+			library := "vim9script\nexport def Run()\nenddef\n"
+			libPath := writeWorkspaceFile(t, root, "lib.vim", library)
+			source := "vim9script\nimport './lib.vim' as lib\nlib.Run()\n"
+			mainPath := writeWorkspaceFile(t, root, "main.vim", source)
+			s := initializeWorkspaceServer(t, root)
+			documentURI := uri.File(mainPath)
+			s.documents.Open(documentURI.String(), 1, source)
+			var err error
+			switch change {
+			case "insert line", "open overlay":
+				err = os.WriteFile(libPath, []byte("# external edit\n"+library), 0o600)
+			case "delete":
+				err = os.Remove(libPath)
+			case "grow":
+				err = os.Truncate(libPath, maxFileBytes+1)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if change == "open overlay" {
+				s.documents.Open(uri.File(libPath).String(), 7, library)
+			}
+			edit, err := s.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 5}}, NewName: "Execute"})
+			if change == "open overlay" {
+				if err != nil || edit == nil {
+					t.Fatalf("valid open overlay rejected: %#v %v", edit, err)
+				}
+			} else if err == nil || edit != nil || change != "delete" && !errors.Is(err, protocol.ErrContentModified) {
+				t.Fatalf("stale closed-file rename: edit=%#v err=%v", edit, err)
+			}
+		})
 	}
 }
 
