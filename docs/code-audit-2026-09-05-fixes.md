@@ -20,8 +20,9 @@
 | F12 | 已提交 | `3b59a34` |
 | F13 | 已提交 | `5d6d26c` |
 | F14 | 已提交 | `029f315` |
-| F15 | 已修复 | `fix(ci): enforce benchmark comparison budgets` |
-| F16 | 待修复 | |
+| F15 | 已提交 | `521111a` |
+| F16 | 已提交 | 本提交：`fix(release): use one deterministic packager for all assets` |
+| 集成复核 | 已提交 | `6b7f358` |
 
 ## F01
 
@@ -104,3 +105,15 @@ benchreport 增加 baseline 比较模式，要求两侧同工作负载、至少�
 最终 `go test -count=1 ./...` 揭示子进程集成测试仍断言旧 watcher glob，并未声明其要求的版本化编辑/层级符号能力。此前 `go test ./...` 返回的 integration 缓存不能验证 TestMain 动态编译的服务器源码。已更新测试客户端契约，并令 make test 与 Windows CI 测试禁用结果缓存；该补充单独提交，不混入 F16 发布修复。
 
 验证：`go test -count=1 ./test/integration -run TestLSPSubprocess -timeout 60s`、`go test -count=1 ./...`、vet、make、gofmt、gopls CLI、YAML 语法检查均通过。F10/F14 的真实子进程验证以这次无缓存结果为准，前面的缓存成功不应解读为独立集成验证。
+
+## F16
+
+release workflow 删除重复 shell 编译/压缩实现，调用同一个 Go 工具。保留既有 8 个目标及所有二进制/压缩包下载名称；包括 Linux armv7、FreeBSD amd64，包内为根级 vimls[.exe]、README.md 与 LICENSES 文件。所有压缩条目使用固定时间/模式，checksums 覆盖八个原始二进制与八个压缩包。发布测试也禁用集成结果缓存；文档统一实际入口、命名和重现条件。
+
+验证：真实仓库 README/许可证打包、八目标名称/内容/模式/时间、tar/zip 字节确定性、16 项 checksum 及 workflow 使用工具的正式测试通过；gofmt、gopls CLI、全量 `go test -count=1 ./...`、`make test`、vet、make 与三个 workflow 的 YAML 语法检查通过。MCP 对工具测试仍报告陈旧源码诊断，以 CLI 和编译结果复核。
+
+另以本机 Go 1.27.0 实际执行 `go run -mod=readonly ./tools/release -version v0.0.0-audit -epoch 1788566400 -output-dir /tmp/vimls-audit-release.8CEBzy`：8 个目标全部交叉编译成功，`shasum -a 256 -c checksums.txt` 的 16 项全部 OK，本机 darwin-amd64 二进制输出 `vimls v0.0.0-audit`。临时产物留在该目录供复核；未运行其他平台二进制、未触发远端 CI、未创建 tag/release 或推送。
+
+## 收尾
+
+F01–F16 均已完成，本轮共 16 个逐项修复提交，加 1 个独立集成验证补充提交。最终以无缓存全量测试和真实子进程结果为准；原审计保持历史基线，不把旧缺陷断言当作修复后的通过条件。

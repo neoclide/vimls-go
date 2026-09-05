@@ -365,16 +365,20 @@ bytes/op and allocs/op.
 
 ```sh
 gofmt -w <changed-go-files>
-go test -mod=readonly ./...
+go test -mod=readonly -count=1 ./...
 go test -mod=readonly -race ./...
 go vet -mod=readonly ./...
 go test -mod=readonly -coverpkg=./internal/... -coverprofile=coverage.out ./...
 go run -mod=readonly ./tools/covercheck -profile coverage.out -min 90
-go test -mod=readonly -run TestLSPSubprocess ./test/integration
+go test -mod=readonly -count=1 -run TestLSPSubprocess ./test/integration
 ```
 
 Scheduled lanes add bounded live fuzzing and benchmark regression checks via
 `.github/workflows/scheduled.yml`.
+
+`make test` and the regular CI/release test commands disable result caching.
+The integration `TestMain` builds the server with a subprocess, whose source
+dependencies are not fully represented in Go's integration-package test cache.
 
 The benchmark lane measures `HEAD^` and `HEAD` on the same runner/toolchain,
 retains both raw outputs and commit IDs, then runs
@@ -391,11 +395,16 @@ them to code. No automatic waiver or baseline update is performed.
 
 ## Release evidence
 
-Pushing a `v*` tag runs `tools/release`, which builds CGO-free amd64 and arm64
-binaries for Linux, macOS and Windows with `-trimpath`, an empty Go build ID and
-the tag injected into `vimls --version`. Tar and zip entries use the commit
-timestamp, stable paths and modes; `checksums.txt` lists the SHA-256 of every
-archive. Generate the same assets locally with:
+Pushing a `v*` tag runs `tools/release`, the single build/packaging implementation.
+It builds CGO-free amd64 and arm64 binaries for Linux, macOS and Windows,
+plus Linux armv7 and FreeBSD amd64, with `-trimpath`, stripped debug data,
+an empty Go build ID and the tag injected into `vimls --version`.
+Downloads retain `vimls-OS-ARCH[.exe]` and
+`vimls-TAG-OS-ARCH.tar.gz` (Windows: `.zip`). Archives contain a root-level
+`vimls[.exe]`, `README.md`, and `LICENSES/*`, with fixed commit timestamps,
+paths and modes. `checksums.txt` lists the SHA-256 of all eight binaries and
+eight archives. Reproduction requires the same clean source and Go toolchain;
+generate assets locally with:
 
 ```sh
 go run ./tools/release -version vX.Y.Z -epoch "$(git log -1 --format=%ct)"
