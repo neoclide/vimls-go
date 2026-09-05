@@ -1,5 +1,15 @@
 package server
 
+// Call only after installing workspace data, without holding server locks.
+func (s *Server) scheduleWorkspaceRefresh(indexComplete bool) {
+	s.scheduleDiagnosticRefresh()
+	s.scheduleSemanticTokensRefresh()
+	s.scheduleInlayHintRefresh()
+	if indexComplete {
+		s.scheduleCodeLensRefresh()
+	}
+}
+
 // scheduleSemanticTokensRefresh merges changes occurring while the client
 // request is in flight; all client calls are deliberately outside server locks.
 func (s *Server) scheduleSemanticTokensRefresh() {

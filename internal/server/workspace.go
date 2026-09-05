@@ -323,12 +323,7 @@ func (s *Server) workspaceIndexWorker() {
 		s.finishWorkspaceRebuildLocked()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
-		s.scheduleDiagnosticRefresh()
-		s.scheduleSemanticTokensRefresh()
-		s.scheduleInlayHintRefresh()
-		if indexComplete {
-			s.scheduleCodeLensRefresh()
-		}
+		s.scheduleWorkspaceRefresh(indexComplete)
 		s.finishWorkspaceIndexProgress(progress)
 		for _, warning := range warnings {
 			_ = s.sendWarning(s.analysisContext, warning)
@@ -1406,9 +1401,11 @@ func (s *Server) DidChangeRuntimepath(ctx context.Context, params *DidChangeRunt
 		}
 		openSnapshots := s.documents.Snapshots()
 		applied := s.applyRuntimepathDeltaLocked(ctx, oldPaths, paths, openSnapshots)
+		indexComplete := s.workspaceIndex != nil && s.workspaceIndex.Complete()
 		s.workspaceMu.Unlock()
 		s.publishMu.Unlock()
 		if applied {
+			s.scheduleWorkspaceRefresh(indexComplete)
 			for _, snapshot := range openSnapshots {
 				s.startAnalysis(snapshot.URI())
 			}
@@ -1852,6 +1849,15 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 	sort.Strings(paths)
 
 	var allDependents []string
+	installed := false
+	defer func() {
+		if installed {
+			s.workspaceMu.Lock()
+			complete := s.workspaceIndex != nil && s.workspaceIndex.Complete()
+			s.workspaceMu.Unlock()
+			s.scheduleWorkspaceRefresh(complete)
+		}
+	}()
 	for _, path := range paths {
 		if ctx.Err() != nil || s.analysisContext.Err() != nil {
 			return false
@@ -1883,7 +1889,9 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 					s.publishMu.Unlock()
 					return false
 				}
+				_, hadSource := index.Source(path)
 				_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), nil, nil)
+				installed = installed || hadSource
 				s.workspaceMu.Lock()
 				delete(s.workspaceFiles, path)
 				s.workspaceRevision++
@@ -1914,7 +1922,9 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 				s.publishMu.Unlock()
 				return false
 			}
+			_, hadSource := index.Source(path)
 			_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), nil, nil)
+			installed = installed || hadSource
 			s.workspaceMu.Lock()
 			s.workspaceFiles[path] = struct{}{}
 			s.workspaceRevision++
@@ -1968,6 +1978,7 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 			return false
 		}
 		_, deps := s.replaceWorkspaceFileWithAnalysisSnapshot(uri.File(path).String(), file, fileAnalysis)
+		installed = true
 		s.workspaceMu.Lock()
 		s.workspaceFiles[path] = struct{}{}
 		s.workspaceRevision++

@@ -15,8 +15,8 @@
 | F07 | 已提交 | `96793cf` |
 | F08 | 已提交 | `bffc03f` |
 | F09 | 已提交 | `832d562` |
-| F10 | 已修复 | `fix(workspace): align file watchers with discovered Vim sources` |
-| F11 | 待修复 | |
+| F10 | 已提交 | `63d69b2` |
+| F11 | 已修复 | `fix(server): refresh clients after workspace delta installation` |
 | F12 | 待修复 | |
 | F13 | 待修复 | |
 | F14 | 待修复 | |
@@ -76,3 +76,7 @@ server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根�
 ## F10
 
 监听 glob 从发现阶段的配置文件名/runtime 目录集合生成；增量事件复用发现阶段的源码选择规则，并保留已经索引的符号链接规范目标。runtime 子树监听允许无扩展名文件，事件处理仍过滤无关文件。覆盖根配置文件、普通 Vim 文件及嵌套 runtime 无扩展名文件的修改/删除/创建，以及绝对/相对 watcher 注册。Watched/Watch/Discover 定向测试、全量 test、vet、make、gofmt/gopls 均通过。
+
+## F11
+
+完整重建、runtimepath 增量和 watched-file 实际安装共用已有四类 capability-gated/coalesced 刷新；Code Lens 仍要求完整索引。刷新在发布锁释放后发生；同内容事件与 runtimepath 无操作不重复刷新，批次部分安装后回退也不会丢失已发生的更新通知。新增两类增量的支持/不支持能力矩阵和重复无变化事件测试，验证真实客户端请求及刷新代数；Refresh/Watched/Runtimepath 定向测试、全量 test、vet、make、gofmt/gopls 均通过。

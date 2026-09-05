@@ -353,6 +353,61 @@ func TestDependentAnalysisDoesNotScheduleRefresh(t *testing.T) {
 	assertNoRefresh(t, client.codeLensCalls)
 }
 
+func TestWorkspaceDeltaSchedulesRefresh(t *testing.T) {
+	for _, kind := range []string{"watched", "runtimepath"} {
+		for _, supported := range []bool{false, true} {
+			t.Run(kind+"/"+map[bool]string{false: "unsupported", true: "supported"}[supported], func(t *testing.T) {
+				root := t.TempDir()
+				path := writeWorkspaceFile(t, root, "lib.vim", "function Initial()\nendfunction\n")
+				instance := initializeWorkspaceServer(t, root)
+				client := newRefreshClient()
+				instance.mu.Lock()
+				instance.client = client
+				instance.pullDiagnostics = supported
+				instance.diagnosticRefreshSupport = supported
+				instance.semanticTokensRefreshSupport = supported
+				instance.inlayHintRefreshSupport = supported
+				instance.codeLensRefreshSupport = supported
+				instance.mu.Unlock()
+				if err := os.WriteFile(path, []byte("function Updated()\nendfunction\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				runtimeRoot := t.TempDir()
+				writeWorkspaceFile(t, runtimeRoot, "plugin/extra.vim", "function Extra()\nendfunction\n")
+				apply := func() {
+					t.Helper()
+					if kind == "watched" {
+						if !instance.applyWatchedFileChanges(context.Background(), []protocol.FileEvent{{URI: uri.File(path), Type: protocol.FileChangeTypeChanged}}) {
+							t.Fatal("unexpected rebuild fallback")
+						}
+					} else if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				apply()
+				apply() // Repeated identical events must not schedule another refresh.
+				instance.mu.Lock()
+				generations := []uint64{instance.diagnosticRefreshGeneration, instance.semanticTokensRefreshGeneration, instance.inlayHintRefreshGeneration, instance.codeLensRefreshGeneration}
+				instance.mu.Unlock()
+				var want uint64
+				if supported {
+					want = 1
+				}
+				for _, got := range generations {
+					if got != want {
+						t.Fatalf("refresh generations = %v, want all %d", generations, want)
+					}
+				}
+				if supported {
+					for _, calls := range []chan struct{}{client.diagnosticCalls, client.semanticTokensCalls, client.inlayHintCalls, client.codeLensCalls} {
+						waitForRefresh(t, calls)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestWorkspaceIndexSchedulesRefresh(t *testing.T) {
 	value := true
 	root := t.TempDir()
