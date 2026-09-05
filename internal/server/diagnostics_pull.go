@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"maps"
+	"os"
 	"sort"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -220,6 +222,7 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 			enumerated[document.snapshot.URI()] = struct{}{}
 		}
 		s.publishMu.Lock()
+		reported := maps.Clone(s.workspaceDiagnosticReported)
 		for documentURI, cached := range s.pullDiagnosticResults {
 			if cached.key.closed {
 				if _, ok := enumerated[documentURI]; !ok {
@@ -228,6 +231,25 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 			}
 		}
 		s.publishMu.Unlock()
+		removed := make(map[string]string)
+		for documentURI, resultID := range reported {
+			if _, ok := enumerated[documentURI]; ok {
+				continue
+			}
+			// An open overlay still owns its diagnostics, including after its root
+			// is removed. Do not clear it on behalf of the workspace request.
+			if _, open := s.documents.Snapshot(documentURI); open {
+				continue
+			}
+			path, ok := workspaceURIPath(uri.URI(documentURI))
+			if !ok {
+				continue
+			}
+			_, err := os.Stat(path)
+			if !workspacePathInRoots(path, roots) || os.IsNotExist(err) {
+				removed[documentURI] = resultID + "-removed"
+			}
+		}
 
 		items := make([]protocol.WorkspaceDocumentDiagnosticReport, 0, len(ordered))
 		for _, document := range ordered {
@@ -315,12 +337,55 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 				break
 			}
 		}
+		for documentURI := range removed {
+			if _, open := s.documents.Snapshot(documentURI); open {
+				delete(removed, documentURI)
+			}
+		}
 		s.publishMu.Unlock()
 		if stale || !currentWorkspace || !currentDocuments {
 			if attempt == 1 {
 				return nil, protocol.ErrContentModified
 			}
 			continue
+		}
+		removedURIs := make([]string, 0, len(removed))
+		for documentURI := range removed {
+			removedURIs = append(removedURIs, documentURI)
+		}
+		sort.Strings(removedURIs)
+		for _, documentURI := range removedURIs {
+			resultID := removed[documentURI]
+			if previous[documentURI] != resultID {
+				items = append(items, &protocol.WorkspaceFullDocumentDiagnosticReport{
+					FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{Kind: string(protocol.DocumentDiagnosticReportKindFull), ResultID: &resultID, Items: []protocol.Diagnostic{}},
+					URI:                          uri.URI(documentURI),
+				})
+			}
+		}
+		// Preserve removal ownership across failed/cancelled partial responses.
+		// A later previousResultId acknowledges the empty report and releases it.
+		recordReported := func() {
+			s.publishMu.Lock()
+			defer s.publishMu.Unlock()
+			if s.workspaceDiagnosticReported == nil {
+				s.workspaceDiagnosticReported = make(map[string]string)
+			}
+			for _, documentURI := range removedURIs {
+				if previous[documentURI] == removed[documentURI] && s.workspaceDiagnosticReported[documentURI] == reported[documentURI] {
+					delete(s.workspaceDiagnosticReported, documentURI)
+				}
+			}
+			for _, item := range items {
+				switch item := item.(type) {
+				case *protocol.WorkspaceFullDocumentDiagnosticReport:
+					if _, gone := removed[item.URI.String()]; !gone && item.ResultID != nil {
+						s.workspaceDiagnosticReported[item.URI.String()] = *item.ResultID
+					}
+				case *protocol.WorkspaceUnchangedDocumentDiagnosticReport:
+					s.workspaceDiagnosticReported[item.URI.String()] = item.ResultID
+				}
+			}
 		}
 		if partialToken != nil && len(items) > 0 {
 			s.mu.Lock()
@@ -329,6 +394,8 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 			if client == nil {
 				return nil, jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "diagnostic progress unavailable")
 			}
+			// Progress may reach the client even if a later batch fails.
+			recordReported()
 			for start := 0; start < len(items); start += workspaceDiagnosticPartialBatchSize {
 				end := min(start+workspaceDiagnosticPartialBatchSize, len(items))
 				value, err := protocol.Marshal(&protocol.WorkspaceDiagnosticReportPartialResult{Items: append([]protocol.WorkspaceDocumentDiagnosticReport(nil), items[start:end]...)})
@@ -344,6 +411,7 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 			}
 			return &protocol.WorkspaceDiagnosticReport{Items: []protocol.WorkspaceDocumentDiagnosticReport{}}, nil
 		}
+		recordReported()
 		return &protocol.WorkspaceDiagnosticReport{Items: items}, nil
 	}
 	return nil, protocol.ErrContentModified

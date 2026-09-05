@@ -204,6 +204,7 @@ type Server struct {
 	parseInFlight               map[parseInFlightKey]*inFlightParse
 	published                   map[string]publishedDiagnosticsState
 	pullDiagnosticResults       map[string]pullDiagnosticResult
+	workspaceDiagnosticReported map[string]string // publishMu; retained until removal is acknowledged
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult
 	nextSemanticTokenResultID   uint64

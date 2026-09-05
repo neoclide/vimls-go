@@ -172,8 +172,22 @@ func TestDiagnosticWorkspacePullPrunesOnlyNoLongerEnumeratedClosedCache(t *testi
 		t.Fatal(err)
 	}
 	report, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{})
-	if err != nil || len(report.Items) != 0 {
+	if err != nil || len(report.Items) != 1 {
 		t.Fatalf("report=%#v err=%v", report, err)
+	}
+	removed, ok := report.Items[0].(*protocol.WorkspaceFullDocumentDiagnosticReport)
+	if !ok || removed.URI.String() != closedURI || len(removed.Items) != 0 || removed.ResultID == nil || removed.Version != nil {
+		t.Fatalf("removal report = %#v", report.Items[0])
+	}
+	// A lost response can be retried; only an explicit acknowledgement prunes
+	// the lightweight removal ownership, not the potentially large AST cache.
+	retried, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{})
+	if err != nil || len(retried.Items) != 1 || *retried.Items[0].(*protocol.WorkspaceFullDocumentDiagnosticReport).ResultID != *removed.ResultID {
+		t.Fatalf("retry = %#v, %v", retried, err)
+	}
+	acknowledged, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{PreviousResultIds: []protocol.PreviousResultId{{URI: removed.URI, Value: *removed.ResultID}}})
+	if err != nil || len(acknowledged.Items) != 0 {
+		t.Fatalf("acknowledgement = %#v, %v", acknowledged, err)
 	}
 	instance.publishMu.Lock()
 	_, closedCached := instance.pullDiagnosticResults[closedURI]
@@ -181,6 +195,70 @@ func TestDiagnosticWorkspacePullPrunesOnlyNoLongerEnumeratedClosedCache(t *testi
 	instance.publishMu.Unlock()
 	if closedCached || !externalCached {
 		t.Fatalf("closed=%t external=%t", closedCached, externalCached)
+	}
+}
+
+func TestDiagnosticWorkspaceRemovalReports(t *testing.T) {
+	for _, kind := range []string{"deleted", "removed root", "unreadable", "open overlay"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			path := writeWorkspaceFile(t, root, "main.vim", "vim9script\necho missing\n")
+			instance := initializeWorkspaceServer(t, root)
+			first, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{})
+			if err != nil || len(first.Items) != 1 {
+				t.Fatalf("first = %#v, %v", first, err)
+			}
+			original := first.Items[0].(*protocol.WorkspaceFullDocumentDiagnosticReport)
+			if len(original.Items) == 0 {
+				t.Fatal("missing initial diagnostics")
+			}
+			if kind == "removed root" {
+				instance.workspaceMu.Lock()
+				instance.workspaceRoots = nil
+				instance.workspaceRevision++
+				instance.workspaceMu.Unlock()
+			} else {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "unreadable" {
+					// An existing non-regular replacement is not proof of deletion.
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				} else if kind == "open overlay" {
+					instance.documents.Open(original.URI.String(), 1, "vim9script\necho missing\n")
+				} else if !instance.applyWatchedFileChanges(context.Background(), []protocol.FileEvent{{URI: original.URI, Type: protocol.FileChangeTypeDeleted}}) {
+					t.Fatal("unexpected rebuild fallback")
+				}
+			}
+			client := &workspaceDiagnosticProgressClient{}
+			instance.client = client
+			report, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{
+				PreviousResultIds:   []protocol.PreviousResultId{{URI: original.URI, Value: *original.ResultID}, {URI: uri.File(filepath.Join(root, "never-reported.vim")), Value: "foreign"}},
+				PartialResultParams: protocol.PartialResultParams{PartialResultToken: protocol.String("removals")},
+			})
+			if err != nil || len(report.Items) != 0 {
+				t.Fatalf("report = %#v, %v", report, err)
+			}
+			if kind == "unreadable" {
+				if len(client.updates) != 0 {
+					t.Fatal("temporary failure cleared diagnostics")
+				}
+				return
+			}
+			if len(client.updates) != 1 {
+				t.Fatalf("updates = %d", len(client.updates))
+			}
+			var partial protocol.WorkspaceDiagnosticReportPartialResult
+			if err := protocol.Unmarshal(client.updates[0].Value, &partial); err != nil || len(partial.Items) != 1 {
+				t.Fatalf("partial = %#v, %v", partial, err)
+			}
+			full := partial.Items[0].(*protocol.WorkspaceFullDocumentDiagnosticReport)
+			if full.URI != original.URI || (len(full.Items) == 0) != (kind != "open overlay") {
+				t.Fatalf("diagnostics = %#v", full)
+			}
+		})
 	}
 }
 

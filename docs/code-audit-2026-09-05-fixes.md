@@ -16,8 +16,8 @@
 | F08 | 已提交 | `bffc03f` |
 | F09 | 已提交 | `832d562` |
 | F10 | 已提交 | `63d69b2` |
-| F11 | 已修复 | `fix(server): refresh clients after workspace delta installation` |
-| F12 | 待修复 | |
+| F11 | 已提交 | `5afb246` |
+| F12 | 已修复 | `fix(server): clear removed workspace pull diagnostics` |
 | F13 | 待修复 | |
 | F14 | 待修复 | |
 | F15 | 待修复 | |
@@ -80,3 +80,7 @@ server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根�
 ## F11
 
 完整重建、runtimepath 增量和 watched-file 实际安装共用已有四类 capability-gated/coalesced 刷新；Code Lens 仍要求完整索引。刷新在发布锁释放后发生；同内容事件与 runtimepath 无操作不重复刷新，批次部分安装后回退也不会丢失已发生的更新通知。新增两类增量的支持/不支持能力矩阵和重复无变化事件测试，验证真实客户端请求及刷新代数；Refresh/Watched/Runtimepath 定向测试、全量 test、vet、make、gofmt/gopls 均通过。
+
+## F12
+
+单独保留工作区诊断曾报告的 URI/result ID（不保留对应 AST/诊断内容）；删除或移出根的关闭文件返回显式空 full 报告。客户端以 previousResultId 确认后释放删除记录，丢失响应可重试相同删除结果；部分响应可能成功后再失败，因此发送前保留所属 URI。未知客户端 URI 不产生报告；打开 overlay、临时读取/文件类型错误不误清空。覆盖删除、移出根、重试/确认、partial result、外部打开文件及读取失败；DiagnosticWorkspace 定向测试、全量 test、vet、make、gofmt/gopls 均通过。
