@@ -93,7 +93,7 @@ func TestStyleDiagnosticsWithUnusedVim9Variable(t *testing.T) {
 }
 
 func TestNoremapStyleDiagnostics(t *testing.T) {
-	result := Analyze(syntax.Parse("nnoremap <leader>x :call s:Run()<CR>\n"))
+	result := Analyze(syntax.Parse("function! s:Run() abort\nendfunction\nnnoremap <leader>x :call s:Run()<CR>\n"))
 	var got []string
 	for _, diagnostic := range result.Diagnostics {
 		if strings.HasPrefix(diagnostic.Code, "vimls/") {
@@ -372,7 +372,7 @@ func TestComplexAutocmdLineLengthThreshold(t *testing.T) {
   autocmd BufEnter * if 1 | call s:Run() | endif
 augroup END
 `
-	result := Analyze(syntax.Parse(shortSource))
+	result := Analyze(syntax.Parse("function! s:Run() abort\nendfunction\n" + shortSource))
 	for _, diag := range result.Diagnostics {
 		if diag.Code == "vimls/complex-autocmd" {
 			t.Fatalf("unexpected complex-autocmd diagnostic for short line: %#v", diag)
@@ -385,7 +385,7 @@ augroup END
   autocmd BufEnter * if 1 | call s:Run() | echo 'this autocommand body is deliberately long enough to exceed the one hundred and eighty character single line threshold for complex-autocmd' | endif
 augroup END
 `
-	resultLong := Analyze(syntax.Parse(longSource))
+	resultLong := Analyze(syntax.Parse("function! s:Run() abort\nendfunction\n" + longSource))
 	found := false
 	for _, diag := range resultLong.Diagnostics {
 		if diag.Code == "vimls/complex-autocmd" {
@@ -406,7 +406,7 @@ augroup END
     \ endif
 augroup END
 `
-	resultMultiline := Analyze(syntax.Parse(multilineSource))
+	resultMultiline := Analyze(syntax.Parse("function! s:Run() abort\nendfunction\n" + multilineSource))
 	foundMultiline := false
 	for _, diag := range resultMultiline.Diagnostics {
 		if diag.Code == "vimls/complex-autocmd" {

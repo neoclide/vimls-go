@@ -168,7 +168,7 @@ func TestConfigFileModeKeepsBehaviorRules(t *testing.T) {
 		},
 		{
 			name:   "mapping-script-local-reference",
-			source: "nnoremap <leader>q :call s:Q()<CR>\n",
+			source: "function! s:Q() abort\nendfunction\nnnoremap <leader>q :call s:Q()<CR>\n",
 			want:   []string{"vimls/mapping-script-local-reference"},
 		},
 		{

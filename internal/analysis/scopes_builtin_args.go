@@ -768,6 +768,9 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 			for _, expression := range command.Expressions {
 				walk(expression, scope, command.Dialect)
 			}
+			if command.Mapping != nil {
+				walk(command.Mapping.RHSExpression, scope, command.Dialect)
+			}
 			for _, expression := range command.Targets {
 				walk(expression, scope, command.Dialect)
 			}
@@ -1191,7 +1194,12 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 			return
 		}
 		if unresolvedDirectFunction(scope, callee) && !vimdata.IsNeovimCompatFunction(callee.Value) {
-			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E117", Message: "Unknown function: " + callee.Value, Span: callee.Span})
+			name, span := callee.Value, callee.Span
+			if local, scriptLocal := scriptLocalName(name); scriptLocal {
+				span.Start += len(name) - len(local)
+				name = "s:" + local
+			}
+			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E117", Message: "Unknown function: " + name, Span: span})
 			return
 		}
 	}
@@ -1261,7 +1269,14 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 }
 
 func unresolvedDirectFunction(scope *Scope, callee *syntax.Expression) bool {
-	if scope == nil || callee == nil || callee.Kind != syntax.ExpressionIdentifier || !unresolvedFunctionName(callee.Value) {
+	if scope == nil || callee == nil || callee.Kind != syntax.ExpressionIdentifier {
+		return false
+	}
+	if name, scriptLocal := scriptLocalName(callee.Value); scriptLocal {
+		if !validScopeVariableName(name) {
+			return false
+		}
+	} else if !unresolvedFunctionName(callee.Value) {
 		return false
 	}
 	return resolve(scope, callee.Value, callee.Span.Start, true, nil) == nil

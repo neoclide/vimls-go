@@ -1123,3 +1123,23 @@ func TestHeredocHeaderAndEndMarkerSemanticTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestSemanticTokensSeparateMissingScriptLocalFunctionPrefix(t *testing.T) {
+	for _, source := range []string{
+		"nmap <leader>sr :call <SID>SessionReload()<CR>\n",
+		"call <SID>SessionReload()\n",
+		"call s:SessionReload()\n",
+	} {
+		instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+		tokens, err := instance.SemanticTokensFull(context.Background(), &protocol.SemanticTokensParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		prefix := "<SID>"
+		if !strings.Contains(source, prefix) {
+			prefix = "s:"
+		}
+		assertSemanticToken(t, tokens.Data, 0, uint32(strings.Index(source, prefix)), semanticNamespace, 0)
+		assertSemanticToken(t, tokens.Data, 0, uint32(strings.Index(source, "SessionReload")), semanticFunction, 0)
+	}
+}

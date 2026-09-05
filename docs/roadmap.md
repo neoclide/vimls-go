@@ -22,6 +22,11 @@ candidate success from the older green run 33969555293 (`871bddb`) or reuse the
 historical candidate's performance/archive results. Local repair and validation
 do not publish a release; push and tagging remain separate actions.
 
+Explicit script-local calls now report E117 when their same-file function is
+missing, including `:call <SID>Name()<CR>` mapping bodies. `<SID>` retains its
+script namespace highlighting even without a declaration; the missing-name
+range excludes the prefix. Other undecoded mapping key notation stays opaque.
+
 Missing-function diagnostics (E117, global and autoload functions) now wait for
 both workspace and runtimepath source indexing to complete. The interval between
 workspace installation and runtimepath reconciliation also defers missing-command

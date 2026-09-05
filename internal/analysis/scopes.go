@@ -3486,13 +3486,17 @@ func suppressUnexpandedBodyDiagnostics(result *FileAnalysis) {
 				}
 			}
 			if command.Embedded != nil {
-				if command.Mapping != nil && strings.Contains(result.File.Text(command.Embedded.Span), "<") {
-					// Key notation is not decoded into a source-mapped view yet.
-					// Mapping headers and ordinary neighbouring commands stay checked.
-					opaque = append(opaque, command.Embedded.Span)
-				} else {
-					collect(command.Embedded.Commands, userBody || command.Canonical == "command")
+				if command.Mapping != nil {
+					// <SID> has a known script-local meaning and does not change
+					// the command structure. Other key notation remains opaque.
+					body := strings.ReplaceAll(strings.ToLower(result.File.Text(command.Embedded.Span)), "<sid>", "")
+					if strings.Contains(body, "<") {
+						// Mapping headers and neighbouring commands stay checked.
+						opaque = append(opaque, command.Embedded.Span)
+						continue
+					}
 				}
+				collect(command.Embedded.Commands, userBody || command.Canonical == "command")
 			}
 		}
 	}

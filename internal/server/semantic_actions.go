@@ -491,7 +491,7 @@ func collectExpressionSemanticFacts(file *syntax.File, expression *syntax.Expres
 			if _, ok := vimdata.LookupFunction(callee.Value); ok {
 				modifiers = semanticDefaultLibrary
 			}
-			*facts = append(*facts, semanticFact{span: callee.Span, tokenType: semanticFunction, modifiers: modifiers, priority: 1})
+			appendSymbolSemanticFacts(file, facts, callee.Span, semanticFunction, modifiers, 1)
 		case syntax.ExpressionMember:
 			// Arrow callees are classified when the member expression itself is
 			// visited below. Avoid emitting the same function fact twice while

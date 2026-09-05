@@ -260,12 +260,17 @@ Representative source evidence:
 ## Unresolved functions and variables
 
 Vim uses E117 for a direct function call whose name cannot be found. The
-language server reports `E117: Unknown function: {name}` only for an unscoped
-Vim9 call when the name does not resolve to a built-in function, a lexical
-callable, or a same-file function declaration. Scoped calls such as
-`g:Dynamic()`, autoload calls such as `plugin#Dynamic()`, member calls, and
-legacy Vim script calls remain `unknown` because their target may be supplied
-dynamically.
+language server checks unscoped lowercase calls and explicit script-local calls
+(`s:Name()` and `<SID>Name()`) against builtins, lexical callables and same-file
+function declarations. Script-local declarations may appear after the call.
+The same check applies to parsed mapping command bodies and `<expr>` mappings.
+For `nmap <leader>sr :call <SID>SessionReload()<CR>`, a missing declaration
+produces `Unknown function: s:SessionReload` on `SessionReload`; `<SID>` is a
+script namespace prefix, not part of the function identifier. Other undecoded
+mapping key notation remains conservative and may suppress body diagnostics.
+Globally scoped calls such as `g:Dynamic()`, autoload calls such as
+`plugin#Dynamic()`, and dynamic member calls retain their separate conservative
+rules because their target may be supplied dynamically.
 
 The server defers E117, global-function-not-indexed hints and autoload-function-not-found
 warnings until both workspace and runtimepath source indexes are complete.
@@ -297,6 +302,8 @@ as LSP warnings. Their native Vim codes and messages stay unchanged.
 
 Representative source evidence:
 
+- `runtime/doc/map.txt`, `script-local`, defines `<SID>` in mappings as the
+  script-local identity used by `s:` function declarations.
 - `src/errors.h:284-285` defines E117.
 - `src/errors.h:292-295` defines E121.
 - `src/testdir/test_vim9_expr.vim:3885-3897` shows that an unscoped call does
