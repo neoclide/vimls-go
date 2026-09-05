@@ -275,7 +275,12 @@ func scanSetItemEnd(source string, start, end int) int {
 		}
 		if character == 0x16 {
 			position++
-			if position < end && (source[position] == '|' || source[position] == '"' || source[position] == '#') {
+			if position < end && source[position] >= utf8.RuneSelf {
+				// Session files may quote each UTF-8 byte independently. Do not
+				// reinterpret a quoted trail byte as an encoded lead byte and
+				// accidentally consume a following backslash escape.
+				position = nextEncodedCharacter(source, position, end)
+			} else if position < end && (source[position] == '|' || source[position] == '"' || source[position] == '#') {
 				position++
 			}
 			continue

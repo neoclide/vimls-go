@@ -2,6 +2,23 @@ package syntax
 
 import "testing"
 
+func TestSetSessionQuotedUTF8Bytes(t *testing.T) {
+	for _, value := range []string{
+		"tab:\x16\xe2\x16\x80\x16\xba\\ ,trail:\x16\xe2\x16\x80\x16\xa2,extends:#,nbsp:.",
+		"tab:\x16▸\\ ,trail:•",
+	} {
+		file := Parse("setlocal listchars=" + value + " shiftwidth=3 | echo 1\n")
+		if len(file.Diagnostics) != 0 || len(file.Commands) != 2 || file.Commands[0].Set == nil {
+			t.Fatalf("parse: %#v", file)
+		}
+		options := file.Commands[0].Set.Options
+		if len(options) != 2 || file.Text(options[0].Value) != value || file.Text(options[1].Name) != "shiftwidth" || file.Commands[1].Canonical != "echo" {
+			t.Fatalf("quoted option boundary: %#v", options)
+		}
+		assertFileSpans(t, file)
+	}
+}
+
 func TestSetCommandQueriesAndScopes(t *testing.T) {
 	for _, test := range []struct {
 		name      string
