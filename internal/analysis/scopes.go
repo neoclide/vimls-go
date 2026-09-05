@@ -1564,6 +1564,21 @@ func collectArgumentShadowDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
+	// Declaration targets are not visible while their initializer (or loop
+	// iterable) is being evaluated. Keep the same boundary as reference binding.
+	initializers := make(map[syntax.Span]syntax.Span)
+	for command := range result.commandScopes {
+		if declaration := command.Declaration; declaration != nil && declaration.Initializer != nil && !ordinaryContainerAssignment(command) {
+			for _, binding := range declaration.Bindings {
+				initializers[binding.Name] = declaration.Initializer.Span
+			}
+		}
+		if loop := command.For; loop != nil && loop.Iterable != nil {
+			for _, binding := range loop.Bindings {
+				initializers[binding.Name] = loop.Iterable.Span
+			}
+		}
+	}
 	for _, declaration := range result.Declarations {
 		if declaration == nil || !declaration.Parameter || declaration.Name == "_" || declaration.Scope == nil {
 			continue
@@ -1574,7 +1589,7 @@ func collectArgumentShadowDiagnostics(result *FileAnalysis) {
 		if !compiled || syntaxDiagnosticTouchesCall(result.File.Diagnostics, declaration.Span) {
 			continue
 		}
-		if scriptArgumentConflict(result, declaration) {
+		if scriptArgumentConflict(result, declaration, initializers) {
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1168", Message: "Argument already declared in the script: " + argumentScriptMessageTail(result.File, declaration), Span: declaration.Span})
 			continue
 		}
@@ -1588,6 +1603,9 @@ func collectArgumentShadowDiagnostics(result *FileAnalysis) {
 			}
 			for _, outer := range parent.Declarations {
 				if outer.Name == declaration.Name && outer.Span.Start < declaration.Span.Start && (outer.Kind == SymbolKindVariable || outer.Kind == SymbolKindConstant || outer.Parameter) {
+					if initializer := initializers[outer.Span]; initializer.Start <= declaration.Span.Start && declaration.Span.Start < initializer.End {
+						continue
+					}
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1167", Message: "Argument name shadows existing variable: " + declaration.Name, Span: declaration.Span})
 					goto next
 				}
@@ -1679,7 +1697,7 @@ func collectAggregateLocalRedeclarationDiagnostics(result *FileAnalysis) {
 			continue
 		}
 		aggregate := directMethodAggregate(result.File, declaration.Scope)
-		if aggregate == nil || scriptArgumentConflict(result, declaration) || !aggregateHasVisibleStaticVariable(result, aggregate, declaration.Name) {
+		if aggregate == nil || scriptArgumentConflict(result, declaration, nil) || !aggregateHasVisibleStaticVariable(result, aggregate, declaration.Name) {
 			continue
 		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1341", Message: "Variable already declared in the class: " + declaration.Name, Span: declaration.Span})
@@ -1744,7 +1762,7 @@ func aggregateHasVisibleStaticVariable(result *FileAnalysis, aggregate *syntax.C
 	return false
 }
 
-func scriptArgumentConflict(result *FileAnalysis, parameter *Declaration) bool {
+func scriptArgumentConflict(result *FileAnalysis, parameter *Declaration, initializers map[syntax.Span]syntax.Span) bool {
 	deferred := scopeContainsDef(parameter.Scope)
 	for scope := parameter.Scope.Parent; scope != nil; scope = scope.Parent {
 		scriptLevel := true
@@ -1759,6 +1777,9 @@ func scriptArgumentConflict(result *FileAnalysis, parameter *Declaration) bool {
 		}
 		for _, declaration := range scope.Declarations {
 			if declaration.Name != parameter.Name || !deferred && declaration.Span.Start >= parameter.Span.Start {
+				continue
+			}
+			if initializer := initializers[declaration.Span]; initializer.Start <= parameter.Span.Start && parameter.Span.Start < initializer.End {
 				continue
 			}
 			switch declaration.Kind {

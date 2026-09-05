@@ -8,7 +8,7 @@
 
 | 编号 | 工作项 | 状态 |
 |---|---|---|
-| FP01 | 初始化作用域 | 待修复 |
+| FP01 | 初始化作用域 | 已修复：作用域、引用及全量门禁通过 |
 | FP02 | 用户命令 args | 待修复 |
 | FP03 | 函数与变量命名空间 | 待修复 |
 | FP04 | 局部字典方法 | 已修复：正反回归及全量门禁通过 |
@@ -34,6 +34,8 @@
 - 尾随逗号后不只有换行合法，同一行空格后接右括号也合法。
 
 ## 验证与提交记录
+
+- FP01：初始化表达式及 for 迭代表达式中尚不可见的声明目标，不再导致 lambda 参数 E1167/E1168；已有外层变量、后续初始化表达式仍保持遮蔽检查。测试同时检查 lambda 引用绑定参数；本地 Vim 9.2.1015 验证脚本/局部自身初始化合法及已有局部变量 E1167。TestInitializerLambdaParametersDoNotShadowTargets、原引用回归、全量 go test / go vet / make、gofmt、diff 检查通过。FP12 提交 c593cd6。
 
 - FP12：循环解构按成员位置检查，不再把整行 list 类型与单个绑定比较；字面量逐行检查，保留后续行真实不匹配及 E710/E711，动态 any 保持保守。TestTypedForDestructuringDiagnostics 覆盖 typed pairs、rest、discard、错误成员/后续行/已知类型容器及普通循环。Vim 9.2.1015 正反探针验证合法 typed pairs/rest 和错误成员 E1163；全量 go test / go vet / make、gofmt、diff 检查通过。FP17 提交 9430267。
 

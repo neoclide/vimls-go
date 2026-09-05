@@ -230,6 +230,36 @@ execute $'legacy execute "{join(call_function, '\n')}"'
 	}
 }
 
+func TestInitializerLambdaParametersDoNotShadowTargets(t *testing.T) {
+	for _, test := range []struct{ name, source, code string }{
+		{"local target", "def Test()\nconst value = mapnew([1], (_, value: number) => value)\necho value\nenddef", ""},
+		{"script target", "var value = mapnew([1], (_, value: number) => value)\necho value", ""},
+		{"loop target", "def Test()\nfor value in mapnew([1], (_, value: number) => value)\necho value\nendfor\nenddef", ""},
+		{"existing local", "def Test()\nvar value = 1\nvar values = mapnew([1], (_, value: number) => value)\necho values value\nenddef", "vim/E1167"},
+		{"existing script", "var value = 1\nvar values = mapnew([1], (_, value: number) => value)\necho values value", "vim/E1168"},
+		{"later initializer", "def Test()\nvar value = mapnew([1], (_, n: number) => n)\nvar values = mapnew([1], (_, value: number) => value)\necho values value\nenddef", "vim/E1167"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse("vim9script\n" + test.source + "\n")
+			result := Analyze(file)
+			var got []syntax.Diagnostic
+			for _, diagnostic := range CombinedDiagnostics(file, result) {
+				if diagnostic.Code == "vim/E1167" || diagnostic.Code == "vim/E1168" {
+					got = append(got, diagnostic)
+				}
+			}
+			if test.code == "" && len(got) != 0 || test.code != "" && (len(got) != 1 || got[0].Code != test.code) {
+				t.Fatalf("shadow diagnostics = %#v, want %s", got, test.code)
+			}
+			for _, reference := range result.References {
+				if reference.Name == "value" && reference.scope.Lambda != nil && (reference.Declaration == nil || !reference.Declaration.Parameter) {
+					t.Fatalf("lambda reference did not resolve to parameter: %#v", reference)
+				}
+			}
+		})
+	}
+}
+
 func TestAnalyzeInitializerUsesOuterShadowedDeclaration(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar value = 1\nif true\n  var value = value\n  echo value\nendif\n"))
 	if len(result.References) != 2 {
