@@ -272,7 +272,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					if !completionTextMatches(selection.prefix, name) {
 						continue
 					}
-					if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("user command")}, 7500, completionSourceCommand) {
+					if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("user command"), Data: completionResolveTargetData(completionResolveCommand, name)}, 7500, completionSourceCommand) {
 						break
 					}
 				}

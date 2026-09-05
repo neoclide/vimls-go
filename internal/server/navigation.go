@@ -140,7 +140,7 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 			if document.occurrence.Start < document.occurrence.End || !spanContains(command.Name, offset) {
 				return
 			}
-			if _, ok := vimdata.Lookup(":" + file.Text(command.Name)); ok {
+			if _, ok := vimdata.Lookup(":" + file.Text(command.Name)); ok || command.Kind == syntax.CommandUser {
 				document.occurrence = command.Name
 			}
 		})

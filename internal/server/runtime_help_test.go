@@ -60,7 +60,7 @@ func TestRuntimeHelpEmptyRuntimepathDoesNotStartWorker(t *testing.T) {
 
 func TestRuntimeHelpHoverAppendsSeparateDocument(t *testing.T) {
 	root := t.TempDir()
-	writeWorkspaceFile(t, root, "doc/plugin.txt", "*PluginRun()*\nRuntime function help.\ng:enabled *g:enabled*\nRuntime variable help.\n*plugin#run*\nRuntime autoload help.\nlen({expr}) *len()*\nRuntime built-in help.\n*<Plug>(coc-diagnostic-prev)*\nJump to the previous diagnostic.\n")
+	writeWorkspaceFile(t, root, "doc/plugin.txt", "*PluginRun()*\nRuntime function help.\ng:enabled *g:enabled*\nRuntime variable help.\n*plugin#run*\nRuntime autoload help.\nlen({expr}) *len()*\nRuntime built-in help.\n*<Plug>(coc-diagnostic-prev)*\nJump to the previous diagnostic.\n:CocRestart *:CocRestart*\nRestart coc.nvim.\n")
 	for _, tc := range []struct {
 		name, source, needle, want string
 	}{
@@ -74,6 +74,7 @@ func TestRuntimeHelpHoverAppendsSeparateDocument(t *testing.T) {
 		{"builtin", "echo len([])\n", "len", "Runtime built-in help."},
 		{"builtin arrow", "echo []->len()\n", "len", "Runtime built-in help."},
 		{"plug mapping", "nmap <silent> [c <Plug>(coc-diagnostic-prev)\n", "coc-diagnostic-prev", "Jump to the previous diagnostic."},
+		{"user command", "function! s:AddStrict() abort\n  CocRestart\nendfunction\n", "CocRestart", "Restart coc.nvim."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, documentURI := openNavigationDocument(t, text.UTF16, tc.source)
@@ -119,6 +120,16 @@ func TestRuntimeHelpHoverAppendsSeparateDocument(t *testing.T) {
 				doc, ok := resolved.Documentation.(*protocol.MarkupContent)
 				if !ok || !strings.Contains(doc.Value, "Runtime built-in help.") {
 					t.Fatalf("builtin completion documentation = %#v", resolved.Documentation)
+				}
+			}
+			if tc.name == "user command" {
+				resolved, err := s.CompletionResolve(context.Background(), &protocol.CompletionItem{Label: "CocRestart", Data: completionResolveTargetData(completionResolveCommand, "CocRestart")})
+				if err != nil {
+					t.Fatal(err)
+				}
+				doc, ok := resolved.Documentation.(*protocol.MarkupContent)
+				if !ok || !strings.Contains(doc.Value, "Restart coc.nvim.") {
+					t.Fatalf("user command completion documentation = %#v", resolved.Documentation)
 				}
 			}
 			if before != nil {

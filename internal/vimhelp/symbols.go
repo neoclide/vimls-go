@@ -18,10 +18,11 @@ type SymbolDocumentation struct {
 
 var helpSymbolName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(#[A-Za-z_][A-Za-z0-9_]*)*$`)
 
-// ExtractSymbols discovers global variable, function, and <Plug> mapping
-// documentation without requiring a generated tags file. Bare autoload tags
-// are accepted because plugins such as VimTeX omit parentheses. Plain function
-// tags require (). Untagged prose and pattern tags are not guessed into symbols.
+// ExtractSymbols discovers Ex command, global variable, function, and <Plug>
+// mapping documentation without requiring a generated tags file. Bare
+// autoload tags are accepted because plugins such as VimTeX omit parentheses.
+// Plain function tags require (). Untagged prose and pattern tags are not
+// guessed into symbols.
 func ExtractSymbols(sourceName string, source []byte) []SymbolDocumentation {
 	lines := strings.Split(strings.ReplaceAll(string(source), "\r\n", "\n"), "\n")
 	var result []SymbolDocumentation
@@ -105,6 +106,9 @@ func definitionTags(line string) []string {
 func symbolTag(tag string) (string, string) {
 	if plugMappingTag(tag) {
 		return tag, "plug mapping"
+	}
+	if strings.HasPrefix(tag, ":") && helpSymbolName.MatchString(tag[1:]) {
+		return tag, "Ex command"
 	}
 	function := strings.HasSuffix(tag, "()")
 	name := strings.TrimSuffix(tag, "()")

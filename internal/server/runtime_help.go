@@ -227,6 +227,20 @@ func runtimeHelpName(document *navigationDocument, resolvedKind analysis.SymbolK
 	if text := document.analysis.File.Text(document.occurrence); plugMappingTagText(text) {
 		return strings.ToLower(text)
 	}
+	commandName := ""
+	walkCommands(document.analysis.File.Commands, func(command *syntax.Command) {
+		if commandName != "" || command.Name != document.occurrence {
+			return
+		}
+		if command.Kind == syntax.CommandUser {
+			commandName = ":" + document.analysis.File.Text(command.Name)
+		} else if command.Kind == syntax.CommandBuiltin {
+			commandName = ":" + command.Canonical
+		}
+	})
+	if commandName != "" {
+		return commandName
+	}
 	if document.external != nil {
 		name := strings.TrimPrefix(document.external.Name, "g:")
 		switch document.external.Kind {

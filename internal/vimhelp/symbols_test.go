@@ -15,7 +15,7 @@ func TestExtractSymbolsBoundariesAliasesAndExamples(t *testing.T) {
 		"*<Plug>(plugin-run)*\r\nRun the mapping.\r\n" +
 		"====================\r\nUnrelated footer.\r\n"
 	docs := ExtractSymbols("/plugin/doc/test.txt", []byte(source))
-	if len(docs) != 6 {
+	if len(docs) != 7 {
 		t.Fatalf("entries = %#v", docs)
 	}
 	if docs[0].Name != "g:plugin_enabled" || docs[0].Line != 3 || docs[0].Kind != "global variable" || !strings.Contains(docs[0].Markdown, "`PluginRun()`") {
@@ -27,14 +27,17 @@ func TestExtractSymbolsBoundariesAliasesAndExamples(t *testing.T) {
 	if !strings.Contains(docs[1].Markdown, "```vim\n  echo '*g:fake*'\n  echo 'a|b'\n  <meta> *g:also_fake*\n```") {
 		t.Fatalf("example not preserved: %q", docs[1].Markdown)
 	}
-	if docs[3].Markdown != "Shared description." || docs[4].Markdown != docs[3].Markdown {
-		t.Fatalf("bare aliases = %#v", docs[3:])
+	if docs[3].Name != ":PluginCommand" || docs[3].Kind != "Ex command" || docs[3].Markdown != "Unrelated command documentation." {
+		t.Fatalf("command = %#v", docs[3])
 	}
-	if docs[5].Name != "<Plug>(plugin-run)" || docs[5].Kind != "plug mapping" || docs[5].Markdown != "Run the mapping." {
-		t.Fatalf("plug mapping = %#v", docs[5])
+	if docs[4].Markdown != "Shared description." || docs[5].Markdown != docs[4].Markdown {
+		t.Fatalf("bare aliases = %#v", docs[4:])
+	}
+	if docs[6].Name != "<Plug>(plugin-run)" || docs[6].Kind != "plug mapping" || docs[6].Markdown != "Run the mapping." {
+		t.Fatalf("plug mapping = %#v", docs[6])
 	}
 	for _, doc := range docs {
-		if strings.Contains(doc.Markdown, "Unrelated") || doc.Source != "/plugin/doc/test.txt" {
+		if (doc.Name != ":PluginCommand" && strings.Contains(doc.Markdown, "Unrelated")) || doc.Source != "/plugin/doc/test.txt" {
 			t.Fatalf("section/source = %#v", doc)
 		}
 	}
