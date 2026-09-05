@@ -4,50 +4,6 @@
   "vim_pin": "v9.2.1015",
   "files": [
     {
-      "sha256": "9865d417d15bd6797ecc62bac369bce235abbe1bf1ebf9f0346b153d1ef15646",
-      "path": "/Users/chemzqm/.vim/autoload/coc/t.vim"
-    },
-    {
-      "sha256": "5fd51d4b046cb6479adbc2a68a46d198d8948fa4522ee0de5042904587997256",
-      "path": "/Users/chemzqm/.vim/autoload/x.vim"
-    },
-    {
-      "sha256": "5dce486f0519c9cf7a705478bb84a16445f99f1e580a02bc350e67e4e4903f9e",
-      "path": "/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/rust.vim/compiler/cargo.vim"
-    },
-    {
-      "sha256": "e0695d0b2dda2045ec1e2ff3604a72cba00b4f3acb2850e769ae0630c89bb220",
-      "path": "/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/rust.vim/compiler/rustc.vim"
-    },
-    {
-      "sha256": "df6a151550983bf0c9cf4d5f69e0058455f8ee991a8e79dcd3b526f28af4465c",
-      "path": "/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-elixir/compiler/credo.vim"
-    },
-    {
-      "sha256": "ba0b5a89a72962bff61baa3d376d139a10593dc3adebfead00830895e476ab78",
-      "path": "/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-elixir/compiler/exunit.vim"
-    },
-    {
-      "sha256": "ee9aeef04f7900f8d4f530e029f477c924f47de8ef3c7134663b438eeabf137a",
-      "path": "/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-elixir/compiler/mix.vim"
-    },
-    {
-      "sha256": "9a69cfabfa87ede99db5f0313d6d0f142260200dfa96d80d3a4a020238b8256b",
-      "path": "/Users/chemzqm/.vim/bundle/splitjoin.vim/spec/support/vim-javascript/compiler/eslint.vim"
-    },
-    {
-      "sha256": "be9cb309c33888a2eb21558174515bcde2742ea7d40ef4f7a0bd6a5116abcb8a",
-      "path": "/Users/chemzqm/.vim/bundle/swift.vim/compiler/swift.vim"
-    },
-    {
-      "sha256": "915cb602b5e76f65d038ad47ffe8e5be256d04ef3e8d38773683c43ed8294516",
-      "path": "/Users/chemzqm/.vim/bundle/typescript-vim/compiler/typescript.vim"
-    },
-    {
-      "sha256": "02cf7112f6a4e0647aaf5f6a1002f1c5c1f8e6a1db84356c9b0aa625e2932ac5",
-      "path": "/Users/chemzqm/.vim/bundle/vim-fugitive/autoload/fugitive.vim"
-    },
-    {
       "sha256": "9ea6dab2934deda7d630a91e7a0aa1ade9c816aa7338c3b3e4254eb138b1b9a3",
       "path": "/Users/chemzqm/.vim/bundle/vim-matchup/test/issues/10/legacy.vim"
     },
@@ -68,28 +24,8 @@
       "path": "/Users/chemzqm/.vim/bundle/vim-matchup/test/legacy/tabs.vim"
     },
     {
-      "sha256": "87715bd05592a88be47aa0f835651c4a738672360e6c998004bc71b5fe0a82ab",
-      "path": "/Users/chemzqm/.vim/bundle/vim-scala/compiler/sbt.vim"
-    },
-    {
-      "sha256": "df07c97873d1c3493586042aa221942cf95417548a069948d26c934d350c7481",
-      "path": "/Users/chemzqm/.vim/bundle/vim-scala/ftplugin/scala.xpt.vim"
-    },
-    {
-      "sha256": "5a6019511209b3a371daa9b1fd8108590e043140a27da865975e9ae908294bf4",
-      "path": "/Users/chemzqm/.vim/bundle/vimtex/autoload/vimtex/parser/toc.vim"
-    },
-    {
-      "sha256": "ca936a53e890251b3a856a2db368757c7e41b897d8fa6207f46999d5d86af461",
-      "path": "/Users/chemzqm/.vim/bundle/vimtex/autoload/vimtex/ui/nvim.vim"
-    },
-    {
       "sha256": "8a92b34c8350615726dbb39555a9acd1ea4f44629f5450263c7b4b688b0fcb64",
       "path": "/Users/chemzqm/.vim/sessions/coc-list.vim"
-    },
-    {
-      "sha256": "664177f4ed16d027ee8214c23e32f9ba9bcc9ee6d89a36e1fba166a24fa54146",
-      "path": "/Users/chemzqm/.vim/sessions/default.vim"
     },
     {
       "sha256": "e29d99e4ae350fb4f2bfb8efeb829c58dd03dbdede7b05548f73106a2985d2fb",
@@ -108,102 +44,14 @@
       "path": "/Users/chemzqm/.vim/view/~=+.vim=+vimrc=+unite.vim=1.vim"
     },
     {
-      "sha256": "f90aee2c050f2d2027798980f6aa2018f26e822fabb362f4f8c4537ebbe84953",
-      "path": "/Users/chemzqm/vim-dev/coc.nvim/autoload/coc/ui.vim"
-    },
-    {
       "sha256": "c3605521d858f8509ba1ccfe5cfc065f2c369a531df6862135dccfd2d8c0b341",
       "path": "/Users/chemzqm/vim-dev/coc.nvim/autoload/health/coc.vim"
-    },
-    {
-      "sha256": "3b824d8f17116ff637b3b4f0f1c4584cf4ed3dc32fc8de20d9d4dac77fcb18fe",
-      "path": "/usr/local/share/vim/vim92/autoload/dist/ft.vim",
-      "pinned_vim_source": "runtime/autoload/dist/ft.vim",
-      "pinned_vim_sha256": "3b824d8f17116ff637b3b4f0f1c4584cf4ed3dc32fc8de20d9d4dac77fcb18fe",
-      "matches_pin": true
-    },
-    {
-      "sha256": "4adbe1ea77904445d98804d89a3d52797dce08e38ba70890b10524e971bcb71a",
-      "path": "/usr/local/share/vim/vim92/autoload/dist/vim9.vim",
-      "pinned_vim_source": "runtime/autoload/dist/vim9.vim",
-      "pinned_vim_sha256": "4adbe1ea77904445d98804d89a3d52797dce08e38ba70890b10524e971bcb71a",
-      "matches_pin": true
-    },
-    {
-      "sha256": "49c1a5eadc2f1f083f051f2ecdb4c864e8bae1eb365d45dbb5c992a96b04bc47",
-      "path": "/usr/local/share/vim/vim92/autoload/dist/vimindent.vim",
-      "pinned_vim_source": "runtime/autoload/dist/vimindent.vim",
-      "pinned_vim_sha256": "49c1a5eadc2f1f083f051f2ecdb4c864e8bae1eb365d45dbb5c992a96b04bc47",
-      "matches_pin": true
-    },
-    {
-      "sha256": "06e7e3dd1f2f2c03783685965a0605b1a52712929df31176e2fb75cb0c5b5172",
-      "path": "/usr/local/share/vim/vim92/autoload/racket.vim",
-      "pinned_vim_source": "runtime/autoload/racket.vim",
-      "pinned_vim_sha256": "06e7e3dd1f2f2c03783685965a0605b1a52712929df31176e2fb75cb0c5b5172",
-      "matches_pin": true
-    },
-    {
-      "sha256": "c67f9e42743c44ba23a15bc6a26a5e31b072b664d722830afe674d5779f41b4b",
-      "path": "/usr/local/share/vim/vim92/ftplugin/java.vim",
-      "pinned_vim_source": "runtime/ftplugin/java.vim",
-      "pinned_vim_sha256": "c67f9e42743c44ba23a15bc6a26a5e31b072b664d722830afe674d5779f41b4b",
-      "matches_pin": true
-    },
-    {
-      "sha256": "f0bfb13244098c386b43901c9dc980bc2789aed0a2749f9cdb955ef2f0a13ec3",
-      "path": "/usr/local/share/vim/vim92/ftplugin/lua.vim",
-      "pinned_vim_source": "runtime/ftplugin/lua.vim",
-      "pinned_vim_sha256": "f0bfb13244098c386b43901c9dc980bc2789aed0a2749f9cdb955ef2f0a13ec3",
-      "matches_pin": true
-    },
-    {
-      "sha256": "2441d24f09e8a7d990cdb27082424ec65e323d932b8e01ce581f23d24a1a2ee1",
-      "path": "/usr/local/share/vim/vim92/ftplugin/man.vim",
-      "pinned_vim_source": "runtime/ftplugin/man.vim",
-      "pinned_vim_sha256": "2441d24f09e8a7d990cdb27082424ec65e323d932b8e01ce581f23d24a1a2ee1",
-      "matches_pin": true
-    },
-    {
-      "sha256": "68a3ae497ffc1236becaf509c953bc01805f6163b9fad409b712146d6942035c",
-      "path": "/usr/local/share/vim/vim92/import/dist/vimhighlight.vim",
-      "pinned_vim_source": "runtime/import/dist/vimhighlight.vim",
-      "pinned_vim_sha256": "68a3ae497ffc1236becaf509c953bc01805f6163b9fad409b712146d6942035c",
-      "matches_pin": true
-    },
-    {
-      "sha256": "f106706a0c2449a60e4082506ebbcf9b9130818fa49292b4b6deb508ca799e8a",
-      "path": "/usr/local/share/vim/vim92/indent/hare.vim",
-      "pinned_vim_source": "runtime/indent/hare.vim",
-      "pinned_vim_sha256": "f106706a0c2449a60e4082506ebbcf9b9130818fa49292b4b6deb508ca799e8a",
-      "matches_pin": true
-    },
-    {
-      "sha256": "6752f22841f03c1ce28266fe5de3e656c9807ad6476e1f7f21d79a4a2f2b30bb",
-      "path": "/usr/local/share/vim/vim92/indent/mp.vim",
-      "pinned_vim_source": "runtime/indent/mp.vim",
-      "pinned_vim_sha256": "6752f22841f03c1ce28266fe5de3e656c9807ad6476e1f7f21d79a4a2f2b30bb",
-      "matches_pin": true
     },
     {
       "sha256": "809e76907ce1667eab3f2416e4003b571b8cc53bd549072dceccfc5872df1f06",
       "path": "/usr/local/share/vim/vim92/indent/sml.vim",
       "pinned_vim_source": "runtime/indent/sml.vim",
       "pinned_vim_sha256": "809e76907ce1667eab3f2416e4003b571b8cc53bd549072dceccfc5872df1f06",
-      "matches_pin": true
-    },
-    {
-      "sha256": "70406146b5bffd42cce094aec3e4a7ed23a735a8c71ed2b82c5bf8af3d3ea5f2",
-      "path": "/usr/local/share/vim/vim92/pack/dist/opt/cfilter/plugin/cfilter.vim",
-      "pinned_vim_source": "runtime/pack/dist/opt/cfilter/plugin/cfilter.vim",
-      "pinned_vim_sha256": "70406146b5bffd42cce094aec3e4a7ed23a735a8c71ed2b82c5bf8af3d3ea5f2",
-      "matches_pin": true
-    },
-    {
-      "sha256": "f437951e68d921ef6b8165b12efde3b9b41df73903abe207ffde1b5d20f45d68",
-      "path": "/usr/local/share/vim/vim92/pack/dist/opt/comment/autoload/comment.vim",
-      "pinned_vim_source": "runtime/pack/dist/opt/comment/autoload/comment.vim",
-      "pinned_vim_sha256": "f437951e68d921ef6b8165b12efde3b9b41df73903abe207ffde1b5d20f45d68",
       "matches_pin": true
     },
     {
@@ -214,31 +62,10 @@
       "matches_pin": true
     },
     {
-      "sha256": "3f8fee4ddde204ae2e3a5e271f70193a102fadb57a15394519e8946632cb033f",
-      "path": "/usr/local/share/vim/vim92/pack/dist/opt/helptoc/autoload/helptoc.vim",
-      "pinned_vim_source": "runtime/pack/dist/opt/helptoc/autoload/helptoc.vim",
-      "pinned_vim_sha256": "3f8fee4ddde204ae2e3a5e271f70193a102fadb57a15394519e8946632cb033f",
-      "matches_pin": true
-    },
-    {
       "sha256": "a3b0f85f448f89adf22275832326740f4bb7807ac109581ac196fea96cbdfb2c",
       "path": "/usr/local/share/vim/vim92/pack/dist/opt/netrw/autoload/netrw.vim",
       "pinned_vim_source": "runtime/pack/dist/opt/netrw/autoload/netrw.vim",
       "pinned_vim_sha256": "a3b0f85f448f89adf22275832326740f4bb7807ac109581ac196fea96cbdfb2c",
-      "matches_pin": true
-    },
-    {
-      "sha256": "4c7f10bda2e24fd5882303dcf4969492cae47bd1ae64f9f9ce53a71fc8ec6e94",
-      "path": "/usr/local/share/vim/vim92/synmenu.vim",
-      "pinned_vim_source": "runtime/synmenu.vim",
-      "pinned_vim_sha256": "4c7f10bda2e24fd5882303dcf4969492cae47bd1ae64f9f9ce53a71fc8ec6e94",
-      "matches_pin": true
-    },
-    {
-      "sha256": "6dd8bebc9e846260368d8a593f759c97ad822cc52c2ff42c5608ecc181233a7f",
-      "path": "/usr/local/share/vim/vim92/syntax/2html.vim",
-      "pinned_vim_source": "runtime/syntax/2html.vim",
-      "pinned_vim_sha256": "6dd8bebc9e846260368d8a593f759c97ad822cc52c2ff42c5608ecc181233a7f",
       "matches_pin": true
     }
   ]

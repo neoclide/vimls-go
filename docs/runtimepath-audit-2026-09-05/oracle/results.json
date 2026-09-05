@@ -1,77 +1,5 @@
 [
   {
-    "name": "initializer-lambda-shadow",
-    "diagnostic_ids": [
-      1,
-      2
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "command-args-expansion",
-    "diagnostic_ids": [
-      3,
-      4,
-      5,
-      6,
-      7,
-      8,
-      9,
-      10,
-      28
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "function-variable-separate-namespaces",
-    "diagnostic_ids": [
-      11,
-      12,
-      13,
-      14
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
     "name": "fixture-help-text",
     "diagnostic_ids": [
       15,
@@ -161,30 +89,6 @@
     "verified": true
   },
   {
-    "name": "local-dictionary-method",
-    "diagnostic_ids": [
-      34,
-      35,
-      36,
-      37,
-      38
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
     "name": "session-fillchars-msgsep",
     "diagnostic_ids": [
       39,
@@ -203,26 +107,6 @@
       "errors": [],
       "exception": "Vim(setlocal):E474: Invalid argument: fillchars=msgsep:-",
       "throwpoint": "command line..script /Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/driver.vim[7]../Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/session-fillchars-msgsep.vim, line 1",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "session-modifier-address",
-    "diagnostic_ids": [
-      41
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
       "patch1015": 1
     },
     "verified": true
@@ -248,29 +132,6 @@
     "verified": true
   },
   {
-    "name": "new-plus-command-payload",
-    "diagnostic_ids": [
-      49,
-      50,
-      51,
-      52
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
     "name": "required-health-argument",
     "diagnostic_ids": [
       53,
@@ -288,217 +149,8 @@
       "messages": "",
       "version": 902,
       "errors": [],
-      "exception": "Vim(call):E119: Not enough arguments for function: \u003cSNR\u003e2_report_error",
+      "exception": "Vim(call):E119: Not enough arguments for function: <SNR>2_report_error",
       "throwpoint": "command line..script /Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/driver.vim[7]../Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/required-health-argument.vim, line 4",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "vim9-autoload-call",
-    "diagnostic_ids": [
-      58,
-      84
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "logical-expression-bool",
-    "diagnostic_ids": [
-      59,
-      70,
-      86
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "map-changing-container-value-type",
-    "diagnostic_ids": [
-      60,
-      61
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "repeated-destructuring-ignore",
-    "diagnostic_ids": [
-      62,
-      63
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "typed-loop-destructuring",
-    "diagnostic_ids": [
-      64,
-      78
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "delete-then-redefine-function",
-    "diagnostic_ids": [
-      65
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "counterexample-vim9-delete",
-    "diagnostic_ids": null,
-    "expected_exception": "E1084:",
-    "exit_code": 1,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "Vim(delfunction):E1084: Cannot delete Vim9 script function LuaFold",
-      "throwpoint": "command line..script /Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/driver.vim[7]../Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/counterexample-vim9-delete.vim, line 5",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "mapping-bar-payload",
-    "diagnostic_ids": [
-      66,
-      67
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "map-funcref-arguments",
-    "diagnostic_ids": [
-      68,
-      79,
-      80,
-      81,
-      85
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "loop-initializer-lambda-shadow",
-    "diagnostic_ids": [
-      69
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
       "patch1015": 1
     },
     "verified": true
@@ -524,47 +176,6 @@
     "verified": true
   },
   {
-    "name": "vim9-command-quoted-args",
-    "diagnostic_ids": [
-      72,
-      73
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "operatorfunc-lambda",
-    "diagnostic_ids": [
-      74
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
     "name": "legacy-setbufvar-without-call",
     "diagnostic_ids": [
       75,
@@ -579,28 +190,8 @@
       "messages": "",
       "version": 902,
       "errors": [],
-      "exception": "Vim:E492: Not an editor command:   setbufvar(a:bufnr, '\u0026shellslash', 0)",
+      "exception": "Vim:E492: Not an editor command:   setbufvar(a:bufnr, '&shellslash', 0)",
       "throwpoint": "command line..script /Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/driver.vim[7]../Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/legacy-setbufvar-without-call.vim[4]..function Test, line 1",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "vim9-trailing-comma",
-    "diagnostic_ids": [
-      77
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
       "patch1015": 1
     },
     "verified": true
@@ -622,86 +213,6 @@
       "errors": [],
       "exception": "Vim(let):E46: Cannot change read-only variable \"a:newdir\"",
       "throwpoint": "command line..script /Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/driver.vim[7]../Users/chemzqm/vim-dev/vimls-go/docs/runtimepath-audit-2026-09-05/oracle/cases/legacy-readonly-argument.vim[4]..function Test, line 1",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "session-listchars-40",
-    "diagnostic_ids": [
-      40
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "session-listchars-43",
-    "diagnostic_ids": [
-      43
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "session-listchars-45",
-    "diagnostic_ids": [
-      45
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
-      "patch1015": 1
-    },
-    "verified": true
-  },
-  {
-    "name": "session-listchars-47",
-    "diagnostic_ids": [
-      47
-    ],
-    "expected_exception": "",
-    "exit_code": 0,
-    "stdout": "",
-    "stderr": "",
-    "vim_report": {
-      "patch1016": 0,
-      "messages": "",
-      "version": 902,
-      "errors": [],
-      "exception": "",
-      "throwpoint": "",
       "patch1015": 1
     },
     "verified": true
