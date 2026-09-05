@@ -12,8 +12,8 @@
 | F04 | 已提交 | `49639ca`；见下方验证 |
 | F05 | 已提交 | `008adf7` |
 | F06 | 已提交 | `2cabe15` |
-| F07 | 已修复 | `fix(analysis): preserve container types for slices` |
-| F08 | 待修复 | |
+| F07 | 已提交 | `96793cf` |
+| F08 | 已修复 | `fix(analysis): respect function ownership in return inference` |
 | F09 | 待修复 | |
 | F10 | 待修复 | |
 | F11 | 待修复 | |
@@ -64,3 +64,7 @@ server 直接使用已有 `NewPathResolverForRoots`，保留全部工作区根�
 ## F07
 
 索引与切片采用不同类型规则；list/string/blob 切片保留容器类型，tuple 的动态切片保留容器但不假定原来的元素位置/长度。覆盖完整、负数、省略界限、空切片及单元素索引对照。固定 v9.2.1015 的审计 oracle 再次通过（退出 0、v:errors/messages 为空）；定向类型测试、全量 test、vet、make、gofmt/gopls 均通过。
+
+## F08
+
+返回推断使用已有函数 scope 的范围及最近 callable 所有者，跳过嵌套函数的返回和结束标记。legacy 无返回及裸 return 推断为 number，Vim9 void 保持独立。覆盖嵌套函数、无返回、裸 return、条件块及调用表达式类型；类型定向测试、全量 test、vet、make、gofmt/gopls 均通过；固定版本 oracle 已在本轮验证 Outer 返回 42、legacy 默认返回 0。未引入新的控制流求解器。

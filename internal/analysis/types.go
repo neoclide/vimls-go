@@ -331,14 +331,25 @@ func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) 
 				(command.Function.ReturnType == nil || !syntaxDiagnosticOverlaps(state.result.File.Diagnostics, command.Function.ReturnType.Span)) {
 				inferred := UnknownValueType
 				hasValueReturn := false
+				functionScope := state.commandScopes[command]
 				for bodyIndex := index + 1; bodyIndex < len(commands); bodyIndex++ {
 					body := &commands[bodyIndex]
-					if body.Canonical == "endfunction" || body.Canonical == "enddef" {
+					if functionScope == nil || body.Span.Start >= functionScope.Span.End {
 						break
 					}
-					if body.Canonical == "return" && len(body.Expressions) > 0 {
+					owner := state.commandScopes[body]
+					for owner != nil && owner.Kind != syntax.BlockFunction && owner.Kind != syntax.BlockDef && owner.Lambda == nil {
+						owner = owner.Parent
+					}
+					if owner != functionScope {
+						continue
+					}
+					if body.Canonical == "return" && (len(body.Expressions) > 0 || command.Canonical == "function") {
 						hasValueReturn = true
-						current := state.infer(body.Expressions[0], state.commandScopes[body])
+						current := ValueType{Name: "number"} // Legacy bare return yields zero.
+						if len(body.Expressions) > 0 {
+							current = state.infer(body.Expressions[0], state.commandScopes[body])
+						}
 						if isUnresolvedType(inferred) {
 							inferred = current
 						} else {
@@ -348,6 +359,9 @@ func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) 
 				}
 				if !hasValueReturn {
 					inferred = ValueType{Name: "void"}
+					if command.Canonical == "function" {
+						inferred = ValueType{Name: "number"}
+					}
 				}
 				*declaration.Type.Return = inferred
 			}

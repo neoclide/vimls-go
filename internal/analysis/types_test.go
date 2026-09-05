@@ -77,6 +77,36 @@ func TestSliceTypesPreserveContainers(t *testing.T) {
 	}
 }
 
+func TestFunctionReturnInferenceOwnsLexicalBody(t *testing.T) {
+	for _, test := range []struct{ source, name, want string }{
+		{"function! Outer()\n  function! Inner()\n    return 'text'\n  endfunction\n  return 42\nendfunction\nlet value = Outer()\n", "Outer", "number"},
+		{"function! Outer()\n  function! Inner()\n    return 'text'\n  endfunction\nendfunction\nlet value = Outer()\n", "Outer", "number"},
+		{"function! Empty()\nendfunction\nlet value = Empty()\n", "Empty", "number"},
+		{"function! Bare()\n  return\nendfunction\nlet value = Bare()\n", "Bare", "number"},
+		{"function! Conditional()\n  if 1\n    return 'text'\n  endif\n  return 'other'\nendfunction\nlet value = Conditional()\n", "Conditional", "string"},
+		{"vim9script\ndef Empty()\nenddef\n", "Empty", "void"},
+	} {
+		t.Run(test.name+"/"+test.want, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			found := false
+			for _, declaration := range result.Declarations {
+				if declaration.Name == test.name {
+					found = true
+					if declaration.Type.Return == nil || declaration.Type.Return.Name != test.want {
+						t.Fatalf("return=%#v", declaration.Type.Return)
+					}
+				}
+				if declaration.Name == "value" && declaration.Type.Name != test.want {
+					t.Fatalf("call result=%#v", declaration.Type)
+				}
+			}
+			if !found {
+				t.Fatal("missing function")
+			}
+		})
+	}
+}
+
 func TestAnalyzeInfersShiftAndDestructuredElementTypes(t *testing.T) {
 	result := Analyze(syntax.Parse("vim9script\nvar shifted = 8 << 1\nvar [count, label] = [1, 'one']\nconst winid = win_getid()\nconst [row, col] = win_screenpos(winid)\n"))
 	declarations := make(map[string]*Declaration)
