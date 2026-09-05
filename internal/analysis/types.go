@@ -431,8 +431,11 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 				typ = builtinVariableValueType(variable)
 			} else if implicit, ok := legacyImplicitArgumentType(scope, expression.Value); ok {
 				typ = implicit
-			} else if reference := state.references[expression.Span]; reference != nil && reference.Declaration != nil {
-				typ = reference.Declaration.Type
+			} else if reference := state.references[expression.Span]; reference != nil {
+				typ = unknown
+				if reference.Declaration != nil {
+					typ = reference.Declaration.Type
+				}
 			} else if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil {
 				typ = declaration.Type
 			} else {

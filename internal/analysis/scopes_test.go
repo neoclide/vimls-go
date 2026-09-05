@@ -230,6 +230,50 @@ execute $'legacy execute "{join(call_function, '\n')}"'
 	}
 }
 
+func TestLegacyFunctionAndValueNamespaces(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+		wantValue    bool
+	}{
+		{"value before function", "let s:escape = 'text'\nfunction s:escape(value)\nreturn a:value\nendfunction\necho '[' . s:escape . ']'\ncall s:escape('ok')\n", true},
+		{"conditional value", "function s:escape(value)\nreturn a:value\nendfunction\nif g:condition\nlet s:escape = 'text'\nendif\necho '[' . s:escape . ']'\ncall s:escape('ok')\n", false},
+		{"function alone is not a value", "function s:escape(value)\nreturn a:value\nendfunction\necho '[' . s:escape . ']'\ncall s:escape('ok')\n", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			for _, diagnostic := range CombinedDiagnostics(file, result) {
+				if diagnostic.Code == "vim/E729" {
+					t.Fatalf("function leaked into value namespace: %#v", diagnostic)
+				}
+			}
+			for _, reference := range result.References {
+				if reference.Name != "s:escape" {
+					continue
+				}
+				if reference.functionCallee {
+					if reference.Declaration == nil || !functionSymbolKind(reference.Declaration.Kind) {
+						t.Fatalf("call reference = %#v", reference)
+					}
+				} else if test.wantValue {
+					if reference.Declaration == nil || reference.Declaration.Kind != SymbolKindVariable {
+						t.Fatalf("value reference = %#v", reference)
+					}
+				} else if reference.Declaration != nil && functionSymbolKind(reference.Declaration.Kind) {
+					t.Fatalf("value reference points to function: %#v", reference)
+				}
+			}
+		})
+	}
+	file := syntax.Parse("vim9script\ndef Handler(): number\nreturn 1\nenddef\nvar Fn = Handler\necho Fn()\n")
+	result := Analyze(file)
+	for _, reference := range result.References {
+		if reference.Name == "Handler" && (reference.Declaration == nil || !functionSymbolKind(reference.Declaration.Kind)) {
+			t.Fatalf("Vim9 function value lost: %#v", reference)
+		}
+	}
+}
+
 func TestInitializerLambdaParametersDoNotShadowTargets(t *testing.T) {
 	for _, test := range []struct{ name, source, code string }{
 		{"local target", "def Test()\nconst value = mapnew([1], (_, value: number) => value)\necho value\nenddef", ""},

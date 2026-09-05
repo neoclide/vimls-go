@@ -6614,6 +6614,9 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span, scope)
 			}
 			declaration := resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped)
+			if !preferFunction {
+				declaration = resolveValue(scope, expression.Value, expression.Span.Start, skipped, dialect)
+			}
 			result.References = append(result.References, &Reference{
 				Name: expression.Value, Span: expression.Span,
 				Declaration: declaration, functionCallee: preferFunction, scope: scope, dialect: dialect,
@@ -7363,7 +7366,7 @@ func walkAssignmentTarget(result *FileAnalysis, file *syntax.File, expression *s
 			if strings.HasPrefix(expression.Value, "&") {
 				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span, scope)
 			}
-			declaration := resolve(scope, expression.Value, expression.Span.Start, false, skipped)
+			declaration := resolveValue(scope, expression.Value, expression.Span.Start, skipped, dialect)
 			result.References = append(result.References, &Reference{
 				Name: expression.Value, Span: expression.Span, Declaration: declaration, assignmentTarget: true, scope: scope, dialect: dialect,
 			})
@@ -7676,6 +7679,24 @@ func unknownOptionDisplay(result *FileAnalysis, name string, span syntax.Span) (
 	}
 	result.unknownOptions[span] = true
 	return display, true
+}
+
+// Legacy variable reads do not produce a Funcref merely because a function
+// has the same name. Vim9, in contrast, permits function names as values.
+func resolveValue(scope *Scope, name string, offset int, hidden map[syntax.Span]bool, dialect syntax.Dialect) *Declaration {
+	declaration := resolve(scope, name, offset, false, hidden)
+	if dialect != syntax.Legacy || declaration == nil || !functionSymbolKind(declaration.Kind) {
+		return declaration
+	}
+	skipped := make(map[syntax.Span]bool, len(hidden)+1)
+	for span, value := range hidden {
+		skipped[span] = value
+	}
+	for declaration != nil && functionSymbolKind(declaration.Kind) {
+		skipped[declaration.Span] = true
+		declaration = resolve(scope, name, offset, false, skipped)
+	}
+	return declaration
 }
 
 func resolve(scope *Scope, name string, offset int, preferFunction bool, hidden map[syntax.Span]bool) *Declaration {
