@@ -36,6 +36,28 @@ func runtimeHelpHover(t *testing.T, s *Server, documentURI uri.URI, needle strin
 	return hover
 }
 
+func TestRuntimeHelpEmptyRuntimepathDoesNotStartWorker(t *testing.T) {
+	s := New(nil, nil, io.Discard)
+	t.Cleanup(s.stopAnalysis)
+	read := make(chan struct{}, 1)
+	s.testHooks.beforeRuntimeHelpRead = func(context.Context, string) {
+		read <- struct{}{}
+	}
+	s.setRuntimePaths(nil)
+	s.runtimeHelpWG.Wait()
+	s.workspaceMu.Lock()
+	running := s.runtimeHelpRunning
+	s.workspaceMu.Unlock()
+	if running {
+		t.Fatal("empty runtimepath started runtime help worker")
+	}
+	select {
+	case <-read:
+		t.Fatal("empty runtimepath read a help file")
+	default:
+	}
+}
+
 func TestRuntimeHelpHoverAppendsSeparateDocument(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceFile(t, root, "doc/plugin.txt", "*PluginRun()*\nRuntime function help.\ng:enabled *g:enabled*\nRuntime variable help.\n*plugin#run*\nRuntime autoload help.\nlen({expr}) *len()*\nRuntime built-in help.\n*<Plug>(coc-diagnostic-prev)*\nJump to the previous diagnostic.\n")

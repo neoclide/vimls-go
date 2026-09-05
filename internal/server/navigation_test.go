@@ -626,6 +626,57 @@ func TestHoverShowsStructuredBuiltinFunctionSignature(t *testing.T) {
 	}
 }
 
+func TestHoverDistinguishesBuiltinFunctionFromSameNamedExCommand(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceFile(t, root, "doc/builtin.txt", "append({lnum}, {text}) *append()*\nRuntime append function help.\n")
+	for _, source := range []string{
+		"vim9script\nappend(0, 'x')\n",
+		"call append(0, 'x')\n",
+		"vim9script\n['x']->append(0)\n",
+	} {
+		instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+		t.Cleanup(instance.stopAnalysis)
+		instance.setRuntimePaths([]string{root})
+		instance.runtimeHelpWG.Wait()
+		hover := runtimeHelpHover(t, instance, documentURI, "append")
+		sections, ok := hover.Contents.(protocol.MarkedStringSlice)
+		if !ok || len(sections) != 2 {
+			t.Fatalf("source %q hover = %#v", source, hover)
+		}
+		signature, ok := sections[0].(*protocol.MarkedStringWithLanguage)
+		if !ok || signature.Value != "append({lnum}, {text})" {
+			t.Fatalf("source %q signature = %#v", source, sections[0])
+		}
+		if body := fmt.Sprint(sections[1]); !strings.Contains(body, "Runtime append function help.") || strings.Contains(body, ":{range}a[ppend]") {
+			t.Fatalf("source %q runtime help = %#v", source, sections[1])
+		}
+	}
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar Fn = append\n")
+	t.Cleanup(instance.stopAnalysis)
+	instance.setRuntimePaths([]string{root})
+	instance.runtimeHelpWG.Wait()
+	hover := runtimeHelpHover(t, instance, documentURI, "append")
+	sections, ok := hover.Contents.(protocol.MarkedStringSlice)
+	if !ok || len(sections) != 2 || strings.Contains(fmt.Sprint(hover.Contents), ":{range}a[ppend]") {
+		t.Fatalf("function value hover = %#v", hover)
+	}
+}
+
+func TestHoverKeepsAppendExCommandDocumentation(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "append\ntext\n.\n")
+	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+		Position:     protocol.Position{Character: 2},
+	}})
+	if err != nil || hover == nil {
+		t.Fatalf("hover = %#v, %v", hover, err)
+	}
+	content, ok := hover.Contents.(*protocol.MarkupContent)
+	if !ok || !strings.HasPrefix(content.Value, ":{range}a[ppend][!]") {
+		t.Fatalf("append command hover = %#v", hover.Contents)
+	}
+}
+
 func assertFunctionHoverContents(t *testing.T, hover *protocol.Hover, signature, documentation string) {
 	t.Helper()
 	contents, ok := hover.Contents.(protocol.MarkedStringSlice)

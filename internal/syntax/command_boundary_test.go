@@ -47,7 +47,7 @@ func TestFileCommandPrefixFilterBoundaries(t *testing.T) {
 		{"write", "!echo +foo|cat", false, 0},
 		{"echo", "+foo|echo 2", false, 0},
 	} {
-		metadata, _ := vimdata.Lookup(test.command)
+		metadata, _ := vimdata.Lookup(":" + test.command)
 		parsed := &Command{}
 		if test.bang {
 			parsed.Bang = Span{Start: 1, End: 2}

@@ -1404,13 +1404,13 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			return
 		}
 		typedName := file.Source[nameStart:nameEnd]
-		metadata, builtIn := vimdata.Lookup(typedName)
+		metadata, builtIn := vimdata.Lookup(":" + typedName)
 		// Legacy Vim recognizes a deliberately narrow set of alphabetic bytes
 		// after the one-byte :s command before it performs normal command lookup.
 		// This is what makes :sge2 a repeat command without turning an unknown
 		// name such as setbufvar(...) into :substitute followed by garbage.
 		if dialect == Legacy && legacyOneLetterSubstitute(file.Source, nameStart, end) {
-			if substituteMetadata, substituteBuiltIn := vimdata.Lookup("s"); substituteBuiltIn {
+			if substituteMetadata, substituteBuiltIn := vimdata.Lookup(":s"); substituteBuiltIn {
 				nameEnd = nameStart + 1
 				typedName = file.Source[nameStart:nameEnd]
 				metadata, builtIn = substituteMetadata, true
@@ -1756,7 +1756,7 @@ func collectedBlockBarConflict(source string, command *Command) bool {
 	if command == nil || command.Argument.Start >= command.Argument.End {
 		return false
 	}
-	metadata, ok := vimdata.Lookup(command.Canonical)
+	metadata, ok := vimdata.Lookup(":" + command.Canonical)
 	if ok && metadata.Flags&(vimdata.AllowBar|vimdata.ExpressionArgument) != 0 {
 		return false
 	}
@@ -2177,7 +2177,7 @@ func scanMetadataForParsedCommand(command Command) vimdata.Command {
 	if command.Kind == CommandExpression {
 		return vimdata.Command{Flags: vimdata.ExpressionArgument}
 	}
-	metadata, _ := vimdata.Lookup(command.Canonical)
+	metadata, _ := vimdata.Lookup(":" + command.Canonical)
 	if selfSplittingVariableCommand(command.Canonical) {
 		metadata.Flags |= vimdata.AllowBar
 	}
@@ -2648,7 +2648,7 @@ func isPayloadRecoveryLine(source string, start, end int, canonical string) bool
 	if nameEnd == start {
 		return false
 	}
-	metadata, ok := vimdata.Lookup(source[start:nameEnd])
+	metadata, ok := vimdata.Lookup(":" + source[start:nameEnd])
 	if !ok || metadata.Name != canonical {
 		return false
 	}
@@ -2863,7 +2863,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 		return
 	}
 	if command.Dialect == Vim9 {
-		if metadata, ok := vimdata.Lookup(command.Canonical); ok && metadata.Flags&vimdata.FileArgument != 0 {
+		if metadata, ok := vimdata.Lookup(":" + command.Canonical); ok && metadata.Flags&vimdata.FileArgument != 0 {
 			if boundary := command.boundaryExpression; boundary != nil {
 				file.Diagnostics = append(file.Diagnostics, boundary.diagnostics...)
 				command.boundaryExpression = nil
@@ -5756,7 +5756,7 @@ func staticallyInvalidVim9CommandName(name string) bool {
 	if name == "" || startsUpper(name) || strings.Contains(name, ":") {
 		return false
 	}
-	_, builtIn := vimdata.Lookup(name)
+	_, builtIn := vimdata.Lookup(":" + name)
 	return !builtIn
 }
 
@@ -5996,7 +5996,7 @@ func allowsVim9AutomaticContinuation(file *File, commandIndex int) bool {
 	if command.Kind == CommandExpression {
 		return true
 	}
-	if metadata, ok := vimdata.Lookup(command.Canonical); ok && metadata.Flags&vimdata.ExpressionArgument != 0 {
+	if metadata, ok := vimdata.Lookup(":" + command.Canonical); ok && metadata.Flags&vimdata.ExpressionArgument != 0 {
 		return true
 	}
 	if expressionCommand(command.Canonical) {

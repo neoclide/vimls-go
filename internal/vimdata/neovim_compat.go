@@ -281,22 +281,22 @@ var neovimCompatVariables = []Variable{
 // neovimCompatCommands are Neovim-only Ex commands accepted by
 // vim-language-server's docs.
 var neovimCompatCommands = []Command{
-	{Name: "rshada", Flags: AllowBang | AllowBar | FileArgument},
-	{Name: "wshada", Flags: AllowBang | AllowBar | FileArgument},
-	{Name: "checkhealth"},
-	{Name: "connect"},
-	{Name: "detach"},
-	{Name: "fclose"},
-	{Name: "lsp"},
-	{Name: "perlfile"},
-	{Name: "restart"},
-	{Name: "trust"},
-	{Name: "Inspect"},
-	{Name: "InspectTree"},
-	{Name: "EditQuery"},
-	{Name: "UpdateRemotePlugins"},
-	{Name: "Undotree"},
-	{Name: "DiffTool"},
+	{Key: ":rshada", Name: "rshada", Flags: AllowBang | AllowBar | FileArgument},
+	{Key: ":wshada", Name: "wshada", Flags: AllowBang | AllowBar | FileArgument},
+	{Key: ":checkhealth", Name: "checkhealth"},
+	{Key: ":connect", Name: "connect"},
+	{Key: ":detach", Name: "detach"},
+	{Key: ":fclose", Name: "fclose"},
+	{Key: ":lsp", Name: "lsp"},
+	{Key: ":perlfile", Name: "perlfile"},
+	{Key: ":restart", Name: "restart"},
+	{Key: ":trust", Name: "trust"},
+	{Key: ":Inspect", Name: "Inspect"},
+	{Key: ":InspectTree", Name: "InspectTree"},
+	{Key: ":EditQuery", Name: "EditQuery"},
+	{Key: ":UpdateRemotePlugins", Name: "UpdateRemotePlugins"},
+	{Key: ":Undotree", Name: "Undotree"},
+	{Key: ":DiffTool", Name: "DiffTool"},
 }
 
 // neovimCompatEvents are Neovim-only autocmd events.

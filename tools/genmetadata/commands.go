@@ -49,7 +49,7 @@ func generateCommands(vimRoot, output string) error {
 	fmt.Fprintf(&generated, "const (\n\tCommandVimTag = %q\n\tCommandVimCommit = %q\n)\n\n", vimTag, vimCommit)
 	fmt.Fprintln(&generated, "var commands = [...]Command{")
 	for _, command := range commands {
-		fmt.Fprintf(&generated, "\t{Name: %q, Flags: %s, Documentation: %q, DocumentationSource: %q},\n", command.Name, command.Flags, command.Documentation, command.DocumentationSource)
+		fmt.Fprintf(&generated, "\t{Key: %q, Name: %q, Flags: %s, Documentation: %q, DocumentationSource: %q},\n", ":"+command.Name, command.Name, command.Flags, command.Documentation, command.DocumentationSource)
 	}
 	fmt.Fprintln(&generated, "}")
 

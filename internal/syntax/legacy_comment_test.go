@@ -41,7 +41,7 @@ func TestLegacyDoubleQuoteStringsRemainExpressions(t *testing.T) {
 func TestLegacyContinuedStringAfterOperatorIsNotComment(t *testing.T) {
 	source := "let value = \"first\" .\n  \\ \"second\" .\n  \\ \"third\"\n"
 	second := strings.Index(source, "\"second\"")
-	metadata, _ := vimdata.Lookup("let")
+	metadata, _ := vimdata.Lookup(":let")
 	if !legacyExpressionNeedsOperand(source, 4, second) || isCommentStart(source, second, 4, strings.IndexByte(source[second:], '\n')+second, Legacy, metadata) {
 		t.Fatalf("continued quote was classified as a comment")
 	}

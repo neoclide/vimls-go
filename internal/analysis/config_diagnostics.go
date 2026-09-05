@@ -120,7 +120,7 @@ type configMappingRecord struct {
 func dynamicMappingMutationText(source string) bool {
 	for word := range strings.FieldsSeq(source) {
 		word = strings.Trim(strings.ToLower(word), "'\"|;")
-		command, ok := vimdata.Lookup(word)
+		command, ok := vimdata.Lookup(":" + strings.TrimPrefix(word, ":"))
 		if !ok {
 			continue
 		}

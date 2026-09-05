@@ -15,12 +15,12 @@ func TestLookupUsesPinnedVimCommandOrder(t *testing.T) {
 		input string
 		want  string
 	}{
-		{input: "r", want: "read"},
-		{input: "fu", want: "function"},
-		{input: "vim9s", want: "vim9script"},
-		{input: "def", want: "def"},
-		{input: "!", want: "!"},
-		{input: "uniq", want: "uniq"},
+		{input: ":r", want: "read"},
+		{input: ":fu", want: "function"},
+		{input: ":vim9s", want: "vim9script"},
+		{input: ":def", want: "def"},
+		{input: ":!", want: "!"},
+		{input: ":uniq", want: "uniq"},
 	}
 	for _, test := range tests {
 		t.Run(test.input, func(t *testing.T) {
@@ -33,7 +33,10 @@ func TestLookupUsesPinnedVimCommandOrder(t *testing.T) {
 	if _, ok := Lookup(""); ok {
 		t.Fatal("empty command resolved")
 	}
-	if _, ok := Lookup("not-a-command"); ok {
+	if _, ok := Lookup("append"); ok {
+		t.Fatal("command key without colon resolved")
+	}
+	if _, ok := Lookup(":not-a-command"); ok {
 		t.Fatal("unknown command resolved")
 	}
 }
@@ -54,13 +57,16 @@ func TestCommandTableContracts(t *testing.T) {
 		{name: "vim9script", want: 0},
 		{name: "vim9cmd", want: NeedArgument | NoTrailingComment},
 	} {
-		command, ok := Lookup(test.name)
+		command, ok := Lookup(":" + test.name)
 		if !ok || command.Flags != test.want {
 			t.Fatalf("Lookup(%q) = %#v, %v want Flags=%v", test.name, command, ok, test.want)
 		}
 	}
 	for _, command := range commands {
-		got, ok := Lookup(command.Name)
+		if command.Key != ":"+command.Name {
+			t.Fatalf("command %q key = %q", command.Name, command.Key)
+		}
+		got, ok := Lookup(command.Key)
 		if !ok {
 			t.Fatalf("Lookup(%q) = _, false", command.Name)
 		}
@@ -74,7 +80,7 @@ func TestCommandTableContracts(t *testing.T) {
 	if CommandVimTag != "v9.2.1015" || CommandVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" {
 		t.Fatalf("command provenance = %s %s", CommandVimTag, CommandVimCommit)
 	}
-	if command, _ := Lookup("ec"); command.Name != "echo" || !strings.Contains(command.Documentation, "Echoes each {expr1}") || command.DocumentationSource != "eval.txt" {
+	if command, _ := Lookup(":ec"); command.Name != "echo" || !strings.Contains(command.Documentation, "Echoes each {expr1}") || command.DocumentationSource != "eval.txt" {
 		t.Fatalf("echo documentation = %#v", command)
 	}
 }
@@ -94,20 +100,20 @@ func TestCommandsReturnsOrderedCopy(t *testing.T) {
 	if next := Commands(); next[0] != commands[0] {
 		t.Fatalf("Commands() exposed package table: first command = %#v, want %#v", next[0], commands[0])
 	}
-	if command, ok := Lookup(commands[0].Name); !ok || command != commands[0] {
+	if command, ok := Lookup(commands[0].Key); !ok || command != commands[0] {
 		t.Fatalf("Lookup(%q) = %#v, %v after modifying enumeration", commands[0].Name, command, ok)
 	}
 }
 
 func TestLookupMatchesFullOrderedTableForEveryPrefix(t *testing.T) {
 	for _, command := range commands {
-		for length := 1; length <= len(command.Name); length++ {
-			assertLookupMatchesLinear(t, command.Name[:length])
+		for length := 2; length <= len(command.Key); length++ {
+			assertLookupMatchesLinear(t, command.Key[:length])
 		}
-		assertLookupMatchesLinear(t, command.Name+"~")
+		assertLookupMatchesLinear(t, command.Key+"~")
 	}
 	for first := range 256 {
-		assertLookupMatchesLinear(t, string([]byte{byte(first), '~'}))
+		assertLookupMatchesLinear(t, ":"+string([]byte{byte(first), '~'}))
 	}
 }
 
@@ -120,7 +126,11 @@ func assertLookupMatchesLinear(t *testing.T, input string) {
 	}
 }
 
-func linearLookup(name string) (Command, bool) {
+func linearLookup(key string) (Command, bool) {
+	if len(key) < 2 || key[0] != ':' {
+		return Command{}, false
+	}
+	name := key[1:]
 	for _, command := range commands {
 		if len(command.Name) >= len(name) && command.Name[:len(name)] == name {
 			return command, true
@@ -131,8 +141,8 @@ func linearLookup(name string) (Command, bool) {
 
 func BenchmarkLookupCommands(b *testing.B) {
 	inputs := []string{
-		"append", "au", "call", "def", "echo", "function", "global", "let",
-		"setlocal", "s", "syntax", "vim9cmd", "windo", "Next", "++", "FutureCommand",
+		":append", ":au", ":call", ":def", ":echo", ":function", ":global", ":let",
+		":setlocal", ":s", ":syntax", ":vim9cmd", ":windo", ":Next", ":++", ":FutureCommand",
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

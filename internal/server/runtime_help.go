@@ -255,6 +255,9 @@ func runtimeHelpName(document *navigationDocument, resolvedKind analysis.SymbolK
 		}
 		return ""
 	}
+	if function, _, ok := builtinFunctionAt(document.analysis.File, document.occurrence); ok {
+		return function.Name
+	}
 	call := callAt(document.analysis.File, document.occurrence.Start)
 	if call != nil && len(call.Children) > 0 {
 		callee := call.Children[0]

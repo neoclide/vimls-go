@@ -123,6 +123,13 @@ endfunction
 	if err := os.WriteFile(filepath.Join(runtimeRoot, "colors", "default.vim"), []byte(""), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(runtimeRoot, "doc"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	builtinHelp := "abs({expr}) *abs()*\nReturn the absolute value.\nget({list}, {idx} [, {default}]) *get()*\nReturn an item from a list.\n"
+	if err := os.WriteFile(filepath.Join(runtimeRoot, "doc", "builtin.txt"), []byte(builtinHelp), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := subprocessContext(t, 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, vimlsBinary)
@@ -296,9 +303,20 @@ endfunction
 	if string(completion["id"]) != "90" || !strings.Contains(string(completion["result"]), `"isIncomplete":false`) || !strings.Contains(string(completion["result"]), `"label":"Add"`) || !strings.Contains(string(completion["result"]), `"label":"abs"`) || !strings.Contains(string(completion["result"]), `"textEdit"`) {
 		t.Fatalf("completion = %s", completion)
 	}
-	writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":91,"method":"completionItem/resolve","params":%s}`, completionItemJSON(t, completion, "abs")))
-	completionResolve := readJSON(t, reader)
-	if string(completionResolve["id"]) != "91" || !strings.Contains(string(completionResolve["result"]), `builtin function`) || !strings.Contains(string(completionResolve["result"]), `"documentation"`) {
+	resolveDeadline := time.Now().Add(2 * time.Second)
+	var completionResolve map[string]json.RawMessage
+	for requestID := 9100; ; requestID++ {
+		writeJSON(t, writer, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"completionItem/resolve","params":%s}`, requestID, completionItemJSON(t, completion, "abs")))
+		completionResolve = readJSON(t, reader)
+		if strings.Contains(string(completionResolve["result"]), `"documentation"`) {
+			break
+		}
+		if time.Now().After(resolveDeadline) {
+			t.Fatalf("completion resolve = %s", completionResolve)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(string(completionResolve["result"]), `builtin function`) {
 		t.Fatalf("completion resolve = %s", completionResolve)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///completion-command.vim","languageId":"vim","version":1,"text":"ec"}}}`)

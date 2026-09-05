@@ -21,6 +21,7 @@ const (
 
 // Command describes one built-in Ex command from the pinned Vim baseline.
 type Command struct {
+	Key                 string
 	Name                string
 	Flags               CommandFlags
 	Documentation       string
@@ -50,12 +51,14 @@ func init() {
 	}
 }
 
-// Lookup resolves a built-in command or its abbreviation using Vim's command
-// table order. That order is significant when abbreviations are ambiguous.
-func Lookup(name string) (Command, bool) {
-	if name == "" {
+// Lookup resolves a colon-prefixed built-in command key or abbreviation using
+// Vim's command table order. That order is significant when abbreviations are
+// ambiguous.
+func Lookup(key string) (Command, bool) {
+	if len(key) < 2 || key[0] != ':' {
 		return Command{}, false
 	}
+	name := key[1:]
 	start := commandLookupStart[name[0]]
 	end := commandLookupEnd[name[0]]
 	for _, command := range commands[start:end] {

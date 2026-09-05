@@ -48,14 +48,14 @@ func TestNeovimCompatLookupsDoNotExpandPublicLists(t *testing.T) {
 		t.Fatal("LookupVariable accepted an unknown variable")
 	}
 
-	command, ok := Lookup("rshada")
+	command, ok := Lookup(":rshada")
 	if !ok {
 		t.Fatal("Lookup did not recognize Neovim compatibility command")
 	}
-	if command.Flags&AllowBang == 0 || command.Flags&AllowBar == 0 || command.Flags&FileArgument == 0 || command.Flags&NeedArgument != 0 {
+	if command.Key != ":rshada" || command.Flags&AllowBang == 0 || command.Flags&AllowBar == 0 || command.Flags&FileArgument == 0 || command.Flags&NeedArgument != 0 {
 		t.Fatalf("rshada command flags = %b", command.Flags)
 	}
-	if command, ok := Lookup("wsh"); !ok || command.Name != "wshada" {
+	if command, ok := Lookup(":wsh"); !ok || command.Name != "wshada" {
 		t.Fatalf("wshada abbreviation = %#v, %t", command, ok)
 	}
 	for _, command := range Commands() {
@@ -63,7 +63,7 @@ func TestNeovimCompatLookupsDoNotExpandPublicLists(t *testing.T) {
 			t.Fatalf("Neovim compatibility command leaked into Commands: %#v", command)
 		}
 	}
-	if _, ok := Lookup("doesnotexist_neovim_cmd"); ok {
+	if _, ok := Lookup(":doesnotexist_neovim_cmd"); ok {
 		t.Fatal("Lookup accepted an unknown command")
 	}
 }

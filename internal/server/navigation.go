@@ -140,7 +140,7 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 			if document.occurrence.Start < document.occurrence.End || !spanContains(command.Name, offset) {
 				return
 			}
-			if _, ok := vimdata.Lookup(file.Text(command.Name)); ok {
+			if _, ok := vimdata.Lookup(":" + file.Text(command.Name)); ok {
 				document.occurrence = command.Name
 			}
 		})
@@ -865,40 +865,20 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			}
 			return s.localHoverResult(ctx, document, []string{header})
 		}
-		if command, ok := vimdata.Lookup(name); ok && !vimdata.IsNeovimCompatCommand(command.Name) {
+		function, method, ok := builtinFunctionAt(document.analysis.File, document.occurrence)
+		if ok {
+			return s.localHoverContents(ctx, document, s.builtinFunctionHover(function))
+		}
+		if method {
+			return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** A function.", name), "", "function not found"})
+		}
+		if command, ok := exCommandAt(document.analysis.File, document.occurrence); ok && !vimdata.IsNeovimCompatCommand(command.Name) {
 			if command.Documentation != "" {
 				return s.localHoverResult(ctx, document, []string{command.Documentation})
 			}
 			return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** An Ex command.", command.Name)})
 		}
-		call := callAt(document.analysis.File, document.occurrence.Start)
-		if call == nil || len(call.Children) == 0 {
-			return nil, nil
-		}
-		callee := call.Children[0]
-		name = ""
-		method := false
-		switch {
-		case callee.Kind == syntax.ExpressionIdentifier && callee.Span == document.occurrence:
-			name = callee.Value
-		case callee.Kind == syntax.ExpressionMember && document.analysis.File.Text(callee.Operator) == "->":
-			span, ok := expressionMemberSpan(callee)
-			if !ok || span != document.occurrence {
-				return nil, nil
-			}
-			name = callee.Value
-			method = true
-		default:
-			return nil, nil
-		}
-		function, ok := vimdata.LookupFunction(name)
-		if !ok {
-			if method {
-				return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** A function.", name), "", "function not found"})
-			}
-			return nil, nil
-		}
-		return s.localHoverContents(ctx, document, s.builtinFunctionHover(function))
+		return nil, nil
 	}
 	declaration := document.declaration
 	if isFunctionSymbolKind(declaration.Kind) {
@@ -911,6 +891,50 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 	typeName, _ := hoverDeclarationType(declaration)
 	line := hoverDeclarationDescription(declaration.Name, declaration.Kind, typeName)
 	return s.localHoverResult(ctx, document, []string{line})
+}
+
+func exCommandAt(file *syntax.File, span syntax.Span) (vimdata.Command, bool) {
+	var result vimdata.Command
+	found := false
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if found || command.Name != span {
+			return
+		}
+		result, found = vimdata.Lookup(":" + file.Text(command.Name))
+	})
+	return result, found
+}
+
+func builtinFunctionAt(file *syntax.File, span syntax.Span) (vimdata.BuiltinFunction, bool, bool) {
+	var result vimdata.BuiltinFunction
+	method, found := false, false
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if found {
+			return
+		}
+		walkCommandExpressions(command, func(expression *syntax.Expression) {
+			if found || expression == nil {
+				return
+			}
+			name := ""
+			switch expression.Kind {
+			case syntax.ExpressionIdentifier:
+				if expression.Span == span {
+					name = expression.Value
+				}
+			case syntax.ExpressionMember:
+				if file.Text(expression.Operator) == "->" {
+					if memberSpan, ok := expressionMemberSpan(expression); ok && memberSpan == span {
+						name, method = expression.Value, true
+					}
+				}
+			}
+			if name != "" {
+				result, found = vimdata.LookupFunction(name)
+			}
+		})
+	})
+	return result, method, found
 }
 
 func isFunctionSymbolKind(kind analysis.SymbolKind) bool {
