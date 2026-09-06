@@ -90,10 +90,13 @@ The `else` branch of `if !has('nvim')` is also protected. Parentheses,
 negation, comparisons with `0`/`1`, `&&`, `||`, nested branches and `elseif`
 are tracked. `has('nvim') || other` does not guarantee Neovim. Functions,
 lambdas and parsed embedded command bodies inherit their defining context;
-the context is restored outside the containing branch. Short-circuit operands
+Short-circuit operands
 and ternary branches carry the same context for expression analysis.
-Variables containing the result of `has()` and control flow after `finish` or
-`return` are not inferred. Contradictory guards do not suppress errors.
+A script guard such as `if !has('nvim') | finish | endif` also protects
+subsequent settings. The same applies to `has('gui_macvim')` conditions.
+Finish propagation through loops, try blocks or deferred bodies, variables
+containing `has()` results, and `return` flow remain unsupported.
+Contradictory guards do not suppress errors.
 
 Reviewed value differences cover `signcolumn`, `foldcolumn`, `cmdheight`,
 `laststatus`, `completeopt`, `fillchars`, `jumpoptions` and `cpoptions`.

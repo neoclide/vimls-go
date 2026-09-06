@@ -41,7 +41,7 @@ type editorContextAnnotator struct {
 // embedded files receive the owning node's context once, after source mapping.
 func annotateEditorContexts(file *File) {
 	annotator := newEditorContextAnnotator()
-	annotator.commands(file.Commands, file.Blocks, EditorUnknown)
+	annotator.commands(file.Commands, file.Blocks, EditorUnknown, true)
 }
 
 func newEditorContextAnnotator() *editorContextAnnotator {
@@ -51,15 +51,17 @@ func newEditorContextAnnotator() *editorContextAnnotator {
 	}
 }
 
-func (a *editorContextAnnotator) commands(commands []Command, blocks []Block, entry EditorContext) {
+func (a *editorContextAnnotator) commands(commands []Command, blocks []Block, entry EditorContext, script bool) {
 	type branchState struct {
-		entry, body, remaining EditorContext
-		nextBranch             int
+		entry, body, remaining, exits EditorContext
+		finishAllowed                 bool
+		nextBranch                    int
 	}
 	states := make([]branchState, len(blocks))
 	for index := range commands {
 		command := &commands[index]
 		context := entry
+		finishAllowed := script
 		if command.Block >= 0 && command.Block < len(blocks) {
 			block := &blocks[command.Block]
 			state := &states[command.Block]
@@ -67,8 +69,13 @@ func (a *editorContextAnnotator) commands(commands []Command, blocks []Block, en
 			case index == block.Header:
 				if block.Parent >= 0 && block.Parent < len(states) {
 					context = states[block.Parent].body
+					finishAllowed = states[block.Parent].finishAllowed
 				}
 				state.entry, state.body, state.remaining = context, context, context
+				state.exits = EditorUnreachable
+				// Only direct script paths through complete if blocks propagate
+				// finish. Loops, try/finally and deferred bodies stay conservative.
+				state.finishAllowed = finishAllowed && block.Kind == BlockIf && block.End >= 0 && !command.detailsOpaque
 				if block.Kind == BlockIf && !command.detailsOpaque {
 					condition := a.commandCondition(command)
 					state.body = context.intersect(condition.yes)
@@ -76,7 +83,16 @@ func (a *editorContextAnnotator) commands(commands []Command, blocks []Block, en
 				}
 			case index == block.End:
 				context = state.entry
+				if block.Kind == BlockIf && state.finishAllowed {
+					outgoing := state.exits.union(state.body).union(state.remaining)
+					if block.Parent >= 0 && block.Parent < len(states) {
+						states[block.Parent].body = outgoing
+					} else {
+						entry = outgoing
+					}
+				}
 			case block.Kind == BlockIf && state.nextBranch < len(block.Branches) && block.Branches[state.nextBranch] == index:
+				state.exits = state.exits.union(state.body)
 				state.nextBranch++
 				context = state.remaining
 				if command.Canonical == "else" {
@@ -89,8 +105,20 @@ func (a *editorContextAnnotator) commands(commands []Command, blocks []Block, en
 			default:
 				context = state.body
 			}
+			finishAllowed = state.finishAllowed
 		}
 		command.EditorContext = context
+		// Vim v9.2.1015 repeat.txt :finish: stop sourcing this script.
+		// Invalid commands must not establish a new editor assumption.
+		if finishAllowed && !command.detailsOpaque && command.Canonical == "finish" &&
+			command.Argument.Start == command.Argument.End && command.Range.Start == command.Range.End &&
+			command.Bang.Start == command.Bang.End && (command.Dialect != Vim9 || command.TypedName == "finish") {
+			if command.Block >= 0 && command.Block < len(states) {
+				states[command.Block].body = EditorUnreachable
+			} else {
+				entry = EditorUnreachable
+			}
+		}
 		for _, expression := range command.Expressions {
 			a.expression(expression, context)
 		}
@@ -125,7 +153,7 @@ func (a *editorContextAnnotator) commands(commands []Command, blocks []Block, en
 			a.expression(command.Substitute.Expression, context)
 		}
 		if command.Embedded != nil {
-			a.commands(command.Embedded.Commands, command.Embedded.Blocks, context)
+			a.commands(command.Embedded.Commands, command.Embedded.Blocks, context, false)
 		}
 	}
 }
@@ -168,7 +196,7 @@ func (a *editorContextAnnotator) expression(expression *Expression, context Edit
 		a.expression(parameter.Default, context)
 	}
 	if expression.LambdaBody != nil {
-		a.commands(expression.LambdaBody.Commands, expression.LambdaBody.Blocks, context)
+		a.commands(expression.LambdaBody.Commands, expression.LambdaBody.Blocks, context, false)
 	}
 }
 

@@ -126,3 +126,25 @@ func TestNeovimOptionGuardDoesNotLeak(t *testing.T) {
 		t.Fatalf("diagnostics %#v", diagnostics)
 	}
 }
+
+func TestEditorFinishOptionDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		source, code string
+		count        int
+	}{
+		{"if !has('nvim') | finish | endif\nset inccommand=nosplit\nset fillchars+=msgsep:-\n", "", 0},
+		{"if !has('gui_macvim') | finish | endif\nset macmeta\nlet &transp = 20\n", "", 0},
+		{"if has('gui_macvim') | finish | endif\nset macmeta\n", "vimls/macvim-only-option", 1},
+		{"if has('gui_macvim') | finish | endif\nset inccommand=nosplit\n", "vimls/neovim-only-option", 1},
+		{"if has('gui_macvim') | finish | endif\nif !has('nvim') | finish | endif\nset inccommand=nosplit\n", "", 0},
+		{"if !has('nvim') | finish | endif\nset inccommand=invalid\n", "vim/E474", 1},
+		{"if !has('gui_macvim') | finish | endif\nset transp=101\n", "vim/E474", 1},
+	} {
+		for _, config := range []bool{false, true} {
+			diagnostics := compatibilityDiagnostics(test.source, config)
+			if len(diagnostics) != test.count || test.count > 0 && diagnostics[0].Code != test.code {
+				t.Fatalf("%q config=%v: %#v", test.source, config, diagnostics)
+			}
+		}
+	}
+}

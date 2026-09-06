@@ -202,3 +202,59 @@ func TestEditorContextIncompleteCondition(t *testing.T) {
 		t.Fatalf("incomplete condition leaked context: %#v", file.Commands)
 	}
 }
+
+// Provenance: Vim v9.2.1015 runtime/doc/repeat.txt, :finish.
+func TestEditorContextFinishFallthrough(t *testing.T) {
+	for _, test := range []struct {
+		guard string
+		want  EditorContext
+	}{
+		{"if !has('nvim') | finish | endif", EditorNeovim},
+		{"if has('nvim') | finish | endif", EditorVim},
+		{"if !has('gui_macvim') | finish | endif", EditorMacVim},
+		{"if has('gui_macvim') | finish | endif", 4},
+		{"if has('gui_macvim') | finish | endif\nif !has('nvim') | finish | endif", EditorNeovim},
+		{"if has('nvim')\necho 1\nelse\nfinish\nendif", EditorNeovim},
+		{"if has('nvim')\necho 1\nelseif has('gui_macvim')\nfinish\nelse\nfinish\nendif", EditorNeovim},
+		{"if !has('nvim')\nif other\nfinish\nelse\nfinish\nendif\nendif", EditorNeovim},
+		{"if !has('nvim')\nif other\nfinish\nendif\nendif", EditorUnknown},
+		{"if !has('nvim') && other | finish | endif", EditorUnknown},
+		{"if !has('nvim')\nfinish!\nendif", EditorUnknown},
+		{"if !has('nvim')\nfinish extra\nendif", EditorUnknown},
+		{"if !has('nvim')\n1finish\nendif", EditorUnknown},
+		{"while other\nif !has('nvim') | finish | endif\nendwhile", EditorUnknown},
+		{"try\nif !has('nvim') | finish | endif\nfinally\necho 1\nendtry", EditorUnknown},
+		{"function! Guard()\nif !has('nvim') | finish | endif\nendfunction", EditorUnknown},
+		{"autocmd BufEnter * if !has('nvim') | finish | endif", EditorUnknown},
+	} {
+		for _, prefix := range []string{"", "vim9script\n"} {
+			source := prefix + test.guard + "\nset inccommand=nosplit\necho has('nvim') && &inccommand\n"
+			file := Parse(source)
+			var found bool
+			for _, command := range file.Commands {
+				if command.Set != nil {
+					found = true
+					if command.EditorContext != test.want {
+						t.Fatalf("%q context=%v want=%v", source, command.EditorContext, test.want)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("missing set in %q", source)
+			}
+		}
+	}
+}
+
+func TestEditorContextFinishUpdatesRemainingBranchBody(t *testing.T) {
+	file := Parse("if other\nif !has('gui_macvim') | finish | endif\nset macmeta\nelse\nset macmeta\nendif\nset macmeta\n")
+	var got []EditorContext
+	for _, command := range file.Commands {
+		if command.Set != nil {
+			got = append(got, command.EditorContext)
+		}
+	}
+	if want := []EditorContext{EditorMacVim, EditorUnknown, EditorUnknown}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
