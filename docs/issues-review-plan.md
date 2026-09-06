@@ -154,7 +154,7 @@ workspace/server 定向测试通过，覆盖普通/多级 autoload、目录穿�
 `jsonrpc2.Async` 释放读循环后，下一条 null 配置通知可以再发一次请求；这类通知绕过 `maxPendingRequests`。
 底层 jsonrpc2 在连接终止时会清退等待者，因此准确影响是活跃连接内长期积压，不能笼统说进程退出后仍永久泄漏。
 
-计划：为配置拉取保存当前取消函数，更新 generation 时取消已被取代的拉取；请求绑定服务生命周期并设置内部超时（建议 10 秒）。
+已实施：为配置拉取保存当前取消函数，更新 generation 时取消已被取代的拉取；请求绑定服务生命周期并设置 10 秒内部超时。
 带完整 settings 的通知也应使旧拉取失效并取消，旧取消函数不得影响更新的请求。
 失败或超时保留最后成功配置，不重置成默认值；成功返回仍必须通过 generation 检查。
 保留读循环提前释放、初始化/关闭顺序和现有配置安装锁约定。
@@ -162,6 +162,9 @@ workspace/server 定向测试通过，覆盖普通/多级 autoload、目录穿�
 验证：客户端已读请求但不回包、连续 null 通知、乱序响应、完整 settings 覆盖拉取、超时后恢复、shutdown/exit；
 用 barrier 和可控短 deadline 验证 waiter/handler 结束，不使用真实 10 秒 Sleep。
 这里的 timeout 解决等待响应；它本身不能使任意不响应取消的 io.Writer 可中断。
+新增测试通过 barrier 验证连续请求、完整 settings 和 shutdown 能在客户端不回包时结束旧 waiter，
+通过已过期 deadline 验证超时与恢复；真实 net.Pipe 会话验证未回答 configuration 时 shutdown/exit 仍正常完成。
+配置与连接生命周期定向测试、本地 `gopls check` 通过。
 
 ### M-2：区分 Stream 契约与会话关闭
 

@@ -36,6 +36,7 @@ const (
 	maxWorkspaceSymbols         = 200
 	maxRelationshipFactsPerFile = 1 << 15
 	maxRelationshipFacts        = 1 << 18
+	configurationRequestTimeout = 10 * time.Second
 )
 
 var Version = "dev"
@@ -128,6 +129,7 @@ type serverTestHooks struct {
 	beforeWorkspaceIndexWait    func()
 	workspaceIndexWaitTimeout   time.Duration
 	workspaceProgressTimeout    time.Duration
+	configurationTimeout        time.Duration
 	beforeWorkspaceBuild        func([]*text.Snapshot)
 	afterWorkspaceIndexWorker   func()
 	beforeShutdownReturn        func()
@@ -223,6 +225,7 @@ type Server struct {
 	workspaceMu                 sync.Mutex
 	configurationMu             sync.Mutex
 	configurationGeneration     uint64
+	configurationCancel         context.CancelFunc
 	workspaceRoots              []string
 	runtimePaths                []string
 	runtimepathGeneration       uint64
@@ -857,19 +860,45 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 	// Configuration is a server-to-client request. Release the connection read
 	// loop first so it can receive the client's response while this handler waits.
 	s.configurationMu.Lock()
+	if ctx.Err() != nil || s.analysisContext.Err() != nil {
+		s.configurationMu.Unlock()
+		return nil
+	}
+	if s.configurationCancel != nil {
+		s.configurationCancel()
+	}
 	s.configurationGeneration++
 	generation := s.configurationGeneration
+	timeout := configurationRequestTimeout
+	if s.testHooks.configurationTimeout != 0 {
+		timeout = s.testHooks.configurationTimeout
+	}
+	requestContext, cancel := context.WithTimeout(ctx, timeout)
+	stopLifecycleCancel := context.AfterFunc(s.analysisContext, cancel)
+	s.configurationCancel = cancel
 	s.configurationMu.Unlock()
+	defer func() {
+		stopLifecycleCancel()
+		cancel()
+		s.configurationMu.Lock()
+		if s.configurationGeneration == generation {
+			s.configurationCancel = nil
+		}
+		s.configurationMu.Unlock()
+	}()
 	jsonrpc2.Async(ctx)
 	section := "vim"
-	values, err := client.Configuration(ctx, &protocol.ConfigurationParams{Items: []protocol.ConfigurationItem{{Section: &section}}})
+	values, err := client.Configuration(requestContext, &protocol.ConfigurationParams{Items: []protocol.ConfigurationItem{{Section: &section}}})
 	if err != nil {
+		if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+			return nil // Superseded configuration or server shutdown.
+		}
 		return err
 	}
 	if len(values) == 0 {
 		return nil
 	}
-	return s.applyWorkspaceConfigurationGeneration(ctx, []byte(values[0]), generation)
+	return s.applyWorkspaceConfigurationGeneration(requestContext, []byte(values[0]), generation)
 }
 
 func (s *Server) applyWorkspaceConfiguration(ctx context.Context, settings []byte) error {
@@ -883,6 +912,10 @@ func (s *Server) applyWorkspaceConfigurationGeneration(ctx context.Context, sett
 		return nil
 	}
 	if generation == 0 {
+		if s.configurationCancel != nil {
+			s.configurationCancel()
+			s.configurationCancel = nil
+		}
 		s.configurationGeneration++
 	}
 	s.mu.Lock()

@@ -28,6 +28,9 @@ The items below are remaining work, not promises for a particular release.
 
 ## Configuration and plugin projects
 
+Configuration requests now have a 10-second timeout and are cancelled when
+superseded or when the server shuts down; failed requests retain current settings.
+
 - Follow more static `:source` relationships, including cycles.
 - Detect cross-file mapping conflicts only when the loading order is known.
 - Improve path completion and navigation for `:source`, `:runtime` and

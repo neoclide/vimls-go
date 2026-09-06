@@ -147,6 +147,45 @@ func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 	}
 }
 
+func TestServerShutdownWithUnansweredConfiguration(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { _ = serverConn.Close() })
+	t.Cleanup(func() { _ = clientConn.Close() })
+	if err := clientConn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	instance := New(serverConn, serverConn, io.Discard)
+	done := make(chan int, 1)
+	go func() { done <- instance.Run(context.Background()) }()
+	writer, reader := jsonrpc.NewWriter(clientConn), jsonrpc.NewReader(clientConn)
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{"workspace":{"configuration":true}},"initializationOptions":{"runtimepath":[]}}}`)
+	readFrame(t, reader)
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
+	if request := readFrame(t, reader); string(request["method"]) != `"workspace/configuration"` {
+		t.Fatalf("configuration request = %#v", request)
+	}
+	// The request has reached the client, which deliberately never replies.
+	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
+	for {
+		message := readFrame(t, reader)
+		if string(message["id"]) == "2" {
+			if _, failed := message["error"]; failed {
+				t.Fatalf("shutdown failed: %#v", message)
+			}
+			break
+		}
+	}
+	writeFrame(t, writer, `{"jsonrpc":"2.0","method":"exit"}`)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit code = %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("unanswered configuration blocked exit")
+	}
+}
+
 func TestServerCancelsInFlightRequest(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	t.Cleanup(func() { _ = serverConn.Close() })

@@ -160,6 +160,10 @@ Diagnostic settings and `suggest.excludeRuntimePath` reset to defaults when
 omitted from a complete settings snapshot. An omitted `workspace.rebuildDebounce`
 keeps its previous value. These are workspace settings, not startup options.
 
+Configuration requests time out after 10 seconds. A newer settings notification
+or request cancels the previous request; shutdown also cancels pending requests.
+Failures and timeouts retain the last applied settings.
+
 When the editor's runtimepath changes, send the custom
 `vimls/didChangeRuntimepath` request:
 
