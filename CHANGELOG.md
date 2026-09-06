@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## v0.1.1
+
+- Preserve LF, CRLF and CR line endings across text positions, diagnostics,
+  formatting and rename.
+- Cancel superseded configuration requests and bound unanswered requests to
+  10 seconds while retaining the current settings on failure.
+- Find import path completions after prefix filtering in large directories.
+- Avoid repeated suffix scans for unterminated heredocs and reduce metadata
+  lookup and document-edit overhead.
 
 - Reduce repeated scanning and allocation while collecting long Vim9 automatic
   continuations, including expressions, function signatures and block lambdas.
