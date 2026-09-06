@@ -1482,8 +1482,7 @@ func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []synta
 			if strings.HasPrefix(optionName, "&l:") || strings.HasPrefix(optionName, "&g:") {
 				optionName = "&" + optionName[3:]
 			}
-			_, ok := vimdata.LookupOption(optionName)
-			return ok || vimdata.IsNeovimCompatOption(optionName) || vimdata.IsMacVimCompatOption(optionName)
+			return vimdata.IsOption(optionName) || vimdata.IsNeovimCompatOption(optionName) || vimdata.IsMacVimCompatOption(optionName)
 		}
 		if isLiteralIdentifier(name) {
 			return true
@@ -7341,7 +7340,7 @@ func appendNonGenericFunctionDiagnostic(result *FileAnalysis, expression *syntax
 	if declaration == nil {
 		if result.File.Dialect == syntax.Vim9 && validScopeVariableName(callee.Value) && !strings.Contains(callee.Value, "#") &&
 			!syntaxDiagnosticOverlaps(result.File.Diagnostics, callee.Span) {
-			if _, builtin := vimdata.LookupFunction(callee.Value); !builtin && !vimdata.IsNeovimCompatFunction(callee.Value) {
+			if !vimdata.IsFunction(callee.Value) && !vimdata.IsNeovimCompatFunction(callee.Value) {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1558", Message: "Unknown generic function: " + callee.Value, Span: callee.Span,
 				})
@@ -7765,7 +7764,7 @@ func unknownOptionDisplay(result *FileAnalysis, name string, span syntax.Span) (
 	if result == nil || name == "" || span.End <= span.Start || result.unknownOptions[span] {
 		return "", false
 	}
-	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsNeovimCompatOption(name) || vimdata.IsMacVimCompatOption(name) || vimdata.IsTerminalOptionName(name) {
+	if vimdata.IsOption(name) || vimdata.IsNeovimCompatOption(name) || vimdata.IsMacVimCompatOption(name) || vimdata.IsTerminalOptionName(name) {
 		return "", false
 	}
 	display := name

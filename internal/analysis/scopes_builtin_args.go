@@ -500,7 +500,7 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 							if callee != nil && callee.Kind == syntax.ExpressionIdentifier && (callee.Value == "function" || callee.Value == "funcref") &&
 								nameExpression != nil && nameExpression.Kind == syntax.ExpressionString {
 								name := simpleVimStringLiteral(nameExpression.Value)
-								_, builtin := vimdata.LookupFunction(name)
+								builtin := vimdata.IsFunction(name)
 								declaration := resolve(scope, name, nameExpression.Span.Start, true, nil)
 								directFuncref = name != "" && (builtin || declaration != nil && functionSymbolKind(declaration.Kind))
 							}
@@ -1208,7 +1208,7 @@ func collectFunctionCallDiagnostics(result *FileAnalysis, scope *Scope, call *sy
 	if callee.Kind == syntax.ExpressionMember && len(callee.Children) == 1 && result.File.Text(callee.Operator) == "->" {
 		declaration := resolve(scope, callee.Value, call.Span.Start, true, nil)
 		if declaration == nil {
-			_, builtin := vimdata.LookupFunction(callee.Value)
+			builtin := vimdata.IsFunction(callee.Value)
 			if !builtin && unresolvedFunctionName(callee.Value) && !vimdata.IsNeovimCompatFunction(callee.Value) {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E117", Message: "Unknown function: " + callee.Value, Span: memberNameSpan(result.File, callee)})
 			}

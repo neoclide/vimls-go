@@ -488,7 +488,7 @@ func collectExpressionSemanticFacts(file *syntax.File, expression *syntax.Expres
 		switch callee.Kind {
 		case syntax.ExpressionIdentifier:
 			modifiers := uint32(0)
-			if _, ok := vimdata.LookupFunction(callee.Value); ok {
+			if vimdata.IsFunction(callee.Value) {
 				modifiers = semanticDefaultLibrary
 			}
 			appendSymbolSemanticFacts(file, facts, callee.Span, semanticFunction, modifiers, 1)

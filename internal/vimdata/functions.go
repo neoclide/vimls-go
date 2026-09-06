@@ -91,15 +91,27 @@ func BuiltinFunctions() []BuiltinFunction {
 // function names are case-sensitive and do not use Ex-command abbreviations.
 // The returned metadata, including ArgumentChecks, belongs to the caller.
 func LookupFunction(name string) (BuiltinFunction, bool) {
-	if name == "" {
+	index, ok := builtinFunctionIndex[name]
+	if !ok {
 		return BuiltinFunction{}, false
 	}
-	for _, function := range builtinFunctions {
-		if function.Name == name {
-			return cloneFunction(function), true
-		}
+	return cloneFunction(builtinFunctions[index]), true
+}
+
+// IsFunction reports whether name is a canonical pinned builtin function.
+func IsFunction(name string) bool {
+	_, ok := builtinFunctionIndex[name]
+	return ok
+}
+
+var builtinFunctionIndex = buildFunctionIndex()
+
+func buildFunctionIndex() map[string]int {
+	index := make(map[string]int, len(builtinFunctions))
+	for i, function := range builtinFunctions {
+		index[function.Name] = i
 	}
-	return BuiltinFunction{}, false
+	return index
 }
 
 func cloneFunction(function BuiltinFunction) BuiltinFunction {

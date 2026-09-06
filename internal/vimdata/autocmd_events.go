@@ -22,12 +22,46 @@ func AutocmdEvents() []AutocmdEvent { return append([]AutocmdEvent(nil), autocmd
 
 // LookupAutocmdEvent looks up a Vim autocmd event by case-insensitive name.
 func LookupAutocmdEvent(name string) (AutocmdEvent, bool) {
+	// All pinned names are ASCII. Use a stack buffer for their case-insensitive
+	// map lookup, retaining EqualFold for non-ASCII input (including long s).
+	var folded [64]byte
+	if len(name) <= len(folded) {
+		ascii := true
+		for i := range len(name) {
+			c := name[i]
+			if c >= 0x80 {
+				ascii = false
+				break
+			}
+			if c >= 'A' && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			folded[i] = c
+		}
+		if ascii {
+			index, ok := autocmdEventIndex[string(folded[:len(name)])]
+			if ok {
+				return autocmdEvents[index], true
+			}
+			return AutocmdEvent{}, false
+		}
+	}
 	for _, event := range autocmdEvents {
 		if strings.EqualFold(event.Name, name) {
 			return event, true
 		}
 	}
 	return AutocmdEvent{}, false
+}
+
+var autocmdEventIndex = buildAutocmdEventIndex()
+
+func buildAutocmdEventIndex() map[string]int {
+	index := make(map[string]int, len(autocmdEvents))
+	for i, event := range autocmdEvents {
+		index[strings.ToLower(event.Name)] = i
+	}
+	return index
 }
 
 // IsAutocmdEvent reports whether name matches a Vim built-in autocmd event.

@@ -326,21 +326,37 @@ type OptionVariant struct {
 // abbreviation. Vim does not accept arbitrary unique prefixes. The & sigil
 // and an optional g: or l: selector are accepted for expression analysis.
 func LookupOption(name string) (Option, bool) {
-	name = optionLookupName(name)
-	if name == "" {
+	index, ok := builtinOptionIndex[optionLookupName(name)]
+	if !ok {
 		return Option{}, false
 	}
-	for _, option := range builtinOptions {
-		if option.Name == name {
-			return cloneOption(option), true
+	return cloneOption(builtinOptions[index]), true
+}
+
+// IsOption accepts the same exact names as LookupOption without copying metadata.
+func IsOption(name string) bool {
+	_, ok := builtinOptionIndex[optionLookupName(name)]
+	return ok
+}
+
+var builtinOptionIndex, builtinOptionOrder = buildOptionIndex(builtinOptions[:])
+
+func buildOptionIndex(options []Option) (map[string]int, []int) {
+	index := make(map[string]int, 2*len(options))
+	order := make([]int, len(options))
+	for i, option := range options {
+		index[option.Name] = i
+		order[i] = i
+	}
+	for i, option := range options {
+		if option.ShortName != "" {
+			if _, exists := index[option.ShortName]; !exists {
+				index[option.ShortName] = i
+			}
 		}
 	}
-	for _, option := range builtinOptions {
-		if option.ShortName == name {
-			return cloneOption(option), true
-		}
-	}
-	return Option{}, false
+	sort.Slice(order, func(i, j int) bool { return options[order[i]].Name < options[order[j]].Name })
+	return index, order
 }
 
 // IsTerminalOptionName reports the t_xx option namespace accepted by Vim.
@@ -369,10 +385,9 @@ func optionLookupName(name string) string {
 // the returned slice.
 func Options() []Option {
 	result := make([]Option, len(builtinOptions))
-	for i, option := range builtinOptions {
-		result[i] = cloneOption(option)
+	for i, index := range builtinOptionOrder {
+		result[i] = cloneOption(builtinOptions[index])
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 
@@ -391,9 +406,9 @@ func cloneOption(option Option) Option {
 // paths, events and runtime names are deliberately excluded. Callers own the
 // returned slice.
 func OptionValues(name string) []string {
-	option, ok := LookupOption(name)
+	index, ok := builtinOptionIndex[optionLookupName(name)]
 	if !ok {
 		return nil
 	}
-	return append([]string(nil), option.CompletionValues...)
+	return append([]string(nil), builtinOptions[index].CompletionValues...)
 }

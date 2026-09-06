@@ -24,21 +24,32 @@ type Variable struct {
 
 // LookupVariable resolves an exact predefined v: variable name.
 func LookupVariable(name string) (Variable, bool) {
-	if len(name) < 3 || name[0] != 'v' || name[1] != ':' {
+	index, ok := builtinVariableIndex[name]
+	if !ok {
 		return Variable{}, false
 	}
-	for _, variable := range builtinVariables {
-		if variable.Name == name {
-			return variable, true
-		}
+	return builtinVariables[index], true
+}
+
+var builtinVariableIndex, builtinVariableOrder = buildVariableIndex()
+
+func buildVariableIndex() (map[string]int, []int) {
+	index := make(map[string]int, len(builtinVariables))
+	order := make([]int, len(builtinVariables))
+	for i, variable := range builtinVariables {
+		index[variable.Name] = i
+		order[i] = i
 	}
-	return Variable{}, false
+	sort.Slice(order, func(i, j int) bool { return builtinVariables[order[i]].Name < builtinVariables[order[j]].Name })
+	return index, order
 }
 
 // Variables returns the pinned vimvars[] table by canonical v: name. Callers
 // own the returned slice.
 func Variables() []Variable {
-	result := append([]Variable(nil), builtinVariables[:]...)
-	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	result := make([]Variable, len(builtinVariables))
+	for i, index := range builtinVariableOrder {
+		result[i] = builtinVariables[index]
+	}
 	return result
 }

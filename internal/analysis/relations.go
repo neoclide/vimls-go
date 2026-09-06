@@ -95,7 +95,7 @@ func CollectCallRelations(result *FileAnalysis) []CallRelation {
 			if caller := enclosingCallable(scope, callables); caller != nil {
 				name, span, identifier := callRelationTarget(expression)
 				if name != "" && validNameSpan(result.File, span) {
-					if _, builtin := vimdata.LookupFunction(name); !identifier || !builtin {
+					if !identifier || !vimdata.IsFunction(name) {
 						relations = append(relations, CallRelation{
 							CallerName: caller.Name, CallerKind: caller.Kind, CallerSpan: caller.Span,
 							CalleeName: name, CalleeSpan: span,
