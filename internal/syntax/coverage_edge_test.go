@@ -7,7 +7,7 @@ import (
 
 func TestLogicalViewBoundaryAndMappingEdges(t *testing.T) {
 	negative, next := startLogicalView("one\r\ntwo", -4)
-	if negative.Source != (Span{Start: 0, End: 3}) || negative.Next != 5 || next != 5 || negative.identity || len(negative.buffer) != 3 {
+	if negative.Source != (Span{Start: 0, End: 3}) || negative.Next != 5 || next != 5 || negative.identity || (negative.buffer == nil || negative.buffer.Len() != 3) {
 		t.Fatalf("negative start view = %#v, next = %d", negative, next)
 	}
 	past, next := startLogicalView("one", 8)

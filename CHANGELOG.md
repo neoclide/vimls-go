@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reduce repeated scanning and allocation while collecting long Vim9 automatic
+  continuations, including expressions, function signatures and block lambdas.
+
 - Accept stdin with `vimparse -`; limit file and stdin input to 4 MiB and reject
   named special files before parsing.
 - Add completion, hover, navigation and error checking inside mapping expression

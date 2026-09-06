@@ -2922,38 +2922,9 @@ func (lexer *expressionLexer) finish(kind expressionTokenKind, start, end int) e
 // especially important for $'...' where single quotes are literal inside the
 // interpolation expression, not terminators of the outer string.
 func scanInterpolatedStringEnd(source string, start int, quote byte) int {
-	for index := start; index < len(source); {
-		character := source[index]
-		if quote == '"' && character == '\\' {
-			index += minInt(2, len(source)-index)
-			continue
-		}
-		if character == quote {
-			if quote == '\'' && index+1 < len(source) && source[index+1] == '\'' {
-				index += 2
-				continue
-			}
-			return index + 1
-		}
-		if character == '{' {
-			if index+1 < len(source) && source[index+1] == '{' {
-				index += 2
-				continue
-			}
-			close := findInterpolationEnd(source, index, len(source))
-			if close < 0 {
-				return len(source)
-			}
-			index = close + 1
-			continue
-		}
-		if character == '}' && index+1 < len(source) && source[index+1] == '}' {
-			index += 2
-			continue
-		}
-		index++
-	}
-	return len(source)
+	scan := vim9InterpolationScan{next: start, quote: quote}
+	end, _ := scan.scan(source)
+	return end
 }
 
 // scanScriptLocalFunctionName recognizes the textual script-local function

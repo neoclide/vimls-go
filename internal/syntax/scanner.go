@@ -289,9 +289,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 			metadata := scanMetadataForParsedCommand(*command)
 			logical.command.Expressions = nil
 			logical.command.expressionsParsed = false
-			argumentEnd, separator, comment, boundaryExpression := scanVim9CommandArgument(
-				logical.view.Text, logical.command.Argument.Start, len(logical.view.Text), metadata, &logical.command,
-			)
+			argumentEnd, separator, comment, boundaryExpression := scanExtendedVim9Argument(logical, metadata)
 			logical.command.Argument.End = argumentEnd
 			logical.command.Span.End = argumentEnd
 			logical.command.boundaryExpression = boundaryExpression
@@ -340,7 +338,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 					heredocEnd = commandHeredocMarker(source, &file.Commands[last])
 				}
 			} else if last >= commandIndex && usesVim9Continuation(file.Commands[last]) {
-				vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
+				vim9ContinuationState = commandVim9Continuation(file, &file.Commands[last])
 				if needsVim9CommandContinuation(file, last, vim9ContinuationState) {
 					vim9Continuation = last
 				}
@@ -388,7 +386,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 		} else if len(file.Commands) > before {
 			last := len(file.Commands) - 1
 			if usesVim9Continuation(file.Commands[last]) {
-				vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
+				vim9ContinuationState = commandVim9Continuation(file, &file.Commands[last])
 				vim9Continuation = -1
 				if needsVim9CommandContinuation(file, last, vim9ContinuationState) {
 					vim9Continuation = last
@@ -403,6 +401,11 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 		command := &file.Commands[heredocCommand]
 		command.Heredoc.Incomplete = true
 		scanEvalHeredoc(file, command)
+	}
+	for index := range file.Commands {
+		if logical := file.Commands[index].logical; logical != nil && logical.collection != nil && logical.collection.pendingBoundary {
+			finalizeVim9Argument(&file.Commands[index])
+		}
 	}
 	coalesceLegacyEmbeddedBlocks(file)
 	coalesceCollectedCommandBlocks(file, len(file.Source))
@@ -6041,16 +6044,33 @@ func needsVim9CommandContinuation(file *File, commandIndex int, state vim9Contin
 		return false
 	}
 	command := file.Commands[commandIndex]
-	if command.Canonical == "def" && completeVim9DefHeader(file.Text(command.Argument)) {
-		return false
-	}
-	if completeVim9TypedDeclaration(command, file.Text(command.Argument)) {
-		return false
+	// Open delimiters cannot form a complete declaration/header. Avoid parsing
+	// each growing prefix: details are parsed once after collection.
+	if state.depth > 0 {
+		return true
 	}
 	if state.needsContinuation() {
+		if logical := command.logical; logical != nil && logical.collection != nil && state.angleDepth > 0 &&
+			(command.Canonical == "def" || logical.collection.declarationScanEnd > 0 && !logical.collection.declarationHasAssignment) {
+			return true
+		}
+		if command.Canonical == "def" && completeVim9DefHeader(logicalArgumentText(file, &command)) {
+			return false
+		}
+		// A collected initializer ending in punctuation still needs an operand.
+		// Only ambiguous word operators (an identifier named "is", for example)
+		// need the complete-expression probe while collecting.
+		pendingInitializer := command.logical != nil && command.logical.collection != nil && command.logical.collection.pendingBoundary && command.logical.collection.boundaryScan.initialized
+		wordTail := state.tailHasSuffix("is") || state.tailHasSuffix("isnot")
+		if (!pendingInitializer || wordTail) && completeVim9TypedDeclaration(command, file.Text(command.Argument)) {
+			return false
+		}
 		return true
 	}
 	if command.Canonical != "for" {
+		return false
+	}
+	if logical := command.logical; logical != nil && logical.collection != nil && logical.collection.boundaryScan.initialized && logical.collection.boundaryScan.start < logical.command.Argument.End {
 		return false
 	}
 	source := file.Text(command.Argument)
@@ -6148,10 +6168,15 @@ type vim9ContinuationScan struct {
 	lambdaBodyStarted bool
 	bracketDepth      int
 	braceDepth        int
+	angleDepth        int
 }
 
 func scanVim9Continuation(source string, state vim9ContinuationScan) vim9ContinuationScan {
-	for index := 0; index < len(source); index++ {
+	return scanVim9ContinuationFrom(source, 0, state)
+}
+
+func scanVim9ContinuationFrom(source string, start int, state vim9ContinuationScan) vim9ContinuationScan {
+	for index := start; index < len(source); index++ {
 		character := source[index]
 		if state.inComment {
 			if isLineBreak(character) {
@@ -6217,6 +6242,14 @@ func scanVim9Continuation(source string, state vim9ContinuationScan) vim9Continu
 			continue
 		}
 		switch character {
+		case '<':
+			if state.depth == 0 {
+				state.angleDepth++
+			}
+		case '>':
+			if state.depth == 0 && state.angleDepth > 0 {
+				state.angleDepth--
+			}
 		case '(':
 			state.depth++
 		case '[':

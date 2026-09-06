@@ -1,11 +1,14 @@
 package syntax
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // logicalView is the text Vim passes from its source-line reader to the Ex
-// parser.  Text contains no physical continuation prefix.  bytes keeps the
-// corresponding half-open byte range in the original source for every byte
-// in Text, so syntax nodes can keep using original-source Span values.
+// parser. Text contains no physical continuation prefix. Ordered segments map
+// its bytes back to half-open ranges in the original source, so syntax nodes
+// can keep using original-source Span values.
 //
 // A zero-width byte range is used only for text inserted by Vim itself (the
 // separating space before a Vim9 leading-| continuation).
@@ -26,7 +29,7 @@ type logicalView struct {
 	// allocation.  Only a view that removes continuation prefixes or inserts
 	// synthetic text is materialized into mapped source segments.
 	identity bool
-	buffer   []byte
+	buffer   *strings.Builder
 	segments []logicalSegment
 }
 
@@ -36,8 +39,9 @@ type logicalSegment struct {
 }
 
 type logicalCommandView struct {
-	view    *logicalView
-	command Command
+	view       *logicalView
+	command    Command
+	collection *vim9CommandCollection
 }
 
 func readLegacyLogicalView(source string, start int) (view logicalView) {
@@ -180,23 +184,24 @@ func (view *logicalView) appendSource(source string, start, end int) {
 		return
 	}
 	view.makeMapped(end - start)
-	logicalStart := len(view.buffer)
-	view.buffer = append(view.buffer, source[start:end]...)
-	view.appendSegment(Span{Start: logicalStart, End: len(view.buffer)}, Span{Start: start, End: end})
+	logicalStart := view.buffer.Len()
+	view.buffer.WriteString(source[start:end])
+	view.appendSegment(Span{Start: logicalStart, End: view.buffer.Len()}, Span{Start: start, End: end})
 }
 
 func (view *logicalView) appendSynthetic(character byte, original int) {
 	view.makeMapped(1)
-	logicalStart := len(view.buffer)
-	view.buffer = append(view.buffer, character)
+	logicalStart := view.buffer.Len()
+	view.buffer.WriteByte(character)
 	view.appendSegment(Span{Start: logicalStart, End: logicalStart + 1}, Span{Start: original, End: original})
 }
 
 func (view *logicalView) makeMapped(extra int) {
 	if view.identity {
 		capacity := len(view.Text) + extra
-		view.buffer = make([]byte, len(view.Text), capacity)
-		copy(view.buffer, view.Text)
+		view.buffer = new(strings.Builder)
+		view.buffer.Grow(capacity)
+		view.buffer.WriteString(view.Text)
 		if len(view.Text) > 0 {
 			view.segments = append(view.segments, logicalSegment{
 				logical: Span{Start: 0, End: len(view.Text)},
@@ -207,8 +212,9 @@ func (view *logicalView) makeMapped(extra int) {
 		return
 	}
 	if view.buffer == nil {
-		view.buffer = make([]byte, len(view.Text), len(view.Text)+extra)
-		copy(view.buffer, view.Text)
+		view.buffer = new(strings.Builder)
+		view.buffer.Grow(len(view.Text) + extra)
+		view.buffer.WriteString(view.Text)
 	}
 }
 
@@ -229,8 +235,9 @@ func (view *logicalView) appendSegment(logical, source Span) {
 
 func (view *logicalView) finishText() {
 	if !view.identity && view.buffer != nil {
-		view.Text = string(view.buffer)
-		view.buffer = nil
+		// Builder.String shares the append-only buffer; published prefixes remain
+		// immutable while subsequent physical lines are collected.
+		view.Text = view.buffer.String()
 	}
 }
 
@@ -288,10 +295,11 @@ func (view logicalView) byteSpan(index int) Span {
 		start := view.Source.Start + index
 		return Span{Start: start, End: start + 1}
 	}
-	for _, segment := range view.segments {
-		if index < segment.logical.Start || index >= segment.logical.End {
-			continue
-		}
+	position := sort.Search(len(view.segments), func(i int) bool {
+		return view.segments[i].logical.End > index
+	})
+	if position < len(view.segments) && index >= view.segments[position].logical.Start {
+		segment := view.segments[position]
 		if segment.source.Start == segment.source.End {
 			return segment.source
 		}

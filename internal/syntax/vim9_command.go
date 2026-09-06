@@ -347,9 +347,20 @@ func scanVim9For(source string, start, end int, command vimdata.Command) (int, S
 }
 
 func scanVim9OpaqueArgument(source string, start, end int, command vimdata.Command) (int, Span, Span) {
-	depth := 0
-	quote := byte(0)
-	for index := start; index < end; index++ {
+	scan := vim9OpaqueScan{next: start}
+	return scan.scan(source, start, end, command)
+}
+
+type vim9OpaqueScan struct {
+	interpolation vim9InterpolationScan
+	next, depth   int
+	quote         byte
+}
+
+func (scan *vim9OpaqueScan) scan(source string, start, end int, command vimdata.Command) (int, Span, Span) {
+	depth, quote, index := scan.depth, scan.quote, scan.next
+	defer func() { scan.depth, scan.quote, scan.next = depth, quote, index }()
+	for ; index < end; index++ {
 		character := source[index]
 		if quote != 0 {
 			if character == '\\' && quote == '"' {
@@ -388,7 +399,15 @@ func scanVim9OpaqueArgument(source string, start, end int, command vimdata.Comma
 			continue
 		}
 		if character == '$' && index+1 < end && (source[index+1] == '\'' || source[index+1] == '"') {
-			index = scanInterpolatedStringEnd(source, index+2, source[index+1]) - 1
+			if scan.interpolation.quote == 0 {
+				scan.interpolation = vim9InterpolationScan{next: index + 2, quote: source[index+1]}
+			}
+			interpolationEnd, complete := scan.interpolation.scan(source)
+			if !complete {
+				return trimSpaceEnd(source, start, end), Span{}, Span{}
+			}
+			scan.interpolation = vim9InterpolationScan{}
+			index = interpolationEnd - 1
 			continue
 		}
 		switch character {
