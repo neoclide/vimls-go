@@ -903,7 +903,7 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 			applyMetadata(builtinFunctionDetail(function), s.runtimeHelpMarkdown(function.Name))
 		}
 	case completionResolveOption:
-		if option, ok := vimdata.LookupOption(target.Name); ok {
+		if option, ok := vimdata.LookupOptionMetadata(target.Name); ok {
 			applyMetadata(completionOptionDetail(option), optionDocumentation(option))
 		}
 	case completionResolveVariable:

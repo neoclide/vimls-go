@@ -84,3 +84,18 @@ func TestNeovimOptionGuardEditRepublishesDiagnostics(t *testing.T) {
 		}
 	}
 }
+
+func TestMacVimOptionHintProtocol(t *testing.T) {
+	source := "set macmeta\n"
+	file := syntax.Parse(source)
+	file.Diagnostics = analysis.CombinedDiagnostics(file, analysis.Analyze(file))
+	snapshot := text.NewSnapshot("file:///macvim.vim", 1, nil, source)
+	diagnostics := protocolDiagnostics(snapshot, file, text.UTF16, false, nil, 100)
+	want := protocol.Range{Start: protocol.Position{Character: 4}, End: protocol.Position{Character: 11}}
+	if len(diagnostics) != 1 || diagnostics[0].Code != protocol.String("vimls/macvim-only-option") || diagnostics[0].Severity != protocol.DiagnosticSeverityHint || diagnostics[0].Range != want {
+		t.Fatalf("diagnostics %#v", diagnostics)
+	}
+	if got := filterDisabledDiagnostics(file.Diagnostics, map[string]struct{}{"vimls/macvim-only-option": {}}); len(got) != 0 {
+		t.Fatal(got)
+	}
+}

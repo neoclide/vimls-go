@@ -232,6 +232,7 @@ var dynamicHasFeatures = []CompletionValue{
 	{Name: "clipboard_working", Documentation: "Whether Vim's clipboard integration is currently available."},
 	{Name: "conpty", Documentation: "Whether Vim is using ConPTY on Windows."},
 	{Name: "gui_running", Documentation: "Whether the Vim GUI is running or starting."},
+	{Name: "gui_macvim", Documentation: "Whether the current Vim GUI is MacVim."},
 	{Name: "mouse_gpm_enabled", Documentation: "Whether GPM mouse support is currently enabled."},
 	{Name: "multi_byte_encoding", Documentation: "Whether Vim is currently using a multibyte encoding."},
 	{Name: "netbeans_enabled", Documentation: "Whether the NetBeans interface is currently active."},

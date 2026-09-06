@@ -19,6 +19,9 @@ The items below are remaining work, not promises for a particular release.
 - Add more option-value checks where Vim's source gives a clear rule.
   Build-dependent and runtime-dependent values still need conservative handling.
 - Extend the [reviewed Neovim option compatibility rules](neovim.md#option-compatibility).
+  [MacVim option compatibility](language-support.md#macvim-option-compatibility)
+  now shares the parser context and setting diagnostics, with semantic
+  highlighting and hover documentation for MacVim options.
   Editor conditions are now recorded on commands and expressions; future
   Neovim function checks can consume that context without another guard walker.
 

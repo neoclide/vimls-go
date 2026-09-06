@@ -39,7 +39,7 @@ func TestOptionCompatibilityValues(t *testing.T) {
 			_, invalid := ValidateOptionValue(option.Validation, test.value)
 			return !invalid
 		}
-		if gotVim, gotNvim := validate(compat.Vim), validate(compat.Neovim); gotVim != test.vim || gotNvim != test.nvim {
+		if gotVim, gotNvim := validate(compat.Vim), validate(compat.Variant); gotVim != test.vim || gotNvim != test.nvim {
 			t.Errorf("%s=%s got Vim=%v Neovim=%v, want %v %v", test.name, test.value, gotVim, gotNvim, test.vim, test.nvim)
 		}
 	}
@@ -47,12 +47,12 @@ func TestOptionCompatibilityValues(t *testing.T) {
 
 func TestOptionCompatibilityDoesNotMutatePinnedMetadata(t *testing.T) {
 	compat, ok := LookupOptionCompatibility("&l:scl")
-	if !ok || compat.Vim.Name != "signcolumn" || compat.Neovim.Name != "signcolumn" {
+	if !ok || compat.Vim.Name != "signcolumn" || compat.Variant.Name != "signcolumn" {
 		t.Fatalf("lookup %#v", compat)
 	}
-	compat.Neovim.Validation.Values[0] = "changed"
+	compat.Variant.Validation.Values[0] = "changed"
 	next, _ := LookupOptionCompatibility("scl")
-	if next.Neovim.Validation.Values[0] == "changed" {
+	if next.Variant.Validation.Values[0] == "changed" {
 		t.Fatal("compatibility lookup shares mutable metadata")
 	}
 	vim, _ := LookupOption("foldcolumn")
@@ -63,7 +63,7 @@ func TestOptionCompatibilityDoesNotMutatePinnedMetadata(t *testing.T) {
 		t.Fatal("unknown option accepted")
 	}
 	alias, ok := LookupOptionCompatibility("&g:pb")
-	if !ok || alias.Vim.Name != "pumborder" || alias.Neovim.Name != "pumblend" {
+	if !ok || alias.Vim.Name != "pumborder" || alias.Variant.Name != "pumblend" {
 		t.Fatalf("alias collision %#v", alias)
 	}
 }

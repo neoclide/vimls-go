@@ -52,6 +52,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/invalid-atom", Message: "invalid atom", Severity: DiagnosticInformation},
 	{Code: "vimls/invalid-member-tail", Message: "member name has trailing characters", Severity: DiagnosticInformation},
 	{Code: "vimls/invalid-parenthesized-expression", Message: "parenthesized expression requires one value", Severity: DiagnosticInformation},
+	{Code: "vimls/macvim-only-option", Message: "this option setting is MacVim-only; guard it with has('gui_macvim')", Severity: DiagnosticHint},
 	{Code: "vimls/mapping-script-local-reference", Message: "mapping references a script-local name that may not be available", Severity: DiagnosticWarning},
 	{Code: "vimls/mapping-without-unique", Message: "mapping may overwrite an existing mapping; consider <unique>", Severity: DiagnosticHint},
 	{Code: "vimls/match-command", Message: ":match uses shared match slots; prefer matchadd() in plugin code", Severity: DiagnosticHint},

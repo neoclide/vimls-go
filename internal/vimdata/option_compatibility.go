@@ -9,10 +9,11 @@ import (
 )
 
 // OptionCompatibility contains the reviewed, static parts of both editors'
-// option contracts. An empty Vim.Name denotes a Neovim-only option. These
+// option contracts. An empty Vim.Name denotes a variant-only option. These
 // overlays do not change the pinned Vim completion/hover metadata.
 type OptionCompatibility struct {
-	Vim, Neovim Option
+	Vim, Variant Option
+	Feature      string
 }
 
 // LookupOptionCompatibility resolves canonical names, short names and &g:/&l:
@@ -22,13 +23,16 @@ type OptionCompatibility struct {
 // ValidationNone deliberately retains conservative handling of runtime values.
 func LookupOptionCompatibility(name string) (OptionCompatibility, bool) {
 	vim, found := LookupOption(name)
+	if mac, ok := lookupMacVimCompatOption(optionLookupName(name)); ok {
+		return OptionCompatibility{Variant: mac, Feature: "gui_macvim"}, true
+	}
 	if nvim, ok := lookupNeovimCompatOption(optionLookupName(name)); ok {
 		// 'pb' means pumborder in Vim and pumblend in Neovim. Resolve
 		// each editor independently, including the Vim value grammar.
 		if vim.Name == "pumborder" {
 			vim.Validation = OptionValidation{Kind: ValidationPumBorder}
 		}
-		return OptionCompatibility{Vim: vim, Neovim: nvim}, true
+		return OptionCompatibility{Vim: vim, Variant: nvim, Feature: "nvim"}, true
 	}
 	if !found {
 		return OptionCompatibility{}, false
@@ -68,7 +72,7 @@ func LookupOptionCompatibility(name string) (OptionCompatibility, bool) {
 	// These specific option grammars have been reviewed independently of Vim
 	// build features; do not globally enable checks for feature-gated options.
 	vim.AvailableWhen, nvim.AvailableWhen = "1", "1"
-	return OptionCompatibility{Vim: vim, Neovim: cloneOption(nvim)}, true
+	return OptionCompatibility{Vim: vim, Variant: cloneOption(nvim), Feature: "nvim"}, true
 }
 
 func compatExact(values ...string) OptionValidation {

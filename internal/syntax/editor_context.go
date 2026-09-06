@@ -6,12 +6,20 @@ package syntax
 type EditorContext uint8
 
 const (
-	EditorUnknown EditorContext = iota
-	EditorNeovim
-	EditorVim
-	EditorUnreachable
+	EditorUnknown EditorContext = 0
+	EditorNeovim  EditorContext = 1 | 4
+	// EditorVim includes ordinary Vim and MacVim.
+	EditorVim         EditorContext = 2
+	EditorMacVim      EditorContext = 1 | 2
+	EditorUnreachable EditorContext = 1 | 2 | 4
 )
 
+// Implies reports whether every reachable editor satisfies the requirement.
+func (context EditorContext) Implies(required EditorContext) bool {
+	return context != EditorUnreachable && context&required == required
+}
+
+// Bits 1, 2 and 4 exclude ordinary Vim, Neovim and MacVim respectively.
 // Each bit excludes one editor: intersection accumulates exclusions, while
 // union keeps only exclusions shared by both alternatives.
 func (context EditorContext) intersect(other EditorContext) EditorContext { return context | other }
@@ -183,8 +191,13 @@ func (a *editorContextAnnotator) condition(expression *Expression) editorConditi
 		if len(expression.Children) == 2 {
 			callee, argument := expression.Children[0], expression.Children[1]
 			if callee != nil && callee.Kind == ExpressionIdentifier && callee.Value == "has" &&
-				argument != nil && argument.Kind == ExpressionString && (argument.Value == "'nvim'" || argument.Value == "\"nvim\"") {
-				condition = editorCondition{yes: EditorNeovim, no: EditorVim, boolean: true}
+				argument != nil && argument.Kind == ExpressionString {
+				switch argument.Value {
+				case "'nvim'", "\"nvim\"":
+					condition = editorCondition{yes: EditorNeovim, no: EditorVim, boolean: true}
+				case "'gui_macvim'", "\"gui_macvim\"":
+					condition = editorCondition{yes: EditorMacVim, no: 4, boolean: true}
+				}
 			}
 		}
 	case ExpressionNumber, ExpressionIdentifier:

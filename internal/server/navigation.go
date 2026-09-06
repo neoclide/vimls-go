@@ -157,7 +157,7 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 					matchSpan = syntax.Span{Start: option.Prefix.Start, End: option.Name.End}
 				}
 				if spanContains(matchSpan, offset) {
-					if _, ok := vimdata.LookupOption(file.Text(option.Name)); ok {
+					if _, ok := vimdata.LookupOptionMetadata(file.Text(option.Name)); ok {
 						document.occurrence = matchSpan
 						document.optionName = file.Text(option.Name)
 						return
@@ -836,7 +836,7 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		if span, lines, ok := mappingHoverAt(document.analysis.File, document.occurrence.Start); ok && span == document.occurrence {
 			return s.localHoverResult(ctx, document, lines)
 		}
-		if option, ok := vimdata.LookupOption(name); ok {
+		if option, ok := vimdata.LookupOptionMetadata(name); ok {
 			documentation := optionDocumentation(option)
 			header, body, split := strings.Cut(documentation, "\n\n")
 			if split && s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown {

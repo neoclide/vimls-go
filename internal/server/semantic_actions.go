@@ -330,7 +330,7 @@ func collectSemanticFacts(file *syntax.File, fileAnalysis *analysis.FileAnalysis
 		}
 		if command.Set != nil {
 			for _, option := range command.Set.Options {
-				if _, ok := vimdata.LookupOption(file.Text(option.Name)); ok {
+				if _, ok := vimdata.LookupOptionMetadata(file.Text(option.Name)); ok {
 					span := option.Name
 					if option.Prefix.Start < option.Prefix.End {
 						span.Start = option.Prefix.Start
@@ -526,7 +526,7 @@ func collectExpressionSemanticFacts(file *syntax.File, expression *syntax.Expres
 	switch {
 	case strings.HasPrefix(expression.Value, "&"):
 		classify = true
-		if _, ok := vimdata.LookupOption(expression.Value); ok {
+		if _, ok := vimdata.LookupOptionMetadata(expression.Value); ok {
 			modifiers |= semanticDefaultLibrary
 		}
 	case strings.HasPrefix(expression.Value, "@"), strings.HasPrefix(expression.Value, "$"):

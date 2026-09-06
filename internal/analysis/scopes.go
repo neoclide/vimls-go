@@ -1483,7 +1483,7 @@ func collectNameOnlyExpressionDiagnostics(result *FileAnalysis, commands []synta
 				optionName = "&" + optionName[3:]
 			}
 			_, ok := vimdata.LookupOption(optionName)
-			return ok || vimdata.IsNeovimCompatOption(optionName)
+			return ok || vimdata.IsNeovimCompatOption(optionName) || vimdata.IsMacVimCompatOption(optionName)
 		}
 		if isLiteralIdentifier(name) {
 			return true
@@ -7765,7 +7765,7 @@ func unknownOptionDisplay(result *FileAnalysis, name string, span syntax.Span) (
 	if result == nil || name == "" || span.End <= span.Start || result.unknownOptions[span] {
 		return "", false
 	}
-	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsNeovimCompatOption(name) || vimdata.IsTerminalOptionName(name) {
+	if _, ok := vimdata.LookupOption(name); ok || vimdata.IsNeovimCompatOption(name) || vimdata.IsMacVimCompatOption(name) || vimdata.IsTerminalOptionName(name) {
 		return "", false
 	}
 	display := name

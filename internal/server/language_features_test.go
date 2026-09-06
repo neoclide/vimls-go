@@ -306,6 +306,15 @@ func TestCompletionReturnsPinnedHasFeaturesAndExpandSpecials(t *testing.T) {
 			edit:          navigationRange(1, 10, 14),
 		},
 		{
+			name:          "MacVim has feature",
+			source:        "echo has('gui_macvim')\n",
+			label:         "gui_macvim",
+			detail:        "has() feature",
+			documentation: "Whether the current Vim GUI is MacVim.",
+			position:      protocol.Position{Line: 0, Character: 20},
+			edit:          navigationRange(0, 10, 20),
+		},
+		{
 			name:          "expand special preserves modifier",
 			source:        "echo expand(\"<cf:p\")\n",
 			label:         "<cfile>",
@@ -347,7 +356,7 @@ func TestPinnedBuiltinStringCompletionIsCompleteAndDeterministic(t *testing.T) {
 		position  protocol.Position
 		itemCount int
 	}{
-		{source: "echo has('')\n", position: protocol.Position{Line: 0, Character: 10}, itemCount: 223},
+		{source: "echo has('')\n", position: protocol.Position{Line: 0, Character: 10}, itemCount: 224},
 		{source: "echo expand('')\n", position: protocol.Position{Line: 0, Character: 13}, itemCount: 16},
 	}
 	for _, test := range tests {

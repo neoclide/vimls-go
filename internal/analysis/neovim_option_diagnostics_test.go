@@ -16,7 +16,7 @@ func compatibilityDiagnostics(source string, config bool) []syntax.Diagnostic {
 	var diagnostics []syntax.Diagnostic
 	for _, diagnostic := range CombinedDiagnostics(file, result) {
 		switch diagnostic.Code {
-		case "vimls/neovim-only-option", "vim/E474", "vim/E487", "vim/E521", "vim/E539", "vim/E730", "vim/E1511", "vim/E1012", "vim/E113", "vim/E518":
+		case "vimls/macvim-only-option", "vimls/neovim-only-option", "vim/E474", "vim/E487", "vim/E521", "vim/E539", "vim/E730", "vim/E1511", "vim/E1012", "vim/E113", "vim/E518":
 			diagnostics = append(diagnostics, diagnostic)
 		}
 	}

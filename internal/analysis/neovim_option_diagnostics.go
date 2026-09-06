@@ -8,12 +8,16 @@ import (
 	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
-func appendNeovimOptionHint(result *FileAnalysis, context syntax.EditorContext, span syntax.Span) {
-	if context == syntax.EditorNeovim {
+func appendCompatibleOptionHint(result *FileAnalysis, compat vimdata.OptionCompatibility, context syntax.EditorContext, span syntax.Span) {
+	required, code, editor := syntax.EditorNeovim, "vimls/neovim-only-option", "Neovim"
+	if compat.Feature == "gui_macvim" {
+		required, code, editor = syntax.EditorMacVim, "vimls/macvim-only-option", "MacVim"
+	}
+	if context.Implies(required) {
 		return
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-		Code: "vimls/neovim-only-option", Message: "this option setting is Neovim-only; guard it with has('nvim')", Span: span,
+		Code: code, Message: "this option setting is " + editor + "-only; guard it with has('" + compat.Feature + "')", Span: span,
 	})
 }
 
@@ -25,6 +29,14 @@ func appendCompatibleSetOptionDiagnostic(result *FileAnalysis, file *syntax.File
 	only := compat.Vim.Name == ""
 	context := command.EditorContext
 	operator := file.Text(item.Operator)
+	if compat.Variant.Type == vimdata.OptionBool {
+		if operator == "=" || operator == ":" || operator == "+=" || operator == "-=" || operator == "^=" {
+			appendOptionValueError(result, vimdata.OptionValueError{Code: "E474", Message: "Invalid argument"}, item.Span, true)
+		} else if only {
+			appendCompatibleOptionHint(result, compat, context, item.Name)
+		}
+		return true
+	}
 	if file.Text(item.Prefix) != "" || operator == "!" {
 		appendOptionValueError(result, vimdata.OptionValueError{Code: "E474", Message: "Invalid argument"}, item.Span, true)
 		return true
@@ -38,14 +50,14 @@ func appendCompatibleSetOptionDiagnostic(result *FileAnalysis, file *syntax.File
 	if operator == "+=" || operator == "^=" {
 		// A list/flag insertion can be checked as a fragment. Other compound
 		// operators require the previous value. Removal may be a harmless no-op.
-		switch compat.Neovim.Validation.Kind {
+		switch compat.Variant.Validation.Kind {
 		case vimdata.ValidationCommaList, vimdata.ValidationFlagList, vimdata.ValidationFillChars:
 			check = true
 		}
 	}
 	if !check || strings.ContainsAny(value, "\\\x16") {
 		if only {
-			appendNeovimOptionHint(result, context, item.Name)
+			appendCompatibleOptionHint(result, compat, context, item.Name)
 		}
 		return true
 	}
@@ -61,14 +73,14 @@ func appendCompatibleOptionAssignmentDiagnostic(result *FileAnalysis, file *synt
 	}
 	if file.Text(assignment.Operator) != "=" {
 		if compat.Vim.Name == "" {
-			appendNeovimOptionHint(result, assignment.EditorContext, target.Span)
+			appendCompatibleOptionHint(result, compat, assignment.EditorContext, target.Span)
 		}
 		return true
 	}
 	if literal := unwrapParenthesizedExpression(expression); literal != nil {
 		switch literal.Kind {
 		case syntax.ExpressionList, syntax.ExpressionTuple, syntax.ExpressionDictionary, syntax.ExpressionBlob:
-			// These are type errors, not Neovim extensions. The assignment
+			// These are type errors, not editor extensions. The assignment
 			// checker reports them after inference; do not also add a Hint.
 			return true
 		}
@@ -76,7 +88,7 @@ func appendCompatibleOptionAssignmentDiagnostic(result *FileAnalysis, file *synt
 	// Decode strings and numbers independently: foldcolumn is numeric in Vim
 	// and a string in Neovim. Do not let Vim's type choose the literal decoder.
 	value, span, known := staticOptionAssignmentValue(file, expression, vimdata.ValidationExact, dialect)
-	if known && dialect == syntax.Vim9 && compat.Neovim.Type == vimdata.OptionNumber && (compat.Vim.Name == "" || compat.Vim.Type == vimdata.OptionNumber) {
+	if known && dialect == syntax.Vim9 && compat.Variant.Type == vimdata.OptionNumber && (compat.Vim.Name == "" || compat.Vim.Type == vimdata.OptionNumber) {
 		// The existing Vim9 assignment checker owns string-to-number type
 		// errors. Do not add a second option-value error or a compatibility hint.
 		return true
@@ -87,7 +99,7 @@ func appendCompatibleOptionAssignmentDiagnostic(result *FileAnalysis, file *synt
 	if known {
 		appendCompatibleOptionValueDiagnostic(result, compat, assignment.EditorContext, value, span, false)
 	} else if compat.Vim.Name == "" {
-		appendNeovimOptionHint(result, assignment.EditorContext, target.Span)
+		appendCompatibleOptionHint(result, compat, assignment.EditorContext, target.Span)
 	}
 	return true
 }
@@ -115,19 +127,19 @@ func appendCompatibleOptionValueDiagnostic(result *FileAnalysis, compat vimdata.
 		// hint, not evidence that Vim rejects other numeric values.
 		if compat.Vim.Name == "laststatus" {
 			if number, ok := staticSetOptionNumber(value); ok && number == 3 {
-				appendNeovimOptionHint(result, context, span)
+				appendCompatibleOptionHint(result, compat, context, span)
 			}
 		}
 		return
 	}
-	nvimError, nvimInvalid := validate(compat.Neovim)
-	if !nvimInvalid {
-		appendNeovimOptionHint(result, context, span)
+	variantError, variantInvalid := validate(compat.Variant)
+	if !variantInvalid {
+		appendCompatibleOptionHint(result, compat, context, span)
 		return
 	}
 	failure := vimError
-	if compat.Vim.Name == "" || compat.Vim.Type != compat.Neovim.Type {
-		failure = nvimError
+	if compat.Vim.Name == "" || compat.Vim.Type != compat.Variant.Type {
+		failure = variantError
 	}
-	appendOptionValueError(result, failure, span, compat.Neovim.Type == vimdata.OptionNumber)
+	appendOptionValueError(result, failure, span, compat.Variant.Type == vimdata.OptionNumber)
 }

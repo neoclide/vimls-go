@@ -12,6 +12,11 @@ func TestEditorContextBranches(t *testing.T) {
 		yes, no   EditorContext
 	}{
 		{"has('nvim')", EditorNeovim, EditorVim},
+		{"has('gui_macvim')", EditorMacVim, 4},
+		{"!has('nvim') && has('gui_macvim')", EditorMacVim, 4},
+		{"has('nvim') && has('gui_macvim')", EditorUnreachable, EditorUnknown},
+		{"has('nvim') || has('gui_macvim')", 1, 2 | 4},
+		{"has('gui_macvim') == 1", EditorMacVim, 4},
 		{"!has(\"nvim\")", EditorVim, EditorNeovim},
 		{"!!(has('nvim'))", EditorNeovim, EditorVim},
 		{"has('nvim') && other", EditorNeovim, EditorUnknown},

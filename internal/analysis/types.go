@@ -905,9 +905,9 @@ func builtinOptionValueType(option vimdata.Option) ValueType {
 func optionExpressionValueType(expression *syntax.Expression) ValueType {
 	if compat, ok := vimdata.LookupOptionCompatibility(expression.Value); ok {
 		if compat.Vim.Name == "" || expression.EditorContext == syntax.EditorNeovim {
-			return builtinOptionValueType(compat.Neovim)
+			return builtinOptionValueType(compat.Variant)
 		}
-		if compat.Vim.Type != compat.Neovim.Type && expression.EditorContext != syntax.EditorVim {
+		if compat.Vim.Type != compat.Variant.Type && !expression.EditorContext.Implies(syntax.EditorVim) {
 			return UnknownValueType
 		}
 		return builtinOptionValueType(compat.Vim)
@@ -923,8 +923,8 @@ func optionExpressionValueType(expression *syntax.Expression) ValueType {
 
 func optionAcceptsCompatibleType(name string, typ ValueType) bool {
 	compat, ok := vimdata.LookupOptionCompatibility(name)
-	return ok && compat.Vim.Name != "" && compat.Vim.Type != compat.Neovim.Type &&
-		(typ.Name == builtinOptionValueType(compat.Vim).Name || typ.Name == builtinOptionValueType(compat.Neovim).Name)
+	return ok && compat.Vim.Name != "" && compat.Vim.Type != compat.Variant.Type &&
+		(typ.Name == builtinOptionValueType(compat.Vim).Name || typ.Name == builtinOptionValueType(compat.Variant).Name)
 }
 
 func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType) ValueType {
