@@ -47,12 +47,12 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 	}
 	var dialectStack []Dialect
 	var aggregateStack []BlockKind
+	commandBlockDepth := 0
 	heredocCommand := -1
 	heredocRecoveryCommand := ""
-	heredocRecoveryOffset := -1
-	var heredocRecoveryBody Span
-	heredocRecoverySpanEnd := 0
-	heredocRecoveryTokenCount := 0
+	heredocRecoveryChecked := false
+	var heredocEnd heredocMarker
+	var heredocLines *heredocLineIndex
 	vim9Continuation := -1
 	var vim9ContinuationState vim9ContinuationScan
 	lambdaCloseCommand := -1
@@ -67,6 +67,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 		textBodyCommand := -1
 		for index := before; index < len(file.Commands); index++ {
 			command := &file.Commands[index]
+			commandBlockDepth = nextVim9CommandBlockDepth(file, command, commandBlockDepth)
 			command.ScriptVersion = scriptVersion
 			if command.logical != nil {
 				command.logical.command.ScriptVersion = scriptVersion
@@ -157,7 +158,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 		contentEnd, nextOffset := physicalLineEnd(source, offset)
 		if heredocCommand >= 0 {
 			command := &file.Commands[heredocCommand]
-			if commandBlockEndLine(source[offset:contentEnd]) && insideVim9CommandBlock(file, heredocCommand) {
+			if commandBlockEndLine(source[offset:contentEnd]) && commandBlockDepth > 0 {
 				// may_get_cmd_block() collects a :command { ... } definition
 				// before it is executed and explicitly does not understand
 				// heredocs. Its first line-leading } closes the definition even
@@ -170,8 +171,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 				command.Heredoc.Incomplete = true
 				heredocCommand = -1
 				heredocRecoveryCommand = ""
-				heredocRecoveryOffset = -1
-			} else if heredocEndMarkerMatches(source, command, offset, contentEnd) {
+			} else if heredocEnd.matches(source[offset:contentEnd]) {
 				scanEvalHeredoc(file, command)
 				command.Heredoc.EndMarker = Span{Start: offset, End: contentEnd}
 				command.Span.End = contentEnd
@@ -181,20 +181,26 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 				}
 				heredocCommand = -1
 				heredocRecoveryCommand = ""
-				heredocRecoveryOffset = -1
 				offset = nextOffset
 				continue
 			} else {
 				blankRecoveryLine := skipSpace(source, offset, contentEnd) == contentEnd
 				functionRecoveryLine := heredocRecoveryCommand != "" && isPayloadRecoveryLine(source, offset, contentEnd, heredocRecoveryCommand)
-				if heredocRecoveryOffset < 0 && (blankRecoveryLine || functionRecoveryLine) {
-					// Keep looking for the real marker: blank lines are valid heredoc
-					// payload.  If no marker is found by EOF, rewind to the first
-					// blank line (or the enclosing function end) and resume parsing.
-					heredocRecoveryOffset = offset
-					heredocRecoveryBody = command.Heredoc.Body
-					heredocRecoverySpanEnd = command.Span.End
-					heredocRecoveryTokenCount = len(file.Tokens)
+				if !heredocRecoveryChecked && (blankRecoveryLine || functionRecoveryLine) {
+					// Blank lines and function ends may be valid payload. One lazy
+					// source index proves whether to keep looking, instead of
+					// consuming and rewinding the same suffix for every missing marker.
+					if heredocLines == nil {
+						heredocLines = indexHeredocLines(source)
+					}
+					heredocRecoveryChecked = true
+					if !heredocLines.hasMarkerAfter(heredocEnd, offset) && !(commandBlockDepth > 0 && heredocLines.lastCommandBlockEnd >= offset) {
+						command.Heredoc.Incomplete = true
+						scanEvalHeredoc(file, command)
+						heredocCommand = -1
+						heredocRecoveryCommand = ""
+						continue // Reprocess the recovery line as ordinary source.
+					}
 				}
 				if command.Heredoc.Body.Start == 0 && command.Heredoc.Body.End == 0 {
 					command.Heredoc.Body.Start = offset
@@ -205,25 +211,13 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 				if contentEnd < nextOffset {
 					file.Tokens = append(file.Tokens, Token{Kind: TokenNewline, Span: Span{Start: contentEnd, End: nextOffset}})
 				}
-				if nextOffset >= len(source) && heredocRecoveryOffset >= 0 {
-					command.Heredoc.Body = heredocRecoveryBody
-					command.Heredoc.Incomplete = true
-					command.Span.End = heredocRecoverySpanEnd
-					file.Tokens = file.Tokens[:heredocRecoveryTokenCount]
-					scanEvalHeredoc(file, command)
-					heredocCommand = -1
-					heredocRecoveryCommand = ""
-					offset = heredocRecoveryOffset
-					heredocRecoveryOffset = -1
-					continue
-				}
 				offset = nextOffset
 				continue
 			}
 		}
 
 		first := skipSpace(source, offset, contentEnd)
-		if first < contentEnd && source[first] == '}' && hasOpenVim9CommandBlock(file) {
+		if first < contentEnd && source[first] == '}' && commandBlockDepth > 0 {
 			// may_get_cmd_block() stops at any physical line whose first
 			// non-white byte is }, regardless of trailing replacement text.
 			if offset < first {
@@ -235,6 +229,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 				Kind: CommandBlockEnd, Dialect: Vim9, ScriptVersion: scriptVersion,
 				Span: name, Name: name, TypedName: "}", Canonical: "}", Block: -1,
 			})
+			commandBlockDepth--
 			if first+1 < contentEnd {
 				file.Tokens = append(file.Tokens, Token{Kind: TokenOpaque, Span: Span{Start: first + 1, End: contentEnd}})
 			}
@@ -319,14 +314,14 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 			}
 			loadKeymapCommand, textBodyCommand := applyCommandState(newCommands)
 			if loadKeymapCommand >= 0 {
-				offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], nextOffset, hasOpenVim9CommandBlock(file))
+				offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], nextOffset, commandBlockDepth > 0)
 				continue
 			}
 			if textBodyCommand >= 0 {
 				if contentEnd < nextOffset {
 					file.Tokens = append(file.Tokens, Token{Kind: TokenNewline, Span: Span{Start: contentEnd, End: nextOffset}})
 				}
-				offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], nextOffset, textBodyRecoveryCommand(active, dialectStack), hasOpenVim9CommandBlock(file))
+				offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], nextOffset, textBodyRecoveryCommand(active, dialectStack), commandBlockDepth > 0)
 				continue
 			}
 
@@ -341,7 +336,8 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 						file.Commands[last].Heredoc.Body = Span{Start: nextOffset, End: nextOffset}
 					}
 					heredocRecoveryCommand = enclosingFunctionEnd(active, dialectStack)
-					heredocRecoveryOffset = -1
+					heredocRecoveryChecked = false
+					heredocEnd = commandHeredocMarker(source, &file.Commands[last])
 				}
 			} else if last >= commandIndex && usesVim9Continuation(file.Commands[last]) {
 				vim9ContinuationState = scanVim9Continuation(logicalArgumentText(file, &file.Commands[last]), vim9ContinuationScan{})
@@ -369,11 +365,11 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 		before := scanLogicalCommandsWithContext(file, &view, active, directAggregateKind, len(dialectStack) > 1, scriptVersion)
 		loadKeymapCommand, textBodyCommand := applyCommandState(before)
 		if loadKeymapCommand >= 0 {
-			offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, hasOpenVim9CommandBlock(file))
+			offset = parseLoadKeymapBody(file, &file.Commands[loadKeymapCommand], view.Next, commandBlockDepth > 0)
 			continue
 		}
 		if textBodyCommand >= 0 {
-			offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], view.Next, textBodyRecoveryCommand(active, dialectStack), hasOpenVim9CommandBlock(file))
+			offset = parseLegacyTextBody(file, &file.Commands[textBodyCommand], view.Next, textBodyRecoveryCommand(active, dialectStack), commandBlockDepth > 0)
 			continue
 		}
 		if len(file.Commands) > before && file.Commands[len(file.Commands)-1].Heredoc != nil {
@@ -386,7 +382,8 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 					file.Commands[heredocCommand].Heredoc.Body = Span{Start: view.Next, End: view.Next}
 				}
 				heredocRecoveryCommand = enclosingFunctionEnd(active, dialectStack)
-				heredocRecoveryOffset = -1
+				heredocRecoveryChecked = false
+				heredocEnd = commandHeredocMarker(source, &file.Commands[last])
 			}
 		} else if len(file.Commands) > before {
 			last := len(file.Commands) - 1
@@ -1071,14 +1068,19 @@ func hasOpenVim9CommandBlock(file *File) bool {
 func insideVim9CommandBlock(file *File, commandIndex int) bool {
 	depth := 0
 	for index := 0; index <= commandIndex; index++ {
-		command := file.Commands[index]
-		if command.Canonical == "command" && command.Dialect == Vim9 && strings.HasSuffix(strings.TrimSpace(file.Text(command.Argument)), "{") {
-			depth++
-		} else if command.Canonical == "}" && depth > 0 {
-			depth--
-		}
+		depth = nextVim9CommandBlockDepth(file, &file.Commands[index], depth)
 	}
 	return depth > 0
+}
+
+func nextVim9CommandBlockDepth(file *File, command *Command, depth int) int {
+	if command.Canonical == "command" && command.Dialect == Vim9 && strings.HasSuffix(strings.TrimSpace(file.Text(command.Argument)), "{") {
+		return depth + 1
+	}
+	if command.Canonical == "}" && depth > 0 {
+		return depth - 1
+	}
+	return depth
 }
 
 func parseScriptVersion(source string) (uint8, bool) {
@@ -1690,7 +1692,7 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 			parseLegacyTextCommandHeader(file, &parsedCommand)
 		}
 		detectHeredoc(file, &parsedCommand)
-		if hasOpenVim9CommandBlock(file) && separator.Start < separator.End && collectedBlockBarConflict(file.Source, &parsedCommand) {
+		if separator.Start < separator.End && collectedBlockBarConflict(file.Source, &parsedCommand) && hasOpenVim9CommandBlock(file) {
 			lineEnd, _ := physicalLineEnd(file.Source, separator.Start)
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{
 				Code: "vim/E1231", Message: "Cannot use a bar to separate commands here: " + strings.TrimSpace(file.Source[separator.Start:lineEnd]), Span: separator,
@@ -2321,25 +2323,6 @@ func parseVim9HeredocDeclaration(file *File, command *Command) {
 		// diagnostics produced from its potentially half-written head.
 		file.Diagnostics = file.Diagnostics[:diagnosticsStart]
 	}
-}
-
-func heredocEndMarkerMatches(source string, command *Command, lineStart, lineEnd int) bool {
-	if command == nil || command.Heredoc == nil {
-		return false
-	}
-	markerStart := lineStart
-	if command.Heredoc.Trim {
-		commandLineStart := strings.LastIndexAny(source[:command.Span.Start], "\r\n") + 1
-		indentEnd := commandLineStart
-		for indentEnd < command.Span.Start && isSpace(source[indentEnd]) {
-			indentEnd++
-		}
-		indent := source[commandLineStart:indentEnd]
-		if strings.HasPrefix(source[lineStart:lineEnd], indent) {
-			markerStart += len(indent)
-		}
-	}
-	return source[markerStart:lineEnd] == command.Heredoc.Marker
 }
 
 // scanEvalHeredoc parses the interpolation expressions in an eval heredoc.
