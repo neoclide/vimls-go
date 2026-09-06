@@ -28,6 +28,19 @@ Go's test cache does not track every source change that affects it.
 For documentation-only changes, check examples, links and `git diff --check`.
 Go tests are not needed.
 
+To inspect a syntax tree, pass a regular file to `bin/vimparse file.vim` or pipe
+source to stdin:
+
+```sh
+printf 'vim9script\necho 1\n' | bin/vimparse -
+```
+
+Files and stdin have a 4 MiB input limit. Named device files, directories and
+FIFOs are rejected; use `-` for a pipe. Input failures produce a message on stderr
+and exit status 1, with no JSON on stdout. Invalid argument counts return 2.
+Syntax diagnostics remain part of the JSON syntax tree and do not change the
+successful exit status.
+
 ## Where to put tests
 
 | Location | Tests |

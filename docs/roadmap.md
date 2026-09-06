@@ -52,3 +52,6 @@ adding more features. Performance changes need comparable measurements.
 General expression reformatting, embedded-language analysis and persistent
 disk indexes remain outside the current scope. The parser still reparses
 changed source; incremental AST editing is not implemented.
+
+For parser debugging, `vimparse` accepts regular files or stdin with a 4 MiB
+input limit. See the [testing guide](testing.md) for usage.

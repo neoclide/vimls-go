@@ -64,7 +64,9 @@ make build
 ```
 
 This creates `bin/vimls` and `bin/vimparse`. The latter prints a script's syntax
-tree and is mainly useful when debugging the parser.
+tree and is mainly useful when debugging the parser. Use `vimparse path/to/file.vim`
+for a regular file or `vimparse -` to read standard input until EOF. Both accept
+at most 4 MiB; larger inputs are rejected without producing a syntax tree.
 
 ## Set up your editor
 

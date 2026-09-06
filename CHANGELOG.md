@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Accept stdin with `vimparse -`; limit file and stdin input to 4 MiB and reject
+  named special files before parsing.
 - Add completion, hover, navigation and error checking inside mapping expression
   prompts such as `<C-R>=...<CR>`. Commands before a prompt keep their normal
   highlighting and help.
