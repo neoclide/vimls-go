@@ -116,8 +116,13 @@ func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 	serverConn, clientConn := net.Pipe()
 	t.Cleanup(func() { _ = serverConn.Close() })
 	t.Cleanup(func() { _ = clientConn.Close() })
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	var logs bytes.Buffer
 	instance := New(serverConn, serverConn, &logs)
+	configurationDone := make(chan struct{})
+	instance.testHooks.afterConfigurationRequest = func() { close(configurationDone) }
 	done := make(chan int, 1)
 	go func() { done <- instance.Run(context.Background()) }()
 	writer := jsonrpc.NewWriter(clientConn)
@@ -132,6 +137,20 @@ func TestServerReadsWorkspaceConfigurationResponse(t *testing.T) {
 		t.Fatalf("configuration request = %#v", configuration)
 	}
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":1,"result":[{"workspace":{"rebuildDebounce":0}}]}`)
+	// Writing the response only delivers its frame; the asynchronous handler
+	// still has to consume and apply it. Shutdown before that point may cancel
+	// the request and legitimately send $/cancelRequest before its own response.
+	select {
+	case <-configurationDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("configuration response was not processed")
+	}
+	instance.workspaceMu.Lock()
+	delay := instance.workspaceDelay
+	instance.workspaceMu.Unlock()
+	if delay != 0 {
+		t.Fatalf("workspace rebuild debounce = %v, want 0", delay)
+	}
 	writeFrame(t, writer, `{"jsonrpc":"2.0","id":2,"method":"shutdown"}`)
 	if message := readFrame(t, reader); string(message["id"]) != "2" {
 		t.Fatalf("shutdown response = %#v", message)

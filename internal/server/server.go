@@ -130,6 +130,7 @@ type serverTestHooks struct {
 	workspaceIndexWaitTimeout   time.Duration
 	workspaceProgressTimeout    time.Duration
 	configurationTimeout        time.Duration
+	afterConfigurationRequest   func()
 	beforeWorkspaceBuild        func([]*text.Snapshot)
 	afterWorkspaceIndexWorker   func()
 	beforeShutdownReturn        func()
@@ -885,6 +886,9 @@ func (s *Server) refreshWorkspaceConfiguration(ctx context.Context) error {
 			s.configurationCancel = nil
 		}
 		s.configurationMu.Unlock()
+		if s.testHooks.afterConfigurationRequest != nil {
+			s.testHooks.afterConfigurationRequest()
+		}
 	}()
 	jsonrpc2.Async(ctx)
 	section := "vim"
