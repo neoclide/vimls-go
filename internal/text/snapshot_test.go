@@ -383,6 +383,34 @@ func TestApplyChangesDeterministicSequence(t *testing.T) {
 	}
 }
 
+func TestApplyChangesBatchKeepsIntermediateCoordinatesPrivate(t *testing.T) {
+	version := int32(7)
+	base := NewSnapshot("file:///batch.vim", 4, &version, "original\r\ntext")
+	changes := []Change{
+		{Text: "\ufeffé😀\r\nsecond\nlast"},
+		{Range: &Range{Start: Position{Line: 1}, End: Position{Line: 2}}, Text: "added\nnew\r\n"},
+		{Range: &Range{Start: Position{Line: 2}, End: Position{Line: 3}}, Text: ""},
+		{Range: &Range{Start: Position{Character: 3}, End: Position{Character: 5}}, Text: "X"},
+	}
+	got, err := ApplyChanges(base, 5, nil, UTF16, changes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSnapshotMatches(t, got, NewSnapshot(base.URI(), 5, nil, "\ufefféX\r\nadded\nlast"))
+	changes = append(changes, Change{Range: &Range{Start: Position{Line: 100}}})
+	if got, err := ApplyChanges(base, 6, nil, UTF16, changes); err == nil || got != nil {
+		t.Fatalf("invalid batch returned %#v, %v", got, err)
+	}
+	assertSnapshotMatches(t, base, NewSnapshot(base.URI(), 4, &version, "original\r\ntext"))
+	for _, changes := range [][]Change{nil, {{Text: base.Text()}}, {{Text: "temporary"}, {Text: base.Text()}}} {
+		got, err := ApplyChanges(base, 8, nil, UTF16, changes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertSnapshotMatches(t, got, NewSnapshot(base.URI(), 8, nil, base.Text()))
+	}
+}
+
 func FuzzApplyChanges(f *testing.F) {
 	f.Add([]byte("a\nb\n"), []byte{utf8Index, 1, 2}, []byte("l"))
 	f.Add([]byte("a\r\nb\r\n"), []byte{utf16Index, 1, 2}, []byte("c"))

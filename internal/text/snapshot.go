@@ -128,12 +128,17 @@ func ApplyChanges(snapshot *Snapshot, revision uint64, version *int32, encoding 
 	if snapshot == nil {
 		return nil, errors.New("nil text snapshot")
 	}
-	current := snapshot
+	// Keep this editing state private until every ordered change succeeds.
+	// Lines are rebuilt lazily: full replacements need no intermediate index.
+	current := *snapshot
 	for index, change := range changes {
 		var content string
 		if change.Range == nil {
 			content = change.Text
 		} else {
+			if current.lines == nil {
+				current.lines = indexLines(current.text)
+			}
 			start, err := current.Offset(change.Range.Start, encoding)
 			if err != nil {
 				return nil, fmt.Errorf("change %d start: %w", index, err)
@@ -147,12 +152,23 @@ func ApplyChanges(snapshot *Snapshot, revision uint64, version *int32, encoding 
 			}
 			content = current.text[:start] + change.Text + current.text[end:]
 		}
-		current = NewSnapshot(snapshot.uri, revision, version, content)
+		current.text = content
+		current.lines = nil
 	}
-	if len(changes) == 0 {
-		return NewSnapshot(snapshot.uri, revision, version, snapshot.text), nil
+	if current.text == snapshot.text {
+		current.lines = snapshot.lines
+	} else {
+		if current.lines == nil {
+			current.lines = indexLines(current.text)
+		}
+		current.contentID = ContentIDOf(current.text)
 	}
-	return current, nil
+	current.revision = revision
+	current.version, current.hasVersion = 0, version != nil
+	if version != nil {
+		current.version = *version
+	}
+	return &current, nil
 }
 
 func indexLines(content string) []line {
