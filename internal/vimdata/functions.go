@@ -1,5 +1,7 @@
 package vimdata
 
+import "slices"
+
 // FunctionReturnType is the broad Vim value category returned by a builtin
 // function. Unknown is used when Vim computes the return type dynamically or
 // the source table uses a return helper that this package does not classify.
@@ -79,20 +81,28 @@ func (t FunctionReturnType) DisplayName() string {
 // order. The returned slice is a copy and may be modified by the caller.
 func BuiltinFunctions() []BuiltinFunction {
 	result := make([]BuiltinFunction, len(builtinFunctions))
-	copy(result, builtinFunctions[:])
+	for i, function := range builtinFunctions {
+		result[i] = cloneFunction(function)
+	}
 	return result
 }
 
 // LookupFunction resolves a builtin function by its canonical name. Vim
 // function names are case-sensitive and do not use Ex-command abbreviations.
+// The returned metadata, including ArgumentChecks, belongs to the caller.
 func LookupFunction(name string) (BuiltinFunction, bool) {
 	if name == "" {
 		return BuiltinFunction{}, false
 	}
 	for _, function := range builtinFunctions {
 		if function.Name == name {
-			return function, true
+			return cloneFunction(function), true
 		}
 	}
 	return BuiltinFunction{}, false
+}
+
+func cloneFunction(function BuiltinFunction) BuiltinFunction {
+	function.ArgumentChecks = slices.Clone(function.ArgumentChecks)
+	return function
 }

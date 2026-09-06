@@ -100,3 +100,34 @@ func TestFunctionReturnTypeDisplayName(t *testing.T) {
 		t.Fatalf("unknown return type = %q", got)
 	}
 }
+
+func TestFunctionArgumentChecksAreOwned(t *testing.T) {
+	for _, original := range builtinFunctions {
+		want := cloneFunction(original)
+		lookup, ok := LookupFunction(original.Name)
+		if !ok {
+			t.Fatalf("missing %s", original.Name)
+		}
+		var enumerated BuiltinFunction
+		for _, function := range BuiltinFunctions() {
+			if function.Name == original.Name {
+				enumerated = function
+				break
+			}
+		}
+		for _, got := range []BuiltinFunction{lookup, enumerated} {
+			if (got.ArgumentChecks == nil) != (want.ArgumentChecks == nil) {
+				t.Fatalf("%s: nil checks changed", original.Name)
+			}
+			if len(got.ArgumentChecks) > 0 {
+				got.ArgumentChecks[0] = "changed"
+				got.ArgumentChecks = append(got.ArgumentChecks[:0], "replaced")
+			}
+			got.ArgumentChecks = append(got.ArgumentChecks, "appended")
+			next, _ := LookupFunction(original.Name)
+			if !reflect.DeepEqual(next, want) {
+				t.Fatalf("%s: caller mutation changed metadata: %#v", original.Name, next)
+			}
+		}
+	}
+}
