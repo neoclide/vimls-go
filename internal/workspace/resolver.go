@@ -77,10 +77,7 @@ func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool,
 		if err != nil {
 			continue
 		}
-		if len(entries) > 200 {
-			entries = entries[:200]
-			truncated = true
-		}
+		checked := 0
 		for _, entry := range entries {
 			if !strings.HasPrefix(entry.Name(), name) {
 				continue
@@ -88,15 +85,22 @@ func (r *PathResolver) ImportPathCompletions(from, prefix string, autoload bool,
 			if !entry.IsDir() && !strings.HasSuffix(entry.Name(), ".vim") {
 				continue
 			}
+			// Bound filesystem validation after cheap name filtering, so an
+			// unrelated alphabetic prefix cannot hide an exact match.
+			if checked == 200 {
+				truncated = true
+				break
+			}
+			checked++
 			path := filepath.Join(canonical, entry.Name())
 			info, err := os.Stat(path)
 			if err != nil || (!info.IsDir() && !info.Mode().IsRegular()) {
 				continue
 			}
-			if _, ok := r.Canonical(path); !ok {
+			pathCanonical, ok := r.Canonical(path)
+			if !ok {
 				continue
 			}
-			pathCanonical, _ := r.Canonical(path)
 			if fromCanonical != "" && pathCanonical == fromCanonical {
 				continue
 			}

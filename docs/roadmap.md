@@ -32,6 +32,8 @@ The items below are remaining work, not promises for a particular release.
 - Detect cross-file mapping conflicts only when the loading order is known.
 - Improve path completion and navigation for `:source`, `:runtime` and
   `:packadd`.
+  Import completion filters names before its filesystem validation budget,
+  so a precise prefix can find matches late in a large directory.
 - Revisit automatic watching of external plugin files if real projects need it.
   Watching more directories should have a clear benefit and bounded cost.
 

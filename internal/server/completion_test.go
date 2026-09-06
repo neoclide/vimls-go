@@ -22,6 +22,42 @@ import (
 
 var benchmarkCompletionResult protocol.CompletionResult
 
+func TestCompletionImportPrecisePrefixInLargeDirectory(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "import")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 201 {
+		if err := os.WriteFile(filepath.Join(directory, fmt.Sprintf("a%03d.vim", i)), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(directory, "zz_target.vim"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	rootURI := uri.File(root)
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI}); err != nil {
+		t.Fatal(err)
+	}
+	documentURI := uri.File(filepath.Join(root, "main.vim"))
+	for _, prefix := range []string{"./import/zz_", filepath.ToSlash(filepath.Join(directory, "zz_"))} {
+		source := "vim9script\nimport '" + prefix + "' as target\n"
+		instance.documents.Open(documentURI.String(), 1, source)
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Position:     protocol.Position{Line: 1, Character: uint32(len("import '" + prefix))},
+			},
+		})
+		if err != nil || !hasCompletionLabel(completionItems(t, result), prefix+"target.vim") {
+			t.Fatalf("prefix %q: completion=%#v err=%v", prefix, result, err)
+		}
+	}
+}
+
 func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 	root := t.TempDir()
 	runtimePath := filepath.Join(t.TempDir(), "runtime")

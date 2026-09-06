@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,6 +74,39 @@ func TestPathResolverImportPathCompletionsRuntimeAbsoluteAndLimit(t *testing.T) 
 	writeResolverFile(t, filepath.Join(runtimePath, "import", "two.vim"), "")
 	if _, incomplete := resolver.ImportPathCompletions(from, "", false, 1); !incomplete {
 		t.Fatal("limit did not mark incomplete")
+	}
+}
+
+func TestImportPathCompletionFiltersBeforeValidationLimit(t *testing.T) {
+	root := t.TempDir()
+	from := filepath.Join(root, "main.vim")
+	writeResolverFile(t, from, "")
+	for i := range 201 {
+		writeResolverFile(t, filepath.Join(root, "import", fmt.Sprintf("a%03d.vim", i)), "")
+		writeResolverFile(t, filepath.Join(root, "import", fmt.Sprintf("zz_%03d.txt", i)), "")
+	}
+	writeResolverFile(t, filepath.Join(root, "import", "zz_target.vim"), "")
+	resolver, err := NewPathResolver(root, []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prefix := range []string{"./import/zz_", "zz_", filepath.ToSlash(filepath.Join(root, "import", "zz_"))} {
+		calls := 0
+		items, incomplete := resolver.ImportPathCompletions(from, prefix, false, 200, func(string) bool {
+			calls++
+			return true
+		})
+		if incomplete || len(items) != 1 || items[0].Display != prefix+"target.vim" || calls != 1 {
+			t.Fatalf("prefix %q: items=%#v incomplete=%v validations=%d", prefix, items, incomplete, calls)
+		}
+	}
+	calls := 0
+	items, incomplete := resolver.ImportPathCompletions(from, "./import/a", false, 200, func(string) bool {
+		calls++
+		return false
+	})
+	if !incomplete || len(items) != 0 || calls != 200 {
+		t.Fatalf("rejected matches: items=%#v incomplete=%v validations=%d", items, incomplete, calls)
 	}
 }
 

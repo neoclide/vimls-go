@@ -251,10 +251,12 @@ Go `int` 在当前支持的 64 位构建上不是 `int32`；分析文件限制�
 前缀更精确也找不到该文件，因此不是正常的结果上限行为。
 [`completion.go`](../internal/server/completion.go) 的 runtime 前缀走 index，实际 LSP 中这项主要影响相对/绝对 import 路径。
 
-计划：先进行廉价的名字前缀与扩展名过滤，再对候选执行 regular-file、canonical、安全边界和 acceptPath 检查，最后累计结果。
+已实施：先进行廉价的名字前缀与扩展名过滤，再对候选执行 regular-file、canonical、安全边界和 acceptPath 检查，最后累计结果。
 目录扫描预算、昂贵候选检查预算与可见结果上限要区分；在预算已尽时准确标记 incomplete，避免精确前缀被无关目录项消耗。
 保留排序、去重、`./` 拼写、目录尾部 `/`、自身文件排除、符号链接限制和 runtimepath 顺序。
-增加大目录后部匹配、非 Vim 文件/被过滤项占前列、恰好达到上限/额外一项、逃逸路径等测试。
+每个目录保留 200 个匹配候选的昂贵检查预算。测试覆盖大目录后部匹配、非 Vim 文件、acceptPath 拒绝和预算耗尽，
+既有测试覆盖结果限制及逃逸路径；新增 server 测试确认相对/绝对 import 补全。
+workspace 定向测试与 server 回归测试通过；gopls MCP 存在旧 CLI overlay 诊断，本地 `gopls check` 无诊断。
 
 ### L-2/L-3/L-4：不按报告改动现有生命周期
 
