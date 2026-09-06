@@ -122,7 +122,16 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/global-function-not-indexed` | Hint | The global function was not found in the workspace index. |
 | `vimls/unknown-autocmd-event` | Hint | The event name is not recognized. Dynamic groups and `User` events need special care. |
 | `vimls/unused-variable` | Hint | A Vim9 variable is declared but not used. |
+| `vimls/variable-type-change` | Warning | Consecutive simple Legacy assignments change a variable's known basic type. |
 | `vimls/deprecated` | Hint | The referenced symbol is marked deprecated. |
+
+`vimls/variable-type-change` marks the later assignment and links to the previous
+one. It compares basic types, so changing List or Dictionary element types does
+not warn. Either `unknown` or `any` clears the previous type: a sequence such as
+`string → unknown → number` does not warn. Tracking is limited to runs of simple
+Legacy `let` assignments in the same scope. Calls, other commands and control-flow
+boundaries clear the history; deferred command payloads are excluded. Vim9 keeps
+its existing type diagnostics without this additional warning.
 
 ### Incomplete expressions
 

@@ -87,7 +87,7 @@ func TestLegacyTupleMutationBoundary(t *testing.T) {
 		{"let pair = (1, 2)\nlet pair[9] = 3\n", ""},
 		{"let pair = (1, 2)\nlet pair[0] =\n", "vimls/missing-expression"},
 		{"let pair = (1, 2)\ncall ReplacePair()\nlet pair[0] = 3\n", ""},
-		{"let pair = (1, 2)\nlet pair = [1, 2]\nlet pair[0] = 3\n", ""},
+		{"let pair = (1, 2)\nlet pair = [1, 2]\nlet pair[0] = 3\n", "vimls/variable-type-change"},
 		{"let pair = ([1],)\nsilent! let pair += ((2,),)\nlet pair[0][0] = 3\n", ""},
 		{"let pair = (GetValue(), 2)\nlet pair[0] = 3\n", ""},
 		{"silent! let pair = (1, 2)\nlet pair[0] = 3\n", ""},

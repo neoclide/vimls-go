@@ -10,6 +10,10 @@ The items below are remaining work, not promises for a particular release.
 
 ## Language support
 
+Legacy variable type-change warnings now cover straight-line simple assignments.
+They discard unknown types and stop at calls and control-flow boundaries; broader
+flow-sensitive checking remains outside this warning's current scope.
+
 `expand()` initializer types now distinguish strings from lists using a static
 third argument in both dialects, including method calls. Dynamic flags remain
 unknown.

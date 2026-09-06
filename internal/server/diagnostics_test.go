@@ -44,7 +44,7 @@ func TestProtocolDiagnosticSeverity(t *testing.T) {
 			t.Errorf("%s severity = %v, want error", code, got)
 		}
 	}
-	for _, code := range []string{"vim/E117", "vim/E121", "vim/E1001", "vim/E1089"} {
+	for _, code := range []string{"vim/E117", "vim/E121", "vim/E1001", "vim/E1089", "vimls/variable-type-change"} {
 		if got := protocolDiagnosticSeverity(code); got != protocol.DiagnosticSeverityWarning {
 			t.Errorf("%s severity = %v, want warning", code, got)
 		}

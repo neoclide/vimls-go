@@ -76,6 +76,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/unexpected-token", Message: "unexpected token in expression", Severity: DiagnosticInformation},
 	{Code: "vimls/unknown-autocmd-event", Message: "unknown autocommand event", Severity: DiagnosticHint},
 	{Code: "vimls/unused-variable", Message: "variable is declared but never used", Severity: DiagnosticHint},
+	{Code: "vimls/variable-type-change", Message: "variable assignment changes its known type", Severity: DiagnosticWarning},
 }
 
 // LookupVimlsDiagnostic returns metadata for a vimls-owned diagnostic code.

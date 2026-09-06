@@ -233,6 +233,7 @@ func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
 	collectNameOnlyExpressionDiagnostics(result, file.Commands, root)
 	collectUnusedVariableDiagnostics(result)
 	collectStyleDiagnostics(result)
+	collectVariableTypeChangeDiagnostics(result)
 	if result.configFile {
 		collectConfigLeaderOrderDiagnostics(result)
 		collectConfigDuplicateMappingDiagnostics(result)

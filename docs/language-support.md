@@ -58,6 +58,9 @@ See [editing configuration files](userconfig.md).
 ## Limits to keep in mind
 
 - Dynamic code and loading order may leave types or references unresolved.
+- Consecutive simple Legacy assignments warn on known basic type changes;
+  unknown values and control-flow boundaries reset this check. See
+  [diagnostics](diagnostics.md#names-and-unused-code).
 - Mixed-dialect `def` and `function` bodies have incomplete analysis.
 - Call hierarchy excludes lambdas and deferred command bodies.
 - Embedded languages and syntax newer than Vim v9.2.1015 are not analyzed.
