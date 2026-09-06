@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
+	"time"
 
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
 )
@@ -100,4 +102,52 @@ type closeReader struct {
 func (r *closeReader) Close() error {
 	r.closes++
 	return nil
+}
+
+type blockedStreamInput struct {
+	*bytes.Reader
+	entered chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+}
+
+func (r *blockedStreamInput) Read(p []byte) (int, error) {
+	if r.Len() != 0 {
+		return r.Reader.Read(p)
+	}
+	close(r.entered)
+	<-r.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (r *blockedStreamInput) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
+}
+
+func TestStreamCloseReleasesBlockedRead(t *testing.T) {
+	for _, partial := range []string{"", "Content-Length: 99\r\n", "Content-Length: 99\r\n\r\n{"} {
+		t.Run(partial, func(t *testing.T) {
+			input := &blockedStreamInput{Reader: bytes.NewReader([]byte(partial)), entered: make(chan struct{}), closed: make(chan struct{})}
+			stream := NewStream(input, io.Discard)
+			t.Cleanup(func() { _ = stream.Close() })
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { _, _, err := stream.Read(ctx); done <- err }()
+			<-input.entered // Prove Read has entered the underlying transport.
+			cancel()
+			if err := stream.Close(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("closed partial frame unexpectedly succeeded")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("Close did not release the read")
+			}
+		})
+	}
 }

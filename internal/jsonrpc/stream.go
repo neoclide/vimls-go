@@ -9,6 +9,10 @@ import (
 )
 
 // Stream adapts the repository's bounded LSP framing to jsonrpc2.Stream.
+// Contexts are checked before I/O; they cannot interrupt an arbitrary blocked
+// Reader or Writer. The session owner must call Close on cancellation. Input
+// transports must support Close interrupting Read (as pipes and net.Conn do).
+// A separate output remains owned by the caller; only input is closed here.
 type Stream struct {
 	reader    *Reader
 	writer    *Writer

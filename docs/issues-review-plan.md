@@ -173,8 +173,10 @@ workspace/server 定向测试通过，覆盖普通/多级 autoload、目录穿�
 但 [`Server.Run`](../internal/server/server.go) 自己 select context/exit 并关闭 stream，已有 `io.Pipe` 会话取消测试通过。
 [`cmd/vimls/main.go`](../cmd/vimls/main.go) 的 TCP 路径也使用可关闭连接。
 
-计划：当前不引入第二层永久读取 goroutine。任意 io.Reader 无可关闭能力时，把读取移到另一个 goroutine 只能转移阻塞，不能消除泄漏。
-先明确 Stream 的 context 检查与 transport Close 所有权；补充“已经进入阻塞读”的 barrier 测试、半帧取消、TCP/stdio 子进程退出验证。
+已完成契约澄清与验证，不引入第二层永久读取 goroutine。任意 io.Reader 无可关闭能力时，把读取移到另一个 goroutine 只能转移阻塞，不能消除泄漏。
+Stream 注释明确 context 检查与 transport Close 所有权；新增“已经进入阻塞读”的 barrier 测试，覆盖空输入、半头部和半正文。
+`internal/jsonrpc` Stream 测试、`cmd/vimls` TCP 取消测试、integration 的 stdio SIGTERM、TCP listener SIGTERM、TCP 会话及 stdio shared scenario 均通过。
+本地 `gopls check` 无诊断。
 如果这些受支持场景确实不能关闭，再针对传输层选择 deadline/close 方案；不根据现有报告做全局重写。
 
 ### M-3：循环导入不等于错误
