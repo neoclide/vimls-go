@@ -107,7 +107,7 @@ func importMemberContext(source string, offset int) (string, bool) {
 	if offset < 0 || offset > len(source) {
 		return "", false
 	}
-	lineStart := strings.LastIndexByte(source[:offset], '\n') + 1
+	lineStart := strings.LastIndexAny(source[:offset], "\r\n") + 1
 	remaining := 256
 	start := offset
 	for start > lineStart && remaining > 0 && isCompletionIdentifierByte(source[start-1]) {
@@ -475,7 +475,7 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		}
 		return completionContextCommand
 	}
-	lineStart := strings.LastIndexByte(file.Source[:offset], '\n') + 1
+	lineStart := strings.LastIndexAny(file.Source[:offset], "\r\n") + 1
 	linePrefix := strings.TrimSpace(file.Source[lineStart:offset])
 	if linePrefix == ":" {
 		return completionContextCommand

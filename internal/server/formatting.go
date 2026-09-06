@@ -184,14 +184,11 @@ func isContinuationLine(source string, offset int) bool {
 }
 
 // lineEndOffset returns the offset of the line terminator at or after offset,
-// excluding a carriage return, or the end of the source for the final line.
+// or the end of the source for the final line. CRLF is one terminator.
 func lineEndOffset(source string, offset int) int {
 	end := len(source)
-	if index := strings.IndexByte(source[offset:], '\n'); index >= 0 {
+	if index := strings.IndexAny(source[offset:], "\r\n"); index >= 0 {
 		end = offset + index
-	}
-	if end > offset && source[end-1] == '\r' {
-		end--
 	}
 	return end
 }

@@ -561,7 +561,7 @@ func maskVim9Comments(source string) string {
 			}
 			continue
 		}
-		if character == '\n' {
+		if isLineBreak(character) {
 			lineStart = true
 			continue
 		}
@@ -572,7 +572,7 @@ func maskVim9Comments(source string) string {
 		}
 		dictionaryStart := index+1 < len(masked) && masked[index+1] == '{' && (index+2 >= len(masked) || masked[index+2] != '{')
 		if character == '#' && !dictionaryStart && (lineStart || index > 0 && isSpace(masked[index-1])) {
-			for index < len(masked) && masked[index] != '\n' {
+			for index < len(masked) && !isLineBreak(masked[index]) {
 				masked[index] = ' '
 				index++
 			}

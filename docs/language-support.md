@@ -21,6 +21,10 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
+Document text supports LF, CRLF and CR line endings, including mixed files.
+Positions follow the negotiated UTF-8, UTF-16 or UTF-32 encoding. Formatting
+and rename preserve the original line-ending bytes.
+
 ## Plugin files and help
 
 Workspace Vim files are indexed for analysis and navigation. Outside the

@@ -788,8 +788,8 @@ func isComplexAutocmd(file *syntax.File, command *syntax.Command, body string) b
 	if file == nil || command.Span.Start < 0 || command.Span.Start > len(file.Source) {
 		return true
 	}
-	lineStart := strings.LastIndexByte(file.Source[:command.Span.Start], '\n') + 1
-	lineEnd := strings.IndexByte(file.Source[command.Span.Start:], '\n')
+	lineStart := strings.LastIndexAny(file.Source[:command.Span.Start], "\r\n") + 1
+	lineEnd := strings.IndexAny(file.Source[command.Span.Start:], "\r\n")
 	if lineEnd < 0 {
 		lineEnd = len(file.Source)
 	} else {

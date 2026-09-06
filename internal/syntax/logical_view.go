@@ -124,19 +124,23 @@ func startLogicalView(source string, start int) (logicalView, int) {
 
 func physicalLineEnd(source string, start int) (contentEnd int, next int) {
 	newline := start
-	for newline < len(source) && source[newline] != '\n' {
+	for newline < len(source) && !isLineBreak(source[newline]) {
 		newline++
 	}
 	contentEnd = newline
-	if contentEnd > start && source[contentEnd-1] == '\r' {
-		contentEnd--
-	}
 	if newline < len(source) {
 		next = newline + 1
+		if source[newline] == '\r' && next < len(source) && source[next] == '\n' {
+			next++
+		}
 	} else {
 		next = len(source)
 	}
 	return contentEnd, next
+}
+
+func isLineBreak(character byte) bool {
+	return character == '\r' || character == '\n'
 }
 
 func legacyContinuationComment(source string, first, end int) bool {

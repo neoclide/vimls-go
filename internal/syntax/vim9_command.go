@@ -400,7 +400,7 @@ func scanVim9OpaqueArgument(source string, start, end int, command vimdata.Comma
 			}
 		case '#':
 			if isVim9OpaqueCommentStart(source, index, start, end) {
-				if newline := strings.IndexByte(source[index:], '\n'); newline >= 0 {
+				if newline := strings.IndexAny(source[index:], "\r\n"); newline >= 0 {
 					// The comment body is not Ex syntax.  Skip it in one jump so
 					// braces and bars in the body cannot affect the argument's
 					// nesting or command boundary; continue with the next line.
@@ -461,7 +461,7 @@ func findVim9Comment(source string, start, end int) int {
 		}
 		if index == start || isSpace(source[index-1]) {
 			for lineEnd := index; lineEnd < end; lineEnd++ {
-				if source[lineEnd] == '\n' {
+				if isLineBreak(source[lineEnd]) {
 					index = lineEnd
 					goto nextByte
 				}

@@ -2329,7 +2329,7 @@ func heredocEndMarkerMatches(source string, command *Command, lineStart, lineEnd
 	}
 	markerStart := lineStart
 	if command.Heredoc.Trim {
-		commandLineStart := strings.LastIndexByte(source[:command.Span.Start], '\n') + 1
+		commandLineStart := strings.LastIndexAny(source[:command.Span.Start], "\r\n") + 1
 		indentEnd := commandLineStart
 		for indentEnd < command.Span.Start && isSpace(source[indentEnd]) {
 			indentEnd++
@@ -2898,7 +2898,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	diagnoseClassMemberModifierOrder(file, command)
 	if isEmbeddedCommand(command.Canonical) {
-		if listDoCommand(command.Canonical) && command.baseDialect == Legacy && strings.Contains(source, "\n") {
+		if listDoCommand(command.Canonical) && command.baseDialect == Legacy && strings.ContainsAny(source, "\r\n") {
 			command.Embedded = parseLegacyDoCommandList(file, command.Argument, depth)
 		} else {
 			diagnosticsStart := len(file.Diagnostics)
@@ -4814,7 +4814,7 @@ func parseLegacyAutocmdCommandList(file *File, span Span, depth int) *CommandLis
 	view := []byte(file.Source[span.Start:span.End])
 	for lineStart := 0; lineStart < len(view); {
 		lineEnd := lineStart
-		for lineEnd < len(view) && view[lineEnd] != '\n' {
+		for lineEnd < len(view) && !isLineBreak(view[lineEnd]) {
 			lineEnd++
 		}
 		prefix := lineStart
@@ -4826,9 +4826,14 @@ func parseLegacyAutocmdCommandList(file *File, span Span, depth int) *CommandLis
 				view[index] = ' '
 			}
 		}
-		if lineEnd < len(view) && view[lineEnd] == '\n' {
+		if lineEnd < len(view) {
+			next := lineEnd + 1
+			if view[lineEnd] == '\r' && next < len(view) && view[next] == '\n' {
+				view[next] = ' '
+				next++
+			}
 			view[lineEnd] = ' '
-			lineStart = lineEnd + 1
+			lineStart = next
 		} else {
 			lineStart = len(view)
 		}
@@ -6166,7 +6171,7 @@ func scanVim9Continuation(source string, state vim9ContinuationScan) vim9Continu
 	for index := 0; index < len(source); index++ {
 		character := source[index]
 		if state.inComment {
-			if character == '\n' {
+			if isLineBreak(character) {
 				state.inComment = false
 				state.pendingSpace = true
 			}
@@ -6212,7 +6217,7 @@ func scanVim9Continuation(source string, state vim9ContinuationScan) vim9Continu
 			// tail, not the start of a multiline string.  Keep collecting the block
 			// so the expression parser can report E488 and find its real close.
 			state.appendTail(character)
-			for index+1 < len(source) && source[index+1] != '\n' {
+			for index+1 < len(source) && !isLineBreak(source[index+1]) {
 				index++
 			}
 			continue
@@ -6635,7 +6640,7 @@ func allowsMultipleExpressionArguments(name string) bool {
 func legacyExpressionNeedsOperand(source string, start, end int) bool {
 	for {
 		end = trimSpaceEnd(source, start, end)
-		lineStart := strings.LastIndexByte(source[start:end], '\n')
+		lineStart := strings.LastIndexAny(source[start:end], "\r\n")
 		if lineStart < 0 {
 			break
 		}
@@ -6648,7 +6653,7 @@ func legacyExpressionNeedsOperand(source string, start, end int) bool {
 		// evaluation.  When the quote is the first token on the continued
 		// line, determine its role from the preceding logical token.
 		end = lineStart - 1
-		if end > start && source[end-1] == '\r' {
+		if end > start && source[end] == '\n' && source[end-1] == '\r' {
 			end--
 		}
 	}
@@ -6698,12 +6703,7 @@ func findVim9ScriptPrologue(source string) (Command, bool) {
 	dynamicGuard := false
 	directFinish := false
 	for start := 0; start < len(source); {
-		end := strings.IndexByte(source[start:], '\n')
-		if end < 0 {
-			end = len(source)
-		} else {
-			end += start
-		}
+		end, next := physicalLineEnd(source, start)
 		commandStart := start
 		if commandStart == 0 && strings.HasPrefix(source, "\ufeff") {
 			commandStart = len("\ufeff")
@@ -6777,7 +6777,7 @@ func findVim9ScriptPrologue(source string) (Command, bool) {
 		if end == len(source) {
 			break
 		}
-		start = end + 1
+		start = next
 	}
 	return Command{}, false
 }

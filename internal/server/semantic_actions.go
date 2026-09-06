@@ -942,7 +942,7 @@ func lineIndent(source string, offset int) string {
 	if offset < 0 || offset > len(source) {
 		return ""
 	}
-	start := strings.LastIndexByte(source[:offset], '\n') + 1
+	start := strings.LastIndexAny(source[:offset], "\r\n") + 1
 	end := start
 	for end < offset && (source[end] == ' ' || source[end] == '\t') {
 		end++

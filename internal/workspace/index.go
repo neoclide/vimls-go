@@ -1823,7 +1823,7 @@ func LeadingFunctionDocumentation(file *syntax.File, command *syntax.Command) st
 	if file == nil || command == nil || command.Span.Start <= 0 {
 		return ""
 	}
-	lineStart := strings.LastIndexByte(file.Source[:command.Span.Start], '\n') + 1
+	lineStart := strings.LastIndexAny(file.Source[:command.Span.Start], "\r\n") + 1
 	before := file.Source[lineStart:command.Span.Start]
 	for i := 0; i < len(before); i++ {
 		if before[i] != ' ' && before[i] != '\t' {
@@ -1833,10 +1833,10 @@ func LeadingFunctionDocumentation(file *syntax.File, command *syntax.Command) st
 	lines := make([]string, 0)
 	for lineStart > 0 {
 		lineEnd := lineStart - 1
-		if lineEnd > 0 && file.Source[lineEnd-1] == '\r' {
+		if lineEnd > 0 && file.Source[lineEnd] == '\n' && file.Source[lineEnd-1] == '\r' {
 			lineEnd--
 		}
-		previousStart := strings.LastIndexByte(file.Source[:lineEnd], '\n') + 1
+		previousStart := strings.LastIndexAny(file.Source[:lineEnd], "\r\n") + 1
 		first := previousStart
 		for first < lineEnd && (file.Source[first] == ' ' || file.Source[first] == '\t') {
 			first++

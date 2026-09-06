@@ -219,13 +219,18 @@ autoload 导入还具有不同的加载时机。
 `indexLines` 和 [`physicalLineEnd`](../internal/syntax/logical_view.go) 当前都只查 LF；`foo\r\nbar\rnext` 得到 2 行而非 3 行。
 仅修改 Snapshot 会产生“坐标分行了、parser 仍是一条命令”的新不一致。
 
-计划：text 的行索引与 syntax 的物理行边界使用一致的三种终止符规则，CRLF 只算一个换行。
+已实施：text 的行索引与 syntax 的物理行边界使用一致的三种终止符规则，CRLF 只算一个换行。
 审查 formatting、semantic token 切行、行注释/字符串/续行与嵌入 payload 中的 LF 专用扫描，区分语言载荷里的 CR 与物理行终止符。
 保留原始 source、ContentID 和字节位置，不把整个文件预先转换为 LF。
 服务端的转换继续留在 server/text，不引入 syntax 对 protocol 的依赖。
 
 验证矩阵包括 LF/CRLF/CR/混合换行、末尾换行、空行、BOM、无效 UTF-8、组合字符和 astral 字符，覆盖 UTF-8/16/32、顺序增量编辑与全量结果一致。
 端到端验证诊断、符号、rename/edit、格式化不改变原文件换行拼写。
+新增矩阵覆盖以上内容，比较换行映射后的整个公开 AST，并拒绝落在 CRLF 中间的范围。
+text/syntax 包测试、server 功能矩阵、analysis/workspace 注释与文档定向测试、本地 `gopls check` 通过。
+`TestPinnedVimBufferNewlines` 使用 `/usr/local/bin/vim`：Vim 9.2、patch 1–1015，1016 探针为 0，
+`unix`/`dos`/`mac` 三种显式缓冲区格式均 exit_status=0、`v:errors=[]`；`:messages` 仅包含各临时文件的读取记录。
+这是编辑器缓冲区行语义的验证；现代 Unix 上直接 `:source` 原始 CR 文件属于另一项平台相关行为，不作泛化承诺。
 
 ### M-5：先移除重复哈希，不能移除中间坐标状态
 

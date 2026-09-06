@@ -305,7 +305,7 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			if next.text == "(" && next.span.Start == token.span.End {
 				if arrow, ok := p.methodOperator(left); ok {
 					lineEnd := len(p.source)
-					if newline := strings.IndexByte(p.source[token.span.Start-p.base:], '\n'); newline >= 0 {
+					if newline := strings.IndexAny(p.source[token.span.Start-p.base:], "\r\n"); newline >= 0 {
 						lineEnd = token.span.Start - p.base + newline
 					}
 					tail := &Expression{Kind: ExpressionMissing, Span: Span{Start: token.span.Start, End: p.base + lineEnd}}
@@ -356,7 +356,7 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 					code = "vim/E1202"
 					tailStart := token.span.Start - p.base
 					tailEnd := len(p.source)
-					if newline := strings.IndexByte(p.source[tailStart:], '\n'); newline >= 0 {
+					if newline := strings.IndexAny(p.source[tailStart:], "\r\n"); newline >= 0 {
 						tailEnd = tailStart + newline
 					}
 					message = "No white space allowed after '.': " + p.source[tailStart:tailEnd]
@@ -500,7 +500,7 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 		// incomplete type list (Fn<, []) without a closing '>'.  Keep that
 		// delimiter for the caller; treating the whole line as E1554 loses the
 		// useful outer call and, for a partial first type, its AST node.
-		scanLineEnd := strings.IndexByte(p.source[open:], '\n')
+		scanLineEnd := strings.IndexAny(p.source[open:], "\r\n")
 		if scanLineEnd < 0 {
 			scanLineEnd = len(p.source) - open
 		}
@@ -611,7 +611,7 @@ func (p *expressionParser) parseGenericCall(left *Expression) (*Expression, bool
 		// Recover an unterminated generic list only when its call argument
 		// opener is on this physical line.  Do not let a missing '>' consume
 		// later lines (or turn a comparison into a generic call).
-		lineEnd := strings.IndexByte(p.source[open:], '\n')
+		lineEnd := strings.IndexAny(p.source[open:], "\r\n")
 		if lineEnd < 0 {
 			lineEnd = len(p.source) - open
 		}
@@ -740,7 +740,7 @@ func (p *expressionParser) parseGenericTypeArguments(open, end int, closed bool,
 				diagnosticSpan = Span{Start: p.base + part.Start - 1, End: p.base + part.Start}
 				if !closed {
 					lineEnd := len(p.source)
-					if newline := strings.IndexByte(p.source[open:], '\n'); newline >= 0 {
+					if newline := strings.IndexAny(p.source[open:], "\r\n"); newline >= 0 {
 						lineEnd = open + newline
 					}
 					message += ": " + p.source[open:lineEnd]
@@ -1223,7 +1223,7 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 			if p.dialect == Vim9 && member.text == "(" {
 				depth := 0
 				lineEnd := len(p.source)
-				if newline := strings.IndexByte(p.source[member.span.Start-p.base:], '\n'); newline >= 0 {
+				if newline := strings.IndexAny(p.source[member.span.Start-p.base:], "\r\n"); newline >= 0 {
 					lineEnd = member.span.Start - p.base + newline
 				}
 				for p.current().kind != expressionEOF {
@@ -1249,7 +1249,7 @@ func (p *expressionParser) parsePostfix(left *Expression) *Expression {
 		p.advance()
 		if p.dialect == Vim9 {
 			lineEnd := len(p.source)
-			if newline := strings.IndexByte(p.source[member.span.End-p.base:], '\n'); newline >= 0 {
+			if newline := strings.IndexAny(p.source[member.span.End-p.base:], "\r\n"); newline >= 0 {
 				lineEnd = member.span.End - p.base + newline
 			}
 			parenthesis := strings.IndexByte(p.source[member.span.End-p.base:lineEnd], '(')
@@ -1607,10 +1607,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 		}
 		if blockEnd >= 0 {
 			bodyStart := blockStart + 1
-			lineEnd := bodyStart
-			for lineEnd < len(p.source) && p.source[lineEnd] != '\n' {
-				lineEnd++
-			}
+			lineEnd, nextLine := physicalLineEnd(p.source, bodyStart)
 			payloadStart := bodyStart
 			for payloadStart < lineEnd && (p.source[payloadStart] == ' ' || p.source[payloadStart] == '\t' || p.source[payloadStart] == '\r') {
 				payloadStart++
@@ -1621,10 +1618,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 				// but keep parsing commands from the next physical line.
 				bodyParseStart := blockEnd
 				if lineEnd < blockEnd {
-					bodyParseStart = lineEnd
-					if p.source[bodyParseStart] == '\n' {
-						bodyParseStart++
-					}
+					bodyParseStart = nextLine
 				}
 				body := parseSourceContext(p.source[bodyParseStart:blockEnd], Vim9, true)
 				bodyOffset, ok := safeLambdaOffset(p.base, bodyParseStart)
@@ -2116,7 +2110,7 @@ func findVim9LambdaBlockEnd(source string, open int) int {
 		return -1
 	}
 	firstLineEnd := len(source)
-	if newline := strings.IndexByte(source[open:], '\n'); newline >= 0 {
+	if newline := strings.IndexAny(source[open:], "\r\n"); newline >= 0 {
 		firstLineEnd = open + newline
 	}
 	depth := 0
@@ -2144,7 +2138,7 @@ func findVim9LambdaBlockEnd(source string, open int) int {
 			continue
 		}
 		if character == '#' {
-			for index < len(source) && source[index] != '\n' {
+			for index < len(source) && !isLineBreak(source[index]) {
 				index++
 			}
 			continue
@@ -2186,11 +2180,15 @@ func skipVim9LambdaSpace(source string, offset int) int {
 
 func hasUnescapedVim9LambdaLineBreak(source string, start, end int) bool {
 	for index := start; index < end; index++ {
-		if source[index] != '\n' {
+		if !isLineBreak(source[index]) {
 			continue
 		}
 		next := index + 1
-		for next < end && (source[next] == ' ' || source[next] == '\t' || source[next] == '\r') {
+		if source[index] == '\r' && next < end && source[next] == '\n' {
+			index++
+			next++
+		}
+		for next < end && (source[next] == ' ' || source[next] == '\t') {
 			next++
 		}
 		if next >= end || !isLineLeadingBackslash(source, next) {
@@ -2653,7 +2651,7 @@ func (p *expressionParser) adjacentOrContinuationLine(left, right int) bool {
 	}
 	start := left - p.base
 	end := right - p.base
-	return start >= 0 && end <= len(p.source) && start < end && strings.ContainsRune(p.source[start:end], '\n') && continuationGap(p.source[start:end])
+	return start >= 0 && end <= len(p.source) && start < end && strings.ContainsAny(p.source[start:end], "\r\n") && continuationGap(p.source[start:end])
 }
 
 func continuationGap(source string) bool {
@@ -2667,7 +2665,7 @@ func continuationGap(source string) bool {
 		if source[index] != '#' {
 			return false
 		}
-		for index < len(source) && source[index] != '\n' {
+		for index < len(source) && !isLineBreak(source[index]) {
 			index++
 		}
 	}
@@ -2788,13 +2786,13 @@ func (lexer *expressionLexer) scan() expressionToken {
 			continue
 		}
 		if lexer.dialect == Vim9 && source[index] == '#' && (!strings.HasPrefix(source[index:], "#{") || strings.HasPrefix(source[index:], "#{{")) && (index == 0 || isExpressionSpace(source[index-1])) {
-			for index < len(source) && source[index] != '\n' {
+			for index < len(source) && !isLineBreak(source[index]) {
 				index++
 			}
 			continue
 		}
 		if lexer.dialect == Legacy && source[index] == '"' && isLineLeadingLegacyComment(source, index) {
-			for index < len(source) && source[index] != '\n' {
+			for index < len(source) && !isLineBreak(source[index]) {
 				index++
 			}
 			continue
@@ -3013,7 +3011,7 @@ func isLineLeadingBackslash(source string, index int) bool {
 	if source[index] != '\\' {
 		return false
 	}
-	for previous := index - 1; previous >= 0 && source[previous] != '\n'; previous-- {
+	for previous := index - 1; previous >= 0 && !isLineBreak(source[previous]); previous-- {
 		if source[previous] != ' ' && source[previous] != '\t' {
 			return false
 		}
@@ -3026,7 +3024,7 @@ func isLineLeadingLegacyComment(source string, index int) bool {
 		return false
 	}
 	for previous := index - 1; previous >= 0; previous-- {
-		if source[previous] == '\n' {
+		if isLineBreak(source[previous]) {
 			return true
 		}
 		if source[previous] != ' ' && source[previous] != '\t' && source[previous] != '\r' {

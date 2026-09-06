@@ -175,12 +175,12 @@ func indexLines(content string) []line {
 	lines := make([]line, 0, 1)
 	start := 0
 	for index := 0; index < len(content); index++ {
-		if content[index] != '\n' {
+		if content[index] != '\n' && content[index] != '\r' {
 			continue
 		}
 		end := index
-		if end > start && content[end-1] == '\r' {
-			end--
+		if content[index] == '\r' && index+1 < len(content) && content[index+1] == '\n' {
+			index++
 		}
 		lines = append(lines, line{start: start, end: end})
 		start = index + 1

@@ -285,13 +285,13 @@ func hasDeprecatedComment(file *syntax.File, command *syntax.Command) bool {
 	if file == nil || command == nil || file.Dialect != syntax.Vim9 || command.Dialect != syntax.Vim9 || command.Span.Start <= 0 {
 		return false
 	}
-	lineStart := strings.LastIndexByte(file.Source[:command.Span.Start], '\n') + 1
+	lineStart := strings.LastIndexAny(file.Source[:command.Span.Start], "\r\n") + 1
 	for lineStart > 0 {
 		lineEnd := lineStart - 1
-		if lineEnd > 0 && file.Source[lineEnd-1] == '\r' {
+		if lineEnd > 0 && file.Source[lineEnd] == '\n' && file.Source[lineEnd-1] == '\r' {
 			lineEnd--
 		}
-		previousStart := strings.LastIndexByte(file.Source[:lineEnd], '\n') + 1
+		previousStart := strings.LastIndexAny(file.Source[:lineEnd], "\r\n") + 1
 		first := previousStart
 		for first < lineEnd && (file.Source[first] == ' ' || file.Source[first] == '\t') {
 			first++

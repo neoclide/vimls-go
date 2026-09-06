@@ -171,12 +171,12 @@ func parseFunctionSignature(file *File, command *Command) {
 			// bounded to this physical line; a non-empty parenthesis remains
 			// the ordinary missing-terminator case.
 			recovered := -1
-			for index := offset + 1; index < len(source) && source[index] != '\n'; index++ {
+			for index := offset + 1; index < len(source) && !isLineBreak(source[index]); index++ {
 				if source[index] != '(' {
 					continue
 				}
 				close := index + 1
-				for close < len(source) && source[close] != '\n' && isExpressionSpace(source[close]) {
+				for close < len(source) && !isLineBreak(source[close]) && isExpressionSpace(source[close]) {
 					close++
 				}
 				if close < len(source) && source[close] == ')' {
@@ -238,7 +238,7 @@ func parseFunctionSignature(file *File, command *Command) {
 	}
 	open := offset
 	if vim9Context && open+1 < len(rawSource) && rawSource[open+1] == '#' {
-		end := strings.IndexByte(rawSource[open+1:], '\n')
+		end := strings.IndexAny(rawSource[open+1:], "\r\n")
 		if end < 0 {
 			end = len(rawSource)
 		} else {
@@ -414,7 +414,7 @@ func parseFunctionSignature(file *File, command *Command) {
 		}
 	} else if command.Canonical == "def" {
 		lineEnd := command.Argument.End
-		for lineEnd < len(file.Source) && file.Source[lineEnd] != '\n' {
+		for lineEnd < len(file.Source) && !isLineBreak(file.Source[lineEnd]) {
 			lineEnd++
 		}
 		trailing := skipSpace(file.Source, command.Argument.End, lineEnd)
@@ -665,7 +665,7 @@ func parseParameter(file *File, command *Command, source string, part Span) *Par
 			code, message := "vim/E125", "Illegal argument: "+strings.TrimSpace(source[start:end])
 			span := parameter.DefaultSpan
 			if defSignature && command.Dialect == Vim9 {
-				if part.End < len(source) && source[part.End] == ')' && strings.Contains(source[equals+1:part.End], "\n") {
+				if part.End < len(source) && source[part.End] == ')' && strings.ContainsAny(source[equals+1:part.End], "\r\n") {
 					message = "Illegal argument: )"
 					span = Span{Start: command.Argument.Start + part.End, End: command.Argument.Start + part.End + 1}
 				} else {

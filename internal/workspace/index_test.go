@@ -994,3 +994,26 @@ func TestFormatFunctionSignatureAndLeadingDocumentation(t *testing.T) {
 		t.Fatalf("split command documentation = %q, want empty", got)
 	}
 }
+
+func TestLeadingFunctionDocumentationPhysicalNewlines(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n", "\r"} {
+		for _, gap := range []bool{false, true} {
+			source := "\" First" + newline + "\" Second" + newline
+			if gap {
+				source += newline
+			}
+			source += "function! F() abort" + newline + "endfunction" + newline
+			file := syntax.Parse(source)
+			if len(file.Commands) == 0 {
+				t.Fatal("missing function")
+			}
+			want := "First\nSecond"
+			if gap {
+				want = ""
+			}
+			if got := LeadingFunctionDocumentation(file, &file.Commands[0]); got != want {
+				t.Fatalf("newline=%q gap=%v: documentation=%q want=%q", newline, gap, got, want)
+			}
+		}
+	}
+}
