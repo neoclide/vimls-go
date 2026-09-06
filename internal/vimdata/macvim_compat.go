@@ -29,13 +29,3 @@ func lookupMacVimCompatOption(name string) (Option, bool) {
 	}
 	return Option{}, false
 }
-
-// LookupOptionMetadata returns option metadata for hover and semantic tokens.
-// MacVim overlays take precedence over obsolete entries such as antialias.
-// Diagnostic lookup and the pinned completion list remain independent.
-func LookupOptionMetadata(name string) (Option, bool) {
-	if option, ok := lookupMacVimCompatOption(optionLookupName(name)); ok {
-		return option, true
-	}
-	return LookupOption(name)
-}

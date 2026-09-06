@@ -10,7 +10,7 @@ import (
 
 // OptionCompatibility contains the reviewed, static parts of both editors'
 // option contracts. An empty Vim.Name denotes a variant-only option. These
-// overlays do not change the pinned Vim completion/hover metadata.
+// overlays do not change the pinned Vim option table.
 type OptionCompatibility struct {
 	Vim, Variant Option
 	Feature      string
@@ -161,4 +161,24 @@ func validateCompatMouseScroll(value string) (OptionValueError, bool) {
 		seen[direction] = true
 	}
 	return OptionValueError{}, false
+}
+
+// LookupOptionMetadata returns presentation metadata without expanding the
+// pinned completion list or changing diagnostic lookup.
+func LookupOptionMetadata(name string) (Option, bool) {
+	normalized := optionLookupName(name)
+	if option, ok := lookupMacVimCompatOption(normalized); ok {
+		return option, true
+	}
+	vim, found := LookupOption(name)
+	if nvim, ok := lookupNeovimCompatOption(normalized); ok {
+		if found {
+			// The pb alias denotes pumborder in Vim and pumblend in Neovim.
+			// Preserve both meanings when the presentation has no editor assumption.
+			vim.Documentation += "\n\nIn Neovim, this name refers to:\n\n" + nvim.Documentation
+			return vim, true
+		}
+		return nvim, true
+	}
+	return vim, found
 }

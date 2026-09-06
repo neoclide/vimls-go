@@ -21,7 +21,7 @@ The items below are remaining work, not promises for a particular release.
 - Extend the [reviewed Neovim option compatibility rules](neovim.md#option-compatibility).
   [MacVim option compatibility](language-support.md#macvim-option-compatibility)
   now shares the parser context and setting diagnostics, with semantic
-  highlighting and hover documentation for MacVim options.
+  highlighting and hover documentation for MacVim and Neovim-only options.
   Direct script `finish` guards narrow the context of subsequent commands.
   Editor conditions are now recorded on commands and expressions; future
   Neovim function checks can consume that context without another guard walker.

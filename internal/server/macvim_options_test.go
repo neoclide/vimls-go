@@ -9,11 +9,25 @@ import (
 	"go.lsp.dev/protocol"
 )
 
-func TestMacVimOptionHoverAndSemanticTokens(t *testing.T) {
-	for _, test := range []struct{ name, spelling string }{
-		{"antialias", "noanti"}, {"blurradius", "blur"}, {"fullscreen", "invfu"},
-		{"fuoptions", "fuopt"}, {"macligatures", "macligatures"}, {"macmeta", "nommta"},
-		{"macthinstrokes", "macthinstrokes"}, {"transparency", "transp"},
+func TestEditorOptionHoverAndSemanticTokens(t *testing.T) {
+	for _, test := range []struct{ name, spelling, editor string }{
+		{"antialias", "noanti", "MacVim GUI:"}, {"blurradius", "blur", "MacVim GUI:"}, {"fullscreen", "invfu", "MacVim GUI:"},
+		{"fuoptions", "fuopt", "MacVim GUI:"}, {"macligatures", "macligatures", "MacVim GUI:"}, {"macmeta", "nommta", "MacVim GUI:"},
+		{"macthinstrokes", "macthinstrokes", "MacVim GUI:"}, {"transparency", "transp", "MacVim GUI:"},
+		{"channel", "channel", "Neovim:"},
+		{"inccommand", "icm", "Neovim:"},
+		{"pumblend", "pumblend", "Neovim:"},
+		{"redrawdebug", "rdb", "Neovim:"},
+		{"scrollback", "scbk", "Neovim:"},
+		{"shada", "sd", "Neovim:"},
+		{"shadafile", "sdf", "Neovim:"},
+		{"winblend", "winbl", "Neovim:"},
+		{"busy", "busy", "Neovim:"},
+		{"mousescroll", "mousescroll", "Neovim:"},
+		{"statuscolumn", "stc", "Neovim:"},
+		{"termpastefilter", "tpf", "Neovim:"},
+		{"winbar", "wbr", "Neovim:"},
+		{"winborder", "winborder", "Neovim:"},
 	} {
 		for _, expression := range []bool{false, true} {
 			spelling, prefix := test.spelling, "set "
@@ -30,7 +44,7 @@ func TestMacVimOptionHoverAndSemanticTokens(t *testing.T) {
 				t.Fatalf("%q hover=%#v error=%v", source, hover, err)
 			}
 			content, ok := joinedHoverMarkdown(hover.Contents)
-			if !ok || !strings.HasPrefix(content.Value, "'"+test.name+"'") || !strings.Contains(content.Value, "MacVim GUI:") || !strings.Contains(content.Value, "https://macvim.org/docs/options.txt.html") || strings.Contains(content.Value, "unavailable in Vim") {
+			if !ok || !strings.HasPrefix(content.Value, "'"+test.name+"'") || !strings.Contains(content.Value, test.editor) || !strings.Contains(content.Value, "reference](") || strings.Contains(content.Value, "unavailable in Vim") {
 				t.Fatalf("%q hover=%#v", source, hover)
 			}
 			if test.name == "macmeta" && !strings.Contains(content.Value, "local to buffer") {
@@ -62,7 +76,7 @@ func TestMacVimOptionHoverAndSemanticTokens(t *testing.T) {
 			instance.languageFeatures.hoverMarkup = protocol.MarkupKindPlainText
 			plain := runtimeHelpHover(t, instance, documentURI, spelling)
 			plainContent, ok := joinedHoverMarkdown(plain.Contents)
-			if !ok || !strings.Contains(plainContent.Value, "MacVim GUI:") || strings.Contains(plainContent.Value, "**") {
+			if !ok || !strings.Contains(plainContent.Value, test.editor) || strings.Contains(plainContent.Value, "**") {
 				t.Fatalf("plain=%#v", plain)
 			}
 		}

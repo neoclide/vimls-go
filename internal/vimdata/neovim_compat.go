@@ -245,23 +245,25 @@ var neovimCompatFunctions = []BuiltinFunction{
 }
 
 // neovimCompatOptions are Neovim-only options present in vim-language-server's
-// builtin docs. They are recognized for diagnostics without enabling Neovim
+// builtin docs. Presentation summaries and scopes were reviewed against Neovim
+// 73923b0dd85bb936ba2f63ee916dabaa0603340d runtime/doc/options.txt.
+// They are recognized for diagnostics and presentation without enabling Neovim
 // option completion.
 var neovimCompatOptions = []Option{
-	{Name: "channel", Type: OptionNumber},
-	{Name: "inccommand", ShortName: "icm", Type: OptionString, Validation: compatExact("", "nosplit", "split")},
-	{Name: "pumblend", ShortName: "pb", Type: OptionNumber, Validation: compatNumberRange(0, 100)},
-	{Name: "redrawdebug", ShortName: "rdb", Type: OptionString, Validation: compatCommaList("compositor", "line", "flush", "nothrottle", "invalid", "nodelta")},
-	{Name: "scrollback", ShortName: "scbk", Type: OptionNumber, Validation: compatNumberRange(1, 1000000)},
-	{Name: "shada", ShortName: "sd", Type: OptionString},
-	{Name: "shadafile", ShortName: "sdf", Type: OptionString},
-	{Name: "winblend", ShortName: "winbl", Type: OptionNumber, Validation: compatNumberRange(0, 100)},
-	{Name: "busy", Type: OptionNumber},
-	{Name: "mousescroll", Type: OptionString, Validation: OptionValidation{Kind: ValidationMouseScroll}},
-	{Name: "statuscolumn", ShortName: "stc", Type: OptionString},
-	{Name: "termpastefilter", ShortName: "tpf", Type: OptionString, Validation: compatCommaList("BS", "HT", "FF", "ESC", "DEL", "C0", "C1")},
-	{Name: "winbar", ShortName: "wbr", Type: OptionString},
-	{Name: "winborder", Type: OptionString, Validation: OptionValidation{Kind: ValidationWinBorder}},
+	{Name: "channel", Type: OptionNumber, Scope: OptionBuffer, Documentation: "'channel' number\nlocal to buffer\nNeovim: Connected buffer channel ID; read-only.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'channel')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "inccommand", ShortName: "icm", Type: OptionString, Validation: compatExact("", "nosplit", "split"), Scope: OptionGlobal, Documentation: "'inccommand' 'icm' string\nglobal\nNeovim: Previews substitutions while typing; accepts nosplit, split or an empty value.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'inccommand')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "pumblend", ShortName: "pb", Type: OptionNumber, Validation: compatNumberRange(0, 100), Scope: OptionGlobal, Documentation: "'pumblend' 'pb' number\nglobal\nNeovim: Popup-menu transparency, from 0 (opaque) to 100 (transparent).\n\n[Neovim reference](https://neovim.io/doc/user/options/#'pumblend')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "redrawdebug", ShortName: "rdb", Type: OptionString, Validation: compatCommaList("compositor", "line", "flush", "nothrottle", "invalid", "nodelta"), Scope: OptionGlobal, Documentation: "'redrawdebug' 'rdb' string\nglobal\nNeovim: Flags for debugging screen redraws.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'redrawdebug')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "scrollback", ShortName: "scbk", Type: OptionNumber, Validation: compatNumberRange(1, 1000000), Scope: OptionBuffer, Documentation: "'scrollback' 'scbk' number\nlocal to buffer\nNeovim: Retained terminal or prompt-buffer history, from 1 to 1000000 lines.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'scrollback')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "shada", ShortName: "sd", Type: OptionString, Scope: OptionGlobal, Documentation: "'shada' 'sd' string\nglobal\nNeovim: Controls which session data ShaDa saves and restores.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'shada')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "shadafile", ShortName: "sdf", Type: OptionString, Scope: OptionGlobal, Documentation: "'shadafile' 'sdf' string\nglobal\nNeovim: Overrides the ShaDa file path; NONE disables persistence.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'shadafile')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "winblend", ShortName: "winbl", Type: OptionNumber, Validation: compatNumberRange(0, 100), Scope: OptionWindow, Documentation: "'winblend' 'winbl' number\nlocal to window\nNeovim: Floating-window transparency, from 0 (opaque) to 100 (transparent).\n\n[Neovim reference](https://neovim.io/doc/user/options/#'winblend')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "busy", Type: OptionNumber, Scope: OptionBuffer, Documentation: "'busy' number\nlocal to buffer\nNeovim: Plugin-defined busy status displayed in the default statusline.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'busy')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "mousescroll", Type: OptionString, Validation: OptionValidation{Kind: ValidationMouseScroll}, Scope: OptionGlobal, Documentation: "'mousescroll' string\nglobal\nNeovim: Mouse-wheel scroll counts, using ver:count and hor:count.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'mousescroll')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "statuscolumn", ShortName: "stc", Type: OptionString, Scope: OptionWindow, Documentation: "'statuscolumn' 'stc' string\nlocal to window\nNeovim: Formats the fold, sign and number column area using statusline-style syntax.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'statuscolumn')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "termpastefilter", ShortName: "tpf", Type: OptionString, Validation: compatCommaList("BS", "HT", "FF", "ESC", "DEL", "C0", "C1"), Scope: OptionGlobal, Documentation: "'termpastefilter' 'tpf' string\nglobal\nNeovim: Selects control characters removed from terminal paste input.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'termpastefilter')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "winbar", ShortName: "wbr", Type: OptionString, Scope: OptionGlobalLocal, Documentation: "'winbar' 'wbr' string\nglobal or local to window\nNeovim: Formats the bar above a window using statusline-style syntax.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'winbar')", DocumentationSource: "https://neovim.io/doc/user/options/"},
+	{Name: "winborder", Type: OptionString, Validation: OptionValidation{Kind: ValidationWinBorder}, Scope: OptionGlobal, Documentation: "'winborder' string\nglobal\nNeovim: Default floating-window border style, or eight custom border characters.\n\n[Neovim reference](https://neovim.io/doc/user/options/#'winborder')", DocumentationSource: "https://neovim.io/doc/user/options/"},
 }
 
 // neovimCompatVariables are Neovim-only v: variables accepted by

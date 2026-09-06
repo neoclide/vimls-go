@@ -1,6 +1,9 @@
 package vimdata
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestOptionCompatibilityValues(t *testing.T) {
 	for _, test := range []struct {
@@ -65,5 +68,27 @@ func TestOptionCompatibilityDoesNotMutatePinnedMetadata(t *testing.T) {
 	alias, ok := LookupOptionCompatibility("&g:pb")
 	if !ok || alias.Vim.Name != "pumborder" || alias.Variant.Name != "pumblend" {
 		t.Fatalf("alias collision %#v", alias)
+	}
+}
+
+func TestNeovimOptionPresentationMetadata(t *testing.T) {
+	for _, option := range neovimCompatOptions {
+		names := []string{option.Name, "&g:" + option.Name}
+		if option.ShortName != "" {
+			names = append(names, "&l:"+option.ShortName)
+		}
+		for _, name := range names {
+			got, ok := LookupOptionMetadata(name)
+			if !ok || !strings.Contains(got.Documentation, "'"+option.Name+"'") || !strings.Contains(got.Documentation, "Neovim:") {
+				t.Fatalf("%s: %#v", name, got)
+			}
+		}
+	}
+	alias, ok := LookupOptionMetadata("pb")
+	if !ok || alias.Name != "pumborder" || !strings.Contains(alias.Documentation, "'pumblend'") {
+		t.Fatalf("alias=%#v", alias)
+	}
+	if _, ok := LookupOptionMetadata("unknownoption"); ok {
+		t.Fatal("unknown option recognized")
 	}
 }
