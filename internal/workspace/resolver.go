@@ -315,12 +315,21 @@ func (r *PathResolver) ResolveAutoload(name string) PathResolution {
 }
 
 // AutoloadPath maps a complete legacy autoload name to its runtime-relative
-// source path without accessing the filesystem.
+// source path without accessing the filesystem. Unsafe path components are
+// unresolved; this is a navigation boundary, not a Vim name diagnostic.
 func AutoloadPath(name string) (string, bool) {
 	name = strings.TrimPrefix(name, "g:")
+	if strings.ContainsAny(name, "/\\\x00\r\n") {
+		return "", false
+	}
 	separator := strings.LastIndexByte(name, '#')
 	if separator <= 0 || separator == len(name)-1 {
 		return "", false
+	}
+	for component := range strings.SplitSeq(name[:separator], "#") {
+		if component == "." || component == ".." {
+			return "", false
+		}
 	}
 	prefix := strings.ReplaceAll(name[:separator], "#", "/") + ".vim"
 	return "autoload/" + prefix, true

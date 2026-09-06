@@ -411,6 +411,30 @@ func TestRuntimepathDeltaNoopAndReorder(t *testing.T) {
 	}
 }
 
+func TestAutoloadNavigationCannotSelectOtherRuntimeDirectory(t *testing.T) {
+	root, runtimePath := t.TempDir(), t.TempDir()
+	writeWorkspaceFile(t, runtimePath, "plugin/target.vim", "")
+	writeWorkspaceFile(t, runtimePath, "autoload/target.vim", "")
+	instance := initializeWorkspaceServer(t, root)
+	if err := instance.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimePath}}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceMu.Lock()
+	state := workspaceNavigationSnapshot{index: instance.workspaceIndex}
+	instance.workspaceMu.Unlock()
+	if _, ok := state.index.RuntimeFile("plugin/target.vim"); !ok {
+		t.Fatal("missing non-autoload runtime fixture")
+	}
+	if got := resolveAutoloadInState(state, "target#Run"); got.Path == "" {
+		t.Fatal("ordinary autoload target did not resolve")
+	}
+	for _, name := range []string{"../plugin/target#Run", "..#plugin#target#Run", "g:..#plugin#target#Run"} {
+		if got := resolveAutoloadInState(state, name); got.Path != "" {
+			t.Fatalf("unsafe autoload %q resolved to %q", name, got.Path)
+		}
+	}
+}
+
 func TestRuntimepathDeltaDoesNotDiscardConcurrentWorkspaceRebuild(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	runtimeRoot := t.TempDir()

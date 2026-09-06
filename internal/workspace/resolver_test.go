@@ -194,6 +194,40 @@ func TestPathResolverResolvesLegacyAutoloadName(t *testing.T) {
 	}
 }
 
+func TestAutoloadPathRejectsPathComponents(t *testing.T) {
+	for _, name := range []string{
+		"../etc/passwd#Run", "g:../etc/passwd#Run", "foo#..#bar#Run",
+		"foo#.#bar#Run", "..#Run", ".#Run", "foo\\bar#Run",
+		"foo#Run/extra", "foo#Run\\extra", "foo\x00#Run", "foo\r#Run", "foo\n#Run",
+	} {
+		if path, ok := AutoloadPath(name); ok || path != "" {
+			t.Fatalf("unsafe name %q resolved to %q", name, path)
+		}
+	}
+	// This helper enforces a path boundary, not the complete grammar of
+	// ordinary or dynamically constructed Vim function names.
+	for name, want := range map[string]string{
+		"g:foo#bar#Run": "autoload/foo/bar.vim",
+		"foo##bar#Run":  "autoload/foo//bar.vim",
+		"包#工具#运行":       "autoload/包/工具.vim",
+	} {
+		if path, ok := AutoloadPath(name); !ok || path != want {
+			t.Fatalf("name %q resolved to %q, %v; want %q", name, path, ok, want)
+		}
+	}
+	root := t.TempDir()
+	writeResolverFile(t, filepath.Join(root, "plugin", "target.vim"), "")
+	resolver, err := NewPathResolver(root, []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../plugin/target#Run", "..#plugin#target#Run"} {
+		if result := resolver.ResolveAutoload(name); result.Path != "" || len(result.Candidates) != 0 {
+			t.Fatalf("autoload resolved another runtime directory: %#v", result)
+		}
+	}
+}
+
 func TestPathResolverKeepsCanonicalRuntimePath(t *testing.T) {
 	root := t.TempDir()
 	runtimePath, err := filepath.EvalSymlinks(t.TempDir())
