@@ -18,6 +18,9 @@ The items below are remaining work, not promises for a particular release.
   locations can be preserved reliably.
 - Add more option-value checks where Vim's source gives a clear rule.
   Build-dependent and runtime-dependent values still need conservative handling.
+- Extend the [reviewed Neovim option compatibility rules](neovim.md#option-compatibility).
+  Editor conditions are now recorded on commands and expressions; future
+  Neovim function checks can consume that context without another guard walker.
 
 ## Configuration and plugin projects
 

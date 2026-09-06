@@ -65,6 +65,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/missing-option-value", Message: "option requires a value; :set without an operator displays the current value", Severity: DiagnosticWarning},
 	{Code: "vimls/missing-ternary-colon", Message: "expected : in ternary expression", Severity: DiagnosticInformation},
 	{Code: "vimls/missing-type", Message: "expected Vim9 type", Severity: DiagnosticInformation},
+	{Code: "vimls/neovim-only-option", Message: "this option setting is Neovim-only; guard it with has('nvim')", Severity: DiagnosticHint},
 	{Code: "vimls/normal-without-bang", Message: ":normal may invoke user-defined mappings; prefer :normal!", Severity: DiagnosticWarning},
 	{Code: "vimls/recursive-map", Message: "mapping may recursively expand user mappings", Severity: DiagnosticWarning},
 	{Code: "vimls/set-vs-setlocal", Message: ":set may modify a global option; consider :setlocal", Severity: DiagnosticWarning},

@@ -60,8 +60,9 @@ const (
 // Command is one Ex command. Argument retains the exact source range instead
 // of normalizing text needed by later dialect-specific parsers.
 type Command struct {
-	Kind    CommandKind
-	Dialect Dialect
+	Kind          CommandKind
+	Dialect       Dialect
+	EditorContext EditorContext
 	// baseDialect is the enclosing context before legacy/vim9cmd modifiers.
 	// Recursive do_cmdline() payloads re-enter this context.
 	baseDialect        Dialect
@@ -626,7 +627,9 @@ func Parse(source string) *File {
 type LegacyParser struct{}
 
 func (LegacyParser) Parse(source string) *File {
-	return parseSource(source, Legacy)
+	file := parseSource(source, Legacy)
+	annotateEditorContexts(file)
+	return file
 }
 
 // Vim9Parser is the independent Vim9 parser entry point. File-level callers
@@ -634,5 +637,7 @@ func (LegacyParser) Parse(source string) *File {
 type Vim9Parser struct{}
 
 func (Vim9Parser) Parse(source string) *File {
-	return parseSource(source, Vim9)
+	file := parseSource(source, Vim9)
+	annotateEditorContexts(file)
+	return file
 }

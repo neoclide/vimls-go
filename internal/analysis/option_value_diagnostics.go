@@ -27,7 +27,10 @@ func optionAcceptsFunction(name string) bool {
 }
 
 func appendSetOptionValueDiagnostic(result *FileAnalysis, file *syntax.File, command *syntax.Command, item syntax.SetOption) {
-	if result == nil || file == nil || file.Text(item.Prefix) != "" {
+	if result == nil || file == nil {
+		return
+	}
+	if appendCompatibleSetOptionDiagnostic(result, file, command, item) || file.Text(item.Prefix) != "" {
 		return
 	}
 	operator := file.Text(item.Operator)
@@ -83,11 +86,17 @@ func setNumberOptionMayUseKeyNotation(name, value string) bool {
 }
 
 func appendOptionAssignmentValueDiagnostic(result *FileAnalysis, file *syntax.File, assignment *syntax.Expression, dialect syntax.Dialect) {
-	if result == nil || file == nil || assignment == nil || assignment.Kind != syntax.ExpressionAssignment || len(assignment.Children) != 2 || file.Text(assignment.Operator) != "=" {
+	if result == nil || file == nil || assignment == nil || assignment.Kind != syntax.ExpressionAssignment || len(assignment.Children) != 2 {
 		return
 	}
 	target, valueExpression := assignment.Children[0], assignment.Children[1]
 	if target == nil || target.Kind != syntax.ExpressionIdentifier || !strings.HasPrefix(target.Value, "&") {
+		return
+	}
+	if appendCompatibleOptionAssignmentDiagnostic(result, file, assignment, dialect) {
+		return
+	}
+	if file.Text(assignment.Operator) != "=" {
 		return
 	}
 	option, ok := vimdata.LookupOption(target.Value)
@@ -231,8 +240,12 @@ func appendOptionValueDiagnostic(result *FileAnalysis, validation vimdata.Option
 	if !invalid {
 		return
 	}
+	appendOptionValueError(result, failure, valueSpan, validation.Kind == vimdata.ValidationNumberRange)
+}
+
+func appendOptionValueError(result *FileAnalysis, failure vimdata.OptionValueError, valueSpan syntax.Span, wholeValue bool) {
 	span := syntax.Span{Start: valueSpan.Start + failure.Start, End: valueSpan.Start + failure.End}
-	if validation.Kind == vimdata.ValidationNumberRange || span.Start >= span.End {
+	if wholeValue || span.Start >= span.End {
 		span = valueSpan
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{

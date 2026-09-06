@@ -43,6 +43,9 @@ const (
 	ValidationFillChars
 	ValidationStatuslineOpt
 	ValidationWinHighlight
+	ValidationPumBorder
+	ValidationWinBorder
+	ValidationMouseScroll
 )
 
 // OptionValidation is the statically reproducible part of an opt_did_set_cb.
@@ -128,6 +131,10 @@ func ValidateOptionValue(validation OptionValidation, value string) (OptionValue
 		return validateStatuslineOpt(value)
 	case ValidationWinHighlight:
 		return validateWinHighlight(value)
+	case ValidationPumBorder, ValidationWinBorder:
+		return validateCompatBorder(validation.Kind, value)
+	case ValidationMouseScroll:
+		return validateCompatMouseScroll(value)
 	}
 	return OptionValueError{}, false
 }

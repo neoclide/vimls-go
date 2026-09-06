@@ -40,6 +40,7 @@ const (
 // spans refer to the original document bytes.
 type Expression struct {
 	Kind           ExpressionKind
+	EditorContext  EditorContext
 	Span           Span
 	Operator       Span
 	Value          string
@@ -63,14 +64,18 @@ func (parser LegacyExpressionParser) Parse(source string) (*Expression, []Diagno
 	if version == 0 {
 		version = 1
 	}
-	return parseExpressionWithVersion(source, 0, Legacy, version)
+	expression, diagnostics := parseExpressionWithVersion(source, 0, Legacy, version)
+	newEditorContextAnnotator().expression(expression, EditorUnknown)
+	return expression, diagnostics
 }
 
 // Vim9ExpressionParser parses one Vim9 expression.
 type Vim9ExpressionParser struct{}
 
 func (Vim9ExpressionParser) Parse(source string) (*Expression, []Diagnostic) {
-	return parseExpression(source, 0, Vim9)
+	expression, diagnostics := parseExpression(source, 0, Vim9)
+	newEditorContextAnnotator().expression(expression, EditorUnknown)
+	return expression, diagnostics
 }
 
 type expressionTokenKind uint8

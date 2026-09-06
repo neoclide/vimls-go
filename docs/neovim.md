@@ -70,3 +70,54 @@ complete set of API completion items.
 
 Lua code, including `init.lua` and embedded Lua bodies, needs a Lua language
 server. Editing Vim9 in Neovim also does not make Neovim able to execute it.
+
+## Option compatibility
+
+A setting accepted only by Neovim receives `vimls/neovim-only-option` (Hint)
+unless the surrounding condition guarantees Neovim. For example:
+
+```vim
+if has('nvim')
+  set signcolumn=auto:2
+  set foldcolumn=auto:3
+  set laststatus=3
+else
+  set signcolumn=yes
+endif
+```
+
+The `else` branch of `if !has('nvim')` is also protected. Parentheses,
+negation, comparisons with `0`/`1`, `&&`, `||`, nested branches and `elseif`
+are tracked. `has('nvim') || other` does not guarantee Neovim. Functions,
+lambdas and parsed embedded command bodies inherit their defining context;
+the context is restored outside the containing branch. Short-circuit operands
+and ternary branches carry the same context for expression analysis.
+Variables containing the result of `has()` and control flow after `finish` or
+`return` are not inferred. Contradictory guards do not suppress errors.
+
+Reviewed value differences cover `signcolumn`, `foldcolumn`, `cmdheight`,
+`laststatus`, `completeopt`, `fillchars`, `jumpoptions` and `cpoptions`.
+Known Neovim-only options such as `inccommand`, `pumblend`, `winblend`,
+`statuscolumn`, `winbar` and `shada` also receive the guard hint. Full names,
+documented short names, `setlocal`/`setglobal` and `&g:`/`&l:` assignments are
+recognized. The short name `pb` retains both meanings: Vim's `pumborder` and
+Neovim's `pumblend`.
+
+Vim-compatible values retain their existing behavior. Values rejected by both
+reviewed grammars, such as `signcolumn=auto:10`, remain errors even inside a
+Neovim guard. A guard does not hide unknown-option errors or unrelated
+diagnostics. Static list/flag additions via `:set +=` and `^=` are checked;
+removals and operations requiring the previous value remain conservative.
+Dynamic expressions, escaped values and runtime-dependent formats are not
+fully checked. A Neovim-only option name can still receive a Hint when its
+assigned value is dynamic. Option completion and hover retain the pinned Vim
+metadata; this does not enable Neovim function diagnostics or API completion.
+`laststatus=3` also receives the Hint because its global-statusline meaning is
+Neovim-specific, even though Vim accepts the number without an error. Other
+numeric values of this permissive Vim option do not receive new range errors.
+
+Compatibility rules use Vim v9.2.1015 and the documented option contracts in
+[Neovim snapshot 73923b0dd8](https://github.com/neovim/neovim/blob/73923b0dd85bb936ba2f63ee916dabaa0603340d/runtime/doc/options.txt).
+They are a reviewed subset, not a complete version-by-version Neovim model.
+For example, the snapshot documents `completeopt=preselect`, while the locally
+checked Neovim 0.12.4 executable does not accept it.

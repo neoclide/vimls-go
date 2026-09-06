@@ -92,14 +92,14 @@ endif`,
   setlocal missingopt
   let &g:missingexpr = 1
 endif`,
-			wantWarning: true,
+			wantWarning: false,
 		},
 		{
 			name: "if has gui_running or nvim",
 			source: `if has('gui_running') || has('nvim')
   set missingopt
 endif`,
-			wantWarning: true,
+			wantWarning: false,
 		},
 		{
 			name: "if has gui_running and other condition",
@@ -155,7 +155,7 @@ endif`,
 		{
 			name:        "vim9script if has nvim",
 			source:      "vim9script\nif has('nvim')\n  &missingexpr = 1\nendif\n",
-			wantWarning: true,
+			wantWarning: false,
 		},
 	}
 

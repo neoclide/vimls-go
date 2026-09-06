@@ -418,13 +418,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			typ = ValueType{Name: "tuple"}
 		default:
 			if strings.HasPrefix(expression.Value, "&") {
-				if option, ok := vimdata.LookupOption(expression.Value); ok {
-					typ = builtinOptionValueType(option)
-				} else if vimdata.IsTerminalOptionName(expression.Value) {
-					typ = ValueType{Name: "string"}
-				} else {
-					typ = unknown
-				}
+				typ = optionExpressionValueType(expression)
 			} else if strings.HasPrefix(expression.Value, "$") || strings.HasPrefix(expression.Value, "@") {
 				typ = ValueType{Name: "string"}
 			} else if variable, ok := vimdata.LookupVariable(expression.Value); ok {
@@ -906,6 +900,31 @@ func builtinOptionValueType(option vimdata.Option) ValueType {
 	default:
 		return UnknownValueType
 	}
+}
+
+func optionExpressionValueType(expression *syntax.Expression) ValueType {
+	if compat, ok := vimdata.LookupOptionCompatibility(expression.Value); ok {
+		if compat.Vim.Name == "" || expression.EditorContext == syntax.EditorNeovim {
+			return builtinOptionValueType(compat.Neovim)
+		}
+		if compat.Vim.Type != compat.Neovim.Type && expression.EditorContext != syntax.EditorVim {
+			return UnknownValueType
+		}
+		return builtinOptionValueType(compat.Vim)
+	}
+	if option, ok := vimdata.LookupOption(expression.Value); ok {
+		return builtinOptionValueType(option)
+	}
+	if vimdata.IsTerminalOptionName(expression.Value) {
+		return ValueType{Name: "string"}
+	}
+	return UnknownValueType
+}
+
+func optionAcceptsCompatibleType(name string, typ ValueType) bool {
+	compat, ok := vimdata.LookupOptionCompatibility(name)
+	return ok && compat.Vim.Name != "" && compat.Vim.Type != compat.Neovim.Type &&
+		(typ.Name == builtinOptionValueType(compat.Vim).Name || typ.Name == builtinOptionValueType(compat.Neovim).Name)
 }
 
 func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType) ValueType {

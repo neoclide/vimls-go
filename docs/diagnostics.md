@@ -108,6 +108,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/mapping-without-unique` | Hint | The mapping may replace an existing mapping. |
 | `vimls/match-command` | Hint | `:match` uses shared slots; plugin code may prefer `matchadd()`. |
 | `vimls/missing-option-value` | Warning | In configuration files, a bare `:set option` displays the current value of a number or string option; it does not assign a new one. |
+| `vimls/neovim-only-option` | Hint | This option setting is specific to Neovim. Protect it with `has('nvim')`; settings rejected by both editors still produce errors. See [Neovim option compatibility](neovim.md#option-compatibility). |
 | `vimls/normal-without-bang` | Warning | `:normal` may invoke user mappings; `:normal!` avoids that. |
 | `vimls/recursive-map` | Warning | The mapping may expand other mappings. |
 | `vimls/set-vs-setlocal` | Warning | The option assignment may change a global default. |

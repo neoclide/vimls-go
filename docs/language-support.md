@@ -101,3 +101,6 @@ See [editing configuration files](https://github.com/neoclide/vimls-go/blob/main
 Some Neovim names are recognized for compatibility, but full Neovim API
 completion and type checking are not provided. See
 [Neovim setup](https://github.com/neoclide/vimls-go/blob/main/docs/neovim.md).
+Reviewed Neovim-only option settings receive a Hint unless their branch is
+protected by `has('nvim')`. Unknown options and values rejected by both editors
+remain errors; see [option compatibility](neovim.md#option-compatibility).

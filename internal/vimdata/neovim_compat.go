@@ -248,20 +248,20 @@ var neovimCompatFunctions = []BuiltinFunction{
 // builtin docs. They are recognized for diagnostics without enabling Neovim
 // option completion.
 var neovimCompatOptions = []Option{
-	{Name: "channel"},
-	{Name: "inccommand"},
-	{Name: "pumblend"},
-	{Name: "redrawdebug"},
-	{Name: "scrollback"},
-	{Name: "shada"},
-	{Name: "shadafile"},
-	{Name: "winblend"},
-	{Name: "busy"},
-	{Name: "mousescroll"},
-	{Name: "statuscolumn"},
-	{Name: "termpastefilter"},
-	{Name: "winbar"},
-	{Name: "winborder"},
+	{Name: "channel", Type: OptionNumber},
+	{Name: "inccommand", ShortName: "icm", Type: OptionString, Validation: compatExact("", "nosplit", "split")},
+	{Name: "pumblend", ShortName: "pb", Type: OptionNumber, Validation: compatNumberRange(0, 100)},
+	{Name: "redrawdebug", ShortName: "rdb", Type: OptionString, Validation: compatCommaList("compositor", "line", "flush", "nothrottle", "invalid", "nodelta")},
+	{Name: "scrollback", ShortName: "scbk", Type: OptionNumber, Validation: compatNumberRange(1, 1000000)},
+	{Name: "shada", ShortName: "sd", Type: OptionString},
+	{Name: "shadafile", ShortName: "sdf", Type: OptionString},
+	{Name: "winblend", ShortName: "winbl", Type: OptionNumber, Validation: compatNumberRange(0, 100)},
+	{Name: "busy", Type: OptionNumber},
+	{Name: "mousescroll", Type: OptionString, Validation: OptionValidation{Kind: ValidationMouseScroll}},
+	{Name: "statuscolumn", ShortName: "stc", Type: OptionString},
+	{Name: "termpastefilter", ShortName: "tpf", Type: OptionString, Validation: compatCommaList("BS", "HT", "FF", "ESC", "DEL", "C0", "C1")},
+	{Name: "winbar", ShortName: "wbr", Type: OptionString},
+	{Name: "winborder", Type: OptionString, Validation: OptionValidation{Kind: ValidationWinBorder}},
 }
 
 // neovimCompatVariables are Neovim-only v: variables accepted by
@@ -380,8 +380,8 @@ func lookupNeovimCompatFunction(name string) (BuiltinFunction, bool) {
 
 func lookupNeovimCompatOption(name string) (Option, bool) {
 	for _, option := range neovimCompatOptions {
-		if option.Name == name {
-			return option, true
+		if option.Name == name || option.ShortName != "" && option.ShortName == name {
+			return cloneOption(option), true
 		}
 	}
 	return Option{}, false

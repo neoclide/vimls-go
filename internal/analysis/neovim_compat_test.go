@@ -15,7 +15,7 @@ func TestAnalyzeNeovimCompatNamesDoNotReportUnknown(t *testing.T) {
 		"call nvim_buf_get_lines(0, 0, -1, 0)\n",
 		// Neovim-only options, variables, and commands from the compatibility
 		// lists.
-		"vim9script\necho &shada\nset shada=''\n",
+		"vim9script\necho &shada\nif has('nvim')\nset shada=''\nendif\n",
 		"vim9script\necho v:lua\n",
 		"rshada\n",
 		"rshada!\n",

@@ -5712,7 +5712,9 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 					result.Diagnostics = append(result.Diagnostics, diagnostic)
 					return
 				}
-				if target.Kind != syntax.ExpressionIdentifier || !optionAcceptsFunction(target.Value) || result.TypeOf(expression.Children[1]).Name != "func" {
+				if target.Kind != syntax.ExpressionIdentifier ||
+					(!optionAcceptsFunction(target.Value) || result.TypeOf(expression.Children[1]).Name != "func") &&
+						!optionAcceptsCompatibleType(target.Value, result.TypeOf(expression.Children[1])) {
 					appendTypeMismatchDiagnostic(result, expected, expression.Children[1])
 				}
 			}
@@ -5947,13 +5949,16 @@ func assignmentTargetType(result *FileAnalysis, scope *Scope, target *syntax.Exp
 	switch target.Kind {
 	case syntax.ExpressionIdentifier:
 		if strings.HasPrefix(target.Value, "&") {
-			if option, ok := vimdata.LookupOption(target.Value); ok {
-				return builtinOptionValueType(option)
+			typ := optionExpressionValueType(target)
+			if isUnknownType(typ) {
+				// An ambiguous read type must not disable assignment checking.
+				// Compatible scalar alternatives are accepted at the call site;
+				// containers still need to fail the ordinary type check.
+				if option, ok := vimdata.LookupOption(target.Value); ok {
+					return builtinOptionValueType(option)
+				}
 			}
-			if vimdata.IsTerminalOptionName(target.Value) {
-				return ValueType{Name: "string"}
-			}
-			return UnknownValueType
+			return typ
 		}
 		if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") {
 			return ValueType{Name: "string"}
@@ -7591,7 +7596,7 @@ func appendUnknownOptionDiagnostic(result *FileAnalysis, name string, span synta
 	diag := syntax.Diagnostic{
 		Code: "vim/E113", Message: "Unknown option: " + display, Span: span,
 	}
-	if isUnderGuiOrNvimGuard(result, scope, span) {
+	if isUnderGuiGuard(result, scope, span) {
 		severity := syntax.DiagnosticWarning
 		diag.Severity = &severity
 	}
@@ -7606,14 +7611,14 @@ func appendUnknownSetOptionDiagnostic(result *FileAnalysis, name string, span sy
 	diag := syntax.Diagnostic{
 		Code: "vim/E518", Message: "Unknown option: " + display, Span: span,
 	}
-	if isUnderGuiOrNvimGuard(result, scope, span) {
+	if isUnderGuiGuard(result, scope, span) {
 		severity := syntax.DiagnosticWarning
 		diag.Severity = &severity
 	}
 	result.Diagnostics = append(result.Diagnostics, diag)
 }
 
-func isUnderGuiOrNvimGuard(result *FileAnalysis, scope *Scope, span syntax.Span) bool {
+func isUnderGuiGuard(result *FileAnalysis, scope *Scope, span syntax.Span) bool {
 	if result == nil || result.File == nil || scope == nil {
 		return false
 	}
@@ -7664,7 +7669,7 @@ func isUnderGuiOrNvimGuard(result *FileAnalysis, scope *Scope, span syntax.Span)
 			guardCmd := &commands[branchCmdIdx]
 			if guardCmd.Canonical == "if" || guardCmd.Canonical == "elseif" {
 				for _, expr := range guardCmd.Expressions {
-					if isGuiOrNvimCondition(expr) {
+					if isGuiCondition(expr) {
 						return true
 					}
 				}
@@ -7674,27 +7679,27 @@ func isUnderGuiOrNvimGuard(result *FileAnalysis, scope *Scope, span syntax.Span)
 	return false
 }
 
-func isGuiOrNvimCondition(expr *syntax.Expression) bool {
+func isGuiCondition(expr *syntax.Expression) bool {
 	if expr == nil {
 		return false
 	}
 	switch expr.Kind {
 	case syntax.ExpressionParenthesized:
 		for _, child := range expr.Children {
-			if isGuiOrNvimCondition(child) {
+			if isGuiCondition(child) {
 				return true
 			}
 		}
 		return false
 	case syntax.ExpressionCall:
-		return isHasGuiOrNvimCall(expr)
+		return isHasGuiCall(expr)
 	case syntax.ExpressionBinary:
 		op := expr.Value
 		if (op == "&&" || op == "and") && len(expr.Children) == 2 {
-			return isGuiOrNvimCondition(expr.Children[0]) || isGuiOrNvimCondition(expr.Children[1])
+			return isGuiCondition(expr.Children[0]) || isGuiCondition(expr.Children[1])
 		}
 		if (op == "||" || op == "or") && len(expr.Children) == 2 {
-			return isGuiOrNvimCondition(expr.Children[0]) && isGuiOrNvimCondition(expr.Children[1])
+			return isGuiCondition(expr.Children[0]) && isGuiCondition(expr.Children[1])
 		}
 		if (op == "==" || op == "!=") && len(expr.Children) == 2 {
 			return isComparisonToHasFeature(expr)
@@ -7703,7 +7708,7 @@ func isGuiOrNvimCondition(expr *syntax.Expression) bool {
 	return false
 }
 
-func isHasGuiOrNvimCall(expr *syntax.Expression) bool {
+func isHasGuiCall(expr *syntax.Expression) bool {
 	if expr == nil || expr.Kind != syntax.ExpressionCall {
 		return false
 	}
@@ -7712,14 +7717,14 @@ func isHasGuiOrNvimCall(expr *syntax.Expression) bool {
 		arg := expr.Children[1]
 		if callee != nil && callee.Kind == syntax.ExpressionIdentifier && callee.Value == "has" && arg != nil && arg.Kind == syntax.ExpressionString {
 			feature, ok := unquoteFeatureString(arg.Value)
-			if ok && (strings.EqualFold(feature, "gui_running") || strings.EqualFold(feature, "nvim")) {
+			if ok && strings.EqualFold(feature, "gui_running") {
 				return true
 			}
 		}
 	}
 	if expr.Value == "->" && len(expr.Children) == 2 {
 		for _, child := range expr.Children {
-			if child.Kind == syntax.ExpressionCall && isHasGuiOrNvimCall(child) {
+			if child.Kind == syntax.ExpressionCall && isHasGuiCall(child) {
 				return true
 			}
 		}
@@ -7741,7 +7746,7 @@ func isComparisonToHasFeature(expr *syntax.Expression) bool {
 	left, right := expr.Children[0], expr.Children[1]
 	op := expr.Value
 	check := func(callExpr, constExpr *syntax.Expression) bool {
-		if !isHasGuiOrNvimCall(callExpr) || constExpr == nil || constExpr.Kind != syntax.ExpressionNumber {
+		if !isHasGuiCall(callExpr) || constExpr == nil || constExpr.Kind != syntax.ExpressionNumber {
 			return false
 		}
 		val := constExpr.Value
