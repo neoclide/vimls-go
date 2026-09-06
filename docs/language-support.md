@@ -1,134 +1,103 @@
-# Language server features
+# What vimls-go supports
 
-Heredoc header flags (`trim` and `eval`) and opening/closing markers use the
-custom `special` semantic token type. Literal heredoc payload remains opaque.
+vimls-go supports Legacy Vim script and Vim9 script through **Vim v9.2.1015**,
+including Vim9 classes, interfaces, enums and imports. Both dialects can be used
+in the same project.
 
-At initialization, an empty or unusable runtimepath falls back to a bounded Vim
-subprocess using `json_encode(globpath(&runtimepath, '', 0, 1))`. Discovery skips
-vimrc, plugins and viminfo; failures are silent. Explicit runtimepath updates
-remain authoritative, including an empty update that clears the runtime index.
+These docs describe the current source. Check the
+[changelog](../CHANGELOG.md) for features that have not reached a release yet.
 
-vimls-go supports Legacy Vim script and Vim9 script from Vim 9.1 through
-Vim v9.2.1015. Syntax added after v9.2.1015 is not supported until the project
-updates its pinned Vim version.
+## Writing and reading code
 
-The server analyzes source files without starting Vim or executing Vim script.
-It works with workspace files and configured `runtimepath` files. Outside
-workspace folders it parses recursive `plugin`, `autoload`, and `import` Vim
-scripts; top-level `colors/*.vim` files provide only colorscheme name/path
-completion metadata. It also reads `doc/*.txt` in the background for global
-variable, global function, autoload function and named `<Plug>` mapping hover
-documentation. Hovering a named mapping shows its runtime documentation only;
-the generic `<Plug>` explanation is limited to the `<Plug>` prefix. Other
-runtime subtrees are not scanned.
-
-Function signature hovers use `MarkupContent` with a Vim Markdown code block
-and source documentation, or plain text according to client capabilities.
-Runtime help remains an additional documentation section.
-
-Workspace folder parsing and external runtimepath parsing run in separate
-phases. Workspace parsing reports work-done progress; external directory scans
-use up to four goroutines and log each completed directory. Runtimepath changes
-are debounced for 100ms and processed serially, reusing retained directories and
-removing data no longer owned by any active root. Both phases trigger supported
-diagnostic, semantic-token and inlay-hint refresh requests after installation;
-Code Lens refresh additionally requires a complete index.
-
-## Available features
-
-| Feature | Support |
+| Feature | What you can use it for |
 | --- | --- |
-| Diagnostics | Syntax errors, unresolved names, invalid calls, imports and statically provable Vim9 type errors. Capable clients use document and workspace pull diagnostics; legacy clients use push diagnostics. |
-| Completion | Commands, variables, functions, options, events, mappings, highlight and syntax groups, imports, members, autoload names, color schemes and other context-specific values. Built-in resolve documentation comes from the current runtimepath cache. |
-| Hover | Symbol kind, type, signature, source comments and pinned Vim help for options and predefined variables, followed by a separate runtime help document when available. Built-in function and Ex command prose comes only from the current runtimepath help worker, including completion documentation. Variables with semantic information show a type, including `unknown` and explicit Vim9 `any`. |
-| Signature help | Built-in functions and statically resolved user functions, imported functions, function values, methods and constructors. Built-in signatures remain pinned; their prose comes from the current runtimepath cache. |
-| Navigation | Definition, declaration, type definition, references, document highlights and document links for statically resolved local, imported, global and autoload symbols. |
-| Hierarchies and implementations | Direct type supertypes/subtypes, interface and abstract-class implementations, compatible member providers, and incoming/outgoing calls for statically resolved named callables. |
-| Code Lens | Reference counts for named Legacy and Vim9 functions, methods and constructors. Implementation counts are limited to Vim9 abstract-class and interface methods. Clickable navigation depends on client support for `editor.action.showReferences`. |
-| Symbols and structure | Document symbols, workspace symbols, folding ranges and selection ranges. |
-| Safe editing | Prepare rename, rename, semantic highlighting, inferred-type inlay hints and a small set of syntax quick fixes. |
-| Formatting | Source-preserving indentation for whole documents, selected ranges and on-type newline/continuation triggers. Clients that declare `textDocument.rangeFormatting.rangesSupport` may format several selected ranges in one request. Only proven leading whitespace is changed. |
-| Workspace updates | Incremental document synchronization, workspace folders, watched Vim files and delta runtimepath refreshes through `vimls/didChangeRuntimepath` (request or compatible notification). |
+| Completion | Commands, functions, scoped variables, options, events, mappings, highlight groups, imports, class members, autoload names and color schemes. |
+| Hover | See a symbol's type, function signature, source comments and available runtime help. |
+| Signature help | Check parameters while calling a built-in function, user function, method or constructor. |
+| Diagnostics | Find syntax errors, missing names, invalid calls and Vim9 type errors that can be checked from source. |
+| Inlay hints | See inferred Vim9 variable and return types beside the code. |
+| Semantic highlighting | Distinguish types, functions, variables, parameters and modifiers. |
 
-Legacy and Vim9 files may use the same workspace. The server understands
-`vim9script`, `scriptversion`, `vim9cmd` and `legacy` when choosing the relevant
-language rules.
+Completion follows the command being edited. For example, `:set` offers options,
+`:autocmd` offers events, and mappings offer key names and modifiers.
 
-## Expressions in mappings
+The parser handles unfinished code so that an incomplete line does not prevent
+you from working on the rest of the file.
 
-Besides `<expr>` mappings and direct Ex bodies, mapping RHS syntax recognizes
-these interactive expression prompts using the containing script's dialect:
+## Finding and changing things
 
-| Prompt | Context |
+Definition, declaration, type-definition and reference lookup work with
+resolved local symbols, workspace files, imports and autoload functions.
+You can also browse the file outline, search workspace symbols, fold blocks
+and expand a selection.
+
+For Vim9 classes, you can follow inheritance and find interface or abstract
+method implementations. Call hierarchy shows incoming and outgoing calls for
+named functions, methods and constructors that the server can resolve.
+
+Code Lens shows reference counts and, for interface and abstract-class methods,
+implementation counts. Clicking a count requires a client that supports
+`editor.action.showReferences`.
+
+Rename checks the affected references before offering edits. It refuses
+ambiguous targets and changes that would require renaming autoload files or
+namespaces. Quick fixes cover a small set of clear syntax errors.
+
+Formatting adjusts indentation for a file or selection, and on supported typing
+events. It leaves expressions, spacing within lines, line wrapping and embedded
+language bodies alone.
+
+## Plugin files and help
+
+The server indexes Vim files in your workspace. Outside the workspace,
+`runtimepath` is scanned more narrowly:
+
+| Location under each runtime root | Used for |
 | --- | --- |
-| `<C-R>=`, `<C-R><C-R>=`, `<C-R><C-O>=` | Insert and command-line modes |
-| `<C-R><C-P>=` | Insert mode; in command-line mode `<C-R><C-P>` inserts a path |
-| `<C-\>e` | Command-line expression replacing the current command line |
-| `"=`, `@=` | Normal-mode expression register selection or execution |
+| `plugin/**/*.vim`, `autoload/**/*.vim`, `import/**/*.vim` | Symbols, completion and navigation. |
+| `colors/*.vim` | Color-scheme names and paths. These files are not parsed. |
+| `doc/*.txt` | Help for functions, variables, Ex commands and named `<Plug>` mappings. |
 
-Explicit leading mode transitions such as `:`, `/`, `?`, `i`, and insert-mode
-`<C-O>:` are recognized. `<C-O>` alone runs one Normal command; `<C-O>=` is
-an indent operator, not an expression prompt. Other unknown Normal commands
-remain opaque rather than guessing their resulting mode.
+Other directories under a runtime root, such as `ftplugin` and `syntax`, are
+not scanned. They can still be analyzed if they are inside a workspace folder.
 
-Prompt expressions retain source ranges and support function/reference analysis,
-semantic highlighting, hover, navigation, completion and signature help.
-Multiple prompts, incomplete expressions and Enter aliases are recognized.
-Cancelled prompts and payloads containing undecoded editing keys remain opaque;
-evaluated values are never executed or parsed as generated commands. The static Ex
-command head before a register prompt (for example `:edit <C-R>=...`) retains
-command hover and semantic highlighting through the shared command parser;
-its dynamic arguments remain opaque.
+Help loads in the background, so an early hover may have a signature before
+its help text is ready. Help tags identify documentation; they do not always
+mean a source definition is available.
 
-## Current limitations
+Built-in function and command descriptions come from runtime help. Built-in
+signatures, option data and the language rules remain tied to the supported
+Vim version. For path setup and refreshing changed help files, see
+[configuration](https://github.com/neoclide/vimls-go/blob/main/docs/configuration.md).
 
-- Runtime help is extracted from global symbol and complete `<Plug>(name)` help
-  tags, not arbitrary untagged prose or pattern/dictionary-member tags. Help-only symbols can show documentation
-  without proving that a definition exists. Hover never waits for help loading;
-  an early hover can omit the extra document. Retained runtime directories reuse
-  their cache; edits to their help files are picked up after removing/re-adding
-  the root or restarting the server. Source watchers do not refresh help files.
+## Mappings and configuration files
 
-- File-command `++opt` and `+cmd` prefixes preserve their original source spans
-  and outer command boundaries. Escaped `+cmd` payloads remain opaque; they are
-  not decoded or checked as standalone commands. User-command replacements and
-  undecoded mapping key notation likewise receive only conservative diagnostics.
-- Document, range, multi-range and on-type formatting adjust indentation only;
-  they do not rewrite expressions, spacing, wrapping or embedded languages.
-- Legacy tuples have direct type/reference, fixed-index, destructuring and loop
-  analysis. Slice arity and nonliteral destructuring cardinality remain unknown;
-  legacy tuple mutation errors require adjacent literal assignments, not merely
-  a stored type that dynamic execution could invalidate.
-- Expression mappings use Vim's result-to-string conversion, not a String-only
-  constraint. Literal Blob and lambda results are diagnosed; variable and call
-  results remain unknown because mappings execute later.
-- Rename is offered only when every affected symbol can be resolved safely.
-  Autoload function rename and other namespace-changing edits are rejected.
-- Code actions are limited to a few unambiguous syntax repairs; there is no
-  source-wide rewriting or speculative type fix.
-- Dynamic behavior such as `execute()`, `eval()`, runtime-created functions,
-  mutable runtimepath state and dynamically formed names cannot always be
-  resolved. The server returns no result or keeps the type `unknown` instead of
-  guessing.
-- Unresolved uppercase user commands receive an E492 warning after source
-  indexing and runtime help loading complete. Explicit definitions and
-  Ex-command help tags count as known commands; dynamic-only definitions may
-  still warn. This does not turn unknown commands into parser errors.
-- Dynamically sourced runtime files are not discovered unless they also match
-  the external runtimepath layout above or are inside a workspace folder.
-- Call hierarchy excludes lambdas and deferred mapping, autocommand and user
-  command bodies. Type aliases are followed only when they resolve uniquely to
-  a class, interface or enum.
-- Embedded Python, Ruby, Perl, Lua, shell and other heredoc languages are
-  preserved as source ranges but are not analyzed.
-- Native `def` inside a Legacy-root file and Legacy `function` inside a
-  Vim9-root file are retained safely, but their mixed-dialect semantics are not
-  complete.
-- Syntax introduced after Vim v9.2.1015 is not supported.
+The server follows references in supported autocommand bodies, `<expr>`
+mappings, `<Cmd>` bodies and static function-name callback options.
 
-## Configuration
+Recognized mapping expression prompts include `<C-R>=`, its register-insertion
+variants, command-line `<C-\>e`, and Normal-mode `"=` / `@=`. Key sequences
+are interpreted in their mode: `<C-O>=` is an indent command, for example.
+Cancelled prompts and expressions with undecoded editing keys are left alone.
+The result of an expression is never executed or treated as generated code.
 
-Runtime roots can be configured and changed dynamically.
+Vimrc-style files receive different style suggestions from plugin files.
+See [editing configuration files](https://github.com/neoclide/vimls-go/blob/main/docs/userconfig.md).
 
-See [Client configuration](configuration.md) for the supported settings and
-runtimepath request.
+## Limits to keep in mind
+
+- Dynamic `execute`, `eval`, function names and loading order cannot always be
+  resolved. Types may remain `unknown`, and navigation may return no result.
+- A file that loads another script dynamically may need the script added to a
+  workspace or a supported runtime directory.
+- Mixing `def` into a Legacy script, or `function` into a Vim9 script, is
+  accepted, but analysis inside those functions is incomplete.
+- Call hierarchy does not include lambdas or calls inside deferred mappings,
+  autocommands and user commands.
+- Embedded Lua, Python, shell and other languages are preserved but not analyzed.
+- Syntax added after Vim v9.2.1015 is unsupported until the version pin advances.
+- Files larger than 4 MiB are synchronized but not analyzed.
+
+Some Neovim names are recognized for compatibility, but full Neovim API
+completion and type checking are not provided. See
+[Neovim setup](https://github.com/neoclide/vimls-go/blob/main/docs/neovim.md).

@@ -1,86 +1,72 @@
-# Legacy parser comparison
+# Comparing Legacy parsers
 
-This nested benchmark module compares the legacy parser with
-`github.com/vim-jp/go-vimlparser` without adding the reference parser to the
-language server's production module graph.
+This separate Go module compares vimls-go with
+[go-vimlparser](https://github.com/vim-jp/go-vimlparser). It does not add the
+reference parser to the server's dependencies.
 
-Use a temporary Go workspace so both local checkouts are built without network
-access:
+Use local checkouts of both projects and a clean runtime tree from Vim
+`v9.2.1015`. Set these paths for your machine, then create a temporary Go
+workspace:
 
 ```sh
+vimls_source=/path/to/vimls-go
+vim_source=/path/to/vim
+reference_source=/path/to/go-vimlparser
 bench_work=$(mktemp -d)
-vim_source=/Users/chemzqm/lib/vim
+
 test "$(git -C "$vim_source" describe --tags --exact-match)" = v9.2.1015
 test -z "$(git -C "$vim_source" status --porcelain -- runtime)"
-cd "$bench_work"
-go work init \
-  /path/to/vimls-go \
-  /path/to/vimls-go/tools/benchlegacy \
-  /path/to/go-vimlparser
 
-cd /path/to/vimls-go/tools/benchlegacy
+cd "$bench_work"
+go work init "$vimls_source" "$vimls_source/tools/benchlegacy" "$reference_source"
+cd "$vimls_source/tools/benchlegacy"
+
 GOMAXPROCS=1 GOPROXY=off GOSUMDB=off GOWORK="$bench_work/go.work" \
-  go test -run '^$' -bench '^BenchmarkLegacyParsers/(vimls-go|go-vimlparser)-common$' \
-  -benchmem -benchtime=1x -count=5 -args \
-  -root "$vim_source/runtime"
+  go test -run '^$' \
+  -bench '^BenchmarkLegacyParsers/(vimls-go|go-vimlparser)-common$' \
+  -benchmem -benchtime=1x -count=5 -args -root "$vim_source/runtime"
 ```
 
-After the single-worker parser comparison, measure the bounded workspace batch
-path separately:
+The comparison includes only Legacy files that both parsers accept.
+Discovery, file reads and selection happen before timing. The reference
+parser's required reader construction remains timed.
+
+Keep the runtime tree, file order, toolchain and worker count fixed between
+runs. Personal plugin collections change too often to serve as the standing
+performance input. A parser that stops at an error cannot be compared fairly
+with one that continues through the rest of the file.
+
+## Workspace workers
+
+Measure parallel workspace parsing separately:
 
 ```sh
 GOMAXPROCS=4 GOPROXY=off GOSUMDB=off GOWORK="$bench_work/go.work" \
   go test -run '^$' \
   -bench '^BenchmarkLegacyParsers/vimls-go-all-workers-(1|2|4)$' \
-  -benchmem -benchtime=1x -count=5 -args \
-  -root "$vim_source/runtime"
+  -benchmem -benchtime=1x -count=5 -args -root "$vim_source/runtime"
 ```
 
-Keep `GOMAXPROCS=4` fixed for all three batch lanes; the `workers` suffix is the
-only concurrency variable. Do not compare a parallel lane with the
-single-worker go-vimlparser result as parser efficiency.
-
-The official `v9.2.1015` runtime tree is the standing performance corpus. Do not
-add personal runtimepath or plugin roots to routine A/B commands. Those trees
-may be useful as occasional correctness smoke inputs, but their changing files
-and size make them unsuitable as the parser performance gate.
-
-Discovery, file reads, line splitting, dialect classification, and the
-common-success intersection are outside the timed section. The reference lane
-does include `NewStringReader`, because it is required preprocessing and its
-reader is consumed by each parse. Only files that are legacy according to
-vimls-go, produce no vimls-go diagnostics, and parse to completion with
-go-vimlparser enter the comparable `common` corpus. `vimls-go-loose-all`
-measures recovery over every discovered legacy file, but is not compared with
-the fail-fast reference parser.
+Here the worker count is the changing variable. These results describe batch
+throughput, not a comparison with the single-worker reference parser.
 
 ## Isolated parser profiles
 
-Go's top-level `-cpuprofile` and `-memprofile` include corpus discovery,
-classification, and the go-vimlparser reference pass. Use the explicitly
-enabled profile test instead when attributing vimls-go parser costs. It reads
-and hashes the corpus first, then records only `workspace.ParseSources`:
+Use the profile test to exclude corpus setup and the reference parser from
+vimls-go's profile:
 
 ```sh
 profile_dir=$(mktemp -d)
 GOMAXPROCS=1 GOPROXY=off GOSUMDB=off GOWORK="$bench_work/go.work" \
-  go test -run '^TestProfileVimlsBatch$' -args \
+  go test -count=1 -run '^TestProfileVimlsBatch$' -args \
   -profile-dir "$profile_dir" -profile-workers 1 -profile-runs 5 \
   -root "$vim_source/runtime"
 
 go tool pprof -top "$profile_dir/cpu.pprof"
 go tool pprof -top -sample_index=alloc_space \
-  -base="$profile_dir/allocs-before.pprof" \
-  "$profile_dir/allocs-after.pprof"
-go tool pprof -top -sample_index=inuse_space \
-  -base="$profile_dir/heap-before.pprof" \
-  "$profile_dir/heap-after.pprof"
+  -base="$profile_dir/allocs-before.pprof" "$profile_dir/allocs-after.pprof"
 ```
 
-Use a new empty `profile-dir` for each run; profile files are created with
-exclusive access and are never overwritten. Allocation attribution uses Go's
-normal sampling rate so CPU samples are not distorted by per-allocation
-profiling. The test log also reports separate top-level and nested command-slice
-length, capacity, waste, byte totals, and length distributions so backing-array
-growth can be distinguished from the reported `Command` value size. Continue
-to use `-benchmem` for exact bytes/op and allocs/op.
+Use a new output directory each time; existing profiles are not overwritten.
+Profiles use allocation sampling. Read `-benchmem` for bytes and allocations
+per operation, and do not interpret those values as retained heap or RSS.

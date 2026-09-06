@@ -7,7 +7,7 @@ import (
 )
 
 // callbackFunctionOptions are string options whose value is the name of a
-// callback function (see config.md §7 P1). Options that take an expression
+// callback function (see docs/userconfig.md). Options that take an expression
 // string (e.g. 'formatexpr') are intentionally excluded: they are not a bare
 // function-name reference.
 var callbackFunctionOptions = map[string]bool{

@@ -1,109 +1,84 @@
-# User configuration files
+# Editing vimrc and other configuration files
 
-vimls-go treats a small set of files — your `vimrc`, `gvimrc`, `exrc`,
-Neovim-compatible `init.vim`/`ginit.vim`, and any file you explicitly list —
-as *user configuration files* and applies a tailored analysis on top of the
-regular Vimscript support. Configuration files express user preferences:
-top-level `g:` assignments, direct `<Leader>` mappings, and global `:set`
-calls are normal there, while the same code would be flagged when it appears
-inside a plugin.
+Code that is normal in a vimrc can be a bad default for a shared plugin. For
+example, a vimrc is expected to set global options and define the user's own
+keys. vimls-go adjusts its suggestions to account for that.
 
-The role never changes how a file is parsed and never executes it. It only
-adjusts which diagnostics are reported and which completion templates are
-offered. The behavior is pinned to Vim v9.2.1015.
+This changes diagnostics and completion templates. It does not change the
+script's language or execute the file.
 
-## Which files get the configuration role
+## Which files count as configuration?
 
-A file is analyzed as a user configuration file when any of these hold:
+The server checks these rules in order:
 
-1. It matches an absolute `configFiles` pattern from
-   `initializationOptions.configFiles` (see
-   [configuration.md](configuration.md) for the option and the accepted
-   `*`, `**`, and `~/` patterns).
-2. Its name is a known configuration name: `.vimrc`, `vimrc`, `.gvimrc`,
-   `gvimrc`, `.exrc`, `exrc`, `_vimrc`, `_gvimrc`, or the Neovim-compatible
-   `init.vim` and `ginit.vim`.
-3. It lives below a workspace root but not inside a standard runtime
-   directory (`plugin/`, `autoload/`, `ftplugin/`, `syntax/`, …).
-4. It belongs to no workspace or runtime root at all (a standalone file you
-   opened directly).
+1. A path matching `configFiles` is a configuration file.
+2. Known names such as `.vimrc`, `vimrc`, `_vimrc`, `gvimrc`, `.gvimrc`,
+   `_gvimrc`, `exrc`, `.exrc`, `init.vim` and `ginit.vim` count automatically.
+3. Inside a workspace, files count unless they are under a standard Vim runtime
+   directory such as `plugin`, `autoload`, `ftplugin` or `syntax`.
+4. Other files inside runtime roots receive plugin-oriented suggestions.
+5. A standalone file outside all those roots counts as configuration.
 
-Files inside runtime roots — plugin files, `$VIMRUNTIME` scripts, and other
-indexed runtime directories — keep the regular plugin-oriented analysis.
+If your files are classified incorrectly, add their absolute paths or patterns
+to `configFiles`. Patterns can use `~/`, `*` and `**`.
+See [startup options](configuration.md#runtimepath-and-configuration-files)
+for the client setting.
 
-## What changes in the configuration role
+## Suggestions you will see
 
-### Diagnostics that are turned off
+In configuration files, vimls-go does not warn about overwriting a global
+configuration value, using global state, assigning user keys directly, or
+omitting `<unique>` from a mapping.
 
-The plugin-oriented warnings below are suppressed because they describe code
-habits that are intentional in a vimrc:
+Other suggestions are adjusted:
 
-- `vimls/configuration-overwrite`
-- `vimls/global-internal-state`
-- `vimls/direct-user-keymap`
-- `vimls/mapping-without-unique`
+| Situation | What vimls-go reports |
+| --- | --- |
+| A recursive mapping | A hint, since reusing other mappings may be intentional. |
+| `:set` at the top of a vimrc | No `set-vs-setlocal` warning. That warning is kept for buffer/window autocommands. |
+| `function` or `command` without `!` | A reload-safety hint, using `vim/E122` or `vim/E174`. |
+| An augroup that may accumulate commands on reload | `vimls/autocmd-group-not-cleared`. |
+| A mapping defined before its leader assignment | `vimls/config-mapleader-order`. |
+| A clearly repeated mapping in the same file | `vimls/duplicate-mapping`. |
+| A plugin-style loaded guard that skips later reloads | `vimls/config-loaded-guard`. |
 
-### Diagnostics that are adjusted
+For example, set the leader before defining keys that use it:
 
-- `vimls/recursive-map` is reported at **Hint** level (instead of Warning):
-  recursive mappings in a vimrc often intentionally compose existing
-  mappings. The `<Plug>` and `<script>` exceptions still apply.
-- `vimls/set-vs-setlocal` is only suggested **inside buffer/window-directed
-  autocommand bodies** (FileType, BufRead/BufEnter, Win*…). A top-level `:set`
-  in a vimrc establishes global defaults and is not flagged.
-- `vim/E122` (function) and `vim/E174` (user command) are reported at **Hint**
-  level (instead of Warning) to recommend `function!` and `command!` for reload
-  safety.
+```vim
+let g:mapleader = ','
+nnoremap <Leader>w :write<CR>
+```
 
-### Diagnostics that are configuration-specific
+A reloadable augroup usually clears its old commands before adding new ones:
 
-- `vimls/autocmd-group-not-cleared` (Warning) understands reload safety in
-  depth: a bare `autocmd!` inside the group, event/pattern-targeted clears,
-  and `autocmd! event pattern cmd` replacements are recognized, while
-  `++once`, conditional clears, and `execute`-generated autocommands are not
-  treated as proof. The report carries related information pointing at the
-  first uncovered persistent autocommand.
-- `vimls/config-mapleader-order` (Warning) reports mappings that use
-  `<Leader>`/`<LocalLeader>` before the corresponding `g:mapleader` /
-  `g:maplocalleader` is assigned on the same straight-line path — such a
-  mapping keeps the old leader, because leader keys are expanded when the
-  mapping is defined.
-- `vimls/duplicate-mapping` (Warning) reports statically confirmed
-  same-key redefinitions (matching modes, LHS spelling, global/`<buffer>`
-  scope, mapping vs abbreviation). `unmap` and `mapclear` reset the earlier
-  definition.
-- `vimls/config-loaded-guard` (Hint) flags the plugin-style
-  `if exists('g:loaded_*') | finish | endif` guard in a vimrc: once the file
-  has been sourced, later `:source` runs skip every edit below the guard. In
-  Vim9 scripts the hint additionally explains that reload already cleared
-  script-local items; `vim9script noclear` single-load designs are exempt.
+```vim
+augroup my_vimrc
+  autocmd!
+  autocmd FileType vim setlocal shiftwidth=2
+augroup END
+```
 
-All codes stay configurable through the normal `vim.diagnostic.disabled` and
-`vim.diagnostic.override` settings, and are listed in
-[diagnostics.md](diagnostics.md) with their defaults.
+These checks use the code in the file. They do not reconstruct the full order
+in which your configuration and plugins run. Cross-file mapping conflicts and
+dynamic `execute` commands can remain undetected.
+
+All of the suggestions can be hidden or given a different severity through
+the normal [diagnostic settings](configuration.md#settings).
 
 ## Completion and navigation
 
-- Snippet-capable clients get the usual augroup template (with `autocmd!` and
-  `augroup END`), the Legacy `function … abort` and Vim9 `def … enddef`
-  templates, plus a `<Leader>` mapping skeleton at the mapping key position.
-  In the configuration role the `:function` block template omits the `!`,
-  and no template adds `!`, `command!`, or `<unique>` by default.
-- Static navigation works from `autocmd … call Func()`, `<expr>` mapping
-  right-hand sides, `<Cmd>call Func()<CR>` payloads, and the callback options
-  `completefunc`, `omnifunc`, `operatorfunc`, and `tagfunc` (`:set opt=Func`
-  or `:let &opt = 'Func'`) straight to the function definition.
+Completion includes augroup, function and mapping templates when the client
+supports snippets. Function templates do not automatically add `!` in
+configuration files. Global variables get a small preference when top-level
+completion candidates otherwise tie.
 
-Completion candidate sets stay identical to the plugin role for the same text.
-At top level with no explicit scope prefix, a configuration file gives an
-otherwise tied `g:` declaration a small relevance preference; function-local
-completion order stays unchanged.
+Navigation follows static calls in autocommands, `<expr>` mappings and
+`<Cmd>call ...<CR>` bodies. It also recognizes function names assigned to
+`completefunc`, `omnifunc`, `operatorfunc` and `tagfunc`:
 
-## Notes
+```vim
+set omnifunc=MyComplete
+```
 
-- The role is decided per document from its path at analysis time; nothing is
-  written into the AST, and renaming or moving a file through a workspace
-  root reclassifies it automatically when the workspace configuration
-  changes.
-- If a file is meaningful as a plugin *and* as user configuration, you can
-  force the role with an explicit `configFiles` pattern.
+You can jump from `MyComplete` to its definition when that function can be
+resolved. Dynamically constructed callback names are not followed.

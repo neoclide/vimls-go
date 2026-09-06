@@ -1,387 +1,47 @@
-# Delivery roadmap
-
-## v0.1.0 release work ledger (2026-09-05)
-
-The first-release target is `v0.1.0`; the 1.0 sections below retain the longer-term
-language contract. Current production source is `4fb39e4`. The current local
-acceptance includes the integration-test corrections documented in
-[release-candidate.md](release-candidate.md); the old `549c5b7` acceptance and
-archive checksums are historical and do not certify this source.
-
-| Priority | Work | Status / evidence |
-| --- | --- | --- |
-| P0 | Current CI integration failures | Fixed locally: option hover asserts two documents and full `nonumber` range; runtime indexing is awaited before hierarchy requests. `TestLSPSubprocess` passed 20 uncached repetitions. |
-| P0 | Candidate-SHA platform CI | Run 33973871423 failed on Linux/macOS/Windows integration tests; coverage stopped at the same failing test. Vulnerability and Vim oracle/client jobs passed. The repaired source still needs a new remote CI run. |
-| P1 | Language and LSP scope | M0–M6 surfaces remain implemented within the conservative contract. Legacy tuple/mapping oracle evidence and explicit deferred features remain applicable. |
-| P2 | Current local acceptance | Fresh uncached full tests, vet and build pass; exact commands and current oracle/client/archive/performance results are recorded in release-candidate.md. |
-| P3 | Release documentation | README and CHANGELOG target 0.1.0, describe optional Vim discovery, and reflect runtime help plus semantic-token updates. |
-
-M7 remains open until the **repaired candidate** has native Windows and
-Linux/macOS CI results, including race and the 90% coverage gate. Do not infer
-candidate success from the older green run 33969555293 (`871bddb`) or reuse the
-historical candidate's performance/archive results. Local repair and validation
-do not publish a release; push and tagging remain separate actions.
-
-Mapping expression prompts now enter the shared expression AST: `<C-R>=`,
-literal/fixed-indent register variants, command-line `<C-\>e`, and Normal
-`"=`/`@=`. Mode-specific parsing preserves raw mapping text and source ranges;
-function features work inside the prompt without interpreting generated commands.
-Static Ex command heads before register prompts use the existing embedded
-command parser, retaining hover and semantic highlighting for `:vs`, `:tabe`
-and other commands.
-Pinned Vim v9.2.1015 help and the mapping-expression-register oracle cover these
-entry forms; `<C-O>=` and command-line `<C-R><C-P>=` remain non-expression input.
-
-Function signature hovers now use `MarkupContent` instead of deprecated
-`MarkedStringWithLanguage`; Markdown code blocks preserve Vim highlighting
-and plain-text clients retain readable signatures and documentation.
-
-Named `<Plug>` mapping hover now shows only its runtime help. The generic
-`<Plug>` explanation appears only when hovering the prefix itself.
-
-Explicit script-local calls now report E117 when their same-file function is
-missing, including `:call <SID>Name()<CR>` mapping bodies. `<SID>` retains its
-script namespace highlighting even without a declaration; the missing-name
-range excludes the prefix. Other undecoded mapping key notation stays opaque.
-
-Missing-function diagnostics (E117, global and autoload functions) now wait for
-both workspace and runtimepath source indexing to complete. The interval between
-workspace installation and runtimepath reconciliation also defers missing-command
-warnings; completing indexing recomputes open-document diagnostics.
-
-Unknown uppercase user commands now receive an E492 warning only after the
-source index is complete and runtime help has loaded. Source definitions and
-Ex-command help tags both establish known names; existing E492 parser errors
-retain their severity. Help completion invalidates and refreshes diagnostics.
-
-Heredoc semantic highlighting now marks header flags and delimiters as
-`special`, preserving opaque literal bodies and source spans across logical
-line mapping.
-
-Default runtimepath discovery now queries `vim` on `PATH` with
-`globpath(&runtimepath, '', 0, 1)` serialized as JSON, instead of guessing an
-installation directory. Empty initialization values use this fallback; missing
-Vim, failed commands, invalid output and timeouts remain silent. Tests cover
-JSON paths containing commas/spaces, client precedence, output limits and
-cancellation.
-
-External runtimepath discovery parses recursive `plugin`, `autoload`, and
-`import` Vim scripts; `colors/*.vim` contributes only completion paths. Roots
-inside workspace folders use ordinary workspace discovery once. Other
-external runtime trees and dynamic source targets are not chased.
-
-Workspace/runtimepath scheduling: workspace indexing has its own progress and
-installation phase. External roots scan with bounded directory concurrency and
-a `window/logMessage` for each directory without individual timings, followed
-by one total elapsed time for the entire update across all directory batches,
-source reads, analysis and index installation (excluding debounce and queue time).
-The help worker likewise logs total elapsed time once after scanning all pending
-roots. Runtimepath updates coalesce over 100ms, finish an
-active batch before applying the latest pending list, and preserve retained
-analysis facts across workspace rebuilds. Each installation uses capability-
-gated diagnostic, semantic-token, inlay-hint and complete-index Code Lens refresh.
-Regression evidence lives in `runtimepath_worker_test.go` and
-`runtimepath_lifecycle_test.go`.
-
-## Definition of done
-
-Version 1.0 is complete only when the language-support contract is covered
-through the pinned Vim v9.2.1015 ceiling, the required LSP features work through
-the real stdio server, and all release gates pass. Parser acceptance alone is
-not language-server completion.
-
-File-command prefix boundaries are supported; expanding escaped `+cmd`,
-user-command templates and mapping key notation into source-mapped code
-remains deferred.
-
-## M0: repository and protocol foundation
-
-Deliver:
-
-- Go module, `cmd/vimls`, version output, build and test commands.
-- Bounded LSP `Content-Length` framing and JSON-RPC request/notification/error
-  handling.
-- `initialize`, `initialized`, `shutdown`, and `exit` lifecycle.
-- Logging to stderr and no non-protocol stdout output.
-
-Exit gate: fragmented and coalesced frames, malformed JSON, unknown methods,
-duplicate IDs, cancellation, shutdown order, and a real subprocess handshake
-all pass under `go test -race ./...`; the 10,000-notification soak remains
-stable and internal statement coverage remains at least 90%.
-
-## M1: text snapshots and document synchronization
-
-Deliver:
-
-- URI/version snapshots, line index, negotiated position conversion.
-- Full and incremental `didOpen`/`didChange`/`didSave`/`didClose`.
-- Analysis cancellation and stale-result prevention.
-- `workspace/didChangeConfiguration` reanalysis with configuration revisions.
-
-Exit gate: table tests cover ASCII, tabs, UTF-8, UTF-16 astral characters,
-combining characters, CRLF, BOM, invalid ranges, multiple ordered edits, close,
-and reopen. Incremental edits produce the same final text as full replacement.
-
-Current status (2026-09-01): snapshots retain complete immutable text plus a
-content ID independent of URI/version/revision. Ordered incremental changes,
-including UTF-8/16/32, CRLF, BOM, combining, astral, and invalid UTF-8 cases,
-are checked against direct full replacement. Content changes still receive a
-complete parse; only exact same-content parser trees are reused.
-
-## M2: command lexer and recovering parser core
-
-Deliver:
-
-- Ex ranges, modifiers, command lookup/abbreviation, separators, comments,
-  continuation, strings, heredocs, and opaque user commands.
-- Contextual dialect state, one-command overrides, and typed nodes for basic
-  declarations and blocks.
-- Expression parser with stable byte spans and deterministic AST serialization
-  for golden tests.
-
-Exit gate: official/curated legacy, Vim9, invalid, and incomplete corpora parse
-without panic or nontermination; recovery reaches later valid declarations.
-Existing mixed-dialect cases are smoke coverage only: mixing alone produces no
-diagnostic and must not prevent recovery to later commands.
-
-## M3: full legacy and Vim9 syntax
-
-Deliver the remaining syntax in `syntax-coverage.md`, including functions,
-classes, interfaces, enums, type aliases, generics, imports/exports, complex
-expressions, mappings, autocommands, and embedded payload preservation.
-
-Current verified syntax is recorded in `syntax-coverage.md` and focused package
-tests. Generated official positive and negative cases are the primary
-per-form evidence. Focused curated tests cover mixed-dialect transitions and
-incomplete-input recovery once per shared parser mechanism, rather than
-duplicating every syntax form across those contexts. Historical version
-boundaries retain focused compatibility-diagnostic evidence.
-
-Complete parsing and semantics for `def` in a legacy-root file and `function`
-in a Vim9-root file are deferred. Existing tests for those combinations remain,
-but no exhaustive combination matrix is an M3 exit gate.
-
-Exit gate: every required construct has official or focused acceptance evidence
-and relevant rejection evidence. Context switching and physical-line recovery
-have focused cross-cutting coverage, every version-gated form has its actual
-boundary covered, and parser fuzz seeds plus the selected official Vim
-runtime/source corpus produce no crashes or unbounded behavior.
-
-## M4: semantics and diagnostics
-
-Current protocol status: document pull diagnostics are supported for capable
-clients with full/unchanged IDs and refresh after diagnostic-setting or complete
-workspace rebuild changes. Workspace pull covers open and closed workspace-root
-Vim files, supports per-document previous result IDs and partial-result progress,
-and waits for active indexing before using the installed complete index.
-
-Deliver:
-
-- Scopes, declarations, imports, references, mutability, arity, and Vim9 types.
-- Conservative legacy inference and version-target diagnostics.
-- Stable diagnostic codes, ranges, severities, related information, and limits.
-
-Exit gate: diagnostics match golden results and safe Vim oracle cases; unknown
-dynamic behavior does not create false undefined/type errors; stale diagnostics
-cannot publish after a newer edit or close.
-
-Current status (2026-09-01): lexical and workspace-backed symbols, mutability,
-user-function arity, Vim9 type checking, imports and the classified Vim
-v9.2.1015 compile-diagnostic inventory are implemented. Unresolved or dynamic
-behavior remains intentionally unknown.
-
-## M5: navigation and workspace index
-
-Runtime help addition (2026-09-05): one background goroutine extracts global
-variable/function, autoload and complete `<Plug>(name)` mapping help from
-runtimepath `doc/*.txt`. Hover appends
-the cached help as a separate document without waiting or doing help I/O.
-Runtimepath deltas retain completed/in-flight work for retained roots, parse
-only additions, remove discarded roots immediately, and update duplicate
-precedence on reorder. Per-file read/parse failures, including parser panics,
-are isolated. Shutdown joins the worker. Deterministic tests cover incremental
-reads, in-flight updates, hover content/scope, cancellation and failure recovery.
-
-Deliver:
-
-- Document/workspace symbols, hover, definition, declaration, references,
-  document highlights, folding ranges, and selection ranges.
-- Incremental index for workspace files, imports, autoload names and configured
-  runtimepath roots, plus builtin metadata pinned to Vim v9.2.1015.
-
-Exit gate: cross-file legacy autoload and Vim9 import navigation works through a
-subprocess LSP test; duplicate, missing, cyclic, symlinked, and out-of-root files
-have deterministic behavior; canceled index work leaves no partial state.
-
-Current status (2026-09-01): the document navigation surface, workspace symbol
-index, open-document overlay, client-driven watched-file refresh, static Vim9
-import navigation, and legacy/Vim9 autoload navigation are implemented. A
-directed import graph is published as immutable, revisioned snapshots alongside
-the index; it uses canonical identity, open-buffer overlays, and transitive
-reverse invalidation. The server dynamically registers Vim file watchers below
-workspace roots when the client supports it; runtimepath roots are never
-watched. Client-provided or locally discovered runtimepath roots and later
-custom request replacements are included in the canonical, bounded index.
-Cross-file analysis and requests bind generation, index
-instance/revision, and graph revision; stale foreground requests retry once,
-while stale background results are discarded and requeued. Rebuild and
-close/reopen publication also validate current open snapshots. The subprocess
-test covers watcher registration, runtimepath and workspace symbols, plus
-cross-file definition and references. Builtin metadata is pinned to the single
-supported ceiling, Vim v9.2.1015.
-
-## M6: completion and safe edits
-
-Deliver:
-
-- Contextual command, modifier, variable, member, builtin, option, event, and
-  import completion with resolve documentation.
-- Signature help, prepare rename, rename, and syntax-backed code actions.
-- Semantic tokens after syntax classifications are stable.
-- Source-preserving document and range indentation formatting.
-- Type hierarchy, implementation lookup and call hierarchy for statically
-  resolved workspace symbols.
-
-Exit gate: completion and signature results are relevant to dialect/scope and
-bounded; rename refuses dynamic/ambiguous symbols and produces non-overlapping,
-version-valid edits; token and Formatting ranges remain valid for Unicode text.
-
-Current status (2026-09-01): static import/source document links and contextual
-completion for Ex commands, modifiers, scoped declarations (including legacy
-argument/local namespace spellings), builtin functions,
-static imports, Vim9 object members, options, autocmd events, and bounded import
-paths are implemented. Completion uses deterministic scoring, negotiated LSP
-edits, lazy resolve documentation, cancellation and a soft budget. The tested
-`.`, `:`, `&`, `#`, `<`, `"` and `'` member, command/scoped-name, option,
-autoload, mapping-token and builtin-string triggers are advertised.
-Snippet-capable clients receive required-argument direct-call
-snippets and dialect-specific legacy/Vim9 function blocks; other clients retain
-plain edits. Mapping special arguments complete only before the LHS; ordinary
-RHS payloads stay opaque. Highlight definitions complete pinned argument keys
-and finite help-listed values without losing local group completion. Color
-scheme names come from bounded, non-recursive `colors/*.vim` lookups across the
-configured runtimepath, with the first duplicate taking precedence. The
-structured `:augroup`, `:command`, and `:set` command nodes now bound group,
-user-command attribute, operator, and pinned fixed-option-value completion;
-replacement bodies and dynamic values remain excluded. The
-workspace rebuild records runtime-relative source paths once; colorscheme,
-runtime import and autoload foreground requests reuse that immutable index
-instead of searching runtimepath again. The same index retains global and
-autoload function locations, signatures, and leading comments for completion,
-definition, and hover; exported Vim9 autoload short names derive their callable
-prefix from the indexed `autoload/` path. Legacy completion also reuses the
-index for active global variables, requiring `g:` inside callable scopes and
-omitting function-name conflicts. Direct builtin string contexts
-complete pinned v9.2.1015 `has()` feature names and
-`expand()` special tokens without treating arbitrary string contents as
-expressions. Direct builtin (including receiver-adjusted `->` methods),
-same-file user-function,
-static-imported exported-function, and directly bound function-value signature
-help are implemented, as are local class/object methods, inherited methods,
-explicit/default constructors, and imported aggregate constructors, static
-methods, typed objects, constructor-inferred objects, and chained calls. Safe
-local imported-type propagation also covers type aliases, local returns, and
-copy initializers, imported factory returns, same-block direct assignments, and
-statically typed container extraction. Safe same-file/static-import rename, full semantic tokens,
-inferred-type inlay hints, and the deterministic missing-block-end quick fix
-are also implemented. Hover and signature content honor the client's ordered Markdown/plain-text
-preferences and are bounded safely at UTF-8 boundaries. Options and predefined
-variables reuse pinned Vim help; builtin function and Ex command prose (including
-abbreviated command hover and completion resolve) comes only from the current
-runtimepath help worker. The Ex-command generator retains command keys, names
-and parser flags without embedding help text. The stdio
-subprocess test exercises completion, resolve, hover, and the implemented
-signature-help wire contracts.
-
-Legacy local navigation treats `s:` and `<SID>` as one binding while preserving
-each spelling during rename; autoload navigation accepts an optional `g:`
-prefix and keeps rename disabled when the file contract cannot be updated.
-Incomplete function/class/interface/enum blocks retain document-symbol
-hierarchy plus folding and selection ranges through end-of-file.
-Local Vim9 navigation resolves inherited methods/variables, constructors, and
-enum values, and separates interface/abstract declarations from statically
-known concrete definitions. Imported aggregate member navigation and safe
-rename cover constructors, static/object/factory-return methods, and enum values
-with open-buffer overlays, complete-index guards, captured document versions,
-and workspace-staleness rejection.
-
-Document and range Formatting use one syntax-backed indentation plan for Legacy
-and Vim9 files. They return minimal leading-whitespace edits, preserve opaque
-and literal payloads, honor the negotiated position encoding and reject stale
-document snapshots. The pinned Vim/vim-lsp smoke applies edits in both dialects.
-
-Type Hierarchy reports direct `extends` and `implements` edges, resolving unique
-local and imported aggregate aliases. Implementation lookup traverses interface
-and abstract-class descendants and validates effective member providers. Call
-Hierarchy covers named Legacy/Vim9 functions, methods and explicit constructors
-across local, import, global and autoload navigation. Reverse queries use a
-bounded, completeness-tracked relationship index; open documents override
-indexed source, and incomplete or oversized results fail explicitly instead of
-returning partial data. All seven methods and item-data round trips are covered
-by the stdio subprocess test.
-
-Code Lens reports reference counts for named Legacy and Vim9 functions,
-methods and constructors, and implementation counts for Vim9 abstract-class
-and interface methods. Lenses resolve lazily against the current document and
-complete workspace index. Clickable navigation depends on client support for
-`editor.action.showReferences`.
-
-## M7: compatibility, performance, and release readiness
-
-Deliver:
-
-- CI and clean-oracle coverage for Vim v9.2.1015.
-- Linux/macOS builds on each change; Windows build and integration coverage
-  before release.
-- Fuzz corpus, large-file/workspace benchmarks, vulnerability scan, changelog,
-  installation/client examples, and reproducible release archives.
-
-Exit gate: all checks in `docs/testing.md` pass; no open crash/data-corruption,
-protocol lifecycle or false-edit blockers; performance budgets
-hold on the documented runner; a clean install passes the repository's Go stdio
-harness plus the pinned Vim/vim-lsp smoke. Both start the built server process,
-open legacy and Vim9 inputs, observe expected diagnostics and shut down cleanly.
-
-The Vim smoke uses Vim v9.2.1015 and downloads the archive for vim-lsp commit
-`e10d186452743beb7b43d2b3427020832f930c2b` into the ignored `.test-tools`
-directory after verifying its pinned SHA-256. It never reads or changes user
-configuration. Run it with:
-
-```sh
-make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
-```
-
-Tag releases build deterministic CGO-free archives for Linux, macOS and
-Windows on amd64 and arm64 through `tools/release`, with SHA-256 checksums.
-
-## Required 1.0 LSP surface
-
-- Lifecycle and cancellation.
-- Incremental text synchronization and versioned diagnostics.
-- Hover, definition, declaration, references, highlights.
-- Document/workspace symbols, folding and selection ranges.
-- Completion with resolve and signature help.
-- Prepare rename and rename for provably safe symbols.
-- Semantic tokens and focused code actions.
-- Source-preserving document and range Formatting.
-- Type hierarchy, implementation lookup and call hierarchy for statically
-  resolved symbols.
-- Reference Code Lens for named callables and implementation Code Lens for
-  Vim9 abstract-class and interface methods.
-
-Embedded-language delegation, general pretty-printing and nonstandard client
-extensions are post-1.0 unless real client validation shows one is required for
-a usable baseline. The implemented Formatting contract is documented in
-[language-support contract](language-support.md).
-
-## Planning gates
-
-Before each implementation slice:
-
-1. Freeze a short task brief with owned paths, contract, fixtures, and commands.
-2. Delegate only independent non-overlapping work.
-3. Integrate in the primary thread.
-4. Update the support contract from actual behavior, not intended behavior.
-
-Run an adversarial QA review only at a substantial feature stabilization point
-or before release, not as a blocker between every implementation slice.
+# Roadmap
+
+[Version 0.1.0](https://github.com/neoclide/vimls-go/releases/tag/v0.1.0)
+is published. It provides the main editing features for Legacy Vim script and
+Vim9; the [changelog](../CHANGELOG.md) lists changes made since that release.
+
+The aim remains broad support for both languages through the pinned Vim
+version. The [support guide](language-support.md) describes what works today.
+The items below are remaining work, not promises for a particular release.
+
+## Language support
+
+- Complete support for `def` functions in Legacy scripts and `function`
+  blocks in Vim9 scripts.
+- Improve type information for values imported into Legacy code and for code
+  whose type becomes more specific after a condition.
+- Decode more escaped command and mapping payloads where the original source
+  locations can be preserved reliably.
+- Add more option-value checks where Vim's source gives a clear rule.
+  Build-dependent and runtime-dependent values still need conservative handling.
+
+## Configuration and plugin projects
+
+- Follow more static `:source` relationships, including cycles.
+- Detect cross-file mapping conflicts only when the loading order is known.
+- Improve path completion and navigation for `:source`, `:runtime` and
+  `:packadd`.
+- Revisit automatic watching of external plugin files if real projects need it.
+  Watching more directories should have a clear benefit and bounded cost.
+
+Parameter-name hints and links in comments are possible additions. Type hints
+already exist; these extra conveniences are not required for the current
+editing features to work.
+
+## Before 1.0
+
+Use real plugin projects to find incorrect diagnostics, missing navigation and
+unsafe edits. Each supported behavior needs focused tests and, where Vim's
+semantics are unclear, a reproduction against the pinned Vim version.
+
+Release checks must cover the packaged executable, supported platforms and a
+real editor client. Fix crashes, lost edits and incorrect rename results before
+adding more features. Performance changes need comparable measurements.
+
+General expression reformatting, embedded-language analysis and persistent
+disk indexes remain outside the current scope. The parser still reparses
+changed source; incremental AST editing is not implemented.

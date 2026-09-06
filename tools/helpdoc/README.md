@@ -1,6 +1,10 @@
-# Runtime help extraction experiment
+# Inspecting runtime help
 
-Build and run from the repository root:
+This tool extracts the help that vimls-go can show for plugin functions,
+variables, commands and named `<Plug>` mappings. Use it to check a missing
+description or measure help-loading work.
+
+Run from the repository root:
 
 ```sh
 go build -o bin/helpdoc ./tools/helpdoc
@@ -8,57 +12,41 @@ go build -o bin/helpdoc ./tools/helpdoc
   -output /path/to/runtime-help.md -repeat 5 > /path/to/stats.json
 ```
 
-Alternatively use `-runtimepath '/one/root,/another/root'`. The file input is
-the same comma-separated Vim option value, with pasted CR/LF line wraps removed;
-commas in paths can be escaped as `\,`. It does not launch Vim or source plugins.
-Output directories must already exist. The Markdown destination is overwritten.
+The input file contains the comma-separated value of Vim's `runtimepath`.
+Line wraps are removed; escape a comma inside a path as `\,`.
+You can also pass `-runtimepath '/one/root,/another/root'` directly.
 
-The experiment scans exactly `doc/*.txt` under each runtimepath root, preserving
-root order and deduplicating canonical roots and files. It does not recursively
-scan `doc/`, translated `*.??x` files, or packages outside the supplied roots.
-Missing roots and inaccessible directories are reported in both Markdown and
-JSON; a failure to read a discovered file or write the report fails the command.
+Output directories must already exist. The Markdown report is overwritten,
+and the JSON statistics are written to stdout. The tool does not launch Vim
+or source plugins.
 
-Extraction uses help definitions directly, without relying on generated `tags`:
+## What it reads
 
-- `*g:name*`: global variables, including names containing `#`.
-- `*Name()*`, `*g:Name()*`, and lowercase built-in function tags: global functions.
-- `*plugin#name()*` and `*plugin#name*`: autoload functions.
-- `*<Plug>(plugin-name)*`: named `<Plug>` mappings.
-- Adjacent alias tags share a description. Duplicate definitions remain separate
-  entries with full source paths and one-based tag line numbers.
+It reads `doc/*.txt` under the supplied roots, in runtimepath order. It does
+not recurse below `doc`, read translated help files, or find packages outside
+those roots.
 
-Every help tag and section separator bounds the preceding description. Example
-blocks preserve literal text, references become inline code, and help headings
-become Markdown headings, using the existing `vimhelp.ToMarkdown` converter.
-The help markup reference is the read-only official Vim `v9.2.1015` version of
-`runtime/doc/helphelp.txt`, section `help-writing`.
+Descriptions come from help tags such as `*g:name*`, `*Name()*`,
+`*plugin#name()*` and `*<Plug>(plugin-name)*`. Reports keep source paths and
+line numbers so you can inspect a surprising result. Untagged prose and
+dictionary-member descriptions are not inferred.
 
-Help is free-form: untagged descriptions, dictionary-member/pattern tags, and
-plain function names without `()` are not inferred. Tags are documentation
-claims, not proof of a runtime definition. The tool does not validate symbols by
-parsing or executing the associated Vim scripts. Section boundaries are a
-heuristic and may require plugin-specific refinement after inspecting results.
-The converter supports Vim help markup, not arbitrary embedded HTML/Markdown.
+A help tag is a documentation entry, not proof that a function exists. The
+server uses source indexing separately for that.
 
-Each run rediscovers and rereads all inputs and retains extracted Markdown in
-memory. JSON reports discovery, reading, extraction plus Markdown conversion,
-total load time, and total Go allocation. Forced GC before/after each run and
-the heap-delta samples are excluded from load timings; automatic GC is included.
-The final retained heap delta is an approximate Go heap measurement, not RSS.
-`markdown_body_bytes` sums per entry, counting shared alias bodies repeatedly.
-Report assembly and writing are measured separately after the final run; write
-time measures `os.WriteFile`, without an `fsync`. Filesystem caches are not
-cleared: the first run is not a guaranteed cold-cache measurement. Build and
-process startup are excluded from the internal measurements.
+## Reading the measurements
 
-The server shares the same extractor and loads runtime help in the background.
-This tool measures complete scans; server runtimepath updates reuse retained
-directories and parse only newly added directories. Local inputs and results can be kept in ignored
-`bin/helpdoc-report/`, so third-party documentation is not committed.
+The JSON separates discovery, reading, extraction and report writing. Each
+repeat performs a complete scan; the running server can reuse unchanged roots,
+so these timings do not describe every server update.
 
-Focused validation:
+Filesystem caches are not cleared. The first sample is not guaranteed to be
+cold, and the reported Go heap change is not process RSS. Use the same inputs
+and toolchain for comparisons.
+
+Keep local reports in ignored `bin/helpdoc-report/` if they contain third-party
+documentation. Focused checks for this tool are:
 
 ```sh
-go test ./tools/helpdoc ./internal/vimhelp
+go test -count=1 ./tools/helpdoc ./internal/vimhelp
 ```
