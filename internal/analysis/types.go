@@ -520,7 +520,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 				for _, argument := range arguments {
 					argumentTypes = append(argumentTypes, state.infer(argument, scope))
 				}
-				typ = builtinReturnValueType(builtin, argumentTypes)
+				typ = builtinReturnValueType(builtin, argumentTypes, arguments)
 			} else if callee.Name == "func" && callee.Return != nil {
 				typ = *callee.Return
 			} else {
@@ -927,7 +927,33 @@ func optionAcceptsCompatibleType(name string, typ ValueType) bool {
 		(typ.Name == builtinOptionValueType(compat.Vim).Name || typ.Name == builtinOptionValueType(compat.Variant).Name)
 }
 
-func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType) ValueType {
+func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType, expressions []*syntax.Expression) ValueType {
+	// Vim v9.2.1015 builtin.txt: expand() returns a String unless {list}
+	// is true. evalfunc.c uses ret_any, so the broad metadata cannot express it.
+	if function.Name == "expand" && len(expressions) >= 1 && len(expressions) <= 3 {
+		if len(expressions) < 3 {
+			return ValueType{Name: "string"}
+		}
+		flag := expressions[2]
+		for flag != nil && flag.Kind == syntax.ExpressionParenthesized && len(flag.Children) == 1 {
+			flag = flag.Children[0]
+		}
+		value, known := staticNumberValue(flag)
+		if flag != nil && flag.Kind == syntax.ExpressionIdentifier {
+			switch flag.Value {
+			case "true", "v:true":
+				value, known = 1, true
+			case "false", "v:false":
+				value, known = 0, true
+			}
+		}
+		if known {
+			if value != 0 {
+				return ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}
+			}
+			return ValueType{Name: "string"}
+		}
+	}
 	if function.Name == "get" && len(arguments) == 3 {
 		if isSpecialType(arguments[2]) {
 			return indexedType(arguments[0])

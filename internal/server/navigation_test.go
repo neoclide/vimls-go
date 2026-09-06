@@ -565,6 +565,50 @@ func TestHoverShowsVariableTypes(t *testing.T) {
 	}
 }
 
+func TestHoverShowsExpandVariableType(t *testing.T) {
+	for _, test := range []struct{ expression, want string }{
+		{"expand('~/vim-dev')", "string"},
+		{"expand('~/vim-dev', 1)", "string"},
+		{"expand('~/vim-dev', 0, 0)", "string"},
+		{"expand('~/vim-dev', 0, (v:false))", "string"},
+		{"expand('~/vim-dev', 0, 1)", "list<string>"},
+		{"expand('~/vim-dev', 0, v:true)", "list<string>"},
+		{"expand('~/vim-dev', 0, g:flag)", "unknown"},
+		{"'~/vim-dev'->expand()", "string"},
+		{"'~/vim-dev'->expand(0, 1)", "list<string>"},
+		{"'~/vim-dev'->expand(0, g:flag)", "unknown"},
+	} {
+		for _, prefix := range []string{"", "vim9script\n"} {
+			t.Run(prefix+test.expression, func(t *testing.T) {
+				name := "g:local"
+				source := prefix + "let g:local = " + test.expression + "\necho g:local\n"
+				if prefix != "" {
+					name = "local"
+					source = prefix + "var local = " + test.expression + "\necho local\n"
+				}
+				instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+				for _, offset := range []int{strings.Index(source, name), strings.LastIndex(source, name)} {
+					before := source[:offset]
+					position := protocol.Position{Line: uint32(strings.Count(before, "\n")), Character: uint32(offset - strings.LastIndex(before, "\n") - 1)}
+					hover, err := instance.Hover(context.Background(), &protocol.HoverParams{
+						TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+							TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: position,
+						},
+					})
+					if err != nil || hover == nil {
+						t.Fatalf("hover = %#v, error = %v", hover, err)
+					}
+					content, ok := hover.Contents.(*protocol.MarkupContent)
+					want := fmt.Sprintf("**%s** %s %s variable.", name, titleArticle(test.want), test.want)
+					if !ok || content.Value != want {
+						t.Fatalf("hover contents = %#v, want %q", hover.Contents, want)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestHoverShowsVim9HeredocListStringType(t *testing.T) {
 	source := "vim9script\nconst call_function =<< trim CALL_FUNCTION_END\n  function! coc#api#call(method, args) abort\n  endfunction\nCALL_FUNCTION_END\necho call_function\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

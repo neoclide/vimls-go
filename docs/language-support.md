@@ -25,6 +25,12 @@ Document text supports LF, CRLF and CR line endings, including mixed files.
 Positions follow the negotiated UTF-8, UTF-16 or UTF-32 encoding. Formatting
 and rename preserve the original line-ending bytes.
 
+Variable types follow known initializer return types in both dialects.
+For example, `let g:local = expand('~/vim-dev')` shows `string` on hover.
+For `expand()`, a literal true third argument produces `list<string>`;
+an omitted or literal false third argument produces `string`. Dynamic list
+flags remain `unknown`. Method calls (`->expand()`) use the same rules.
+
 ## Plugin files and help
 
 Workspace Vim files are indexed for analysis and navigation. Outside the

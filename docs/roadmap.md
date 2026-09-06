@@ -10,6 +10,10 @@ The items below are remaining work, not promises for a particular release.
 
 ## Language support
 
+`expand()` initializer types now distinguish strings from lists using a static
+third argument in both dialects, including method calls. Dynamic flags remain
+unknown.
+
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
 - Improve type information for values imported into Legacy code and for code

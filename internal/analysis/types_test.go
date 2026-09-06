@@ -6,6 +6,28 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+func TestAnalyzeExpandReturnType(t *testing.T) {
+	// Vim v9.2.1015 runtime/doc/builtin.txt, expand(): {list} selects List.
+	result := Analyze(syntax.Parse("let g:local = expand('~/vim-dev')\nlet g:paths = expand('*', 0, 1)\nlet g:dynamic = expand('*', 0, g:flag)\n"))
+	want := map[string]string{"g:local": "string", "g:paths": "list", "g:dynamic": UnknownValueType.Name}
+	for _, declaration := range result.Declarations {
+		expected, ok := want[declaration.Name]
+		if !ok {
+			continue
+		}
+		if declaration.Type.Name != expected {
+			t.Fatalf("%s type = %#v, want %s", declaration.Name, declaration.Type, expected)
+		}
+		if expected == "list" && (len(declaration.Type.Arguments) != 1 || declaration.Type.Arguments[0].Name != "string") {
+			t.Fatalf("list element type = %#v", declaration.Type)
+		}
+		delete(want, declaration.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing declarations: %v", want)
+	}
+}
+
 func TestCompiledLogicalNumberConversions(t *testing.T) {
 	for _, test := range []struct {
 		expression string
