@@ -116,12 +116,15 @@ count and sampling method comparable. The standing workloads include parsing,
 completion, runtime indexing and workspace updates:
 
 ```sh
-go test -mod=readonly ./internal/syntax ./internal/server -run '^$' \
+go test -mod=readonly -p 1 ./internal/syntax ./internal/server -run '^$' \
   -bench '^(BenchmarkParseLargeFile|BenchmarkCompletionLatency|BenchmarkRuntimepathIndexing|BenchmarkReverseDependentReanalysis|BenchmarkWorkspaceRebuild)$' \
-  -benchmem -benchtime=10x -count=5
+  -benchmem -benchtime=1s -count=20
 ```
 
-`tools/benchreport` compares matching workloads. Its gates allow at most 15%
+`tools/benchreport` compares matching workloads with at least 20 samples on each
+side. The scheduled lane runs packages serially and measures each sample for
+one second. With 20 samples, nearest-rank P95 is the second-slowest sample;
+one timing outlier does not set the relative timing gate. Its gates allow at most 15%
 growth in median/p95 sample time and 20% growth in median allocations; completion
 must stay below 100 ms. Confirm noisy failures before attributing them to a
 change. P95 here describes benchmark sample means, not individual requests.

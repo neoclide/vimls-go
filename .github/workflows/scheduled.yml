@@ -59,25 +59,28 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26.x"
-      - name: Run benchmark regression lane (count=5)
+      - name: Run benchmark regression lane (count=20)
         run: |
           set -euo pipefail
           mkdir -p artifacts
           benchmark_pattern='^(BenchmarkParseLargeFile|BenchmarkCompletionLatency|BenchmarkRuntimepathIndexing|BenchmarkReverseDependentReanalysis|BenchmarkWorkspaceRebuild)$'
           baseline_dir=$(mktemp -d "$RUNNER_TEMP/vimls-benchmark.XXXXXX")
           git worktree add --detach "$baseline_dir" HEAD^
+          trap 'git worktree remove --force "$baseline_dir"' EXIT
           echo "=== Environment ===" > artifacts/benchmark_report.txt
           go version >> artifacts/benchmark_report.txt
           uname -a >> artifacts/benchmark_report.txt
           echo "GOMAXPROCS=${GOMAXPROCS:-$(nproc)}" >> artifacts/benchmark_report.txt
           echo "" >> artifacts/benchmark_report.txt
           git rev-parse HEAD HEAD^ >> artifacts/benchmark_report.txt
-          (cd "$baseline_dir" && go test -mod=readonly ./internal/syntax ./internal/server -run '^$' \
-            -bench "$benchmark_pattern" -benchmem -benchtime=10x -count=5) | tee artifacts/benchmark_baseline.txt
-          echo "=== Raw Benchmark Output (count=5) ===" >> artifacts/benchmark_report.txt
-          go test -mod=readonly ./internal/syntax ./internal/server -run '^$' \
+          # Serialize packages and average longer samples. Twenty samples keep
+          # nearest-rank P95 from being determined by a single timing outlier.
+          (cd "$baseline_dir" && go test -mod=readonly -p 1 ./internal/syntax ./internal/server -run '^$' \
+            -bench "$benchmark_pattern" -benchmem -benchtime=1s -count=20) | tee artifacts/benchmark_baseline.txt
+          echo "=== Raw Benchmark Output (count=20, benchtime=1s) ===" >> artifacts/benchmark_report.txt
+          go test -mod=readonly -p 1 ./internal/syntax ./internal/server -run '^$' \
             -bench "$benchmark_pattern" \
-            -benchmem -benchtime=10x -count=5 | tee artifacts/benchmark_current.txt
+            -benchmem -benchtime=1s -count=20 | tee artifacts/benchmark_current.txt
           echo "" >> artifacts/benchmark_report.txt
           go run ./tools/benchreport -input artifacts/benchmark_current.txt -baseline artifacts/benchmark_baseline.txt 2>&1 | tee -a artifacts/benchmark_report.txt
       - name: Upload benchmark report artifact

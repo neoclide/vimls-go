@@ -1,6 +1,42 @@
 package syntax
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestSearchRangeTrailingEscapeStopsAtLineEnd(t *testing.T) {
+	for _, parser := range []struct {
+		name  string
+		parse func(string) *File
+	}{
+		{"legacy", (LegacyParser{}).Parse},
+		{"vim9", (Vim9Parser{}).Parse},
+	} {
+		for _, test := range []struct {
+			name, source, pattern string
+		}{
+			{"forward at EOF", "/\\", "/\\"},
+			{"backward before LF", "?\\\necho 1\n", "?\\"},
+			{"modifier before CRLF", "silent :/needle\\\r\necho 1\n", "/needle\\"},
+			{"escaped delimiter", ":/needle\\//echo 1\n", "/needle\\//"},
+		} {
+			t.Run(parser.name+"/"+test.name, func(t *testing.T) {
+				file := parser.parse(test.source)
+				assertFileSpans(t, file)
+				if len(file.Commands) == 0 || file.Text(file.Commands[0].Range) != test.pattern {
+					t.Fatalf("commands = %#v, want range %q", file.Commands, test.pattern)
+				}
+				if end := len(strings.TrimRight(strings.SplitN(test.source, "\n", 2)[0], "\r")); file.Commands[0].Span.End > end {
+					t.Fatalf("command span = %#v, exceeds line end %d", file.Commands[0].Span, end)
+				}
+				if strings.Contains(test.source, "echo 1") && file.Commands[len(file.Commands)-1].Canonical != "echo" {
+					t.Fatalf("following command was lost: %#v", file.Commands)
+				}
+			})
+		}
+	}
+}
 
 func TestVim9cmdMissingCommandDiagnostic(t *testing.T) {
 	tests := []struct {

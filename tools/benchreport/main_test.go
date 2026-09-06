@@ -46,7 +46,7 @@ func TestPercentileIndexNearestRank(t *testing.T) {
 }
 
 func TestPercentileCalculations(t *testing.T) {
-	// N = 5 samples: 1.0, 2.0, 3.0, 4.0, 5.0 (count=5 scheduled benchmark lane)
+	// N = 5 samples: 1.0, 2.0, 3.0, 4.0, 5.0
 	fiveFloats := []float64{1.0, 2.0, 3.0, 4.0, 5.0}
 	fiveInts := []int64{1, 2, 3, 4, 5}
 	if got := percentileFloat(fiveFloats, 0.95); got != 5.0 {
@@ -128,25 +128,27 @@ func TestRegressionGate(t *testing.T) {
 	input := func(name string, count int, ns float64, bytes, allocations int) string {
 		return strings.Repeat(fmt.Sprintf("%s-8 10 %.2f ns/op %d B/op %d allocs/op\n", name, ns, bytes, allocations), count)
 	}
-	base := input("BenchmarkParseLargeFile", 5, 100, 100, 10)
+	base := input("BenchmarkParseLargeFile", 20, 100, 100, 10)
 	for _, test := range []struct {
 		name, current, baseline string
 		fail                    bool
 	}{
 		{"unchanged", base, base, false},
-		{"threshold", input("BenchmarkParseLargeFile", 5, 115, 120, 12), base, false},
-		{"time", input("BenchmarkParseLargeFile", 5, 116, 100, 10), base, true},
-		{"bytes", input("BenchmarkParseLargeFile", 5, 100, 121, 10), base, true},
-		{"allocations", input("BenchmarkParseLargeFile", 5, 100, 100, 13), base, true},
-		{"p95", base + input("BenchmarkParseLargeFile", 1, 1000, 100, 10), base, true},
-		{"missing samples", input("BenchmarkParseLargeFile", 4, 100, 100, 10), base, true},
-		{"missing workload", input("BenchmarkOther", 5, 100, 100, 10), base, true},
+		{"threshold", input("BenchmarkParseLargeFile", 20, 115, 120, 12), base, false},
+		{"time", input("BenchmarkParseLargeFile", 20, 116, 100, 10), base, true},
+		{"bytes", input("BenchmarkParseLargeFile", 20, 100, 121, 10), base, true},
+		{"allocations", input("BenchmarkParseLargeFile", 20, 100, 100, 13), base, true},
+		{"single timing outlier", input("BenchmarkParseLargeFile", 19, 100, 100, 10) + input("BenchmarkParseLargeFile", 1, 1000, 100, 10), base, false},
+		{"p95", input("BenchmarkParseLargeFile", 18, 100, 100, 10) + input("BenchmarkParseLargeFile", 2, 116, 100, 10), base, true},
+		{"missing current samples", input("BenchmarkParseLargeFile", 19, 100, 100, 10), base, true},
+		{"missing baseline samples", base, input("BenchmarkParseLargeFile", 19, 100, 100, 10), true},
+		{"missing workload", input("BenchmarkOther", 20, 100, 100, 10), base, true},
 		{"empty baseline", base, "PASS\n", true},
 		{"empty current", "PASS\n", base, true},
 		{"malformed sample", base + "BenchmarkParseLargeFile broken\n", base, true},
-		{"missing allocation metrics", strings.Repeat("BenchmarkParseLargeFile-8 10 100 ns/op\n", 5), base, true},
-		{"completion budget", input("BenchmarkCompletionLatency/small", 5, 100e6, 0, 0), input("BenchmarkCompletionLatency/small", 5, 100e6, 0, 0), true},
-		{"zero allocation baseline", input("BenchmarkParseLargeFile", 5, 100, 1, 1), input("BenchmarkParseLargeFile", 5, 100, 0, 0), true},
+		{"missing allocation metrics", strings.Repeat("BenchmarkParseLargeFile-8 10 100 ns/op\n", 20), base, true},
+		{"completion budget", input("BenchmarkCompletionLatency/small", 20, 100e6, 0, 0), input("BenchmarkCompletionLatency/small", 20, 100e6, 0, 0), true},
+		{"zero allocation baseline", input("BenchmarkParseLargeFile", 20, 100, 1, 1), input("BenchmarkParseLargeFile", 20, 100, 0, 0), true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := runWithBaseline(strings.NewReader(test.current), strings.NewReader(test.baseline), io.Discard)

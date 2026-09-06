@@ -25,7 +25,7 @@ type sample struct {
 
 func main() {
 	inputFile := flag.String("input", "", "input file containing benchmark output (defaults to stdin)")
-	baselineFile := flag.String("baseline", "", "baseline output; enables the five-sample regression gate")
+	baselineFile := flag.String("baseline", "", "baseline output; enables the twenty-sample regression gate")
 	flag.Parse()
 
 	var r io.Reader = os.Stdin
@@ -183,8 +183,10 @@ func compareSamples(current, baseline map[string][]sample, w io.Writer) error {
 				}
 			}
 		}
-		if len(before) < 5 || len(after) < 5 {
-			failures = append(failures, fmt.Sprintf("%s needs five samples on both sides (baseline=%d current=%d)", name, len(before), len(after)))
+		// With fewer than 20 samples, nearest-rank P95 is the maximum and a
+		// single scheduling outlier can fail an otherwise unchanged workload.
+		if len(before) < 20 || len(after) < 20 {
+			failures = append(failures, fmt.Sprintf("%s needs twenty samples on both sides (baseline=%d current=%d)", name, len(before), len(after)))
 			continue
 		}
 		metrics := []struct {

@@ -6860,7 +6860,8 @@ func scanRange(source string, start, end int) int {
 			delimiter := character
 			index++
 			for index < end {
-				if source[index] == '\\' {
+				// A trailing backslash has no escaped byte before the line end.
+				if source[index] == '\\' && index+1 < end {
 					index += 2
 				} else if source[index] == delimiter {
 					index++
