@@ -1397,11 +1397,22 @@ func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 	}
 	analysisDone := installAnalysisFinishedHook(instance)
 	documentURI := uri.URI("file:///pull-cache.vim")
+	waitAnalysis := func() {
+		t.Helper()
+		select {
+		case <-analysisDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for background pull analysis")
+		}
+	}
 	open := func(version int32) {
 		t.Helper()
 		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: version, Text: "vim9script\necho missing\n"}}); err != nil {
 			t.Fatal(err)
 		}
+		// This test checks stable cache identities. A concurrent background
+		// analysis can supersede a pull request and return ContentModified.
+		waitAnalysis()
 	}
 	pull := func(previous *string) *protocol.RelatedFullDocumentDiagnosticReport {
 		t.Helper()
@@ -1425,11 +1436,6 @@ func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 		t.Fatalf("wrong-id full = %#v, want cached id %q", full, *first.ResultID)
 	}
 	select {
-	case <-analysisDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for background pull analysis")
-	}
-	select {
 	case params := <-published:
 		t.Fatalf("pull client published diagnostics: %#v", params)
 	default:
@@ -1445,6 +1451,7 @@ func TestDocumentPullDiagnosticsTransportCacheAndConfiguration(t *testing.T) {
 	if err := instance.DidChangeConfiguration(context.Background(), &protocol.DidChangeConfigurationParams{Settings: protocol.LSPAny([]byte(`{"diagnostic":{"disabled":["vim/E121"]}}`))}); err != nil {
 		t.Fatal(err)
 	}
+	waitAnalysis()
 	third := pull(second.ResultID)
 	if *third.ResultID == *second.ResultID || len(third.Items) != 0 {
 		t.Fatalf("disabled configuration report = %#v", third)

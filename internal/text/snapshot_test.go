@@ -506,6 +506,31 @@ func fuzzBoundaries(content string, encoding Encoding) []fuzzBoundary {
 	return boundaries
 }
 
+func TestFuzzPositionLineEndings(t *testing.T) {
+	for _, encoding := range []Encoding{UTF8, UTF16, UTF32} {
+		for _, ending := range []string{"\n", "\r", "\r\n"} {
+			content := "a" + ending + "b" + ending
+			for _, boundary := range []fuzzBoundary{
+				{offset: 0, position: Position{}},
+				{offset: 1, position: Position{Character: 1}},
+				{offset: 1 + len(ending), position: Position{Line: 1}},
+				{offset: 2 + len(ending), position: Position{Line: 1, Character: 1}},
+				{offset: len(content), position: Position{Line: 2}},
+			} {
+				got, ok := fuzzPosition(content, boundary.offset, encoding)
+				if !ok || got != boundary.position {
+					t.Fatalf("%s %q offset %d = %v, %v; want %v", encoding, content, boundary.offset, got, ok, boundary.position)
+				}
+			}
+			if ending == "\r\n" {
+				if _, ok := fuzzPosition(content, 2, encoding); ok {
+					t.Fatal("accepted an edit boundary inside CRLF")
+				}
+			}
+		}
+	}
+}
+
 func fuzzPosition(content string, target int, encoding Encoding) (Position, bool) {
 	if target < 0 || target > len(content) || (encoding != UTF8 && encoding != UTF16 && encoding != UTF32) {
 		return Position{}, false
@@ -513,11 +538,11 @@ func fuzzPosition(content string, target int, encoding Encoding) (Position, bool
 	for line, start := 0, 0; ; line++ {
 		end := len(content)
 		next := len(content)
-		if newline := strings.IndexByte(content[start:], '\n'); newline >= 0 {
-			next = start + newline
-			end = next
-			if end > start && content[end-1] == '\r' {
-				end--
+		if newline := strings.IndexAny(content[start:], "\r\n"); newline >= 0 {
+			end = start + newline
+			next = end
+			if content[end] == '\r' && end+1 < len(content) && content[end+1] == '\n' {
+				next++
 			}
 		}
 		if target >= start && target <= end {

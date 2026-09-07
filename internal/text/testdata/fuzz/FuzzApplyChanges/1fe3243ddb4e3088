@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("\r0")
+[]byte("001")
+[]byte("0")
