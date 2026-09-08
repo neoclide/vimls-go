@@ -14,6 +14,7 @@ import (
 // FileAnalysis is the protocol-independent lexical information collected from
 // one syntax tree.  All spans are byte spans in File.Source.
 type FileAnalysis struct {
+	progress     *analysisProgress
 	File         *syntax.File
 	Root         *Scope
 	Scopes       []*Scope
@@ -133,6 +134,190 @@ func AnalyzeConfigFile(file *syntax.File) *FileAnalysis {
 }
 
 func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
+	result, _ := AnalyzeWithYield(file, configFile, nil)
+	return result
+}
+
+// AnalyzeWithYield performs the same full analysis as Analyze/AnalyzeConfigFile.
+// At phase and batched traversal boundaries, yield may suspend the caller or return an error to abandon
+// the private partial result. It is never retained in the returned analysis.
+// Callers must not hold locks needed by the work they are yielding to.
+func AnalyzeWithYield(file *syntax.File, configFile bool, yield func() error) (*FileAnalysis, error) {
+	if err := runAnalysisPhases(yield); err != nil {
+		return nil, err
+	}
+	result := newFileAnalysis(file, configFile)
+	if yield != nil {
+		result.progress = &analysisProgress{yield: yield}
+		defer func() { result.progress = nil }()
+		originalYield := yield
+		yield = func() error {
+			if result.progress.err != nil {
+				return result.progress.err
+			}
+			return originalYield()
+		}
+	}
+	if file == nil {
+		return result, nil
+	}
+	root := result.Root
+	if err := runAnalysisPhases(yield,
+		func() { collectCommandScopes(result, root, file.Commands, file.Blocks, nil) },
+		func() { collectLambdaScopesCommands(result, root, file.Commands) },
+
+		// First collect every declaration.  This is separate from reference
+		// walking so a function can be referenced before its definition, as Vim
+		// permits, without making variables forward-visible.
+		func() { collectEmbeddedDeclarations(result, root, file.Commands) },
+		func() { collectLambdaDeclarations(result, file.Commands) },
+		func() { collectLegacyFunctionOverwriteRiskDiagnostics(result, file.Commands) },
+		func() { collectUserCommandOverwriteRiskDiagnostics(result, file.Commands) },
+		func() { collectNameDeclarationConflictDiagnostics(result) },
+		func() { collectVim9ScriptFunctionDeletionDiagnostics(result, file.Commands, root) },
+		func() { collectVim9LegacyScriptVariableDiagnostics(result) },
+
+		// A malformed or partially parsed enum value may remain an opaque command.
+		// The enum block is still authoritative for its one-name-per-line members.
+		func() { collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks) },
+		func() { collectDuplicateEnumValueDiagnostics(result) },
+		func() { collectArgumentRedeclarationDiagnostics(result) },
+		func() { collectArgumentShadowDiagnostics(result) },
+		func() { collectLegacyConstExistingVariableDiagnostics(result, file.Commands) },
+		func() { collectVim9RedeclarationDiagnostics(result) },
+		func() { collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands) },
+		func() { collectImportedItemRedefinitionDiagnostics(result, file.Commands) },
+		func() { collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands) },
+		func() { collectAggregateLocalRedeclarationDiagnostics(result) },
+		func() { collectDuplicateTypeAliasDiagnostics(result) },
+		func() { collectAbstractConstructorDiagnostics(result) },
+		func() { collectDuplicateMethodDiagnostics(result) },
+		func() { collectUnimplementedAbstractMethodDiagnostics(result) },
+		func() { collectMethodAccessLevelDiagnostics(result) },
+		func() { collectGenericMethodOverrideDiagnostics(result) },
+		func() { collectMethodTypeMismatchDiagnostics(result) },
+		func() { collectDuplicateClassVariableDiagnostics(result) },
+		func() { collectPublicUnderscoreVariableDiagnostics(result) },
+		func() { collectPublicProtectedMemberNameDiagnostics(result) },
+		func() { collectConstructorDefaultValueDiagnostics(result) },
+		func() { collectUninitializedObjectVariableDiagnostics(result) },
+		func() { collectTypeDiagnostics(result) },
+		func() { collectInterfaceVariableAccessDiagnostics(result) },
+		func() { collectReturnOutsideFunctionDiagnostics(result) },
+		func() { collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks) },
+		func() { collectUnreachableCodeDiagnostics(result) },
+		func() { collectLoopNestingDiagnostics(result) },
+
+		func() { sortDeclarations(result) },
+	); err != nil {
+		return nil, err
+	}
+	for index := range file.Commands {
+		if index%32 == 0 {
+			if err := runAnalysisPhases(yield); err != nil {
+				return nil, err
+			}
+		}
+		command := &file.Commands[index]
+		scope := result.commandScopes[command]
+		if scope == nil {
+			scope = root
+		}
+		walkCommand(result, file, command, scope)
+	}
+	sort.SliceStable(result.References, func(i, j int) bool {
+		return result.References[i].Span.Start < result.References[j].Span.Start
+	})
+	if err := runAnalysisPhases(yield,
+		func() { collectDeprecatedReferenceDiagnostics(result) },
+		func() { collectImportNamespaceDiagnostics(result) },
+		func() { inferTypes(result) },
+		func() { collectNullReceiverDiagnostics(result) },
+		func() { collectExtendedAggregateDiagnostics(result) },
+		func() { collectImplementedInterfaceNameDiagnostics(result) },
+		func() { collectImplementedInterfaceMembersDiagnostics(result) },
+		func() { collectVariableTypeMismatchDiagnostics(result) },
+		func() { collectVim9DestructuringDiagnostics(result, file.Commands) },
+		func() { collectLegacyListCardinalityDiagnostics(result, file.Commands) },
+		func() { collectFuncrefVariableNameDiagnostics(result) },
+		func() { collectMissingDictionaryKeyDiagnostics(result, file.Commands, root) },
+		func() { collectDeferDiagnostics(result, file.Commands, root) },
+		func() { collectOperatorDiagnostics(result, file.Commands, root) },
+		func() { collectAggregateAccessDiagnostics(result) },
+		func() { collectVoidValueDiagnostics(result, file.Commands) },
+		func() { collectTypeMismatchDiagnostics(result, file.Commands, root) },
+		func() { collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root) },
+		func() { collectAssignmentDiagnostics(result, file.Commands, root) },
+		func() { collectNameOnlyExpressionDiagnostics(result, file.Commands, root) },
+		func() { collectUnusedVariableDiagnostics(result) },
+		func() { collectStyleDiagnostics(result) },
+		func() { collectVariableTypeChangeDiagnostics(result) },
+	); err != nil {
+		return nil, err
+	}
+	if result.configFile {
+		collectConfigLeaderOrderDiagnostics(result)
+		collectConfigDuplicateMappingDiagnostics(result)
+		collectConfigLoadedGuardDiagnostics(result)
+	}
+	suppressUnexpandedBodyDiagnostics(result)
+	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
+		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
+	})
+	if result.progress != nil && result.progress.err != nil {
+		return nil, result.progress.err
+	}
+	return result, nil
+}
+
+// Progress is private to a running full analysis and is removed before return.
+// Batching keeps the callback out of the per-node hot path in ordinary analysis.
+type analysisProgress struct {
+	yield func() error
+	steps uint64
+	err   error
+}
+
+func (result *FileAnalysis) analysisStep() bool {
+	if result == nil {
+		return true
+	}
+	p := result.progress
+	if p == nil {
+		return true
+	}
+	if p.err != nil {
+		return false
+	}
+	p.steps++
+	if p.steps%64 == 0 {
+		p.err = p.yield()
+	}
+	return p.err == nil
+}
+
+// runAnalysisPhases keeps phase order explicit while allowing background work
+// to yield without restarting or exposing partially populated results.
+func runAnalysisPhases(yield func() error, phases ...func()) error {
+	if yield != nil {
+		if err := yield(); err != nil {
+			return err
+		}
+	}
+	for index, phase := range phases {
+		if index > 0 && yield != nil {
+			if err := yield(); err != nil {
+				return err
+			}
+		}
+		phase()
+	}
+	return nil
+}
+
+// newFileAnalysis allocates exclusively owned state. Completion facts and full
+// analysis must never share mutable scopes, declarations or inferred types.
+func newFileAnalysis(file *syntax.File, configFile bool) *FileAnalysis {
 	result := &FileAnalysis{File: file, configFile: configFile, suppressedSyntaxDiagnostics: make(map[syntax.Diagnostic]bool)}
 	root := &Scope{Block: -1}
 	if file != nil {
@@ -154,95 +339,6 @@ func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
 	result.superMemberExempt = make(map[syntax.Span]bool)
 	result.classAliases = localClassAliases(file)
 	result.classes = localAggregates(file, syntax.BlockClass)
-	collectCommandScopes(result, root, file.Commands, file.Blocks, nil)
-	collectLambdaScopesCommands(result, root, file.Commands)
-
-	// First collect every declaration.  This is separate from reference
-	// walking so a function can be referenced before its definition, as Vim
-	// permits, without making variables forward-visible.
-	collectEmbeddedDeclarations(result, root, file.Commands)
-	collectLambdaDeclarations(result, file.Commands)
-	collectLegacyFunctionOverwriteRiskDiagnostics(result, file.Commands)
-	collectUserCommandOverwriteRiskDiagnostics(result, file.Commands)
-	collectNameDeclarationConflictDiagnostics(result)
-	collectVim9ScriptFunctionDeletionDiagnostics(result, file.Commands, root)
-	collectVim9LegacyScriptVariableDiagnostics(result)
-
-	// A malformed or partially parsed enum value may remain an opaque command.
-	// The enum block is still authoritative for its one-name-per-line members.
-	collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks)
-	collectDuplicateEnumValueDiagnostics(result)
-	collectArgumentRedeclarationDiagnostics(result)
-	collectArgumentShadowDiagnostics(result)
-	collectLegacyConstExistingVariableDiagnostics(result, file.Commands)
-	collectVim9RedeclarationDiagnostics(result)
-	collectVim9NameAlreadyDefinedDiagnostics(result, file.Commands)
-	collectImportedItemRedefinitionDiagnostics(result, file.Commands)
-	collectVim9ScriptItemRedefinitionDiagnostics(result, file.Commands)
-	collectAggregateLocalRedeclarationDiagnostics(result)
-	collectDuplicateTypeAliasDiagnostics(result)
-	collectAbstractConstructorDiagnostics(result)
-	collectDuplicateMethodDiagnostics(result)
-	collectUnimplementedAbstractMethodDiagnostics(result)
-	collectMethodAccessLevelDiagnostics(result)
-	collectGenericMethodOverrideDiagnostics(result)
-	collectMethodTypeMismatchDiagnostics(result)
-	collectDuplicateClassVariableDiagnostics(result)
-	collectPublicUnderscoreVariableDiagnostics(result)
-	collectPublicProtectedMemberNameDiagnostics(result)
-	collectConstructorDefaultValueDiagnostics(result)
-	collectUninitializedObjectVariableDiagnostics(result)
-	collectTypeDiagnostics(result)
-	collectInterfaceVariableAccessDiagnostics(result)
-	collectReturnOutsideFunctionDiagnostics(result)
-	collectMissingReturnValueDiagnostics(result, file.Commands, file.Blocks)
-	collectUnreachableCodeDiagnostics(result)
-	collectLoopNestingDiagnostics(result)
-
-	sortDeclarations(result)
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		scope := result.commandScopes[command]
-		if scope == nil {
-			scope = root
-		}
-		walkCommand(result, file, command, scope)
-	}
-	sort.SliceStable(result.References, func(i, j int) bool {
-		return result.References[i].Span.Start < result.References[j].Span.Start
-	})
-	collectDeprecatedReferenceDiagnostics(result)
-	collectImportNamespaceDiagnostics(result)
-	inferTypes(result)
-	collectNullReceiverDiagnostics(result)
-	collectExtendedAggregateDiagnostics(result)
-	collectImplementedInterfaceNameDiagnostics(result)
-	collectImplementedInterfaceMembersDiagnostics(result)
-	collectVariableTypeMismatchDiagnostics(result)
-	collectVim9DestructuringDiagnostics(result, file.Commands)
-	collectLegacyListCardinalityDiagnostics(result, file.Commands)
-	collectFuncrefVariableNameDiagnostics(result)
-	collectMissingDictionaryKeyDiagnostics(result, file.Commands, root)
-	collectDeferDiagnostics(result, file.Commands, root)
-	collectOperatorDiagnostics(result, file.Commands, root)
-	collectAggregateAccessDiagnostics(result)
-	collectVoidValueDiagnostics(result, file.Commands)
-	collectTypeMismatchDiagnostics(result, file.Commands, root)
-	collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root)
-	collectAssignmentDiagnostics(result, file.Commands, root)
-	collectNameOnlyExpressionDiagnostics(result, file.Commands, root)
-	collectUnusedVariableDiagnostics(result)
-	collectStyleDiagnostics(result)
-	collectVariableTypeChangeDiagnostics(result)
-	if result.configFile {
-		collectConfigLeaderOrderDiagnostics(result)
-		collectConfigDuplicateMappingDiagnostics(result)
-		collectConfigLoadedGuardDiagnostics(result)
-	}
-	suppressUnexpandedBodyDiagnostics(result)
-	sort.SliceStable(result.Diagnostics, func(i, j int) bool {
-		return result.Diagnostics[i].Span.Start < result.Diagnostics[j].Span.Start
-	})
 	return result
 }
 
@@ -6147,6 +6243,9 @@ func collectOpaqueEnumDeclarations(result *FileAnalysis, commands []syntax.Comma
 }
 
 func collectCommandScopes(result *FileAnalysis, parent *Scope, commands []syntax.Command, blocks []syntax.Block, list *syntax.CommandList) {
+	if !result.analysisStep() {
+		return
+	}
 	if result == nil || parent == nil {
 		return
 	}
@@ -6161,6 +6260,9 @@ func collectCommandScopes(result *FileAnalysis, parent *Scope, commands []syntax
 		return nil
 	}
 	for index, block := range blocks {
+		if !result.analysisStep() {
+			return
+		}
 		blockParent := parent
 		if block.Parent >= 0 {
 			if candidate := blockScope(block.Parent, block.Span.Start); candidate != nil {
@@ -6192,6 +6294,9 @@ func collectCommandScopes(result *FileAnalysis, parent *Scope, commands []syntax
 	for index := range commands {
 		command := &commands[index]
 		scope := parent
+		if !result.analysisStep() {
+			return
+		}
 		if candidate := blockScope(command.Block, command.Span.Start); candidate != nil {
 			scope = candidate
 		}
@@ -6582,6 +6687,9 @@ func sortDeclarations(result *FileAnalysis) {
 }
 
 func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Command, scope *Scope) {
+	if !result.analysisStep() {
+		return
+	}
 	if command == nil || scope == nil {
 		return
 	}
@@ -6671,6 +6779,9 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 }
 
 func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.Expression, scope *Scope, skipped map[syntax.Span]bool, preferFunction bool, dialect syntax.Dialect) {
+	if !result.analysisStep() {
+		return
+	}
 	if expression == nil || scope == nil || file == nil {
 		return
 	}

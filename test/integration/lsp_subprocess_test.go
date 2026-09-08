@@ -666,7 +666,7 @@ func TestDocumentPullDiagnosticsSubprocess(t *testing.T) {
 		ResultID string `json:"resultId"`
 	}
 	if err := json.Unmarshal(changed["result"], &changedFull); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decode changed diagnostic response: %v, response: %s", err, changed)
 	}
 	if changedFull.Kind != "full" || changedFull.ResultID == "" || changedFull.ResultID == full.ResultID {
 		t.Fatalf("changed diagnostic response = %s", changed)

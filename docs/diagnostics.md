@@ -4,6 +4,13 @@ vimls-go checks your script while you edit. It reports syntax errors, missing
 names, invalid calls and Vim9 type errors that can be determined from source.
 It also offers suggestions for maintaining plugins and configuration files.
 
+During typing, analysis yields to completion and waits until 150 ms after the
+latest accepted edit before resuming. Scope/reference/type traversals include
+batched pause and cancellation checks. Obsolete open-document semantic work is
+abandoned after edits or close; same-content work can resume. Diagnostic requests and background work
+have independent cancellation; results still require current document and
+workspace snapshots before publication.
+
 It does not run the script. A clean diagnostics list cannot prove that code
 depending on editor state, dynamic names or loading order will work at runtime.
 

@@ -67,11 +67,16 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 	if ctx.Err() != nil {
 		return nil, protocol.ErrRequestCancelled
 	}
+	finish := s.completionPriority.begin()
+	defer finish()
+	if hook := s.testHooks.beforeCompletion; hook != nil {
+		hook()
+	}
 	s.mu.Lock()
 	excludeRuntimePath := s.excludeRuntimePathCompletions
 	s.mu.Unlock()
 	for attempt := range 2 {
-		snapshot, file, analysisResult, encoding, err := s.structureDocumentWithAnalysis(ctx, params.TextDocument.URI.String())
+		snapshot, file, encoding, err := s.structureDocument(ctx, params.TextDocument.URI.String())
 		if err != nil {
 			return nil, err
 		}
@@ -212,6 +217,13 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			continue
 		}
+		var analysisResult *analysis.FileAnalysis
+		if contextKind == completionContextExpression || contextKind == completionContextMethod || contextKind == completionContextVim9Statement || contextKind == completionContextMember {
+			file, analysisResult = s.completionSnapshotFacts(ctx, snapshot, file)
+			if ctx.Err() != nil {
+				return nil, protocol.ErrRequestCancelled
+			}
+		}
 		if contextKind == completionContextMember {
 			items, deep := completionObjectMembers(file, analysisResult, offset)
 			result := s.completionList(snapshot, encoding, selection, completionCandidates(items, 9000, completionSourceLocal))
@@ -330,13 +342,14 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 				}
 			}
+			var functionParameters map[string][]string
 			for _, visible := range visibleCompletionDeclarations(analysisResult, offset) {
 				declaration := visible.declaration
 				if methodCall && declaration.Kind != analysis.SymbolKindFunction {
 					continue
 				}
 				label := completionDeclarationLabel(declaration, analysisResult.Root, file.Dialect, scopePrefix)
-				if label == "" {
+				if label == "" || !completionTextMatches(selection.prefix, label) {
 					continue
 				}
 				item := protocol.CompletionItem{Label: label, Kind: completionSymbolKind(declaration.Kind)}
@@ -344,16 +357,21 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					snippet string
 					ok      bool
 				)
-				if methodCall {
-					parameters, found := completionUserFunctionParameters(file, label)
-					if found && len(parameters) == 0 {
-						continue
+				if declaration.Kind == analysis.SymbolKindFunction && (canSnippet || methodCall) {
+					if functionParameters == nil {
+						functionParameters = completionFunctionParameters(file)
 					}
-					if found && len(parameters) > 0 {
-						snippet, ok = completionFunctionSnippet(label, parameters[1:], canSnippet)
+					parameters, found := functionParameters[declaration.Name]
+					if methodCall {
+						if found && len(parameters) == 0 {
+							continue
+						}
+						if found && len(parameters) > 0 {
+							snippet, ok = completionFunctionSnippet(label, parameters[1:], canSnippet)
+						}
+					} else {
+						snippet, ok = completionFunctionSnippet(label, parameters, canSnippet && found)
 					}
-				} else {
-					snippet, ok = completionUserFunctionSnippet(file, label, canSnippet)
 				}
 				if ok {
 					item.InsertText = protocol.NewOptional(snippet)
@@ -364,9 +382,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
 				}
 				item.Detail = protocol.NewOptional(string(declaration.Kind))
-				if declaration.Type.Name != "" && declaration.Type.Name != analysis.ValueTypeAny {
-					item.Detail = protocol.NewOptional(string(declaration.Kind) + ": " + formatValueType(declaration.Type))
-				}
+				item.Data = localCompletionResolveData(snapshot, declaration)
 				score := 10000
 				for depth := 0; depth < visible.scopeDepth; depth++ {
 					score = score * 99 / 100
@@ -1270,22 +1286,22 @@ func completionFunctionSnippet(name string, parameters []string, enabled bool) (
 	return builder.String(), true
 }
 
-func completionUserFunctionSnippet(file *syntax.File, name string, enabled bool) (string, bool) {
-	parameters, found := completionUserFunctionParameters(file, name)
-	return completionFunctionSnippet(name, parameters, enabled && found)
-}
-
-func completionUserFunctionParameters(file *syntax.File, name string) ([]string, bool) {
+// Collect once per request, and only when function insertion needs parameters.
+// Variables never need a file-wide function lookup.
+func completionFunctionParameters(file *syntax.File) map[string][]string {
+	result := make(map[string][]string)
 	if file == nil {
-		return nil, false
+		return result
 	}
-	var parameters []string
-	found := false
 	walkCommands(file.Commands, func(command *syntax.Command) {
-		if found || command.Function == nil || file.Text(command.Function.Name) != name {
+		if command.Function == nil {
 			return
 		}
-		found = true
+		name := file.Text(command.Function.Name)
+		if _, found := result[name]; found {
+			return
+		}
+		var parameters []string
 		for _, parameter := range command.Function.Parameters {
 			if parameter.Name.Start < parameter.Name.End {
 				label := file.Text(parameter.Name)
@@ -1295,8 +1311,9 @@ func completionUserFunctionParameters(file *syntax.File, name string) ([]string,
 				parameters = append(parameters, label)
 			}
 		}
+		result[name] = parameters
 	})
-	return parameters, found
+	return result
 }
 
 func completionBuiltinFunctionSnippet(function vimdata.BuiltinFunction, enabled bool) (string, bool) {
@@ -1454,7 +1471,8 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 	if member == nil || len(member.Children) == 0 || member.Children[0] == nil {
 		return nil, false
 	}
-	typ := result.TypeOf(member.Children[0])
+	types := analysis.NewCompletionTypes(result)
+	typ := types.TypeOf(member.Children[0], offset)
 	if typ.Name == "" || typ.Name == analysis.ValueTypeAny || typ.Name == "dict" || typ.Name == "list" {
 		return nil, false
 	}
@@ -1469,7 +1487,8 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 			find(symbol.Children)
 		}
 	}
-	find(analysis.CollectSymbols(file))
+	symbols := analysis.CollectSymbols(file)
+	find(symbols)
 	if container == nil {
 		return nil, false
 	}
@@ -1489,10 +1508,14 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 		}
 		items = append(items, protocol.CompletionItem{Label: strings.TrimPrefix(symbol.Name, container.Name+"."), Kind: kind, Detail: protocol.NewOptional(symbol.Detail)})
 		declaration := declarations[symbol.SelectionRange]
-		if declaration == nil || deep == 3 || !completionStaticType(declaration.Type) {
+		if declaration == nil || deep == 3 {
 			continue
 		}
-		childContainer := completionContainer(analysis.CollectSymbols(file), declaration.Type.Name)
+		memberType := types.DeclarationType(declaration)
+		if !completionStaticType(memberType) {
+			continue
+		}
+		childContainer := completionContainer(symbols, memberType.Name)
 		if childContainer == nil {
 			continue
 		}

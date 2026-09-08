@@ -285,14 +285,14 @@ func TestCompletionFunctionSnippetEscapesAndDefaultIsPlain(t *testing.T) {
 		t.Fatalf("snippet = %q", got)
 	}
 	file := syntax.Parse("vim9script\ndef Call(first: string, second: number)\nenddef\n")
-	if got, snippet = completionUserFunctionSnippet(file, "Call", true); !snippet || got != "Call(${1:first}, ${2:second})$0" {
+	if got, snippet = completionFunctionSnippet("Call", completionFunctionParameters(file)["Call"], true); !snippet || got != "Call(${1:first}, ${2:second})$0" {
 		t.Fatalf("user function snippet = %q, %t", got, snippet)
 	}
 	if got, snippet = completionFunctionSnippet("Done", nil, true); !snippet || got != "Done()$0" {
 		t.Fatalf("zero-argument snippet = %q, %t", got, snippet)
 	}
 	legacy := syntax.Parse("function! Legacy(argument)\nendfunction\n")
-	if got, snippet = completionUserFunctionSnippet(legacy, "Legacy", true); !snippet || got != "Legacy(${1:argument})$0" {
+	if got, snippet = completionFunctionSnippet("Legacy", completionFunctionParameters(legacy)["Legacy"], true); !snippet || got != "Legacy(${1:argument})$0" {
 		t.Fatalf("legacy function snippet = %q, %t", got, snippet)
 	}
 }

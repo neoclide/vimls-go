@@ -593,6 +593,12 @@ func (s *Server) openWorkspaceReferenceLocationsInState(ctx context.Context, wor
 		}
 		file, fileAnalysis := s.analyzeSnapshotContext(ctx, snapshot)
 		if file == nil || fileAnalysis == nil {
+			if ctx.Err() != nil {
+				return nil, nil, protocol.ErrRequestCancelled
+			}
+			if snapshot.ByteLen() <= maxFileBytes {
+				return nil, nil, protocol.ErrContentModified
+			}
 			continue
 		}
 		for _, reference := range workspace.CollectExternalReferencesFromAnalysis(path, file, fileAnalysis) {

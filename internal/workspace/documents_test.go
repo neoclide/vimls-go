@@ -119,6 +119,48 @@ func TestDocumentsCancelAndRejectStaleAnalysis(t *testing.T) {
 	}
 }
 
+func TestRequestAnalysisSnapshotDoesNotReplaceOtherWork(t *testing.T) {
+	documents := NewDocuments()
+	const uri = "file:///requests.vim"
+	documents.Open(uri, 1, "let count = 1\n")
+	background, _ := documents.BeginAnalysis(context.Background(), uri)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first, _ := documents.SnapshotAnalysis(ctx, uri)
+	second, _ := documents.SnapshotAnalysis(context.Background(), uri)
+	if !documents.IsCurrent(background) || !documents.IsCurrent(first) || !documents.IsCurrent(second) {
+		t.Fatal("request capture superseded another consumer")
+	}
+	restarted, _ := documents.BeginAnalysis(context.Background(), uri)
+	if documents.IsCurrent(background) || !documents.IsCurrent(first) || !documents.IsCurrent(second) {
+		t.Fatal("delayed background restart canceled an independent request")
+	}
+	cancel()
+	if documents.IsCurrent(first) || !documents.IsCurrent(second) || !documents.IsCurrent(restarted) {
+		t.Fatal("request cancellation affected another consumer")
+	}
+	if _, _, err := documents.Change(uri, 2, text.UTF16, []text.Change{{Text: "let count = 2\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	if documents.IsCurrent(second) || documents.IsCurrent(restarted) {
+		t.Fatal("edit retained stale analysis identity")
+	}
+	current, _ := documents.SnapshotAnalysis(context.Background(), uri)
+	documents.ConfigurationChanged()
+	if documents.IsCurrent(current) {
+		t.Fatal("configuration retained stale request identity")
+	}
+	current, _ = documents.SnapshotAnalysis(context.Background(), uri)
+	documents.Close(uri)
+	documents.Open(uri, 2, current.Snapshot.Text())
+	if documents.IsCurrent(current) {
+		t.Fatal("reopen retained stale request identity")
+	}
+	if _, ok := documents.SnapshotAnalysis(context.Background(), "missing"); ok {
+		t.Fatal("captured missing document")
+	}
+}
+
 func TestDocumentsSnapshotsAreSortedAndIndependent(t *testing.T) {
 	documents := NewDocuments()
 	documents.Open("file:///z.vim", 1, "z")

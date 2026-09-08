@@ -15,8 +15,23 @@ import (
 // The analysis worker normally populates parsed, but requests also parse a
 // current snapshot when the worker has not caught up yet.
 func (s *Server) structureDocument(ctx context.Context, documentURI string) (*text.Snapshot, *syntax.File, text.Encoding, error) {
-	snapshot, file, _, encoding, err := s.structureDocumentWithAnalysis(ctx, documentURI)
-	return snapshot, file, encoding, err
+	if ctx.Err() != nil {
+		return nil, nil, text.UTF16, protocol.ErrRequestCancelled
+	}
+	s.publishMu.Lock()
+	snapshot, ok := s.documents.Snapshot(documentURI)
+	s.publishMu.Unlock()
+	s.mu.Lock()
+	encoding := s.encoding
+	s.mu.Unlock()
+	if !ok || snapshot.ByteLen() > maxFileBytes {
+		return nil, nil, encoding, nil
+	}
+	file := s.parseSnapshotContext(ctx, snapshot)
+	if ctx.Err() != nil {
+		return nil, nil, encoding, protocol.ErrRequestCancelled
+	}
+	return snapshot, file, encoding, nil
 }
 
 func (s *Server) structureDocumentWithAnalysis(ctx context.Context, documentURI string) (*text.Snapshot, *syntax.File, *analysis.FileAnalysis, text.Encoding, error) {
@@ -35,6 +50,9 @@ func (s *Server) structureDocumentWithAnalysis(ctx context.Context, documentURI 
 	file, fileAnalysis := s.analyzeSnapshotContext(ctx, snapshot)
 	if err := ctx.Err(); err != nil {
 		return nil, nil, nil, encoding, protocol.ErrRequestCancelled
+	}
+	if file == nil || fileAnalysis == nil {
+		return nil, nil, nil, encoding, protocol.ErrContentModified
 	}
 	return snapshot, file, fileAnalysis, encoding, nil
 }

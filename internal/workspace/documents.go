@@ -149,6 +149,19 @@ func (d *Documents) BeginAnalysis(ctx context.Context, uri string) (Analysis, bo
 	}, true
 }
 
+// SnapshotAnalysis captures request-owned work without replacing a background
+// analysis or another request. The caller's context controls cancellation;
+// IsCurrent still rejects edits, reopen and configuration changes at publication.
+func (d *Documents) SnapshotAnalysis(ctx context.Context, uri string) (Analysis, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	current := d.documents[uri]
+	if current == nil {
+		return Analysis{}, false
+	}
+	return Analysis{Context: ctx, Snapshot: current.snapshot, ConfigRevision: d.configRevision}, true
+}
+
 func (d *Documents) IsCurrent(analysis Analysis) bool {
 	if analysis.Context == nil || analysis.Context.Err() != nil || analysis.Snapshot == nil {
 		return false

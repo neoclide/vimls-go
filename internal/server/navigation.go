@@ -59,6 +59,9 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 		if err := ctx.Err(); err != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
+		if snapshot.ByteLen() <= maxFileBytes {
+			return nil, protocol.ErrContentModified
+		}
 		return nil, nil
 	}
 

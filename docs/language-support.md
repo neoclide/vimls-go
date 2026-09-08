@@ -21,6 +21,26 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
+Completion uses the current text without waiting for full file analysis.
+Commands and options use syntax and built-in metadata; local variables and
+members use lexical declarations. Local declaration type details are computed
+on `completionItem/resolve`; the initial list retains insertion text and snippets.
+Clients that do not resolve items show the declaration kind without inferred
+type detail. Resolving an item from an edited or reopened document leaves it
+unchanged. Member discovery still queries the receiver and bounded nested-member
+types. Function parameters and member symbols are each collected at most once
+per completion request.
+
+Background diagnostics and workspace analysis yield between phases and in
+batched scope, reference and type traversals while
+completion requests are active and until 150 ms after the latest accepted edit.
+Queued document analysis captures the latest snapshot after this wait, merging
+intermediate edits. Editing or closing an open document cancels obsolete shared
+semantic work, including a paused pass; identical-content work can continue.
+Cancelling one requesting consumer does not cancel the shared computation.
+Parsing needed by a foreground request bypasses the wait;
+it still reads the whole source, so large files can increase completion latency.
+
 Document text supports LF, CRLF and CR line endings, including mixed files.
 Positions follow the negotiated UTF-8, UTF-16 or UTF-32 encoding. Formatting
 and rename preserve the original line-ending bytes.

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"runtime"
 	"testing"
@@ -10,6 +11,40 @@ import (
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
+
+func TestParseAndAnalyzeSourcesYieldErrorUnblocksProducer(t *testing.T) {
+	// More jobs than the single worker's queue can hold. An error returned by
+	// its yield callback must also release the producer, even if the caller's
+	// context has not been canceled.
+	sources := make([]string, 32)
+	for i := range sources {
+		sources[i] = "vim9script\nvar value: number = 'wrong'\n"
+	}
+	done := make(chan []AnalyzedSource, 1)
+	go func() {
+		calls := 0
+		done <- ParseAndAnalyzeSourcesWithYield(context.Background(), sources, 1, func(context.Context) error {
+			calls++
+			if calls == 8 {
+				return errors.New("stop background work")
+			}
+			return nil
+		})
+	}()
+	select {
+	case result := <-done:
+		if len(result) != len(sources) {
+			t.Fatalf("result length = %d", len(result))
+		}
+		for i, item := range result {
+			if item.File != nil || item.Analysis != nil {
+				t.Fatalf("partial result installed in slot %d", i)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("yield failure left producer blocked")
+	}
+}
 
 func TestParseSourcesMatchesSequentialResultsInInputOrder(t *testing.T) {
 	sources := []string{

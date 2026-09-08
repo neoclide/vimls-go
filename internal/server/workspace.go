@@ -913,7 +913,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, workspaceRoots, runtim
 		sources = append(sources, source)
 		indexedDiskFiles = append(indexedDiskFiles, diskFile)
 	}
-	files := workspace.ParseAndAnalyzeSources(ctx, sources, 0)
+	files := s.parseAndAnalyzeSources(ctx, sources)
 	if ctx.Err() != nil {
 		return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 	}
@@ -979,7 +979,7 @@ func (s *Server) buildWorkspaceIndex(ctx context.Context, workspaceRoots, runtim
 		if len(newPaths) == 0 {
 			break
 		}
-		parsed := workspace.ParseAndAnalyzeSources(ctx, newSources, 0)
+		parsed := s.parseAndAnalyzeSources(ctx, newSources)
 		if ctx.Err() != nil {
 			return newWorkspaceIndex(), workspace.NewImportGraph(), map[string]struct{}{}, nil
 		}
@@ -1848,7 +1848,7 @@ func (s *Server) applyRuntimepathDeltaLocked(ctx context.Context, oldPaths, newP
 	}
 	var parsed []workspace.AnalyzedSource
 	if len(newSources) > 0 {
-		parsed = workspace.ParseAndAnalyzeSources(ctx, newSources, 0)
+		parsed = s.parseAndAnalyzeSources(ctx, newSources)
 		if ctx.Err() != nil {
 			return false
 		}
@@ -2230,7 +2230,7 @@ func (s *Server) applyWatchedFileChanges(ctx context.Context, changes []protocol
 		}
 
 		file := syntax.Parse(content)
-		fileAnalysis := analysis.Analyze(file)
+		fileAnalysis := s.analyzeFile(ctx, file, false)
 
 		if ctx.Err() != nil || s.analysisContext.Err() != nil {
 			return false

@@ -67,11 +67,11 @@ func (s *Server) Diagnostic(ctx context.Context, params *protocol.DocumentDiagno
 		if ctx.Err() != nil {
 			return nil, protocol.ErrRequestCancelled
 		}
-		// The JSON-RPC request values are borrowed and become invalid when the
-		// handler returns. Keep its cancellation signal, but never retain those
-		// values in the document's longer-lived analysis context.
+		// Request-owned work must survive a background restart after input
+		// backoff. Preserve request cancellation without borrowing RPC values
+		// into any longer-lived shared computation.
 		analysisContext := valueContext{Context: ctx, values: s.analysisContext}
-		work, open := s.documents.BeginAnalysis(analysisContext, params.TextDocument.URI.String())
+		work, open := s.documents.SnapshotAnalysis(analysisContext, params.TextDocument.URI.String())
 		if !open {
 			s.publishMu.Lock()
 			s.nextDiagnosticResultID++
@@ -201,7 +201,7 @@ func (s *Server) DiagnosticWorkspace(ctx context.Context, params *protocol.Works
 				}
 				document.snapshot = text.NewSnapshot(uri.File(document.path).String(), 0, nil, string(content))
 			} else {
-				work, ok := s.documents.BeginAnalysis(valueContext{Context: ctx, values: s.analysisContext}, document.snapshot.URI())
+				work, ok := s.documents.SnapshotAnalysis(valueContext{Context: ctx, values: s.analysisContext}, document.snapshot.URI())
 				if !ok || work.Snapshot != document.snapshot || work.ConfigRevision != configRevision {
 					stale = true
 					break
@@ -441,7 +441,7 @@ func (s *Server) computeClosedWorkspaceDiagnostics(ctx context.Context, snapshot
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
-		fileAnalysis = analyzeWithRole(file, s.IsConfigFile(path))
+		fileAnalysis = s.analyzeFile(ctx, file, s.IsConfigFile(path))
 	}
 	if ctx.Err() != nil {
 		return nil, workspaceIdentity{}, false

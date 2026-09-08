@@ -66,6 +66,16 @@ General expression reformatting, embedded-language analysis and persistent
 disk indexes remain outside the current scope. The parser still reparses
 changed source; incremental AST editing is not implemented.
 
+Completion shares syntax independently of full analysis. Local declaration
+details are inferred only on resolve with snapshot validation; function parameter
+and member symbol scans are reused within a request. Diagnostic and workspace
+analysis yield to active completions at phase and batched traversal boundaries and back off until
+150 ms after the latest edit. Queued document analysis then consumes the latest
+snapshot. Content-owned cancellation abandons obsolete open-document semantic
+work while preserving same-content sharing and independent waiter cancellation.
+Further large-file latency work should measure parsing and client-side
+rendering separately; neither is preempted by this scheduling.
+
 Text indexing and parsing now agree on LF, CRLF and CR physical lines.
 Formatting and rename preserve their original byte spelling.
 

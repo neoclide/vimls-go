@@ -22,7 +22,7 @@ type AnalyzedSource struct {
 // parse already inside syntax.Parse is allowed to finish because the parser
 // does not accept a cancellation hook.
 func ParseSources(ctx context.Context, sources []string, workers int) []*syntax.File {
-	analyzed := parseAndAnalyzeSources(ctx, sources, workers, false)
+	analyzed := parseAndAnalyzeSources(ctx, sources, workers, false, nil)
 	results := make([]*syntax.File, len(analyzed))
 	for index, result := range analyzed {
 		results[index] = result.File
@@ -33,14 +33,23 @@ func ParseSources(ctx context.Context, sources []string, workers int) []*syntax.
 // ParseAndAnalyzeSources parses and performs file-local semantic analysis of
 // independent sources in a bounded worker pool. Results retain source order.
 func ParseAndAnalyzeSources(ctx context.Context, sources []string, workers int) []AnalyzedSource {
-	return parseAndAnalyzeSources(ctx, sources, workers, true)
+	return parseAndAnalyzeSources(ctx, sources, workers, true, nil)
 }
 
-func parseAndAnalyzeSources(ctx context.Context, sources []string, workers int, analyze bool) []AnalyzedSource {
+// ParseAndAnalyzeSourcesWithYield lets a caller suspend background work before
+// each file and between semantic phases. yield may be called concurrently by
+// workers and must honor ctx cancellation. No partial analysis is returned.
+func ParseAndAnalyzeSourcesWithYield(ctx context.Context, sources []string, workers int, yield func(context.Context) error) []AnalyzedSource {
+	return parseAndAnalyzeSources(ctx, sources, workers, true, yield)
+}
+
+func parseAndAnalyzeSources(ctx context.Context, sources []string, workers int, analyze bool, yield func(context.Context) error) []AnalyzedSource {
 	results := make([]AnalyzedSource, len(sources))
 	if len(sources) == 0 || ctx.Err() != nil {
 		return results
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	workerCount := parseWorkerCount(workers, len(sources))
 	jobs := make(chan int, workerCount)
@@ -57,10 +66,30 @@ func parseAndAnalyzeSources(ctx context.Context, sources []string, workers int, 
 					if !ok || ctx.Err() != nil {
 						return
 					}
+					if yield != nil {
+						if err := yield(ctx); err != nil {
+							cancel()
+							return
+						}
+					}
 					file := syntax.Parse(sources[index])
 					results[index].File = file
 					if analyze && ctx.Err() == nil {
-						results[index].Analysis = analysis.Analyze(file)
+						result, err := analysis.AnalyzeWithYield(file, false, func() error {
+							if err := ctx.Err(); err != nil {
+								return err
+							}
+							if yield != nil {
+								return yield(ctx)
+							}
+							return nil
+						})
+						if err != nil {
+							results[index] = AnalyzedSource{}
+							cancel()
+							return
+						}
+						results[index].Analysis = result
 					}
 				}
 			}

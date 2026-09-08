@@ -49,12 +49,28 @@ type typeState struct {
 	references    map[syntax.Span]*Reference
 	commandScopes map[*syntax.Command]*Scope
 	commandBodies []syntax.Span
+	completion    *CompletionTypes
 }
 
 func inferTypes(result *FileAnalysis) {
 	if result == nil || result.File == nil {
 		return
 	}
+	state := newTypeState(result)
+	state.collectFacts()
+
+	// A small fixed number of source-order passes lets a function return fact
+	// propagate through a forward call without creating a recursive solver.
+	for pass := range 2 {
+		if pass > 0 {
+			result.expressionTypes = make(map[*syntax.Expression]ValueType)
+		}
+		state.walkCommands()
+		state.inferFunctionReturns()
+	}
+}
+
+func newTypeState(result *FileAnalysis) *typeState {
 	result.expressionTypes = make(map[*syntax.Expression]ValueType)
 	state := &typeState{
 		result:        result,
@@ -73,17 +89,8 @@ func inferTypes(result *FileAnalysis) {
 	for _, reference := range result.References {
 		state.references[reference.Span] = reference
 	}
-	state.collectFacts()
 
-	// A small fixed number of source-order passes lets a function return fact
-	// propagate through a forward call without creating a recursive solver.
-	for pass := range 2 {
-		if pass > 0 {
-			result.expressionTypes = make(map[*syntax.Expression]ValueType)
-		}
-		state.walkCommands()
-		state.inferFunctionReturns()
-	}
+	return state
 }
 
 func (state *typeState) collectFacts() {
@@ -94,6 +101,9 @@ func (state *typeState) collectFacts() {
 func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 	file := state.result.File
 	for index := range commands {
+		if !state.result.analysisStep() {
+			return
+		}
 		command := &commands[index]
 		if command.Aggregate != nil {
 			if declaration := state.declarations[command.Aggregate.Name]; declaration != nil {
@@ -218,6 +228,9 @@ func (state *typeState) collectUserCommandBodies(commands []syntax.Command) {
 func (state *typeState) walkCommandList(commands []syntax.Command) {
 	file := state.result.File
 	for index := range commands {
+		if !state.result.analysisStep() {
+			return
+		}
 		command := &commands[index]
 		scope := state.commandScopes[command]
 		if scope == nil {
@@ -324,46 +337,15 @@ func (state *typeState) inferFunctionReturns() {
 
 func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) {
 	for index := range commands {
+		if !state.result.analysisStep() {
+			return
+		}
 		command := &commands[index]
 		if command.Function != nil && (command.Function.ReturnType == nil || command.Function.ReturnType.Kind == syntax.TypeMissing) {
 			declaration := state.declarations[command.Function.Name]
 			if declaration != nil && declaration.Type.Return != nil && isUnresolvedType(*declaration.Type.Return) &&
 				(command.Function.ReturnType == nil || !syntaxDiagnosticOverlaps(state.result.File.Diagnostics, command.Function.ReturnType.Span)) {
-				inferred := UnknownValueType
-				hasValueReturn := false
-				functionScope := state.commandScopes[command]
-				for bodyIndex := index + 1; bodyIndex < len(commands); bodyIndex++ {
-					body := &commands[bodyIndex]
-					if functionScope == nil || body.Span.Start >= functionScope.Span.End {
-						break
-					}
-					owner := state.commandScopes[body]
-					for owner != nil && owner.Kind != syntax.BlockFunction && owner.Kind != syntax.BlockDef && owner.Lambda == nil {
-						owner = owner.Parent
-					}
-					if owner != functionScope {
-						continue
-					}
-					if body.Canonical == "return" && (len(body.Expressions) > 0 || command.Canonical == "function") {
-						hasValueReturn = true
-						current := ValueType{Name: "number"} // Legacy bare return yields zero.
-						if len(body.Expressions) > 0 {
-							current = state.infer(body.Expressions[0], state.commandScopes[body])
-						}
-						if isUnresolvedType(inferred) {
-							inferred = current
-						} else {
-							inferred = mergeTypes(inferred, current)
-						}
-					}
-				}
-				if !hasValueReturn {
-					inferred = ValueType{Name: "void"}
-					if command.Canonical == "function" {
-						inferred = ValueType{Name: "number"}
-					}
-				}
-				*declaration.Type.Return = inferred
+				*declaration.Type.Return = state.inferFunctionReturn(commands, index)
 			}
 		}
 		if command.Embedded != nil {
@@ -372,7 +354,52 @@ func (state *typeState) inferFunctionReturnsCommands(commands []syntax.Command) 
 	}
 }
 
+func (state *typeState) inferFunctionReturn(commands []syntax.Command, index int) ValueType {
+	command := &commands[index]
+	inferred := UnknownValueType
+	hasValueReturn := false
+	functionScope := state.commandScopes[command]
+	for bodyIndex := index + 1; bodyIndex < len(commands); bodyIndex++ {
+		if !state.result.analysisStep() {
+			return UnknownValueType
+		}
+		body := &commands[bodyIndex]
+		if functionScope == nil || body.Span.Start >= functionScope.Span.End {
+			break
+		}
+		owner := state.commandScopes[body]
+		for owner != nil && owner.Kind != syntax.BlockFunction && owner.Kind != syntax.BlockDef && owner.Lambda == nil {
+			owner = owner.Parent
+		}
+		if owner != functionScope {
+			continue
+		}
+		if body.Canonical == "return" && (len(body.Expressions) > 0 || command.Canonical == "function") {
+			hasValueReturn = true
+			current := ValueType{Name: "number"} // Legacy bare return yields zero.
+			if len(body.Expressions) > 0 {
+				current = state.infer(body.Expressions[0], state.commandScopes[body])
+			}
+			if isUnresolvedType(inferred) {
+				inferred = current
+			} else {
+				inferred = mergeTypes(inferred, current)
+			}
+		}
+	}
+	if !hasValueReturn {
+		inferred = ValueType{Name: "void"}
+		if command.Canonical == "function" {
+			inferred = ValueType{Name: "number"}
+		}
+	}
+	return inferred
+}
+
 func (state *typeState) infer(expression *syntax.Expression, scope *Scope) ValueType {
+	if !state.result.analysisStep() {
+		return UnknownValueType
+	}
 	if expression == nil {
 		return UnknownValueType
 	}
@@ -428,10 +455,10 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			} else if reference := state.references[expression.Span]; reference != nil {
 				typ = unknown
 				if reference.Declaration != nil {
-					typ = reference.Declaration.Type
+					typ = state.typeOfDeclaration(reference.Declaration)
 				}
 			} else if declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil); declaration != nil {
-				typ = declaration.Type
+				typ = state.typeOfDeclaration(declaration)
 			} else {
 				typ = unknown
 			}
@@ -509,6 +536,9 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		}
 	case syntax.ExpressionCall:
 		if len(expression.Children) > 0 {
+			if state.completion != nil {
+				state.collectCompletionCallee(expression.Children[0], scope)
+			}
 			callee := state.infer(expression.Children[0], scope)
 			for _, argument := range expression.Children[1:] {
 				state.infer(argument, scope)
@@ -1109,8 +1139,10 @@ func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) 
 		// Infer declarations in source order before looking at returns.  This is
 		// important for block lambdas whose return expression names a local
 		// declared earlier in the body.
-		state.walkCommandList(expression.LambdaBody.Commands)
-		state.inferFunctionReturnsCommands(expression.LambdaBody.Commands)
+		if state.completion == nil {
+			state.walkCommandList(expression.LambdaBody.Commands)
+			state.inferFunctionReturnsCommands(expression.LambdaBody.Commands)
+		}
 		returnType = state.lambdaBodyReturnType(expression.LambdaBody.Commands, lambdaScope)
 	} else if len(expression.Children) > len(expression.Parameters) {
 		returnType = state.infer(expression.Children[len(expression.Parameters)], lambdaScope)
@@ -1193,6 +1225,9 @@ func compatibleTypes(expected, actual ValueType) bool {
 }
 
 func (state *typeState) assign(expression *syntax.Expression, typ ValueType) {
+	if state.completion != nil {
+		return
+	}
 	if expression == nil || isUnresolvedType(typ) {
 		return
 	}

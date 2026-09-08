@@ -57,6 +57,7 @@ type parsedDocument struct {
 	configFile bool
 	file       *syntax.File
 	analysis   *analysis.FileAnalysis
+	completion *analysis.FileAnalysis
 }
 
 type parseInFlightKey struct {
@@ -66,9 +67,21 @@ type parseInFlightKey struct {
 }
 
 type inFlightParse struct {
-	source   string
-	done     chan struct{}
+	source string
+	done   chan struct{}
+	file   *syntax.File
+}
+
+type analysisInFlightKey struct {
+	parseInFlightKey
+	completion bool
+}
+
+type inFlightAnalysis struct {
+	context  context.Context
+	cancel   context.CancelFunc
 	file     *syntax.File
+	done     chan struct{}
 	analysis *analysis.FileAnalysis
 }
 
@@ -121,7 +134,12 @@ type serverTestHooks struct {
 	afterAnalysisFinished        func(string)
 	beforeParseSnapshotCacheMiss func(*text.Snapshot)
 	beforeInFlightWait           func(*text.Snapshot)
+	beforeAnalysisInFlightWait   func(*text.Snapshot)
 	beforeAnalyze                func(*syntax.File)
+	beforeAnalysisCheckpoint     func()
+	analysisPaused               func()
+	beforeCompletion             func()
+	beforeLocalCompletionResolve func(*text.Snapshot)
 
 	beforeWorkspaceWGWait       func()
 	beforeWorkspaceRestoreRead  func(workspaceRestore)
@@ -194,6 +212,7 @@ type Server struct {
 	documents                   *workspace.Documents
 	encoding                    text.Encoding
 	completion                  completionCapabilities
+	completionPriority          completionPriority
 	languageFeatures            languageFeatureCapabilities
 	exitOnce                    sync.Once
 	stopOnce                    sync.Once
@@ -212,6 +231,7 @@ type Server struct {
 	publishMu                   sync.Mutex
 	parsed                      map[string]parsedDocument
 	parseInFlight               map[parseInFlightKey]*inFlightParse
+	analysisInFlight            map[analysisInFlightKey]*inFlightAnalysis
 	published                   map[string]publishedDiagnosticsState
 	pullDiagnosticResults       map[string]pullDiagnosticResult
 	workspaceDiagnosticReported map[string]string // publishMu; retained until removal is acknowledged
@@ -299,6 +319,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		analysisRunning:       make(map[string]struct{}),
 		parsed:                make(map[string]parsedDocument),
 		parseInFlight:         make(map[parseInFlightKey]*inFlightParse),
+		analysisInFlight:      make(map[analysisInFlightKey]*inFlightAnalysis),
 		published:             make(map[string]publishedDiagnosticsState),
 		workspaceIndex:        newWorkspaceIndex(),
 		workspaceGraph:        graph,
@@ -727,6 +748,7 @@ func (s *Server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 	document := params.TextDocument
 	s.publishMu.Lock()
 	snapshot := s.documents.Open(document.URI.String(), document.Version, document.Text)
+	s.cancelStaleAnalysisLocked(snapshot.URI(), snapshot)
 	st := s.published[snapshot.URI()]
 	st.mustPublish = true
 	st.publishSeq++
@@ -770,6 +792,9 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 	s.mu.Unlock()
 	s.publishMu.Lock()
 	snapshot, changed, err := s.documents.Change(params.TextDocument.URI.String(), params.TextDocument.Version, encoding, changes)
+	if err == nil {
+		s.cancelStaleAnalysisLocked(snapshot.URI(), snapshot)
+	}
 	var dependents []string
 	if err == nil {
 		st := s.published[params.TextDocument.URI.String()]
@@ -789,6 +814,7 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 	if err != nil {
 		s.logf("vimls: ignored content change for %s: %v", params.TextDocument.URI, err)
 	} else {
+		s.completionPriority.userActivity()
 		s.startAnalysis(params.TextDocument.URI.String())
 		s.startWorkspaceDependents(dependents)
 	}
@@ -798,6 +824,9 @@ func (s *Server) DidChange(_ context.Context, params *protocol.DidChangeTextDocu
 func (s *Server) DidSave(_ context.Context, params *protocol.DidSaveTextDocumentParams) error {
 	s.publishMu.Lock()
 	snapshot, changed, err := s.documents.Save(params.TextDocument.URI.String(), params.Text)
+	if err == nil {
+		s.cancelStaleAnalysisLocked(snapshot.URI(), snapshot)
+	}
 	var dependents []string
 	if err == nil {
 		st := s.published[params.TextDocument.URI.String()]
@@ -830,6 +859,7 @@ func (s *Server) DidClose(_ context.Context, params *protocol.DidCloseTextDocume
 	s.analysisMu.Unlock()
 	s.publishMu.Lock()
 	closed := s.documents.Close(documentURI)
+	s.cancelStaleAnalysisLocked(documentURI, nil)
 	delete(s.parsed, documentURI)
 	delete(s.pullDiagnosticResults, documentURI)
 	delete(s.semanticTokenResults, documentURI)
@@ -1258,6 +1288,11 @@ func (s *Server) wakeAnalysisLocked() {
 }
 
 func (s *Server) analyzeDocument(documentURI string) {
+	// Wait before capturing the snapshot: queued edits coalesce while the user
+	// types, and a foreground request can still start its own shared parse.
+	if s.analysisCheckpoint(s.analysisContext) != nil {
+		return
+	}
 	work, ok := s.documents.BeginAnalysis(s.analysisContext, documentURI)
 	if !ok || work.Context.Err() != nil {
 		return
@@ -1373,8 +1408,7 @@ func (s *Server) prepareSyntax(work workspace.Analysis, file *syntax.File, resul
 // cache contains parser output only; callers that add diagnostics must work on
 // a separate File header and diagnostics slice.
 func (s *Server) parseSnapshot(snapshot *text.Snapshot) *syntax.File {
-	file, _ := s.analyzeSnapshot(snapshot)
-	return file
+	return s.parseSnapshotContext(context.Background(), snapshot)
 }
 
 // analyzeSnapshot returns the cached or parsed syntax tree and pure file analysis
@@ -1392,143 +1426,6 @@ func (s *Server) configFileRoleForURI(documentURI string) bool {
 		return false
 	}
 	return s.IsConfigFile(path)
-}
-
-// analyzeWithRole returns the file-local analysis for one parsed file in the
-// configuration-file mode selected for the document.
-func analyzeWithRole(file *syntax.File, configFile bool) *analysis.FileAnalysis {
-	if configFile {
-		return analysis.AnalyzeConfigFile(file)
-	}
-	return analysis.Analyze(file)
-}
-
-// analyzeSnapshotContext returns the syntax tree and pure file analysis for snapshot,
-// waiting for in-flight calculations or initiating a single parse+analysis pass.
-// If ctx is cancelled while waiting on an in-flight calculation, it yields without
-// disturbing the in-flight work.
-func (s *Server) analyzeSnapshotContext(ctx context.Context, snapshot *text.Snapshot) (*syntax.File, *analysis.FileAnalysis) {
-	if snapshot == nil || snapshot.ByteLen() > maxFileBytes {
-		return nil, nil
-	}
-	documentURI := snapshot.URI()
-	contentID := snapshot.ContentID()
-	source := snapshot.Text()
-	configFile := s.configFileRoleForURI(documentURI)
-
-	s.publishMu.Lock()
-	parsed := s.parsed[documentURI]
-	if parsed.file != nil && parsed.contentID == contentID && parsed.configFile == configFile && parsed.file.Source == source {
-		if parsed.analysis != nil {
-			s.publishMu.Unlock()
-			return parsed.file, parsed.analysis
-		}
-		file := parsed.file
-		s.publishMu.Unlock()
-		if hook := s.testHooks.beforeAnalyze; hook != nil {
-			hook(file)
-		}
-		fileAnalysis := analyzeWithRole(file, configFile)
-		s.publishMu.Lock()
-		if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID && cur.configFile == configFile {
-			cur.analysis = fileAnalysis
-			s.parsed[documentURI] = cur
-		}
-		s.publishMu.Unlock()
-		return file, fileAnalysis
-	}
-
-	key := parseInFlightKey{
-		uri:        documentURI,
-		contentID:  contentID,
-		configFile: configFile,
-	}
-
-	for {
-		if ctx.Err() != nil {
-			s.publishMu.Unlock()
-			return nil, nil
-		}
-		inFlight := s.parseInFlight[key]
-		if inFlight != nil && inFlight.source == source {
-			done := inFlight.done
-			hook := s.testHooks.beforeInFlightWait
-			s.publishMu.Unlock()
-			if hook != nil {
-				hook(snapshot)
-			}
-			select {
-			case <-ctx.Done():
-				return nil, nil
-			case <-done:
-			}
-			s.publishMu.Lock()
-			parsed = s.parsed[documentURI]
-			if parsed.file != nil && parsed.contentID == contentID && parsed.configFile == configFile && parsed.file.Source == source {
-				if parsed.analysis != nil {
-					s.publishMu.Unlock()
-					return parsed.file, parsed.analysis
-				}
-				file := parsed.file
-				s.publishMu.Unlock()
-				if hook := s.testHooks.beforeAnalyze; hook != nil {
-					hook(file)
-				}
-				fileAnalysis := analyzeWithRole(file, configFile)
-				s.publishMu.Lock()
-				if cur := s.parsed[documentURI]; cur.file == file && cur.contentID == contentID && cur.configFile == configFile {
-					cur.analysis = fileAnalysis
-					s.parsed[documentURI] = cur
-				}
-				s.publishMu.Unlock()
-				return file, fileAnalysis
-			}
-			if inFlight.file != nil && inFlight.analysis != nil {
-				s.publishMu.Unlock()
-				return inFlight.file, inFlight.analysis
-			}
-			continue
-		}
-
-		entry := &inFlightParse{
-			source: source,
-			done:   make(chan struct{}),
-		}
-		s.parseInFlight[key] = entry
-		s.publishMu.Unlock()
-
-		if hook := s.testHooks.beforeParseSnapshotCacheMiss; hook != nil {
-			hook(snapshot)
-		}
-		file := syntax.Parse(source)
-		if hook := s.testHooks.beforeAnalyze; hook != nil {
-			hook(file)
-		}
-		fileAnalysis := analyzeWithRole(file, configFile)
-
-		entry.file = file
-		entry.analysis = fileAnalysis
-
-		s.publishMu.Lock()
-		if s.parseInFlight[key] == entry {
-			delete(s.parseInFlight, key)
-		}
-		close(entry.done)
-
-		if s.analysisContext.Err() == nil {
-			current, ok := s.documents.Snapshot(documentURI)
-			if ok && current == snapshot {
-				s.parsed[documentURI] = parsedDocument{
-					contentID:  contentID,
-					configFile: configFile,
-					file:       file,
-					analysis:   fileAnalysis,
-				}
-			}
-		}
-		s.publishMu.Unlock()
-		return file, fileAnalysis
-	}
 }
 
 func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, identity workspaceIdentity) bool {

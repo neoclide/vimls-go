@@ -28,11 +28,13 @@ const (
 	completionResolveVariable         completionResolveKind = "variable"
 	completionResolveCommand          completionResolveKind = "command"
 	completionResolveCommandAttribute completionResolveKind = "command-attribute"
+	completionResolveLocal            completionResolveKind = "local"
 )
 
 type completionResolveTarget struct {
-	Kind completionResolveKind `json:"kind"`
-	Name string                `json:"name"`
+	Kind  completionResolveKind  `json:"kind"`
+	Name  string                 `json:"name"`
+	Local *localCompletionTarget `json:"local,omitempty"`
 }
 
 func completionResolveTargetData(kind completionResolveKind, name string) []byte {
@@ -898,6 +900,8 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 		}
 	}
 	switch target.Kind {
+	case completionResolveLocal:
+		return s.resolveLocalCompletion(ctx, &result, target)
 	case completionResolveBuiltinFunction:
 		if function, ok := vimdata.LookupFunction(target.Name); ok {
 			applyMetadata(builtinFunctionDetail(function), s.runtimeHelpMarkdown(function.Name))

@@ -1192,8 +1192,10 @@ func TestServerConcurrentABAInFlightDoesNotDuplicateA(t *testing.T) {
 	if leaderAAnalysis == nil || secondAAnalysis == nil || leaderAAnalysis != secondAAnalysis {
 		t.Fatalf("expected matching analysis pointer for A: %p vs %p", leaderAAnalysis, secondAAnalysis)
 	}
-	if bFile == nil || bAnalysis == nil {
-		t.Fatal("B failed")
+	// B never became the current document content. Its syntax may be parsed,
+	// but obsolete semantic work must be abandoned instead of completed.
+	if bFile != nil || bAnalysis != nil {
+		t.Fatal("obsolete B analysis was not abandoned")
 	}
 }
 
