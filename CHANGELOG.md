@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.2
+
+- Produce completion candidates without waiting for background type analysis;
+  resolve local type details on demand and let analysis yield while typing.
+- Infer variable types from known initializer return types, including the
+  string and list forms of `expand()`.
+- Warn when consecutive simple Legacy assignments change a variable's known
+  basic type, using `vimls/variable-type-change`.
+- Stabilize configuration-shutdown and diagnostic-cache tests; correct the
+  text-edit fuzz reference model for CR and CRLF line endings.
+
 ## v0.1.1
 
 - Preserve LF, CRLF and CR line endings across text positions, diagnostics,
