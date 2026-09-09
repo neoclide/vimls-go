@@ -47,6 +47,62 @@ if executable('vimls')
 endif
 ```
 
+## yegappan/lsp
+
+Install `vimls` on your `PATH`. For [yegappan/lsp](https://github.com/yegappan/lsp) (Vim 9.0 or newer), register `vimls` in your vimrc.
+
+In Vim9 script:
+
+```vim
+vim9script
+
+if executable('vimls')
+  augroup vimls_lsp
+    autocmd!
+    autocmd User LspSetup g:LspAddServer([{
+      name: 'vimls',
+      filetype: ['vim'],
+      path: 'vimls',
+      args: [],
+      initializationOptions: {
+        runtimepath: globpath(&runtimepath, '', 0, 1),
+      },
+    }])
+  augroup END
+endif
+```
+
+Or in legacy Vim script:
+
+```vim
+if executable('vimls')
+  augroup vimls_lsp
+    autocmd!
+    autocmd User LspSetup call LspAddServer([{
+          \ 'name': 'vimls',
+          \ 'filetype': ['vim'],
+          \ 'path': 'vimls',
+          \ 'args': [],
+          \ 'initializationOptions': {
+          \   'runtimepath': globpath(&runtimepath, '', 0, 1),
+          \ },
+          \ }])
+  augroup END
+endif
+```
+
+Use an absolute path in `path` if `vimls` is not on your `PATH`. Server settings can be supplied with `workspaceConfig`:
+
+```vim
+      workspaceConfig: {
+        vim: {
+          diagnostic: {
+            disabled: ['vimls/explicit-local-scope'],
+          },
+        },
+      },
+```
+
 For Neovim's built-in client, use the [Neovim setup](neovim.md).
 
 ## Settings

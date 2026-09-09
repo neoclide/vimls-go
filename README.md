@@ -7,7 +7,7 @@
 A language server for Legacy Vim script and Vim9 script, written in Go.
 
 It adds completion, error checking, navigation and refactoring to editors that
-support LSP. You can use it with coc.nvim, vim-lsp or Neovim's built-in client.
+support LSP. You can use it with coc.nvim, vim-lsp, yegappan/lsp or Neovim's built-in client.
 
 ## What it does
 
@@ -70,7 +70,7 @@ at most 4 MiB; larger inputs are rejected without producing a syntax tree.
 
 ## Set up your editor
 
-- [coc.nvim and vim-lsp setup, settings and troubleshooting](https://github.com/neoclide/vimls-go/blob/main/docs/configuration.md)
+- [coc.nvim, vim-lsp and yegappan/lsp setup, settings and troubleshooting](https://github.com/neoclide/vimls-go/blob/main/docs/configuration.md)
 - [Neovim setup](https://github.com/neoclide/vimls-go/blob/main/docs/neovim.md)
 - [Editing vimrc and other configuration files](https://github.com/neoclide/vimls-go/blob/main/docs/userconfig.md)
 - [Understanding and adjusting diagnostics](https://github.com/neoclide/vimls-go/blob/main/docs/diagnostics.md)
