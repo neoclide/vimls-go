@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.3
+
+- Keep cached plugin command completions available while background analysis is
+  running, including commands from workspace and runtimepath indexes.
+- Add setup documentation for the yegappan/lsp client.
+- Validate the version's CHANGELOG section before `make release` creates or
+  pushes a tag, rejecting missing, empty or duplicate release notes.
+
 ## v0.1.2
 
 - Produce completion candidates without waiting for background type analysis;

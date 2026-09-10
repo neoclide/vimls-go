@@ -149,7 +149,12 @@ For comparison with go-vimlparser and parser-only profiling, follow
 
 Choose a new version, add its `## vX.Y.Z` changelog section, commit the release
 changes and validate that exact source. The changelog section must be nonempty
-and unique; the packager uses it as the release notes.
+and unique; the packager uses it as the release notes. `make release` checks the
+section with the same parser before creating or pushing a tag. To check it alone:
+
+```sh
+go run -mod=readonly ./tools/release -version v0.2.0 -check-changelog
+```
 
 You can build release assets locally without publishing. For example, after
 choosing version `v0.2.0`:

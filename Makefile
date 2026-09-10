@@ -82,6 +82,7 @@ release:
 	  { echo 'Usage: make release VERSION=0.1.0 [RELEASE_REMOTE=origin]' >&2; exit 1; }; \
 	test -z "$$(git status --porcelain)" || \
 	  { echo 'Commit or stash working-tree changes before releasing.' >&2; exit 1; }; \
+	$(GO) run $(GO_MOD) ./tools/release -version "$$release_tag" -check-changelog; \
 	git remote get-url "$$RELEASE_REMOTE" >/dev/null; \
 	if git show-ref --verify --quiet "refs/tags/$$release_tag"; then \
 	  test "$$(git cat-file -t "refs/tags/$$release_tag")" = tag && \

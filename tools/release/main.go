@@ -36,9 +36,20 @@ func main() {
 	epoch := flag.Int64("epoch", 0, "SOURCE_DATE_EPOCH timestamp")
 	output := flag.String("output-dir", "dist", "archive output directory")
 	notesOutput := flag.String("notes-output", "", "optional destination for this version's CHANGELOG release notes")
+	checkChangelog := flag.Bool("check-changelog", false, "validate this version's CHANGELOG section without building assets")
 	flag.Parse()
-	if !regexp.MustCompile(`^v[0-9][0-9A-Za-z.+-]*$`).MatchString(*version) || *epoch <= 0 {
+	if !regexp.MustCompile(`^v[0-9][0-9A-Za-z.+-]*$`).MatchString(*version) || (!*checkChangelog && *epoch <= 0) {
 		fatalf("-version vX.Y.Z and a positive -epoch are required")
+	}
+	if *checkChangelog {
+		changelog, err := os.ReadFile("CHANGELOG.md")
+		if err != nil {
+			fatalf("%v", err)
+		}
+		if _, err := releaseNotes(string(changelog), *version); err != nil {
+			fatalf("%v", err)
+		}
+		return
 	}
 	if err := os.MkdirAll(*output, 0o755); err != nil {
 		fatalf("%v", err)
