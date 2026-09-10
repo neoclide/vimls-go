@@ -2029,3 +2029,156 @@ func TestCompletionItemDefaultsEditRangeFromInitializeCapabilities(t *testing.T)
 		t.Fatal("snippet item has no textEditText")
 	}
 }
+
+func TestCompletionRuntimePathPluginCommands(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	workspaceRoot := filepath.Join(runtimeRoot, "project")
+
+	writeWorkspaceFile(t, runtimeRoot, "plugin/plugin.vim", "command! PluginCommand echo 'plugin'\n")
+	writeWorkspaceFile(t, runtimeRoot, "doc/plugin.txt", "*:DocCommand*\nDocumentation for DocCommand.\n")
+	writeWorkspaceFile(t, workspaceRoot, "plugin/workspace.vim", "command! WorkspaceCommand echo 'workspace'\n")
+
+	instance := New(nil, nil, io.Discard)
+	t.Cleanup(instance.stopAnalysis)
+	rootURI := uri.File(workspaceRoot)
+	options := protocol.LSPAny(fmt.Appendf(nil, `{"runtimepath":[%q]}`, runtimeRoot))
+	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: options}); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceWG.Wait()
+	instance.runtimeHelpWG.Wait()
+
+	documentURI := uri.File(filepath.Join(workspaceRoot, "main.vim"))
+	source := "command! LocalCommand echo 'local'\n"
+	instance.documents.Open(documentURI.String(), 1, source)
+
+	complete := func(prefix string) protocol.CompletionItemSlice {
+		pos := protocol.Position{Line: 1, Character: uint32(len(prefix))}
+		fullSource := source + prefix
+		instance.documents.Open(documentURI.String(), 2, fullSource)
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Position:     pos,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return completionItems(t, result)
+	}
+
+	// 1. All command sources (plugin script, help doc, workspace, buffer-local) complete.
+	for _, expected := range []string{"PluginCommand", "DocCommand", "WorkspaceCommand", "LocalCommand"} {
+		items := complete(expected[:3])
+		if !hasCompletion(items, expected, protocol.CompletionItemKindKeyword) {
+			t.Fatalf("expected command %s to complete, got: %#v", expected, items)
+		}
+	}
+
+	// 2. Commands still complete during active buffer editing when workspacePending is non-empty.
+	instance.workspaceMu.Lock()
+	instance.workspacePending["simulated_pending_file.vim"] = struct{}{}
+	instance.workspaceMu.Unlock()
+
+	items := complete("Plugin")
+	if !hasCompletion(items, "PluginCommand", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("expected PluginCommand while workspace pending, got: %#v", items)
+	}
+	items = complete("Doc")
+	if !hasCompletion(items, "DocCommand", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("expected DocCommand while workspace pending, got: %#v", items)
+	}
+
+	instance.workspaceMu.Lock()
+	delete(instance.workspacePending, "simulated_pending_file.vim")
+	instance.workspaceMu.Unlock()
+
+	// 3. CompletionResolve returns help documentation for doc commands.
+	resolved, err := instance.CompletionResolve(context.Background(), &protocol.CompletionItem{
+		Label: "DocCommand",
+		Kind:  protocol.CompletionItemKindKeyword,
+		Data:  completionResolveTargetData(completionResolveCommand, "DocCommand"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fmt.Sprint(resolved.Documentation), "Documentation for DocCommand") {
+		t.Fatalf("resolved documentation = %#v, want contains 'Documentation for DocCommand'", resolved.Documentation)
+	}
+
+	// 4. suggest.excludeRuntimePath excludes runtimepath commands but preserves workspace & local commands.
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"vim":{"suggest":{"excludeRuntimePath":true}}}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if items := complete("Plugin"); hasCompletionLabel(items, "PluginCommand") {
+		t.Fatalf("expected PluginCommand to be excluded by excludeRuntimePath, got: %#v", items)
+	}
+	if items := complete("Doc"); hasCompletionLabel(items, "DocCommand") {
+		t.Fatalf("expected DocCommand to be excluded by excludeRuntimePath, got: %#v", items)
+	}
+	if items := complete("Workspace"); !hasCompletionLabel(items, "WorkspaceCommand") {
+		t.Fatalf("expected WorkspaceCommand to remain when excludeRuntimePath=true, got: %#v", items)
+	}
+	if items := complete("Local"); !hasCompletionLabel(items, "LocalCommand") {
+		t.Fatalf("expected LocalCommand to remain when excludeRuntimePath=true, got: %#v", items)
+	}
+
+	// 5. Incomplete index still returns available commands and sets IsIncomplete=true.
+	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	instance.workspaceIndex.SetComplete(false)
+	instance.documents.Open(documentURI.String(), 3, source+"Plugin")
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 1, Character: uint32(len("Plugin"))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := result.(*protocol.CompletionList)
+	if !ok {
+		t.Fatalf("completion result = %T, want *protocol.CompletionList", result)
+	}
+	if !list.IsIncomplete {
+		t.Fatal("expected IsIncomplete=true when index is incomplete")
+	}
+	if !hasCompletion(completionItems(t, result), "PluginCommand", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("expected PluginCommand to be returned even when index incomplete, got: %#v", list.Items)
+	}
+
+	// 6. Verify DidChange active editing keeps completing runtime plugin commands.
+	err = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+		TextDocument: protocol.VersionedTextDocumentIdentifier{
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI},
+			Version:                4,
+		},
+		ContentChanges: []protocol.TextDocumentContentChangeEvent{
+			&protocol.TextDocumentContentChangeWholeDocument{
+				Text: source + "Plug",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = instance.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 1, Character: 4},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCompletion(completionItems(t, result), "PluginCommand", protocol.CompletionItemKindKeyword) {
+		t.Fatalf("expected PluginCommand after DidChange, got: %#v", completionItems(t, result))
+	}
+}

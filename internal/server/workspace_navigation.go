@@ -9,6 +9,7 @@ import (
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/vimhelp"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -26,6 +27,8 @@ type workspaceNavigationSnapshot struct {
 	roots          []string
 	workspaceRoots []string
 	runtimePaths   []string
+	helpFiles      map[string][]vimhelp.SymbolDocumentation
+	helpRunning    bool
 }
 
 func (document *navigationDocument) workspaceTargetInState(state workspaceNavigationSnapshot) (workspaceNavigationTarget, bool) {
@@ -124,6 +127,8 @@ func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
 		roots:          roots,
 		workspaceRoots: workspaceRoots,
 		runtimePaths:   runtimePaths,
+		helpFiles:      s.runtimeHelpFiles,
+		helpRunning:    s.runtimeHelpRunning,
 	}
 	if s.workspaceRunning {
 		// A rebuild prepares its replacement index off-lock. Do not expose the

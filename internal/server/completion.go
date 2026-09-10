@@ -247,7 +247,15 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		budgetExpired := false
 		workspaceIncomplete := false
 		var completionWorkspaceState workspaceNavigationSnapshot
+		completionWorkspaceStateCaptured := false
 		completionWorkspaceStateUsed := false
+		ensureWorkspaceState := func() workspaceNavigationSnapshot {
+			if !completionWorkspaceStateCaptured {
+				completionWorkspaceState = s.captureWorkspaceNavigationState()
+				completionWorkspaceStateCaptured = true
+			}
+			return completionWorkspaceState
+		}
 		candidates := make(map[string]completionCandidate)
 		commandDialect := completionCommandDialectAt(file, offset)
 		add := func(item protocol.CompletionItem, score int, source completionSource) bool {
@@ -285,21 +293,78 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
-			userCommandState := s.captureWorkspaceNavigationState()
-			s.workspaceMu.Lock()
-			if s.workspaceIndexReadyLocked() && s.workspaceIndex.Complete() {
-				for _, name := range s.workspaceIndex.UserCommandCompletionNames(completionPathPredicate(userCommandState, excludeRuntimePath)) {
+			walkCommands(file.Commands, func(command *syntax.Command) {
+				if name, _, _, ok := syntax.DefinedUserCommand(file, command); ok && isUserCommandName(name) {
+					if !completionTextMatches(selection.prefix, name) {
+						return
+					}
+					add(protocol.CompletionItem{
+						Label:  name,
+						Kind:   protocol.CompletionItemKindKeyword,
+						Detail: protocol.NewOptional("user command"),
+						Data:   completionResolveTargetData(completionResolveCommand, name),
+					}, 8500, completionSourceLocal)
+				}
+			})
+			userCommandState := ensureWorkspaceState()
+			acceptPath := completionPathPredicate(userCommandState, excludeRuntimePath)
+			if userCommandState.index == nil {
+				workspaceIncomplete = true
+			} else {
+				completionWorkspaceStateUsed = true
+				if !userCommandState.index.Complete() {
+					workspaceIncomplete = true
+				}
+				for _, name := range userCommandState.index.UserCommandCompletionNames(acceptPath) {
 					if !completionTextMatches(selection.prefix, name) {
 						continue
 					}
-					if !add(protocol.CompletionItem{Label: name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("user command"), Data: completionResolveTargetData(completionResolveCommand, name)}, 7500, completionSourceCommand) {
+					if !add(protocol.CompletionItem{
+						Label:  name,
+						Kind:   protocol.CompletionItemKindKeyword,
+						Detail: protocol.NewOptional("user command"),
+						Data:   completionResolveTargetData(completionResolveCommand, name),
+					}, 7500, completionSourceCommand) {
 						break
 					}
 				}
-			} else {
+			}
+			if userCommandState.helpRunning {
 				workspaceIncomplete = true
 			}
-			s.workspaceMu.Unlock()
+			if len(userCommandState.helpFiles) > 0 {
+				completionWorkspaceStateUsed = true
+				paths := make([]string, 0, len(userCommandState.helpFiles))
+				for path := range userCommandState.helpFiles {
+					paths = append(paths, path)
+				}
+				sort.Strings(paths)
+				for _, path := range paths {
+					if acceptPath != nil && !acceptPath(path) {
+						continue
+					}
+					for _, doc := range userCommandState.helpFiles[path] {
+						if doc.Kind != "Ex command" {
+							continue
+						}
+						name := strings.TrimPrefix(doc.Name, ":")
+						if !isUserCommandName(name) {
+							continue
+						}
+						if !completionTextMatches(selection.prefix, name) {
+							continue
+						}
+						if !add(protocol.CompletionItem{
+							Label:  name,
+							Kind:   protocol.CompletionItemKindKeyword,
+							Detail: protocol.NewOptional("user command"),
+							Data:   completionResolveTargetData(completionResolveCommand, name),
+						}, 7500, completionSourceCommand) {
+							break
+						}
+					}
+				}
+			}
 		}
 		if contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
 			values := vimdata.HasFeatures()
@@ -401,7 +466,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					break
 				}
 			}
-			completionWorkspaceState = s.captureWorkspaceNavigationState()
+			completionWorkspaceState = ensureWorkspaceState()
 			if completionWorkspaceState.index == nil {
 				workspaceIncomplete = true
 			} else if scopePrefix == "" || scopePrefix == "g:" {
@@ -786,6 +851,19 @@ func completionCommandScore(name string, dialect syntax.Dialect) int {
 		return 9000 - index
 	}
 	return 8000
+}
+
+func isUserCommandName(name string) bool {
+	if len(name) == 0 || name[0] < 'A' || name[0] > 'Z' {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		ch := name[i]
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 func completionCommandDialectAt(file *syntax.File, offset int) syntax.Dialect {
