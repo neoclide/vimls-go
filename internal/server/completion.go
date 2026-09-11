@@ -275,11 +275,12 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			return true
 		}
 		addCommandCandidates := func() {
+			bang := completionCommandBang(file, selection)
 			for _, command := range vimdata.Commands() {
 				if !completionTextMatches(selection.prefix, command.Name) {
 					continue
 				}
-				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command"), Data: completionResolveTargetData(completionResolveCommand, command.Name)}
+				item := protocol.CompletionItem{Label: command.Name, Kind: protocol.CompletionItemKindKeyword, Detail: protocol.NewOptional("Ex command"), Data: commandCompletionResolveTargetData(command.Name, bang)}
 				if snippet, ok := commandBlockSnippet(command.Name, file.Dialect, canSnippet, configFile); ok {
 					item.InsertText = protocol.NewOptional(snippet)
 					item.InsertTextFormat = protocol.InsertTextFormatSnippet
@@ -941,6 +942,18 @@ func completionAugroups(file *syntax.File) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+// completionCommandBang captures the bang retained after the command-name edit.
+func completionCommandBang(file *syntax.File, selection completionSelection) bool {
+	found := false
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Name.Start == selection.start && command.Name.End == selection.end &&
+			command.Bang.Start == selection.end && command.Bang.Start < command.Bang.End {
+			found = true
+		}
+	})
+	return found
 }
 
 func completionSelectionAt(source string, cursor int) completionSelection {

@@ -27,6 +27,9 @@ the same contextual completion as Legacy attributes.
 
 Hover on a documented mapping or user-command bang variant includes `!` in
 the command range and works when the cursor is on that character.
+Command completion also retains an existing `!` when resolving documentation,
+so a completion before `!` shows the bang variant's help without changing the
+insertion text.
 
 Completion uses the current text without waiting for full file analysis.
 Commands and options use syntax and built-in metadata; local variables and

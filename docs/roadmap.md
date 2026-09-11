@@ -15,6 +15,8 @@ definitions and Vim9 attribute completion.
 
 Documented command bang variants now have a complete hover range, including
 the bang character, while retaining built-in documentation precedence.
+Completion resolve now carries the existing command bang context and selects
+the corresponding built-in help.
 
 Legacy variable type-change warnings now cover straight-line simple assignments.
 They discard unknown types and stop at calls and control-flow boundaries; broader

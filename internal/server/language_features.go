@@ -35,11 +35,17 @@ const (
 type completionResolveTarget struct {
 	Kind  completionResolveKind  `json:"kind"`
 	Name  string                 `json:"name"`
+	Bang  bool                   `json:"bang,omitempty"`
 	Local *localCompletionTarget `json:"local,omitempty"`
 }
 
 func completionResolveTargetData(kind completionResolveKind, name string) []byte {
 	data, _ := json.Marshal(completionResolveTarget{Kind: kind, Name: name})
+	return data
+}
+
+func commandCompletionResolveTargetData(name string, bang bool) []byte {
+	data, _ := json.Marshal(completionResolveTarget{Kind: completionResolveCommand, Name: name, Bang: bang})
 	return data
 }
 
@@ -920,7 +926,7 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 			applyMetadata("variable: "+variable.Type, variable.Documentation)
 		}
 	case completionResolveCommand:
-		if documentation, ok := vimdata.LookupMappingCommandDocumentation(target.Name, false); ok {
+		if documentation, ok := vimdata.LookupMappingCommandDocumentation(target.Name, target.Bang); ok {
 			applyMetadata("Ex command", documentation)
 			break
 		}
