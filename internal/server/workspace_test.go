@@ -12,7 +12,9 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -1733,35 +1735,39 @@ func TestServerRebuildRejectsCapturedSnapshotAfterOpenEdit(t *testing.T) {
 }
 
 func TestWorkspaceRebuildDebouncesBurst(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	t.Cleanup(instance.stopAnalysis)
-	delayStarted := make(chan struct{})
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	releaseWorker := func() {
-		releaseOnce.Do(func() { close(release) })
-	}
-	t.Cleanup(func() {
-		releaseWorker()
+	synctest.Test(t, func(t *testing.T) {
+		instance := New(nil, nil, io.Discard)
+		t.Cleanup(instance.stopAnalysis)
+		instance.workspaceDelay = 100 * time.Millisecond
+		var builds atomic.Int32
+		instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
+			builds.Add(1)
+		}
+		instance.scheduleWorkspaceRebuild()
+		synctest.Wait()
+
+		// Use virtual time: a real sleep can overshoot the debounce deadline
+		// on a loaded CI runner, allowing a build before the second event.
+		time.Sleep(80 * time.Millisecond)
+		instance.scheduleWorkspaceRebuild()
+		synctest.Wait() // Let the worker reset its timer before advancing time.
+		time.Sleep(99 * time.Millisecond)
+		synctest.Wait()
+		if got := builds.Load(); got != 0 {
+			t.Fatalf("workspace rebuilt before the reset deadline: builds=%d", got)
+		}
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		if got := builds.Load(); got != 1 {
+			t.Fatalf("workspace builds at the reset deadline = %d, want 1", got)
+		}
 		instance.workspaceWG.Wait()
+		time.Sleep(instance.workspaceDelay)
+		synctest.Wait()
+		if got := builds.Load(); got != 1 {
+			t.Fatalf("workspace burst caused extra builds: builds=%d", got)
+		}
 	})
-	instance.testHooks.beforeWorkspaceRebuildDelay = func() { close(delayStarted) }
-	instance.testHooks.beforeWorkspaceBuild = func([]*text.Snapshot) {
-		close(started)
-		<-release
-	}
-	instance.scheduleWorkspaceRebuild()
-	waitForServerRace(t, delayStarted, "workspace rebuild debounce timer")
-	time.Sleep(80 * time.Millisecond)
-	instance.scheduleWorkspaceRebuild()
-	select {
-	case <-started:
-		t.Fatal("workspace rebuild ignored the debounce window")
-	case <-time.After(40 * time.Millisecond):
-	}
-	waitForServerRace(t, started, "debounced workspace rebuild")
-	releaseWorker()
 }
 
 func TestWorkspaceIndexReportsWorkDoneProgress(t *testing.T) {
