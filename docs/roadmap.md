@@ -65,6 +65,11 @@ adding more features. Performance changes need comparable measurements.
 Build and release versions now use the root `VERSION` file. Local builds append
 `-dev`; release packaging requires the tag to match the file.
 
+Vim and Neovim event help is available as
+[generated Go metadata](../tools/geneventdocs/README.md), preferring Vim for
+shared names. Connecting this data to event hover and completion documentation
+remains follow-up work.
+
 General expression reformatting, embedded-language analysis and persistent
 disk indexes remain outside the current scope. The parser still reparses
 changed source; incremental AST editing is not implemented.

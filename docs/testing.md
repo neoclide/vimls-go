@@ -155,6 +155,13 @@ change. P95 here describes benchmark sample means, not individual requests.
 For comparison with go-vimlparser and parser-only profiling, follow
 [tools/benchlegacy](../tools/benchlegacy/README.md).
 
+## Event documentation
+
+For the merged Vim and Neovim event documentation, regeneration commands and
+pinned source revisions are in the [generator guide](../tools/geneventdocs/README.md).
+Run `go test -count=1 ./tools/geneventdocs ./internal/vimdata` and compare
+regenerated Go with the checked-in metadata after changing the extractor.
+
 ## Preparing a release
 
 Update `VERSION`, add its matching `## vX.Y.Z` changelog section, commit the release

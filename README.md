@@ -94,4 +94,5 @@ for remaining work. These docs describe the current source; the
 ## License
 
 [MIT](LICENSES/MIT.txt). Copied Vim material keeps its
-[Vim license](LICENSES/VIM.txt).
+[Vim license](LICENSES/VIM.txt). Collected Neovim documentation retains its
+[upstream license](LICENSES/NEOVIM.txt); see the [event documentation provenance](tools/geneventdocs/README.md).
