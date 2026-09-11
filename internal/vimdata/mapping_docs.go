@@ -3,7 +3,8 @@ package vimdata
 // Command help is adapted from Vim v9.2.1015 runtime/doc/map.txt, revision
 // 5ab969f719bb09555e90e8dff8c94fc37bcbf2ae. The installed
 // /usr/local/share/vim/vim92/doc/map.txt was byte-identical when reviewed.
-// Upstream documentation retains the Vim license; see LICENSES/VIM.txt.
+// Modified Vim manual excerpts (OPL-1.0+); see LICENSES/VIM-DOC.txt for
+// attribution and modification details.
 // These excerpts are maintained manually, without a documentation generator.
 
 var mappingCommandDocumentation = buildMappingCommandDocumentation()

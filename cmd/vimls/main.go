@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/neoclide/vimls-go/LICENSES"
 	"github.com/neoclide/vimls-go/internal/server"
 )
 
@@ -17,8 +18,16 @@ func main() {
 
 func run() int {
 	version := flag.Bool("version", false, "print version and exit")
+	showLicenses := flag.Bool("licenses", false, "print licenses and documentation attribution and exit")
 	listen := flag.String("listen", "", "listen on a TCP address instead of stdio (for example 127.0.0.1:4389)")
 	flag.Parse()
+	if *showLicenses {
+		if err := licenses.Write(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "vimls: licenses: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	if *version {
 		fmt.Printf("%s %s\n", server.Name, server.Version)
 		return 0

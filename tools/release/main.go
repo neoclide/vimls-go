@@ -159,6 +159,9 @@ func releaseDocuments(root string) ([]archiveEntry, error) {
 		return nil, err
 	}
 	for _, license := range licenses {
+		if filepath.Ext(license.Name()) != ".txt" {
+			continue
+		}
 		if !license.Type().IsRegular() {
 			return nil, fmt.Errorf("non-regular license file %s", license.Name())
 		}

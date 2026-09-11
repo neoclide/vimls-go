@@ -1,0 +1,45 @@
+Vim and Neovim documentation excerpts in vimls-go
+
+The Vim user manual and reference manual are Copyright (c) 1988 by Bram
+Moolenaar. This material may be distributed only subject to the terms and
+conditions set forth in the Open Publication License, v1.0 or later (the
+latest version is presently available at https://opencontent.org/openpub/).
+The license is incorporated by reference as permitted by its section I.
+The pinned manuals do not elect either optional restriction in section VI.
+
+This distribution contains modified excerpts, not the original manuals.
+Compilation and modifications through 2026-09-11: chemzqm
+<chemzqm@gmail.com> and vimls-go contributors, https://github.com/neoclide/vimls-go.
+Modifications comprise selection and omission of surrounding sections,
+conversion of Vim help markup and examples to Markdown, whitespace and link
+normalization, manual adaptation of mapping help, merging event entries
+(preferring Vim for shared names), and packaging as Go metadata for hover
+and completion. No endorsement by the original authors is claimed or implied.
+Future changes to these excerpts must update the modification date and
+description here and retain source provenance and applicable notices.
+
+Original, unmodified sources and copyright notices:
+
+Vim v9.2.1015, commit 5ab969f719bb09555e90e8dff8c94fc37bcbf2ae:
+https://github.com/vim/vim/tree/5ab969f719bb09555e90e8dff8c94fc37bcbf2ae/runtime/doc
+https://github.com/vim/vim/blob/5ab969f719bb09555e90e8dff8c94fc37bcbf2ae/runtime/doc/usr_01.txt
+
+Neovim snapshot 73923b0dd85bb936ba2f63ee916dabaa0603340d:
+https://github.com/neovim/neovim/tree/73923b0dd85bb936ba2f63ee916dabaa0603340d/runtime/doc
+https://github.com/neovim/neovim/blob/73923b0dd85bb936ba2f63ee916dabaa0603340d/runtime/doc/usr_01.txt
+Neovim contributions also retain their applicable upstream notices and
+terms in NEOVIM.txt; that software license does not replace the manuals'
+Open Publication License notice.
+
+The excerpts are in internal/vimdata/*_generated.go and mapping_docs.go.
+Source filenames, tags and revisions are retained in the metadata where
+available and in the mapping help header. The generators are tools/genmetadata
+and tools/geneventdocs; their source records the extraction and conversion.
+
+As acknowledged by both upstream manuals, parts of the user manual derive
+from "Vi IMproved - Vim" by Steve Oualline, published by New Riders Publishing,
+ISBN 0735710015, under the Open Publication License. Those parts were modified
+by upstream; absence of a frombook tag does not establish absence of book text.
+
+This notice applies to the documentation excerpts. vimls-go's own code retains
+the MIT license in MIT.txt. Copied Vim software material retains VIM.txt.

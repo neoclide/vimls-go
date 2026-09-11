@@ -123,6 +123,9 @@ with the same source paths and inspect the result. Both metadata targets include
 the event documentation generator. Use `make eventdocs-check` or
 `make eventdocs-refresh` with those paths to operate on event documentation only.
 The CI Vim oracle job checks all generated metadata using both pinned checkouts.
+When changing documentation excerpts, update the modification date and
+description in [the documentation notice](../LICENSES/VIM-DOC.txt). Keep
+original source attribution and license references in regenerated output.
 Do not edit generated tables
 to hide a mismatch. Official compile-diagnostic fixtures are maintained one
 error code at a time in `internal/analysis/official_compile_cases_e*_test.go`.

@@ -75,6 +75,9 @@ Release checks must cover the packaged executable, supported platforms and a
 real editor client. Fix crashes, lost edits and incorrect rename results before
 adding more features. Performance changes need comparable measurements.
 
+Standalone `vimls --licenses` displays embedded licenses and documentation
+attribution; release archives include the same notice files.
+
 Build and release versions now use the root `VERSION` file. Local builds append
 `-dev`; release packaging requires the tag to match the file.
 

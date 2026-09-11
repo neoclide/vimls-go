@@ -93,6 +93,11 @@ for remaining work. These docs describe the current source; the
 
 ## License
 
-[MIT](LICENSES/MIT.txt). Copied Vim material keeps its
-[Vim license](LICENSES/VIM.txt). Collected Neovim documentation retains its
-[upstream license](LICENSES/NEOVIM.txt); see the [event documentation provenance](tools/geneventdocs/README.md).
+[MIT](LICENSES/MIT.txt) for this project's code. Copied Vim software material
+retains the [Vim license](LICENSES/VIM.txt). Vim and Neovim manual excerpts
+retain the **Open Publication License, v1.0 or later**; see
+[documentation copyright, sources and modifications](LICENSES/VIM-DOC.txt).
+Applicable [Neovim notices](LICENSES/NEOVIM.txt) are also retained.
+
+Archives include these notices. Standalone executables embed the same files;
+run `vimls --licenses` to display them without starting the language server.

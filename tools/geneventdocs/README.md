@@ -58,7 +58,10 @@ Review inventory, aliases and documentation differences before changing pins.
 ## Provenance and licenses
 
 The extraction, Markdown conversion, merge and Go packaging are this project's
-modifications. Vim material retains the [Vim license](../../LICENSES/VIM.txt).
-Neovim material is copyright Neovim contributors and retains the
+modifications. Manual excerpts retain the Open Publication License, v1.0 or
+later; [VIM-DOC.txt](../../LICENSES/VIM-DOC.txt) records copyright, original
+sources, modification date and attribution. Update that notice when changing
+the extracted documentation.
+Applicable Neovim contributor notices are also retained in the
 [complete upstream license](../../LICENSES/NEOVIM.txt), including Apache 2.0
 and the terms for parts contributed under the Vim license.

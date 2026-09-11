@@ -64,9 +64,14 @@ func TestReleaseAssetsPreserveDownloadContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"README.md", "CHANGELOG.md", "docs/language-support.md", "LICENSES/MIT.txt", "LICENSES/VIM.txt"} {
+	for _, required := range []string{"README.md", "CHANGELOG.md", "docs/language-support.md", "LICENSES/MIT.txt", "LICENSES/VIM.txt", "LICENSES/VIM-DOC.txt", "LICENSES/NEOVIM.txt"} {
 		if !slices.ContainsFunc(documents, func(document archiveEntry) bool { return document.name == required }) {
 			t.Fatalf("release is missing %s", required)
+		}
+	}
+	for _, document := range documents {
+		if strings.HasSuffix(document.name, ".go") {
+			t.Fatalf("release includes license embedding source: %s", document.name)
 		}
 	}
 	output := t.TempDir()
