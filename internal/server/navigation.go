@@ -831,11 +831,14 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			return s.localHoverResult(ctx, document, []string{autocmdEventDocumentation(event)})
 		}
 	}
-	if document.declaration == nil {
-		name := document.analysis.File.Text(document.occurrence)
-		if document.optionName != "" {
-			name = document.optionName
-		}
+	name := document.analysis.File.Text(document.occurrence)
+	if document.optionName != "" {
+		name = document.optionName
+	}
+	// Legacy option assignments are recorded as declarations. Their hover still
+	// describes the option, including subsequent references to that binding.
+	option, isOption := vimdata.LookupOptionMetadata(name)
+	if document.declaration == nil || isOption && strings.HasPrefix(name, "&") {
 		if contextKind, _ := completionBuiltinStringAt(document.analysis.File, document.occurrence.Start); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
 			var values []vimdata.CompletionValue
 			var header string
@@ -863,7 +866,7 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 		if span, lines, ok := mappingHoverAt(document.analysis.File, document.occurrence.Start); ok && span == document.occurrence {
 			return s.localHoverResult(ctx, document, lines)
 		}
-		if option, ok := vimdata.LookupOptionMetadata(name); ok {
+		if isOption {
 			documentation := optionDocumentation(option)
 			header, body, split := strings.Cut(documentation, "\n\n")
 			if split && s.languageFeatures.hoverMarkup == protocol.MarkupKindMarkdown {

@@ -818,6 +818,44 @@ func TestHoverShowsPinnedOptionAndPredefinedVariableHelp(t *testing.T) {
 	}
 }
 
+func TestHoverShowsAssignedOptionHelp(t *testing.T) {
+	for _, source := range []string{
+		"let &titlestring = 'abc'\n",
+		"let &g:titlestring = 'abc'\n",
+		"let &l:titlestring = 'abc'\n",
+		"let &titlestring .= 'abc'\n",
+		"vim9script\n&titlestring = 'abc'\n",
+		"let &titlestring = 'abc'\necho &titlestring\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+			for line, value := range strings.Split(source, "\n") {
+				start := strings.Index(value, "&")
+				if start < 0 {
+					continue
+				}
+				end := strings.Index(value, "titlestring") + len("titlestring")
+				for column := start; column < end; column++ {
+					hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+						TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: uint32(line), Character: uint32(column)},
+					}})
+					if err != nil || hover == nil {
+						t.Fatalf("hover at %d:%d = %#v, %v", line, column, hover, err)
+					}
+					content, ok := joinedHoverMarkdown(hover.Contents)
+					if !ok || !strings.HasPrefix(content.Value, "'titlestring'") || !strings.Contains(content.Value, "When this option is not empty") {
+						t.Fatalf("hover content = %#v", hover.Contents)
+					}
+					want := protocol.Range{Start: protocol.Position{Line: uint32(line), Character: uint32(start)}, End: protocol.Position{Line: uint32(line), Character: uint32(end)}}
+					if hover.Range == nil || *hover.Range != want {
+						t.Fatalf("hover range = %#v, want %#v", hover.Range, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestHoverShowsTerminalOptionVariable(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "let &t_SI = \"\\e[5 q\"\necho &t_SI\n")
 	hover, err := instance.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -827,8 +865,8 @@ func TestHoverShowsTerminalOptionVariable(t *testing.T) {
 		t.Fatalf("hover = %#v, %v", hover, err)
 	}
 	content, ok := hover.Contents.(*protocol.MarkupContent)
-	if !ok || content.Kind != protocol.MarkupKindMarkdown || content.Value != "**&t_SI** A string variable." {
-		t.Fatalf("hover content = %#v, want %q", hover.Contents, "**&t_SI** A string variable.")
+	if !ok || content.Kind != protocol.MarkupKindMarkdown || !strings.Contains(content.Value, "start insert mode (bar cursor shape)") {
+		t.Fatalf("hover content = %#v, want terminal option documentation", hover.Contents)
 	}
 }
 
