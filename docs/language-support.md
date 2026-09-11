@@ -21,6 +21,10 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
+User-command definitions preserve attribute, name and body locations through
+logical-line continuations in both dialects. Vim9 command attributes support
+the same contextual completion as Legacy attributes.
+
 Completion uses the current text without waiting for full file analysis.
 Commands and options use syntax and built-in metadata; local variables and
 members use lexical declarations. Local declaration type details are computed
