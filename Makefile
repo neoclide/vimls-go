@@ -3,10 +3,11 @@ GO_MOD ?= -mod=readonly
 TEST_PARALLEL ?= 4
 COVERAGE_MIN ?= 90
 VIM_EXECUTABLE ?= vim
+NEOVIM_SOURCE ?=
 RELEASE_REMOTE ?= origin
 export RELEASE_REMOTE
 
-.PHONY: build check clean client-smoke client-tools coverage format-check incr metadata-check metadata-refresh oracle race release test vet
+.PHONY: build check clean client-smoke client-tools coverage eventdocs-check eventdocs-refresh format-check incr metadata-check metadata-refresh oracle race release test vet
 
 build:
 	mkdir -p bin
@@ -39,11 +40,11 @@ vet:
 format-check:
 	@test -z "$$(gofmt -l $$(find cmd internal test tools -name '*.go' -type f))"
 
-metadata-refresh:
+metadata-refresh: eventdocs-refresh
 	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
 	$(GO) run $(GO_MOD) ./tools/genmetadata -vim-root "$(VIM_SOURCE)"
 
-metadata-check:
+metadata-check: eventdocs-check
 	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
 	@set -eu; \
 	metadata_tmp="$$(mktemp -d)"; \
@@ -54,7 +55,21 @@ metadata-check:
 	cmp internal/vimdata/options_generated.go "$$metadata_tmp/options_generated.go"; \
 	cmp internal/vimdata/options_set_generated.vim "$$metadata_tmp/options_set_generated.vim"; \
 	cmp internal/vimdata/variables_generated.go "$$metadata_tmp/variables_generated.go"
-	$(GO) test $(GO_MOD) ./internal/vimdata ./tools/genmetadata ./internal/vimhelp
+	$(GO) test $(GO_MOD) -count=1 ./internal/vimdata ./tools/genmetadata ./tools/geneventdocs ./internal/vimhelp
+
+eventdocs-refresh:
+	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
+	@test -n "$(NEOVIM_SOURCE)" || (echo "set NEOVIM_SOURCE to the official Neovim checkout" >&2; exit 1)
+	$(GO) run $(GO_MOD) ./tools/geneventdocs -vim-root "$(VIM_SOURCE)" -neovim-root "$(NEOVIM_SOURCE)"
+
+eventdocs-check:
+	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
+	@test -n "$(NEOVIM_SOURCE)" || (echo "set NEOVIM_SOURCE to the official Neovim checkout" >&2; exit 1)
+	@set -eu; \
+	eventdocs_tmp="$$(mktemp)"; \
+	trap 'rm -f "$$eventdocs_tmp"' EXIT; \
+	$(GO) run $(GO_MOD) ./tools/geneventdocs -vim-root "$(VIM_SOURCE)" -neovim-root "$(NEOVIM_SOURCE)" -output "$$eventdocs_tmp"; \
+	cmp internal/vimdata/autocmd_docs_generated.go "$$eventdocs_tmp"
 
 oracle:
 	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim v9.2.1015 binary" >&2; exit 1)

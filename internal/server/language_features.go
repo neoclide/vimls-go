@@ -421,8 +421,12 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 			result = completionContextColorscheme
 			return
 		}
-		if command.Canonical == "autocmd" && (spanContains(command.Argument, offset) || offset == command.Argument.End) && completionArgumentWord(file.Source, command.Argument, offset) > 0 {
-			result = completionContextAutocmdEvent
+		if command.Canonical == "autocmd" && offset > command.Name.End && (spanContains(command.Argument, offset) || offset == command.Argument.End) {
+			if completionArgumentWord(file.Source, command.Argument, offset) == 0 {
+				result = completionContextAutocmdHead
+			} else {
+				result = completionContextAutocmdEvent
+			}
 			return
 		}
 		for _, modifier := range command.Modifiers {

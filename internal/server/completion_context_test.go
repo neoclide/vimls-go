@@ -62,6 +62,30 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 	}
 }
 
+func TestCompletionContextAutocmdWithoutStructuredHeader(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   completionContext
+	}{
+		{"autocmd F", completionContextAutocmdHead},
+		{"autocmd ", completionContextAutocmdHead},
+		{"autocmd Group F", completionContextAutocmdEvent},
+		{"aut", completionContextCommand},
+		{"au", completionContextCommand},
+		{"autocmd", completionContextCommand},
+	} {
+		file := syntax.Parse(tc.source)
+		if len(file.Commands) != 1 || file.Commands[0].Canonical != "autocmd" {
+			t.Fatalf("unexpected AST for %q", tc.source)
+		}
+		// Exercise the fallback, not the ordinary parser's structured header.
+		file.Commands[0].Autocmd = nil
+		if got := completionContextAt(file, len(tc.source)); got != tc.want {
+			t.Errorf("%q: got %v, want %v", tc.source, got, tc.want)
+		}
+	}
+}
+
 func TestCompletionMethodContextRequiresArrowExpression(t *testing.T) {
 	for _, test := range []struct {
 		source, at string

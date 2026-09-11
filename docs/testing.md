@@ -111,15 +111,19 @@ The filter matches case identifiers in the committed artifact. Use the matching
 
 ## Generated metadata
 
-The generator reads the pinned Vim source. Use an upstream checkout read-only;
-its current HEAD need not be the pinned tag.
+The generators read pinned Vim and Neovim sources. Both upstream checkouts are
+read-only; their current HEAD need not be the pinned revision.
 
 ```sh
-make metadata-check VIM_SOURCE=/path/to/vim
+make metadata-check VIM_SOURCE=/path/to/vim NEOVIM_SOURCE=/path/to/neovim
 ```
 
 When deliberately updating generated metadata, use `make metadata-refresh`
-with the same source path and inspect the result. Do not edit generated tables
+with the same source paths and inspect the result. Both metadata targets include
+the event documentation generator. Use `make eventdocs-check` or
+`make eventdocs-refresh` with those paths to operate on event documentation only.
+The CI Vim oracle job checks all generated metadata using both pinned checkouts.
+Do not edit generated tables
 to hide a mismatch. Official compile-diagnostic fixtures are maintained one
 error code at a time in `internal/analysis/official_compile_cases_e*_test.go`.
 

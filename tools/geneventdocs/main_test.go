@@ -1,9 +1,39 @@
 package main
 
 import (
+	"errors"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestGitFileIncludesStderr(t *testing.T) {
+	_, err := gitFile(filepath.Join(t.TempDir(), "missing"), vimRevision, "runtime/doc/autocmd.txt")
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected Git exit error: %v", err)
+	}
+	detail := strings.TrimSpace(string(exitErr.Stderr))
+	if detail == "" || !strings.Contains(err.Error(), detail) {
+		t.Fatalf("Git stderr %q missing from %v", detail, err)
+	}
+}
+
+func TestInventoryNeovimAliasQuotes(t *testing.T) {
+	for _, quote := range []string{"'", "\""} {
+		source := "events = {\n  BufReadPost = true,\n},\naliases = {\n  BufRead = " + quote + "BufReadPost" + quote + ",\n},\n"
+		entries, err := inventory([]byte(source), "Neovim")
+		if err != nil || len(entries) != 2 || entries[0].name != "BufRead" || entries[0].alias != "BufReadPost" {
+			t.Fatalf("quote %q: %+v %v", quote, entries, err)
+		}
+	}
+	for _, line := range []string{`BufRead = 'BufReadPost",`, `BufRead = "BufReadPost',`} {
+		if luaAliasRE.MatchString(line) {
+			t.Fatalf("accepted mismatched quotes: %s", line)
+		}
+	}
+}
 
 func TestInventoryCanonicalAliases(t *testing.T) {
 	vim, err := inventory([]byte(`KEYVALUE_ENTRY(-EVENT_BUFREADPOST, "BufRead"),

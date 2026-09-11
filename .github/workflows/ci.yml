@@ -70,6 +70,12 @@ jobs:
           repository: vim/vim
           ref: v9.2.1015
           path: .test-tools/vim
+      - uses: actions/checkout@v4
+        with:
+          repository: neovim/neovim
+          ref: 73923b0dd85bb936ba2f63ee916dabaa0603340d
+          path: .test-tools/neovim
+      - run: make metadata-check VIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/vim" NEOVIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/neovim"
       - run: sudo apt-get update && sudo apt-get install -y libncurses-dev
       - run: ./configure --with-features=huge --enable-gui=no --without-x && make -j2
         working-directory: .test-tools/vim

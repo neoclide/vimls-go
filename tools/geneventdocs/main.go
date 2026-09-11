@@ -26,7 +26,7 @@ type entry struct {
 
 var vimEventRE = regexp.MustCompile(`KEYVALUE_ENTRY\(\s*-?EVENT_([A-Z0-9_]+)\s*,\s*"([A-Za-z][A-Za-z0-9]*)"\s*\)`)
 var luaEventRE = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9]*)\s*=\s*(true|false),`)
-var luaAliasRE = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9]*)\s*=\s*'([A-Za-z][A-Za-z0-9]*)',`)
+var luaAliasRE = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9]*)\s*=\s*(?:'([A-Za-z][A-Za-z0-9]*)'|"([A-Za-z][A-Za-z0-9]*)"),`)
 var helpTagRE = regexp.MustCompile(`\*[^*[:space:]]+\*`)
 var exampleRE = regexp.MustCompile(`(?:^| )>[A-Za-z0-9_-]*$`)
 
@@ -65,6 +65,9 @@ func main() {
 func gitFile(root, revision, path string) ([]byte, error) {
 	data, err := exec.Command("git", "-C", root, "show", revision+":"+path).Output()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) != 0 {
+			return nil, fmt.Errorf("read %s at %s: %w: %s", path, revision, err, strings.TrimSpace(string(exitErr.Stderr)))
+		}
 		return nil, fmt.Errorf("read %s at %s: %w", path, revision, err)
 	}
 	return data, nil
@@ -107,7 +110,11 @@ func inventory(source []byte, editor string) ([]entry, error) {
 				}
 			} else if section == "aliases" {
 				if m := luaAliasRE.FindStringSubmatch(line); m != nil {
-					entries = append(entries, entry{name: m[1], alias: m[2]})
+					alias := m[2]
+					if alias == "" {
+						alias = m[3]
+					}
+					entries = append(entries, entry{name: m[1], alias: alias})
 				}
 			}
 		}

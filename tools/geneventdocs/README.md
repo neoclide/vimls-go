@@ -42,13 +42,16 @@ that name. Every merged entry must have documentation or generation fails.
 Run from the repository root:
 
 ```sh
-go run -mod=readonly ./tools/geneventdocs \
-  -vim-root /Users/chemzqm/lib/vim \
-  -neovim-root /Users/chemzqm/lib/neovim
+make eventdocs-refresh VIM_SOURCE=/Users/chemzqm/lib/vim \
+  NEOVIM_SOURCE=/Users/chemzqm/lib/neovim
+make eventdocs-check VIM_SOURCE=/Users/chemzqm/lib/vim \
+  NEOVIM_SOURCE=/Users/chemzqm/lib/neovim
 ```
 
-Use `-output /temporary/path/events.go` to regenerate outside the checkout and
-compare with the checked-in file. Run
+`metadata-refresh` and `metadata-check` include these targets. CI runs
+`metadata-check` with the pinned upstream revisions. For direct generator use,
+`go run ./tools/geneventdocs -vim-root ... -neovim-root ... -output /temporary/path/events.go`
+regenerates outside the checkout. Run
 `go test -count=1 ./tools/geneventdocs ./internal/vimdata` after extractor changes.
 Review inventory, aliases and documentation differences before changing pins.
 
