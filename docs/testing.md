@@ -31,6 +31,10 @@ without Git metadata. This affects `vimls -version` and LSP server info. Direct
 `go build` without linker flags retains the source default `dev`.
 Release builds embed the matching release tag, including its leading `v`.
 
+`make incr` increases the patch number in `VERSION` and commits only that file
+with the message `chore: bump version to X.Y.Z`. Other staged changes remain
+staged. The file must contain a single `MAJOR.MINOR.PATCH` value.
+
 For documentation-only changes, check examples, links and `git diff --check`.
 Go tests are not needed.
 

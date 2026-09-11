@@ -6,7 +6,7 @@ VIM_EXECUTABLE ?= vim
 RELEASE_REMOTE ?= origin
 export RELEASE_REMOTE
 
-.PHONY: build check clean client-smoke client-tools coverage format-check metadata-check metadata-refresh oracle race release test vet
+.PHONY: build check clean client-smoke client-tools coverage format-check incr metadata-check metadata-refresh oracle race release test vet
 
 build:
 	mkdir -p bin
@@ -15,6 +15,14 @@ build:
 	set -x; \
 	$(GO) build $(GO_MOD) -ldflags "-X github.com/neoclide/vimls-go/internal/server.Version=$$build_version" -o bin/vimls ./cmd/vimls
 	$(GO) build $(GO_MOD) -o bin/vimparse ./cmd/vimparse
+
+incr:
+	@set -eu; \
+	new_version="$$(awk -F. 'NR == 1 && NF == 3 && $$1 ~ /^[0-9]+$$/ && $$2 ~ /^[0-9]+$$/ && $$3 ~ /^[0-9]+$$/ { printf "%s.%s.%d\n", $$1, $$2, $$3 + 1; valid = 1; next } { invalid = 1 } END { if (!valid || invalid) exit 1 }' VERSION)" || \
+		{ echo 'Invalid VERSION file: expected MAJOR.MINOR.PATCH.' >&2; exit 1; }; \
+	printf '%s\n' "$$new_version" > VERSION; \
+	git commit --only -m "chore: bump version to $$new_version" -- VERSION; \
+	echo "VERSION is now $$new_version"
 
 clean:
 	$(GO) clean -cache -testcache -fuzzcache
