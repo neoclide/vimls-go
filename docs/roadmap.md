@@ -62,6 +62,9 @@ Release checks must cover the packaged executable, supported platforms and a
 real editor client. Fix crashes, lost edits and incorrect rename results before
 adding more features. Performance changes need comparable measurements.
 
+Build and release versions now use the root `VERSION` file. Local builds append
+`-dev`; release packaging requires the tag to match the file.
+
 General expression reformatting, embedded-language analysis and persistent
 disk indexes remain outside the current scope. The parser still reparses
 changed source; incremental AST editing is not implemented.

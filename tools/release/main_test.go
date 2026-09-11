@@ -16,6 +16,29 @@ import (
 	"time"
 )
 
+func TestValidateReleaseVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name, contents, tag string
+		valid               bool
+	}{
+		{"stable", "0.1.3\n", "v0.1.3", true},
+		{"no newline", "0.1.3", "v0.1.3", true},
+		{"prerelease", "0.2.0-rc.1\n", "v0.2.0-rc.1", true},
+		{"mismatch", "0.1.3\n", "v0.1.4", false},
+		{"missing tag prefix", "0.1.3\n", "0.1.3", false},
+		{"empty", "", "v0.1.3", false},
+		{"prefixed file", "v0.1.3\n", "v0.1.3", false},
+		{"multiple lines", "0.1.3\n0.1.4\n", "v0.1.3", false},
+		{"whitespace", " 0.1.3\n", "v0.1.3", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateReleaseVersion(tc.contents, tc.tag); (err == nil) != tc.valid {
+				t.Fatalf("validateReleaseVersion(%q, %q) = %v; valid = %v", tc.contents, tc.tag, err, tc.valid)
+			}
+		})
+	}
+}
+
 func TestWriteArchiveIsDeterministic(t *testing.T) {
 	stamp := time.Unix(1700000000, 0).UTC()
 	for _, zipped := range []bool{false, true} {

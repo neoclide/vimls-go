@@ -4,13 +4,16 @@ TEST_PARALLEL ?= 4
 COVERAGE_MIN ?= 90
 VIM_EXECUTABLE ?= vim
 RELEASE_REMOTE ?= origin
-export VERSION RELEASE_REMOTE
+export RELEASE_REMOTE
 
 .PHONY: build check clean client-smoke client-tools coverage format-check metadata-check metadata-refresh oracle race release test vet
 
 build:
 	mkdir -p bin
-	$(GO) build $(GO_MOD) -o bin/vimls ./cmd/vimls
+	@set -eu; \
+	build_version="$$(cat VERSION)-dev"; \
+	set -x; \
+	$(GO) build $(GO_MOD) -ldflags "-X github.com/neoclide/vimls-go/internal/server.Version=$$build_version" -o bin/vimls ./cmd/vimls
 	$(GO) build $(GO_MOD) -o bin/vimparse ./cmd/vimparse
 
 clean:
@@ -76,10 +79,9 @@ check: format-check test race vet coverage build
 # Push only the release tag; GitHub Actions builds and publishes its commit.
 release:
 	@set -eu; \
-	release_tag="$${VERSION:-}"; \
-	case "$$release_tag" in v*) ;; *) release_tag="v$$release_tag" ;; esac; \
+	release_tag="v$$(cat VERSION)"; \
 	printf '%s\n' "$$release_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$$' || \
-	  { echo 'Usage: make release VERSION=0.1.0 [RELEASE_REMOTE=origin]' >&2; exit 1; }; \
+	  { echo 'Invalid VERSION file: expected a version such as 0.1.3 without a leading v.' >&2; exit 1; }; \
 	test -z "$$(git status --porcelain)" || \
 	  { echo 'Commit or stash working-tree changes before releasing.' >&2; exit 1; }; \
 	$(GO) run $(GO_MOD) ./tools/release -version "$$release_tag" -check-changelog; \

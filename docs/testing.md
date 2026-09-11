@@ -25,6 +25,12 @@ make
 test suite. Keep `-count=1`: integration tests build a server subprocess, and
 Go's test cache does not track every source change that affects it.
 
+The root `VERSION` file contains one version without a leading `v` (currently
+`0.1.3`). Local `make` builds append `-dev`, producing `vimls 0.1.3-dev`, even
+without Git metadata. This affects `vimls -version` and LSP server info. Direct
+`go build` without linker flags retains the source default `dev`.
+Release builds embed the matching release tag, including its leading `v`.
+
 For documentation-only changes, check examples, links and `git diff --check`.
 Go tests are not needed.
 
@@ -147,10 +153,12 @@ For comparison with go-vimlparser and parser-only profiling, follow
 
 ## Preparing a release
 
-Choose a new version, add its `## vX.Y.Z` changelog section, commit the release
+Update `VERSION`, add its matching `## vX.Y.Z` changelog section, commit the release
 changes and validate that exact source. The changelog section must be nonempty
 and unique; the packager uses it as the release notes. `make release` checks the
-section with the same parser before creating or pushing a tag. To check it alone:
+section and rejects a tag that differs from `VERSION` before creating or pushing
+a tag. The release packager enforces the same version check in GitHub Actions.
+To check it alone (after setting `VERSION` to `0.2.0`):
 
 ```sh
 go run -mod=readonly ./tools/release -version v0.2.0 -check-changelog
@@ -189,10 +197,11 @@ release**. Run it only when publication is authorized and the working tree is
 clean. For the example version above:
 
 ```sh
-make release VERSION=0.2.0
+make release
 ```
 
-The default remote is `origin`; `RELEASE_REMOTE` can select another remote.
+The tag comes only from the `VERSION` file. The default remote is `origin`;
+`RELEASE_REMOTE` can select another remote.
 The command pushes only the tag. It can retry an existing annotated tag at
 HEAD, but will not move an existing tag.
 

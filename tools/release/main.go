@@ -41,6 +41,13 @@ func main() {
 	if !regexp.MustCompile(`^v[0-9][0-9A-Za-z.+-]*$`).MatchString(*version) || (!*checkChangelog && *epoch <= 0) {
 		fatalf("-version vX.Y.Z and a positive -epoch are required")
 	}
+	versionFile, err := os.ReadFile("VERSION")
+	if err != nil {
+		fatalf("%v", err)
+	}
+	if err := validateReleaseVersion(string(versionFile), *version); err != nil {
+		fatalf("%v", err)
+	}
 	if *checkChangelog {
 		changelog, err := os.ReadFile("CHANGELOG.md")
 		if err != nil {
@@ -87,6 +94,17 @@ func main() {
 	if err := writeChecksums(filepath.Join(*output, "checksums.txt"), assets); err != nil {
 		fatalf("%v", err)
 	}
+}
+
+func validateReleaseVersion(contents, tag string) error {
+	version := strings.TrimSuffix(contents, "\n")
+	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$`).MatchString(version) {
+		return fmt.Errorf("VERSION must contain one version without a leading v, for example 0.1.3")
+	}
+	if tag != "v"+version {
+		return fmt.Errorf("release tag %q does not match VERSION %q", tag, version)
+	}
+	return nil
 }
 
 // releaseNotes selects an exact version from our "## vX.Y.Z" changelog format.
