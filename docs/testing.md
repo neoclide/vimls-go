@@ -206,8 +206,8 @@ make release
 
 The tag comes only from the `VERSION` file. The default remote is `origin`;
 `RELEASE_REMOTE` can select another remote.
-The command pushes only the tag. It can retry an existing annotated tag at
-HEAD, but will not move an existing tag.
+The command pushes only the tag. If that tag already exists locally, it prints
+a message and exits successfully before checking the worktree or publishing.
 
 The [release workflow](../.github/workflows/release.yml) runs checks, builds
 assets and publishes the matching changelog section. A tag containing a hyphen

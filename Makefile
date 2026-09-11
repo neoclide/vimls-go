@@ -12,7 +12,7 @@ build:
 	mkdir -p bin
 	@set -eu; \
 	build_version="$$(cat VERSION)-dev"; \
-	set -x; \
+	echo "Building bin/vimls ($$build_version)"; \
 	$(GO) build $(GO_MOD) -ldflags "-X github.com/neoclide/vimls-go/internal/server.Version=$$build_version" -o bin/vimls ./cmd/vimls
 	$(GO) build $(GO_MOD) -o bin/vimparse ./cmd/vimparse
 
@@ -90,15 +90,13 @@ release:
 	release_tag="v$$(cat VERSION)"; \
 	printf '%s\n' "$$release_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$$' || \
 	  { echo 'Invalid VERSION file: expected a version such as 0.1.3 without a leading v.' >&2; exit 1; }; \
+	if git show-ref --verify --quiet "refs/tags/$$release_tag"; then \
+	  echo "Local tag $$release_tag already exists; skipping release."; \
+	  exit 0; \
+	fi; \
 	test -z "$$(git status --porcelain)" || \
 	  { echo 'Commit or stash working-tree changes before releasing.' >&2; exit 1; }; \
 	$(GO) run $(GO_MOD) ./tools/release -version "$$release_tag" -check-changelog; \
 	git remote get-url "$$RELEASE_REMOTE" >/dev/null; \
-	if git show-ref --verify --quiet "refs/tags/$$release_tag"; then \
-	  test "$$(git cat-file -t "refs/tags/$$release_tag")" = tag && \
-	  test "$$(git rev-parse "refs/tags/$$release_tag^{commit}")" = "$$(git rev-parse HEAD)" || \
-	    { echo "$$release_tag must be an annotated tag at HEAD; it will not be replaced." >&2; exit 1; }; \
-	else \
-	  git tag -a "$$release_tag" -m "Release $$release_tag"; \
-	fi; \
+	git tag -a "$$release_tag" -m "Release $$release_tag"; \
 	git push "$$RELEASE_REMOTE" "refs/tags/$$release_tag:refs/tags/$$release_tag"
