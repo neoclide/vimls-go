@@ -21,6 +21,10 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
+Option diagnostics assume known options exist regardless of Vim build features;
+assignment type checks skip unknown RHS types and Vim9 `any`.
+Invalid boolean option compound assignments in a Vim9 `def` use E521 uniformly.
+
 User-command definitions preserve attribute, name and body locations through
 logical-line continuations in both dialects. Vim9 command attributes support
 the same contextual completion as Legacy attributes.

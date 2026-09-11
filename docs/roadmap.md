@@ -10,6 +10,11 @@ The items below are remaining work, not promises for a particular release.
 
 ## Language support
 
+Option diagnostics now include feature-gated options, treating known options as
+available without inspecting the user's Vim build.
+Compiled boolean option compound assignments now use E521 uniformly when the
+RHS type is known, as a deliberate simplification of Vim's error-code choices.
+
 User-command metadata now survives logical-line mapping, including continued
 definitions and Vim9 attribute completion.
 

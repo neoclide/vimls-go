@@ -41,12 +41,18 @@ such as `vimls/unused-variable`. Use the complete code when configuring them.
 | `vim/E46`, `vim/E1018`, `vim/E741`, `vim/E742` | A read-only binding or locked value is being changed. The exact code depends on the context. |
 | `vim/E113`, `vim/E518` | The option name is unknown. |
 | `vim/E474`, `vim/E487`, `vim/E539` | A supported option-value check found an invalid value, number or flag. Dynamic values are not fully checked. |
+| `vim/E521`, `vim/E928`, `vim/E734` | An option assignment requires a number, requires a string, or uses an incompatible assignment operator. Known RHS types also receive the corresponding Vim conversion error; unknown and `any` RHS types are skipped. See the [option error list](option-assignment-errors.md). |
 | `vim/E488` | There is unexpected text after a command or expression. |
 | `vim/E492` | The command is invalid or its name is not known. Unknown uppercase user commands are warnings. |
 
 For Vim's explanation of an error, run `:help E117` with the relevant number.
 vimls-go follows **Vim v9.2.1015**; help from another version can describe
 different rules.
+
+Option diagnostics assume known options exist, including options gated by Vim
+build features. They do not inspect the user's Vim build.
+Invalid boolean option compound assignments in a Vim9 `def` intentionally use
+E521 uniformly; unknown and `any` RHS types are skipped.
 
 For example, this Vim9 assignment has a known type mismatch:
 

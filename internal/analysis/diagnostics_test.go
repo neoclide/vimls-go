@@ -5124,7 +5124,7 @@ func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 			unknownSpans = append(unknownSpans, file.Text(diagnostic.Span))
 			unknownCodes = append(unknownCodes, diagnostic.Code)
 			unknownMessages = append(unknownMessages, diagnostic.Message)
-		case "vim/E1012":
+		case "vim/E745", "vim/E928":
 			mismatchSpans = append(mismatchSpans, file.Text(diagnostic.Span))
 		}
 	}
@@ -5142,7 +5142,7 @@ func TestAnalyzeOptionTypesAndUnknownWarnings(t *testing.T) {
 	}
 	wantMismatch := []string{"[7]", "123"}
 	if !reflect.DeepEqual(mismatchSpans, wantMismatch) {
-		t.Fatalf("E1012 spans = %#v, want %#v; diagnostics = %#v", mismatchSpans, wantMismatch, result.Diagnostics)
+		t.Fatalf("option conversion spans = %#v, want %#v; diagnostics = %#v", mismatchSpans, wantMismatch, result.Diagnostics)
 	}
 }
 

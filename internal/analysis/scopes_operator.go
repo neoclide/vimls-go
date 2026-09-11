@@ -321,6 +321,13 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 			}
+			if option, ok := optionAssignment(expression); ok {
+				appendOptionAssignmentTypeDiagnostic(result, expressionScope, expression, command.Dialect, option)
+				for _, child := range expression.Children {
+					walk(child, expressionScope)
+				}
+				return
+			}
 			if target, ok := objectCompoundAssignment(result, expressionScope, expression); ok {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1411", Message: "Missing dot after object \"" + target.Value + "\"", Span: target.Span,

@@ -4754,7 +4754,7 @@ func collectFuncrefVariableNameDiagnostics(result *FileAnalysis) {
 	}
 	for _, declaration := range result.Declarations {
 		if declaration == nil || declaration.Kind != SymbolKindVariable && declaration.Kind != SymbolKindConstant ||
-			declaration.Type.Name != "func" && declaration.Type.Name != "partial" || funcrefVariableNameAllowed(result.File.Dialect, declaration) {
+			declaration.Type.Name != "func" && declaration.Type.Name != "partial" || strings.HasPrefix(declaration.Name, "&") || funcrefVariableNameAllowed(result.File.Dialect, declaration) {
 			continue
 		}
 		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -5724,6 +5724,12 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 
 func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression) {
 	if expression == nil {
+		return
+	}
+	if _, ok := optionAssignment(expression); ok {
+		for _, child := range expression.Children {
+			collectAssignmentTypeMismatchDiagnostics(result, scope, child)
+		}
 		return
 	}
 	if _, ok := objectCompoundAssignment(result, scope, expression); ok {

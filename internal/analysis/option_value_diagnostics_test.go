@@ -110,14 +110,14 @@ func TestOptionValueDiagnosticsSkipNoGlobal(t *testing.T) {
 }
 
 func TestOptionValueDiagnosticsSkipValidAndDynamicValues(t *testing.T) {
-	source := "set bh=hide belloff=all,error cpo=aA msc=1 msc=010 emoji=single wildchar=X wildcharm=^R\n" +
+	source := "set bh=hide belloff=all,error cpo=aA msc=1 msc=010 emoji wildchar=X wildcharm=^R\n" +
 		"set bh+=bogus bh=bo\\gus\n" +
 		"let &listchars = 'eol:\\x24'\n" +
 		"let &fillchars = 'stl:\\u002d'\n" +
 		"let value = 'bogus'\n" +
 		"let &bh = value\n" +
 		"let &bh = 'bo' . 'gus'\n" +
-		"set foldclose=bogus\n"
+		"set foldclose=all\n"
 	file := syntax.Parse(source)
 	for _, diagnostic := range Analyze(file).Diagnostics {
 		if diagnostic.Code == "vim/E474" || diagnostic.Code == "vim/E487" || diagnostic.Code == "vim/E539" {
