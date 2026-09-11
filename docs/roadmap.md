@@ -67,8 +67,8 @@ Build and release versions now use the root `VERSION` file. Local builds append
 
 Vim and Neovim event help is available as
 [generated Go metadata](../tools/geneventdocs/README.md), preferring Vim for
-shared names. Connecting this data to event hover and completion documentation
-remains follow-up work.
+shared names. Event hover and completion documentation use this data, including
+Neovim-only event completion candidates.
 
 General expression reformatting, embedded-language analysis and persistent
 disk indexes remain outside the current scope. The parser still reparses

@@ -31,6 +31,14 @@ unchanged. Member discovery still queries the receiver and bounded nested-member
 types. Function parameters and member symbols are each collected at most once
 per completion request.
 
+Autocmd event hover and completion documentation use compiled help for 156
+event names: 127 Vim spellings and 29 Neovim-only additions. Shared names use
+Vim's documentation; Neovim-only events are labeled accordingly. Hover applies
+to event tokens, including comma-separated lists and events after an augroup,
+not patterns or command bodies. Completion loads the selected event's help via
+`completionItem/resolve`. Both support Markdown and plain text. Sources are
+pinned in the [event documentation generator](../tools/geneventdocs/README.md).
+
 Background diagnostics and workspace analysis yield between phases and in
 batched scope, reference and type traversals while
 completion requests are active and until 150 ms after the latest accepted edit.

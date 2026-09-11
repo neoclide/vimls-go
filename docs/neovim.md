@@ -115,7 +115,7 @@ Dynamic expressions, escaped values and runtime-dependent formats are not
 fully checked. A Neovim-only option name can still receive a Hint when its
 assigned value is dynamic. Neovim-only options have semantic highlighting and
 hover documentation, including short names. The ambiguous `pb` alias documents
-both Vim and Neovim meanings. Completion candidates retain the pinned Vim list;
+both Vim and Neovim meanings. Option completion candidates retain the pinned Vim list;
 this does not enable Neovim function diagnostics or API completion.
 `laststatus=3` also receives the Hint because its global-statusline meaning is
 Neovim-specific, even though Vim accepts the number without an error. Other

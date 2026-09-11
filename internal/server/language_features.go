@@ -28,6 +28,7 @@ const (
 	completionResolveVariable         completionResolveKind = "variable"
 	completionResolveCommand          completionResolveKind = "command"
 	completionResolveCommandAttribute completionResolveKind = "command-attribute"
+	completionResolveAutocmdEvent     completionResolveKind = "autocmd-event"
 	completionResolveLocal            completionResolveKind = "local"
 )
 
@@ -925,6 +926,10 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 		if attr, ok := vimdata.LookupUserCommandAttribute(target.Name); ok {
 			applyMetadata(attr.Detail, attr.Documentation)
 		}
+	case completionResolveAutocmdEvent:
+		if event, ok := vimdata.LookupAutocmdEventDocumentation(target.Name); ok {
+			applyMetadata(autocmdEventDetail(event), autocmdEventDocumentation(event))
+		}
 	}
 	return &result, nil
 }
@@ -941,6 +946,18 @@ func builtinFunctionDetail(function vimdata.BuiltinFunction) string {
 		detail += ": " + returnType
 	}
 	return detail
+}
+
+func autocmdEventDetail(event vimdata.AutocmdEventDocumentation) string {
+	detail := event.Editor + " autocmd event"
+	if event.AliasOf != "" {
+		detail += " (alias of " + event.AliasOf + ")"
+	}
+	return detail
+}
+
+func autocmdEventDocumentation(event vimdata.AutocmdEventDocumentation) string {
+	return "**" + event.Name + "** — " + autocmdEventDetail(event) + "\n\n" + event.Documentation
 }
 
 func completionSymbolKind(kind analysis.SymbolKind) protocol.CompletionItemKind {

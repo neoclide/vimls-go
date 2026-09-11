@@ -20,7 +20,7 @@ func AutocmdEventDocumentations() []AutocmdEventDocumentation {
 }
 
 // LookupAutocmdEventDocumentation matches event names case-insensitively.
-// This documentation inventory does not change accepted syntax or completion.
+// The inventory supplies hover and completion without changing accepted syntax.
 func LookupAutocmdEventDocumentation(name string) (AutocmdEventDocumentation, bool) {
 	i, ok := autocmdDocumentationIndex[strings.ToLower(name)]
 	if !ok {

@@ -2,8 +2,9 @@
 
 This Go generator collects Vim and Neovim event help into
 [`internal/vimdata/autocmd_docs_generated.go`](../../internal/vimdata/autocmd_docs_generated.go).
-There is no runtime JSON or source-checkout dependency. Event hover and
-completion integration remain follow-up work.
+There is no runtime JSON or source-checkout dependency. Event hover reads this
+data directly; completion includes the merged event names and loads each
+selected event's documentation through `completionItem/resolve`.
 
 | Editor | Pinned revision | Inventory |
 | --- | --- | --- |

@@ -29,6 +29,7 @@ type navigationDocument struct {
 	externalMember    string
 	externalClass     bool
 	optionName        string
+	autocmdEventName  string
 	augroupName       string
 	memberSnapshots   map[uri.URI]*text.Snapshot
 	memberTarget      syntax.Span
@@ -132,6 +133,23 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 				}
 			}
 		}
+	}
+	if document.occurrence.Start >= document.occurrence.End {
+		walkCommands(file.Commands, func(command *syntax.Command) {
+			if document.autocmdEventName != "" || command.Autocmd == nil {
+				return
+			}
+			for _, span := range command.Autocmd.Events {
+				if !spanContains(span, offset) {
+					continue
+				}
+				if event, ok := vimdata.LookupAutocmdEventDocumentation(file.Text(span)); ok {
+					document.autocmdEventName = event.Name
+					document.occurrence = span
+					return
+				}
+			}
+		})
 	}
 	if document.occurrence.Start >= document.occurrence.End {
 		if name, span, ok := autocmdAugroupReferenceAt(file, offset); ok {
@@ -807,6 +825,11 @@ func startsWithUppercaseASCII(name string) bool {
 }
 
 func (s *Server) localHover(ctx context.Context, document *navigationDocument) (*protocol.Hover, error) {
+	if document.autocmdEventName != "" {
+		if event, ok := vimdata.LookupAutocmdEventDocumentation(document.autocmdEventName); ok {
+			return s.localHoverResult(ctx, document, []string{autocmdEventDocumentation(event)})
+		}
+	}
 	if document.declaration == nil {
 		name := document.analysis.File.Text(document.occurrence)
 		if document.optionName != "" {

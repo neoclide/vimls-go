@@ -745,8 +745,10 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 		} else if contextKind == completionContextAutocmdHead || contextKind == completionContextAutocmdEvent {
-			for _, event := range vimdata.AutocmdEvents() {
-				if !add(protocol.CompletionItem{Label: event.Name, Kind: protocol.CompletionItemKindEvent}, 8000, completionSourceBuiltin) {
+			for _, event := range vimdata.AutocmdEventDocumentations() {
+				if !add(protocol.CompletionItem{Label: event.Name, Kind: protocol.CompletionItemKindEvent,
+					Detail: protocol.NewOptional(autocmdEventDetail(event)),
+					Data:   completionResolveTargetData(completionResolveAutocmdEvent, event.Name)}, 8000, completionSourceBuiltin) {
 					break
 				}
 			}
