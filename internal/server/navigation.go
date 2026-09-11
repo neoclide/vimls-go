@@ -159,11 +159,12 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 	}
 	if document.occurrence.Start >= document.occurrence.End {
 		walkCommands(file.Commands, func(command *syntax.Command) {
-			if document.occurrence.Start < document.occurrence.End || !spanContains(command.Name, offset) {
+			nameSpan := documentedCommandNameSpan(command)
+			if document.occurrence.Start < document.occurrence.End || !spanContains(nameSpan, offset) {
 				return
 			}
 			if _, ok := vimdata.Lookup(":" + file.Text(command.Name)); ok || command.Kind == syntax.CommandUser {
-				document.occurrence = command.Name
+				document.occurrence = nameSpan
 			}
 		})
 	}
@@ -1212,6 +1213,17 @@ func userCommandAttributeHoverAt(file *syntax.File, offset int) (syntax.Span, []
 	return syntax.Span{}, nil, false
 }
 
+// documentedCommandNameSpan includes bang when it selects built-in command help.
+func documentedCommandNameSpan(command *syntax.Command) syntax.Span {
+	span := command.Name
+	if command.Bang.Start < command.Bang.End {
+		if _, ok := vimdata.LookupMappingCommandDocumentation(command.Canonical, true); ok {
+			span.End = command.Bang.End
+		}
+	}
+	return span
+}
+
 func mappingHoverAt(file *syntax.File, offset int) (syntax.Span, []string, bool) {
 	if file == nil {
 		return syntax.Span{}, nil, false
@@ -1225,9 +1237,10 @@ func mappingHoverAt(file *syntax.File, offset int) (syntax.Span, []string, bool)
 		if found {
 			return
 		}
-		if spanContains(command.Name, offset) {
+		nameSpan := documentedCommandNameSpan(command)
+		if spanContains(nameSpan, offset) {
 			if documentation, ok := vimdata.LookupMappingCommandDocumentation(command.Canonical, command.Bang.Start < command.Bang.End); ok {
-				foundSpan = command.Name
+				foundSpan = nameSpan
 				foundLines = []string{documentation}
 				found = true
 				return

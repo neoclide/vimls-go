@@ -42,7 +42,7 @@ func TestMappingCommandHoverDocumentation(t *testing.T) {
 				if !found || !ok || content.Kind != kind || content.Value != want {
 					t.Fatalf("contents = %#v, want %q", hover.Contents, want)
 				}
-				if hover.Range == nil || hover.Range.Start != (protocol.Position{Line: 1, Character: 7}) || hover.Range.End != (protocol.Position{Line: 1, Character: uint32(7 + len(strings.TrimSuffix(tc.typed, "!")))}) {
+				if hover.Range == nil || hover.Range.Start != (protocol.Position{Line: 1, Character: 7}) || hover.Range.End != (protocol.Position{Line: 1, Character: uint32(7 + len(tc.typed))}) {
 					t.Fatalf("range = %#v", hover.Range)
 				}
 			}
@@ -196,6 +196,42 @@ func TestMappingDocumentationOverridesRuntimeHelp(t *testing.T) {
 				if !ok || string(doc) != markdownToPlainText(want) {
 					t.Fatalf("loaded=%v resolved docs = %#v", loaded, resolved.Documentation)
 				}
+			}
+		}
+	}
+}
+
+func TestMappingBangHoverRange(t *testing.T) {
+	for _, name := range []string{"map", "noremap", "unmap", "mapclear", "command"} {
+		source := name + "!"
+		switch name {
+		case "map", "noremap":
+			source += " K abc"
+		case "unmap":
+			source += " K"
+		case "command":
+			source += " Demo echo 1"
+		}
+		s, uri := openNavigationDocument(t, text.UTF16, source+"\n")
+		t.Cleanup(s.stopAnalysis)
+		root := t.TempDir()
+		writeWorkspaceFile(t, root, "doc/map.txt", "*:"+name+"*\nRuntime duplicate.\n")
+		s.setRuntimePaths([]string{root})
+		s.runtimeHelpWG.Wait()
+		for _, offset := range []int{0, len(name)} {
+			hover, err := s.Hover(context.Background(), &protocol.HoverParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: uri}, Position: protocol.Position{Character: uint32(offset)},
+			}})
+			if err != nil || hover == nil {
+				t.Fatalf("%s offset %d: %#v %v", name, offset, hover, err)
+			}
+			want, _ := vimdata.LookupMappingCommandDocumentation(name, true)
+			contents, ok := hover.Contents.(*protocol.MarkupContent)
+			if !ok || contents.Value != want {
+				t.Fatalf("%s contents=%#v", name, hover.Contents)
+			}
+			if hover.Range == nil || *hover.Range != navigationRange(0, 0, uint32(len(name)+1)) {
+				t.Fatalf("%s range=%v", name, hover.Range)
 			}
 		}
 	}

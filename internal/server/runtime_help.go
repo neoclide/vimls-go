@@ -251,7 +251,7 @@ func runtimeHelpName(document *navigationDocument, resolvedKind analysis.SymbolK
 	commandName := ""
 	hasBuiltinDocumentation := false
 	walkCommands(document.analysis.File.Commands, func(command *syntax.Command) {
-		if commandName != "" || command.Name != document.occurrence {
+		if commandName != "" || documentedCommandNameSpan(command) != document.occurrence {
 			return
 		}
 		if command.Kind == syntax.CommandUser {

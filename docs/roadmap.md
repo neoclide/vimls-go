@@ -13,6 +13,9 @@ The items below are remaining work, not promises for a particular release.
 User-command metadata now survives logical-line mapping, including continued
 definitions and Vim9 attribute completion.
 
+Documented command bang variants now have a complete hover range, including
+the bang character, while retaining built-in documentation precedence.
+
 Legacy variable type-change warnings now cover straight-line simple assignments.
 They discard unknown types and stop at calls and control-flow boundaries; broader
 flow-sensitive checking remains outside this warning's current scope.

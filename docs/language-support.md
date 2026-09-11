@@ -25,6 +25,9 @@ User-command definitions preserve attribute, name and body locations through
 logical-line continuations in both dialects. Vim9 command attributes support
 the same contextual completion as Legacy attributes.
 
+Hover on a documented mapping or user-command bang variant includes `!` in
+the command range and works when the cursor is on that character.
+
 Completion uses the current text without waiting for full file analysis.
 Commands and options use syntax and built-in metadata; local variables and
 members use lexical declarations. Local declaration type details are computed
