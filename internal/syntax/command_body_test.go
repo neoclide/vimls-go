@@ -483,3 +483,24 @@ func TestUserCommandStrayBlockEnd(t *testing.T) {
 	}
 	assertFileSpans(t, file)
 }
+
+func TestVim9AugroupLogicalSpans(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\naugroup Project\naugroup END\n",
+		"vim9script\naugroup\n  \\ Project\naugroup END\n",
+	} {
+		file := Parse(source)
+		if len(file.Diagnostics) != 0 {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		var names []string
+		for _, command := range file.Commands {
+			if command.Canonical == "augroup" {
+				names = append(names, file.Text(command.Augroup))
+			}
+		}
+		if len(names) != 2 || names[0] != "Project" || names[1] != "END" {
+			t.Fatalf("augroup names = %q for %q", names, source)
+		}
+	}
+}

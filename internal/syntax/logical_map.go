@@ -83,6 +83,7 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 	command.Set = temporaryCommand.Set
 	command.Substitute = temporaryCommand.Substitute
 	command.Autocmd = temporaryCommand.Autocmd
+	command.Augroup = temporaryCommand.Augroup
 }
 
 type logicalSpanMapper struct {
@@ -98,6 +99,7 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 	if command == nil {
 		return
 	}
+	command.Augroup = mapper.optional(command.Augroup)
 	mapper.commandList(command.Embedded)
 	if command.Declaration != nil {
 		declaration := command.Declaration

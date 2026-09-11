@@ -2279,3 +2279,27 @@ func TestMissingNameDiagnosticsRefreshAfterRuntimepathScan(t *testing.T) {
 		}
 	}
 }
+
+func TestVim9AutocmdGroupDiagnostics(t *testing.T) {
+	instance, published := initializeWorkspaceDiagnosticServer(t, t.TempDir())
+	documentURI := uri.MustParse("untitled:issue2")
+	source := `vim9script
+if exists("g:loaded_lsp_vim")
+  augroup lspsetup
+    au!
+    au User LspAttached lsp#Map()
+    au User LspDetached lsp#Unmap()
+  augroup END
+endif
+au User Outside lsp#Map()
+`
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+		URI: documentURI, Version: 1, Text: source,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnosticsForURI(t, published, documentURI)
+	if len(params.Diagnostics) != 1 || params.Diagnostics[0].Code != protocol.String("vimls/autocmd-outside-augroup") || params.Diagnostics[0].Range.Start.Line != 8 {
+		t.Fatalf("diagnostics = %#v; want only the final ungrouped autocmd", params.Diagnostics)
+	}
+}

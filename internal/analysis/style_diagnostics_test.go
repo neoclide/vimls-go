@@ -522,3 +522,33 @@ func TestCatchErrorMessageDiagnostic(t *testing.T) {
 		}
 	}
 }
+
+func TestAutocmdGroupInsideConditional(t *testing.T) {
+	for _, prefix := range []string{"", "vim9script\n"} {
+		for _, name := range []string{"au", "autocmd"} {
+			source := prefix + `if exists("g:loaded_lsp_vim")
+  augroup lspsetup
+    au!
+    au User LspAttached lsp#Map()
+    au User LspDetached lsp#Unmap()
+  augroup END
+endif
+au User Outside lsp#Map()
+`
+			source = strings.ReplaceAll(source, "au ", name+" ")
+			for _, config := range []bool{false, true} {
+				diagnostics := analyzeModeDiagnostics(t, source, config)
+				var outside []syntax.Span
+				for _, d := range diagnostics {
+					if d.Code == "vimls/autocmd-outside-augroup" {
+						outside = append(outside, d.Span)
+					}
+				}
+				want := strings.LastIndex(source, name+" User Outside")
+				if len(outside) != 1 || outside[0] != (syntax.Span{Start: want, End: want + len(name)}) {
+					t.Fatalf("prefix=%q command=%s config=%v: outside spans = %v", prefix, name, config, outside)
+				}
+			}
+		}
+	}
+}
