@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.4
+
+- Add diagnostics for wrong option assignments.
+- Show option documentation for option variable.
+- Add documentation for builtin map commands.
+- Add documentation for autocmd events.
+
 ## v0.1.3
 
 - Keep cached plugin command completions available while background analysis is
