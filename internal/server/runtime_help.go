@@ -12,6 +12,7 @@ import (
 
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 	"github.com/neoclide/vimls-go/internal/vimhelp"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
@@ -248,6 +249,7 @@ func runtimeHelpName(document *navigationDocument, resolvedKind analysis.SymbolK
 		return strings.ToLower(text)
 	}
 	commandName := ""
+	hasBuiltinDocumentation := false
 	walkCommands(document.analysis.File.Commands, func(command *syntax.Command) {
 		if commandName != "" || command.Name != document.occurrence {
 			return
@@ -256,8 +258,12 @@ func runtimeHelpName(document *navigationDocument, resolvedKind analysis.SymbolK
 			commandName = ":" + document.analysis.File.Text(command.Name)
 		} else if command.Kind == syntax.CommandBuiltin {
 			commandName = ":" + command.Canonical
+			_, hasBuiltinDocumentation = vimdata.LookupMappingCommandDocumentation(command.Canonical, command.Bang.Start < command.Bang.End)
 		}
 	})
+	if hasBuiltinDocumentation {
+		return ""
+	}
 	if commandName != "" {
 		return commandName
 	}

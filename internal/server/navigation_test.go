@@ -2050,7 +2050,7 @@ func TestHoverKeymapDetails(t *testing.T) {
 			character: 2,
 			wantRange: navigationRange(0, 0, 8),
 			contains: []string{
-				"**vnoremap** An Ex command.",
+				":vnoremap",
 			},
 		},
 		{

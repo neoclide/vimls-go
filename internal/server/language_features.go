@@ -920,6 +920,10 @@ func (s *Server) CompletionResolve(ctx context.Context, item *protocol.Completio
 			applyMetadata("variable: "+variable.Type, variable.Documentation)
 		}
 	case completionResolveCommand:
+		if documentation, ok := vimdata.LookupMappingCommandDocumentation(target.Name, false); ok {
+			applyMetadata("Ex command", documentation)
+			break
+		}
 		documentation := s.runtimeHelpMarkdown(":" + target.Name)
 		if command, ok := vimdata.Lookup(":" + target.Name); ok && command.Name == target.Name && !vimdata.IsNeovimCompatCommand(command.Name) {
 			applyMetadata("Ex command", documentation)

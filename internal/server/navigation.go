@@ -1222,7 +1222,18 @@ func mappingHoverAt(file *syntax.File, offset int) (syntax.Span, []string, bool)
 		found      bool
 	)
 	walkCommands(file.Commands, func(command *syntax.Command) {
-		if found || command.Mapping == nil {
+		if found {
+			return
+		}
+		if spanContains(command.Name, offset) {
+			if documentation, ok := vimdata.LookupMappingCommandDocumentation(command.Canonical, command.Bang.Start < command.Bang.End); ok {
+				foundSpan = command.Name
+				foundLines = []string{documentation}
+				found = true
+				return
+			}
+		}
+		if command.Mapping == nil {
 			return
 		}
 		mapping := command.Mapping
