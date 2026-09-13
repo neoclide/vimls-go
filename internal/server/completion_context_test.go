@@ -45,6 +45,13 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		{"echo expand('<cfile>:p')", ":p", completionContextNone}, {"echo other('<cf')", "<cf", completionContextNone}, {"echo has('gui_')", "'gui_'", completionContextExpression},
 		{"nmap lhs", "lhs", completionContextNone}, {"nmap lhs <bu", "<bu", completionContextNone},
 		{"echo 'value'", "value", completionContextNone}, {"\" echo value", "value", completionContextNone}, {"map x value", "value", completionContextNone}, {"loadkeymap\na a", "a a", completionContextNone},
+		{"vim9script\nexport var Pi: f", "f", completionContextType},
+		{"vim9script\nexport var Pi: ", ": ", completionContextType},
+		{"vim9script\nvar x: float = f", " = f", completionContextExpression},
+		{"vim9script\ndef Foo(x: f", "x: f", completionContextType},
+		{"vim9script\ndef Foo(): f", "): f", completionContextType},
+		{"vim9script\ntype Alias = f", "= f", completionContextType},
+		{"vim9script\nvar l: list<f", "<f", completionContextType},
 		{"let x =<< END\nvalue\nEND", "value", completionContextNone}, {"append\nvalue\n.", "value", completionContextNone}, {"finish\nvalue", "value", completionContextNone},
 	}
 	for _, test := range cases {

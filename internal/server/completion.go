@@ -218,7 +218,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			continue
 		}
 		var analysisResult *analysis.FileAnalysis
-		if contextKind == completionContextExpression || contextKind == completionContextMethod || contextKind == completionContextVim9Statement || contextKind == completionContextMember {
+		if contextKind == completionContextExpression || contextKind == completionContextMethod || contextKind == completionContextVim9Statement || contextKind == completionContextMember || contextKind == completionContextType {
 			file, analysisResult = s.completionSnapshotFacts(ctx, snapshot, file)
 			if ctx.Err() != nil {
 				return nil, protocol.ErrRequestCancelled
@@ -549,6 +549,45 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					item.FilterText = protocol.NewOptional(function.Name)
 				}
 				if !add(item, 8000, completionSourceBuiltin) {
+					break
+				}
+			}
+		} else if contextKind == completionContextType {
+			for _, typeName := range vimdata.Vim9Types() {
+				if !add(protocol.CompletionItem{
+					Label:  typeName,
+					Kind:   protocol.CompletionItemKindClass,
+					Detail: protocol.NewOptional("type"),
+				}, 8000, completionSourceBuiltin) {
+					break
+				}
+			}
+			for _, visible := range visibleCompletionDeclarations(analysisResult, offset) {
+				declaration := visible.declaration
+				if !isTypeSymbolKind(declaration.Kind) {
+					continue
+				}
+				label := completionDeclarationLabel(declaration, analysisResult.Root, file.Dialect, "")
+				if label == "" || !completionTextMatches(selection.prefix, label) {
+					continue
+				}
+				item := protocol.CompletionItem{
+					Label:  label,
+					Kind:   completionSymbolKind(declaration.Kind),
+					Detail: protocol.NewOptional(string(declaration.Kind)),
+					Data:   localCompletionResolveData(snapshot, declaration),
+				}
+				if declaration.Deprecated {
+					item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}
+				}
+				score := 10000
+				for depth := 0; depth < visible.scopeDepth; depth++ {
+					score = score * 99 / 100
+				}
+				if declaration.Deprecated {
+					score /= 2
+				}
+				if !add(item, score, completionSourceLocal) {
 					break
 				}
 			}
@@ -1451,6 +1490,19 @@ func completionCandidates(items protocol.CompletionItemSlice, score int, source 
 		result[item.Label] = completionCandidate{item: item, score: itemScore, source: source}
 	}
 	return result
+}
+
+func isTypeSymbolKind(kind analysis.SymbolKind) bool {
+	switch kind {
+	case analysis.SymbolKindClass,
+		analysis.SymbolKindInterface,
+		analysis.SymbolKindEnum,
+		analysis.SymbolKindTypeAlias,
+		analysis.SymbolKindImport:
+		return true
+	default:
+		return false
+	}
 }
 
 type visibleCompletionDeclaration struct {

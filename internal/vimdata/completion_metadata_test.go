@@ -53,6 +53,26 @@ func TestCompletionMetadataTables(t *testing.T) {
 	if ExpandSpecials()[0].Name == "changed" {
 		t.Fatal("ExpandSpecials exposed its table")
 	}
+	vim9Types := Vim9Types()
+	if len(vim9Types) != 14 {
+		t.Fatalf("Vim9Types() = %d, want 14", len(vim9Types))
+	}
+	for _, expected := range []string{"any", "bool", "blob", "channel", "dict", "float", "func", "job", "list", "number", "object", "string", "tuple", "void"} {
+		found := false
+		for _, typ := range vim9Types {
+			if typ == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing Vim9 type %q", expected)
+		}
+	}
+	vim9Types[0] = "changed"
+	if Vim9Types()[0] == "changed" {
+		t.Fatal("Vim9Types exposed its table")
+	}
 	options := Options()
 	variables := Variables()
 	for _, table := range [][]string{{options[0].Name}, {variables[0].Name}} {

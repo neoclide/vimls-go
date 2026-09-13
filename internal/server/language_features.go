@@ -234,6 +234,7 @@ const (
 	completionContextMappingArgument
 	completionContextHasFeature
 	completionContextExpandSpecial
+	completionContextType
 )
 
 func completionContextAt(file *syntax.File, offset int) completionContext {
@@ -290,7 +291,14 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 			result = completionContextFunctionAttribute
 			return
 		}
-		if !spanContains(command.Span, offset) && offset != command.Span.End {
+		commandCoversOffset := spanContains(command.Span, offset) || offset == command.Span.End
+		if !commandCoversOffset && offset > command.Span.End && offset <= len(file.Source) {
+			trailing := file.Source[command.Span.End:offset]
+			if strings.Trim(trailing, " \t") == "" {
+				commandCoversOffset = true
+			}
+		}
+		if !commandCoversOffset {
 			if contextKind, ok := completionHighlightContextAt(file, command, offset); ok {
 				result = contextKind
 			}
@@ -464,6 +472,10 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 			result = completionContextCommand
 			return
 		}
+		if completionTypeContextAt(file, command, offset) {
+			result = completionContextType
+			return
+		}
 		if spanContains(command.Argument, offset) || offset == command.Argument.End {
 			result = completionContextExpression
 		}
@@ -500,6 +512,268 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		return completionContextCommand
 	}
 	return completionContextNone
+}
+
+func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset int) bool {
+	if file == nil || command == nil || offset < 0 || offset > len(file.Source) {
+		return false
+	}
+	if command.Dialect != syntax.Vim9 && command.Canonical != "def" {
+		return false
+	}
+
+	// 1. Variable / constant / final declarations
+	if command.Declaration != nil {
+		declaration := command.Declaration
+		if typeNodeContainsOffset(declaration.ParsedType, offset) {
+			return true
+		}
+		if declaration.Type.Start < declaration.Type.End && declaration.Type.Start <= offset && offset <= declaration.Type.End {
+			return true
+		}
+		if declaration.Name.End > 0 && declaration.Name.End <= len(file.Source) {
+			limit := command.Span.End
+			if declaration.Assignment.Start > 0 && declaration.Assignment.Start <= limit {
+				limit = declaration.Assignment.Start
+			}
+			if offset > limit && offset <= len(file.Source) {
+				lineEnd := len(file.Source)
+				if idx := strings.IndexAny(file.Source[declaration.Name.End:], "\r\n#"); idx >= 0 {
+					lineEnd = declaration.Name.End + idx
+				}
+				if offset <= lineEnd && (declaration.Assignment.Start <= 0 || offset <= declaration.Assignment.Start) {
+					limit = lineEnd
+				}
+			}
+			if limit > len(file.Source) {
+				limit = len(file.Source)
+			}
+			if declaration.Name.End <= limit {
+				if colon := strings.IndexByte(file.Source[declaration.Name.End:limit], ':'); colon >= 0 {
+					colonOffset := declaration.Name.End + colon
+					if colonOffset < offset && offset <= limit {
+						return true
+					}
+				}
+			}
+		}
+		for _, binding := range declaration.Bindings {
+			if typeNodeContainsOffset(binding.ParsedType, offset) {
+				return true
+			}
+			if binding.Type.Start < binding.Type.End && binding.Type.Start <= offset && offset <= binding.Type.End {
+				return true
+			}
+			if binding.Name.End > 0 && binding.Name.End <= len(file.Source) {
+				limit := command.Span.End
+				if binding.Name.End < limit && limit <= len(file.Source) {
+					sub := file.Source[binding.Name.End:limit]
+					if endIdx := strings.IndexAny(sub, ",]="); endIdx >= 0 {
+						limit = binding.Name.End + endIdx
+					}
+					if colon := strings.IndexByte(file.Source[binding.Name.End:limit], ':'); colon >= 0 {
+						colonOffset := binding.Name.End + colon
+						if colonOffset < offset && offset <= limit {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 2. For loop bindings (e.g. for [a: int, b: f] in ...)
+	if command.For != nil {
+		for _, binding := range command.For.Bindings {
+			if typeNodeContainsOffset(binding.ParsedType, offset) {
+				return true
+			}
+			if binding.Type.Start < binding.Type.End && binding.Type.Start <= offset && offset <= binding.Type.End {
+				return true
+			}
+			if binding.Name.End > 0 && binding.Name.End <= len(file.Source) {
+				limit := command.Span.End
+				if command.For.In.Start > 0 && command.For.In.Start <= limit {
+					limit = command.For.In.Start
+				}
+				if binding.Name.End < limit && limit <= len(file.Source) {
+					sub := file.Source[binding.Name.End:limit]
+					if endIdx := strings.IndexAny(sub, ",]"); endIdx >= 0 {
+						limit = binding.Name.End + endIdx
+					}
+					if colon := strings.IndexByte(file.Source[binding.Name.End:limit], ':'); colon >= 0 {
+						colonOffset := binding.Name.End + colon
+						if colonOffset < offset && offset <= limit {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Function signature (parameters and return type)
+	if command.Function != nil {
+		function := command.Function
+		for _, parameter := range function.Parameters {
+			if typeNodeContainsOffset(parameter.Type, offset) {
+				return true
+			}
+			if parameter.TypeSpan.Start < parameter.TypeSpan.End && parameter.TypeSpan.Start <= offset && offset <= parameter.TypeSpan.End {
+				return true
+			}
+			if parameter.Name.End > 0 && parameter.Name.End <= len(file.Source) {
+				limit := command.Span.End
+				if parameter.DefaultSpan.Start > 0 && parameter.DefaultSpan.Start <= limit {
+					limit = parameter.DefaultSpan.Start
+				}
+				if parameter.Name.End < limit && limit <= len(file.Source) {
+					sub := file.Source[parameter.Name.End:limit]
+					if endIdx := strings.IndexAny(sub, ",)="); endIdx >= 0 {
+						limit = parameter.Name.End + endIdx
+					}
+					if colon := strings.IndexByte(file.Source[parameter.Name.End:limit], ':'); colon >= 0 {
+						colonOffset := parameter.Name.End + colon
+						if colonOffset < offset && offset <= limit {
+							return true
+						}
+					}
+				}
+			}
+		}
+		if typeNodeContainsOffset(function.ReturnType, offset) {
+			return true
+		}
+		if function.ReturnTypeSpan.Start < function.ReturnTypeSpan.End && function.ReturnTypeSpan.Start <= offset && offset <= function.ReturnTypeSpan.End {
+			return true
+		}
+		if command.Argument.Start <= command.Argument.End && command.Argument.End <= len(file.Source) {
+			argText := file.Source[command.Argument.Start:command.Argument.End]
+			if rparen := strings.LastIndexByte(argText, ')'); rparen >= 0 {
+				afterParen := command.Argument.Start + rparen + 1
+				limit := len(file.Source)
+				if idx := strings.IndexAny(file.Source[afterParen:], "\r\n#{"); idx >= 0 {
+					limit = afterParen + idx
+				}
+				if afterParen < limit {
+					if colon := strings.IndexByte(file.Source[afterParen:limit], ':'); colon >= 0 {
+						colonOffset := afterParen + colon
+						if colonOffset < offset && offset <= limit {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 4. Type alias (type Alias = ...)
+	if command.TypeAlias != nil {
+		if typeNodeContainsOffset(command.TypeAlias.Type, offset) {
+			return true
+		}
+		if command.TypeAlias.TypeSpan.Start < command.TypeAlias.TypeSpan.End && command.TypeAlias.TypeSpan.Start <= offset && offset <= command.TypeAlias.TypeSpan.End {
+			return true
+		}
+		if command.TypeAlias.Assignment.Start > 0 && command.TypeAlias.Assignment.End <= len(file.Source) {
+			limit := len(file.Source)
+			if idx := strings.IndexAny(file.Source[command.TypeAlias.Assignment.End:], "\r\n#"); idx >= 0 {
+				limit = command.TypeAlias.Assignment.End + idx
+			}
+			if command.TypeAlias.Assignment.End <= offset && offset <= limit {
+				return true
+			}
+		}
+	}
+
+	// 5. Expressions (lambdas, cast type, type arguments)
+	var inExpressionType bool
+	walkCommandExpressions(command, func(expr *syntax.Expression) {
+		if inExpressionType || expr == nil {
+			return
+		}
+		if expr.CastType != nil && typeNodeContainsOffset(expr.CastType, offset) {
+			inExpressionType = true
+			return
+		}
+		for _, typeArg := range expr.TypeArguments {
+			if typeNodeContainsOffset(typeArg, offset) {
+				inExpressionType = true
+				return
+			}
+		}
+		if expr.Kind == syntax.ExpressionLambda {
+			for _, parameter := range expr.Parameters {
+				if typeNodeContainsOffset(parameter.Type, offset) {
+					inExpressionType = true
+					return
+				}
+				if parameter.TypeSpan.Start < parameter.TypeSpan.End && parameter.TypeSpan.Start <= offset && offset <= parameter.TypeSpan.End {
+					inExpressionType = true
+					return
+				}
+				if parameter.Name.End > 0 && parameter.Name.End <= len(file.Source) {
+					limit := expr.Span.End
+					if parameter.DefaultSpan.Start > 0 && parameter.DefaultSpan.Start <= limit {
+						limit = parameter.DefaultSpan.Start
+					}
+					if parameter.Name.End < limit && limit <= len(file.Source) {
+						sub := file.Source[parameter.Name.End:limit]
+						if endIdx := strings.IndexAny(sub, ",)="); endIdx >= 0 {
+							limit = parameter.Name.End + endIdx
+						}
+						if colon := strings.IndexByte(file.Source[parameter.Name.End:limit], ':'); colon >= 0 {
+							colonOffset := parameter.Name.End + colon
+							if colonOffset < offset && offset <= limit {
+								inExpressionType = true
+								return
+							}
+						}
+					}
+				}
+			}
+			if typeNodeContainsOffset(expr.ReturnType, offset) {
+				inExpressionType = true
+				return
+			}
+			if expr.Operator.Start > 0 && expr.Span.Start <= expr.Operator.Start && expr.Operator.Start <= len(file.Source) {
+				header := file.Source[expr.Span.Start:expr.Operator.Start]
+				if rparen := strings.LastIndexByte(header, ')'); rparen >= 0 {
+					afterParen := expr.Span.Start + rparen + 1
+					if colon := strings.IndexByte(file.Source[afterParen:expr.Operator.Start], ':'); colon >= 0 {
+						colonOffset := afterParen + colon
+						if colonOffset < offset && offset <= expr.Operator.Start {
+							inExpressionType = true
+							return
+						}
+					}
+				}
+			}
+		}
+	})
+	if inExpressionType {
+		return true
+	}
+
+	return false
+}
+
+func typeNodeContainsOffset(typeNode *syntax.Type, offset int) bool {
+	if typeNode == nil {
+		return false
+	}
+	if typeNode.Span.Start < typeNode.Span.End && typeNode.Span.Start <= offset && offset <= typeNode.Span.End {
+		return true
+	}
+	for _, arg := range typeNode.Arguments {
+		if typeNodeContainsOffset(arg, offset) {
+			return true
+		}
+	}
+	if typeNodeContainsOffset(typeNode.ReturnType, offset) {
+		return true
+	}
+	return false
 }
 
 func completionCallableBlockAt(file *syntax.File, offset int) syntax.BlockKind {

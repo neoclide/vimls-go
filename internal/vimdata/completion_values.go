@@ -289,3 +289,25 @@ func HasFeatures() []CompletionValue {
 func ExpandSpecials() []CompletionValue {
 	return append([]CompletionValue(nil), expandSpecials...)
 }
+
+// vim9Types lists the 14 built-in types supported by Vim9 script at CompletionValueVimTag.
+var vim9Types = []string{
+	"any",
+	"blob",
+	"bool",
+	"channel",
+	"dict",
+	"float",
+	"func",
+	"job",
+	"list",
+	"number",
+	"object",
+	"string",
+	"tuple",
+	"void",
+}
+
+func Vim9Types() []string {
+	return append([]string(nil), vim9Types...)
+}

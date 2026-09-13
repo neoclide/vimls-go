@@ -2182,3 +2182,183 @@ func TestCompletionRuntimePathPluginCommands(t *testing.T) {
 		t.Fatalf("expected PluginCommand after DidChange, got: %#v", completionItems(t, result))
 	}
 }
+
+func TestCompletionVim9TypeAnnotation(t *testing.T) {
+	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nexport var Pi: f\n")
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 1, Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := completionItems(t, result)
+	if !hasCompletion(items, "float", protocol.CompletionItemKindClass) {
+		t.Fatalf("expected float type completion in 'export var Pi: f', got: %#v", items)
+	}
+	if !hasCompletion(items, "func", protocol.CompletionItemKindClass) {
+		t.Fatalf("expected func type completion in 'export var Pi: f', got: %#v", items)
+	}
+	if hasCompletionLabel(items, "for") || hasCompletionLabel(items, "finish") {
+		t.Fatalf("unexpected command in type completion: %#v", items)
+	}
+	floatItem := completionItemWithLabel(items, "float")
+	if floatItem == nil {
+		t.Fatalf("expected float item, got: %#v", items)
+	}
+	if detail, ok := floatItem.Detail.Get(); !ok || detail != "type" {
+		t.Fatalf("expected detail 'type' for float, got: %#v", floatItem)
+	}
+}
+
+func TestCompletionVim9TypeContexts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		source    string
+		line      int
+		character int
+		wantType  string
+		wantKind  protocol.CompletionItemKind
+	}{
+		{
+			name:      "empty prefix after colon in var",
+			source:    "vim9script\nvar Pi: \n",
+			line:      1,
+			character: 8,
+			wantType:  "number",
+			wantKind:  protocol.CompletionItemKindClass,
+		},
+		{
+			name:      "def parameter type",
+			source:    "vim9script\ndef Calc(radius: f)\nenddef\n",
+			line:      1,
+			character: 18,
+			wantType:  "float",
+			wantKind:  protocol.CompletionItemKindClass,
+		},
+		{
+			name:      "def return type",
+			source:    "vim9script\ndef GetPi(): f\nenddef\n",
+			line:      1,
+			character: 14,
+			wantType:  "float",
+			wantKind:  protocol.CompletionItemKindClass,
+		},
+		{
+			name:      "type alias value",
+			source:    "vim9script\ntype MyFloat = f\n",
+			line:      1,
+			character: 16,
+			wantType:  "float",
+			wantKind:  protocol.CompletionItemKindClass,
+		},
+		{
+			name:      "generic list type argument",
+			source:    "vim9script\nvar items: list<f>\n",
+			line:      1,
+			character: 17,
+			wantType:  "float",
+			wantKind:  protocol.CompletionItemKindClass,
+		},
+		{
+			name:      "destructured binding type",
+			source:    "vim9script\nvar [a: number, b: f] = [1, 2.0]\n",
+			line:      1,
+			character: 20,
+			wantType:  "float",
+			wantKind:  protocol.CompletionItemKindClass,
+		},
+		{
+			name:      "class member variable type",
+			source:    "vim9script\nclass Circle\n  var radius: f\nendclass\n",
+			line:      2,
+			character: 15,
+			wantType:  "float",
+			wantKind:  protocol.CompletionItemKindClass,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, tc.source)
+			result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+					Position:     protocol.Position{Line: uint32(tc.line), Character: uint32(tc.character)},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			items := completionItems(t, result)
+			if !hasCompletion(items, tc.wantType, tc.wantKind) {
+				t.Fatalf("expected %q with kind %v, got: %#v", tc.wantType, tc.wantKind, items)
+			}
+		})
+	}
+}
+
+func TestCompletionVim9UserDefinedTypes(t *testing.T) {
+	source := "vim9script\nclass CustomShape\nendclass\ntype CustomAlias = number\nenum CustomColor\n  Red\nendenum\nvar shape: Cust\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 7, Character: 15},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := completionItems(t, result)
+	if !hasCompletion(items, "CustomShape", protocol.CompletionItemKindClass) {
+		t.Fatalf("expected CustomShape in type completion, got: %#v", items)
+	}
+	if !hasCompletion(items, "CustomAlias", protocol.CompletionItemKindClass) {
+		t.Fatalf("expected CustomAlias in type completion, got: %#v", items)
+	}
+	if !hasCompletion(items, "CustomColor", protocol.CompletionItemKindClass) {
+		t.Fatalf("expected CustomColor in type completion, got: %#v", items)
+	}
+	if hasCompletionLabel(items, "Red") {
+		t.Fatalf("enum member Red should not be in type completion: %#v", items)
+	}
+}
+
+func TestCompletionVim9TypeExcludesExpressionsAndViceVersa(t *testing.T) {
+	source := "vim9script\nvar my_var = 42\ndef MyFunc(): void\nenddef\nvar test: f\nvar expr = f\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+
+	// Line 4: "var test: f" -> type position
+	typeResult, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 4, Character: 11},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	typeItems := completionItems(t, typeResult)
+	if !hasCompletion(typeItems, "float", protocol.CompletionItemKindClass) {
+		t.Fatalf("expected float in type position, got: %#v", typeItems)
+	}
+	if hasCompletionLabel(typeItems, "my_var") || hasCompletionLabel(typeItems, "MyFunc") {
+		t.Fatalf("variables and functions should not appear in type completion: %#v", typeItems)
+	}
+
+	// Line 5: "var expr = f" -> expression position
+	exprResult, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+			Position:     protocol.Position{Line: 5, Character: 12},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exprItems := completionItems(t, exprResult)
+	if hasCompletionLabel(exprItems, "float") {
+		t.Fatalf("float type should not appear in expression completion: %#v", exprItems)
+	}
+}
