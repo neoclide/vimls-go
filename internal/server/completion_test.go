@@ -2537,4 +2537,34 @@ func TestCompletionVim9ImportAutoload(t *testing.T) {
 	if !hasCompletion(items6, "as", protocol.CompletionItemKindKeyword) {
 		t.Fatal("Case 6 failed: expected 'as' keyword in 'import \"mylib.vim\" a'")
 	}
+
+	// Verify no builtin functions appear after import
+	if hasCompletionLabel(items1, "abs") || hasCompletionLabel(items1, "add") {
+		t.Fatal("Case 1 failed: builtin functions must not appear after import")
+	}
+	if hasCompletionLabel(items2, "abs") || hasCompletionLabel(items2, "add") {
+		t.Fatal("Case 2 failed: builtin functions must not appear after import a")
+	}
+
+	// Case 7: user functions in scope must not appear after import
+	instance7, docURI7 := openNavigationDocument(t, text.UTF16, "vim9script\ndef MyCustomFunc()\nenddef\nimport a\n")
+	result7, err := instance7.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI7},
+			Position:     protocol.Position{Line: 3, Character: 8},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items7 := completionItems(t, result7)
+	if !hasCompletion(items7, "autoload", protocol.CompletionItemKindKeyword) {
+		t.Fatal("Case 7 failed: expected 'autoload' keyword in 'import a'")
+	}
+	if hasCompletionLabel(items7, "MyCustomFunc") {
+		t.Fatal("Case 7 failed: user function must not appear after import")
+	}
+	if hasCompletionLabel(items7, "abs") {
+		t.Fatal("Case 7 failed: builtin function must not appear after import")
+	}
 }

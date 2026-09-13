@@ -386,6 +386,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 		} else if contextKind == completionContextExpression || contextKind == completionContextMethod || contextKind == completionContextVim9Statement {
+			inImport := isImportCommandAt(file, offset)
 			methodCall := contextKind == completionContextMethod
 			scopePrefix := completionScopePrefixAt(snapshot.Text(), selection.start)
 			insideCallable := completionInsideCallable(analysisResult, offset)
@@ -426,6 +427,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			for _, visible := range visibleCompletionDeclarations(analysisResult, offset) {
 				declaration := visible.declaration
 				if methodCall && declaration.Kind != analysis.SymbolKindFunction {
+					continue
+				}
+				if inImport && (declaration.Kind == analysis.SymbolKindFunction || declaration.Kind == analysis.SymbolKindMethod || declaration.Kind == analysis.SymbolKindConstructor) {
 					continue
 				}
 				label := completionDeclarationLabel(declaration, analysisResult.Root, file.Dialect, scopePrefix)
@@ -484,7 +488,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			completionWorkspaceState = ensureWorkspaceState()
 			if completionWorkspaceState.index == nil {
 				workspaceIncomplete = true
-			} else if scopePrefix == "" || scopePrefix == "g:" {
+			} else if !inImport && (scopePrefix == "" || scopePrefix == "g:") {
 				completionWorkspaceStateUsed = true
 				workspacePrefix := strings.TrimPrefix(selection.prefix, "g:")
 				labelPrefix := ""
@@ -540,30 +544,32 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 				}
 			}
-			for _, function := range vimdata.BuiltinFunctions() {
-				if methodCall && function.MethodArgument == 0 {
-					continue
-				}
-				if !completionTextMatches(selection.prefix, function.Name) {
-					continue
-				}
-				item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction, Data: completionResolveTargetData(completionResolveBuiltinFunction, function.Name)}
-				var (
-					snippet string
-					ok      bool
-				)
-				if methodCall {
-					snippet, ok = completionBuiltinMethodSnippet(function, canSnippet)
-				} else {
-					snippet, ok = completionBuiltinFunctionSnippet(function, canSnippet)
-				}
-				if ok {
-					item.InsertText = protocol.NewOptional(snippet)
-					item.InsertTextFormat = protocol.InsertTextFormatSnippet
-					item.FilterText = protocol.NewOptional(function.Name)
-				}
-				if !add(item, 8000, completionSourceBuiltin) {
-					break
+			if !inImport {
+				for _, function := range vimdata.BuiltinFunctions() {
+					if methodCall && function.MethodArgument == 0 {
+						continue
+					}
+					if !completionTextMatches(selection.prefix, function.Name) {
+						continue
+					}
+					item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction, Data: completionResolveTargetData(completionResolveBuiltinFunction, function.Name)}
+					var (
+						snippet string
+						ok      bool
+					)
+					if methodCall {
+						snippet, ok = completionBuiltinMethodSnippet(function, canSnippet)
+					} else {
+						snippet, ok = completionBuiltinFunctionSnippet(function, canSnippet)
+					}
+					if ok {
+						item.InsertText = protocol.NewOptional(snippet)
+						item.InsertTextFormat = protocol.InsertTextFormatSnippet
+						item.FilterText = protocol.NewOptional(function.Name)
+					}
+					if !add(item, 8000, completionSourceBuiltin) {
+						break
+					}
 				}
 			}
 		} else if contextKind == completionContextType {

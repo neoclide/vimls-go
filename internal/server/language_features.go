@@ -890,6 +890,30 @@ func isImportAsCandidateAt(file *syntax.File, offset int) bool {
 	return matched
 }
 
+func isImportCommandAt(file *syntax.File, offset int) bool {
+	if file == nil || offset < 0 || offset > len(file.Source) {
+		return false
+	}
+	inImport := false
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if inImport || command == nil || command.Canonical != "import" {
+			return
+		}
+		if offset <= command.Name.End || command.Name.End >= len(file.Source) {
+			return
+		}
+		text := file.Source[command.Name.End:offset]
+		if strings.ContainsAny(text, "\r\n|") {
+			return
+		}
+		if len(text) > 0 && !isSpace(text[0]) {
+			return
+		}
+		inImport = true
+	})
+	return inImport
+}
+
 func completionCallableBlockAt(file *syntax.File, offset int) syntax.BlockKind {
 	if file == nil {
 		return ""
