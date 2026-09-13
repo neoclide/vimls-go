@@ -8,9 +8,11 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/neoclide/vimls-go/internal/vimdata"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	"go.lsp.dev/protocol"
 )
@@ -418,4 +420,93 @@ func cleanConfigFilePatterns(patterns []string) []string {
 		}
 	}
 	return result
+}
+
+func vimVersionFromOptions(raw any) (vimdata.VimVersion, bool, string) {
+	if raw == nil {
+		return vimdata.VimVersion{}, false, ""
+	}
+	var options map[string]any
+	switch value := raw.(type) {
+	case map[string]any:
+		options = value
+	case []byte:
+		if len(value) == 0 || string(value) == "null" {
+			return vimdata.VimVersion{}, false, ""
+		}
+		if err := json.Unmarshal(value, &options); err != nil {
+			return vimdata.VimVersion{}, false, "vimls: initializationOptions must be an object; ignoring vimVersion"
+		}
+	default:
+		return vimdata.VimVersion{}, false, "vimls: initializationOptions must be an object; ignoring vimVersion"
+	}
+	var rawVersion any
+	for _, key := range []string{"vimVersion", "vim_version", "version"} {
+		if v, exists := options[key]; exists && v != nil {
+			rawVersion = v
+			break
+		}
+	}
+	if rawVersion == nil {
+		if rawVim, exists := options["vim"]; exists && rawVim != nil {
+			if vimMap, ok := rawVim.(map[string]any); ok {
+				for _, key := range []string{"vimVersion", "vim_version", "version"} {
+					if v, exists := vimMap[key]; exists && v != nil {
+						rawVersion = v
+						break
+					}
+				}
+			}
+		}
+	}
+	if rawVersion == nil {
+		return vimdata.VimVersion{}, false, ""
+	}
+	var versionStr string
+	switch v := rawVersion.(type) {
+	case string:
+		versionStr = v
+	case float64:
+		versionStr = strconv.FormatFloat(v, 'f', -1, 64)
+	default:
+		return vimdata.VimVersion{}, true, "vimls: vimVersion must be a version string; ignoring vimVersion"
+	}
+	version, ok := vimdata.ParseVimVersion(versionStr)
+	if !ok {
+		return vimdata.VimVersion{}, true, "vimls: invalid vimVersion format: " + versionStr + "; ignoring vimVersion"
+	}
+	return version, true, ""
+}
+
+func vimVersionFromSettings(raw []byte, previous vimdata.VimVersion) (vimdata.VimVersion, string) {
+	settings, warning := workspaceSettingsObject(raw, "previous vimVersion")
+	if warning != "" {
+		return previous, warning
+	}
+	var rawVersion json.RawMessage
+	for _, key := range []string{"vimVersion", "vim_version", "version"} {
+		if v, exists := settings[key]; exists && string(v) != "null" {
+			rawVersion = v
+			break
+		}
+	}
+	if rawVersion == nil {
+		return previous, ""
+	}
+	var versionStr string
+	if err := json.Unmarshal(rawVersion, &versionStr); err != nil {
+		var versionNum float64
+		if errNum := json.Unmarshal(rawVersion, &versionNum); errNum != nil {
+			return previous, "vimls: vimVersion must be a version string; retaining previous value"
+		}
+		versionStr = strconv.FormatFloat(versionNum, 'f', -1, 64)
+	}
+	if versionStr == "" || versionStr == "0" {
+		return vimdata.VimVersion{}, ""
+	}
+	version, ok := vimdata.ParseVimVersion(versionStr)
+	if !ok {
+		return previous, "vimls: invalid vimVersion format: " + versionStr + "; retaining previous value"
+	}
+	return version, ""
 }

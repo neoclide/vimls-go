@@ -1,12 +1,94 @@
 package vimdata
 
-import "strings"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// VimVersion represents a 3-component Vim version (major.minor.patch).
+type VimVersion struct {
+	Major int
+	Minor int
+	Patch int
+}
+
+// ParseVimVersion parses a version string like "9.0.0196", "v9.1.0", "9.1", etc.
+func ParseVimVersion(s string) (VimVersion, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	s = strings.TrimPrefix(s, "V")
+	if s == "" {
+		return VimVersion{}, false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) == 0 || len(parts) > 3 {
+		return VimVersion{}, false
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil || major < 0 {
+		return VimVersion{}, false
+	}
+	minor := 0
+	if len(parts) > 1 {
+		minor, err = strconv.Atoi(parts[1])
+		if err != nil || minor < 0 {
+			return VimVersion{}, false
+		}
+	}
+	patch := 0
+	if len(parts) > 2 {
+		patch, err = strconv.Atoi(parts[2])
+		if err != nil || patch < 0 {
+			return VimVersion{}, false
+		}
+	}
+	return VimVersion{Major: major, Minor: minor, Patch: patch}, true
+}
+
+// Compare returns -1 if v < other, 0 if v == other, and 1 if v > other.
+func (v VimVersion) Compare(other VimVersion) int {
+	if v.Major != other.Major {
+		if v.Major < other.Major {
+			return -1
+		}
+		return 1
+	}
+	if v.Minor != other.Minor {
+		if v.Minor < other.Minor {
+			return -1
+		}
+		return 1
+	}
+	if v.Patch != other.Patch {
+		if v.Patch < other.Patch {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+// Valid reports whether v represents a valid non-zero Vim version.
+func (v VimVersion) Valid() bool {
+	return v.Major > 0
+}
+
+func (v VimVersion) String() string {
+	return fmt.Sprintf("%d.%d.%04d", v.Major, v.Minor, v.Patch)
+}
 
 // FeatureHistory records the Vim version and commit message when a feature
 // was introduced after Vim v9.0.0000.
 type FeatureHistory struct {
 	Version     string
 	Description string
+}
+
+// VimVersion returns the parsed VimVersion for this feature.
+func (h FeatureHistory) VimVersion() VimVersion {
+	v, _ := ParseVimVersion(h.Version)
+	return v
 }
 
 // Since returns the hover presentation line, e.g. "Since Vim 9.0.0640".

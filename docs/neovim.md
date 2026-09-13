@@ -16,6 +16,7 @@ vim.lsp.config('vimls', {
   root_markers = { '.git' },
   init_options = {
     runtimepath = vim.api.nvim_list_runtime_paths(),
+    vimVersion = '9.0.0500',
   },
 })
 vim.lsp.enable('vimls')

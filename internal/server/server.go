@@ -18,6 +18,7 @@ import (
 	"github.com/neoclide/vimls-go/internal/jsonrpc"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 	"github.com/neoclide/vimls-go/internal/vimhelp"
 	"github.com/neoclide/vimls-go/internal/workspace"
 	jsonrpc2 "go.lsp.dev/jsonrpc2"
@@ -294,6 +295,7 @@ type Server struct {
 	disabledDiagnostics map[string]struct{}
 	overrideDiagnostics map[string]protocol.DiagnosticSeverity
 	diagnosticMaxNumber int
+	targetVimVersion    vimdata.VimVersion
 
 	completionNow func() time.Time
 }
@@ -573,6 +575,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 		runtimePaths = defaultRuntimePaths(ctx)
 	}
 	configFiles, _, configFilesWarning := configFilesFromOptions([]byte(params.InitializationOptions))
+	targetVersion, _, vimVersionWarning := vimVersionFromOptions([]byte(params.InitializationOptions))
 	watchDynamic, watchRelative := watchedFilesCapabilities(params.Capabilities.Workspace)
 	workspaceConfiguration := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.Configuration != nil && *params.Capabilities.Workspace.Configuration
 	workspaceProgress := params.Capabilities.Window != nil && params.Capabilities.Window.WorkDoneProgress != nil && *params.Capabilities.Window.WorkDoneProgress
@@ -590,8 +593,9 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 	inlayHintRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.InlayHint != nil && params.Capabilities.Workspace.InlayHint.RefreshSupport != nil && *params.Capabilities.Workspace.InlayHint.RefreshSupport
 	codeLensRefreshSupport := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.CodeLens != nil && params.Capabilities.Workspace.CodeLens.RefreshSupport != nil && *params.Capabilities.Workspace.CodeLens.RefreshSupport
 	s.mu.Lock()
+	s.targetVimVersion = targetVersion
 	s.pendingWarning = ""
-	for _, warning := range []string{runtimepathWarning, configFilesWarning} {
+	for _, warning := range []string{runtimepathWarning, configFilesWarning, vimVersionWarning} {
 		if warning == "" {
 			continue
 		}
@@ -972,10 +976,12 @@ func (s *Server) applyWorkspaceConfigurationGeneration(ctx context.Context, sett
 	s.publishMu.Lock()
 	s.mu.Lock()
 	disabled, overrides, maxNumber, diagnosticsWarning := diagnosticSettingsFromSettings(settings, s.disabledDiagnostics, s.overrideDiagnostics, s.diagnosticMaxNumber)
-	diagnosticsChanged := !maps.Equal(disabled, s.disabledDiagnostics) || !maps.Equal(overrides, s.overrideDiagnostics) || maxNumber != s.diagnosticMaxNumber
+	targetVersion, vimVersionWarning := vimVersionFromSettings(settings, s.targetVimVersion)
+	diagnosticsChanged := !maps.Equal(disabled, s.disabledDiagnostics) || !maps.Equal(overrides, s.overrideDiagnostics) || maxNumber != s.diagnosticMaxNumber || targetVersion != s.targetVimVersion
 	s.disabledDiagnostics = disabled
 	s.overrideDiagnostics = overrides
 	s.diagnosticMaxNumber = maxNumber
+	s.targetVimVersion = targetVersion
 	s.mu.Unlock()
 	var snapshots []*text.Snapshot
 	if workspaceDelayChanged || diagnosticsChanged {
@@ -993,7 +999,7 @@ func (s *Server) applyWorkspaceConfigurationGeneration(ctx context.Context, sett
 		s.startAnalysis(snapshot.URI())
 	}
 	warning := ""
-	for _, next := range []string{workspaceDelayWarning, diagnosticsWarning, excludeRuntimePathWarning} {
+	for _, next := range []string{workspaceDelayWarning, diagnosticsWarning, excludeRuntimePathWarning, vimVersionWarning} {
 		if next == "" {
 			continue
 		}
@@ -1378,6 +1384,12 @@ func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.
 		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandDiagnostics(file, workspaceSnapshot.userCommandNames)...)
 	}
 	file.Diagnostics = append(file.Diagnostics, workspaceSnapshot.globalDiagnostics...)
+	s.mu.Lock()
+	targetVersion := s.targetVimVersion
+	s.mu.Unlock()
+	if targetVersion.Valid() {
+		file.Diagnostics = append(file.Diagnostics, analysis.VersionDiagnostics(file, fileAnalysis, targetVersion)...)
+	}
 	file.Diagnostics = filterDisabledDiagnostics(file.Diagnostics, disabledDiagnostics)
 	sort.SliceStable(file.Diagnostics, func(left, right int) bool {
 		if file.Diagnostics[left].Span.Start != file.Diagnostics[right].Span.Start {

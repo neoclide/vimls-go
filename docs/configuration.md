@@ -25,7 +25,21 @@ selected in `:CocConfig`:
 }
 ```
 
-Restart the service after changing the executable path.
+Restart the service after changing the executable path. When configuring `vimls` as a custom language server in `:CocConfig`, `initializationOptions` can also provide `vimVersion`:
+
+```json
+{
+  "languageserver": {
+    "vimls": {
+      "command": "vimls",
+      "filetypes": ["vim"],
+      "initializationOptions": {
+        "vimVersion": "9.0.0500"
+      }
+    }
+  }
+}
+```
 
 ## vim-lsp
 
@@ -33,6 +47,10 @@ Install `vimls` on your `PATH`, then add this to your vimrc:
 
 ```vim
 if executable('vimls')
+  function! s:vim_version() abort
+    return exists('v:versionlong') ? printf('%d.%d.%04d', v:versionlong / 1000000, (v:versionlong % 1000000) / 10000, v:versionlong % 10000) : ''
+  endfunction
+
   augroup vimls_lsp
     autocmd!
     autocmd User lsp_setup call lsp#register_server({
@@ -41,6 +59,7 @@ if executable('vimls')
           \ 'allowlist': ['vim'],
           \ 'initialization_options': {
           \   'runtimepath': globpath(&runtimepath, '', 0, 1),
+          \   'vimVersion': s:vim_version(),
           \ },
           \ })
   augroup END
@@ -56,6 +75,10 @@ In Vim9 script:
 ```vim
 vim9script
 
+def VimVersion(): string
+  return exists('v:versionlong') ? printf('%d.%d.%04d', v:versionlong / 1000000, (v:versionlong % 1000000) / 10000, v:versionlong % 10000) : ''
+enddef
+
 if executable('vimls')
   augroup vimls_lsp
     autocmd!
@@ -66,6 +89,7 @@ if executable('vimls')
       args: [],
       initializationOptions: {
         runtimepath: globpath(&runtimepath, '', 0, 1),
+        vimVersion: VimVersion(),
       },
     }])
   augroup END
@@ -76,6 +100,10 @@ Or in legacy Vim script:
 
 ```vim
 if executable('vimls')
+  function! s:vim_version() abort
+    return exists('v:versionlong') ? printf('%d.%d.%04d', v:versionlong / 1000000, (v:versionlong % 1000000) / 10000, v:versionlong % 10000) : ''
+  endfunction
+
   augroup vimls_lsp
     autocmd!
     autocmd User LspSetup call LspAddServer([{
@@ -85,6 +113,7 @@ if executable('vimls')
           \ 'args': [],
           \ 'initializationOptions': {
           \   'runtimepath': globpath(&runtimepath, '', 0, 1),
+          \   'vimVersion': s:vim_version(),
           \ },
           \ }])
   augroup END
@@ -140,10 +169,11 @@ previous value in place and produce a warning.
 
 ## Runtimepath and configuration files
 
-Clients can pass two startup options:
+Clients can pass startup options in `initializationOptions`:
 
 | Startup option | Value |
 | --- | --- |
+| `vimVersion` | Target Vim version string for compatibility checks (e.g. `"9.0.0500"` or `"9.1"`). Also accepted as `version` or `vim_version`. |
 | `runtimepath` | An ordered list of absolute runtime directory paths. |
 | `configFiles` | Paths or absolute glob patterns for files that should be treated as user configuration. Supports `~/`, `*` and `**`. |
 
@@ -151,9 +181,18 @@ For a client with an `initializationOptions` field:
 
 ```json
 {
+  "vimVersion": "9.0.0500",
   "runtimepath": ["/usr/local/share/vim/vim92", "/home/me/.vim"],
   "configFiles": ["~/.vimrc", "~/.config/vim/**/*.vim"]
 }
+```
+
+In Vim, you can resolve the running editor's semantic version dynamically from `v:versionlong` instead of hardcoding a version string:
+
+```vim
+function! s:vim_version() abort
+  return exists('v:versionlong') ? printf('%d.%d.%04d', v:versionlong / 1000000, (v:versionlong % 1000000) / 10000, v:versionlong % 10000) : ''
+endfunction
 ```
 
 Use directories that exist on your machine. The client should pass its actual

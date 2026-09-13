@@ -206,3 +206,23 @@ These Information messages may disappear as you finish typing.
 
 If ordinary code reaches an analysis limit, include that input in a bug report.
 Hiding the message does not remove the limit.
+
+## Target Vim version diagnostics
+
+When a target Vim version is configured via startup options (e.g. `vimVersion`
+in `initializationOptions`), vimls-go checks referenced language features
+introduced after Vim v9.0.0000 against that target version. If a referenced
+feature is newer than the target version, vimls-go emits a standard Vim error
+diagnostic that explicitly states in which Vim version it was added:
+
+| Feature kind | Code | Message format / example |
+| --- | --- | --- |
+| Ex command | `vim/E492` | `Not an editor command: defer (added in Vim 9.0.0370)` |
+| Option in `:set` | `vim/E518` | `Unknown option: smoothscroll (added in Vim 9.0.0640)` |
+| Option in expressions (`&opt`) | `vim/E113` | `Unknown option: smoothscroll (added in Vim 9.0.0640)` |
+| Builtin function | `vim/E117` | `Unknown function: indexof (added in Vim 9.0.0196)` |
+| Autocommand event | `vim/E216` | `No such group or event: WinResized (added in Vim 9.0.0917)` |
+
+These diagnostics use precomputed semantic references and command indexes without
+redundant AST expression traversals. User-declared variables, functions, and
+custom commands are disambiguated and never confused with newer built-in features.

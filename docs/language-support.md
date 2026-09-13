@@ -9,8 +9,8 @@ the same project. See the [changelog](../CHANGELOG.md) for release availability.
 | Feature | Support |
 | --- | --- |
 | Completion | Commands, functions, variables, options, events, mappings, imports and class members. |
-| Hover and signature help | Types, signatures, source comments and runtime help. |
-| Diagnostics | Syntax errors, unresolved names, invalid calls and Vim9 type errors. |
+| Hover and signature help | Types, signatures, source comments, runtime help and feature introduction history. |
+| Diagnostics | Syntax errors, unresolved names, invalid calls, Vim9 type errors and target Vim version checks. |
 | Navigation | Definitions, references, implementations, call hierarchy and workspace symbols. |
 | Editing | Rename, selected quick fixes, folding and selection expansion. |
 | Inlay hints and Code Lens | Inferred Vim9 types, reference counts and implementation counts. |
