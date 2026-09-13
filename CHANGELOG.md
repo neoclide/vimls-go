@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.5
+
+- Support for vim9 'import' statement without as.
+- Support import completion with relative file paths.
+- Complete full runtimepath import file paths, including nested files; autoload paths complete files and subdirectories one level at a time, including after `/`.
+- Support autoload keyword completion in import statements.
+- Support vim9 script type completion.
+- Fix a parser crash while entering an incomplete lambda parameter type.
+- Fix import `as` completion for quoted paths and malformed trailing expressions, omit namespace-only import candidates, and avoid duplicate spaces on type-completion retriggers.
+
 ## v0.1.4
 
 - Add diagnostics for wrong option assignments.
