@@ -15,6 +15,12 @@ available without inspecting the user's Vim build.
 Compiled boolean option compound assignments now use E521 uniformly when the
 RHS type is known, as a deliberate simplification of Vim's error-code choices.
 
+Plain literal imports without `as` introduce the filename-derived namespace:
+`import 'libs.vim'` makes exported members available as `libs.Two`. Scope
+analysis, member completion and navigation use this namespace. Renaming a
+filename-derived namespace is unsupported because it would change the import
+path; explicit aliases remain available with `as`.
+
 Runtimepath `import` and `import autoload` completion lists full indexed file
 paths, including nested files, instead of directory candidates. An empty ordinary
 `import` path also offers sibling `.vim` files and subdirectories with a `./`

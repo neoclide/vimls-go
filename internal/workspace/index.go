@@ -1907,7 +1907,7 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 	}
 	imports := make(map[syntax.Span]*syntax.Import)
 	var importNodes []*syntax.Import
-	collectImports(file.Commands, file.Blocks, false, imports, &importNodes)
+	collectImports(file, file.Commands, file.Blocks, false, imports, &importNodes)
 	importsByName := make(map[string][]*syntax.Import)
 	for _, importNode := range importNodes {
 		name := ImportAlias(file, importNode)
@@ -1960,7 +1960,7 @@ func CollectExternalReferencesFromAnalysis(path string, file *syntax.File, resul
 				return
 			}
 		} else if (!emptyIndexSpan(importNode.Alias) && !strings.HasPrefix(receiver.Value, "s:")) || importNode.PathSpan.End > receiver.Span.Start {
-			// An implicit filename alias has no lexical declaration, and a
+			// A nonliteral filename alias may lack a lexical declaration, and a
 			// legacy s: spelling can name a script-local import. Other unbound
 			// receivers remain unknown instead of binding to a later import.
 			return
@@ -2033,18 +2033,18 @@ func emptyIndexSpan(span syntax.Span) bool {
 	return span.Start >= span.End
 }
 
-func collectImports(commands []syntax.Command, blocks []syntax.Block, deferred bool, imports map[syntax.Span]*syntax.Import, all *[]*syntax.Import) {
+func collectImports(file *syntax.File, commands []syntax.Command, blocks []syntax.Block, deferred bool, imports map[syntax.Span]*syntax.Import, all *[]*syntax.Import) {
 	for index := range commands {
 		command := &commands[index]
 		insideFunction := deferred || syntax.CommandInsideFunction(command, blocks)
 		if command.Import != nil && !insideFunction {
 			*all = append(*all, command.Import)
-			if command.Import.Alias.Start < command.Import.Alias.End {
-				imports[command.Import.Alias] = command.Import
+			if span := analysis.ImportDeclarationSpan(file, command.Import); span.Start < span.End {
+				imports[span] = command.Import
 			}
 		}
 		if command.Embedded != nil {
-			collectImports(command.Embedded.Commands, command.Embedded.Blocks, insideFunction, imports, all)
+			collectImports(file, command.Embedded.Commands, command.Embedded.Blocks, insideFunction, imports, all)
 		}
 	}
 }

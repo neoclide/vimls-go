@@ -2675,3 +2675,86 @@ func TestCompletionImportLocalPathsAndSelfExclusion(t *testing.T) {
 		})
 	}
 }
+
+func TestCompletionImportFilenameNamespace(t *testing.T) {
+	for _, declaration := range []string{"import 'libs.vim'", "import './import/libs.vim'", "import autoload 'libs.vim'", "import 'libs.vim' as custom"} {
+		t.Run(declaration, func(t *testing.T) {
+			root := t.TempDir()
+			library := "vim9script\nexport var Two: float = 2.00\nvar Private = 1\n"
+			directory := "import"
+			if strings.Contains(declaration, "autoload") {
+				directory = "autoload"
+			}
+			target := writeWorkspaceFile(t, root, directory+"/libs.vim", library)
+			instance := New(nil, nil, io.Discard)
+			t.Cleanup(instance.stopAnalysis)
+			rootURI := uri.File(root)
+			options, err := json.Marshal(map[string]any{"runtimepath": []string{root}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny(options)}); err != nil {
+				t.Fatal(err)
+			}
+			if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+				t.Fatal(err)
+			}
+			instance.workspaceWG.Wait()
+			alias := "libs"
+			if strings.Contains(declaration, " as ") {
+				alias = "custom"
+			}
+			documentURI := uri.File(filepath.Join(root, "main.vim"))
+			source := "vim9script\n" + declaration + "\necho " + alias + ".Two\n"
+			if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+				t.Fatal(err)
+			}
+			report, err := instance.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			full, ok := report.(*protocol.RelatedFullDocumentDiagnosticReport)
+			if !ok || len(full.Items) != 0 {
+				t.Fatalf("diagnostics = %#v", report)
+			}
+			position := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: uint32(len("echo " + alias + ".T"))}}
+			definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: position})
+			if err != nil {
+				t.Fatal(err)
+			}
+			locations := definition.(protocol.LocationSlice)
+			if len(locations) != 1 || locations[0].URI != canonicalTestURI(t, target) {
+				t.Fatalf("definition = %#v", definition)
+			}
+			if alias == "libs" {
+				namespacePosition := position
+				namespacePosition.Position.Character = 6
+				prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: namespacePosition})
+				if err != nil || prepared != nil {
+					t.Fatalf("filename namespace rename = %#v, %v", prepared, err)
+				}
+				edits, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: namespacePosition, NewName: "other"})
+				if err == nil || edits != nil {
+					t.Fatalf("filename namespace edits = %#v, %v", edits, err)
+				}
+			}
+
+			for _, prefix := range []string{"", "T"} {
+				position.Position.Character = uint32(len("echo " + alias + "." + prefix))
+				result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: position})
+				if err != nil {
+					t.Fatal(err)
+				}
+				items := completionItems(t, result)
+				if len(items) != 1 || items[0].Label != "Two" {
+					t.Fatalf("prefix %q completion = %#v", prefix, items)
+				}
+				edit, ok := items[0].TextEdit.(*protocol.TextEdit)
+				start := uint32(len("echo " + alias + "."))
+				if !ok || edit.NewText != "Two" || edit.Range != navigationRange(2, start, start+3) {
+					t.Fatalf("edit = %#v", items[0].TextEdit)
+				}
+			}
+		})
+	}
+}

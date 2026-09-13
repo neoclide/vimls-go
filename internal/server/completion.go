@@ -971,7 +971,7 @@ func completionCommandDialectAt(file *syntax.File, offset int) syntax.Dialect {
 func importAlias(file *syntax.File, alias string) bool {
 	found := false
 	walkCommands(file.Commands, func(command *syntax.Command) {
-		if command.Import != nil && file.Text(command.Import.Alias) == alias {
+		if command.Import != nil && workspace.ImportAlias(file, command.Import) == alias {
 			found = true
 		}
 	})

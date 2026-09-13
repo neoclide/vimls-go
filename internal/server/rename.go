@@ -30,7 +30,7 @@ func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRena
 		if err != nil || document == nil {
 			return nil, err
 		}
-		if document.memberConstructor {
+		if document.memberConstructor || document.filenameImportNamespace() {
 			return nil, document.checkCurrent(ctx)
 		}
 		_, _, workspaceAttempt := document.workspaceLocalTarget()
@@ -148,7 +148,7 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 		if err != nil || document == nil {
 			return nil, err
 		}
-		if document.memberConstructor {
+		if document.memberConstructor || document.filenameImportNamespace() {
 			return nil, unsafeRenameError()
 		}
 		_, _, workspaceAttempt := document.workspaceLocalTarget()
@@ -631,4 +631,19 @@ func normalizeRenameLocations(locations []protocol.Location) []protocol.Location
 		return locations[i].Range.Start.Character < locations[j].Range.Start.Character
 	})
 	return deduplicateLocations(locations)
+}
+
+// A filename-derived namespace cannot be renamed by editing identifiers:
+// changing its declaration would change the imported filename itself.
+func (document *navigationDocument) filenameImportNamespace() bool {
+	if document.declaration == nil || document.declaration.Kind != analysis.SymbolKindImport {
+		return false
+	}
+	found := false
+	walkCommands(document.analysis.File.Commands, func(command *syntax.Command) {
+		if node := command.Import; node != nil && node.Alias.Start == node.Alias.End && analysis.ImportDeclarationSpan(document.analysis.File, node) == document.declaration.Span {
+			found = true
+		}
+	})
+	return found
 }

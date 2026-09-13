@@ -60,3 +60,37 @@ func TestAnalyzeImportsKeepsUnknownAndValidImportsQuiet(t *testing.T) {
 		t.Fatalf("conservative import diagnostics = %#v", diagnostics)
 	}
 }
+
+func TestImportFilenameNamespaceDeclaration(t *testing.T) {
+	for _, test := range []struct{ source, want string }{
+		{"import 'libs.vim'", "libs"},
+		{"import \"./nested/libs.vim\"", "libs"},
+		{"import autoload 'libs.vim'", "libs"},
+		{"import 'libs.vim' as custom", "custom"},
+		{"import path", ""},
+		{"import './.vim'", ""},
+		{"import 'libs.vim' .. suffix", ""},
+	} {
+		t.Run(test.source, func(t *testing.T) {
+			file := syntax.Parse("vim9script\n" + test.source + "\necho libs.Two\n")
+			result := Analyze(file)
+			var name string
+			for _, declaration := range result.Declarations {
+				if declaration.Kind == SymbolKindImport {
+					name = declaration.Name
+					if file.Text(declaration.Span) != name {
+						t.Fatalf("declaration span = %#v", declaration)
+					}
+				}
+			}
+			if name != test.want {
+				t.Fatalf("namespace = %q, want %q", name, test.want)
+			}
+			for _, reference := range result.References {
+				if reference.Name == "libs" && (reference.Declaration != nil) != (test.want == "libs") {
+					t.Fatalf("reference = %#v", reference)
+				}
+			}
+		})
+	}
+}

@@ -6522,7 +6522,7 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 		addDeclaration(result, commandScope, file, command.TypeAlias.Name, SymbolKindTypeAlias, false)
 	}
 	if command.Import != nil {
-		addDeclaration(result, commandScope, file, command.Import.Alias, SymbolKindImport, false)
+		addDeclaration(result, commandScope, file, ImportDeclarationSpan(file, command.Import), SymbolKindImport, false)
 	}
 	if command.Declaration != nil && !ordinaryContainerAssignment(command) {
 		mutable := command.Canonical != "const" && command.Canonical != "final"

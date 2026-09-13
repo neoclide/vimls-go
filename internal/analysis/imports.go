@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
@@ -89,4 +90,23 @@ func AnalyzeImports(loads []ImportLoad, members []ImportMember) []syntax.Diagnos
 		return diagnostics[left].Code < diagnostics[right].Code
 	})
 	return diagnostics
+}
+
+// ImportDeclarationSpan locates an explicit alias or the namespace in a plain
+// literal filename. Dynamic or escaped expressions have no proven name span.
+func ImportDeclarationSpan(file *syntax.File, node *syntax.Import) syntax.Span {
+	if !emptySyntaxSpan(node.Alias) {
+		return node.Alias
+	}
+	if node.Path == nil || node.Path.Kind != syntax.ExpressionString {
+		return syntax.Span{}
+	}
+	path := simpleVimStringLiteral(file.Text(node.PathSpan))
+	name := path[strings.LastIndex(path, "/")+1:]
+	extension := strings.Index(name, ".vim")
+	if extension <= 0 || extension+4 != len(name) {
+		return syntax.Span{}
+	}
+	end := node.PathSpan.End - 1 - 4
+	return syntax.Span{Start: end - extension, End: end}
 }

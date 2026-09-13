@@ -156,7 +156,7 @@ func (s *Server) importMemberCompletionsInState(documentURI string, file *syntax
 	}
 	var targetPath string
 	walkCommands(file.Commands, func(command *syntax.Command) {
-		if targetPath != "" || command.Import == nil || file.Text(command.Import.Alias) != alias {
+		if targetPath != "" || command.Import == nil || workspace.ImportAlias(file, command.Import) != alias {
 			return
 		}
 		resolution := resolveImportInState(state, path, file, command.Import)
