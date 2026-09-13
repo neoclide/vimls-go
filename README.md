@@ -4,6 +4,8 @@
 
 # vimls-go
 
+[![CI](https://github.com/neoclide/vimls-go/actions/workflows/ci.yml/badge.svg)](https://github.com/neoclide/vimls-go/actions/workflows/ci.yml)
+
 A language server for Legacy Vim script and Vim9 script, written in Go.
 
 It adds completion, error checking, navigation and refactoring to editors that
@@ -79,6 +81,24 @@ For plugin completion and help, the client should send the editor's
 `runtimepath`. Without usable paths, the server tries a clean Vim process to
 find default runtime directories. It loads no user configuration or plugins.
 If Vim is unavailable, core analysis still works.
+
+## Performance
+
+The following results compare vimls-go v0.1.5 against
+[go-vimlparser](https://github.com/vim-jp/go-vimlparser) on the Vim v9.2.1036
+runtime (2,201 `.vim` files discovered; 1,948 files parsed cleanly by both
+parsers, ~10.67 MB total). Measured with `GOMAXPROCS=1` on an Intel Core
+i7-9750H at 2.60 GHz using [`tools/benchlegacy`](tools/benchlegacy/).
+
+| | vimls-go | go-vimlparser |
+| --- | --- | --- |
+| Throughput (median) | **~8.0 MB/s** | ~1.9 MB/s |
+| Wall time (median, 1948 files) | ~1,404 ms | ~5,837 ms |
+| Memory allocated | ~418 MB | ~5,566 MB |
+| Allocation count | ~1,225,600 | ~37,324,127 |
+
+vimls-go is roughly **4× faster**, allocates **13× less memory** and makes
+**30× fewer allocations** than go-vimlparser on this corpus.
 
 ## Contributing
 
