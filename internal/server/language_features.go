@@ -1340,7 +1340,11 @@ func autocmdEventDetail(event vimdata.AutocmdEventDocumentation) string {
 }
 
 func autocmdEventDocumentation(event vimdata.AutocmdEventDocumentation) string {
-	return "**" + event.Name + "** — " + autocmdEventDetail(event) + "\n\n" + event.Documentation
+	header := "**" + event.Name + "** — " + autocmdEventDetail(event)
+	if history, ok := vimdata.LookupAutocmdEventHistory(event.Name); ok {
+		header += "\n" + history.Since()
+	}
+	return header + "\n\n" + event.Documentation
 }
 
 func completionSymbolKind(kind analysis.SymbolKind) protocol.CompletionItemKind {

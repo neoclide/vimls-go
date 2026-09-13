@@ -897,7 +897,11 @@ func (s *Server) localHover(ctx context.Context, document *navigationDocument) (
 			return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** A function.", name), "", "function not found"})
 		}
 		if command, ok := exCommandAt(document.analysis.File, document.occurrence); ok && !vimdata.IsNeovimCompatCommand(command.Name) {
-			return s.localHoverResult(ctx, document, []string{fmt.Sprintf("**%s** An Ex command.", command.Name)})
+			lines := []string{fmt.Sprintf("**%s** An Ex command.", command.Name)}
+			if history, ok := vimdata.LookupCommandHistory(command.Name); ok {
+				lines = append(lines, history.Since())
+			}
+			return s.localHoverResult(ctx, document, lines)
 		}
 		return nil, nil
 	}
@@ -985,6 +989,9 @@ func optionDocumentation(option vimdata.Option) string {
 		if requirement != "" {
 			metadata += " build requirement: " + requirement
 		}
+		if history, ok := vimdata.LookupOptionHistory(option.Name); ok {
+			metadata += "\n" + history.Since()
+		}
 		body := strings.TrimSpace(strings.Join(lines[index+1:], "\n"))
 		if strings.HasPrefix(body, "{") && requirement != "" {
 			if note, rest, found := strings.Cut(body, "}"); found {
@@ -1006,6 +1013,9 @@ func optionDocumentation(option vimdata.Option) string {
 	}
 	if requirement != "" {
 		documentation += "\n\nbuild requirement: " + requirement
+	}
+	if history, ok := vimdata.LookupOptionHistory(option.Name); ok {
+		documentation += "\n" + history.Since()
 	}
 	return documentation
 }
@@ -1071,7 +1081,11 @@ func (s *Server) builtinFunctionHover(function vimdata.BuiltinFunction) protocol
 	if signature == "" {
 		signature, _ = formatBuiltinFunctionSignature(function)
 	}
-	return s.signatureHover(signature, "")
+	doc := ""
+	if history, ok := vimdata.LookupFunctionHistory(function.Name); ok {
+		doc = history.Since()
+	}
+	return s.signatureHover(signature, doc)
 }
 
 func (s *Server) hoverContent(value string) *protocol.MarkupContent {
