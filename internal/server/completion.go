@@ -553,12 +553,19 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 		} else if contextKind == completionContextType {
+			needsLeadingSpace := (strings.HasSuffix(snapshot.Text()[:selection.start], ":") && !strings.HasSuffix(snapshot.Text()[:selection.start], "::")) ||
+				(params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter && params.Context.TriggerCharacter != nil && *params.Context.TriggerCharacter == ":")
 			for _, typeName := range vimdata.Vim9Types() {
-				if !add(protocol.CompletionItem{
-					Label:  typeName,
-					Kind:   protocol.CompletionItemKindClass,
-					Detail: protocol.NewOptional("type"),
-				}, 8000, completionSourceBuiltin) {
+				item := protocol.CompletionItem{
+					Label:      typeName,
+					Kind:       protocol.CompletionItemKindClass,
+					Detail:     protocol.NewOptional("type"),
+					FilterText: protocol.NewOptional(typeName),
+				}
+				if needsLeadingSpace {
+					item.InsertText = protocol.NewOptional(" " + typeName)
+				}
+				if !add(item, 8000, completionSourceBuiltin) {
 					break
 				}
 			}
@@ -572,10 +579,14 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					continue
 				}
 				item := protocol.CompletionItem{
-					Label:  label,
-					Kind:   completionSymbolKind(declaration.Kind),
-					Detail: protocol.NewOptional(string(declaration.Kind)),
-					Data:   localCompletionResolveData(snapshot, declaration),
+					Label:      label,
+					Kind:       completionSymbolKind(declaration.Kind),
+					Detail:     protocol.NewOptional(string(declaration.Kind)),
+					Data:       localCompletionResolveData(snapshot, declaration),
+					FilterText: protocol.NewOptional(label),
+				}
+				if needsLeadingSpace {
+					item.InsertText = protocol.NewOptional(" " + label)
 				}
 				if declaration.Deprecated {
 					item.Tags = []protocol.CompletionItemTag{protocol.CompletionItemTagDeprecated}

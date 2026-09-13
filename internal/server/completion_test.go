@@ -2184,6 +2184,7 @@ func TestCompletionRuntimePathPluginCommands(t *testing.T) {
 }
 
 func TestCompletionVim9TypeAnnotation(t *testing.T) {
+	// Case 1: with space after colon -> no leading space added
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nexport var Pi: f\n")
 	result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
@@ -2210,6 +2211,83 @@ func TestCompletionVim9TypeAnnotation(t *testing.T) {
 	}
 	if detail, ok := floatItem.Detail.Get(); !ok || detail != "type" {
 		t.Fatalf("expected detail 'type' for float, got: %#v", floatItem)
+	}
+	if edit := completionMainEditFromItem(*floatItem); edit.text != "float" {
+		t.Fatalf("expected 'float' edit text when space already present, got %q", edit.text)
+	}
+
+	// Case 2: colon trigger directly after colon -> adds leading space to insertText
+	instanceColon, docURIColon := openNavigationDocument(t, text.UTF16, "vim9script\nexport var Pi:\n")
+	trigger := ":"
+	resultColon, err := instanceColon.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURIColon},
+			Position:     protocol.Position{Line: 1, Character: 14},
+		},
+		Context: protocol.CompletionContext{
+			TriggerKind:      protocol.CompletionTriggerKindTriggerCharacter,
+			TriggerCharacter: &trigger,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemsColon := completionItems(t, resultColon)
+	floatColon := completionItemWithLabel(itemsColon, "float")
+	if floatColon == nil {
+		t.Fatalf("expected float item after colon trigger, got: %#v", itemsColon)
+	}
+	if insertText, ok := floatColon.InsertText.Get(); !ok || insertText != " float" {
+		t.Fatalf("expected ' float' insertText after colon trigger, got %q (ok=%v)", insertText, ok)
+	}
+	if edit := completionMainEditFromItem(*floatColon); edit.text != " float" {
+		t.Fatalf("expected ' float' main edit text after colon trigger, got %q", edit.text)
+	}
+
+	// Case 3: typed prefix immediately after colon without space -> adds leading space to insertText
+	instanceNoSpace, docURINoSpace := openNavigationDocument(t, text.UTF16, "vim9script\nexport var Pi:f\n")
+	resultNoSpace, err := instanceNoSpace.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURINoSpace},
+			Position:     protocol.Position{Line: 1, Character: 15},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemsNoSpace := completionItems(t, resultNoSpace)
+	floatNoSpace := completionItemWithLabel(itemsNoSpace, "float")
+	if floatNoSpace == nil {
+		t.Fatalf("expected float item in 'export var Pi:f', got: %#v", itemsNoSpace)
+	}
+	if insertText, ok := floatNoSpace.InsertText.Get(); !ok || insertText != " float" {
+		t.Fatalf("expected ' float' insertText in 'export var Pi:f', got %q (ok=%v)", insertText, ok)
+	}
+	if edit := completionMainEditFromItem(*floatNoSpace); edit.text != " float" {
+		t.Fatalf("expected ' float' main edit text in 'export var Pi:f', got %q", edit.text)
+	}
+
+	// Case 4: user-defined type directly after colon -> adds leading space to insertText
+	instanceClass, docURIClass := openNavigationDocument(t, text.UTF16, "vim9script\nclass MyClass\nendclass\nvar obj:\n")
+	resultClass, err := instanceClass.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURIClass},
+			Position:     protocol.Position{Line: 3, Character: 8},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemsClass := completionItems(t, resultClass)
+	classItem := completionItemWithLabel(itemsClass, "MyClass")
+	if classItem == nil {
+		t.Fatalf("expected MyClass item in 'var obj:', got: %#v", itemsClass)
+	}
+	if insertText, ok := classItem.InsertText.Get(); !ok || insertText != " MyClass" {
+		t.Fatalf("expected ' MyClass' insertText in 'var obj:', got %q (ok=%v)", insertText, ok)
+	}
+	if edit := completionMainEditFromItem(*classItem); edit.text != " MyClass" {
+		t.Fatalf("expected ' MyClass' main edit text in 'var obj:', got %q", edit.text)
 	}
 }
 

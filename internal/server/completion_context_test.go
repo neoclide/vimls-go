@@ -47,6 +47,8 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		{"echo 'value'", "value", completionContextNone}, {"\" echo value", "value", completionContextNone}, {"map x value", "value", completionContextNone}, {"loadkeymap\na a", "a a", completionContextNone},
 		{"vim9script\nexport var Pi: f", "f", completionContextType},
 		{"vim9script\nexport var Pi: ", ": ", completionContextType},
+		{"vim9script\nexport var Pi:f", ":f", completionContextType},
+		{"vim9script\nexport var Pi:", "Pi:", completionContextType},
 		{"vim9script\nvar x: float = f", " = f", completionContextExpression},
 		{"vim9script\ndef Foo(x: f", "x: f", completionContextType},
 		{"vim9script\ndef Foo(): f", "): f", completionContextType},
