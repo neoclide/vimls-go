@@ -665,7 +665,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 		SelectionRangeProvider:    protocol.Boolean(true),
 		WorkspaceSymbolProvider:   protocol.Boolean(true),
 		DocumentLinkProvider:      &protocol.DocumentLinkOptions{ResolveProvider: &documentLinkResolve},
-		CompletionProvider:        &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&", "#", "<", "+", "\"", "'", "-"}},
+		CompletionProvider:        &protocol.CompletionOptions{ResolveProvider: &completionResolve, TriggerCharacters: []string{".", ":", "&", "#", "<", "+", "\"", "'", "-", "/"}},
 		SignatureHelpProvider:     &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{","}},
 		RenameProvider:            renameProvider,
 		SemanticTokensProvider: &protocol.SemanticTokensOptions{

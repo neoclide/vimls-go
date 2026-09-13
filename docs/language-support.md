@@ -35,6 +35,15 @@ Command completion also retains an existing `!` when resolving documentation,
 so a completion before `!` shows the bang variant's help without changing the
 insertion text.
 
+Runtimepath `import` and `import autoload` completion lists full indexed file
+paths, including nested files, instead of directory candidates. An empty ordinary
+`import` path also offers sibling `.vim` files and subdirectories with a `./`
+prefix; an empty `import autoload` path only offers runtimepath files. Explicit
+relative paths remain supported for both forms.
+All import candidates exclude the importing file, including symlink aliases.
+`/` triggers completion. Relative and absolute paths still complete one directory
+at a time; completion does not recursively scan the filesystem.
+
 Completion uses the current text without waiting for full file analysis.
 Commands and options use syntax and built-in metadata; local variables and
 members use lexical declarations. Local declaration type details are computed

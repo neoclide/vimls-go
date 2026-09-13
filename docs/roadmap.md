@@ -15,6 +15,15 @@ available without inspecting the user's Vim build.
 Compiled boolean option compound assignments now use E521 uniformly when the
 RHS type is known, as a deliberate simplification of Vim's error-code choices.
 
+Runtimepath `import` and `import autoload` completion lists full indexed file
+paths, including nested files, instead of directory candidates. An empty ordinary
+`import` path also offers sibling `.vim` files and subdirectories with a `./`
+prefix; an empty `import autoload` path only offers runtimepath files. Explicit
+relative paths remain supported for both forms.
+All import candidates exclude the importing file, including symlink aliases.
+`/` triggers completion. Relative and absolute paths still complete one directory
+at a time; completion does not recursively scan the filesystem.
+
 User-command metadata now survives logical-line mapping, including continued
 definitions and Vim9 attribute completion.
 

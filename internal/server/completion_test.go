@@ -109,6 +109,34 @@ func TestCompletionRuntimeImportAndColorschemePaths(t *testing.T) {
 			t.Fatalf("completion at %#v = %#v, %v", test.position, result, err)
 		}
 	}
+	// Empty and directory prefixes must offer complete paths, including when
+	// the client requests completion after typing a slash.
+	for _, prefix := range []string{"", "pkg/", "pkg/al"} {
+		pathURI := uri.File(filepath.Join(root, "path.vim"))
+		instance.documents.Open(pathURI.String(), 1, "vim9script\nimport '"+prefix+"'\n")
+		trigger := "'"
+		if strings.HasSuffix(prefix, "/") {
+			trigger = "/"
+		}
+		result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: pathURI},
+				Position:     protocol.Position{Line: 1, Character: uint32(len("import '" + prefix))},
+			},
+			Context: protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: &trigger},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := completionItems(t, result)
+		if len(items) != 1 || items[0].Label != "pkg/alpha.vim" || items[0].Kind != protocol.CompletionItemKindFile {
+			t.Fatalf("import prefix %q = %#v", prefix, items)
+		}
+		edit, ok := items[0].TextEdit.(*protocol.TextEdit)
+		if !ok || edit.NewText != "pkg/alpha.vim" || edit.Range != navigationRange(1, 8, uint32(8+len(prefix))) {
+			t.Fatalf("import prefix %q edit = %#v", prefix, items[0].TextEdit)
+		}
+	}
 	builtinSource := "vim9script\necho has('gui_')\necho expand('<cf')\necho has('nv')\n"
 	builtinURI := uri.File(filepath.Join(root, "builtin.vim"))
 	instance.documents.Open(builtinURI.String(), 1, builtinSource)
@@ -2566,5 +2594,84 @@ func TestCompletionVim9ImportAutoload(t *testing.T) {
 	}
 	if hasCompletionLabel(items7, "abs") {
 		t.Fatal("Case 7 failed: builtin function must not appear after import")
+	}
+}
+
+func TestCompletionImportLocalPathsAndSelfExclusion(t *testing.T) {
+	root := t.TempDir()
+	for _, directory := range []string{"import", "autoload"} {
+		t.Run(directory, func(t *testing.T) {
+			base := filepath.Join(root, directory)
+			for _, name := range []string{"main.vim", "local.vim", "nested/child.vim", "skip.txt"} {
+				path := filepath.Join(base, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("vim9script\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			from := filepath.Join(base, "main.vim")
+			if err := os.Symlink(from, filepath.Join(base, "alias.vim")); err != nil {
+				t.Fatal(err)
+			}
+			instance := New(nil, nil, io.Discard)
+			t.Cleanup(instance.stopAnalysis)
+			rootURI := uri.File(root)
+			options, err := json.Marshal(map[string]any{"runtimepath": []string{root}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{RootURI: &rootURI, InitializationOptions: protocol.LSPAny(options)}); err != nil {
+				t.Fatal(err)
+			}
+			if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+				t.Fatal(err)
+			}
+			instance.workspaceWG.Wait()
+			command := "import '"
+			if directory == "autoload" {
+				command = "import autoload '"
+			}
+			for _, prefix := range []string{"", "./", "./nested/"} {
+				t.Run(prefix, func(t *testing.T) {
+					documentURI := uri.File(from)
+					instance.documents.Open(documentURI.String(), 1, "vim9script\n"+command+prefix+"'\n")
+					trigger := "'"
+					if prefix != "" {
+						trigger = "/"
+					}
+					result, err := instance.Completion(context.Background(), &protocol.CompletionParams{
+						TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 1, Character: uint32(len(command + prefix))}},
+						Context:                    protocol.CompletionContext{TriggerKind: protocol.CompletionTriggerKindTriggerCharacter, TriggerCharacter: &trigger},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					var labels []string
+					for _, item := range completionItems(t, result) {
+						labels = append(labels, item.Label)
+						edit, ok := item.TextEdit.(*protocol.TextEdit)
+						if !ok || edit.NewText != item.Label || edit.Range != navigationRange(1, uint32(len(command)), uint32(len(command+prefix))) {
+							t.Fatalf("edit = %#v", item.TextEdit)
+						}
+					}
+					slices.Sort(labels)
+					want := []string{"./local.vim", "./nested/"}
+					if prefix == "" {
+						if directory == "autoload" {
+							want = nil
+						}
+						want = append(want, "local.vim", "nested/child.vim")
+					}
+					if prefix == "./nested/" {
+						want = []string{"./nested/child.vim"}
+					}
+					if !reflect.DeepEqual(labels, want) {
+						t.Fatalf("prefix %q labels = %v, want %v", prefix, labels, want)
+					}
+				})
+			}
+		})
 	}
 }

@@ -629,8 +629,9 @@ func (i *Index) GlobalFunctionDependents(path string) []string {
 	return paths
 }
 
-// RuntimePathCompletions returns direct indexed children below one runtime
-// directory. Duplicate displays keep the first runtimepath entry.
+// RuntimePathCompletions returns complete indexed file paths below one runtime
+// directory, including nested files. Duplicate displays keep the first
+// runtimepath entry.
 func (i *Index) RuntimePathCompletions(directory, prefix string, limit int, acceptPath ...func(string) bool) ([]PathCompletion, bool) {
 	return i.runtimePathCompletions(directory, prefix, limit, true, false, false, firstPathPredicate(acceptPath))
 }
@@ -642,7 +643,7 @@ func firstPathPredicate(predicates []func(string) bool) func(string) bool {
 	return predicates[0]
 }
 
-func (i *Index) runtimePathCompletions(directory, prefix string, limit int, includeDirectories, includeAfter, fuzzy bool, acceptPath func(string) bool) ([]PathCompletion, bool) {
+func (i *Index) runtimePathCompletions(directory, prefix string, limit int, recursive, includeAfter, fuzzy bool, acceptPath func(string) bool) ([]PathCompletion, bool) {
 	if limit <= 0 || strings.ContainsAny(prefix, "\x00\r\n\\") {
 		return nil, false
 	}
@@ -662,40 +663,20 @@ func (i *Index) runtimePathCompletions(directory, prefix string, limit int, incl
 		}
 		for relative, path := range files {
 			parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(relative)))
-			if parent == wantedDirectory {
-				name := filepath.Base(filepath.FromSlash(relative))
-				matches := strings.HasPrefix(strings.ToLower(name), namePrefixFolded)
-				if fuzzy {
-					matches = fuzzyTextMatches(namePrefix, strings.TrimSuffix(name, ".vim"))
-				}
-				if matches && strings.HasSuffix(name, ".vim") {
-					if acceptPath != nil && !acceptPath(path) {
-						continue
-					}
-					display := dirPart + name
-					if _, exists := seen[display]; !exists {
-						seen[display] = PathCompletion{Display: display, Path: path}
-					}
-				}
+			if parent != wantedDirectory && (!recursive || !strings.HasPrefix(parent, wantedDirectory+"/")) {
 				continue
 			}
-			if !includeDirectories {
+			name := strings.TrimPrefix(relative, wantedDirectory+"/")
+			display := dirPart + name
+			matches := strings.HasPrefix(strings.ToLower(name), namePrefixFolded)
+			if fuzzy {
+				matches = fuzzyTextMatches(namePrefix, strings.TrimSuffix(name, ".vim"))
+			}
+			if !matches || !strings.HasSuffix(name, ".vim") || (acceptPath != nil && !acceptPath(path)) {
 				continue
 			}
-			prefixDirectory := wantedDirectory + "/"
-			if !strings.HasPrefix(parent, prefixDirectory) {
-				continue
-			}
-			child := strings.TrimPrefix(parent, prefixDirectory)
-			if slash := strings.IndexByte(child, '/'); slash >= 0 {
-				child = child[:slash]
-			}
-			if child == "" || !strings.HasPrefix(strings.ToLower(child), namePrefixFolded) {
-				continue
-			}
-			display := dirPart + child + "/"
 			if _, exists := seen[display]; !exists {
-				seen[display] = PathCompletion{Display: display, IsDir: true}
+				seen[display] = PathCompletion{Display: display, Path: path}
 			}
 		}
 	}

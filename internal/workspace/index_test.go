@@ -643,12 +643,21 @@ func TestIndexRuntimeFileCatalogUsesPrecedenceAndUpdates(t *testing.T) {
 	if incomplete || len(colors) != 1 || colors[0].Display != "my-dark" {
 		t.Fatalf("fuzzy colorscheme catalog = %#v, incomplete=%v", colors, incomplete)
 	}
+	for _, prefix := range []string{"", "p", "pkg/"} {
+		items, incomplete := index.RuntimePathCompletions("import", prefix, 10)
+		if incomplete || len(items) != 1 || items[0].Display != "pkg/api.vim" || items[0].IsDir {
+			t.Fatalf("recursive import prefix %q = %#v, incomplete=%v", prefix, items, incomplete)
+		}
+	}
+	if items, _ := index.RuntimePathCompletions("import", "", 10, func(string) bool { return false }); len(items) != 0 {
+		t.Fatalf("excluded nested imports = %#v", items)
+	}
 	imports, incomplete := index.RuntimePathCompletions("import", "pkg/", 10)
 	if incomplete || len(imports) != 1 || imports[0].Display != "pkg/api.vim" || imports[0].IsDir {
 		t.Fatalf("import catalog = %#v, incomplete=%v", imports, incomplete)
 	}
 	autoloads, incomplete := index.RuntimePathCompletions("autoload", "pkg/", 10)
-	if incomplete || len(autoloads) != 1 || autoloads[0].Display != "pkg/nested/" || !autoloads[0].IsDir {
+	if incomplete || len(autoloads) != 1 || autoloads[0].Display != "pkg/nested/api.vim" || autoloads[0].IsDir {
 		t.Fatalf("autoload catalog = %#v, incomplete=%v", autoloads, incomplete)
 	}
 	if path, ok := index.RuntimeFile("import/pkg/api.vim"); !ok || path != mustResolverCanonical(t, paths[5]) {

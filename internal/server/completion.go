@@ -125,21 +125,28 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 			var paths []workspace.PathCompletion
 			var truncated bool
-			acceptPath := completionPathPredicate(state, excludeRuntimePath)
+			acceptRuntimePath := completionPathPredicate(state, excludeRuntimePath)
+			// Both providers supply canonical paths; exclude the importing
+			// document regardless of whether it is also indexed in runtimepath.
+			acceptPath := func(path string) bool {
+				return path != from && (acceptRuntimePath == nil || acceptRuntimePath(path))
+			}
+			autoload := importAutoloadAt(file, offset)
 			if workspace.RuntimeImportCompletionPrefix(selection.prefix) {
-				if state.index == nil {
-					return s.completionList(snapshot, encoding, selection, nil), nil
+				if state.index != nil {
+					directory := "import"
+					if autoload {
+						directory = "autoload"
+					}
+					paths, truncated = state.index.RuntimePathCompletions(directory, selection.prefix, maxCompletionItems, acceptPath)
 				}
-				directory := "import"
-				if importAutoloadAt(file, offset) {
-					directory = "autoload"
+				if selection.prefix == "" && !autoload && state.resolver != nil {
+					local, localTruncated := state.resolver.ImportPathCompletions(from, "./", autoload, maxCompletionItems, acceptPath)
+					paths = append(paths, local...)
+					truncated = truncated || localTruncated
 				}
-				paths, truncated = state.index.RuntimePathCompletions(directory, selection.prefix, maxCompletionItems, acceptPath)
-			} else {
-				if state.resolver == nil {
-					return s.completionList(snapshot, encoding, selection, nil), nil
-				}
-				paths, truncated = state.resolver.ImportPathCompletions(from, selection.prefix, importAutoloadAt(file, offset), maxCompletionItems, acceptPath)
+			} else if state.resolver != nil {
+				paths, truncated = state.resolver.ImportPathCompletions(from, selection.prefix, autoload, maxCompletionItems, acceptPath)
 			}
 			items := make(map[string]completionCandidate, len(paths))
 			for _, path := range paths {
