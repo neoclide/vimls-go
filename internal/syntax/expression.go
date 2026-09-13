@@ -1505,7 +1505,7 @@ func (p *expressionParser) parseVim9Lambda(open expressionToken) (*Expression, b
 		}
 		typeColon := findTopLevelByte(p.source, nameEnd, parameterHeadEnd, ':')
 		if typeColon >= 0 {
-			typeStart := skipVim9LambdaSpace(p.source, typeColon+1)
+			typeStart := min(skipVim9LambdaSpace(p.source, typeColon+1), parameterHeadEnd)
 			typeEnd := trimExpressionSpaceEnd(p.source, typeStart, parameterHeadEnd)
 			parameter.TypeSpan = Span{Start: p.base + typeStart, End: p.base + typeEnd}
 			parameter.Type, p.diagnostics = appendTypeDiagnostics(p.diagnostics, p.source[typeStart:typeEnd], p.base+typeStart)

@@ -2633,7 +2633,7 @@ func TestCompletionImportLocalPathsAndSelfExclusion(t *testing.T) {
 			if directory == "autoload" {
 				command = "import autoload '"
 			}
-			for _, prefix := range []string{"", "./", "./nested/"} {
+			for _, prefix := range []string{"", "./", "./nested/", "nested/"} {
 				t.Run(prefix, func(t *testing.T) {
 					documentURI := uri.File(from)
 					instance.documents.Open(documentURI.String(), 1, "vim9script\n"+command+prefix+"'\n")
@@ -2662,10 +2662,14 @@ func TestCompletionImportLocalPathsAndSelfExclusion(t *testing.T) {
 						if directory == "autoload" {
 							want = nil
 						}
-						want = append(want, "local.vim", "nested/child.vim")
+						if directory == "autoload" {
+							want = append(want, "local.vim", "nested/")
+						} else {
+							want = append(want, "local.vim", "nested/child.vim")
+						}
 					}
-					if prefix == "./nested/" {
-						want = []string{"./nested/child.vim"}
+					if prefix == "./nested/" || prefix == "nested/" {
+						want = []string{prefix + "child.vim"}
 					}
 					if !reflect.DeepEqual(labels, want) {
 						t.Fatalf("prefix %q labels = %v, want %v", prefix, labels, want)

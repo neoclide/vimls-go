@@ -657,8 +657,25 @@ func TestIndexRuntimeFileCatalogUsesPrecedenceAndUpdates(t *testing.T) {
 		t.Fatalf("import catalog = %#v, incomplete=%v", imports, incomplete)
 	}
 	autoloads, incomplete := index.RuntimePathCompletions("autoload", "pkg/", 10)
-	if incomplete || len(autoloads) != 1 || autoloads[0].Display != "pkg/nested/api.vim" || autoloads[0].IsDir {
+	if incomplete || len(autoloads) != 1 || autoloads[0].Display != "pkg/nested/" || !autoloads[0].IsDir {
 		t.Fatalf("autoload catalog = %#v, incomplete=%v", autoloads, incomplete)
+	}
+	for _, test := range []struct {
+		prefix, want string
+		directory    bool
+	}{
+		{"", "pkg/", true},
+		{"p", "pkg/", true},
+		{"pkg/", "pkg/nested/", true},
+		{"pkg/nested/", "pkg/nested/api.vim", false},
+	} {
+		items, incomplete := index.RuntimePathCompletions("autoload", test.prefix, 10)
+		if incomplete || len(items) != 1 || items[0].Display != test.want || items[0].IsDir != test.directory {
+			t.Fatalf("autoload prefix %q = %#v, incomplete=%v", test.prefix, items, incomplete)
+		}
+	}
+	if items, _ := index.RuntimePathCompletions("autoload", "", 10, func(string) bool { return false }); len(items) != 0 {
+		t.Fatalf("excluded autoload directory = %#v", items)
 	}
 	if path, ok := index.RuntimeFile("import/pkg/api.vim"); !ok || path != mustResolverCanonical(t, paths[5]) {
 		t.Fatalf("runtime file = %q, %v", path, ok)

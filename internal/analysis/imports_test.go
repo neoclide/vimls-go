@@ -94,3 +94,23 @@ func TestImportFilenameNamespaceDeclaration(t *testing.T) {
 		})
 	}
 }
+
+func TestImportDeclarationSpanKeepsSourceByteOffsets(t *testing.T) {
+	for _, test := range []struct{ path, want string }{
+		{`'./目录/🧩/libs.vim'`, "libs"},
+		{`"./目录/libs.vim"`, "libs"},
+		{`'lib\nfoo.vim'`, ""},
+		{`"lib\\foo.vim"`, ""},
+		{`"lib\x73.vim"`, ""},
+		{`'lib''s.vim'`, ""},
+	} {
+		file := syntax.Parse("vim9script\nimport " + test.path + "\n")
+		span := ImportDeclarationSpan(file, file.Commands[1].Import)
+		if got := file.Text(span); got != test.want {
+			t.Fatalf("path %s span %#v gives %q, want %q", test.path, span, got, test.want)
+		}
+		if test.want == "" && span != (syntax.Span{}) {
+			t.Fatalf("escaped path %s produced span %#v", test.path, span)
+		}
+	}
+}

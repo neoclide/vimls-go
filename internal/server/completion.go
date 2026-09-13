@@ -436,7 +436,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				if methodCall && declaration.Kind != analysis.SymbolKindFunction {
 					continue
 				}
-				if inImport && (declaration.Kind == analysis.SymbolKindFunction || declaration.Kind == analysis.SymbolKindMethod || declaration.Kind == analysis.SymbolKindConstructor) {
+				if inImport && (declaration.Kind == analysis.SymbolKindFunction || declaration.Kind == analysis.SymbolKindMethod || declaration.Kind == analysis.SymbolKindConstructor || declaration.Kind == analysis.SymbolKindImport) {
 					continue
 				}
 				label := completionDeclarationLabel(declaration, analysisResult.Root, file.Dialect, scopePrefix)
@@ -580,8 +580,7 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 				}
 			}
 		} else if contextKind == completionContextType {
-			needsLeadingSpace := (strings.HasSuffix(snapshot.Text()[:selection.start], ":") && !strings.HasSuffix(snapshot.Text()[:selection.start], "::")) ||
-				(params.Context.TriggerKind == protocol.CompletionTriggerKindTriggerCharacter && params.Context.TriggerCharacter != nil && *params.Context.TriggerCharacter == ":")
+			needsLeadingSpace := strings.HasSuffix(snapshot.Text()[:selection.start], ":") && !strings.HasSuffix(snapshot.Text()[:selection.start], "::")
 			for _, typeName := range vimdata.Vim9Types() {
 				item := protocol.CompletionItem{
 					Label:      typeName,

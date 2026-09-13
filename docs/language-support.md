@@ -21,72 +21,22 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
-Option diagnostics assume known options exist regardless of Vim build features;
-assignment type checks skip unknown RHS types and Vim9 `any`.
-Invalid boolean option compound assignments in a Vim9 `def` use E521 uniformly.
+Types are inferred from known values and function return types in both dialects.
+Uncertain dynamic behavior may leave types or references unresolved. See
+[diagnostics](diagnostics.md) for diagnostic coverage and warning policies.
 
-User-command definitions preserve attribute, name and body locations through
-logical-line continuations in both dialects. Vim9 command attributes support
-the same contextual completion as Legacy attributes.
+LF, CRLF and CR line endings are supported. Formatting and rename preserve
+existing line endings.
 
-Hover on a documented mapping or user-command bang variant includes `!` in
-the command range and works when the cursor is on that character.
-Command completion also retains an existing `!` when resolving documentation,
-so a completion before `!` shows the bang variant's help without changing the
-insertion text.
+### Imports
 
-Plain literal imports without `as` introduce the filename-derived namespace:
-`import 'libs.vim'` makes exported members available as `libs.Two`. Scope
-analysis, member completion and navigation use this namespace. Renaming a
-filename-derived namespace is unsupported because it would change the import
-path; explicit aliases remain available with `as`.
+`import 'libs.vim'` exposes exported members as `libs.Two`; use `as` to choose
+a different namespace name.
 
-Runtimepath `import` and `import autoload` completion lists full indexed file
-paths, including nested files, instead of directory candidates. An empty ordinary
-`import` path also offers sibling `.vim` files and subdirectories with a `./`
-prefix; an empty `import autoload` path only offers runtimepath files. Explicit
-relative paths remain supported for both forms.
-All import candidates exclude the importing file, including symlink aliases.
-`/` triggers completion. Relative and absolute paths still complete one directory
-at a time; completion does not recursively scan the filesystem.
-
-Completion uses the current text without waiting for full file analysis.
-Commands and options use syntax and built-in metadata; local variables and
-members use lexical declarations. Local declaration type details are computed
-on `completionItem/resolve`; the initial list retains insertion text and snippets.
-Clients that do not resolve items show the declaration kind without inferred
-type detail. Resolving an item from an edited or reopened document leaves it
-unchanged. Member discovery still queries the receiver and bounded nested-member
-types. Function parameters and member symbols are each collected at most once
-per completion request.
-
-Autocmd event hover and completion documentation use compiled help for 156
-event names: 127 Vim spellings and 29 Neovim-only additions. Shared names use
-Vim's documentation; Neovim-only events are labeled accordingly. Hover applies
-to event tokens, including comma-separated lists and events after an augroup,
-not patterns or command bodies. Completion loads the selected event's help via
-`completionItem/resolve`. Both support Markdown and plain text. Sources are
-pinned in the [event documentation generator](../tools/geneventdocs/README.md).
-
-Background diagnostics and workspace analysis yield between phases and in
-batched scope, reference and type traversals while
-completion requests are active and until 150 ms after the latest accepted edit.
-Queued document analysis captures the latest snapshot after this wait, merging
-intermediate edits. Editing or closing an open document cancels obsolete shared
-semantic work, including a paused pass; identical-content work can continue.
-Cancelling one requesting consumer does not cancel the shared computation.
-Parsing needed by a foreground request bypasses the wait;
-it still reads the whole source, so large files can increase completion latency.
-
-Document text supports LF, CRLF and CR line endings, including mixed files.
-Positions follow the negotiated UTF-8, UTF-16 or UTF-32 encoding. Formatting
-and rename preserve the original line-ending bytes.
-
-Variable types follow known initializer return types in both dialects.
-For example, `let g:local = expand('~/vim-dev')` shows `string` on hover.
-For `expand()`, a literal true third argument produces `list<string>`;
-an omitted or literal false third argument produces `string`. Dynamic list
-flags remain `unknown`. Method calls (`->expand()`) use the same rules.
+Ordinary `import` completion shows full runtimepath file paths and offers nearby
+files and directories with a `./` prefix. `import autoload` completes runtimepath
+files and directories one level at a time. Typing `/` continues path completion.
+The current file is excluded from import suggestions.
 
 ## Plugin files and help
 
@@ -115,9 +65,6 @@ See [editing configuration files](userconfig.md).
 ## Limits to keep in mind
 
 - Dynamic code and loading order may leave types or references unresolved.
-- Consecutive simple Legacy assignments warn on known basic type changes;
-  unknown values and control-flow boundaries reset this check. See
-  [diagnostics](diagnostics.md#names-and-unused-code).
 - Mixed-dialect `def` and `function` bodies have incomplete analysis.
 - Call hierarchy excludes lambdas and deferred command bodies.
 - Embedded languages and syntax newer than Vim v9.2.1015 are not analyzed.

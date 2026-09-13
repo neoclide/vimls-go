@@ -629,11 +629,11 @@ func (i *Index) GlobalFunctionDependents(path string) []string {
 	return paths
 }
 
-// RuntimePathCompletions returns complete indexed file paths below one runtime
-// directory, including nested files. Duplicate displays keep the first
-// runtimepath entry.
+// RuntimePathCompletions returns full indexed import paths, but only direct
+// files and subdirectories for autoload paths. Duplicate displays keep the
+// first runtimepath entry.
 func (i *Index) RuntimePathCompletions(directory, prefix string, limit int, acceptPath ...func(string) bool) ([]PathCompletion, bool) {
-	return i.runtimePathCompletions(directory, prefix, limit, true, false, false, firstPathPredicate(acceptPath))
+	return i.runtimePathCompletions(directory, prefix, limit, directory != "autoload", false, false, firstPathPredicate(acceptPath))
 }
 
 func firstPathPredicate(predicates []func(string) bool) func(string) bool {
@@ -663,6 +663,22 @@ func (i *Index) runtimePathCompletions(directory, prefix string, limit int, recu
 		}
 		for relative, path := range files {
 			parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(relative)))
+			if directory == "autoload" && !recursive && strings.HasPrefix(parent, wantedDirectory+"/") {
+				// Only expose directories containing an eligible indexed file:
+				// hidden runtime files and self imports must not leak candidates.
+				if acceptPath != nil && !acceptPath(path) {
+					continue
+				}
+				child, _, _ := strings.Cut(strings.TrimPrefix(parent, wantedDirectory+"/"), "/")
+				if !strings.HasPrefix(strings.ToLower(child), namePrefixFolded) {
+					continue
+				}
+				display := dirPart + child + "/"
+				if _, exists := seen[display]; !exists {
+					seen[display] = PathCompletion{Display: display, IsDir: true}
+				}
+				continue
+			}
 			if parent != wantedDirectory && (!recursive || !strings.HasPrefix(parent, wantedDirectory+"/")) {
 				continue
 			}

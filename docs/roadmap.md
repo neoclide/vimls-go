@@ -15,16 +15,24 @@ available without inspecting the user's Vim build.
 Compiled boolean option compound assignments now use E521 uniformly when the
 RHS type is known, as a deliberate simplification of Vim's error-code choices.
 
+Import `as` completion uses the parsed path expression boundary, including
+quotes inside filenames, and does not accept extra adjacent path expressions.
+Import expressions omit namespace-only candidates. Type completion uses the
+current text to insert required spacing, even when a client repeats a trigger.
+Incomplete lambda parameter types recover without crashing the parser.
+
 Plain literal imports without `as` introduce the filename-derived namespace:
 `import 'libs.vim'` makes exported members available as `libs.Two`. Scope
 analysis, member completion and navigation use this namespace. Renaming a
 filename-derived namespace is unsupported because it would change the import
 path; explicit aliases remain available with `as`.
 
-Runtimepath `import` and `import autoload` completion lists full indexed file
-paths, including nested files, instead of directory candidates. An empty ordinary
+Runtimepath `import` completion lists full indexed file paths, including nested
+files. `import autoload` lists only direct files and subdirectories; typing `/`
+completes the next directory level. An empty ordinary
 `import` path also offers sibling `.vim` files and subdirectories with a `./`
-prefix; an empty `import autoload` path only offers runtimepath files. Explicit
+prefix; an empty `import autoload` path only offers runtimepath files and
+subdirectories. Explicit
 relative paths remain supported for both forms.
 All import candidates exclude the importing file, including symlink aliases.
 `/` triggers completion. Relative and absolute paths still complete one directory

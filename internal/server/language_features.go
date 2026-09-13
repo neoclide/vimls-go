@@ -558,13 +558,8 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 			if limit > len(file.Source) {
 				limit = len(file.Source)
 			}
-			if declaration.Name.End <= limit {
-				if colon := strings.IndexByte(file.Source[declaration.Name.End:limit], ':'); colon >= 0 {
-					colonOffset := declaration.Name.End + colon
-					if colonOffset < offset && offset <= limit {
-						return true
-					}
-				}
+			if completionAfterTypeColon(file.Source, declaration.Name.End, limit, offset, "") {
+				return true
 			}
 		}
 		for _, binding := range declaration.Bindings {
@@ -574,20 +569,9 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 			if binding.Type.Start < binding.Type.End && binding.Type.Start <= offset && offset <= binding.Type.End {
 				return true
 			}
-			if binding.Name.End > 0 && binding.Name.End <= len(file.Source) {
-				limit := command.Span.End
-				if binding.Name.End < limit && limit <= len(file.Source) {
-					sub := file.Source[binding.Name.End:limit]
-					if endIdx := strings.IndexAny(sub, ",]="); endIdx >= 0 {
-						limit = binding.Name.End + endIdx
-					}
-					if colon := strings.IndexByte(file.Source[binding.Name.End:limit], ':'); colon >= 0 {
-						colonOffset := binding.Name.End + colon
-						if colonOffset < offset && offset <= limit {
-							return true
-						}
-					}
-				}
+			limit := command.Span.End
+			if completionAfterTypeColon(file.Source, binding.Name.End, limit, offset, ",]=") {
+				return true
 			}
 		}
 	}
@@ -601,23 +585,12 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 			if binding.Type.Start < binding.Type.End && binding.Type.Start <= offset && offset <= binding.Type.End {
 				return true
 			}
-			if binding.Name.End > 0 && binding.Name.End <= len(file.Source) {
-				limit := command.Span.End
-				if command.For.In.Start > 0 && command.For.In.Start <= limit {
-					limit = command.For.In.Start
-				}
-				if binding.Name.End < limit && limit <= len(file.Source) {
-					sub := file.Source[binding.Name.End:limit]
-					if endIdx := strings.IndexAny(sub, ",]"); endIdx >= 0 {
-						limit = binding.Name.End + endIdx
-					}
-					if colon := strings.IndexByte(file.Source[binding.Name.End:limit], ':'); colon >= 0 {
-						colonOffset := binding.Name.End + colon
-						if colonOffset < offset && offset <= limit {
-							return true
-						}
-					}
-				}
+			limit := command.Span.End
+			if command.For.In.Start > 0 && command.For.In.Start < limit {
+				limit = command.For.In.Start
+			}
+			if completionAfterTypeColon(file.Source, binding.Name.End, limit, offset, ",]") {
+				return true
 			}
 		}
 	}
@@ -632,23 +605,12 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 			if parameter.TypeSpan.Start < parameter.TypeSpan.End && parameter.TypeSpan.Start <= offset && offset <= parameter.TypeSpan.End {
 				return true
 			}
-			if parameter.Name.End > 0 && parameter.Name.End <= len(file.Source) {
-				limit := command.Span.End
-				if parameter.DefaultSpan.Start > 0 && parameter.DefaultSpan.Start <= limit {
-					limit = parameter.DefaultSpan.Start
-				}
-				if parameter.Name.End < limit && limit <= len(file.Source) {
-					sub := file.Source[parameter.Name.End:limit]
-					if endIdx := strings.IndexAny(sub, ",)="); endIdx >= 0 {
-						limit = parameter.Name.End + endIdx
-					}
-					if colon := strings.IndexByte(file.Source[parameter.Name.End:limit], ':'); colon >= 0 {
-						colonOffset := parameter.Name.End + colon
-						if colonOffset < offset && offset <= limit {
-							return true
-						}
-					}
-				}
+			limit := command.Span.End
+			if parameter.DefaultSpan.Start > 0 && parameter.DefaultSpan.Start < limit {
+				limit = parameter.DefaultSpan.Start
+			}
+			if completionAfterTypeColon(file.Source, parameter.Name.End, limit, offset, ",)=") {
+				return true
 			}
 		}
 		if typeNodeContainsOffset(function.ReturnType, offset) {
@@ -665,13 +627,8 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 				if idx := strings.IndexAny(file.Source[afterParen:], "\r\n#{"); idx >= 0 {
 					limit = afterParen + idx
 				}
-				if afterParen < limit {
-					if colon := strings.IndexByte(file.Source[afterParen:limit], ':'); colon >= 0 {
-						colonOffset := afterParen + colon
-						if colonOffset < offset && offset <= limit {
-							return true
-						}
-					}
+				if completionAfterTypeColon(file.Source, afterParen, limit, offset, "") {
+					return true
 				}
 			}
 		}
@@ -722,24 +679,13 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 					inExpressionType = true
 					return
 				}
-				if parameter.Name.End > 0 && parameter.Name.End <= len(file.Source) {
-					limit := expr.Span.End
-					if parameter.DefaultSpan.Start > 0 && parameter.DefaultSpan.Start <= limit {
-						limit = parameter.DefaultSpan.Start
-					}
-					if parameter.Name.End < limit && limit <= len(file.Source) {
-						sub := file.Source[parameter.Name.End:limit]
-						if endIdx := strings.IndexAny(sub, ",)="); endIdx >= 0 {
-							limit = parameter.Name.End + endIdx
-						}
-						if colon := strings.IndexByte(file.Source[parameter.Name.End:limit], ':'); colon >= 0 {
-							colonOffset := parameter.Name.End + colon
-							if colonOffset < offset && offset <= limit {
-								inExpressionType = true
-								return
-							}
-						}
-					}
+				limit := expr.Span.End
+				if parameter.DefaultSpan.Start > 0 && parameter.DefaultSpan.Start < limit {
+					limit = parameter.DefaultSpan.Start
+				}
+				if completionAfterTypeColon(file.Source, parameter.Name.End, limit, offset, ",)=") {
+					inExpressionType = true
+					return
 				}
 			}
 			if typeNodeContainsOffset(expr.ReturnType, offset) {
@@ -750,12 +696,9 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 				header := file.Source[expr.Span.Start:expr.Operator.Start]
 				if rparen := strings.LastIndexByte(header, ')'); rparen >= 0 {
 					afterParen := expr.Span.Start + rparen + 1
-					if colon := strings.IndexByte(file.Source[afterParen:expr.Operator.Start], ':'); colon >= 0 {
-						colonOffset := afterParen + colon
-						if colonOffset < offset && offset <= expr.Operator.Start {
-							inExpressionType = true
-							return
-						}
+					if completionAfterTypeColon(file.Source, afterParen, expr.Operator.Start, offset, "") {
+						inExpressionType = true
+						return
 					}
 				}
 			}
@@ -766,6 +709,19 @@ func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset 
 	}
 
 	return false
+}
+
+// completionAfterTypeColon handles incomplete annotations whose type node is
+// not available yet. Callers supply the syntax-specific end of the annotation.
+func completionAfterTypeColon(source string, start, limit, offset int, terminators string) bool {
+	if start <= 0 || start >= limit || limit > len(source) || offset <= start || offset > limit {
+		return false
+	}
+	if end := strings.IndexAny(source[start:limit], terminators); end >= 0 {
+		limit = start + end
+	}
+	colon := strings.IndexByte(source[start:limit], ':')
+	return colon >= 0 && start+colon < offset && offset <= limit
 }
 
 func typeNodeContainsOffset(typeNode *syntax.Type, offset int) bool {
@@ -831,20 +787,16 @@ func isImportAsCandidate(file *syntax.File, command *syntax.Command, offset int)
 	if offset > lineEnd {
 		return false
 	}
-	textBefore := file.Source[command.Name.End:offset]
-	if strings.ContainsAny(textBefore, "\r\n#|") {
+	if command.Import == nil || command.Import.Path == nil {
 		return false
 	}
-	singleQuotes := strings.Count(textBefore, "'")
-	doubleQuotes := strings.Count(textBefore, "\"")
-	if (singleQuotes == 0 && doubleQuotes == 0) || singleQuotes%2 != 0 || doubleQuotes%2 != 0 {
+	pathEnd := command.Import.Path.Span.End
+	if pathEnd <= command.Name.End || pathEnd >= offset {
 		return false
 	}
-	lastQuote := strings.LastIndexAny(textBefore, "'\"")
-	if lastQuote < 0 {
-		return false
-	}
-	textAfterPath := textBefore[lastQuote+1:]
+	// Use the parsed expression boundary: quote counting mistakes quotes
+	// inside strings for delimiters and accepts multiple adjacent paths.
+	textAfterPath := file.Source[pathEnd:offset]
 	trimmed := strings.TrimLeft(textAfterPath, " \t")
 	if len(textAfterPath) == len(trimmed) {
 		return false
@@ -855,7 +807,7 @@ func isImportAsCandidate(file *syntax.File, command *syntax.Command, offset int)
 			return false
 		}
 	}
-	return true
+	return strings.HasPrefix("as", trimmed)
 }
 
 func isImportAutoloadCandidateAt(file *syntax.File, offset int) bool {
@@ -908,6 +860,11 @@ func isImportCommandAt(file *syntax.File, offset int) bool {
 		}
 		if len(text) > 0 && !isSpace(text[0]) {
 			return
+		}
+		for _, token := range file.Tokens {
+			if token.Kind == syntax.TokenComment && command.Name.End <= token.Span.Start && token.Span.Start < offset {
+				return
+			}
 		}
 		inImport = true
 	})
