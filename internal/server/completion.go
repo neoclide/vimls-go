@@ -408,6 +408,20 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 					}
 				}
 			}
+			if isImportAutoloadCandidateAt(file, offset) {
+				add(protocol.CompletionItem{
+					Label:  "autoload",
+					Kind:   protocol.CompletionItemKindKeyword,
+					Detail: protocol.NewOptional("keyword"),
+				}, 10000, completionSourceCommand)
+			}
+			if isImportAsCandidateAt(file, offset) {
+				add(protocol.CompletionItem{
+					Label:  "as",
+					Kind:   protocol.CompletionItemKindKeyword,
+					Detail: protocol.NewOptional("keyword"),
+				}, 10000, completionSourceCommand)
+			}
 			var functionParameters map[string][]string
 			for _, visible := range visibleCompletionDeclarations(analysisResult, offset) {
 				declaration := visible.declaration

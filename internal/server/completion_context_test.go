@@ -54,6 +54,10 @@ func TestCompletionContextSpecificAndRejectedSyntax(t *testing.T) {
 		{"vim9script\ndef Foo(): f", "): f", completionContextType},
 		{"vim9script\ntype Alias = f", "= f", completionContextType},
 		{"vim9script\nvar l: list<f", "<f", completionContextType},
+		{"vim9script\nimport ", "import ", completionContextExpression},
+		{"vim9script\nimport a", "import a", completionContextExpression},
+		{"vim9script\nimport aut", "import aut", completionContextExpression},
+		{"vim9script\nimport 'mylib.vim' a", " a", completionContextExpression},
 		{"let x =<< END\nvalue\nEND", "value", completionContextNone}, {"append\nvalue\n.", "value", completionContextNone}, {"finish\nvalue", "value", completionContextNone},
 	}
 	for _, test := range cases {

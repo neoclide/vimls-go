@@ -367,10 +367,20 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 			}
 			return
 		}
-		if command.Import != nil && command.Import.Path != nil && command.Import.Path.Kind == syntax.ExpressionString &&
-			command.Import.PathSpan.Start < offset && offset < command.Import.PathSpan.End {
-			result = completionContextImportPath
-			return
+		if command.Canonical == "import" {
+			if command.Import != nil && command.Import.Path != nil && command.Import.Path.Kind == syntax.ExpressionString &&
+				command.Import.PathSpan.Start < offset && offset < command.Import.PathSpan.End {
+				result = completionContextImportPath
+				return
+			}
+			if isImportAutoloadCandidate(file, command, offset) {
+				result = completionContextExpression
+				return
+			}
+			if isImportAsCandidate(file, command, offset) {
+				result = completionContextExpression
+				return
+			}
 		}
 		if command.Syntax != nil {
 			if spanContains(command.Syntax.Subcommand, offset) || offset == command.Syntax.Subcommand.End {
@@ -774,6 +784,110 @@ func typeNodeContainsOffset(typeNode *syntax.Type, offset int) bool {
 		return true
 	}
 	return false
+}
+
+func isImportAutoloadCandidate(file *syntax.File, command *syntax.Command, offset int) bool {
+	if file == nil || command == nil || command.Canonical != "import" {
+		return false
+	}
+	if offset <= command.Name.End || command.Name.End > len(file.Source) || offset > len(file.Source) {
+		return false
+	}
+	lineEnd := len(file.Source)
+	if idx := strings.IndexAny(file.Source[command.Name.End:], "\r\n"); idx >= 0 {
+		lineEnd = command.Name.End + idx
+	}
+	if offset > lineEnd {
+		return false
+	}
+	textBefore := file.Source[command.Name.End:offset]
+	if strings.ContainsAny(textBefore, "\r\n#|") {
+		return false
+	}
+	trimmed := strings.TrimLeft(textBefore, " \t")
+	if len(textBefore) == len(trimmed) {
+		return false
+	}
+	for i := 0; i < len(trimmed); i++ {
+		b := trimmed[i]
+		if !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func isImportAsCandidate(file *syntax.File, command *syntax.Command, offset int) bool {
+	if file == nil || command == nil || command.Canonical != "import" {
+		return false
+	}
+	if offset <= command.Name.End || command.Name.End > len(file.Source) || offset > len(file.Source) {
+		return false
+	}
+	lineEnd := len(file.Source)
+	if idx := strings.IndexAny(file.Source[command.Name.End:], "\r\n"); idx >= 0 {
+		lineEnd = command.Name.End + idx
+	}
+	if offset > lineEnd {
+		return false
+	}
+	textBefore := file.Source[command.Name.End:offset]
+	if strings.ContainsAny(textBefore, "\r\n#|") {
+		return false
+	}
+	singleQuotes := strings.Count(textBefore, "'")
+	doubleQuotes := strings.Count(textBefore, "\"")
+	if (singleQuotes == 0 && doubleQuotes == 0) || singleQuotes%2 != 0 || doubleQuotes%2 != 0 {
+		return false
+	}
+	lastQuote := strings.LastIndexAny(textBefore, "'\"")
+	if lastQuote < 0 {
+		return false
+	}
+	textAfterPath := textBefore[lastQuote+1:]
+	trimmed := strings.TrimLeft(textAfterPath, " \t")
+	if len(textAfterPath) == len(trimmed) {
+		return false
+	}
+	for i := 0; i < len(trimmed); i++ {
+		b := trimmed[i]
+		if !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func isImportAutoloadCandidateAt(file *syntax.File, offset int) bool {
+	if file == nil || offset < 0 || offset > len(file.Source) {
+		return false
+	}
+	matched := false
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if matched || command == nil {
+			return
+		}
+		if isImportAutoloadCandidate(file, command, offset) {
+			matched = true
+		}
+	})
+	return matched
+}
+
+func isImportAsCandidateAt(file *syntax.File, offset int) bool {
+	if file == nil || offset < 0 || offset > len(file.Source) {
+		return false
+	}
+	matched := false
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if matched || command == nil {
+			return
+		}
+		if isImportAsCandidate(file, command, offset) {
+			matched = true
+		}
+	})
+	return matched
 }
 
 func completionCallableBlockAt(file *syntax.File, offset int) syntax.BlockKind {

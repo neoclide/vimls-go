@@ -2440,3 +2440,101 @@ func TestCompletionVim9TypeExcludesExpressionsAndViceVersa(t *testing.T) {
 		t.Fatalf("float type should not appear in expression completion: %#v", exprItems)
 	}
 }
+
+func TestCompletionVim9ImportAutoload(t *testing.T) {
+	// Case 1: "import " with empty prefix suggests autoload
+	instance1, docURI1 := openNavigationDocument(t, text.UTF16, "vim9script\nimport \n")
+	result1, err := instance1.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI1},
+			Position:     protocol.Position{Line: 1, Character: 7},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items1 := completionItems(t, result1)
+	if !hasCompletion(items1, "autoload", protocol.CompletionItemKindKeyword) {
+		t.Fatal("Case 1 failed: expected 'autoload' keyword in 'import '")
+	}
+
+	// Case 2: "import a" suggests autoload
+	instance2, docURI2 := openNavigationDocument(t, text.UTF16, "vim9script\nimport a\n")
+	result2, err := instance2.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI2},
+			Position:     protocol.Position{Line: 1, Character: 8},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items2 := completionItems(t, result2)
+	if !hasCompletion(items2, "autoload", protocol.CompletionItemKindKeyword) {
+		t.Fatal("Case 2 failed: expected 'autoload' keyword in 'import a'")
+	}
+
+	// Case 3: "import aut" suggests autoload
+	instance3, docURI3 := openNavigationDocument(t, text.UTF16, "vim9script\nimport aut\n")
+	result3, err := instance3.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI3},
+			Position:     protocol.Position{Line: 1, Character: 10},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items3 := completionItems(t, result3)
+	if !hasCompletion(items3, "autoload", protocol.CompletionItemKindKeyword) {
+		t.Fatal("Case 3 failed: expected 'autoload' keyword in 'import aut'")
+	}
+
+	// Case 4: vim9cmd import aut
+	instance4, docURI4 := openNavigationDocument(t, text.UTF16, "vim9cmd import aut\n")
+	result4, err := instance4.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI4},
+			Position:     protocol.Position{Line: 0, Character: 18},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items4 := completionItems(t, result4)
+	if !hasCompletion(items4, "autoload", protocol.CompletionItemKindKeyword) {
+		t.Fatal("Case 4 failed: expected 'autoload' keyword in 'vim9cmd import aut'")
+	}
+
+	// Case 5: "import autoload " does NOT suggest autoload again
+	instance5, docURI5 := openNavigationDocument(t, text.UTF16, "vim9script\nimport autoload \n")
+	result5, err := instance5.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI5},
+			Position:     protocol.Position{Line: 1, Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items5 := completionItems(t, result5)
+	if hasCompletionLabel(items5, "autoload") {
+		t.Fatal("Case 5 failed: did not expect 'autoload' in 'import autoload '")
+	}
+
+	// Case 6: "import 'mylib.vim' a" suggests "as"
+	instance6, docURI6 := openNavigationDocument(t, text.UTF16, "vim9script\nimport 'mylib.vim' a\n")
+	result6, err := instance6.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: docURI6},
+			Position:     protocol.Position{Line: 1, Character: 20},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items6 := completionItems(t, result6)
+	if !hasCompletion(items6, "as", protocol.CompletionItemKindKeyword) {
+		t.Fatal("Case 6 failed: expected 'as' keyword in 'import \"mylib.vim\" a'")
+	}
+}
