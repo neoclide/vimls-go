@@ -189,7 +189,7 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 		})
 	}
 	if document.occurrence.Start >= document.occurrence.End {
-		if contextKind, argument := completionBuiltinStringAt(file, offset); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+		if contextKind, argument := completionBuiltinStringAt(file, document.occurrence.Start); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
 			if span, ok := completionBuiltinStringValueSpan(file, argument, contextKind); ok && spanContains(span, offset) {
 				document.occurrence = span
 			}
@@ -255,7 +255,7 @@ func memberNavigationSymbols(file *syntax.File, result *analysis.FileAnalysis, m
 	return declaration, definition, true
 }
 
-func inheritedAbstractMember(file *syntax.File, symbols []*analysis.Symbol, class *analysis.Symbol, name string, kind analysis.SymbolKind) *analysis.Symbol {
+func inheritedAbstractMember(file *syntax.File, symbols []*analysis.Symbol, class *analysis.Symbol, name string, kind analysis.SymbolKind) *syntax.Command {
 	seen := make(map[string]bool)
 	for class != nil && !seen[class.Name] {
 		seen[class.Name] = true
@@ -304,7 +304,7 @@ func implementedInterfaceMember(file *syntax.File, symbols []*analysis.Symbol, c
 		}
 		for _, implemented := range command.Aggregate.Implements {
 			iface := completionContainer(symbols, file.Text(implemented))
-			candidate, _, ok := memberSymbolInContainer(file, symbols, iface, name, classReceiver)
+			candidate, _, ok := memberSymbolInContainer(file, symbols, iface, name, false)
 			if !ok || !sameMemberCategory(kind, candidate.Kind) {
 				continue
 			}
