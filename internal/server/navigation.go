@@ -685,6 +685,84 @@ func (s *Server) DocumentHighlight(ctx context.Context, params *protocol.Documen
 	return nil, protocol.ErrContentModified
 }
 
+// linkedEditingWordPattern matches replacement text accepted by a linked
+// editing range: a Vim identifier with an optional scope prefix.
+const linkedEditingWordPattern = `(?:[sglabwtv]:)?[A-Za-z_][A-Za-z0-9_]*`
+
+// LinkedEditingRange reports the declaration and every reference of the symbol
+// under the cursor so a client can rename it while typing.
+//
+// Only symbols whose rename is provably a single-file edit are offered. An
+// exported, autoload or global symbol may be referenced from other files, a
+// symbol declared elsewhere cannot be covered by ranges in this document, and a
+// class or interface member may be reachable through an exported aggregate;
+// editing only this file would leave the rest of the workspace inconsistent, so
+// those requests return no ranges. Linked ranges must also carry identical
+// text, which withholds a reference spelled differently from the declaration,
+// such as <SID>name beside s:name.
+func (s *Server) LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (*protocol.LinkedEditingRanges, error) {
+	for attempt := range 2 {
+		ranges, err := s.linkedEditingRanges(ctx, params.TextDocument.URI.String(), params.Position)
+		if err == nil {
+			return ranges, nil
+		}
+		if !errors.Is(err, protocol.ErrContentModified) || attempt == 1 {
+			return nil, err
+		}
+	}
+	return nil, protocol.ErrContentModified
+}
+
+// linkedEditingRanges returns no ranges when the symbol cannot be edited as a
+// group. It reports protocol.ErrContentModified when the analysed snapshot is
+// no longer current, which the caller may retry.
+func (s *Server) linkedEditingRanges(ctx context.Context, documentURI string, position protocol.Position) (*protocol.LinkedEditingRanges, error) {
+	document, err := s.navigationAt(ctx, documentURI, position)
+	if err != nil || document == nil {
+		return nil, err
+	}
+	// withhold reports "no ranges" unless the snapshot was replaced meanwhile.
+	withhold := func() (*protocol.LinkedEditingRanges, error) {
+		return nil, document.checkCurrent(ctx)
+	}
+	// Class and interface members are excluded: a member of an exported
+	// aggregate is reachable from other files, but CollectSymbolFacts does not
+	// report the member itself as exported, so a single-document edit cannot be
+	// shown to be complete.
+	member := document.memberTarget.Start < document.memberTarget.End
+	if document.external != nil || document.declaration == nil || member || document.memberConstructor || document.filenameImportNamespace() {
+		return withhold()
+	}
+	if _, _, workspaceVisible := document.workspaceLocalTarget(); workspaceVisible {
+		return withhold()
+	}
+	spans := document.occurrences(true)
+	if len(spans) < 2 {
+		return withhold()
+	}
+	text := document.analysis.File.Text(spans[0])
+	ranges := make([]protocol.Range, 0, len(spans))
+	for index, span := range spans {
+		if document.analysis.File.Text(span) != text {
+			return withhold()
+		}
+		// Linked ranges must not overlap; occurrences are ordered by start.
+		if index > 0 && span.Start < spans[index-1].End {
+			return withhold()
+		}
+		rangeValue, ok := protocolRange(document.snapshot, document.encoding, span)
+		if !ok {
+			return withhold()
+		}
+		ranges = append(ranges, rangeValue)
+	}
+	if err := document.checkCurrent(ctx); err != nil {
+		return nil, err
+	}
+	pattern := linkedEditingWordPattern
+	return &protocol.LinkedEditingRanges{Ranges: ranges, WordPattern: &pattern}, nil
+}
+
 func sameNavigationURI(left, right uri.URI) bool {
 	leftPath, leftOK := workspaceURIPath(left)
 	rightPath, rightOK := workspaceURIPath(right)

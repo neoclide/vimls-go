@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.6 — unreleased
+
+- Add linked editing ranges: the declaration and its references in the current
+  file are edited together while typing. Ranges are offered only for symbols
+  whose rename is a single-file edit, so exported, autoload and global symbols,
+  class and interface members, symbols declared in another file, and references
+  spelled differently from the declaration return no ranges instead of a partial
+  rename.
+
 ## v0.1.5
 
 - Support for vim9 'import' statement without as.

@@ -54,6 +54,14 @@ flow-sensitive checking remains outside this warning's current scope.
 third argument in both dialects, including method calls. Dynamic flags remain
 unknown.
 
+Linked editing reports the declaration and its references in the current file so
+a client can rename the symbol by typing. It is offered only where a
+single-document edit is provably complete, so exported, autoload and global
+symbols, class and interface members, symbols declared in another file, and
+references spelled differently from the declaration are all withheld.
+Extending it to those symbols needs a client that applies edits across documents
+while typing.
+
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
 - Improve type information for values imported into Legacy code and for code

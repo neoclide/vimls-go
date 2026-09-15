@@ -12,7 +12,7 @@ the same project. See the [changelog](../CHANGELOG.md) for release availability.
 | Hover and signature help | Types, signatures, source comments, runtime help and feature introduction history. |
 | Diagnostics | Syntax errors, unresolved names, invalid calls, Vim9 type errors and target Vim version checks. |
 | Navigation | Definitions, references, implementations, call hierarchy and workspace symbols. |
-| Editing | Rename, selected quick fixes, folding and selection expansion. |
+| Editing | Rename, linked editing, selected quick fixes, folding and selection expansion. |
 | Inlay hints and Code Lens | Inferred Vim9 types, reference counts and implementation counts. |
 | Semantic highlighting | Types, functions, variables, parameters and modifiers. |
 | Formatting | Indentation for files, selections and supported typing events. |
@@ -20,6 +20,16 @@ the same project. See the [changelog](../CHANGELOG.md) for release availability.
 The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
+
+Linked editing covers the declaration and its references in the current file.
+It is offered only for symbols whose rename is a single-file edit: script-local
+and local variables, function parameters, non-exported Vim9 symbols and
+`<SID>`-free script-local Legacy names. It is withheld for exported, autoload
+and global symbols, for class and interface members, and for symbols declared in
+another file, because editing only the open document would leave the rest of the
+workspace inconsistent. A reference spelled differently from the declaration,
+such as `<SID>name` beside `s:name`, is withheld as well, because linked ranges
+must carry identical text.
 
 Types are inferred from known values and function return types in both dialects.
 Uncertain dynamic behavior may leave types or references unresolved. See
