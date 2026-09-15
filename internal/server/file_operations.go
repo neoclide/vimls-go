@@ -278,6 +278,12 @@ func renameFileImportNodeEdits(state workspaceNavigationSnapshot, snapshot *text
 	if !ok {
 		return nil, false
 	}
+	// A spelling that fits the same lookup directory can still be shadowed
+	// by another runtimepath entry, including a destination in this batch.
+	prospective := state.resolver.ResolveImportPathAfterRenames(from, newRaw, node.Autoload, renamed)
+	if !sameWorkspacePath(prospective.Path, newTarget) {
+		return nil, false
+	}
 	if newRaw == raw {
 		return nil, true
 	}
@@ -313,10 +319,15 @@ func renameFileNamespaceEdits(snapshot *text.Snapshot, file *syntax.File, result
 	if declaration.Start < node.PathSpan.Start || declaration.End > node.PathSpan.End || declaration.Start >= declaration.End {
 		return nil, false
 	}
-	// Splitting the literal byte-for-byte is only sound for a single-quoted
-	// literal, where the raw text is the decoded path plus its quotes.
-	const extension = ".vim'"
-	if raw[0] != '\'' || strings.Count(raw, "'") != 2 || !strings.HasSuffix(raw, extension) || !strings.HasSuffix(newRaw, extension) {
+	// Splitting the literal byte-for-byte requires a path without quote
+	// escapes or double-quoted backslash escapes. Both quote styles work for
+	// these plain literals, and requoteImportPath preserves that style.
+	if len(raw) < 2 || (raw[0] != '\'' && raw[0] != '"') || strings.Count(raw, string(raw[0])) != 2 ||
+		(raw[0] == '"' && strings.Contains(raw, "\\")) {
+		return nil, false
+	}
+	extension := ".vim" + string(raw[0])
+	if !strings.HasSuffix(raw, extension) || !strings.HasSuffix(newRaw, extension) {
 		return nil, false
 	}
 	if file.Text(declaration) != oldName {

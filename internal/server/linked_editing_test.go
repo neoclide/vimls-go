@@ -109,6 +109,16 @@ func TestLinkedEditingRangeWithholdsWorkspaceVisibleSymbols(t *testing.T) {
 			position: protocol.Position{Line: 2, Character: 6},
 		},
 		{
+			name:     "vim9 explicitly global function",
+			source:   "vim9script\ndef g:Helper()\nenddef\ng:Helper()\n",
+			position: protocol.Position{Line: 1, Character: 7},
+		},
+		{
+			name:     "legacy global variable declared inside a function",
+			source:   "function! s:Run()\n  let g:value = 1\n  echo g:value\nendfunction\n",
+			position: protocol.Position{Line: 2, Character: 9},
+		},
+		{
 			name:     "vim9 exported function",
 			source:   "vim9script\nexport def Helper(): number\n  return 1\nenddef\nvar n = Helper()\n",
 			position: protocol.Position{Line: 4, Character: 9},
@@ -147,4 +157,18 @@ func linkedEditingRanges(t *testing.T, instance *Server, documentURI uri.URI, po
 		t.Fatal(err)
 	}
 	return ranges
+}
+
+// Type annotations are not included in analysis.References. Preserve the
+// original reproducer, where a constructor reference would otherwise enable
+// linked editing while leaving the annotation with the old class name.
+func TestLinkedEditingRangeWithholdsTypeNames(t *testing.T) {
+	source := "vim9script\nclass Widget\nendclass\nvar x: Widget = Widget.new()\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	for _, position := range []protocol.Position{{Line: 1, Character: 8}, {Line: 3, Character: 18}} {
+		ranges := linkedEditingRanges(t, instance, documentURI, position)
+		if ranges != nil {
+			t.Fatalf("ranges at %+v = %#v, want nil until type references are complete", position, ranges)
+		}
+	}
 }

@@ -5,6 +5,47 @@ import (
 	"strings"
 )
 
+// ResolveImportPathAfterRenames resolves raw in the prospective file set,
+// preserving runtimepath precedence. renamed maps canonical source paths to
+// canonical destinations; sources disappear and destinations take their place.
+// The filesystem itself is never changed.
+func (r *PathResolver) ResolveImportPathAfterRenames(from, raw string, autoload bool, renamed map[string]string) PathResolution {
+	if r == nil {
+		return PathResolution{}
+	}
+	spec, ok := decodeStaticPath(raw)
+	if !ok {
+		return PathResolution{Dynamic: true}
+	}
+	destinations := make(map[string]string, len(renamed))
+	for source, destination := range renamed {
+		if previous, exists := destinations[destination]; exists && previous != source {
+			// A collision has no proven post-rename file identity.
+			return PathResolution{}
+		}
+		destinations[destination] = source
+	}
+	result := PathResolution{}
+	for _, candidate := range r.importCandidates(from, spec, autoload) {
+		lookup := r.choose([]string{candidate})
+		if len(lookup.Candidates) == 0 {
+			continue
+		}
+		path := lookup.Candidates[0]
+		result.Candidates = append(result.Candidates, path)
+		if source, incoming := destinations[path]; incoming {
+			if r.choose([]string{source}).Path != "" {
+				result.Path = path
+				return result
+			}
+		} else if _, outgoing := renamed[path]; !outgoing && lookup.Path != "" {
+			result.Path = path
+			return result
+		}
+	}
+	return result
+}
+
 // RewriteImportPath returns the literal import path that must replace raw after
 // either the file raw resolves to moves from oldTarget to newTarget, or the
 // importing script moves to from. The original spelling form is preserved: a

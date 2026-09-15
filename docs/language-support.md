@@ -25,11 +25,13 @@ Linked editing covers the declaration and its references in the current file.
 It is offered only for symbols whose rename is a single-file edit: script-local
 and local variables, function parameters, non-exported Vim9 symbols and
 `<SID>`-free script-local Legacy names. It is withheld for exported, autoload
-and global symbols, for class and interface members, and for symbols declared in
-another file, because editing only the open document would leave the rest of the
-workspace inconsistent. A reference spelled differently from the declaration,
-such as `<SID>name` beside `s:name`, is withheld as well, because linked ranges
-must carry identical text.
+and global symbols (including explicit `g:` declarations inside functions), for
+class and interface members, and for symbols declared in another file, because
+editing only the open document would leave the rest of the workspace
+inconsistent. Class, interface, enum and type-alias names are also withheld
+until type annotation references are included. A reference spelled differently
+from the declaration, such as `<SID>name` beside `s:name`, is withheld as well,
+because linked ranges must carry identical text.
 
 Renaming a file through the client's file operation rewrites the Vim9 `:import`
 statements that name it, and also the relative imports of the renamed files
@@ -38,9 +40,12 @@ original form: a relative path stays relative to the importing script, an
 absolute path stays absolute, and a `runtimepath` import stays below the same
 `import/` or `autoload/` directory. A `:import` without an `as` alias derives its
 namespace from the filename, so the derived declaration and every bound
-reference are rewritten together. An import is left alone, and its document is
-skipped rather than partly edited, when the new location cannot be expressed in
-the original form, when the new filename is not a valid Vim identifier, when the
+reference are rewritten together for plain single- or double-quoted literals.
+The proposed path is checked against the whole file rename batch and the
+runtimepath search order; a path that would resolve to another script is
+withheld. An import is left alone, and its document is skipped rather than partly
+edited, when the new location cannot be expressed in the original form, when
+the new filename is not a valid Vim identifier, when the
 document's content cannot be verified against the indexed source, or when the
 derived namespace has a textual occurrence that the analysis does not bind, such
 as a type annotation or a comment. A rename is never refused for these reasons.

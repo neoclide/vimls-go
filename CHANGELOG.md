@@ -2,6 +2,11 @@
 
 ## v0.1.6 — unreleased
 
+- Withhold file-rename import edits that would load a different script through
+  runtimepath precedence, accounting for all files in the rename batch. Support
+  plain double-quoted imports without an alias as well as single-quoted imports.
+- Withhold linked editing for explicit globals at every scope and for type
+  names whose type annotation references are not yet included.
 - Rewrite Vim9 `:import` statements when a file is renamed through the client's
   file operation, including the relative imports of the renamed files
   themselves and the derived namespace of an import without an `as` alias. Each

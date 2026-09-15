@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -491,4 +493,82 @@ func applyTextEdits(t *testing.T, source string, edits []protocol.TextDocumentEd
 	}
 	builder.WriteString(source[previous:])
 	return builder.String()
+}
+
+// Preserve the original two-runtimepath reproducer: the renamed file lives in
+// the second entry and its new basename already exists in the first entry.
+func TestWillRenameFilesWithholdsShadowedRuntimeImport(t *testing.T) {
+	for _, autoload := range []bool{false, true} {
+		directory, command := "import", "import"
+		if autoload {
+			directory, command = "autoload", "import autoload"
+		}
+		t.Run(directory, func(t *testing.T) {
+			root := t.TempDir()
+			first, second := filepath.Join(root, "first"), filepath.Join(root, "second")
+			library := "vim9script\nexport def Two(): number\n  return 2\nenddef\n"
+			writeWorkspaceFile(t, root, "first/"+directory+"/util.vim", library)
+			old := writeWorkspaceFile(t, root, "second/"+directory+"/lib.vim", library)
+			source := "vim9script\n" + command + " 'lib.vim' as lib\necho lib.Two()\n"
+			writeWorkspaceFile(t, root, "main.vim", source)
+			instance := New(nil, nil, io.Discard)
+			t.Cleanup(instance.stopAnalysis)
+			rootURI := uri.File(root)
+			documentChanges := true
+			options, err := json.Marshal(map[string]any{"runtimepath": []string{first, second}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+				RootURI:               &rootURI,
+				Capabilities:          protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{WorkspaceEdit: &protocol.WorkspaceEditClientCapabilities{DocumentChanges: &documentChanges}}},
+				InitializationOptions: protocol.LSPAny(options),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			instance.workspaceDelay = 0
+			if err := instance.Initialized(context.Background(), &protocol.InitializedParams{}); err != nil {
+				t.Fatal(err)
+			}
+			instance.workspaceWG.Wait()
+			instance.runtimepathWG.Wait()
+			edit, err := instance.WillRenameFiles(context.Background(), renameFileParams(old, filepath.Join(second, directory, "util.vim")))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(edit.DocumentChanges) != 0 {
+				t.Fatalf("shadowed import was rewritten: %#v", edit.DocumentChanges)
+			}
+		})
+	}
+}
+
+func TestWillRenameFilesRewritesDoubleQuotedDerivedNamespace(t *testing.T) {
+	for _, moveImporter := range []bool{false, true} {
+		name := "rename target and namespace"
+		if moveImporter {
+			name = "move importer with unchanged namespace"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Two(): number\n  return 2\nenddef\n")
+			source := "vim9script\nimport \"./lib.vim\"\necho lib.Two()\n"
+			mainPath := writeWorkspaceFile(t, root, "main.vim", source)
+			instance := initializeWorkspaceServer(t, root)
+			params := renameFileParams(libPath, filepath.Join(root, "util.vim"))
+			want := "vim9script\nimport \"./util.vim\"\necho util.Two()\n"
+			if moveImporter {
+				params = renameFileParams(mainPath, filepath.Join(root, "sub", "main.vim"))
+				want = "vim9script\nimport \"../lib.vim\"\necho lib.Two()\n"
+			}
+			edit, err := instance.WillRenameFiles(context.Background(), params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated := applyRenameEdits(t, edit, map[string]string{mainPath: source})
+			if updated[mainPath] != want {
+				t.Fatalf("main.vim = %q, want %q", updated[mainPath], want)
+			}
+		})
+	}
 }

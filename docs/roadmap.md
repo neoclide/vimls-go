@@ -62,8 +62,12 @@ a client can rename the symbol by typing. It is offered only where a
 single-document edit is provably complete, so exported, autoload and global
 symbols, class and interface members, symbols declared in another file, and
 references spelled differently from the declaration are all withheld.
+Explicit `g:` declarations are withheld in both dialects and at every scope.
 Extending it to those symbols needs a client that applies edits across documents
 while typing; members additionally need the rename scope described below.
+Class, interface, enum and type-alias names are withheld until the analysis
+records their type annotation references; expression occurrences alone can
+leave a single-document rename incomplete.
 
 Renaming a member from its declaration currently edits only the declaring file.
 The same symbol renamed from a use site in an importing file edits both files, so
@@ -82,6 +86,10 @@ completeness rule is what withholds a document whose namespace appears in a type
 annotation or a comment: `analysis.References` records neither, so the bound
 references alone cannot be proven to be every use site. Teaching the analysis to
 bind namespaced type names would let those documents be rewritten too.
+Plain single- and double-quoted imports both preserve their quoting, including
+imports without an alias. Proposed paths are resolved against the prospective
+file set for the entire rename batch, preserving runtimepath precedence and
+withholding a document whose rewritten path would load a different script.
 
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.

@@ -125,3 +125,47 @@ func TestImportPathName(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveImportPathAfterRenamesPreservesPrecedence(t *testing.T) {
+	root := t.TempDir()
+	old := filepath.Join(root, "second", "import", "lib.vim")
+	earlier := filepath.Join(root, "first", "import", "util.vim")
+	incoming := filepath.Join(root, "first", "import", "incoming.vim")
+	destination := filepath.Join(root, "second", "import", "util.vim")
+	writeResolverFile(t, old, "vim9script\n")
+	writeResolverFile(t, earlier, "vim9script\n")
+	writeResolverFile(t, incoming, "vim9script\n")
+	resolver, err := NewPathResolver(root, []string{filepath.Join(root, "first"), filepath.Join(root, "second")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := func(path string) string {
+		value, ok := resolver.Canonical(path)
+		if !ok {
+			t.Fatalf("cannot canonicalize %s", path)
+		}
+		return value
+	}
+	old, earlier, incoming, destination = canonical(old), canonical(earlier), canonical(incoming), canonical(destination)
+	away := canonical(filepath.Join(root, "first", "import", "away.vim"))
+	for _, tc := range []struct {
+		name    string
+		renamed map[string]string
+		want    string
+	}{
+		{"existing shadow", map[string]string{old: destination}, earlier},
+		{"shadow moves away", map[string]string{old: destination, earlier: away}, destination},
+		{"shadow arrives in batch", map[string]string{old: destination, earlier: away, incoming: earlier}, earlier},
+		{"ambiguous destination", map[string]string{old: destination, incoming: destination}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolver.ResolveImportPathAfterRenames(filepath.Join(root, "main.vim"), "'util.vim'", false, tc.renamed)
+			if got.Path != tc.want {
+				t.Fatalf("prospective resolution = %q, want %q", got.Path, tc.want)
+			}
+		})
+	}
+	if got := resolver.ResolveImportPathAfterRenames("", "g:path", false, nil); !got.Dynamic {
+		t.Fatalf("dynamic resolution = %#v", got)
+	}
+}
