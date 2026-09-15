@@ -25,13 +25,15 @@ Linked editing covers the declaration and its references in the current file.
 It is offered only for symbols whose rename is a single-file edit: script-local
 and local variables, function parameters, non-exported Vim9 symbols and
 `<SID>`-free script-local Legacy names. It is withheld for exported, autoload
-and global symbols (including explicit `g:` declarations inside functions), for
-class and interface members, and for symbols declared in another file, because
-editing only the open document would leave the rest of the workspace
-inconsistent. Class, interface, enum and type-alias names are also withheld
-until type annotation references are included. A reference spelled differently
-from the declaration, such as `<SID>name` beside `s:name`, is withheld as well,
-because linked ranges must carry identical text.
+and global symbols, for class and interface members, and for symbols declared in
+another file, because editing only the open document would leave the rest of the
+workspace inconsistent. Explicit `g:`, `b:`, `w:`, `t:` and `v:` names are withheld
+at every scope, including declarations inside functions: these scopes are shared
+with other scripts. Class, interface, enum and type-alias names, as well as all
+import aliases (including explicit `as` aliases), are also withheld until type
+annotation references are included. A reference spelled differently from the
+declaration, such as `<SID>name` beside `s:name`, is withheld as well, because
+linked ranges must carry identical text.
 
 Renaming a file through the client's file operation rewrites the Vim9 `:import`
 statements that name it, and also the relative imports of the renamed files
@@ -49,6 +51,12 @@ the new filename is not a valid Vim identifier, when the
 document's content cannot be verified against the indexed source, or when the
 derived namespace has a textual occurrence that the analysis does not bind, such
 as a type annotation or a comment. A rename is never refused for these reasons.
+
+A rename batch whose source or existing destination is itself a symbolic link
+produces no import edits. Moving or replacing the link must not be treated as
+moving or replacing its target, and its effect on other files in the batch
+cannot be proven by canonical file identities alone. Regular files reached
+through symbolic-link parent directories remain supported.
 
 Types are inferred from known values and function return types in both dialects.
 Uncertain dynamic behavior may leave types or references unresolved. See
