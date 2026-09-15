@@ -304,7 +304,7 @@ func implementedInterfaceMember(file *syntax.File, symbols []*analysis.Symbol, c
 		}
 		for _, implemented := range command.Aggregate.Implements {
 			iface := completionContainer(symbols, file.Text(implemented))
-			candidate, _, ok := memberSymbolInContainer(file, symbols, iface, name, false)
+			candidate, _, ok := memberSymbolInContainer(file, symbols, iface, name, classReceiver)
 			if !ok || !sameMemberCategory(kind, candidate.Kind) {
 				continue
 			}
@@ -733,16 +733,17 @@ func (s *Server) linkedEditingRanges(ctx context.Context, documentURI string, po
 	if document.external != nil || document.declaration == nil || member || document.memberConstructor || document.filenameImportNamespace() {
 		return withhold()
 	}
-	// Explicit globals remain visible outside this file regardless of dialect
-	// or whether the declaration occurs inside a function. Workspace symbol
-	// facts alone do not classify all of these declarations as global.
-	if strings.HasPrefix(document.declaration.Name, "g:") {
+	// Global, buffer, window, tab and Vim scopes are shared with other scripts,
+	// even when their declarations occur inside a function. Workspace symbol
+	// facts alone do not classify all of these declarations as shared.
+	if name := document.declaration.Name; len(name) > 2 && name[1] == ':' && strings.ContainsRune("gbwtv", rune(name[0])) {
 		return withhold()
 	}
-	// Type annotations are not bound references yet, so occurrences cannot
-	// prove a complete rename of a type name even within a single file.
+	// Type annotations are not bound references yet, including their import
+	// namespace qualifiers. Expression occurrences cannot prove a complete
+	// rename of either a type name or an explicit import alias.
 	switch document.declaration.Kind {
-	case analysis.SymbolKindClass, analysis.SymbolKindInterface, analysis.SymbolKindEnum, analysis.SymbolKindTypeAlias:
+	case analysis.SymbolKindClass, analysis.SymbolKindInterface, analysis.SymbolKindEnum, analysis.SymbolKindTypeAlias, analysis.SymbolKindImport:
 		return withhold()
 	}
 	if _, _, workspaceVisible := document.workspaceLocalTarget(); workspaceVisible {
