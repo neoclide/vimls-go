@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
 	"sort"
 	"strings"
 
@@ -107,13 +108,27 @@ func (s *Server) renameFileImportChanges(ctx context.Context, files []protocol.F
 // renameFileTargets maps each renamed file to its new location. A rename that
 // cannot be expressed as two workspace paths, that does not move the file, or
 // that gives one source two destinations is dropped: no import can then be
-// proven to need a rewrite.
+// proven to need a rewrite. A batch with a symbolic-link endpoint is withheld
+// because canonical file identities cannot describe that directory-entry move.
 func renameFileTargets(files []protocol.FileRename) map[string]string {
 	renamed := make(map[string]string, len(files))
 	ambiguous := make(map[string]struct{})
 	for _, file := range files {
-		oldPath, oldOK := workspaceURIPath(uri.URI(file.OldURI))
-		newPath, newOK := workspaceURIPath(uri.URI(file.NewURI))
+		oldURI, newURI := uri.URI(file.OldURI), uri.URI(file.NewURI)
+		if !oldURI.IsFile() || !newURI.IsFile() {
+			continue
+		}
+		// Inspect the directory entries before workspaceURIPath follows links.
+		// Moving a link does not move its target; replacing a link likewise does
+		// not replace its target. Ignoring just this operation would also give
+		// other files in the batch an incorrect prospective lookup order.
+		for _, path := range []string{oldURI.FsPath(), newURI.FsPath()} {
+			if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				return nil
+			}
+		}
+		oldPath, oldOK := workspaceURIPath(oldURI)
+		newPath, newOK := workspaceURIPath(newURI)
 		if !oldOK || !newOK || sameWorkspacePath(oldPath, newPath) {
 			continue
 		}
