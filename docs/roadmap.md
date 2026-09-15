@@ -62,12 +62,15 @@ a client can rename the symbol by typing. It is offered only where a
 single-document edit is provably complete, so exported, autoload and global
 symbols, class and interface members, symbols declared in another file, and
 references spelled differently from the declaration are all withheld.
-Explicit `g:` declarations are withheld in both dialects and at every scope.
+Explicit `g:`, `b:`, `w:`, `t:` and `v:` names are withheld at every scope,
+including declarations inside functions, because their scopes are shared with
+other scripts.
 Extending it to those symbols needs a client that applies edits across documents
 while typing; members additionally need the rename scope described below.
-Class, interface, enum and type-alias names are withheld until the analysis
-records their type annotation references; expression occurrences alone can
-leave a single-document rename incomplete.
+Class, interface, enum and type-alias names, as well as all import aliases, are
+withheld until the analysis records their type annotation references. Explicit
+`as` aliases are not exempt: expression occurrences alone can leave variable,
+parameter, return and nested type annotations naming the old namespace.
 
 Renaming a member from its declaration currently edits only the declaring file.
 The same symbol renamed from a use site in an importing file edits both files, so
@@ -90,6 +93,12 @@ Plain single- and double-quoted imports both preserve their quoting, including
 imports without an alias. Proposed paths are resolved against the prospective
 file set for the entire rename batch, preserving runtimepath precedence and
 withholding a document whose rewritten path would load a different script.
+Batches with a symbolic-link source or destination produce no import edits.
+The directory entries are checked before canonicalization, so moving a link is
+not mistaken for moving its target. Supporting these batches requires modeling
+the links' own paths and their effect on prospective lookup order; dropping
+only the link operation is insufficient. Regular files accessed through linked
+parent directories remain supported.
 
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
