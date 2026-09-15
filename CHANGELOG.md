@@ -2,6 +2,11 @@
 
 ## v0.1.6 — unreleased
 
+- Rewrite Vim9 `:import` statements when a file is renamed through the client's
+  file operation, including the relative imports of the renamed files
+  themselves and the derived namespace of an import without an `as` alias. Each
+  import keeps its original form, and a document is skipped rather than partly
+  edited when an import cannot be rewritten or its content cannot be verified.
 - Add linked editing ranges: the declaration and its references in the current
   file are edited together while typing. Ranges are offered only for symbols
   whose rename is a single-file edit, so exported, autoload and global symbols,

@@ -31,6 +31,20 @@ workspace inconsistent. A reference spelled differently from the declaration,
 such as `<SID>name` beside `s:name`, is withheld as well, because linked ranges
 must carry identical text.
 
+Renaming a file through the client's file operation rewrites the Vim9 `:import`
+statements that name it, and also the relative imports of the renamed files
+themselves when their own spelling moves with them. Each import keeps its
+original form: a relative path stays relative to the importing script, an
+absolute path stays absolute, and a `runtimepath` import stays below the same
+`import/` or `autoload/` directory. A `:import` without an `as` alias derives its
+namespace from the filename, so the derived declaration and every bound
+reference are rewritten together. An import is left alone, and its document is
+skipped rather than partly edited, when the new location cannot be expressed in
+the original form, when the new filename is not a valid Vim identifier, when the
+document's content cannot be verified against the indexed source, or when the
+derived namespace has a textual occurrence that the analysis does not bind, such
+as a type annotation or a comment. A rename is never refused for these reasons.
+
 Types are inferred from known values and function return types in both dialects.
 Uncertain dynamic behavior may leave types or references unresolved. See
 [diagnostics](diagnostics.md) for diagnostic coverage and warning policies.

@@ -24,6 +24,7 @@ type workspaceNavigationSnapshot struct {
 	identity       workspaceIdentity
 	resolver       *workspace.PathResolver
 	index          *workspace.Index
+	graph          workspace.ImportGraphSnapshot
 	roots          []string
 	workspaceRoots []string
 	runtimePaths   []string
@@ -124,6 +125,7 @@ func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
 		identity:       s.workspaceIdentityLocked(),
 		resolver:       s.workspaceResolver,
 		index:          s.workspaceIndex,
+		graph:          s.workspaceGraphView,
 		roots:          roots,
 		workspaceRoots: workspaceRoots,
 		runtimePaths:   runtimePaths,
@@ -133,8 +135,11 @@ func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
 	if s.workspaceRunning {
 		// A rebuild prepares its replacement index off-lock. Do not expose the
 		// previously installed index under the new workspace revision to
-		// document requests; they can still return document-local results.
+		// document requests; they can still return document-local results. The
+		// import graph is withheld for the same reason: its reverse edges
+		// describe the superseded file set.
 		state.index = nil
+		state.graph = workspace.ImportGraphSnapshot{}
 	}
 	s.workspaceMu.Unlock()
 	return state

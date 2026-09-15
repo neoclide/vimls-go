@@ -72,6 +72,17 @@ member of an exported aggregate is reachable from other files, but
 `CollectSymbolFacts` reports the member itself as unexported, so
 `workspaceLocalTarget` does not select the workspace path.
 
+A renamed file rewrites the `:import` statements that name it, using the import
+graph's reverse edges to find the importing documents. Each import is rewritten
+in its own form, and the relative imports of the renamed files are recomputed for
+their new location. The derived namespace of an import without an `as` alias is
+rewritten together with its bound references, and only when the namespace has no
+textual occurrence outside the literal that the analysis does not bind. That
+completeness rule is what withholds a document whose namespace appears in a type
+annotation or a comment: `analysis.References` records neither, so the bound
+references alone cannot be proven to be every use site. Teaching the analysis to
+bind namespaced type names would let those documents be rewritten too.
+
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
 - Improve type information for values imported into Legacy code and for code

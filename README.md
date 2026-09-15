@@ -18,7 +18,8 @@ support LSP. You can use it with coc.nvim, vim-lsp, yegappan/lsp or Neovim's bui
 - Follows definitions and references across files, imports and autoload functions.
 - Shows function signatures, inferred types and help from your Vim runtime.
 - Finds callers, class relationships and interface implementations.
-- Renames resolved symbols and formats indentation.
+- Renames resolved symbols, updates imports when you rename a file, and formats
+  indentation.
 
 Both dialects can share a workspace. The supported syntax goes through
 **Vim v9.2.1015**. See [language support](docs/language-support.md) for the

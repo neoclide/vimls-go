@@ -558,6 +558,7 @@ func implementedMethod(method string) bool {
 		protocol.MethodWorkspaceDidChangeWorkspaceFolders,
 		protocol.MethodWorkspaceDidChangeWatchedFiles,
 		protocol.MethodWorkspaceSymbol,
+		protocol.MethodWorkspaceWillRenameFiles,
 		MethodDidChangeRuntimepath:
 		return true
 	default:
@@ -648,6 +649,21 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 	if codeActionLiterals {
 		codeActionProvider = &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}}
 	}
+	workspaceOptions := &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
+		Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
+	}}
+	if params.Capabilities.Workspace != nil && params.Capabilities.Workspace.FileOperations != nil &&
+		params.Capabilities.Workspace.FileOperations.WillRename != nil && *params.Capabilities.Workspace.FileOperations.WillRename {
+		// Only a literal :import path can be rewritten, and only for the file
+		// kind such a path can name.
+		fileScheme := "file"
+		workspaceOptions.FileOperations = &protocol.FileOperationOptions{
+			WillRename: protocol.FileOperationRegistrationOptions{Filters: []protocol.FileOperationFilter{{
+				Scheme:  &fileScheme,
+				Pattern: protocol.FileOperationPattern{Glob: willRenameImportGlob, Matches: protocol.FileOperationPatternKindFile},
+			}}},
+		}
+	}
 	capabilities := protocol.ServerCapabilities{
 		PositionEncoding:                protocolEncoding,
 		DocumentFormattingProvider:      protocol.Boolean(true),
@@ -682,9 +698,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 		CodeLensProvider:   &protocol.CodeLensOptions{ResolveProvider: &codeLensResolve},
 		CodeActionProvider: codeActionProvider,
 		InlayHintProvider:  protocol.Boolean(true),
-		Workspace: &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
-			Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
-		}},
+		Workspace:          workspaceOptions,
 		TextDocumentSync: &protocol.TextDocumentSyncOptions{
 			OpenClose: &openClose,
 			Change:    &changeKind,
