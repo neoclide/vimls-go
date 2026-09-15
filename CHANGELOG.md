@@ -8,6 +8,11 @@
   class and interface members, symbols declared in another file, and references
   spelled differently from the declaration return no ranges instead of a partial
   rename.
+- Report a Vim error diagnostic when a referenced command, option, builtin
+  function or autocommand event was added after the configured target version,
+  naming the version that introduced it.
+- Show the introduction history of commands, options, builtin functions and
+  autocommand events in hover.
 
 ## v0.1.5
 

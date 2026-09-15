@@ -14,6 +14,9 @@ Option diagnostics now include feature-gated options, treating known options as
 available without inspecting the user's Vim build.
 Compiled boolean option compound assignments now use E521 uniformly when the
 RHS type is known, as a deliberate simplification of Vim's error-code choices.
+Referencing a command, option, builtin function or autocommand event added after
+the configured target Vim version reports the matching Vim error and names the
+version that introduced it.
 
 Import `as` completion uses the parsed path expression boundary, including
 quotes inside filenames, and does not accept extra adjacent path expressions.
