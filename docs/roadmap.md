@@ -63,7 +63,14 @@ single-document edit is provably complete, so exported, autoload and global
 symbols, class and interface members, symbols declared in another file, and
 references spelled differently from the declaration are all withheld.
 Extending it to those symbols needs a client that applies edits across documents
-while typing.
+while typing; members additionally need the rename scope described below.
+
+Renaming a member from its declaration currently edits only the declaring file.
+The same symbol renamed from a use site in an importing file edits both files, so
+the two entry points disagree and the declaration-side result is incomplete. A
+member of an exported aggregate is reachable from other files, but
+`CollectSymbolFacts` reports the member itself as unexported, so
+`workspaceLocalTarget` does not select the workspace path.
 
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
