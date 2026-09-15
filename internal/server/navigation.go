@@ -189,7 +189,7 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 		})
 	}
 	if document.occurrence.Start >= document.occurrence.End {
-		if contextKind, argument := completionBuiltinStringAt(file, document.occurrence.Start); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
+		if contextKind, argument := completionBuiltinStringAt(file, offset); contextKind == completionContextHasFeature || contextKind == completionContextExpandSpecial {
 			if span, ok := completionBuiltinStringValueSpan(file, argument, contextKind); ok && spanContains(span, offset) {
 				document.occurrence = span
 			}
@@ -255,7 +255,7 @@ func memberNavigationSymbols(file *syntax.File, result *analysis.FileAnalysis, m
 	return declaration, definition, true
 }
 
-func inheritedAbstractMember(file *syntax.File, symbols []*analysis.Symbol, class *analysis.Symbol, name string, kind analysis.SymbolKind) *syntax.Command {
+func inheritedAbstractMember(file *syntax.File, symbols []*analysis.Symbol, class *analysis.Symbol, name string, kind analysis.SymbolKind) *analysis.Symbol {
 	seen := make(map[string]bool)
 	for class != nil && !seen[class.Name] {
 		seen[class.Name] = true
