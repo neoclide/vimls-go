@@ -49,6 +49,10 @@ the bang character, while retaining built-in documentation precedence.
 Completion resolve now carries the existing command bang context and selects
 the corresponding built-in help.
 
+When Neovim's runtime help lacks a pinned Vim built-in function, its hover can
+load Vim's clean `$VIMRUNTIME` help once from `vim` on `PATH`. This fallback
+adds only missing non-Neovim function documentation to hover results.
+
 Legacy variable type-change warnings now cover straight-line simple assignments.
 They discard unknown types and stop at calls and control-flow boundaries; broader
 flow-sensitive checking remains outside this warning's current scope.

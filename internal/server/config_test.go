@@ -22,12 +22,31 @@ import (
 // A copy of this test executable handles the exact Vim discovery invocation.
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "-u" {
-		want := []string{"-u", "NORC", "--noplugin", "-i", "NONE", "-es", "-V1", "--cmd", "echo json_encode(globpath(&runtimepath, '', 0, 1))|q"}
-		if !reflect.DeepEqual(os.Args[1:], want) {
+		base := []string{"-u", "NORC", "--noplugin", "-i", "NONE", "-es", "-V1", "--cmd"}
+		defaultRuntimepath := append(append([]string(nil), base...), "if has('nvim') | cquit | endif | echo json_encode(globpath(&runtimepath, '', 0, 1))|q")
+		vimRuntime := append(append([]string(nil), base...), "if has('nvim') | cquit | endif | echo json_encode([$VIMRUNTIME])|q")
+		if !reflect.DeepEqual(os.Args[1:], defaultRuntimepath) && !reflect.DeepEqual(os.Args[1:], vimRuntime) {
 			os.Exit(2)
 		}
+		if os.Getenv("VIMLS_TEST_RTP_REQUIRE_UNSET_VIM_ENV") != "" {
+			if _, exists := os.LookupEnv("VIM"); exists {
+				os.Exit(3)
+			}
+			if _, exists := os.LookupEnv("VIMRUNTIME"); exists {
+				os.Exit(3)
+			}
+		}
+		if rejected := os.Getenv("VIMLS_TEST_RTP_NEOVIM_EXECUTABLE"); rejected != "" && filepath.Clean(os.Args[0]) == filepath.Clean(rejected) {
+			// Model a Neovim compatibility binary taking the has('nvim') cquit
+			// branch before it emits a runtimepath.
+			os.Exit(1)
+		}
 		if trace := os.Getenv("VIMLS_TEST_RTP_TRACE"); trace != "" {
-			_ = os.WriteFile(trace, []byte("invoked"), 0o600)
+			file, err := os.OpenFile(trace, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+			if err == nil {
+				_, _ = file.WriteString("invoked\n")
+				_ = file.Close()
+			}
 		}
 		switch os.Getenv("VIMLS_TEST_RTP_MODE") {
 		case "exit":
@@ -227,6 +246,79 @@ func TestDefaultRuntimePathsFromVimJSON(t *testing.T) {
 	expected := []string{mustWorkspaceCanonicalPath(t, comma), mustWorkspaceCanonicalPath(t, root)}
 	if got := defaultRuntimePaths(context.Background()); !reflect.DeepEqual(got, expected) {
 		t.Fatalf("runtimepath = %#v, want %#v", got, expected)
+	}
+}
+
+func TestVimRuntimePathsFromVimJSON(t *testing.T) {
+	root := t.TempDir()
+	data, err := json.Marshal([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIMLS_TEST_RTP_OUTPUT", string(data))
+	want := []string{mustWorkspaceCanonicalPath(t, root)}
+	if got, _ := vimRuntimePaths(context.Background()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Vim runtime = %#v, want %#v", got, want)
+	}
+}
+
+func TestVimRuntimePathsClearsInheritedVimEnvironment(t *testing.T) {
+	root := t.TempDir()
+	data, err := json.Marshal([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIM", "/usr/local/share/nvim")
+	t.Setenv("VIMRUNTIME", "/usr/local/share/nvim/runtime")
+	t.Setenv("VIMLS_TEST_RTP_REQUIRE_UNSET_VIM_ENV", "1")
+	t.Setenv("VIMLS_TEST_RTP_OUTPUT", string(data))
+	want := []string{mustWorkspaceCanonicalPath(t, root)}
+	if got, _ := vimRuntimePaths(context.Background()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Vim runtime = %#v, want %#v", got, want)
+	}
+}
+
+func TestVimRuntimePathsSkipsNeovimCompatibilityExecutable(t *testing.T) {
+	writeVim := func(directory string) string {
+		t.Helper()
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(executable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := "vim"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, data, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	neovim := writeVim(t.TempDir())
+	vimDirectory := t.TempDir()
+	vim := writeVim(vimDirectory)
+	root := t.TempDir()
+	data, err := json.Marshal([]string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the actual Vim candidate directly after the rejected compatibility
+	// executable, without relying on the test process's initial PATH.
+	t.Setenv("PATH", filepath.Dir(neovim)+string(os.PathListSeparator)+filepath.Dir(vim))
+	t.Setenv("VIMLS_TEST_RTP_NEOVIM_EXECUTABLE", neovim)
+	t.Setenv("VIMLS_TEST_RTP_OUTPUT", string(data))
+	want := []string{mustWorkspaceCanonicalPath(t, root)}
+	wantExecutable, err := filepath.Abs(vim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, executable := vimRuntimePaths(context.Background()); !reflect.DeepEqual(got, want) || executable != wantExecutable {
+		t.Fatalf("Vim runtime after Neovim compatibility executable = %#v, executable = %q, want %#v", got, executable, want)
 	}
 }
 

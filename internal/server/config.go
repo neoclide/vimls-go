@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -163,10 +164,81 @@ const maxRuntimepathOutputBytes = 64 << 10
 // Vim writes :echo to stderr in silent Ex mode with verbosity enabled. Capture
 // both streams privately so warnings and failures cannot corrupt LSP stdout.
 func defaultRuntimePaths(ctx context.Context) []string {
+	return runtimePathsFromVim(ctx, "echo json_encode(globpath(&runtimepath, '', 0, 1))|q")
+}
+
+// vimRuntimePaths returns only the runtime owned by the Vim executable. Unlike
+// the default runtimepath, this excludes user runtime directories even when
+// Vim starts with -u NORC and --noplugin.
+func vimRuntimePaths(ctx context.Context) ([]string, string) {
+	return runtimePathsFromVimWithExecutable(ctx, "echo json_encode([$VIMRUNTIME])|q")
+}
+
+func runtimePathsFromVim(ctx context.Context, commandText string) []string {
+	// Initialization keeps its established single-command failure behavior.
+	// The hover-only Vim-help fallback below is the path that may skip a
+	// Neovim compatibility executable and try later PATH candidates.
+	return runtimePathsFromVimExecutable(ctx, "vim", commandText)
+}
+
+func runtimePathsFromVimWithExecutable(ctx context.Context, commandText string) ([]string, string) {
+	for _, executable := range vimExecutablesOnPath() {
+		if paths := runtimePathsFromVimExecutable(ctx, executable, commandText); len(paths) > 0 {
+			return paths, executable
+		}
+	}
+	return nil, ""
+}
+
+// vimExecutablesOnPath returns every executable literally named "vim" in
+// PATH. Neovim distributions sometimes provide such a compatibility wrapper;
+// trying later candidates lets an installed Vim still supply its own runtime.
+func vimExecutablesOnPath() []string {
+	name := "vim"
+	if os.PathSeparator == '\\' {
+		name += ".exe"
+	}
+	seen := make(map[string]struct{})
+	var result []string
+	for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
+		if directory == "" {
+			directory = "."
+		}
+		path := filepath.Join(directory, name)
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+			continue
+		}
+		path, err = filepath.Abs(path)
+		if err != nil {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+	return result
+}
+
+func runtimePathsFromVimExecutable(ctx context.Context, executable, commandText string) []string {
 	ctx, cancel := context.WithTimeout(ctx, defaultRuntimepathTimeout)
 	defer cancel()
-	command := exec.CommandContext(ctx, "vim", "-u", "NORC", "--noplugin", "-i", "NONE", "-es", "-V1",
-		"--cmd", "echo json_encode(globpath(&runtimepath, '', 0, 1))|q")
+	// has('nvim') rejects a Neovim compatibility executable before it can
+	// report Neovim's runtime as Vim's. cquit makes that candidate fail without
+	// emitting a response on the language-server transport.
+	commandText = "if has('nvim') | cquit | endif | " + commandText
+	command := exec.CommandContext(ctx, executable, "-u", "NORC", "--noplugin", "-i", "NONE", "-es", "-V1",
+		"--cmd", commandText)
+	// Neovim exports VIM and VIMRUNTIME to its children. Vim accepts either
+	// inherited value, which would make a `vim` subprocess report Neovim's
+	// runtime rather than its own. Preserve PATH and every other process
+	// setting, but let Vim derive both directories from its executable.
+	command.Env = slices.DeleteFunc(os.Environ(), func(value string) bool {
+		name, _, _ := strings.Cut(value, "=")
+		return name == "VIM" || name == "VIMRUNTIME"
+	})
 	command.WaitDelay = 100 * time.Millisecond
 	var output runtimepathCommandOutput
 	command.Stdout, command.Stderr = &output, &output

@@ -876,7 +876,7 @@ func (s *Server) Hover(ctx context.Context, params *protocol.HoverParams) (*prot
 						return nil, err
 					} else if current {
 						return &protocol.Hover{
-							Contents: s.appendRuntimeHelp(document, contents, kind),
+							Contents: s.appendRuntimeHelp(ctx, document, contents, kind),
 							Range:    &rangeValue,
 						}, nil
 					} else if attempt == 1 {
@@ -1152,7 +1152,7 @@ func (s *Server) localHoverContents(ctx context.Context, document *navigationDoc
 	if err := document.checkCurrent(ctx); err != nil {
 		return nil, err
 	}
-	contents = s.appendRuntimeHelp(document, contents, "")
+	contents = s.appendRuntimeHelp(ctx, document, contents, "")
 	if contents == nil {
 		return nil, nil
 	}

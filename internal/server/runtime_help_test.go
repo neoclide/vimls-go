@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -58,6 +59,64 @@ func TestRuntimeHelpEmptyRuntimepathDoesNotStartWorker(t *testing.T) {
 	}
 }
 
+func TestVimBuiltinHelpFallbackForMissingNeovimDocumentation(t *testing.T) {
+	vimRuntime := t.TempDir()
+	neovimRuntime := t.TempDir()
+	writeWorkspaceFile(t, vimRuntime, "doc/eval.txt", "*popup_create()*\nVim-only function help.\n*nvim_buf_get_lines()*\nNeovim API help must not be imported.\n")
+	writeWorkspaceFile(t, neovimRuntime, "doc/eval.txt", "*len()*\nNeovim function help.\n")
+	runtimeJSON, err := json.Marshal([]string{vimRuntime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(t.TempDir(), "vim-invocations")
+	t.Setenv("VIMLS_TEST_RTP_OUTPUT", string(runtimeJSON))
+	t.Setenv("VIMLS_TEST_RTP_TRACE", trace)
+
+	s, documentURI := openNavigationDocument(t, text.UTF16, "echo balloon_show('')\necho popup_create('', {})\n")
+	t.Cleanup(s.stopAnalysis)
+	client := &indexingClient{}
+	s.client = client
+	s.setRuntimePaths([]string{neovimRuntime})
+	s.runtimeHelpWG.Wait()
+	hover := runtimeHelpHover(t, s, documentURI, "popup_create")
+	s.vimBuiltinHelpWG.Wait()
+	if hover == nil || !strings.Contains(fmt.Sprint(hover.Contents), "Vim-only function help.") {
+		t.Fatalf("fallback documentation missing from initial hover: %#v", hover)
+	}
+	if !strings.Contains(fmt.Sprint(hover.Contents), "popup_create({what}, {options})") {
+		t.Fatalf("builtin signature missing from fallback hover: %#v", hover)
+	}
+	// A second missing Vim function must reuse the one fallback scan. Its
+	// absent documentation also proves that only matching Vim built-ins merged.
+	_ = runtimeHelpHover(t, s, documentURI, "balloon_show")
+	s.vimBuiltinHelpWG.Wait()
+	data, err := os.ReadFile(trace)
+	if err != nil || strings.Count(string(data), "invoked\n") != 1 {
+		t.Fatalf("Vim fallback invocations = %q, err = %v", data, err)
+	}
+	s.workspaceMu.Lock()
+	_, hasVimFunction := s.vimBuiltinHelp["popup_create"]
+	_, hasNeovimAPI := s.vimBuiltinHelp["nvim_buf_get_lines"]
+	s.workspaceMu.Unlock()
+	if !hasVimFunction || hasNeovimAPI {
+		t.Fatalf("fallback documentation = %#v", s.vimBuiltinHelp)
+	}
+	client.mu.Lock()
+	logs := strings.Join(client.logs, "\n")
+	client.mu.Unlock()
+	for _, want := range []string{
+		"vimls: loading Vim built-in help from vim on PATH",
+		"vimls: using Vim executable: ",
+		"vimls: scanning Vim $VIMRUNTIME help: " + mustWorkspaceCanonicalPath(t, vimRuntime),
+		"vimls: parsed Vim $VIMRUNTIME help: 1 files, 1 built-in functions",
+		"vimls: scanned Vim $VIMRUNTIME help; total elapsed ",
+	} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("LogMessage logs = %q, want %q", logs, want)
+		}
+	}
+}
+
 func TestRuntimeHelpHoverAppendsSeparateDocument(t *testing.T) {
 	root := t.TempDir()
 	writeWorkspaceFile(t, root, "doc/plugin.txt", "*PluginRun()*\nRuntime function help.\ng:enabled *g:enabled*\nRuntime variable help.\n*plugin#run*\nRuntime autoload help.\nlen({expr}) *len()*\nRuntime built-in help.\n*<Plug>(coc-diagnostic-prev)*\nJump to the previous diagnostic.\n:CocRestart *:CocRestart*\nRestart coc.nvim.\n")
@@ -79,6 +138,13 @@ func TestRuntimeHelpHoverAppendsSeparateDocument(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s, documentURI := openNavigationDocument(t, text.UTF16, tc.source)
 			t.Cleanup(s.stopAnalysis)
+			// This test isolates client runtimepath documentation. Suppress the
+			// separate Vim fallback, which is covered below.
+			if tc.name == "builtin" || tc.name == "builtin arrow" {
+				s.workspaceMu.Lock()
+				s.vimBuiltinHelpStarted = true
+				s.workspaceMu.Unlock()
+			}
 			before := runtimeHelpHover(t, s, documentURI, tc.needle)
 			s.setRuntimePaths([]string{root})
 			s.runtimeHelpWG.Wait()

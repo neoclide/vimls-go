@@ -69,6 +69,15 @@ they do not receive unknown-name warnings. This is not full Neovim API support:
 the list does not provide Neovim function signatures, type checking or a
 complete set of API completion items.
 
+If a hover for a pinned Vim built-in function has no matching entry after
+Neovim's runtime help loads, vimls-go tries `vim` on `PATH` once and reads its
+`$VIMRUNTIME` help in the background. It invokes Vim with `-u NORC` and
+`--noplugin`, so it loads neither user configuration nor plugins. Only
+documentation for Vim built-in functions missing from the Neovim runtime is
+added to hover results; it is not used for Neovim APIs or completion. A missing
+or unusable `vim` executable is ignored silently. Inherited Neovim `VIM` and
+`VIMRUNTIME` values are removed for this process so Vim reports its own runtime.
+
 Lua code, including `init.lua` and embedded Lua bodies, needs a Lua language
 server. Editing Vim9 in Neovim also does not make Neovim able to execute it.
 

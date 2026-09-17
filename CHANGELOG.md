@@ -2,11 +2,14 @@
 
 ## v0.1.6 — unreleased
 
+- Load vim's runtimepath for builtin function hover on neovim by find runtime
+  from executable vim in PATH. Silent failed when error happens.
 - Preserve runtime help prose following inline error and concept tags, so
   builtin hovers such as `popup_create()` include their full documentation.
-- Withhold file-rename import edits that would load a different script through
-  runtimepath precedence, accounting for all files in the rename batch. Support
-  plain double-quoted imports without an alias as well as single-quoted imports.
+- Update single- and double-quoted imports during file renames, including
+  imports without an `as` alias. Requires client support for
+  `workspace/willRenameFiles`. Skip edits if runtimepath search order would
+  resolve an import to a different script after the rename batch.
 - Withhold linked editing for explicit globals at every scope and for type
   names whose type annotation references are not yet included.
 - Rewrite Vim9 `:import` statements when a file is renamed through the client's

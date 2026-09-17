@@ -332,17 +332,40 @@ func (s *Server) runtimeHelpMarkdown(name string) string {
 	return doc.Markdown
 }
 
-func (s *Server) appendRuntimeHelp(document *navigationDocument, contents protocol.HoverContents, resolvedKind analysis.SymbolKind) protocol.HoverContents {
+func (s *Server) appendRuntimeHelp(ctx context.Context, document *navigationDocument, contents protocol.HoverContents, resolvedKind analysis.SymbolKind) protocol.HoverContents {
 	name := runtimeHelpName(document, resolvedKind)
 	if name == "" {
 		return contents
 	}
 	s.workspaceMu.Lock()
 	doc, found := s.runtimeHelp[name]
+	var vimDone <-chan struct{}
+	if !found {
+		if !s.runtimeHelpRunning {
+			doc, found = s.vimBuiltinHelp[name]
+			if !found {
+				vimDone = s.startVimBuiltinHelpLocked(name)
+			}
+		}
+	}
 	s.workspaceMu.Unlock()
+	if !found && vimDone != nil {
+		select {
+		case <-vimDone:
+			s.workspaceMu.Lock()
+			doc, found = s.vimBuiltinHelp[name]
+			s.workspaceMu.Unlock()
+		case <-ctx.Done():
+			return contents
+		}
+	}
 	if !found {
 		return contents
 	}
+	return s.appendRuntimeHelpDocument(contents, doc)
+}
+
+func (s *Server) appendRuntimeHelpDocument(contents protocol.HoverContents, doc vimhelp.SymbolDocumentation) protocol.HoverContents {
 	body := stripRuntimeHelpHeading(doc.Markdown, doc.Name, doc.Tag)
 	help := fmt.Sprintf("%s\n\n`%s:%d`", body, doc.Source, doc.Line)
 	if s.languageFeatures.hoverMarkup != protocol.MarkupKindMarkdown {
@@ -362,6 +385,69 @@ func (s *Server) appendRuntimeHelp(document *navigationDocument, contents protoc
 		sections = append(sections, current)
 	}
 	return append(sections, protocol.String(boundedDocumentationText(help)))
+}
+
+// startVimBuiltinHelpLocked supplements a Neovim runtimepath only after a
+// hover misses its own help entry. The clean Vim invocation discovers its
+// executable-owned runtime directory; failures are deliberately silent, just like
+// default runtimepath discovery during initialization.
+func (s *Server) startVimBuiltinHelpLocked(name string) <-chan struct{} {
+	if len(s.runtimePaths) == 0 || s.runtimeHelpRunning || !vimdata.IsFunction(name) || vimdata.IsNeovimCompatFunction(name) || s.analysisStopped || s.analysisContext.Err() != nil {
+		return nil
+	}
+	if s.vimBuiltinHelpStarted {
+		return s.vimBuiltinHelpDone
+	}
+	s.vimBuiltinHelpStarted = true
+	s.vimBuiltinHelpDone = make(chan struct{})
+	s.vimBuiltinHelpWG.Add(1)
+	done := s.vimBuiltinHelpDone
+	go func() {
+		defer close(done)
+		s.collectVimBuiltinHelp()
+	}()
+	return done
+}
+
+func (s *Server) collectVimBuiltinHelp() {
+	defer s.vimBuiltinHelpWG.Done()
+	started := time.Now()
+	defer s.logScanDuration(s.analysisContext, "scanned Vim $VIMRUNTIME help", started)
+	s.logScanMessage(s.analysisContext, "loading Vim built-in help from vim on PATH")
+	roots, executable := vimRuntimePaths(s.analysisContext)
+	if len(roots) == 0 || s.analysisContext.Err() != nil {
+		s.logScanMessage(s.analysisContext, "Vim built-in help unavailable: no usable $VIMRUNTIME")
+		return
+	}
+	s.logScanMessage(s.analysisContext, "using Vim executable: "+executable)
+	for _, root := range roots {
+		s.logScanMessage(s.analysisContext, "scanning Vim $VIMRUNTIME help: "+root)
+	}
+	directories := make(map[string][]string, len(roots))
+	files := make(map[string][]vimhelp.SymbolDocumentation)
+	if !s.collectRuntimeHelp(s.analysisContext, roots, directories, files) || s.analysisContext.Err() != nil {
+		s.logScanMessage(s.analysisContext, "Vim $VIMRUNTIME help scan did not complete")
+		return
+	}
+	all := runtimeHelpIndex(roots, directories, files)
+	functions := make(map[string]vimhelp.SymbolDocumentation)
+	for name, doc := range all {
+		// This is a hover-only Vim fallback. Do not import plugin, option,
+		// command, or Neovim API documentation from the other runtime.
+		if doc.Kind == "global function" && vimdata.IsFunction(name) && !vimdata.IsNeovimCompatFunction(name) {
+			functions[name] = doc
+		}
+	}
+	fileCount := 0
+	for _, paths := range directories {
+		fileCount += len(paths)
+	}
+	s.logScanMessage(s.analysisContext, fmt.Sprintf("parsed Vim $VIMRUNTIME help: %d files, %d built-in functions", fileCount, len(functions)))
+	s.workspaceMu.Lock()
+	if !s.analysisStopped && s.analysisContext.Err() == nil {
+		s.vimBuiltinHelp = functions
+	}
+	s.workspaceMu.Unlock()
 }
 
 func stripRuntimeHelpHeading(markdown, name, tag string) string {

@@ -263,6 +263,10 @@ type Server struct {
 	runtimeHelpRoot             string
 	runtimeHelpCancel           context.CancelFunc
 	runtimeHelpWG               sync.WaitGroup
+	vimBuiltinHelp              map[string]vimhelp.SymbolDocumentation
+	vimBuiltinHelpStarted       bool
+	vimBuiltinHelpDone          chan struct{}
+	vimBuiltinHelpWG            sync.WaitGroup
 	workspaceIndex              *workspace.Index
 	workspaceGraph              *workspace.ImportGraph
 	workspaceGraphView          workspace.ImportGraphSnapshot
@@ -332,6 +336,7 @@ func New(input io.Reader, output, logOutput io.Writer) *Server {
 		workspaceChanged:      make(chan struct{}),
 		workspaceWake:         make(chan struct{}, 1),
 		workspaceDelay:        defaultWorkspaceRebuildDebounce,
+		vimBuiltinHelp:        make(map[string]vimhelp.SymbolDocumentation),
 		disabledDiagnostics:   make(map[string]struct{}),
 		overrideDiagnostics:   make(map[string]protocol.DiagnosticSeverity),
 		diagnosticMaxNumber:   maxDiagnosticsPerDocument,
@@ -1830,6 +1835,7 @@ func (s *Server) stopAnalysis() {
 		s.workspaceWG.Wait()
 		s.runtimepathWG.Wait()
 		s.runtimeHelpWG.Wait()
+		s.vimBuiltinHelpWG.Wait()
 		waitGroupAddBarrier(&s.watchMu)
 		s.watchWG.Wait()
 	})
