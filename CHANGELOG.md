@@ -2,6 +2,8 @@
 
 ## v0.1.6 — unreleased
 
+- Preserve runtime help prose following inline error and concept tags, so
+  builtin hovers such as `popup_create()` include their full documentation.
 - Withhold file-rename import edits that would load a different script through
   runtimepath precedence, accounting for all files in the rename batch. Support
   plain double-quoted imports without an alias as well as single-quoted imports.

@@ -55,22 +55,26 @@ func ExtractSymbols(sourceName string, source []byte) []SymbolDocumentation {
 			continue
 		}
 		tags := definitionTags(line)
-		if len(tags) > 0 {
-			// Every help tag is a boundary, including commands and local
-			// variables, so unrelated sections cannot leak into a symbol.
+		var symbols []SymbolDocumentation
+		for _, tag := range tags {
+			name, kind := symbolTag(tag)
+			if kind != "" {
+				symbols = append(symbols, SymbolDocumentation{Name: strings.Clone(name), Tag: strings.Clone(tag), Kind: kind, Source: sourceName, Line: number + 1})
+			}
+		}
+		if len(symbols) > 0 {
+			// Only tags that define an indexed symbol start a new entry.
+			// Error and concept tags may occur inline in a symbol's prose
+			// (for example, popup_create() documents *E450* in its first
+			// sentence), so treating every help tag as a boundary truncates
+			// otherwise valid documentation.
 			if hasProse {
 				flush(number)
 			}
 			if start < 0 {
 				start = number
 			}
-			for _, tag := range tags {
-				tag = strings.Clone(tag) // Do not retain the complete input file through a tag substring.
-				name, kind := symbolTag(tag)
-				if kind != "" {
-					pending = append(pending, SymbolDocumentation{Name: name, Tag: tag, Kind: kind, Source: sourceName, Line: number + 1})
-				}
-			}
+			pending = append(pending, symbols...)
 		}
 		prose := trimmed
 		if len(tags) > 0 {
