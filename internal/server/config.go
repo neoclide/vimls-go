@@ -206,7 +206,10 @@ func vimExecutablesOnPath() []string {
 		}
 		path := filepath.Join(directory, name)
 		info, err := os.Stat(path)
-		if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		// Windows does not represent executability with Unix mode bits.  A
+		// vim.exe found on PATH is executable by extension, while Unix still
+		// needs the permission check before we try the candidate.
+		if err != nil || info.IsDir() || (os.PathSeparator != '\\' && info.Mode()&0o111 == 0) {
 			continue
 		}
 		path, err = filepath.Abs(path)
