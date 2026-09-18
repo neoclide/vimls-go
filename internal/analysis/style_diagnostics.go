@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -390,6 +391,9 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 		}
 		if strings.HasSuffix(command.Canonical, "match") && command.Canonical != "matchadd" {
 			appendStyleDiagnostic(result, "vimls/match-command", ":match uses shared match slots; prefer matchadd()", command.Name)
+		}
+		if command.Substitute != nil {
+			collectSubstituteStyleDiagnostics(result, file, command)
 		}
 		if command.Mapping != nil {
 			collectMappingStyleDiagnostics(result, file, command, commands, blocks, index)
@@ -867,4 +871,93 @@ func isComplexAutocmd(file *syntax.File, command *syntax.Command, body string) b
 		return utf8.RuneCountInString(line) > 180
 	}
 	return true
+}
+
+func collectSubstituteStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command) {
+	substitute := command.Substitute
+	if substitute == nil {
+		return
+	}
+
+	if substitute.Pattern.Start < substitute.Pattern.End {
+		pattern := file.Text(substitute.Pattern)
+		hasCaseFlag := (substitute.FlagBits & (syntax.SubstituteFlagIgnoreCase | syntax.SubstituteFlagMatchCase)) != 0
+		if !hasCaseFlag && !patternHasCaseOverride(pattern) && patternContainsUnescapedLetter(pattern) {
+			appendStyleDiagnostic(result, "vimls/implicit-pattern-case",
+				"substitute pattern depends on 'ignorecase'; consider 'i' or 'I' flag, or '\\c' / '\\C'",
+				substitute.Pattern)
+		}
+
+		isMagicCmd := command.Canonical == "smagic" || command.Canonical == "snomagic" || substitute.Magic != syntax.SubstituteMagicDefault
+		if !isMagicCmd && !patternHasMagicPrefix(pattern) && strings.ContainsAny(pattern, ".*+?(){}[]~") {
+			appendStyleDiagnostic(result, "vimls/implicit-regex-magic",
+				"substitute pattern relies on Vim's magic setting; consider :smagic or an explicit magic prefix",
+				substitute.Pattern)
+		}
+	} else {
+		span := command.Name
+		if substitute.PreviousPattern.Start < substitute.PreviousPattern.End {
+			span = substitute.PreviousPattern
+		} else if substitute.Delimiter.Start < substitute.PatternDelimiter.End {
+			span = syntax.Span{Start: substitute.Delimiter.Start, End: substitute.PatternDelimiter.End}
+		} else if substitute.Delimiter.Start < substitute.Delimiter.End {
+			span = substitute.Delimiter
+		}
+		appendStyleDiagnostic(result, "vimls/substitute-empty-pattern",
+			"substitute without pattern relies on the user's previous search pattern",
+			span)
+	}
+
+	if !result.configFile && command.Dialect == syntax.Legacy {
+		appendStyleDiagnostic(result, "vimls/substitute-gdefault",
+			"substitute behavior may be affected by 'gdefault'",
+			command.Name)
+	}
+}
+
+func patternHasCaseOverride(pattern string) bool {
+	escaped := false
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		if escaped {
+			if c == 'c' || c == 'C' {
+				return true
+			}
+			escaped = false
+			continue
+		}
+		if c == '\\' {
+			escaped = true
+		}
+	}
+	return false
+}
+
+func patternContainsUnescapedLetter(pattern string) bool {
+	escaped := false
+	for _, r := range pattern {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func patternHasMagicPrefix(pattern string) bool {
+	p := pattern
+	if strings.HasPrefix(p, "\\c") || strings.HasPrefix(p, "\\C") {
+		p = p[2:]
+	}
+	if strings.HasPrefix(p, "\\\\") {
+		return false
+	}
+	return strings.HasPrefix(p, "\\v") || strings.HasPrefix(p, "\\m") || strings.HasPrefix(p, "\\M") || strings.HasPrefix(p, "\\V")
 }

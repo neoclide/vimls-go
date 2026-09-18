@@ -154,6 +154,8 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/normal-without-bang` | Warning | `:normal` may invoke user mappings; `:normal!` avoids that. |
 | `vimls/recursive-map` | Warning | The mapping may expand other mappings. |
 | `vimls/set-vs-setlocal` | Warning | The option assignment may change a global default. |
+| `vimls/substitute-empty-pattern` | Warning | An empty pattern in `:substitute` reuses the previous search pattern from interactive history. |
+| `vimls/substitute-gdefault` | Hint | The `:substitute` command may behave unexpectedly if the user has configured `gdefault`. |
 
 ### Names and unused code
 

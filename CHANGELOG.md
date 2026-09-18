@@ -2,6 +2,9 @@
 
 ## v0.1.6 — unreleased
 
+- Add diagnostics `vimls/encoding-after-scriptencoding`, `vimls/implicit-string-case`,
+  `vimls/abbreviated-option`, `vimls/substitute-empty-pattern` and
+  `vimls/substitute-gdefault`
 - Load vim's runtimepath for builtin function hover on neovim by find runtime
   from executable vim in PATH. Silent failed when error happens.
 - Preserve runtime help prose following inline error and concept tags, so

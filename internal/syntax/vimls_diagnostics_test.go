@@ -30,6 +30,8 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 		"vimls/normal-without-bang":            DiagnosticWarning,
 		"vimls/recursive-map":                  DiagnosticWarning,
 		"vimls/set-vs-setlocal":                DiagnosticWarning,
+		"vimls/substitute-empty-pattern":       DiagnosticWarning,
+		"vimls/substitute-gdefault":            DiagnosticHint,
 		"vimls/unknown-autocmd-event":          DiagnosticHint,
 	}
 	for code, severity := range want {
