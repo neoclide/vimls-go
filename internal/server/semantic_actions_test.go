@@ -648,6 +648,22 @@ func TestCodeActionRepairsStyleDiagnostics(t *testing.T) {
 			wantNewText: []string{"==#", "==?"},
 		},
 		{
+			name:        "explicit string case less than",
+			source:      "if 'a' < 'b'\nendif\n",
+			code:        "vimls/implicit-string-case",
+			diagnostic:  navigationRange(0, 7, 8),
+			wantTitles:  []string{"Use case-sensitive comparison", "Use case-insensitive comparison"},
+			wantNewText: []string{"<#", "<?"},
+		},
+		{
+			name:        "explicit string case less than or equal",
+			source:      "if 'a' <= 'b'\nendif\n",
+			code:        "vimls/implicit-string-case",
+			diagnostic:  navigationRange(0, 7, 9),
+			wantTitles:  []string{"Use case-sensitive comparison", "Use case-insensitive comparison"},
+			wantNewText: []string{"<=#", "<=?"},
+		},
+		{
 			name:        "abbreviated option in set",
 			source:      "set ts=8\n",
 			code:        "vimls/abbreviated-option",

@@ -567,25 +567,26 @@ func collectDeclarationStyleDiagnostics(result *FileAnalysis, file *syntax.File,
 }
 
 func collectExpressionStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command) {
+	dialect := command.Dialect
 	if command.Declaration != nil {
-		visitStyleExpression(result, file, command.Declaration.Target)
-		visitStyleExpression(result, file, command.Declaration.Initializer)
+		visitStyleExpression(result, file, command.Declaration.Target, dialect)
+		visitStyleExpression(result, file, command.Declaration.Initializer, dialect)
 	}
 	if command.For != nil {
-		visitStyleExpression(result, file, command.For.Iterable)
+		visitStyleExpression(result, file, command.For.Iterable, dialect)
 	}
 	for _, target := range command.Targets {
-		visitStyleExpression(result, file, target)
+		visitStyleExpression(result, file, target, dialect)
 	}
 	for _, expression := range command.Expressions {
-		visitStyleExpression(result, file, expression)
+		visitStyleExpression(result, file, expression, dialect)
 	}
 	if command.Mapping != nil {
-		visitStyleExpression(result, file, command.Mapping.RHSExpression)
+		visitStyleExpression(result, file, command.Mapping.RHSExpression, dialect)
 	}
 }
 
-func visitStyleExpression(result *FileAnalysis, file *syntax.File, expression *syntax.Expression) {
+func visitStyleExpression(result *FileAnalysis, file *syntax.File, expression *syntax.Expression, dialect syntax.Dialect) {
 	if expression == nil {
 		return
 	}
@@ -615,7 +616,7 @@ func visitStyleExpression(result *FileAnalysis, file *syntax.File, expression *s
 	if expression.Kind == syntax.ExpressionBinary && len(expression.Children) == 2 {
 		operator := file.Text(expression.Operator)
 		left, right := expression.Children[0], expression.Children[1]
-		if (operator == "==" || operator == "!=" || operator == "is" || operator == "isnot") && (left.Kind == syntax.ExpressionString || right.Kind == syntax.ExpressionString) {
+		if dialect == syntax.Legacy && isImplicitStringCaseOperator(operator) && (isStringOperand(result, left) || isStringOperand(result, right)) {
 			appendStyleDiagnostic(result, "vimls/implicit-string-case", "string comparison depends on 'ignorecase'; consider an explicit case operator", expression.Operator)
 		}
 		if (operator == "=~" || operator == "!~") && right.Kind == syntax.ExpressionString {
@@ -627,8 +628,30 @@ func visitStyleExpression(result *FileAnalysis, file *syntax.File, expression *s
 		}
 	}
 	for _, child := range expression.Children {
-		visitStyleExpression(result, file, child)
+		visitStyleExpression(result, file, child, dialect)
 	}
+}
+
+func isImplicitStringCaseOperator(operator string) bool {
+	switch operator {
+	case "==", "!=", "is", "isnot", "<", "<=", ">", ">=":
+		return true
+	default:
+		return false
+	}
+}
+
+func isStringOperand(result *FileAnalysis, expression *syntax.Expression) bool {
+	for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+		expression = expression.Children[0]
+	}
+	if expression == nil {
+		return false
+	}
+	if expression.Kind == syntax.ExpressionString || expression.Kind == syntax.ExpressionInterpolatedString {
+		return true
+	}
+	return result != nil && result.TypeOf(expression).Name == "string"
 }
 
 func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command, commands []syntax.Command, blocks []syntax.Block, commandIndex int) {

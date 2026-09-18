@@ -599,3 +599,70 @@ func TestAbbreviatedOptionDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func TestImplicitStringCaseDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name:   "legacy string relational comparisons",
+			source: "if 'a' < 'b'\nendif\nif 'a' <= 'b'\nendif\nif 'a' > 'b'\nendif\nif 'a' >= 'b'\nendif\n",
+			want:   []string{"vimls/implicit-string-case", "vimls/implicit-string-case", "vimls/implicit-string-case", "vimls/implicit-string-case"},
+		},
+		{
+			name:   "legacy explicit case operators",
+			source: "if 'a' <# 'b'\nendif\nif 'a' <? 'b'\nendif\nif 'a' <=# 'b'\nendif\nif 'a' <=? 'b'\nendif\nif 'a' ># 'b'\nendif\nif 'a' >? 'b'\nendif\nif 'a' >=# 'b'\nendif\nif 'a' >=? 'b'\nendif\n",
+			want:   nil,
+		},
+		{
+			name:   "legacy numeric comparisons",
+			source: "if 1 < 2\nendif\nif 1 <= 2\nendif\nif 1 > 2\nendif\nif 1 >= 2\nendif\n",
+			want:   nil,
+		},
+		{
+			name:   "legacy inferred string variable",
+			source: "let s = 'hello'\nif s < other\nendif\n",
+			want:   []string{"vimls/implicit-string-case"},
+		},
+		{
+			name:   "legacy inferred number variable",
+			source: "let n = 123\nif n < other\nendif\n",
+			want:   nil,
+		},
+		{
+			name:   "vim9script comparisons unaffected by ignorecase",
+			source: "vim9script\nvar s = 'a'\nif s < 'b'\nendif\nif s == 'b'\nendif\n",
+			want:   nil,
+		},
+		{
+			name:   "vim9 def function unaffected by ignorecase",
+			source: "def Foo()\n  if 'a' < 'b'\n  endif\nenddef\n",
+			want:   nil,
+		},
+		{
+			name:   "vim9script legacy modifier activates diagnostic",
+			source: "vim9script\nlegacy if 'a' < 'b'\nlegacy endif\n",
+			want:   []string{"vimls/implicit-string-case"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			result := Analyze(file)
+			var got []string
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vimls/implicit-string-case" {
+					got = append(got, diagnostic.Code)
+				}
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("diagnostics = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}

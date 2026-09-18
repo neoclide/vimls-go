@@ -844,6 +844,14 @@ func explicitCaseOperators(operator string) (string, string, bool) {
 		return "=~#", "=~?", true
 	case "!~":
 		return "!~#", "!~?", true
+	case "<":
+		return "<#", "<?", true
+	case "<=":
+		return "<=#", "<=?", true
+	case ">":
+		return ">#", ">?", true
+	case ">=":
+		return ">=#", ">=?", true
 	default:
 		return "", "", false
 	}
