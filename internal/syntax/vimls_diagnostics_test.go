@@ -4,6 +4,7 @@ import "testing"
 
 func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 	want := map[string]DiagnosticSeverity{
+		"vimls/abbreviated-option":             DiagnosticHint,
 		"vimls/autocmd-group-not-cleared":      DiagnosticWarning,
 		"vimls/autocmd-outside-augroup":        DiagnosticWarning,
 		"vimls/autoload-function-not-found":    DiagnosticWarning,

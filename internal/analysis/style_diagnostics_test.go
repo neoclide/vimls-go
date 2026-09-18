@@ -552,3 +552,50 @@ au User Outside lsp#Map()
 		}
 	}
 }
+
+func TestAbbreviatedOptionDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name:   "set command abbreviations",
+			source: "setlocal ts=8 sw=4 noai\n",
+			want:   []string{"vimls/abbreviated-option", "vimls/abbreviated-option", "vimls/abbreviated-option"},
+		},
+		{
+			name:   "expression option abbreviations",
+			source: "let &ts = 4\necho &l:sw\necho &g:ai\n",
+			want:   []string{"vimls/abbreviated-option", "vimls/abbreviated-option", "vimls/abbreviated-option"},
+		},
+		{
+			name:   "canonical options no warning",
+			source: "setlocal tabstop=8 shiftwidth=4 noautoindent\nlet &tabstop = 4\necho &l:shiftwidth\n",
+			want:   nil,
+		},
+		{
+			name:   "vim9script option abbreviations",
+			source: "vim9script\nsetlocal ts=8\nvar x = &ts\n",
+			want:   []string{"vimls/abbreviated-option", "vimls/abbreviated-option"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			result := Analyze(file)
+			var got []string
+			for _, diagnostic := range result.Diagnostics {
+				if diagnostic.Code == "vimls/abbreviated-option" {
+					got = append(got, diagnostic.Code)
+				}
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("diagnostics = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}

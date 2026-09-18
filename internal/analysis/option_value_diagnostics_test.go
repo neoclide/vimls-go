@@ -10,8 +10,14 @@ func TestFunctionValuedOptionAssignments(t *testing.T) {
 	for _, option := range []string{"completefunc", "findfunc", "imactivatefunc", "imstatusfunc", "omnifunc", "operatorfunc", "quickfixtextfunc", "tagfunc", "thesaurusfunc", "opfunc", "l:omnifunc", "g:opfunc"} {
 		t.Run(option, func(t *testing.T) {
 			file := syntax.Parse("vim9script\ndef Assign()\n  &" + option + " = (_) => {\nreturn\n}\n  var name: string = &" + option + "\n  echo name\nenddef\n")
-			if diagnostics := CombinedDiagnostics(file, Analyze(file)); len(diagnostics) != 0 {
-				t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+			var errors []syntax.Diagnostic
+			for _, d := range CombinedDiagnostics(file, Analyze(file)) {
+				if d.Code != "" && d.Code[:4] == "vim/" {
+					errors = append(errors, d)
+				}
+			}
+			if len(errors) != 0 {
+				t.Fatalf("unexpected diagnostics: %#v", errors)
 			}
 		})
 	}
@@ -27,12 +33,16 @@ func TestFunctionValuedOptionAssignments(t *testing.T) {
 			file := syntax.Parse("vim9script\n" + test.source)
 			diagnostics := CombinedDiagnostics(file, Analyze(file))
 			found := false
+			var errors []syntax.Diagnostic
 			for _, diagnostic := range diagnostics {
 				if diagnostic.Code == "vim/E1012" {
 					found = true
 				}
+				if diagnostic.Code != "" && diagnostic.Code[:4] == "vim/" {
+					errors = append(errors, diagnostic)
+				}
 			}
-			if found != test.wantMismatch || (!test.wantMismatch && len(diagnostics) != 0) {
+			if found != test.wantMismatch || (!test.wantMismatch && len(errors) != 0) {
 				t.Fatalf("diagnostics = %#v, want mismatch %v", diagnostics, test.wantMismatch)
 			}
 		})

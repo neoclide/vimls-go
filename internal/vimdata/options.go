@@ -339,6 +339,26 @@ func IsOption(name string) bool {
 	return ok
 }
 
+// LookupAbbreviatedOption reports whether name is a recognized option abbreviation
+// and returns its canonical full name. Canonical names and unknown options return false.
+func LookupAbbreviatedOption(name string) (string, bool) {
+	clean := optionLookupName(name)
+	if opt, ok := LookupOption(clean); ok {
+		if opt.ShortName != "" && clean == opt.ShortName && opt.ShortName != opt.Name {
+			return opt.Name, true
+		}
+	}
+	if compat, ok := LookupOptionCompatibility(clean); ok {
+		if compat.Variant.ShortName != "" && clean == compat.Variant.ShortName && compat.Variant.ShortName != compat.Variant.Name {
+			return compat.Variant.Name, true
+		}
+		if compat.Vim.ShortName != "" && clean == compat.Vim.ShortName && compat.Vim.ShortName != compat.Vim.Name {
+			return compat.Vim.Name, true
+		}
+	}
+	return "", false
+}
+
 var builtinOptionIndex, builtinOptionOrder = buildOptionIndex(builtinOptions[:])
 
 func buildOptionIndex(options []Option) (map[string]int, []int) {

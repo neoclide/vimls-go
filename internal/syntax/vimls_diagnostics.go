@@ -25,6 +25,7 @@ type DiagnosticDefinition struct {
 // owned by vimls-go. Keep entries here even when their messages are refined at
 // the emission site for a specific delimiter or command.
 var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
+	{Code: "vimls/abbreviated-option", Message: "use full option name instead of abbreviation", Severity: DiagnosticHint},
 	{Code: "vimls/autocmd-group-not-cleared", Message: "augroup does not clear existing autocommands", Severity: DiagnosticWarning},
 	{Code: "vimls/autocmd-outside-augroup", Message: "autocommand is not contained in an augroup", Severity: DiagnosticWarning},
 	{Code: "vimls/autoload-function-not-found", Message: "autoload function not found in current runtimepath", Severity: DiagnosticWarning},

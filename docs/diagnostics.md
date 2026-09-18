@@ -126,6 +126,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 
 | Code | Default | Meaning |
 | --- | --- | --- |
+| `vimls/abbreviated-option` | Hint | An abbreviated option name was used instead of the canonical full name. |
 | `vimls/autocmd-group-not-cleared` | Warning | Reloading may add another copy of an autocommand. |
 | `vimls/autocmd-outside-augroup` | Warning | An autocommand has no group to manage or clear it. |
 | `vimls/catch-error-message` | Warning | The catch pattern depends on error prose. Vim error codes and catch-all patterns are exempt. |

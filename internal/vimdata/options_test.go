@@ -243,3 +243,31 @@ func TestValidateOptionValue(t *testing.T) {
 		}
 	}
 }
+
+func TestLookupAbbreviatedOption(t *testing.T) {
+	tests := []struct {
+		input     string
+		wantName  string
+		wantFound bool
+	}{
+		{"ts", "tabstop", true},
+		{"&ts", "tabstop", true},
+		{"&l:ts", "tabstop", true},
+		{"&g:ts", "tabstop", true},
+		{"sw", "shiftwidth", true},
+		{"ai", "autoindent", true},
+		{"tabstop", "", false},
+		{"&tabstop", "", false},
+		{"hidden", "", false},
+		{"&l:hidden", "", false},
+		{"unknown_option", "", false},
+		{"rdb", "redrawdebug", true},
+		{"&rdb", "redrawdebug", true},
+	}
+	for _, test := range tests {
+		gotName, gotFound := LookupAbbreviatedOption(test.input)
+		if gotFound != test.wantFound || gotName != test.wantName {
+			t.Errorf("LookupAbbreviatedOption(%q) = (%q, %v), want (%q, %v)", test.input, gotName, gotFound, test.wantName, test.wantFound)
+		}
+	}
+}

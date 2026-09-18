@@ -394,9 +394,14 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 		if command.Mapping != nil {
 			collectMappingStyleDiagnostics(result, file, command, commands, blocks, index)
 		}
-		// In user configuration files a top-level :set establishes global
-		// defaults and is not flagged; :setlocal is suggested only inside an
-		// autocmd body that targets buffers or windows (e.g. FileType).
+		if command.Set != nil {
+			for _, option := range command.Set.Options {
+				name := file.Text(option.Name)
+				if canonical, ok := vimdata.LookupAbbreviatedOption(name); ok {
+					appendStyleDiagnostic(result, "vimls/abbreviated-option", "use full option name '"+canonical+"' instead of abbreviation '"+name+"'", option.Name)
+				}
+			}
+		}
 		if (autocmdContext || !result.configFile) && command.Canonical == "set" && command.Set != nil {
 			for _, option := range command.Set.Options {
 				if metadata, ok := vimdata.LookupOption(file.Text(option.Name)); ok && metadata.Scope != vimdata.OptionGlobal {
@@ -563,7 +568,14 @@ func collectDeclarationStyleDiagnostics(result *FileAnalysis, file *syntax.File,
 
 func collectExpressionStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command) {
 	if command.Declaration != nil {
+		visitStyleExpression(result, file, command.Declaration.Target)
 		visitStyleExpression(result, file, command.Declaration.Initializer)
+	}
+	if command.For != nil {
+		visitStyleExpression(result, file, command.For.Iterable)
+	}
+	for _, target := range command.Targets {
+		visitStyleExpression(result, file, target)
 	}
 	for _, expression := range command.Expressions {
 		visitStyleExpression(result, file, expression)
@@ -576,6 +588,29 @@ func collectExpressionStyleDiagnostics(result *FileAnalysis, file *syntax.File, 
 func visitStyleExpression(result *FileAnalysis, file *syntax.File, expression *syntax.Expression) {
 	if expression == nil {
 		return
+	}
+	if expression.Kind == syntax.ExpressionIdentifier && strings.HasPrefix(expression.Value, "&") {
+		if canonical, ok := vimdata.LookupAbbreviatedOption(expression.Value); ok {
+			optName := strings.TrimPrefix(expression.Value, "&")
+			if strings.HasPrefix(optName, "l:") || strings.HasPrefix(optName, "g:") {
+				optName = optName[2:]
+			}
+			appendStyleDiagnostic(result, "vimls/abbreviated-option", "use full option name '"+canonical+"' instead of abbreviation '"+optName+"'", expression.Span)
+		}
+	}
+	if expression.Kind == syntax.ExpressionLambda && expression.LambdaBody != nil {
+		for i := range expression.LambdaBody.Commands {
+			cmd := &expression.LambdaBody.Commands[i]
+			if cmd.Set != nil {
+				for _, option := range cmd.Set.Options {
+					name := file.Text(option.Name)
+					if canonical, ok := vimdata.LookupAbbreviatedOption(name); ok {
+						appendStyleDiagnostic(result, "vimls/abbreviated-option", "use full option name '"+canonical+"' instead of abbreviation '"+name+"'", option.Name)
+					}
+				}
+			}
+			collectExpressionStyleDiagnostics(result, file, cmd)
+		}
 	}
 	if expression.Kind == syntax.ExpressionBinary && len(expression.Children) == 2 {
 		operator := file.Text(expression.Operator)
@@ -741,6 +776,15 @@ func isMapcheckOrMaparg(name string) bool {
 }
 
 func appendStyleDiagnostic(result *FileAnalysis, code, message string, span syntax.Span) {
+	if result == nil || span.Start >= span.End {
+		return
+	}
+	for i := len(result.Diagnostics) - 1; i >= 0; i-- {
+		diag := result.Diagnostics[i]
+		if diag.Code == code && diag.Span == span {
+			return
+		}
+	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: code, Message: message, Span: span})
 }
 

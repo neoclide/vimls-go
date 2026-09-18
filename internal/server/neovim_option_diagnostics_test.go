@@ -47,10 +47,10 @@ func TestNeovimOptionGuardEditRepublishesDiagnostics(t *testing.T) {
 	instance, client := openDiagnosticsServer(t)
 	documentURI := uri.MustParse("file:///neovim-option.vim")
 	for index, source := range []string{
-		"set scl=auto:2\n",
-		"if has('nvim')\nset scl=auto:2\nendif\n",
-		"if !has('nvim')\nset scl=auto:2\nendif\n",
-		"if has('nvim')\nset scl=auto:10\nendif\n",
+		"set signcolumn=auto:2\n",
+		"if has('nvim')\nset signcolumn=auto:2\nendif\n",
+		"if !has('nvim')\nset signcolumn=auto:2\nendif\n",
+		"if has('nvim')\nset signcolumn=auto:10\nendif\n",
 	} {
 		version := int32(index + 1)
 		var err error

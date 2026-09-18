@@ -647,6 +647,30 @@ func TestCodeActionRepairsStyleDiagnostics(t *testing.T) {
 			wantTitles:  []string{"Use case-sensitive comparison", "Use case-insensitive comparison"},
 			wantNewText: []string{"==#", "==?"},
 		},
+		{
+			name:        "abbreviated option in set",
+			source:      "set ts=8\n",
+			code:        "vimls/abbreviated-option",
+			diagnostic:  navigationRange(0, 4, 6),
+			wantTitles:  []string{"Use full option name 'tabstop'"},
+			wantNewText: []string{"tabstop"},
+		},
+		{
+			name:        "abbreviated option in expression",
+			source:      "let &ts = 8\n",
+			code:        "vimls/abbreviated-option",
+			diagnostic:  navigationRange(0, 4, 7),
+			wantTitles:  []string{"Use full option name 'tabstop'"},
+			wantNewText: []string{"&tabstop"},
+		},
+		{
+			name:        "abbreviated option with local prefix",
+			source:      "echo &l:sw\n",
+			code:        "vimls/abbreviated-option",
+			diagnostic:  navigationRange(0, 5, 10),
+			wantTitles:  []string{"Use full option name 'shiftwidth'"},
+			wantNewText: []string{"&l:shiftwidth"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

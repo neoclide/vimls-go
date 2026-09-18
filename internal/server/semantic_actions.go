@@ -807,6 +807,25 @@ func styleQuickFixesFor(file *syntax.File, diagnostic syntax.Diagnostic) []synta
 		alternative.newText = caseInsensitive
 		alternative.title = "Use case-insensitive comparison"
 		return []syntaxQuickFix{fix, alternative}
+	case "vimls/abbreviated-option":
+		raw := file.Text(diagnostic.Span)
+		canonical, ok := vimdata.LookupAbbreviatedOption(raw)
+		if !ok {
+			return nil
+		}
+		newText := canonical
+		if strings.HasPrefix(raw, "&l:") {
+			newText = "&l:" + canonical
+		} else if strings.HasPrefix(raw, "&g:") {
+			newText = "&g:" + canonical
+		} else if strings.HasPrefix(raw, "&") {
+			newText = "&" + canonical
+		}
+		fix.span = diagnostic.Span
+		fix.newText = newText
+		fix.title = "Use full option name '" + canonical + "'"
+		fix.preferred = true
+		return []syntaxQuickFix{fix}
 	}
 	return nil
 }
@@ -891,7 +910,7 @@ func clientDiagnosticCode(diagnostic protocol.Diagnostic) (string, bool) {
 
 func quickFixDiagnosticCode(code string) bool {
 	switch code {
-	case "vim/E122", "vim/E170", "vim/E171", "vim/E174", "vim/E475", "vim/E600", "vim/E1123", "vimls/missing-method-call", "vimls/normal-without-bang", "vimls/function-without-abort", "vimls/implicit-string-case", "vimls/implicit-pattern-case":
+	case "vim/E122", "vim/E170", "vim/E171", "vim/E174", "vim/E475", "vim/E600", "vim/E1123", "vimls/missing-method-call", "vimls/normal-without-bang", "vimls/function-without-abort", "vimls/implicit-string-case", "vimls/implicit-pattern-case", "vimls/abbreviated-option":
 		return true
 	default:
 		return false
