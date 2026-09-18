@@ -501,6 +501,62 @@ func TestConfigFileMissingOptionValue(t *testing.T) {
 	}
 }
 
+func TestConfigFileSetNomagic(t *testing.T) {
+	nomagicSources := []struct {
+		name     string
+		source   string
+		wantText string
+	}{
+		{"set nomagic", "set nomagic\n", "nomagic"},
+		{"setlocal nomagic", "setlocal nomagic\n", "nomagic"},
+		{"setglobal nomagic", "setglobal nomagic\n", "nomagic"},
+		{"set multiple options with nomagic", "set number nomagic hlsearch\n", "nomagic"},
+		{"vim9script set nomagic", "vim9script\nset nomagic\n", "nomagic"},
+		{"nomagic inside augroup", "augroup test_group\n  autocmd!\n  autocmd BufReadPost * set nomagic\naugroup END\n", "nomagic"},
+	}
+	for _, tt := range nomagicSources {
+		t.Run(tt.name, func(t *testing.T) {
+			diags := analyzeModeDiagnostics(t, tt.source, true)
+			var found []syntax.Diagnostic
+			for _, d := range diags {
+				if d.Code == "vimls/set-nomagic" {
+					found = append(found, d)
+				}
+			}
+			if len(found) != 1 {
+				t.Fatalf("source %q in config mode want 1 vimls/set-nomagic, got %d (all diags: %#v)", tt.source, len(found), diags)
+			}
+			if found[0].Message != "disabling 'magic' breaks plugins; most patterns assume it is on" {
+				t.Errorf("source %q message = %q, want %q", tt.source, found[0].Message, "disabling 'magic' breaks plugins; most patterns assume it is on")
+			}
+			file := syntax.Parse(tt.source)
+			if gotText := file.Text(found[0].Span); gotText != tt.wantText {
+				t.Errorf("source %q span text = %q, want %q", tt.source, gotText, tt.wantText)
+			}
+
+			// In plugin files (configFile = false), no set-nomagic diagnostic is emitted.
+			if got := countCode(t, tt.source, "vimls/set-nomagic", false); got != 0 {
+				t.Errorf("source %q in plugin mode want 0 vimls/set-nomagic, got %d", tt.source, got)
+			}
+		})
+	}
+
+	safeSources := []string{
+		"set magic\n",
+		"setlocal magic\n",
+		"setglobal magic\n",
+		"set nomagic?\n",
+		"set nomagic&\n",
+		"set nonumber\n",
+		"set nohlsearch\n",
+	}
+	for _, source := range safeSources {
+		if got := countCode(t, source, "vimls/set-nomagic", true); got != 0 {
+			t.Errorf("source %q in config mode want 0 vimls/set-nomagic, got %d", source, got)
+		}
+	}
+}
+
 func TestConfigFileModeEncodingAfterScriptencoding(t *testing.T) {
 	code := "vimls/encoding-after-scriptencoding"
 	tests := []struct {

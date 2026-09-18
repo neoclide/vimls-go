@@ -154,6 +154,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/neovim-only-option` | Hint | This option setting is specific to Neovim. Protect it with `has('nvim')`; settings rejected by both editors still produce errors. See [Neovim option compatibility](neovim.md#option-compatibility). |
 | `vimls/normal-without-bang` | Warning | `:normal` may invoke user mappings; `:normal!` avoids that. |
 | `vimls/recursive-map` | Warning | The mapping may expand other mappings. |
+| `vimls/set-nomagic` | Warning | Disabling 'magic' breaks plugins because most patterns assume 'magic' is on; use `\M` instead. |
 | `vimls/set-vs-setlocal` | Warning | The option assignment may change a global default. |
 | `vimls/substitute-empty-pattern` | Warning | An empty pattern in `:substitute` reuses the previous search pattern from interactive history. |
 | `vimls/substitute-gdefault` | Hint | The `:substitute` command may behave unexpectedly if the user has configured `gdefault`. |

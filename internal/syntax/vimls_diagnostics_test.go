@@ -30,6 +30,7 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 		"vimls/neovim-only-option":             DiagnosticHint,
 		"vimls/normal-without-bang":            DiagnosticWarning,
 		"vimls/recursive-map":                  DiagnosticWarning,
+		"vimls/set-nomagic":                    DiagnosticWarning,
 		"vimls/set-vs-setlocal":                DiagnosticWarning,
 		"vimls/substitute-empty-pattern":       DiagnosticWarning,
 		"vimls/substitute-gdefault":            DiagnosticHint,

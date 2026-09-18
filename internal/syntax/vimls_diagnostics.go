@@ -72,6 +72,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/neovim-only-option", Message: "this option setting is Neovim-only; guard it with has('nvim')", Severity: DiagnosticHint},
 	{Code: "vimls/normal-without-bang", Message: ":normal may invoke user-defined mappings; prefer :normal!", Severity: DiagnosticWarning},
 	{Code: "vimls/recursive-map", Message: "mapping may recursively expand user mappings", Severity: DiagnosticWarning},
+	{Code: "vimls/set-nomagic", Message: "disabling 'magic' breaks plugins; most patterns assume it is on", Severity: DiagnosticWarning},
 	{Code: "vimls/set-vs-setlocal", Message: ":set may modify a global option; consider :setlocal", Severity: DiagnosticWarning},
 	{Code: "vimls/substitute-empty-pattern", Message: "substitute without pattern relies on the user's previous search pattern", Severity: DiagnosticWarning},
 	{Code: "vimls/substitute-gdefault", Message: "substitute behavior may be affected by 'gdefault'", Severity: DiagnosticHint},

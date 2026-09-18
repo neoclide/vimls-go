@@ -424,6 +424,10 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 						appendStyleDiagnostic(result, "vimls/missing-option-value", "option requires a value; :set without an operator displays the current value", option.Name)
 					}
 				}
+				if file.Text(option.Prefix) == "no" && file.Text(option.Name) == "magic" && file.Text(option.Operator) == "" {
+					span := syntax.Span{Start: option.Prefix.Start, End: option.Name.End}
+					appendStyleDiagnostic(result, "vimls/set-nomagic", "disabling 'magic' breaks plugins; most patterns assume it is on", span)
+				}
 			}
 		}
 		if result.configFile && command.Canonical == "execute" && command.Argument.Start < command.Argument.End && dynamicAutocmdText(file.Text(command.Argument)) {
