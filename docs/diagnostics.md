@@ -141,6 +141,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/encoding-after-scriptencoding` | Warning | Set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion. |
 | `vimls/explicit-local-scope` | Hint | An explicit local scope would make this variable's role clearer. |
 | `vimls/function-without-abort` | Hint | The Legacy function does not use `abort`. |
+| `vimls/global-empty-pattern` | Warning | An empty pattern in `:global` or `:vglobal` reuses the previous search pattern from interactive history. |
 | `vimls/global-internal-state` | Hint | A short global variable looks like internal plugin state. |
 | `vimls/implicit-pattern-case` | Hint | Pattern matching depends on the user's `ignorecase` option. |
 | `vimls/implicit-regex-magic` | Hint | Pattern interpretation depends on the user's `magic` option. |

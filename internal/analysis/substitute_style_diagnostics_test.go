@@ -609,3 +609,164 @@ endif
 		t.Fatalf("function/block diagnostics = %#v, want %#v", got, want)
 	}
 }
+
+func TestGlobalCommandStyleDiagnostics(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		wantCodes []string
+		wantSpans map[string]string
+		wantMsgs  map[string]string
+	}{
+		{
+			name:      "plain letters pattern in global",
+			source:    "g/foo/d\n",
+			wantCodes: []string{"vimls/implicit-pattern-case"},
+			wantSpans: map[string]string{"vimls/implicit-pattern-case": "foo"},
+			wantMsgs:  map[string]string{"vimls/implicit-pattern-case": "global pattern depends on 'ignorecase'; consider '\\c' or '\\C'"},
+		},
+		{
+			name:      "plain letters pattern in vglobal",
+			source:    "v/foo/d\n",
+			wantCodes: []string{"vimls/implicit-pattern-case"},
+			wantSpans: map[string]string{"vimls/implicit-pattern-case": "foo"},
+			wantMsgs:  map[string]string{"vimls/implicit-pattern-case": "global pattern depends on 'ignorecase'; consider '\\c' or '\\C'"},
+		},
+		{
+			name:      "plain letters pattern in bang global",
+			source:    "g!/foo/d\n",
+			wantCodes: []string{"vimls/implicit-pattern-case"},
+			wantSpans: map[string]string{"vimls/implicit-pattern-case": "foo"},
+		},
+		{
+			name:      "metacharacters pattern in global",
+			source:    "g/foo.*bar/d\n",
+			wantCodes: []string{"vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+			wantSpans: map[string]string{
+				"vimls/implicit-pattern-case": "foo.*bar",
+				"vimls/implicit-regex-magic":  "foo.*bar",
+			},
+			wantMsgs: map[string]string{
+				"vimls/implicit-regex-magic": "global pattern relies on Vim's magic setting; consider an explicit magic prefix",
+			},
+		},
+		{
+			name:      "very magic prefix removes magic dependency",
+			source:    "g/\\vfoo.*bar/d\n",
+			wantCodes: []string{"vimls/implicit-pattern-case"},
+		},
+		{
+			name:      "magic prefix removes magic dependency",
+			source:    "g/\\mfoo.*bar/d\n",
+			wantCodes: []string{"vimls/implicit-pattern-case"},
+		},
+		{
+			name:      "case override prefix removes case dependency",
+			source:    "g/\\Cfoo/d\n",
+			wantCodes: nil,
+		},
+		{
+			name:      "case override lowercase c removes case dependency",
+			source:    "g/\\cfoo/d\n",
+			wantCodes: nil,
+		},
+		{
+			name:      "mid-pattern case override removes case dependency",
+			source:    "g/foo\\cbar/d\n",
+			wantCodes: nil,
+		},
+		{
+			name:      "safe global with explicit magic and case override",
+			source:    "g/\\v\\Cfoo.*bar/d\n",
+			wantCodes: nil,
+		},
+		{
+			name:      "digits only no case or magic dependency",
+			source:    "g/123/d\n",
+			wantCodes: nil,
+		},
+		{
+			name:      "digit escape sequence no case dependency",
+			source:    "g/\\d\\+/d\n",
+			wantCodes: []string{"vimls/implicit-regex-magic"},
+		},
+		{
+			name:      "empty pattern in global",
+			source:    "g//d\n",
+			wantCodes: []string{"vimls/global-empty-pattern"},
+			wantSpans: map[string]string{"vimls/global-empty-pattern": "//"},
+			wantMsgs:  map[string]string{"vimls/global-empty-pattern": "global without pattern relies on the user's previous search pattern"},
+		},
+		{
+			name:      "empty pattern in vglobal",
+			source:    "v//d\n",
+			wantCodes: []string{"vimls/global-empty-pattern"},
+			wantSpans: map[string]string{"vimls/global-empty-pattern": "//"},
+		},
+		{
+			name:      "bare global command",
+			source:    "g\n",
+			wantCodes: []string{"vimls/global-empty-pattern"},
+			wantSpans: map[string]string{"vimls/global-empty-pattern": "g"},
+		},
+		{
+			name:      "bare vglobal command",
+			source:    "v\n",
+			wantCodes: []string{"vimls/global-empty-pattern"},
+			wantSpans: map[string]string{"vimls/global-empty-pattern": "v"},
+		},
+		{
+			name:      "global previous pattern form",
+			source:    "g\\/d\n",
+			wantCodes: []string{"vimls/global-empty-pattern"},
+			wantSpans: map[string]string{"vimls/global-empty-pattern": "\\/"},
+		},
+		{
+			name:      "global single delimiter",
+			source:    "g/\n",
+			wantCodes: []string{"vimls/global-empty-pattern"},
+			wantSpans: map[string]string{"vimls/global-empty-pattern": "/"},
+		},
+		{
+			name:      "vim9 script global pattern",
+			source:    "vim9script\ng/foo/d\n",
+			wantCodes: []string{"vimls/implicit-pattern-case"},
+			wantSpans: map[string]string{"vimls/implicit-pattern-case": "foo"},
+		},
+		{
+			name:      "vim9 script global empty pattern",
+			source:    "vim9script\ng//d\n",
+			wantCodes: []string{"vimls/global-empty-pattern"},
+			wantSpans: map[string]string{"vimls/global-empty-pattern": "//"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := syntax.Parse(tt.source)
+			analysis := Analyze(file)
+			got := collectCodes(analysis.Diagnostics)
+			if !reflect.DeepEqual(got, tt.wantCodes) {
+				t.Fatalf("codes = %#v, want %#v", got, tt.wantCodes)
+			}
+			for code, wantSpan := range tt.wantSpans {
+				d := findDiagnostic(analysis.Diagnostics, code)
+				if d == nil {
+					t.Fatalf("missing diagnostic %s", code)
+				}
+				if file.Text(d.Span) != wantSpan {
+					t.Errorf("diagnostic %s span = %q, want %q", code, file.Text(d.Span), wantSpan)
+				}
+			}
+			for code, wantMsg := range tt.wantMsgs {
+				d := findDiagnostic(analysis.Diagnostics, code)
+				if d == nil {
+					t.Fatalf("missing diagnostic %s", code)
+				}
+				if d.Message != wantMsg {
+					t.Errorf("diagnostic %s message = %q, want %q", code, d.Message, wantMsg)
+				}
+			}
+		})
+	}
+}

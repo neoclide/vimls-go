@@ -99,6 +99,7 @@ type Command struct {
 	Augroup            Span
 	UserCommand        *UserCommandDefinition
 	Substitute         *Substitute
+	Global             *GlobalCommand
 	Autocmd            *AutocmdCommand
 	logical            *logicalCommandView
 	boundaryExpression *expressionBoundary
@@ -344,6 +345,14 @@ const (
 	SubstituteFlagMatchCase
 	SubstituteFlagKeepOptions
 )
+
+// GlobalCommand is the command-specific syntax of :global and :vglobal.
+type GlobalCommand struct {
+	Delimiter       Span
+	Pattern         Span
+	CloseDelimiter  Span
+	PreviousPattern Span
+}
 
 // MappingKind describes the operation performed by a mapping command.  The
 // command name and mode are retained separately because Vim has many aliases

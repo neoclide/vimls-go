@@ -17,6 +17,7 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 		"vimls/encoding-after-scriptencoding":  DiagnosticWarning,
 		"vimls/explicit-local-scope":           DiagnosticHint,
 		"vimls/function-without-abort":         DiagnosticHint,
+		"vimls/global-empty-pattern":           DiagnosticWarning,
 		"vimls/global-function-not-indexed":    DiagnosticHint,
 		"vimls/global-internal-state":          DiagnosticHint,
 		"vimls/implicit-pattern-case":          DiagnosticHint,

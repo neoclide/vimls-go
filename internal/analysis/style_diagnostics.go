@@ -395,6 +395,9 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 		if command.Substitute != nil {
 			collectSubstituteStyleDiagnostics(result, file, command)
 		}
+		if command.Global != nil {
+			collectGlobalStyleDiagnostics(result, file, command)
+		}
 		if command.Mapping != nil {
 			collectMappingStyleDiagnostics(result, file, command, commands, blocks, index)
 		}
@@ -960,4 +963,38 @@ func patternHasMagicPrefix(pattern string) bool {
 		return false
 	}
 	return strings.HasPrefix(p, "\\v") || strings.HasPrefix(p, "\\m") || strings.HasPrefix(p, "\\M") || strings.HasPrefix(p, "\\V")
+}
+
+func collectGlobalStyleDiagnostics(result *FileAnalysis, file *syntax.File, command *syntax.Command) {
+	global := command.Global
+	if global == nil {
+		return
+	}
+
+	if global.Pattern.Start < global.Pattern.End {
+		pattern := file.Text(global.Pattern)
+		if !patternHasCaseOverride(pattern) && patternContainsUnescapedLetter(pattern) {
+			appendStyleDiagnostic(result, "vimls/implicit-pattern-case",
+				"global pattern depends on 'ignorecase'; consider '\\c' or '\\C'",
+				global.Pattern)
+		}
+
+		if !patternHasMagicPrefix(pattern) && strings.ContainsAny(pattern, ".*+?(){}[]~") {
+			appendStyleDiagnostic(result, "vimls/implicit-regex-magic",
+				"global pattern relies on Vim's magic setting; consider an explicit magic prefix",
+				global.Pattern)
+		}
+	} else {
+		span := command.Name
+		if global.PreviousPattern.Start < global.PreviousPattern.End {
+			span = global.PreviousPattern
+		} else if global.Delimiter.Start < global.CloseDelimiter.End {
+			span = syntax.Span{Start: global.Delimiter.Start, End: global.CloseDelimiter.End}
+		} else if global.Delimiter.Start < global.Delimiter.End {
+			span = global.Delimiter
+		}
+		appendStyleDiagnostic(result, "vimls/global-empty-pattern",
+			"global without pattern relies on the user's previous search pattern",
+			span)
+	}
 }

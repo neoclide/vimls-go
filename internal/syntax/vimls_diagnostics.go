@@ -46,6 +46,7 @@ var VimlsDiagnosticDefinitions = [...]DiagnosticDefinition{
 	{Code: "vimls/expression-too-deep", Message: "expression nesting exceeds parser limit", Severity: DiagnosticInformation},
 	{Code: "vimls/file-too-large", Message: "file exceeds the 4 MiB analysis limit", Severity: DiagnosticWarning},
 	{Code: "vimls/function-without-abort", Message: "function does not use abort", Severity: DiagnosticHint},
+	{Code: "vimls/global-empty-pattern", Message: "global without pattern relies on the user's previous search pattern", Severity: DiagnosticWarning},
 	{Code: "vimls/global-function-not-indexed", Message: "global function not found in workspace index", Severity: DiagnosticHint},
 	{Code: "vimls/global-internal-state", Message: "short global variable appears to be plugin-internal state", Severity: DiagnosticHint},
 	{Code: "vimls/implicit-pattern-case", Message: "pattern match depends on 'ignorecase'", Severity: DiagnosticHint},

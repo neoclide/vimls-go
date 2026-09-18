@@ -82,6 +82,7 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 	command.Syntax = temporaryCommand.Syntax
 	command.Set = temporaryCommand.Set
 	command.Substitute = temporaryCommand.Substitute
+	command.Global = temporaryCommand.Global
 	command.Autocmd = temporaryCommand.Autocmd
 	command.Augroup = temporaryCommand.Augroup
 	command.UserCommand = temporaryCommand.UserCommand
@@ -203,6 +204,13 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 		substitute.ReplacementPrefix = mapper.optional(substitute.ReplacementPrefix)
 		substitute.ExpressionSpan = mapper.optional(substitute.ExpressionSpan)
 		mapper.expression(substitute.Expression)
+	}
+	if command.Global != nil {
+		global := command.Global
+		global.Delimiter = mapper.optional(global.Delimiter)
+		global.Pattern = mapper.optional(global.Pattern)
+		global.CloseDelimiter = mapper.optional(global.CloseDelimiter)
+		global.PreviousPattern = mapper.optional(global.PreviousPattern)
 	}
 	if command.Highlight != nil {
 		highlight := command.Highlight

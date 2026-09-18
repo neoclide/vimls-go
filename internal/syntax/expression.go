@@ -1951,6 +1951,13 @@ func (s *lambdaRebaseState) command(command *Command, source string, offset int)
 		substitute.ReplacementPrefix = shiftLambdaOptionalSpan(substitute.ReplacementPrefix, offset)
 		substitute.ExpressionSpan = shiftLambdaOptionalSpan(substitute.ExpressionSpan, offset)
 	}
+	if command.Global != nil {
+		global := command.Global
+		global.Delimiter = shiftLambdaOptionalSpan(global.Delimiter, offset)
+		global.Pattern = shiftLambdaOptionalSpan(global.Pattern, offset)
+		global.CloseDelimiter = shiftLambdaOptionalSpan(global.CloseDelimiter, offset)
+		global.PreviousPattern = shiftLambdaOptionalSpan(global.PreviousPattern, offset)
+	}
 	if command.Highlight != nil {
 		highlight := command.Highlight
 		highlight.Default = shiftLambdaOptionalSpan(highlight.Default, offset)

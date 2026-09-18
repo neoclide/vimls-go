@@ -1974,42 +1974,56 @@ func scanGlobalCommandArgument(source string, start, end int) int {
 	return trimSpaceEnd(source, start, end)
 }
 
-// globalCommandBodySpan returns only the embedded [cmd] span following a
-// global regexp (or a previous-pattern marker). A missing or untrusted
-// regexp boundary deliberately produces no body; callers then retain the
-// complete argument as opaque syntax.
-func globalCommandBodySpan(source string, start, end int) (Span, bool) {
+// parseGlobalCommand extracts the structured pattern boundaries and the
+// embedded [cmd] span following a global regexp (or previous-pattern marker).
+func parseGlobalCommand(source string, start, end int) (*GlobalCommand, Span, bool) {
+	node := &GlobalCommand{}
 	position := skipSpace(source, start, end)
 	if position >= end {
-		return Span{}, false
+		return node, Span{}, false
 	}
 
 	// Undocumented previous-pattern forms use exactly two bytes: g\/, g\?,
 	// or g\&. Other leading backslash forms are not safely extractable.
 	if source[position] == '\\' {
 		if position+1 >= end || (source[position+1] != '/' && source[position+1] != '?' && source[position+1] != '&') {
-			return Span{}, false
+			node.PreviousPattern = Span{Start: position, End: minSpanEnd(position+2, end)}
+			return node, Span{}, false
 		}
+		node.PreviousPattern = Span{Start: position, End: position + 2}
 		bodyStart := skipSpace(source, position+2, end)
 		if bodyStart >= end {
-			return Span{}, false
+			return node, Span{}, false
 		}
-		return Span{Start: bodyStart, End: trimSpaceEnd(source, bodyStart, end)}, true
+		return node, Span{Start: bodyStart, End: trimSpaceEnd(source, bodyStart, end)}, true
 	}
 
 	delimiter := source[position]
 	if (delimiter >= 'A' && delimiter <= 'Z') || (delimiter >= 'a' && delimiter <= 'z') {
-		return Span{}, false
+		return node, Span{}, false
 	}
+	node.Delimiter = Span{Start: position, End: position + 1}
 	closing := scanGlobalRegexpEnd(source, position+1, end, delimiter)
 	if closing < 0 {
-		return Span{}, false
+		node.Pattern = Span{Start: position + 1, End: end}
+		return node, Span{}, false
 	}
+	node.Pattern = Span{Start: position + 1, End: closing}
+	node.CloseDelimiter = Span{Start: closing, End: closing + 1}
 	bodyStart := skipSpace(source, closing+1, end)
 	if bodyStart >= end {
-		return Span{}, false
+		return node, Span{}, false
 	}
-	return Span{Start: bodyStart, End: trimSpaceEnd(source, bodyStart, end)}, true
+	return node, Span{Start: bodyStart, End: trimSpaceEnd(source, bodyStart, end)}, true
+}
+
+// globalCommandBodySpan returns only the embedded [cmd] span following a
+// global regexp (or a previous-pattern marker). A missing or untrusted
+// regexp boundary deliberately produces no body; callers then retain the
+// complete argument as opaque syntax.
+func globalCommandBodySpan(source string, start, end int) (Span, bool) {
+	_, body, ok := parseGlobalCommand(source, start, end)
+	return body, ok
 }
 
 const (
@@ -2798,7 +2812,9 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			command.boundaryExpression = nil
 			return
 		}
-		if body, ok := globalCommandBodySpan(file.Source, command.Argument.Start, command.Argument.End); ok {
+		globalNode, body, ok := parseGlobalCommand(file.Source, command.Argument.Start, command.Argument.End)
+		command.Global = globalNode
+		if ok {
 			command.Embedded = parseEmbeddedCommandList(file, body, command.baseDialect, depth)
 		}
 		return
