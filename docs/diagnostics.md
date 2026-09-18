@@ -138,6 +138,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/direct-user-keymap` | Hint | A plugin can expose a `<Plug>` mapping so users can choose their own keys. |
 | `vimls/duplicate-mapping` | Warning | A later mapping replaces an earlier mapping for the same key. |
 | `vimls/echoerr` | Hint | This command deliberately raises an error. |
+| `vimls/encoding-after-scriptencoding` | Warning | Set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion. |
 | `vimls/explicit-local-scope` | Hint | An explicit local scope would make this variable's role clearer. |
 | `vimls/function-without-abort` | Hint | The Legacy function does not use `abort`. |
 | `vimls/global-internal-state` | Hint | A short global variable looks like internal plugin state. |

@@ -259,6 +259,7 @@ func AnalyzeWithYield(file *syntax.File, configFile bool, yield func() error) (*
 		collectConfigLeaderOrderDiagnostics(result)
 		collectConfigDuplicateMappingDiagnostics(result)
 		collectConfigLoadedGuardDiagnostics(result)
+		collectConfigEncodingAfterScriptencodingDiagnostics(result)
 	}
 	suppressUnexpandedBodyDiagnostics(result)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {

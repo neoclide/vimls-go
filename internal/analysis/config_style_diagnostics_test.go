@@ -500,3 +500,135 @@ func TestConfigFileMissingOptionValue(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigFileModeEncodingAfterScriptencoding(t *testing.T) {
+	code := "vimls/encoding-after-scriptencoding"
+	tests := []struct {
+		name       string
+		source     string
+		configFile bool
+		want       bool
+		wantText   string
+	}{
+		{
+			name:       "set encoding after scriptencoding in config file",
+			source:     "scriptencoding utf-8\nset encoding=utf-8\n",
+			configFile: true,
+			want:       true,
+			wantText:   "encoding",
+		},
+		{
+			name:       "set enc after scriptencoding in config file",
+			source:     "scriptencoding utf-8\nset enc=utf-8\n",
+			configFile: true,
+			want:       true,
+			wantText:   "enc",
+		},
+		{
+			name:       "setlocal encoding after scriptencoding",
+			source:     "scriptencoding utf-8\nsetlocal encoding=utf-8\n",
+			configFile: true,
+			want:       true,
+			wantText:   "encoding",
+		},
+		{
+			name:       "setglobal enc after scriptencoding",
+			source:     "scriptencoding utf-8\nsetglobal enc=utf-8\n",
+			configFile: true,
+			want:       true,
+			wantText:   "enc",
+		},
+		{
+			name:       "let &encoding after scriptencoding",
+			source:     "scriptencoding utf-8\nlet &encoding = 'utf-8'\n",
+			configFile: true,
+			want:       true,
+			wantText:   "&encoding",
+		},
+		{
+			name:       "let &l:encoding after scriptencoding",
+			source:     "scriptencoding utf-8\nlet &l:encoding = 'utf-8'\n",
+			configFile: true,
+			want:       true,
+			wantText:   "&l:encoding",
+		},
+		{
+			name:       "let &enc after scriptencoding",
+			source:     "scriptencoding utf-8\nlet &enc = 'utf-8'\n",
+			configFile: true,
+			want:       true,
+			wantText:   "&enc",
+		},
+		{
+			name:       "vim9script &encoding assignment after scriptencoding",
+			source:     "vim9script\nscriptencoding utf-8\n&encoding = 'utf-8'\n",
+			configFile: true,
+			want:       true,
+			wantText:   "&encoding",
+		},
+		{
+			name:       "correct order set encoding before scriptencoding",
+			source:     "set encoding=utf-8\nscriptencoding utf-8\n",
+			configFile: true,
+			want:       false,
+		},
+		{
+			name:       "correct order let &encoding before scriptencoding",
+			source:     "let &encoding = 'utf-8'\nscriptencoding utf-8\n",
+			configFile: true,
+			want:       false,
+		},
+		{
+			name:       "plugin mode does not trigger config encoding check",
+			source:     "scriptencoding utf-8\nset encoding=utf-8\n",
+			configFile: false,
+			want:       false,
+		},
+		{
+			name:       "querying encoding after scriptencoding is safe",
+			source:     "scriptencoding utf-8\nset encoding?\necho &encoding\n",
+			configFile: true,
+			want:       false,
+		},
+		{
+			name:       "setting other encodings is safe",
+			source:     "scriptencoding utf-8\nset fileencoding=utf-8 termencoding=utf-8\n",
+			configFile: true,
+			want:       false,
+		},
+		{
+			name:       "setting encoding inside function is not top-level",
+			source:     "scriptencoding utf-8\nfunction! SetEnc()\n  set encoding=utf-8\nendfunction\n",
+			configFile: true,
+			want:       false,
+		},
+		{
+			name:       "setting encoding inside if at top-level triggers warning",
+			source:     "scriptencoding utf-8\nif 1\n  set encoding=utf-8\nendif\n",
+			configFile: true,
+			want:       true,
+			wantText:   "encoding",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			diags := analyzeModeDiagnostics(t, test.source, test.configFile)
+			var found []syntax.Diagnostic
+			for _, d := range diags {
+				if d.Code == code {
+					found = append(found, d)
+				}
+			}
+			if (len(found) > 0) != test.want {
+				t.Fatalf("hasCode(%q) = %v, want %v (all diags: %#v)", code, len(found) > 0, test.want, diags)
+			}
+			if test.want && test.wantText != "" {
+				file := syntax.Parse(test.source)
+				spanText := file.Text(found[0].Span)
+				if spanText != test.wantText {
+					t.Fatalf("diagnostic span text = %q, want %q", spanText, test.wantText)
+				}
+			}
+		})
+	}
+}

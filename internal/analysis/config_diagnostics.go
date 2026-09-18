@@ -381,3 +381,91 @@ func configLoadedMarkers(result *FileAnalysis) map[string]bool {
 	}
 	return markers
 }
+
+// collectConfigEncodingAfterScriptencodingDiagnostics reports
+// vimls/encoding-after-scriptencoding for user configuration files.
+// :scriptencoding informs Vim how to convert subsequent script bytes from
+// the script's encoding to Vim's internal 'encoding'. Setting 'encoding'
+// after :scriptencoding breaks the conversion and can corrupt text.
+func collectConfigEncodingAfterScriptencodingDiagnostics(result *FileAnalysis) {
+	file := result.File
+	if file == nil || len(file.Diagnostics) != 0 {
+		return
+	}
+	seenScriptencoding := false
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if !isTopLevelConfigCommand(command, file.Blocks) {
+			continue
+		}
+		if command.Canonical == "scriptencoding" {
+			seenScriptencoding = true
+			continue
+		}
+		if !seenScriptencoding {
+			continue
+		}
+		if command.Set != nil {
+			for _, option := range command.Set.Options {
+				name := file.Text(option.Name)
+				if isEncodingOption(name) {
+					isAssignment := (option.Operator.Start < option.Operator.End && file.Text(option.Operator) != "?") || option.Prefix.Start < option.Prefix.End
+					if isAssignment {
+						span := option.Name
+						if span.Start == span.End {
+							span = option.Span
+						}
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code:    "vimls/encoding-after-scriptencoding",
+							Message: "set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion",
+							Span:    span,
+						})
+					}
+				}
+			}
+			continue
+		}
+		if command.Declaration != nil && command.Declaration.Name.Start < command.Declaration.Name.End {
+			name := file.Text(command.Declaration.Name)
+			if isEncodingOption(name) && command.Declaration.Assignment.Start < command.Declaration.Assignment.End {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code:    "vimls/encoding-after-scriptencoding",
+					Message: "set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion",
+					Span:    command.Declaration.Name,
+				})
+				continue
+			}
+		}
+		if len(command.Expressions) > 0 && command.Expressions[0].Kind == syntax.ExpressionAssignment && len(command.Expressions[0].Children) == 2 {
+			target := command.Expressions[0].Children[0]
+			if target != nil && target.Kind == syntax.ExpressionIdentifier && isEncodingOption(target.Value) {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code:    "vimls/encoding-after-scriptencoding",
+					Message: "set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion",
+					Span:    target.Span,
+				})
+			}
+		}
+	}
+}
+
+func isTopLevelConfigCommand(command *syntax.Command, blocks []syntax.Block) bool {
+	for blockIndex := command.Block; blockIndex >= 0 && blockIndex < len(blocks); blockIndex = blocks[blockIndex].Parent {
+		switch blocks[blockIndex].Kind {
+		case syntax.BlockFunction, syntax.BlockDef, syntax.BlockClass, syntax.BlockInterface, syntax.BlockEnum:
+			return false
+		}
+	}
+	return true
+}
+
+func isEncodingOption(name string) bool {
+	if opt, ok := vimdata.LookupOption(name); ok && opt.Name == "encoding" {
+		return true
+	}
+	clean := strings.TrimPrefix(name, "&")
+	if strings.HasPrefix(clean, "l:") || strings.HasPrefix(clean, "g:") {
+		clean = clean[2:]
+	}
+	return clean == "encoding" || clean == "enc"
+}

@@ -14,6 +14,7 @@ func TestVimlsDiagnosticRuleCatalog(t *testing.T) {
 		"vimls/configuration-overwrite":        DiagnosticWarning,
 		"vimls/direct-user-keymap":             DiagnosticHint,
 		"vimls/echoerr":                        DiagnosticHint,
+		"vimls/encoding-after-scriptencoding":  DiagnosticWarning,
 		"vimls/explicit-local-scope":           DiagnosticHint,
 		"vimls/function-without-abort":         DiagnosticHint,
 		"vimls/global-function-not-indexed":    DiagnosticHint,

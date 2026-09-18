@@ -173,6 +173,35 @@ work while preserving same-content sharing and independent waiter cancellation.
 Further large-file latency work should measure parsing and client-side
 rendering separately; neither is preempted by this scheduling.
 
+### Incremental analysis pass consolidation
+
+Diagnostic collection currently balances modular rule definitions against AST
+traversal overhead. While phase boundaries between declaration indexing,
+reference binding, type inference, and post-inference validation remain strictly
+necessary, multiple passes within the same phase traverse the command list and
+expression trees independently. Planned consolidation follows an incremental
+strategy:
+
+- **Consolidate user-configuration checks**: Merge the independent top-level passes
+  (`collectConfigLeaderOrderDiagnostics`, `collectConfigDuplicateMappingDiagnostics`,
+  `collectConfigLoadedGuardDiagnostics`, and
+  `collectConfigEncodingAfterScriptencodingDiagnostics`) into a single top-level
+  command loop in `collectConfigFileDiagnostics`. Individual check logic remains
+  modular state trackers fed by the unified loop, reducing four command scans to one.
+- **Unify syntax and style expression traversals**: Keep syntax and style lint
+  rules (such as `vimls/abbreviated-option`, `vimls/implicit-string-case`,
+  `vimls/function-without-abort`, and `vimls/implicit-pattern-case`) batched
+  inside `collectStyleDiagnostics` and `visitStyleExpression`. New lint checks
+  hook into this shared walk rather than adding isolated file-level passes.
+- **Batched post-inference expression validation**: Group post-inference checks
+  that inspect expression subtrees (operator compatibility, assignment types,
+  type mismatches, and builtin argument types) into coordinated command walks to
+  reduce redundant recursive expression traversal and stack overhead.
+- **Preserve phase dependencies and cancellation boundaries**: Retain strict phase
+  barriers where semantic state is established, and maintain cooperative `yield`
+  checkpoints during batch processing so long-running analyses remain cancelable
+  without stalling completion requests.
+
 Text indexing and parsing now agree on LF, CRLF and CR physical lines.
 Formatting and rename preserve their original byte spelling.
 
