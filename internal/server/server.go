@@ -54,6 +54,7 @@ const (
 )
 
 type parsedDocument struct {
+	imports    *importTypeCache
 	contentID  text.ContentID
 	configFile bool
 	file       *syntax.File
@@ -76,6 +77,7 @@ type inFlightParse struct {
 type analysisInFlightKey struct {
 	parseInFlightKey
 	completion bool
+	imports    analysis.ImportTypes
 }
 
 type inFlightAnalysis struct {
@@ -113,6 +115,7 @@ type workspaceIdentity struct {
 }
 
 type workspaceAnalysisSnapshot struct {
+	stale                    bool
 	identity                 workspaceIdentity
 	path                     string
 	graph                    workspace.ImportGraphSnapshot
@@ -1329,6 +1332,16 @@ func (s *Server) analyzeDocument(documentURI string) {
 		s.scheduleSemanticTokensRefresh()
 		s.scheduleInlayHintRefresh()
 		s.scheduleCodeLensRefresh()
+	} else if work.Context.Err() == nil {
+		// A dependency may change without changing this document. Dropping its
+		// result must not strand its pending index entry: retry through the
+		// existing coalescing queue, not a recursive analysis or a new worker.
+		s.publishMu.Lock()
+		retry := s.documents.IsCurrent(work) && s.parsed[documentURI].imports != nil
+		s.publishMu.Unlock()
+		if retry {
+			s.startAnalysis(documentURI)
+		}
 	}
 }
 
@@ -1428,13 +1441,28 @@ func (s *Server) prepareSyntax(work workspace.Analysis, file *syntax.File, resul
 		return workspaceAnalysisSnapshot{}, false
 	}
 	documentURI := work.Snapshot.URI()
+	var expected []workspaceIdentity
+	if result != nil {
+		cache := s.parsed[documentURI].imports
+		inputs, err := cache.load(work.Context, s, documentURI)
+		if err != nil || inputs != result.ImportTypes() {
+			return workspaceAnalysisSnapshot{}, false
+		}
+		if cache != nil {
+			identity, ok := cache.consumedIdentity(inputs)
+			if !ok {
+				return workspaceAnalysisSnapshot{}, false
+			}
+			expected = append(expected, identity)
+		}
+	}
 	if work.Snapshot.ByteLen() > maxFileBytes {
 		file = nil
 		result = nil
 	}
-	workspaceSnapshot, dependents := s.replaceWorkspaceFileWithAnalysisSnapshot(documentURI, file, result)
+	workspaceSnapshot, dependents := s.replaceWorkspaceFileWithAnalysisSnapshot(documentURI, file, result, expected...)
 	s.startWorkspaceDependents(dependents)
-	return workspaceSnapshot, true
+	return workspaceSnapshot, !workspaceSnapshot.stale
 }
 
 // parseSnapshot returns the immutable syntax tree for an open snapshot. Its

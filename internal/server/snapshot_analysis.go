@@ -24,8 +24,8 @@ func (s *Server) parseSnapshotContext(ctx context.Context, snapshot *text.Snapsh
 	}
 	// An old snapshot may no longer occupy the URI cache but still have a
 	// shared analysis in flight. Reuse its tree as well (including A/B/A edits).
-	for _, completion := range []bool{false, true} {
-		if running := s.analysisInFlight[analysisInFlightKey{parseInFlightKey: key, completion: completion}]; running != nil && running.file.Source == source {
+	for analysisKey, running := range s.analysisInFlight {
+		if analysisKey.parseInFlightKey == key && running.file.Source == source {
 			s.publishMu.Unlock()
 			return running.file
 		}
@@ -49,12 +49,13 @@ func (s *Server) parseSnapshotContext(ctx context.Context, snapshot *text.Snapsh
 		hook(snapshot)
 	}
 	running.file = syntax.Parse(source)
+	importCache := newImportTypeCache(running.file)
 	s.publishMu.Lock()
 	if s.parseInFlight[key] == running {
 		delete(s.parseInFlight, key)
 	}
 	if current, ok := s.documents.Snapshot(key.uri); ok && current == snapshot && s.analysisContext.Err() == nil {
-		s.parsed[key.uri] = parsedDocument{contentID: key.contentID, configFile: key.configFile, file: running.file}
+		s.parsed[key.uri] = parsedDocument{contentID: key.contentID, configFile: key.configFile, file: running.file, imports: importCache}
 	}
 	close(running.done)
 	s.publishMu.Unlock()
@@ -84,12 +85,30 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 	}
 	key := analysisInFlightKey{parseInFlightKey: parseInFlightKey{uri: snapshot.URI(), contentID: snapshot.ContentID(), configFile: s.configFileRoleForURI(snapshot.URI())}, completion: completion}
 	s.publishMu.Lock()
+	cache := s.parsed[key.uri].imports
+	if cached := s.parsed[key.uri]; cached.file != file {
+		cache = newImportTypeCache(file)
+	}
+	var imports analysis.ImportTypes
+	if cache != nil {
+		s.publishMu.Unlock()
+		var err error
+		imports, err = cache.load(ctx, s, snapshot.URI())
+		if err != nil {
+			return nil, nil
+		}
+		s.publishMu.Lock()
+	}
+	key.imports = imports
 	if cached := s.parsed[key.uri]; cached.file == file && cached.contentID == key.contentID && cached.configFile == key.configFile {
 		facts := cached.analysis
+		if facts != nil && facts.ImportTypes() != imports {
+			facts = nil
+		}
 		if completion && facts == nil {
 			facts = cached.completion
 		}
-		if facts != nil {
+		if facts != nil && facts.ImportTypes() == imports && cache.current(s, imports) {
 			s.publishMu.Unlock()
 			return file, facts
 		}
@@ -106,7 +125,17 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 			if running.analysis == nil {
 				return nil, nil
 			}
+			if current, err := cache.load(ctx, s, snapshot.URI()); err != nil || current != imports {
+				return nil, nil
+			}
 			return running.file, running.analysis
+		}
+	}
+	if cache != nil {
+		for oldKey, old := range s.analysisInFlight {
+			if oldKey.parseInFlightKey == key.parseInFlightKey && oldKey.imports != imports && old.cancel != nil {
+				old.cancel()
+			}
 		}
 	}
 	running := &inFlightAnalysis{file: file, done: make(chan struct{})}
@@ -121,16 +150,36 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 	s.analysisInFlight[key] = running
 	s.publishMu.Unlock()
 	if completion {
-		running.analysis = analysis.CollectCompletionFacts(file)
+		running.analysis = analysis.CollectCompletionFactsWithImports(file, imports)
 	} else {
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
 		// Owned by this content computation, never by an individual waiter.
 		// Edits/close and shutdown also wake a pass paused inside a loop.
-		running.analysis = s.analyzeFile(running.context, file, key.configFile)
+		running.analysis, _ = analysis.AnalyzeWithOptions(file, analysis.Options{ConfigFile: key.configFile, Imports: imports, Yield: func() error {
+			if err := s.analysisCheckpoint(running.context); err != nil {
+				return err
+			}
+			current, err := cache.load(running.context, s, snapshot.URI())
+			if err != nil {
+				return err
+			}
+			if current != imports {
+				return context.Canceled
+			}
+			return nil
+		}})
 	}
+	validationContext := s.analysisContext
+	if running.context != nil {
+		validationContext = running.context
+	}
+	currentImports, loadErr := cache.load(validationContext, s, snapshot.URI())
 	s.publishMu.Lock()
+	if loadErr != nil || currentImports != imports || !cache.current(s, imports) {
+		running.analysis = nil
+	}
 	if s.analysisInFlight[key] == running {
 		delete(s.analysisInFlight, key)
 	}

@@ -49,6 +49,11 @@ For Vim's explanation of an error, run `:help E117` with the relevant number.
 vimls-go follows **Vim v9.2.1015**; help from another version can describe
 different rules.
 
+Type checks also use statically known exported variable and constant types from
+ordinary imports once their targets are indexed. Missing or ambiguous targets
+remain unknown. Autoload value types and types requiring transitive import
+inference do not add hard type errors.
+
 ## Option assignment errors
 
 These diagnostics follow Vim v9.2.1015 for direct option assignments, except

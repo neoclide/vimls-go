@@ -213,6 +213,13 @@ func (s ImportGraphSnapshot) Imports(path string) []ImportFact {
 	return cloneImportFacts(s.imports[canonical])
 }
 
+// ImportsAtCanonicalPath combines membership and import lookup after the caller
+// has resolved the path. Results remain independent of the immutable snapshot.
+func (s ImportGraphSnapshot) ImportsAtCanonicalPath(path string) ([]ImportFact, bool) {
+	_, exists := s.files[path]
+	return cloneImportFacts(s.imports[path]), exists
+}
+
 func (s ImportGraphSnapshot) Outgoing(path string) []ImportFact {
 	imports := s.Imports(path)
 	result := imports[:0]

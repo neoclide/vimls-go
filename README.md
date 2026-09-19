@@ -8,8 +8,7 @@
 
 A language server for Legacy Vim script and Vim9 script, written in Go.
 
-It adds completion, error checking, navigation and refactoring to editors that
-support LSP. You can use it with coc.nvim, vim-lsp, yegappan/lsp or Neovim's built-in client.
+It's designed to be fast and featured, while not execute any vim script.
 
 ## What it does
 

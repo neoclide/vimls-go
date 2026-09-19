@@ -108,6 +108,9 @@ parent directories remain supported.
   blocks in Vim9 scripts.
 - Improve type information for values imported into Legacy code and for code
   whose type becomes more specific after a condition.
+  Ordinary imports now propagate file-local exported variable/constant types,
+  with dependency-aware semantic caching. Transitive re-export inference,
+  cross-file named type identities, and autoload value inference remain deferred.
 - Decode more escaped command and mapping payloads where the original source
   locations can be preserved reliably.
 - Add more option-value checks where Vim's source gives a clear rule.

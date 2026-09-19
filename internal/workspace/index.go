@@ -21,6 +21,7 @@ var (
 // symbol needed by workspace lookup. It contains no pointer into a syntax
 // tree and no source text.
 type SymbolFact struct {
+	StaticType          analysis.StaticType
 	Path                string
 	Name                string
 	Kind                analysis.SymbolKind
@@ -167,6 +168,7 @@ type GlobalNameFact struct {
 }
 
 type indexedFile struct {
+	exportTypes        *analysis.ExportTypes
 	bytes              int
 	source             string
 	facts              []SymbolFact
@@ -349,6 +351,7 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	}
 	functions := functionFacts(file)
 	facts := collectFileSymbolFacts(normalized, file, functions)
+	exportTypes := collectExportTypes(file, result, facts)
 	functionParameters := make(map[syntax.Span][]string, len(functions))
 	for span, function := range functions {
 		functionParameters[span] = function.parameters
@@ -361,7 +364,7 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	types := CollectTypeRelationFacts(normalized, file)
 	aliases := CollectTypeAliasFacts(normalized, file)
 	calls := CollectCallFactsFromAnalysis(normalized, file, result)
-	indexed := indexedFile{bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, augroups: augroups, globals: globals, types: types, aliases: aliases, calls: calls}
+	indexed := indexedFile{exportTypes: exportTypes, bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, augroups: augroups, globals: globals, types: types, aliases: aliases, calls: calls}
 	return i.replaceIndexedFile(normalized, indexed)
 }
 

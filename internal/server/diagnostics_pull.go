@@ -434,19 +434,43 @@ func (s *Server) computeClosedWorkspaceDiagnostics(ctx context.Context, snapshot
 	}
 	var file *syntax.File
 	var fileAnalysis *analysis.FileAnalysis
+	var importCache *importTypeCache
+	var imports analysis.ImportTypes
 	if snapshot.ByteLen() > maxFileBytes {
 		file = &syntax.File{Diagnostics: []syntax.Diagnostic{{Code: "vimls/file-too-large", Message: "file exceeds the 4 MiB analysis limit"}}}
 	} else {
 		file = syntax.Parse(snapshot.Text())
+		importCache = newImportTypeCache(file)
+		var err error
+		imports, err = importCache.load(ctx, s, snapshot.URI())
+		if err != nil {
+			return nil, workspaceIdentity{}, false
+		}
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
-		fileAnalysis = s.analyzeFile(ctx, file, s.IsConfigFile(path))
+		fileAnalysis, _ = analysis.AnalyzeWithOptions(file, analysis.Options{ConfigFile: s.IsConfigFile(path), Imports: imports, Yield: func() error { return s.analysisCheckpoint(ctx) }})
 	}
 	if ctx.Err() != nil {
 		return nil, workspaceIdentity{}, false
 	}
+	var consumed workspaceIdentity
+	if importCache != nil {
+		current, err := importCache.load(ctx, s, snapshot.URI())
+		if err != nil || current != imports {
+			return nil, workspaceIdentity{}, false
+		}
+		var valid bool
+		consumed, valid = importCache.consumedIdentity(imports)
+		if !valid {
+			return nil, workspaceIdentity{}, false
+		}
+	}
 	s.workspaceMu.Lock()
+	if importCache != nil && consumed != s.workspaceIdentityLocked() {
+		s.workspaceMu.Unlock()
+		return nil, workspaceIdentity{}, false
+	}
 	workspaceSnapshot := s.workspaceAnalysisSnapshotLocked(path, file, fileAnalysis)
 	s.workspaceMu.Unlock()
 	return s.composeDocumentDiagnostics(ctx, snapshot, file, fileAnalysis, workspaceSnapshot, disabledDiagnostics)

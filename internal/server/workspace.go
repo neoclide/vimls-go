@@ -1138,7 +1138,7 @@ func (s *Server) replaceWorkspaceFileWithSnapshot(documentURI string, file *synt
 	return s.replaceWorkspaceFileWithAnalysisSnapshot(documentURI, file, nil)
 }
 
-func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, file *syntax.File, result *analysis.FileAnalysis) (workspaceAnalysisSnapshot, []string) {
+func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, file *syntax.File, result *analysis.FileAnalysis, expected ...workspaceIdentity) (workspaceAnalysisSnapshot, []string) {
 	path, ok := workspaceURIPath(uri.URI(documentURI))
 	openByPath := make(map[string]*text.Snapshot)
 	for _, snapshot := range s.documents.Snapshots() {
@@ -1147,6 +1147,10 @@ func (s *Server) replaceWorkspaceFileWithAnalysisSnapshot(documentURI string, fi
 		}
 	}
 	s.workspaceMu.Lock()
+	if len(expected) != 0 && expected[0] != s.workspaceIdentityLocked() {
+		s.workspaceMu.Unlock()
+		return workspaceAnalysisSnapshot{stale: true}, nil
+	}
 	if !ok || !workspacePathInRoots(path, workspaceIndexRoots(s.workspaceRoots, s.runtimePaths)) {
 		snapshot := s.workspaceAnalysisSnapshotLocked("", nil, nil)
 		s.workspaceMu.Unlock()

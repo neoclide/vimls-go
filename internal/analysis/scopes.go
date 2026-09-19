@@ -14,6 +14,7 @@ import (
 // FileAnalysis is the protocol-independent lexical information collected from
 // one syntax tree.  All spans are byte spans in File.Source.
 type FileAnalysis struct {
+	importTypes  ImportTypes
 	progress     *analysisProgress
 	File         *syntax.File
 	Root         *Scope
@@ -25,6 +26,7 @@ type FileAnalysis struct {
 	// document path; it only adjusts vimls-owned configuration diagnostics and
 	// never changes the syntax tree or lexical/semantic structures.
 	configFile bool
+	hasImports bool
 	// Diagnostics contains protocol-independent semantic diagnostics with byte
 	// spans in File.Source.
 	Diagnostics     []syntax.Diagnostic
@@ -143,10 +145,24 @@ func analyzeWithRole(file *syntax.File, configFile bool) *FileAnalysis {
 // the private partial result. It is never retained in the returned analysis.
 // Callers must not hold locks needed by the work they are yielding to.
 func AnalyzeWithYield(file *syntax.File, configFile bool, yield func() error) (*FileAnalysis, error) {
+	return AnalyzeWithOptions(file, Options{ConfigFile: configFile, Yield: yield})
+}
+
+// Options supplies immutable external facts without introducing workspace or
+// process dependencies into analysis.
+type Options struct {
+	ConfigFile bool
+	Imports    ImportTypes
+	Yield      func() error
+}
+
+func AnalyzeWithOptions(file *syntax.File, options Options) (*FileAnalysis, error) {
+	configFile, yield := options.ConfigFile, options.Yield
 	if err := runAnalysisPhases(yield); err != nil {
 		return nil, err
 	}
 	result := newFileAnalysis(file, configFile)
+	result.importTypes = options.Imports
 	if yield != nil {
 		result.progress = &analysisProgress{yield: yield}
 		defer func() { result.progress = nil }()
@@ -6642,6 +6658,9 @@ func addDeclaration(result *FileAnalysis, scope *Scope, file *syntax.File, span 
 		return nil
 	}
 	declaration := &Declaration{Name: file.Text(span), Kind: kind, Span: span, Mutable: mutable, Scope: scope}
+	if kind == SymbolKindImport {
+		result.hasImports = true
+	}
 	scope.Declarations = append(scope.Declarations, declaration)
 	result.Declarations = append(result.Declarations, declaration)
 	return declaration

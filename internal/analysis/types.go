@@ -18,6 +18,9 @@ type ValueType struct {
 	ArgumentCountKnown bool
 	RequiredArguments  int
 	Variadic           bool
+	// imported prevents dependency-derived inference from becoming a local
+	// index fact. Explicit declaration annotations do not acquire this marker.
+	imported bool
 }
 
 const (
@@ -43,6 +46,7 @@ func (analysis *FileAnalysis) TypeOf(expression *syntax.Expression) ValueType {
 }
 
 type typeState struct {
+	importedTypes map[StaticType]ValueType
 	result        *FileAnalysis
 	declarations  map[syntax.Span]*Declaration
 	explicitTypes map[syntax.Span]bool
@@ -381,6 +385,7 @@ func (state *typeState) inferFunctionReturn(commands []syntax.Command, index int
 				current = state.infer(body.Expressions[0], state.commandScopes[body])
 			}
 			if isUnresolvedType(inferred) {
+				current.imported = current.imported || inferred.imported
 				inferred = current
 			} else {
 				inferred = mergeTypes(inferred, current)
@@ -491,7 +496,9 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		}
 		typ = ValueType{Name: "dict", Arguments: []ValueType{state.commonElementType(values, scope)}}
 	case syntax.ExpressionMember:
-		if len(expression.Children) > 0 {
+		if imported, ok := state.importedMemberType(expression, scope); ok {
+			typ = imported
+		} else if len(expression.Children) > 0 {
 			typ = indexedType(state.infer(expression.Children[0], scope))
 		} else {
 			typ = unknown
@@ -607,6 +614,14 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		}
 	default:
 		typ = unknown
+	}
+	if state.result.hasImports {
+		for _, child := range expression.Children {
+			if state.result.expressionTypes[child].imported {
+				typ.imported = true
+				break
+			}
+		}
 	}
 	state.result.expressionTypes[expression] = typ
 	return typ
@@ -1185,6 +1200,7 @@ func (state *typeState) lambdaBodyReturnType(commands []syntax.Command, scope *S
 			}
 			current := state.infer(command.Expressions[0], commandScope)
 			if isUnresolvedType(result) {
+				current.imported = current.imported || result.imported
 				result = current
 			} else {
 				result = mergeTypes(result, current)
@@ -1344,7 +1360,10 @@ func (state *typeState) forDestructuredBindingType(iterable *syntax.Expression, 
 	return destructuredValueType(indexedType(state.infer(iterable, scope)), index, rest)
 }
 
-func destructuredValueType(typ ValueType, index int, rest bool) ValueType {
+func destructuredValueType(typ ValueType, index int, rest bool) (result ValueType) {
+	if typ.imported {
+		defer func() { result.imported = true }()
+	}
 	if typ.Name == ValueTypeAny {
 		return typ
 	}
@@ -1395,7 +1414,10 @@ func forLoopDestructures(file *syntax.File, command *syntax.Command) bool {
 	return start < end && file.Source[start] == '['
 }
 
-func indexedType(typ ValueType) ValueType {
+func indexedType(typ ValueType) (result ValueType) {
+	if typ.imported {
+		defer func() { result.imported = true }()
+	}
 	if len(typ.Arguments) > 0 && (typ.Name == "list" || typ.Name == "dict") {
 		return typ.Arguments[0]
 	}
@@ -1414,19 +1436,19 @@ func indexedType(typ ValueType) ValueType {
 
 func mergeTypes(left, right ValueType) ValueType {
 	if isUnresolvedType(left) || isUnresolvedType(right) {
-		return UnknownValueType
+		return ValueType{imported: left.imported || right.imported}
 	}
 	if left.Name == ValueTypeAny || right.Name == ValueTypeAny {
-		return ValueType{Name: ValueTypeAny}
+		return ValueType{Name: ValueTypeAny, imported: left.imported || right.imported}
 	}
 	if isSpecialType(left) && isSpecialType(right) {
-		return ValueType{Name: ValueTypeSpecial}
+		return ValueType{Name: ValueTypeSpecial, imported: left.imported || right.imported}
 	}
 	if left.Name != right.Name || len(left.Arguments) != len(right.Arguments) {
-		return ValueType{Name: ValueTypeAny}
+		return ValueType{Name: ValueTypeAny, imported: left.imported || right.imported}
 	}
 	argumentCountKnown := left.ArgumentCountKnown && right.ArgumentCountKnown && left.RequiredArguments == right.RequiredArguments && left.Variadic == right.Variadic
-	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: argumentCountKnown}
+	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: argumentCountKnown, imported: left.imported || right.imported}
 	if argumentCountKnown {
 		result.RequiredArguments = left.RequiredArguments
 		result.Variadic = left.Variadic

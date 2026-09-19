@@ -12,7 +12,14 @@ import (
 // The caller owns the result; it shares only the immutable syntax tree with
 // concurrent full analysis.
 func CollectCompletionFacts(file *syntax.File) *FileAnalysis {
+	return CollectCompletionFactsWithImports(file, ImportTypes{})
+}
+
+// CollectCompletionFactsWithImports retains immutable inputs for request-owned
+// type queries, without running inference or diagnostics.
+func CollectCompletionFactsWithImports(file *syntax.File, imports ImportTypes) *FileAnalysis {
 	result := newFileAnalysis(file, false)
+	result.importTypes = imports
 	if file == nil {
 		return result
 	}

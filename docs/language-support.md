@@ -70,6 +70,11 @@ existing line endings.
 `import 'libs.vim'` exposes exported members as `libs.Two`; use `as` to choose
 a different namespace name.
 
+Ordinary imports propagate statically known exported `var`, `const`, and `final`
+types into local inference, completion details, and type checks. This includes
+container element types. Types requiring transitive import inference, named
+cross-file type identities, or autoload execution remain conservative.
+
 Ordinary `import` completion shows full runtimepath file paths and offers nearby
 files and directories with a `./` prefix. `import autoload` completes runtimepath
 files and directories one level at a time. Typing `/` continues path completion.

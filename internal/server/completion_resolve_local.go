@@ -79,5 +79,11 @@ func (s *Server) resolveLocalCompletion(ctx context.Context, item *protocol.Comp
 	if current, ok := s.documents.Snapshot(local.URI); !ok || current != snapshot {
 		return item, nil
 	}
+	s.publishMu.Lock()
+	cache := s.parsed[local.URI].imports
+	s.publishMu.Unlock()
+	if current, err := cache.load(ctx, s, local.URI); err != nil || current != facts.ImportTypes() {
+		return item, nil
+	}
 	return &resolved, nil
 }

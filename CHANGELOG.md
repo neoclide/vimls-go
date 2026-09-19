@@ -2,6 +2,7 @@
 
 ## v0.1.6 — unreleased
 
+- Type propagation capability of exported var/const.
 - Add diagnostics `vimls/encoding-after-scriptencoding`, `vimls/implicit-string-case`,
   `vimls/abbreviated-option`, `vimls/substitute-empty-pattern`, `vimls/set-nomagic`,
   `vimls/substitute-gdefault` and `vimls/global-empty-pattern`.

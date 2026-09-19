@@ -285,15 +285,25 @@ func TestVimRuntimePathsSkipsNeovimCompatibilityExecutable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, err := os.ReadFile(executable)
-		if err != nil {
-			t.Fatal(err)
-		}
 		name := "vim"
 		if runtime.GOOS == "windows" {
 			name += ".exe"
 		}
 		path := filepath.Join(directory, name)
+		if runtime.GOOS != "windows" {
+			// Reuse the running binary: launching fresh copies can spend the
+			// discovery deadline in OS executable validation on macOS. Separate
+			// link paths still let TestMain distinguish the two PATH candidates.
+			if err := os.Symlink(executable, path); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}
+		// Windows symlink creation may require privileges unavailable in CI.
+		data, err := os.ReadFile(executable)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(path, data, 0o700); err != nil {
 			t.Fatal(err)
 		}
