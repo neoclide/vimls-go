@@ -19,7 +19,7 @@ import (
 )
 
 // Keep initialization tests independent of the machine's Vim installation.
-// A copy of this test executable handles the exact Vim discovery invocation.
+// This test executable handles the exact Vim discovery invocation.
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "-u" {
 		base := []string{"-u", "NORC", "--noplugin", "-i", "NONE", "-es", "-V1", "--cmd"}
@@ -71,19 +71,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		panic(err)
-	}
-	data, err := os.ReadFile(executable)
-	if err != nil {
-		panic(err)
-	}
-	name := "vim"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	if err := os.WriteFile(filepath.Join(directory, name), data, 0o700); err != nil {
+	if _, err := writeTestVimExecutable(directory); err != nil {
 		panic(err)
 	}
 	if err := os.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH")); err != nil {
@@ -92,6 +80,27 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = os.RemoveAll(directory)
 	os.Exit(code)
+}
+
+func writeTestVimExecutable(directory string) (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		// Reuse the running binary: launching fresh copies can spend the
+		// discovery deadline in OS executable validation on macOS. Separate
+		// link paths still let TestMain distinguish multiple PATH candidates.
+		path := filepath.Join(directory, "vim")
+		return path, os.Symlink(executable, path)
+	}
+	// Windows symlink creation may require privileges unavailable in CI.
+	data, err := os.ReadFile(executable)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(directory, "vim.exe")
+	return path, os.WriteFile(path, data, 0o700)
 }
 
 func TestCompletionCapabilitiesFromClient(t *testing.T) {
@@ -281,30 +290,8 @@ func TestVimRuntimePathsClearsInheritedVimEnvironment(t *testing.T) {
 func TestVimRuntimePathsSkipsNeovimCompatibilityExecutable(t *testing.T) {
 	writeVim := func(directory string) string {
 		t.Helper()
-		executable, err := os.Executable()
+		path, err := writeTestVimExecutable(directory)
 		if err != nil {
-			t.Fatal(err)
-		}
-		name := "vim"
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
-		path := filepath.Join(directory, name)
-		if runtime.GOOS != "windows" {
-			// Reuse the running binary: launching fresh copies can spend the
-			// discovery deadline in OS executable validation on macOS. Separate
-			// link paths still let TestMain distinguish the two PATH candidates.
-			if err := os.Symlink(executable, path); err != nil {
-				t.Fatal(err)
-			}
-			return path
-		}
-		// Windows symlink creation may require privileges unavailable in CI.
-		data, err := os.ReadFile(executable)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, data, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		return path

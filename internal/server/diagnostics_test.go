@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -349,48 +350,50 @@ func TestServerPublishesUnresolvedDiagnosticsAsWarnings(t *testing.T) {
 }
 
 func TestServerTruncatesDiagnosticsDeterministically(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
-	instance.mu.Lock()
-	instance.client = client
-	instance.mu.Unlock()
-	const maxNumber = 5
-	if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"diagnostic":{"maxNumber":5}}`)); err != nil {
-		t.Fatal(err)
-	}
-	_, _ = instance.Initialize(context.Background(), &protocol.InitializeParams{})
-	documentURI := uri.MustParse("file:///many-diagnostics.vim")
-	source := strings.Repeat("if true\n", maxNumber+3)
-	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
-	})
-	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) != maxNumber {
-		t.Fatalf("diagnostic count = %d, want %d", len(first.Diagnostics), maxNumber)
-	}
-	marker := first.Diagnostics[len(first.Diagnostics)-1]
-	wantEOF := protocol.Position{Line: uint32(maxNumber + 3)}
-	if marker.Code != protocol.String("vimls/diagnostics-truncated") || marker.Range.Start != wantEOF || marker.Range.End != wantEOF {
-		t.Fatalf("diagnostic count = %d, last = %#v", len(first.Diagnostics), first.Diagnostics[len(first.Diagnostics)-1])
-	}
-	for index, diagnostic := range first.Diagnostics[:len(first.Diagnostics)-1] {
-		if diagnostic.Code == protocol.String("vimls/diagnostics-truncated") || index > 0 && first.Diagnostics[index-1].Range.Start.Line > diagnostic.Range.Start.Line {
-			t.Fatalf("retained diagnostic %d = %#v", index, diagnostic)
+	synctest.Test(t, func(t *testing.T) {
+		instance := New(nil, nil, io.Discard)
+		defer instance.stopAnalysis()
+		client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+		instance.mu.Lock()
+		instance.client = client
+		instance.mu.Unlock()
+		const maxNumber = 5
+		if err := instance.applyWorkspaceConfiguration(context.Background(), []byte(`{"diagnostic":{"maxNumber":5}}`)); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{
-			&protocol.TextDocumentContentChangeWholeDocument{Text: source},
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	second := waitForDiagnostics(t, client.published)
-	if !reflect.DeepEqual(first.Diagnostics, second.Diagnostics) {
-		t.Fatalf("diagnostic truncation changed across identical analysis:\nfirst=%#v\nsecond=%#v", first.Diagnostics, second.Diagnostics)
-	}
+		_, _ = instance.Initialize(context.Background(), &protocol.InitializeParams{})
+		documentURI := uri.MustParse("file:///many-diagnostics.vim")
+		source := strings.Repeat("if true\n", maxNumber+3)
+		_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+		})
+		first := waitForDiagnostics(t, client.published)
+		if len(first.Diagnostics) != maxNumber {
+			t.Fatalf("diagnostic count = %d, want %d", len(first.Diagnostics), maxNumber)
+		}
+		marker := first.Diagnostics[len(first.Diagnostics)-1]
+		wantEOF := protocol.Position{Line: uint32(maxNumber + 3)}
+		if marker.Code != protocol.String("vimls/diagnostics-truncated") || marker.Range.Start != wantEOF || marker.Range.End != wantEOF {
+			t.Fatalf("diagnostic count = %d, last = %#v", len(first.Diagnostics), first.Diagnostics[len(first.Diagnostics)-1])
+		}
+		for index, diagnostic := range first.Diagnostics[:len(first.Diagnostics)-1] {
+			if diagnostic.Code == protocol.String("vimls/diagnostics-truncated") || index > 0 && first.Diagnostics[index-1].Range.Start.Line > diagnostic.Range.Start.Line {
+				t.Fatalf("retained diagnostic %d = %#v", index, diagnostic)
+			}
+		}
+		if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{
+				&protocol.TextDocumentContentChangeWholeDocument{Text: source},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		second := waitForDiagnostics(t, client.published)
+		if !reflect.DeepEqual(first.Diagnostics, second.Diagnostics) {
+			t.Fatalf("diagnostic truncation changed across identical analysis:\nfirst=%#v\nsecond=%#v", first.Diagnostics, second.Diagnostics)
+		}
+	})
 }
 
 func TestProtocolDiagnosticsTruncationPrioritizesSeverity(t *testing.T) {
@@ -470,80 +473,84 @@ func TestInitializationConfigurationAppliesWorkspaceSettings(t *testing.T) {
 }
 
 func TestServerPublishesVersionedSyntaxDiagnosticsAndClearsThem(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
-	instance.mu.Lock()
-	instance.client = client
-	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	documentURI := uri.MustParse("file:///diagnostics.vim")
-	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "if true\n"},
+	synctest.Test(t, func(t *testing.T) {
+		instance := New(nil, nil, io.Discard)
+		defer instance.stopAnalysis()
+		client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+		instance.mu.Lock()
+		instance.client = client
+		instance.mu.Unlock()
+		if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
+			t.Fatal(err)
+		}
+		documentURI := uri.MustParse("file:///diagnostics.vim")
+		_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "if true\n"},
+		})
+		first := waitForDiagnostics(t, client.published)
+		if version, ok := first.Version.Get(); !ok || version != 1 || len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vim/E171") {
+			t.Fatalf("first diagnostics = %#v", first)
+		}
+		_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2,
+			},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: "let g:value = 1\n"}},
+		})
+		cleared := waitForDiagnostics(t, client.published)
+		if version, ok := cleared.Version.Get(); !ok || version != 2 || len(cleared.Diagnostics) != 0 {
+			t.Fatalf("cleared diagnostics = %#v", cleared)
+		}
+		instance.publishMu.Lock()
+		parsed := instance.parsed[documentURI.String()].file
+		instance.publishMu.Unlock()
+		if parsed == nil || parsed.Dialect != syntax.Legacy || len(parsed.Commands) != 1 {
+			t.Fatalf("parsed file = %#v", parsed)
+		}
 	})
-	first := waitForDiagnostics(t, client.published)
-	if version, ok := first.Version.Get(); !ok || version != 1 || len(first.Diagnostics) != 1 || first.Diagnostics[0].Code != protocol.String("vim/E171") {
-		t.Fatalf("first diagnostics = %#v", first)
-	}
-	_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2,
-		},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: "let g:value = 1\n"}},
-	})
-	cleared := waitForDiagnostics(t, client.published)
-	if version, ok := cleared.Version.Get(); !ok || version != 2 || len(cleared.Diagnostics) != 0 {
-		t.Fatalf("cleared diagnostics = %#v", cleared)
-	}
-	instance.publishMu.Lock()
-	parsed := instance.parsed[documentURI.String()].file
-	instance.publishMu.Unlock()
-	if parsed == nil || parsed.Dialect != syntax.Legacy || len(parsed.Commands) != 1 {
-		t.Fatalf("parsed file = %#v", parsed)
-	}
 }
 
 func TestServerPublishesSemanticDiagnosticsAndClearsThem(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
-	instance.mu.Lock()
-	instance.client = client
-	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	documentURI := uri.MustParse("file:///semantic-diagnostics.vim")
-	_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{
-			URI: documentURI, Version: 1,
-			Text: "vim9script\nconst value = 1\nvalue = 2\n",
-		},
-	})
-	first := waitForDiagnostics(t, client.published)
-	if version, ok := first.Version.Get(); !ok || version != 1 || len(first.Diagnostics) != 1 {
-		t.Fatalf("first diagnostics = %#v", first)
-	}
-	diagnostic := first.Diagnostics[0]
-	if diagnostic.Code != protocol.String("vim/E46") || diagnostic.Message != protocol.String(`Cannot change read-only variable "value"`) ||
-		diagnostic.Range != (protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 5}}) {
-		t.Fatalf("semantic diagnostic = %#v", diagnostic)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		instance := New(nil, nil, io.Discard)
+		defer instance.stopAnalysis()
+		client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+		instance.mu.Lock()
+		instance.client = client
+		instance.mu.Unlock()
+		if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
+			t.Fatal(err)
+		}
+		documentURI := uri.MustParse("file:///semantic-diagnostics.vim")
+		_ = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI: documentURI, Version: 1,
+				Text: "vim9script\nconst value = 1\nvalue = 2\n",
+			},
+		})
+		first := waitForDiagnostics(t, client.published)
+		if version, ok := first.Version.Get(); !ok || version != 1 || len(first.Diagnostics) != 1 {
+			t.Fatalf("first diagnostics = %#v", first)
+		}
+		diagnostic := first.Diagnostics[0]
+		if diagnostic.Code != protocol.String("vim/E46") || diagnostic.Message != protocol.String(`Cannot change read-only variable "value"`) ||
+			diagnostic.Range != (protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 2, Character: 5}}) {
+			t.Fatalf("semantic diagnostic = %#v", diagnostic)
+		}
 
-	_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2,
-		},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{
-			Text: "vim9script\nvar value = 1\nvalue = 2\n",
-		}},
+		_ = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2,
+			},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{
+				Text: "vim9script\nvar value = 1\nvalue = 2\n",
+			}},
+		})
+		cleared := waitForDiagnostics(t, client.published)
+		if version, ok := cleared.Version.Get(); !ok || version != 2 || len(cleared.Diagnostics) != 0 {
+			t.Fatalf("cleared diagnostics = %#v", cleared)
+		}
 	})
-	cleared := waitForDiagnostics(t, client.published)
-	if version, ok := cleared.Version.Get(); !ok || version != 2 || len(cleared.Diagnostics) != 0 {
-		t.Fatalf("cleared diagnostics = %#v", cleared)
-	}
 }
 
 func TestServerPublishesImportMemberDiagnostics(t *testing.T) {
@@ -1544,115 +1551,117 @@ func installAnalysisFinishedHook(instance *Server) <-chan string {
 }
 
 func TestPushDiagnosticsDeduplicationAndResendOnEdit(t *testing.T) {
-	instance, client := openDiagnosticsServer(t)
-	documentURI := uri.MustParse("file:///test-dedup.vim")
-	source := "vim9script\necho unknownVar\n"
+	synctest.Test(t, func(t *testing.T) {
+		instance, client := openDiagnosticsServer(t)
+		documentURI := uri.MustParse("file:///test-dedup.vim")
+		source := "vim9script\necho unknownVar\n"
 
-	analysisDone := installAnalysisFinishedHook(instance)
+		analysisDone := installAnalysisFinishedHook(instance)
 
-	// 1. Open document at version 1 (has 1 diagnostic)
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) != 1 {
-		t.Fatalf("first diagnostics = %#v", first)
-	}
-	if v, ok := first.Version.Get(); !ok || v != 1 {
-		t.Fatalf("first version = %v, want 1", v)
-	}
-	select {
-	case uri := <-analysisDone:
-		if uri != documentURI.String() {
-			t.Fatalf("step 1: unexpected uri %s", uri)
+		// 1. Open document at version 1 (has 1 diagnostic)
+		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+		}); err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("step 1: timed out waiting for analysisDone")
-	}
 
-	// 2. Pure repeated analysis on unchanged snapshot must NOT publish duplicate
-	instance.startAnalysis(documentURI.String())
-	select {
-	case uri := <-analysisDone:
-		if uri != documentURI.String() {
-			t.Fatalf("step 2: unexpected uri %s", uri)
+		first := waitForDiagnostics(t, client.published)
+		if len(first.Diagnostics) != 1 {
+			t.Fatalf("first diagnostics = %#v", first)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for repeated analysis")
-	}
-	select {
-	case duplicate := <-client.published:
-		t.Fatalf("unexpected duplicate publication for identical snapshot: %#v", duplicate)
-	default:
-	}
-
-	// 3. Edit to version 2 (same diagnostic content, but must publish due to new version)
-	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	second := waitForDiagnostics(t, client.published)
-	if len(second.Diagnostics) != 1 {
-		t.Fatalf("second diagnostics = %#v", second)
-	}
-	if v, ok := second.Version.Get(); !ok || v != 2 {
-		t.Fatalf("second version = %v, want 2", v)
-	}
-	select {
-	case uri := <-analysisDone:
-		if uri != documentURI.String() {
-			t.Fatalf("step 3: unexpected uri %s", uri)
+		if v, ok := first.Version.Get(); !ok || v != 1 {
+			t.Fatalf("first version = %v, want 1", v)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("step 3: timed out waiting for analysisDone")
-	}
-
-	// 4. Edit to version 3 fixing the error (transition from non-empty to empty)
-	cleanSource := "vim9script\nvar unknownVar = 42\necho unknownVar\n"
-	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 3},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: cleanSource}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	third := waitForDiagnostics(t, client.published)
-	if len(third.Diagnostics) != 0 {
-		t.Fatalf("third diagnostics should be empty to clear, got %#v", third)
-	}
-	if v, ok := third.Version.Get(); !ok || v != 3 {
-		t.Fatalf("third version = %v, want 3", v)
-	}
-	select {
-	case uri := <-analysisDone:
-		if uri != documentURI.String() {
-			t.Fatalf("step 4: unexpected uri %s", uri)
+		select {
+		case uri := <-analysisDone:
+			if uri != documentURI.String() {
+				t.Fatalf("step 1: unexpected uri %s", uri)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("step 1: timed out waiting for analysisDone")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("step 4: timed out waiting for analysisDone")
-	}
 
-	// 5. Subsequent repeated analysis on clean snapshot must NOT publish
-	instance.startAnalysis(documentURI.String())
-	select {
-	case uri := <-analysisDone:
-		if uri != documentURI.String() {
-			t.Fatalf("step 5: unexpected uri %s", uri)
+		// 2. Pure repeated analysis on unchanged snapshot must NOT publish duplicate
+		instance.startAnalysis(documentURI.String())
+		select {
+		case uri := <-analysisDone:
+			if uri != documentURI.String() {
+				t.Fatalf("step 2: unexpected uri %s", uri)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for repeated analysis")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for clean repeated analysis")
-	}
-	select {
-	case duplicate := <-client.published:
-		t.Fatalf("unexpected duplicate publication for clean snapshot: %#v", duplicate)
-	default:
-	}
+		select {
+		case duplicate := <-client.published:
+			t.Fatalf("unexpected duplicate publication for identical snapshot: %#v", duplicate)
+		default:
+		}
+
+		// 3. Edit to version 2 (same diagnostic content, but must publish due to new version)
+		if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		second := waitForDiagnostics(t, client.published)
+		if len(second.Diagnostics) != 1 {
+			t.Fatalf("second diagnostics = %#v", second)
+		}
+		if v, ok := second.Version.Get(); !ok || v != 2 {
+			t.Fatalf("second version = %v, want 2", v)
+		}
+		select {
+		case uri := <-analysisDone:
+			if uri != documentURI.String() {
+				t.Fatalf("step 3: unexpected uri %s", uri)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("step 3: timed out waiting for analysisDone")
+		}
+
+		// 4. Edit to version 3 fixing the error (transition from non-empty to empty)
+		cleanSource := "vim9script\nvar unknownVar = 42\necho unknownVar\n"
+		if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 3},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: cleanSource}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		third := waitForDiagnostics(t, client.published)
+		if len(third.Diagnostics) != 0 {
+			t.Fatalf("third diagnostics should be empty to clear, got %#v", third)
+		}
+		if v, ok := third.Version.Get(); !ok || v != 3 {
+			t.Fatalf("third version = %v, want 3", v)
+		}
+		select {
+		case uri := <-analysisDone:
+			if uri != documentURI.String() {
+				t.Fatalf("step 4: unexpected uri %s", uri)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("step 4: timed out waiting for analysisDone")
+		}
+
+		// 5. Subsequent repeated analysis on clean snapshot must NOT publish
+		instance.startAnalysis(documentURI.String())
+		select {
+		case uri := <-analysisDone:
+			if uri != documentURI.String() {
+				t.Fatalf("step 5: unexpected uri %s", uri)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for clean repeated analysis")
+		}
+		select {
+		case duplicate := <-client.published:
+			t.Fatalf("unexpected duplicate publication for clean snapshot: %#v", duplicate)
+		default:
+		}
+	})
 }
 
 func TestPushDiagnosticsHashChangesOnConfiguration(t *testing.T) {
@@ -1737,69 +1746,71 @@ func TestPushDiagnosticsRetryOnFailureForNonEmptyDiagnostics(t *testing.T) {
 }
 
 func TestPushDiagnosticsRetryOnFailureForClearingDiagnostics(t *testing.T) {
-	instance, client := openDiagnosticsServer(t)
-	documentURI := uri.MustParse("file:///test-retry-clear.vim")
-	source := "vim9script\necho unknownVar\n"
+	synctest.Test(t, func(t *testing.T) {
+		instance, client := openDiagnosticsServer(t)
+		documentURI := uri.MustParse("file:///test-retry-clear.vim")
+		source := "vim9script\necho unknownVar\n"
 
-	analysisDone := installAnalysisFinishedHook(instance)
+		analysisDone := installAnalysisFinishedHook(instance)
 
-	// 1. Initial publication succeeds.
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) != 1 {
-		t.Fatalf("expected 1 diagnostic, got %#v", first)
-	}
-	// Drain analysisDone from DidOpen
-	<-analysisDone
-
-	// 2. Clear diagnostics fails on first attempt.
-	var clearAttempts atomic.Int32
-	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
-		if len(params.Diagnostics) == 0 && clearAttempts.Add(1) == 1 {
-			return errors.New("failed to clear diagnostics")
+		// 1. Initial publication succeeds.
+		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source},
+		}); err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	}
+		first := waitForDiagnostics(t, client.published)
+		if len(first.Diagnostics) != 1 {
+			t.Fatalf("expected 1 diagnostic, got %#v", first)
+		}
+		// Drain analysisDone from DidOpen
+		<-analysisDone
 
-	cleanSource := "vim9script\nvar unknownVar = 42\necho unknownVar\n"
-	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: cleanSource}},
-	}); err != nil {
-		t.Fatal(err)
-	}
+		// 2. Clear diagnostics fails on first attempt.
+		var clearAttempts atomic.Int32
+		client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
+			if len(params.Diagnostics) == 0 && clearAttempts.Add(1) == 1 {
+				return errors.New("failed to clear diagnostics")
+			}
+			return nil
+		}
 
-	// Wait for the clear attempt to finish and fail.
-	select {
-	case <-analysisDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for failed clear attempt")
-	}
+		cleanSource := "vim9script\nvar unknownVar = 42\necho unknownVar\n"
+		if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: cleanSource}},
+		}); err != nil {
+			t.Fatal(err)
+		}
 
-	if clearAttempts.Load() != 1 {
-		t.Fatalf("expected 1 clear attempt, got %d", clearAttempts.Load())
-	}
+		// Wait for the clear attempt to finish and fail.
+		select {
+		case <-analysisDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for failed clear attempt")
+		}
 
-	// 3. Trigger re-analysis of the clean snapshot.
-	instance.startAnalysis(documentURI.String())
+		if clearAttempts.Load() != 1 {
+			t.Fatalf("expected 1 clear attempt, got %d", clearAttempts.Load())
+		}
 
-	// 4. Second attempt to clear succeeds.
-	cleared := waitForDiagnostics(t, client.published)
-	if len(cleared.Diagnostics) != 0 {
-		t.Fatalf("expected 0 diagnostics to clear, got %#v", cleared)
-	}
-	select {
-	case <-analysisDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for second clear attempt to finish committing")
-	}
-	if clearAttempts.Load() != 2 {
-		t.Fatalf("expected 2 clear attempts, got %d", clearAttempts.Load())
-	}
+		// 3. Trigger re-analysis of the clean snapshot.
+		instance.startAnalysis(documentURI.String())
+
+		// 4. Second attempt to clear succeeds.
+		cleared := waitForDiagnostics(t, client.published)
+		if len(cleared.Diagnostics) != 0 {
+			t.Fatalf("expected 0 diagnostics to clear, got %#v", cleared)
+		}
+		select {
+		case <-analysisDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for second clear attempt to finish committing")
+		}
+		if clearAttempts.Load() != 2 {
+			t.Fatalf("expected 2 clear attempts, got %d", clearAttempts.Load())
+		}
+	})
 }
 
 func TestPushDiagnosticsClientNilDoesNotCommitPublishedState(t *testing.T) {
@@ -1930,68 +1941,70 @@ func TestPushDiagnosticsStaleSendDoesNotClearNewerPendingState(t *testing.T) {
 }
 
 func TestPushDiagnosticsEditDuringSendStillClearsStaleDiagnostics(t *testing.T) {
-	instance, client := openDiagnosticsServer(t)
-	documentURI := uri.MustParse("file:///test-edit-during-send.vim")
-	analysisDone := installAnalysisFinishedHook(instance)
-	sendStarted := make(chan struct{})
-	releaseSend := make(chan struct{})
-	client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
-		if len(params.Diagnostics) > 0 {
+	synctest.Test(t, func(t *testing.T) {
+		instance, client := openDiagnosticsServer(t)
+		documentURI := uri.MustParse("file:///test-edit-during-send.vim")
+		analysisDone := installAnalysisFinishedHook(instance)
+		sendStarted := make(chan struct{})
+		releaseSend := make(chan struct{})
+		client.publishHook = func(params *protocol.PublishDiagnosticsParams) error {
+			if len(params.Diagnostics) > 0 {
+				select {
+				case <-sendStarted:
+				default:
+					close(sendStarted)
+					<-releaseSend
+				}
+			}
+			return nil
+		}
+
+		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{
+				URI: documentURI, Version: 1,
+				Text: "vim9script\nvar value: number = 'error'\n",
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-sendStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for initial diagnostics send")
+		}
+
+		if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument: protocol.VersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2,
+			},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{
+				Text: "vim9script\nvar value: number = 42\necho value\n",
+			}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		close(releaseSend)
+
+		first := waitForDiagnostics(t, client.published)
+		if len(first.Diagnostics) == 0 {
+			t.Fatal("initial diagnostics unexpectedly empty")
+		}
+		for step := range 2 {
 			select {
-			case <-sendStarted:
-			default:
-				close(sendStarted)
-				<-releaseSend
+			case <-analysisDone:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("timed out waiting for analysis %d", step+1)
 			}
 		}
-		return nil
-	}
-
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{
-			URI: documentURI, Version: 1,
-			Text: "vim9script\nvar value: number = 'error'\n",
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-sendStarted:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for initial diagnostics send")
-	}
-
-	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument: protocol.VersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2,
-		},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{
-			Text: "vim9script\nvar value: number = 42\necho value\n",
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	close(releaseSend)
-
-	first := waitForDiagnostics(t, client.published)
-	if len(first.Diagnostics) == 0 {
-		t.Fatal("initial diagnostics unexpectedly empty")
-	}
-	for step := range 2 {
 		select {
-		case <-analysisDone:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("timed out waiting for analysis %d", step+1)
+		case cleared := <-client.published:
+			if version, ok := cleared.Version.Get(); !ok || version != 2 || len(cleared.Diagnostics) != 0 {
+				t.Fatalf("cleared diagnostics = %#v", cleared)
+			}
+		default:
+			t.Fatal("current clean snapshot did not clear stale diagnostics")
 		}
-	}
-	select {
-	case cleared := <-client.published:
-		if version, ok := cleared.Version.Get(); !ok || version != 2 || len(cleared.Diagnostics) != 0 {
-			t.Fatalf("cleared diagnostics = %#v", cleared)
-		}
-	default:
-		t.Fatal("current clean snapshot did not clear stale diagnostics")
-	}
+	})
 }
 
 func TestPushDiagnosticsCloseWhileFirstNonEmptyPublishBlocked(t *testing.T) {
@@ -2101,61 +2114,63 @@ func TestUnknownOptionInGuiOrNvimGuardProtocolSeverity(t *testing.T) {
 }
 
 func TestUnknownCommandDiagnosticsWaitForRuntimeHelp(t *testing.T) {
-	root, runtimeRoot := t.TempDir(), t.TempDir()
-	source := "DocCommand\nMissingCommand\nDefinedCommand\n"
-	path := writeWorkspaceFile(t, root, "main.vim", source)
-	writeWorkspaceFile(t, root, "commands.vim", "command! DefinedCommand echo 1\n")
-	writeWorkspaceFile(t, runtimeRoot, "doc/plugin.txt", "*:DocCommand*\nA documented command.\n*MissingCommand()*\nFunction help must not define an Ex command.\n")
-	s, published := initializeWorkspaceDiagnosticServer(t, root)
-	started, release := make(chan struct{}), make(chan struct{})
-	var released atomic.Bool
-	t.Cleanup(func() {
+	synctest.Test(t, func(t *testing.T) {
+		root, runtimeRoot := t.TempDir(), t.TempDir()
+		source := "DocCommand\nMissingCommand\nDefinedCommand\n"
+		path := writeWorkspaceFile(t, root, "main.vim", source)
+		writeWorkspaceFile(t, root, "commands.vim", "command! DefinedCommand echo 1\n")
+		writeWorkspaceFile(t, runtimeRoot, "doc/plugin.txt", "*:DocCommand*\nA documented command.\n*MissingCommand()*\nFunction help must not define an Ex command.\n")
+		s, published := initializeWorkspaceDiagnosticServer(t, root)
+		started, release := make(chan struct{}), make(chan struct{})
+		var released atomic.Bool
+		t.Cleanup(func() {
+			if released.CompareAndSwap(false, true) {
+				close(release)
+			}
+		})
+		s.testHooks.beforeRuntimeHelpRead = func(ctx context.Context, _ string) {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+		if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot}}); err != nil {
+			t.Fatal(err)
+		}
+		waitForServerRace(t, started, "runtime help read")
+		documentURI := uri.File(path)
+		finished := installAnalysisFinishedHook(s)
+		if err := s.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Fatal("analysis did not finish while help was loading")
+		}
+		select {
+		case before := <-published:
+			t.Fatalf("unexpected diagnostics before help ready: %#v", before.Diagnostics)
+		default:
+		}
 		if released.CompareAndSwap(false, true) {
 			close(release)
 		}
-	})
-	s.testHooks.beforeRuntimeHelpRead = func(ctx context.Context, _ string) {
-		close(started)
-		select {
-		case <-release:
-		case <-ctx.Done():
+		s.runtimeHelpWG.Wait()
+		after := waitForDiagnosticsForURI(t, published, documentURI)
+		if len(after.Diagnostics) != 1 || after.Diagnostics[0].Code != protocol.String("vim/E492") || after.Diagnostics[0].Severity != protocol.DiagnosticSeverityWarning || after.Diagnostics[0].Range != (protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 14}}) {
+			t.Fatalf("help-ready diagnostics = %#v", after.Diagnostics)
 		}
-	}
-	if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{runtimeRoot}}); err != nil {
-		t.Fatal(err)
-	}
-	waitForServerRace(t, started, "runtime help read")
-	documentURI := uri.File(path)
-	finished := installAnalysisFinishedHook(s)
-	if err := s.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-finished:
-	case <-time.After(5 * time.Second):
-		t.Fatal("analysis did not finish while help was loading")
-	}
-	select {
-	case before := <-published:
-		t.Fatalf("unexpected diagnostics before help ready: %#v", before.Diagnostics)
-	default:
-	}
-	if released.CompareAndSwap(false, true) {
-		close(release)
-	}
-	s.runtimeHelpWG.Wait()
-	after := waitForDiagnosticsForURI(t, published, documentURI)
-	if len(after.Diagnostics) != 1 || after.Diagnostics[0].Code != protocol.String("vim/E492") || after.Diagnostics[0].Severity != protocol.DiagnosticSeverityWarning || after.Diagnostics[0].Range != (protocol.Range{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 14}}) {
-		t.Fatalf("help-ready diagnostics = %#v", after.Diagnostics)
-	}
-	// Removing the help root invalidates its command definition as well.
-	if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{}}); err != nil {
-		t.Fatal(err)
-	}
-	after = waitForDiagnosticsForURI(t, published, documentURI)
-	if len(after.Diagnostics) != 2 || after.Diagnostics[0].Code != protocol.String("vim/E492") || after.Diagnostics[0].Range.Start.Line != 0 {
-		t.Fatalf("removed help diagnostics = %#v", after.Diagnostics)
-	}
+		// Removing the help root invalidates its command definition as well.
+		if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: []string{}}); err != nil {
+			t.Fatal(err)
+		}
+		after = waitForDiagnosticsForURI(t, published, documentURI)
+		if len(after.Diagnostics) != 2 || after.Diagnostics[0].Code != protocol.String("vim/E492") || after.Diagnostics[0].Range.Start.Line != 0 {
+			t.Fatalf("removed help diagnostics = %#v", after.Diagnostics)
+		}
+	})
 }
 
 func TestE492OccurrenceSeverity(t *testing.T) {

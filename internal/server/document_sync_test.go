@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -284,43 +285,45 @@ func TestServerDocumentParserCache(t *testing.T) {
 }
 
 func TestSameContentDidChangeRepublishesNewVersionWithCachedAST(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
-	instance.client = client
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	documentURI := uri.MustParse("file:///same-content.vim")
-	source := "if true\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
-		URI: documentURI, Version: 1, Text: source,
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	first := waitForDiagnostics(t, client.published)
-	firstSnapshot, ok := instance.documents.Snapshot(documentURI.String())
-	if !ok {
-		t.Fatal("first snapshot is missing")
-	}
-	firstFile := instance.parseSnapshot(firstSnapshot)
-	if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-		TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
-		ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	second := waitForDiagnostics(t, client.published)
-	secondSnapshot, ok := instance.documents.Snapshot(documentURI.String())
-	if !ok || secondSnapshot == firstSnapshot || instance.parseSnapshot(secondSnapshot) != firstFile {
-		t.Fatalf("same-content snapshot/cache = %p/%p, want new snapshot and cached %p", secondSnapshot, instance.parseSnapshot(secondSnapshot), firstFile)
-	}
-	for label, result := range map[string]*protocol.PublishDiagnosticsParams{"first": first, "second": second} {
-		got, ok := result.Version.Get()
-		if !ok || got != map[string]int32{"first": 1, "second": 2}[label] || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vim/E171") {
-			t.Fatalf("%s diagnostics = %#v", label, result)
+	synctest.Test(t, func(t *testing.T) {
+		instance := New(nil, nil, io.Discard)
+		defer instance.stopAnalysis()
+		client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 2)}
+		instance.client = client
+		if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
+			t.Fatal(err)
 		}
-	}
+		documentURI := uri.MustParse("file:///same-content.vim")
+		source := "if true\n"
+		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+			URI: documentURI, Version: 1, Text: source,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		first := waitForDiagnostics(t, client.published)
+		firstSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+		if !ok {
+			t.Fatal("first snapshot is missing")
+		}
+		firstFile := instance.parseSnapshot(firstSnapshot)
+		if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+			TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: 2},
+			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		second := waitForDiagnostics(t, client.published)
+		secondSnapshot, ok := instance.documents.Snapshot(documentURI.String())
+		if !ok || secondSnapshot == firstSnapshot || instance.parseSnapshot(secondSnapshot) != firstFile {
+			t.Fatalf("same-content snapshot/cache = %p/%p, want new snapshot and cached %p", secondSnapshot, instance.parseSnapshot(secondSnapshot), firstFile)
+		}
+		for label, result := range map[string]*protocol.PublishDiagnosticsParams{"first": first, "second": second} {
+			got, ok := result.Version.Get()
+			if !ok || got != map[string]int32{"first": 1, "second": 2}[label] || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vim/E171") {
+				t.Fatalf("%s diagnostics = %#v", label, result)
+			}
+		}
+	})
 }
 
 func TestShutdownCancelsAnalysisBeforeExit(t *testing.T) {
@@ -799,47 +802,49 @@ func TestServerUnchangedSavePreservesAnalysisAndWorkspace(t *testing.T) {
 }
 
 func TestAnalysisQueueCoalescesRapidDocumentChanges(t *testing.T) {
-	instance := New(nil, nil, io.Discard)
-	defer instance.stopAnalysis()
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
-	instance.mu.Lock()
-	instance.client = client
-	instance.mu.Unlock()
-	if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
-		t.Fatal(err)
-	}
-	documentURI := uri.MustParse("file:///rapid.vim")
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
-		TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "let g:value = 1\n"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	for version := int32(2); version <= 1001; version++ {
-		content := "let g:value = 1\n"
-		if version == 1001 {
-			content = "if true\n"
+	synctest.Test(t, func(t *testing.T) {
+		instance := New(nil, nil, io.Discard)
+		defer instance.stopAnalysis()
+		client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+		instance.mu.Lock()
+		instance.client = client
+		instance.mu.Unlock()
+		if _, err := instance.Initialize(context.Background(), &protocol.InitializeParams{}); err != nil {
+			t.Fatal(err)
 		}
-		if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-			TextDocument: protocol.VersionedTextDocumentIdentifier{
-				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: version,
-			},
-			ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: content}},
+		documentURI := uri.MustParse("file:///rapid.vim")
+		if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+			TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "let g:value = 1\n"},
 		}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	result := waitForDiagnostics(t, client.published)
-	if version, ok := result.Version.Get(); !ok || version != 1001 || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vim/E171") {
-		t.Fatalf("diagnostics = %#v", result)
-	}
-	instance.analysisMu.Lock()
-	workers := instance.analysisWorkers
-	pending := len(instance.analysisPending)
-	running := len(instance.analysisRunning)
-	instance.analysisMu.Unlock()
-	if workers != analysisParallelism() || workers < 1 || workers > maxParallelAnalysis || pending > 1 || running > 1 {
-		t.Fatalf("workers = %d, pending = %d, running = %d", workers, pending, running)
-	}
+		for version := int32(2); version <= 1001; version++ {
+			content := "let g:value = 1\n"
+			if version == 1001 {
+				content = "if true\n"
+			}
+			if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+				TextDocument: protocol.VersionedTextDocumentIdentifier{
+					TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: version,
+				},
+				ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: content}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		result := waitForDiagnostics(t, client.published)
+		if version, ok := result.Version.Get(); !ok || version != 1001 || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != protocol.String("vim/E171") {
+			t.Fatalf("diagnostics = %#v", result)
+		}
+		instance.analysisMu.Lock()
+		workers := instance.analysisWorkers
+		pending := len(instance.analysisPending)
+		running := len(instance.analysisRunning)
+		instance.analysisMu.Unlock()
+		if workers != analysisParallelism() || workers < 1 || workers > maxParallelAnalysis || pending > 1 || running > 1 {
+			t.Fatalf("workers = %d, pending = %d, running = %d", workers, pending, running)
+		}
+	})
 }
 
 func TestServerSkipsAnalysisForOversizedDocument(t *testing.T) {

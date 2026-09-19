@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 
 	"github.com/neoclide/vimls-go/internal/text"
 	"go.lsp.dev/protocol"
@@ -260,55 +261,57 @@ func TestRuntimeHelpHoverPlaintextAndLocalShadowing(t *testing.T) {
 }
 
 func TestRuntimeHelpRuntimepathUpdatesAreIncremental(t *testing.T) {
-	s := initializeWorkspaceServer(t, t.TempDir())
-	a, b := t.TempDir(), t.TempDir()
-	aPath := writeWorkspaceFile(t, a, "doc/a.txt", "*g:shared*\nFirst root.\n*g:only_a*\nOnly A.\n")
-	bPath := writeWorkspaceFile(t, b, "doc/b.txt", "*g:shared*\nSecond root.\n")
-	var mu sync.Mutex
-	reads := make(map[string]int)
-	s.testHooks.beforeRuntimeHelpRead = func(_ context.Context, path string) {
-		mu.Lock()
-		reads[filepath.Base(path)]++
-		mu.Unlock()
-	}
-	update := func(roots ...string) {
-		t.Helper()
-		if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: roots}); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		s := initializeWorkspaceServer(t, t.TempDir())
+		a, b := t.TempDir(), t.TempDir()
+		aPath := writeWorkspaceFile(t, a, "doc/a.txt", "*g:shared*\nFirst root.\n*g:only_a*\nOnly A.\n")
+		bPath := writeWorkspaceFile(t, b, "doc/b.txt", "*g:shared*\nSecond root.\n")
+		var mu sync.Mutex
+		reads := make(map[string]int)
+		s.testHooks.beforeRuntimeHelpRead = func(_ context.Context, path string) {
+			mu.Lock()
+			reads[filepath.Base(path)]++
+			mu.Unlock()
+		}
+		update := func(roots ...string) {
+			t.Helper()
+			if err := s.DidChangeRuntimepath(context.Background(), &DidChangeRuntimepathParams{Runtimepath: roots}); err != nil {
+				t.Fatal(err)
+			}
+			s.runtimeHelpWG.Wait()
+		}
+		update(a)
+		// Retained files must not be read even when their on-disk contents change.
+		if err := os.WriteFile(aPath, []byte("*g:shared*\nChanged on disk.\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		s.runtimeHelpWG.Wait()
-	}
-	update(a)
-	// Retained files must not be read even when their on-disk contents change.
-	if err := os.WriteFile(aPath, []byte("*g:shared*\nChanged on disk.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	update(a, b)
-	if s.runtimeHelp["g:shared"].Markdown != "First root." {
-		t.Fatalf("retained root was reparsed: %#v", s.runtimeHelp)
-	}
-	update(b, a)
-	update(b, a) // no-op
-	if s.runtimeHelp["g:shared"].Markdown != "Second root." {
-		t.Fatal("reorder did not change duplicate precedence")
-	}
-	update(b)
-	if _, ok := s.runtimeHelp["g:only_a"]; ok || len(s.runtimeHelpFiles) != 1 {
-		t.Fatal("removed root retained documentation")
-	}
-	mu.Lock()
-	if reads[filepath.Base(aPath)] != 1 || reads[filepath.Base(bPath)] != 1 {
-		t.Fatalf("non-incremental reads = %v", reads)
-	}
-	mu.Unlock()
-	update(b, a)
-	if docs := s.runtimeHelpFiles[mustWorkspaceCanonicalPath(t, aPath)]; len(docs) != 1 || docs[0].Markdown != "Changed on disk." {
-		t.Fatalf("re-added root did not reload: %#v", docs)
-	}
-	update()
-	if len(s.runtimeHelp) != 0 || len(s.runtimeHelpRoots) != 0 || len(s.runtimeHelpFiles) != 0 {
-		t.Fatal("empty runtimepath retained help")
-	}
+		update(a, b)
+		if s.runtimeHelp["g:shared"].Markdown != "First root." {
+			t.Fatalf("retained root was reparsed: %#v", s.runtimeHelp)
+		}
+		update(b, a)
+		update(b, a) // no-op
+		if s.runtimeHelp["g:shared"].Markdown != "Second root." {
+			t.Fatal("reorder did not change duplicate precedence")
+		}
+		update(b)
+		if _, ok := s.runtimeHelp["g:only_a"]; ok || len(s.runtimeHelpFiles) != 1 {
+			t.Fatal("removed root retained documentation")
+		}
+		mu.Lock()
+		if reads[filepath.Base(aPath)] != 1 || reads[filepath.Base(bPath)] != 1 {
+			t.Fatalf("non-incremental reads = %v", reads)
+		}
+		mu.Unlock()
+		update(b, a)
+		if docs := s.runtimeHelpFiles[mustWorkspaceCanonicalPath(t, aPath)]; len(docs) != 1 || docs[0].Markdown != "Changed on disk." {
+			t.Fatalf("re-added root did not reload: %#v", docs)
+		}
+		update()
+		if len(s.runtimeHelp) != 0 || len(s.runtimeHelpRoots) != 0 || len(s.runtimeHelpFiles) != 0 {
+			t.Fatal("empty runtimepath retained help")
+		}
+	})
 }
 
 func TestRuntimeHelpLoadingDoesNotBlockHoverOrPublishObsoleteDocs(t *testing.T) {

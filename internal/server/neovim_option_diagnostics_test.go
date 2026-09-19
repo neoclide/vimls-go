@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"unicode/utf8"
 
 	"github.com/neoclide/vimls-go/internal/analysis"
@@ -44,45 +45,47 @@ func TestNeovimOptionHintProtocolRangeAndSettings(t *testing.T) {
 }
 
 func TestNeovimOptionGuardEditRepublishesDiagnostics(t *testing.T) {
-	instance, client := openDiagnosticsServer(t)
-	documentURI := uri.MustParse("file:///neovim-option.vim")
-	for index, source := range []string{
-		"set signcolumn=auto:2\n",
-		"if has('nvim')\nset signcolumn=auto:2\nendif\n",
-		"if !has('nvim')\nset signcolumn=auto:2\nendif\n",
-		"if has('nvim')\nset signcolumn=auto:10\nendif\n",
-	} {
-		version := int32(index + 1)
-		var err error
-		if index == 0 {
-			err = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, LanguageID: "vim", Version: version, Text: source}})
-		} else {
-			err = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
-				TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: version},
-				ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
-			})
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		published := waitForDiagnostics(t, client.published)
-		if got, ok := published.Version.Get(); !ok || got != version {
-			t.Fatalf("version %#v want %d", published.Version, version)
-		}
-		if index == 1 {
-			if len(published.Diagnostics) != 0 {
-				t.Fatalf("guarded diagnostics %#v", published.Diagnostics)
+	synctest.Test(t, func(t *testing.T) {
+		instance, client := openDiagnosticsServer(t)
+		documentURI := uri.MustParse("file:///neovim-option.vim")
+		for index, source := range []string{
+			"set signcolumn=auto:2\n",
+			"if has('nvim')\nset signcolumn=auto:2\nendif\n",
+			"if !has('nvim')\nset signcolumn=auto:2\nendif\n",
+			"if has('nvim')\nset signcolumn=auto:10\nendif\n",
+		} {
+			version := int32(index + 1)
+			var err error
+			if index == 0 {
+				err = instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, LanguageID: "vim", Version: version, Text: source}})
+			} else {
+				err = instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+					TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: documentURI}, Version: version},
+					ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
+				})
 			}
-			continue
+			if err != nil {
+				t.Fatal(err)
+			}
+			published := waitForDiagnostics(t, client.published)
+			if got, ok := published.Version.Get(); !ok || got != version {
+				t.Fatalf("version %#v want %d", published.Version, version)
+			}
+			if index == 1 {
+				if len(published.Diagnostics) != 0 {
+					t.Fatalf("guarded diagnostics %#v", published.Diagnostics)
+				}
+				continue
+			}
+			code, severity := "vimls/neovim-only-option", protocol.DiagnosticSeverityHint
+			if index == 3 {
+				code, severity = "vim/E474", protocol.DiagnosticSeverityError
+			}
+			if len(published.Diagnostics) != 1 || published.Diagnostics[0].Code != protocol.String(code) || published.Diagnostics[0].Severity != severity {
+				t.Fatalf("version %d diagnostics %#v", version, published.Diagnostics)
+			}
 		}
-		code, severity := "vimls/neovim-only-option", protocol.DiagnosticSeverityHint
-		if index == 3 {
-			code, severity = "vim/E474", protocol.DiagnosticSeverityError
-		}
-		if len(published.Diagnostics) != 1 || published.Diagnostics[0].Code != protocol.String(code) || published.Diagnostics[0].Severity != severity {
-			t.Fatalf("version %d diagnostics %#v", version, published.Diagnostics)
-		}
-	}
+	})
 }
 
 func TestMacVimOptionHintProtocol(t *testing.T) {
