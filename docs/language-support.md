@@ -108,10 +108,17 @@ existing line endings.
 `import 'libs.vim'` exposes exported members as `libs.Two`; use `as` to choose
 a different namespace name.
 
-Ordinary imports propagate statically known exported `var`, `const`, and `final`
-types into local inference, completion details, and type checks. This includes
-container element types. Types requiring transitive import inference, named
-cross-file type identities, or autoload execution remain conservative.
+Ordinary and autoload imports propagate statically known exported `var`, `const`,
+and `final` types into local inference, completion details, and type checks,
+including values re-exported through other files and container element types.
+Named types retain their defining file, so aliases of the same type agree and
+unrelated classes with the same name stay distinct. Known inheritance and
+interface relationships are preserved.
+
+Autoload values receive the same static checks without executing or loading
+user scripts. Dynamic or unresolved imports remain unknown. Within an import
+cycle, inference uses only independently known export types across the cycle's
+internal edges.
 
 Ordinary `import` completion shows full runtimepath file paths and offers nearby
 files and directories with a `./` prefix. `import autoload` completes runtimepath

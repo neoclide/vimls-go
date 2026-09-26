@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -59,7 +60,7 @@ enddef
 			"Callback": FreezeType(ValueType{Name: "func", Arguments: []ValueType{{Name: "string"}}, Return: &ValueType{Name: "bool"}, ArgumentCountKnown: true, RequiredArguments: 1}),
 			"Dynamic":  FreezeType(ValueType{Name: "any"}),
 		}
-		exports := NewExportTypes(members)
+		exports := NewExportTypes(members, nil)
 		members["Count"] = FreezeType(ValueType{Name: "string"})
 		bindings := []ImportTypeBinding{{Declaration: span, Exports: exports}}
 		imports := NewImportTypes(bindings)
@@ -97,13 +98,161 @@ enddef
 		if !mismatch {
 			t.Fatalf("missing E1012: %#v", result.Diagnostics)
 		}
-		facts := CollectCompletionFactsWithImports(file, imports)
+		facts := CollectCompletionFactsWithOptions(file, Options{Imports: imports})
 		query := NewCompletionTypes(facts)
 		for _, declaration := range facts.Declarations {
 			if declaration.Name == "element" && query.DeclarationType(declaration).Name != "number" {
 				t.Fatal("completion did not consume imports")
 			}
 		}
+	}
+}
+
+func TestImportedNamedAnnotationUsesCanonicalIdentity(t *testing.T) {
+	file := syntax.Parse("vim9script\nimport './lib.vim' as lib\nvar value: lib.Box\n")
+	identity := NominalType{Path: "/workspace/lib.vim", Span: syntax.Span{Start: 6, End: 9}, Kind: SymbolKindClass}
+	exports := NewExportTypes(nil, map[string]NamedType{"Box": {Type: FreezeDerivedType(ValueType{Name: "Box", Nominal: identity}), Exported: true}})
+	imports := NewImportTypes([]ImportTypeBinding{{Declaration: ImportDeclarationSpan(file, file.Commands[1].Import), Exports: exports}})
+	result, err := AnalyzeWithOptions(file, Options{Imports: imports})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range result.Declarations {
+		if declaration.Name == "value" && declaration.Type.Nominal != identity {
+			t.Fatalf("value type = %#v", declaration.Type)
+		}
+	}
+}
+
+func TestImportedNominalValuesKeepOriginsAncestorsAndEnums(t *testing.T) {
+	file := syntax.Parse(`vim9script
+import './one.vim' as one
+import './two.vim' as two
+var base: one.Base = one.Value
+var named: one.Named = one.Values[0]
+var alias: one.Alias = one.Factory()
+var wrong: one.Child = two.Value
+var wrongEnum: one.State = 1
+var current = one.Current
+def Make(): one.Child
+  return one.Child.new()
+enddef
+var returned = Make()
+`)
+	identity := func(path, name string, start int, kind SymbolKind) NominalType {
+		return NominalType{Path: path, Span: syntax.Span{Start: start, End: start + len(name)}, Kind: kind}
+	}
+	named := identity("/workspace/one.vim", "Named", 1, SymbolKindInterface)
+	base := identity("/workspace/one.vim", "Base", 10, SymbolKindClass)
+	child := identity("/workspace/one.vim", "Child", 20, SymbolKindClass)
+	state := identity("/workspace/one.vim", "State", 30, SymbolKindEnum)
+	oneType := ValueType{Name: "Child", Nominal: child, NominalParents: []NominalType{base, named}}
+	one := NewExportTypes(map[string]StaticType{
+		"Value":   FreezeDerivedType(oneType),
+		"Values":  FreezeDerivedType(ValueType{Name: "list", Arguments: []ValueType{oneType}}),
+		"Factory": FreezeDerivedType(ValueType{Name: "func", Return: &oneType}),
+		"Current": FreezeDerivedType(ValueType{Name: "State", Nominal: state}),
+	}, map[string]NamedType{
+		"Named": {Type: FreezeDerivedType(ValueType{Name: "Named", Nominal: named}), Exported: true},
+		"Base":  {Type: FreezeDerivedType(ValueType{Name: "Base", Nominal: base, NominalParents: []NominalType{named}}), Exported: true},
+		"Child": {Type: FreezeDerivedType(oneType), Exported: true},
+		"Alias": {Type: FreezeDerivedType(oneType), Exported: true},
+		"State": {Type: FreezeDerivedType(ValueType{Name: "State", Nominal: state}), Exported: true},
+	})
+	twoChild := ValueType{Name: "Child", Nominal: identity("/workspace/two.vim", "Child", 20, SymbolKindClass)}
+	two := NewExportTypes(map[string]StaticType{"Value": FreezeDerivedType(twoChild)}, nil)
+	imports := NewImportTypes([]ImportTypeBinding{
+		{Declaration: ImportDeclarationSpan(file, file.Commands[1].Import), Exports: one},
+		{Declaration: ImportDeclarationSpan(file, file.Commands[2].Import), Exports: two},
+	})
+	result, err := AnalyzeWithOptions(file, Options{Imports: imports})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mismatches int
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1012" {
+			mismatches++
+		}
+	}
+	if mismatches != 2 {
+		t.Fatalf("E1012 count = %d, diagnostics=%#v", mismatches, result.Diagnostics)
+	}
+	for _, declaration := range result.Declarations {
+		switch declaration.Name {
+		case "current":
+			if declaration.Type.Nominal != state {
+				t.Fatalf("enum instance type = %#v", declaration.Type)
+			}
+		case "returned":
+			if declaration.Type.Nominal != child {
+				t.Fatalf("returned type = %#v", declaration.Type)
+			}
+		}
+	}
+}
+
+func TestImportedNamedTypesAreDetachedPerAnalysis(t *testing.T) {
+	file := syntax.Parse("vim9script\nimport './lib.vim' as lib\nvar names: lib.Names\nvar children: list<lib.Child>\n")
+	child := NominalType{Path: "/workspace/lib.vim", Span: syntax.Span{Start: 20, End: 25}, Kind: SymbolKindClass}
+	exports := NewExportTypes(nil, map[string]NamedType{
+		"Names": {Type: FreezeDerivedType(ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}), Exported: true},
+		"Child": {Type: FreezeDerivedType(ValueType{Name: "Child", Nominal: child}), Exported: true},
+	})
+	imports := NewImportTypes([]ImportTypeBinding{{Declaration: ImportDeclarationSpan(file, file.Commands[1].Import), Exports: exports}})
+	first, err := AnalyzeWithOptions(file, Options{Imports: imports})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range first.Declarations {
+		if declaration.Name == "names" {
+			declaration.Type.Arguments[0].Name = "number"
+		}
+	}
+	second, err := AnalyzeWithOptions(file, Options{Imports: imports})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range second.Declarations {
+		switch declaration.Name {
+		case "names":
+			if declaration.Type.Arguments[0].Name != "string" {
+				t.Fatalf("mutated imported alias: %#v", declaration.Type)
+			}
+		case "children":
+			if len(declaration.Type.Arguments) != 1 || declaration.Type.Arguments[0].Nominal != child {
+				t.Fatalf("nested imported type = %#v", declaration.Type)
+			}
+		}
+	}
+}
+
+func TestImportedNominalDiagnosticsKeepUnresolvedAncestorsConservative(t *testing.T) {
+	file := syntax.Parse(`vim9script
+import './base.vim' as base
+import './missing.vim' as missing
+class Child extends missing.Parent
+endclass
+class Grandchild extends Child
+endclass
+var value: base.Base = Grandchild.new()
+var wrong: string = Grandchild.new()
+`)
+	base := ValueType{Name: "Base", Nominal: NominalType{Path: "/workspace/base.vim", Span: syntax.Span{Start: 24, End: 28}, Kind: SymbolKindClass}, TypeValue: true}
+	exports := NewExportTypes(nil, map[string]NamedType{"Base": {Type: FreezeDerivedType(base), Exported: true}})
+	imports := NewImportTypes([]ImportTypeBinding{{Declaration: ImportDeclarationSpan(file, file.Commands[1].Import), Exports: exports}})
+	result, err := AnalyzeWithOptions(file, Options{Imports: imports, SourceIdentity: "/workspace/main.vim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mismatches []syntax.Diagnostic
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "vim/E1012" {
+			mismatches = append(mismatches, diagnostic)
+		}
+	}
+	if len(mismatches) != 1 || mismatches[0].Span.Start < strings.Index(file.Source, "var wrong") {
+		t.Fatalf("nominal diagnostics = %#v", mismatches)
 	}
 }
 
@@ -133,7 +282,7 @@ export var Closure = () => {
 	imports := NewImportTypes([]ImportTypeBinding{{Declaration: ImportDeclarationSpan(file, file.Commands[1].Import), Exports: NewExportTypes(map[string]StaticType{
 		"Count": FreezeType(ValueType{Name: "number"}),
 		"Items": FreezeType(ValueType{Name: "list", Arguments: []ValueType{{Name: "number"}}}),
-	})}})
+	}, nil)}})
 	cold := Analyze(file)
 	warm, err := AnalyzeWithOptions(file, Options{Imports: imports})
 	if err != nil {

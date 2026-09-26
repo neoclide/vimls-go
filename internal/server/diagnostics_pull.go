@@ -449,7 +449,7 @@ func (s *Server) computeClosedWorkspaceDiagnostics(ctx context.Context, snapshot
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
-		fileAnalysis, _ = analysis.AnalyzeWithOptions(file, analysis.Options{ConfigFile: s.IsConfigFile(path), Imports: imports, Yield: func() error { return s.analysisCheckpoint(ctx) }})
+		fileAnalysis, _ = analysis.AnalyzeWithOptions(file, analysis.Options{ConfigFile: s.IsConfigFile(path), Imports: imports, SourceIdentity: path, Yield: func() error { return s.analysisCheckpoint(ctx) }})
 	}
 	if ctx.Err() != nil {
 		return nil, workspaceIdentity{}, false

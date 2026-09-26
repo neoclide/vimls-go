@@ -127,12 +127,14 @@ the links' own paths and their effect on prospective lookup order; dropping
 only the link operation is insufficient. Regular files accessed through linked
 parent directories remain supported.
 
+Ordinary and autoload imports now propagate statically known exported value
+types through import chains. Named types retain their defining identity across
+files, aliases and known inheritance relationships. Dependency changes invalidate
+the consuming type results; unresolved imports and circular inference remain
+conservative. Autoload diagnostics use indexed source without executing scripts.
+
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
-- Improve type information for values imported into Legacy code.
-  Ordinary imports now propagate file-local exported variable/constant types,
-  with dependency-aware semantic caching. Transitive re-export inference,
-  cross-file named type identities, and autoload value inference remain deferred.
 - Decode more escaped command and mapping payloads where the original source
   locations can be preserved reliably.
 - Add more option-value checks where Vim's source gives a clear rule.
@@ -152,12 +154,10 @@ parent directories remain supported.
 Configuration requests now have a 10-second timeout and are cancelled when
 superseded or when the server shuts down; failed requests retain current settings.
 
-- Follow more static `:source` relationships, including cycles.
+Import completion filters names before its filesystem validation budget,
+so a precise prefix can find matches late in a large directory.
+
 - Detect cross-file mapping conflicts only when the loading order is known.
-- Improve path completion and navigation for `:source`, `:runtime` and
-  `:packadd`.
-  Import completion filters names before its filesystem validation budget,
-  so a precise prefix can find matches late in a large directory.
 - Revisit automatic watching of external plugin files if real projects need it.
   Watching more directories should have a clear benefit and bounded cost.
 

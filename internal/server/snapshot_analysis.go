@@ -6,6 +6,7 @@ import (
 	"github.com/neoclide/vimls-go/internal/analysis"
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
+	"go.lsp.dev/uri"
 )
 
 // parseSnapshotContext shares only syntax work. A completion or folding request
@@ -149,15 +150,16 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 	}
 	s.analysisInFlight[key] = running
 	s.publishMu.Unlock()
+	sourceIdentity, _ := workspaceURIPath(uri.URI(snapshot.URI()))
 	if completion {
-		running.analysis = analysis.CollectCompletionFactsWithImports(file, imports)
+		running.analysis = analysis.CollectCompletionFactsWithOptions(file, analysis.Options{Imports: imports, SourceIdentity: sourceIdentity})
 	} else {
 		if hook := s.testHooks.beforeAnalyze; hook != nil {
 			hook(file)
 		}
 		// Owned by this content computation, never by an individual waiter.
 		// Edits/close and shutdown also wake a pass paused inside a loop.
-		running.analysis, _ = analysis.AnalyzeWithOptions(file, analysis.Options{ConfigFile: key.configFile, Imports: imports, Yield: func() error {
+		running.analysis, _ = analysis.AnalyzeWithOptions(file, analysis.Options{ConfigFile: key.configFile, Imports: imports, SourceIdentity: sourceIdentity, Yield: func() error {
 			if err := s.analysisCheckpoint(running.context); err != nil {
 				return err
 			}

@@ -43,15 +43,28 @@ func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefini
 			}
 			valueType, anchor, ok := typedValueAt(fileAnalysis, offset)
 			if ok {
-				symbol, resolved = s.resolveUserTypeName(state, path, source, file, valueType.Name, anchor)
+				if annotation, _ := declarationSyntax(file.Commands, anchor); annotation != nil && annotation.Kind == syntax.TypeNamed {
+					symbol, resolved = s.resolveUserTypeName(state, path, source, file, annotation.Name, annotation.Span)
+				}
+				if !resolved && valueType.Nominal != (analysis.NominalType{}) {
+					if target, ok := s.workspaceTargetForNominal(state, valueType.Nominal); ok {
+						symbol, resolved = hierarchySymbolFromNavigationTarget(target), true
+					}
+					if !resolved && valueType.Nominal.Path == path {
+						symbol, resolved = s.resolveUserTypeName(state, path, source, file, valueType.Name, anchor)
+					}
+				} else if !resolved {
+					symbol, resolved = s.resolveUserTypeName(state, path, source, file, valueType.Name, anchor)
+				}
 			}
 		}
+		document := navigationDocument{server: s, snapshot: snapshot, analysis: fileAnalysis}
 		if resolved {
 			location, valid := typeDefinitionLocation(symbol, encoding)
 			if !valid {
 				return protocol.LocationSlice{}, s.structureCurrent(ctx, snapshot)
 			}
-			current, err := s.hierarchyCurrent(ctx, state, snapshot, symbol.snapshot)
+			current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{}, symbol.snapshot)
 			if err != nil {
 				return nil, err
 			}
@@ -59,7 +72,7 @@ func (s *Server) TypeDefinition(ctx context.Context, params *protocol.TypeDefini
 				return protocol.LocationSlice{location}, nil
 			}
 		} else {
-			current, err := s.hierarchyCurrent(ctx, state, snapshot)
+			current, err := document.workspaceNavigationCurrent(ctx, state, workspaceNavigationTarget{})
 			if err != nil {
 				return nil, err
 			}
@@ -154,7 +167,7 @@ func namedTypeSpanAt(node *syntax.Type, offset int) (syntax.Span, bool) {
 }
 
 // typedValueAt returns the analysis value type of the declaration or resolved
-// reference containing offset, together with the anchor span of the occurrence.
+// reference containing offset, together with its declaration's anchor span.
 func typedValueAt(result *analysis.FileAnalysis, offset int) (analysis.ValueType, syntax.Span, bool) {
 	if result == nil {
 		return analysis.ValueType{}, syntax.Span{}, false
@@ -168,7 +181,7 @@ func typedValueAt(result *analysis.FileAnalysis, offset int) (analysis.ValueType
 		if reference == nil || reference.Declaration == nil || !spanContains(reference.Span, offset) {
 			continue
 		}
-		return reference.Declaration.Type, reference.Span, true
+		return reference.Declaration.Type, reference.Declaration.Span, true
 	}
 	return analysis.ValueType{}, syntax.Span{}, false
 }

@@ -50,9 +50,11 @@ vimls-go follows **Vim v9.2.1015**; help from another version can describe
 different rules.
 
 Type checks also use statically known exported variable and constant types from
-ordinary imports once their targets are indexed. Missing or ambiguous targets
-remain unknown. Autoload value types and types requiring transitive import
-inference do not add hard type errors.
+ordinary and autoload imports once their targets are indexed, including values
+re-exported through other files. Named types are distinguished by their defining
+file, with known inheritance, interface and type-alias relationships respected.
+Autoload imports receive static type errors without waiting for Vim to load the
+script. Missing or ambiguous targets and circular inference remain conservative.
 
 In `def` functions and Vim9 lambdas, a `type(value) == v:t_string` guard does
 not change an `any` value's compiled type. A variable initialized from that

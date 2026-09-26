@@ -28,6 +28,7 @@ type navigationDocument struct {
 	external          *workspace.ExternalReferenceFact
 	externalMember    string
 	externalClass     bool
+	nominal           analysis.NominalType
 	optionName        string
 	autocmdEventName  string
 	augroupName       string
@@ -112,8 +113,14 @@ func (s *Server) navigationAt(ctx context.Context, documentURI string, position 
 					document.memberConstructor = member.Value == "new"
 					document.occurrence = syntax.Span{Start: member.Operator.End, End: member.Span.End}
 				}
+				if typ := result.TypeOf(member.Children[0]); typ.Nominal != (analysis.NominalType{}) && typ.Nominal.Path != path {
+					document.nominal = typ.Nominal
+					document.externalClass = typ.TypeValue
+					document.externalMember = member.Value
+					document.occurrence = syntax.Span{Start: member.Operator.End, End: member.Span.End}
+				}
 			}
-			if document.external != nil {
+			if document.external != nil || document.nominal != (analysis.NominalType{}) {
 				return document, document.checkCurrent(ctx)
 			}
 			if file.Text(member.Operator) == "->" {
@@ -420,7 +427,7 @@ func (s *Server) definitionLocations(ctx context.Context, params protocol.TextDo
 			}
 			continue
 		}
-		if document.external == nil {
+		if document.external == nil && document.nominal == (analysis.NominalType{}) {
 			if document.declaration == nil {
 				return protocol.LocationSlice{}, nil
 			}

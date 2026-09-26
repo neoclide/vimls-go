@@ -36,6 +36,13 @@ func (document *navigationDocument) workspaceTargetInState(state workspaceNaviga
 	if state.resolver == nil || state.index == nil {
 		return workspaceNavigationTarget{}, false
 	}
+	if document.nominal != (analysis.NominalType{}) {
+		target, ok := document.server.workspaceTargetForNominal(state, document.nominal)
+		if !ok || document.externalMember == "" {
+			return target, ok
+		}
+		return document.server.resolveWorkspaceMemberTarget(target, document.externalMember, document.externalClass)
+	}
 	if document.external != nil {
 		target, ok := document.server.resolveWorkspaceReference(state, *document.external)
 		if !ok || document.externalMember == "" {
@@ -53,6 +60,15 @@ func (document *navigationDocument) workspaceTargetInState(state workspaceNaviga
 	path, _ := workspaceURIPath(uri.URI(document.snapshot.URI()))
 	resolution := resolveAutoloadInState(state, target.match.Fact.Name)
 	return target, resolution.Path != "" && sameWorkspacePath(resolution.Path, path)
+}
+
+func (s *Server) workspaceTargetForNominal(state workspaceNavigationSnapshot, nominal analysis.NominalType) (workspaceNavigationTarget, bool) {
+	if state.index == nil || nominal.Path == "" {
+		return workspaceNavigationTarget{}, false
+	}
+	return s.lookupWorkspaceTarget(state.index, nominal.Path, func(fact workspace.SymbolFact) bool {
+		return fact.SelectionRange == nominal.Span && fact.Kind == nominal.Kind
+	})
 }
 
 func (s *Server) resolveWorkspaceMemberTarget(target workspaceNavigationTarget, name string, classReceiver bool) (workspaceNavigationTarget, bool) {
@@ -310,6 +326,12 @@ func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Conte
 	defer document.server.publishMu.Unlock()
 	if err := document.checkWorkspaceTarget(ctx, target); err != nil {
 		return false, err
+	}
+	if document.analysis != nil && document.analysis.ImportTypes() != (analysis.ImportTypes{}) {
+		cached := document.server.parsed[document.snapshot.URI()]
+		if cached.file != document.analysis.File || !cached.imports.current(document.server, document.analysis.ImportTypes()) {
+			return false, nil
+		}
 	}
 	for _, snapshot := range snapshots {
 		if snapshot == nil || snapshot == target.openSnapshot || snapshot == document.snapshot {

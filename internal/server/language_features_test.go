@@ -1037,9 +1037,7 @@ func TestSignatureHelpForStaticImportedAggregateMembers(t *testing.T) {
 	}
 
 	overlay := "vim9script\nexport class Box\n  def new(name: string)\n  enddef\n  def Resize(label: string): string\n    return label\n  enddef\n  static def Build(value: number): Box\n    return Box.new('x')\n  enddef\nendclass\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 2, Text: overlay}}); err != nil {
-		t.Fatal(err)
-	}
+	openIndexedNavigationOverlay(t, instance, targetURI, overlay)
 	callOffset := strings.Index(source, "lib.Box.new(1)")
 	closing := callOffset + strings.LastIndex("lib.Box.new(1)", ")")
 	prefix := source[:closing]

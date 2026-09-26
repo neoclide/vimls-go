@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
@@ -12,7 +13,14 @@ import (
 // Vim9's explicit source type.  The concrete null and none names share the
 // special category through valueTypeCategory. Return is set for function values.
 type ValueType struct {
-	Name               string
+	Name           string
+	Nominal        NominalType
+	NominalParents []NominalType
+	// IncompleteParents prevents rejecting an assignment solely because an
+	// unindexed or unresolved ancestor has not established its identity yet.
+	IncompleteParents  bool
+	TypeValue          bool
+	EnumValues         []string
 	Arguments          []ValueType
 	Return             *ValueType
 	ArgumentCountKnown bool
@@ -21,6 +29,18 @@ type ValueType struct {
 	// imported prevents dependency-derived inference from becoming a local
 	// index fact. Explicit declaration annotations do not acquire this marker.
 	imported bool
+}
+
+// NominalType identifies an aggregate definition independently of its spelling.
+// Path is canonicalized by the caller before facts enter analysis.
+type NominalType struct {
+	Path string
+	Span syntax.Span
+	Kind SymbolKind
+}
+
+func (typ ValueType) HasNominal(identity NominalType) bool {
+	return typ.Nominal == identity || slices.Contains(typ.NominalParents, identity)
 }
 
 const (
@@ -62,6 +82,7 @@ func inferTypes(result *FileAnalysis) {
 	}
 	state := newTypeState(result)
 	state.collectFacts()
+	state.attachNominalParents()
 
 	// A small fixed number of source-order passes lets a function return fact
 	// propagate through a forward call without creating a recursive solver.
@@ -74,6 +95,106 @@ func inferTypes(result *FileAnalysis) {
 	}
 }
 
+// attachNominalParents completes the local aggregate graph after aliases have
+// been collected.  Constructors, annotations, and aliases all read the same
+// named facts, so the parent identities are retained wherever the type flows.
+func (state *typeState) attachNominalParents() {
+	if len(state.result.namedTypes) == 0 {
+		return
+	}
+	parents := make(map[NominalType][]NominalType)
+	incomplete := make(map[NominalType]bool)
+	var collect func([]syntax.Command)
+	collect = func(commands []syntax.Command) {
+		for index := range commands {
+			command := &commands[index]
+			if command.Aggregate != nil {
+				name := state.result.File.Text(command.Aggregate.Name)
+				child, ok := state.result.namedTypes[name]
+				if ok && child.Nominal != (NominalType{}) {
+					for _, span := range append(append([]syntax.Span(nil), command.Aggregate.Extends...), command.Aggregate.Implements...) {
+						parent, ok := state.namedType(state.result.File.Text(span), state.result.Root, span.Start)
+						if !ok || parent.Nominal == (NominalType{}) {
+							incomplete[child.Nominal] = true
+							continue
+						}
+						incomplete[child.Nominal] = incomplete[child.Nominal] || parent.IncompleteParents
+						parents[child.Nominal] = append(parents[child.Nominal], parent.Nominal)
+						parents[child.Nominal] = append(parents[child.Nominal], parent.NominalParents...)
+					}
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
+			}
+		}
+	}
+	collect(state.result.File.Commands)
+	ancestors := make(map[NominalType][]NominalType)
+	for name, typ := range state.result.namedTypes {
+		if typ.Nominal != (NominalType{}) && typ.Nominal.Path == state.result.sourceIdentity {
+			if _, found := ancestors[typ.Nominal]; !found {
+				var inherited []NominalType
+				pending := append([]NominalType(nil), parents[typ.Nominal]...)
+				seen := map[NominalType]bool{typ.Nominal: true}
+				for len(pending) != 0 {
+					parent := pending[len(pending)-1]
+					pending = pending[:len(pending)-1]
+					if !seen[parent] {
+						seen[parent] = true
+						incomplete[typ.Nominal] = incomplete[typ.Nominal] || incomplete[parent]
+						inherited = append(inherited, parent)
+						pending = append(pending, parents[parent]...)
+					}
+				}
+				ancestors[typ.Nominal] = inherited
+			}
+			typ.NominalParents = ancestors[typ.Nominal]
+			typ.IncompleteParents = incomplete[typ.Nominal]
+			state.result.namedTypes[name] = typ
+		}
+	}
+	for _, declaration := range state.declarations {
+		addNominalParents(&declaration.Type, ancestors, incomplete)
+	}
+}
+
+func (state *typeState) namedType(name string, scope *Scope, offset int) (ValueType, bool) {
+	if typ, ok := state.result.namedTypes[name]; ok {
+		return typ, true
+	}
+	dot := strings.IndexByte(name, '.')
+	if dot <= 0 || state.result.importTypes.data == nil {
+		return ValueType{}, false
+	}
+	declaration := resolve(scope, name[:dot], offset, false, nil)
+	if declaration == nil || declaration.Kind != SymbolKindImport {
+		return ValueType{}, false
+	}
+	exports := state.result.importTypes.data.bindings[declaration.Span]
+	if exports == nil {
+		return ValueType{}, false
+	}
+	typ, ok := exports.named[name[dot+1:]]
+	if !ok || !typ.Exported {
+		return ValueType{}, false
+	}
+	return typ.Type.ValueType(), true
+}
+
+func addNominalParents(typ *ValueType, parents map[NominalType][]NominalType, incomplete map[NominalType]bool) {
+	if inherited, found := parents[typ.Nominal]; found {
+		typ.NominalParents = inherited
+		typ.IncompleteParents = incomplete[typ.Nominal]
+	}
+	for index := range typ.Arguments {
+		addNominalParents(&typ.Arguments[index], parents, incomplete)
+	}
+	if typ.Return != nil {
+		addNominalParents(typ.Return, parents, incomplete)
+	}
+}
+
 func newTypeState(result *FileAnalysis) *typeState {
 	result.expressionTypes = make(map[*syntax.Expression]ValueType)
 	state := &typeState{
@@ -83,6 +204,7 @@ func newTypeState(result *FileAnalysis) *typeState {
 		references:    make(map[syntax.Span]*Reference),
 		commandScopes: result.commandScopes,
 	}
+	state.collectNamedTypes(result.File.Commands)
 	state.collectUserCommandBodies(result.File.Commands)
 	for _, scope := range result.Scopes {
 		for _, declaration := range scope.Declarations {
@@ -95,6 +217,39 @@ func newTypeState(result *FileAnalysis) *typeState {
 	}
 
 	return state
+}
+
+func (state *typeState) collectNamedTypes(commands []syntax.Command) {
+	if state.result.sourceIdentity == "" {
+		return
+	}
+	for index := range commands {
+		command := &commands[index]
+		if command.Aggregate != nil {
+			if state.result.namedTypes == nil {
+				state.result.namedTypes = make(map[string]ValueType)
+			}
+			name := state.result.File.Text(command.Aggregate.Name)
+			kind := SymbolKindClass
+			if command.Aggregate.Kind == syntax.BlockInterface {
+				kind = SymbolKindInterface
+			} else if command.Aggregate.Kind == syntax.BlockEnum {
+				kind = SymbolKindEnum
+			}
+			typ := ValueType{Name: name, Nominal: NominalType{Path: state.result.sourceIdentity, Span: command.Aggregate.Name, Kind: kind}, TypeValue: kind == SymbolKindClass || kind == SymbolKindEnum}
+			if kind == SymbolKindEnum {
+				for _, member := range command.Aggregate.Members {
+					for _, value := range commands[member].EnumValues {
+						typ.EnumValues = append(typ.EnumValues, state.result.File.Text(value.Name))
+					}
+				}
+			}
+			state.result.namedTypes[name] = typ
+		}
+		if command.Embedded != nil {
+			state.collectNamedTypes(command.Embedded.Commands)
+		}
+	}
 }
 
 func (state *typeState) collectFacts() {
@@ -112,11 +267,23 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 		if command.Aggregate != nil {
 			if declaration := state.declarations[command.Aggregate.Name]; declaration != nil {
 				declaration.Type = ValueType{Name: file.Text(command.Aggregate.Name)}
+				if named, ok := state.result.namedTypes[declaration.Name]; ok {
+					declaration.Type = named
+				}
 			}
 		}
 		if command.TypeAlias != nil {
 			if declaration := state.declarations[command.TypeAlias.Name]; declaration != nil {
-				declaration.Type = convertSyntaxType(command.TypeAlias.Type)
+				declaration.Type = state.result.typeFromSyntax(command.TypeAlias.Type, declaration.Scope)
+				if declaration.Type.Nominal.Kind == SymbolKindClass || declaration.Type.Nominal.Kind == SymbolKindEnum {
+					declaration.Type.TypeValue = true
+				}
+				if !isUnresolvedType(declaration.Type) {
+					if state.result.namedTypes == nil {
+						state.result.namedTypes = make(map[string]ValueType)
+					}
+					state.result.namedTypes[declaration.Name] = declaration.Type
+				}
 			}
 		}
 		if command.Function != nil {
@@ -124,7 +291,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 			if declaration != nil {
 				arguments := make([]ValueType, 0, len(command.Function.Parameters))
 				for _, parameter := range command.Function.Parameters {
-					typ := convertSyntaxType(parameter.Type)
+					typ := state.result.typeFromSyntax(parameter.Type, declaration.Scope)
 					if isUnresolvedType(typ) {
 						typ = UnknownValueType
 					}
@@ -133,7 +300,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 						parameterDeclaration.Type = typ
 					}
 				}
-				returnType := convertSyntaxType(command.Function.ReturnType)
+				returnType := state.result.typeFromSyntax(command.Function.ReturnType, declaration.Scope)
 				declaration.Type = ValueType{Name: "func", Arguments: arguments, Return: new(returnType), ArgumentCountKnown: true, RequiredArguments: requiredParameterCount(command.Function.Parameters), Variadic: parametersAreVariadic(command.Function.Parameters)}
 			}
 		}
@@ -146,7 +313,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 				if declaration == nil {
 					continue
 				}
-				typ := convertSyntaxType(binding.ParsedType)
+				typ := state.result.typeFromSyntax(binding.ParsedType, declaration.Scope)
 				if binding.ParsedType != nil || len(command.Declaration.Bindings) == 1 && command.Declaration.ParsedType != nil {
 					state.explicitTypes[binding.Name] = true
 				}
@@ -162,7 +329,7 @@ func (state *typeState) collectFactsCommands(commands []syntax.Command) {
 			state.collectLambdaFactsExpression(command.For.Iterable)
 			for _, binding := range command.For.Bindings {
 				if declaration := state.declarations[binding.Name]; declaration != nil {
-					if typ := convertSyntaxType(binding.ParsedType); !isUnresolvedType(typ) {
+					if typ := state.result.typeFromSyntax(binding.ParsedType, declaration.Scope); !isUnresolvedType(typ) {
 						declaration.Type = typ
 					}
 				}
@@ -197,7 +364,7 @@ func (state *typeState) collectLambdaFactsExpression(expression *syntax.Expressi
 	if expression.Kind == syntax.ExpressionLambda {
 		for _, parameter := range expression.Parameters {
 			if declaration := state.declarations[parameter.Name]; declaration != nil {
-				declaration.Type = convertSyntaxType(parameter.Type)
+				declaration.Type = state.result.typeFromSyntax(parameter.Type, declaration.Scope)
 			}
 		}
 		if expression.LambdaBody != nil {
@@ -499,7 +666,23 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		if imported, ok := state.importedMemberType(expression, scope); ok {
 			typ = imported
 		} else if len(expression.Children) > 0 {
-			typ = indexedType(state.infer(expression.Children[0], scope))
+			receiver := state.infer(expression.Children[0], scope)
+			if receiver.Nominal.Kind == SymbolKindEnum {
+				if receiver.TypeValue {
+					receiver.TypeValue = false
+					if expression.Value == "values" {
+						typ = ValueType{Name: "list", Arguments: []ValueType{receiver}, imported: receiver.imported}
+					} else if slices.Contains(receiver.EnumValues, expression.Value) {
+						typ = receiver
+					}
+				} else if expression.Value == "name" {
+					typ = ValueType{Name: "string", imported: receiver.imported}
+				} else if expression.Value == "ordinal" {
+					typ = ValueType{Name: "number", imported: receiver.imported}
+				}
+			} else {
+				typ = indexedType(receiver)
+			}
 		} else {
 			typ = unknown
 		}
@@ -550,8 +733,8 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			for _, argument := range expression.Children[1:] {
 				state.infer(argument, scope)
 			}
-			if className, ok := state.constructorObjectClass(expression, scope); ok {
-				typ = ValueType{Name: className}
+			if classType, ok := state.constructorObjectClass(expression, scope); ok {
+				typ = classType
 			} else if builtin, arguments, ok := builtinCallArguments(state.result.File, expression); ok {
 				// The callee and every child were inferred above. builtinCallArguments
 				// only selects and reorders those already-visited expressions.
@@ -605,7 +788,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 		if len(expression.Children) > 0 {
 			state.infer(expression.Children[0], scope)
 		}
-		typ = convertSyntaxType(expression.CastType)
+		typ = state.result.typeFromSyntax(expression.CastType, scope)
 	case syntax.ExpressionLambda:
 		typ = state.lambdaType(expression, scope)
 	case syntax.ExpressionGenericReference:
@@ -905,23 +1088,32 @@ func unwrapParenthesizedExpression(expression *syntax.Expression) *syntax.Expres
 	return expression
 }
 
-func (state *typeState) constructorObjectClass(expression *syntax.Expression, scope *Scope) (string, bool) {
+func (state *typeState) constructorObjectClass(expression *syntax.Expression, scope *Scope) (ValueType, bool) {
 	if state == nil || state.result == nil || state.result.File == nil || expression == nil || expression.Kind != syntax.ExpressionCall || len(expression.Children) == 0 {
-		return "", false
+		return ValueType{}, false
 	}
 	callee := expression.Children[0]
 	if callee == nil || callee.Kind != syntax.ExpressionMember || callee.Value != "new" || state.result.File.Text(callee.Operator) != "." || len(callee.Children) != 1 {
-		return "", false
+		return ValueType{}, false
 	}
 	receiver := callee.Children[0]
-	if receiver == nil || receiver.Kind != syntax.ExpressionIdentifier {
-		return "", false
+	if receiver == nil {
+		return ValueType{}, false
 	}
-	declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
-	if declaration == nil || declaration.Kind != SymbolKindClass {
-		return "", false
+	if receiver.Kind == syntax.ExpressionIdentifier {
+		declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+		if declaration != nil && declaration.Kind == SymbolKindClass {
+			typ := state.typeOfDeclaration(declaration)
+			typ.TypeValue = false
+			return typ, true
+		}
 	}
-	return receiver.Value, true
+	classType := state.infer(receiver, scope)
+	if classType.Nominal.Kind == SymbolKindClass && classType.TypeValue {
+		classType.TypeValue = false
+		return classType, true
+	}
+	return ValueType{}, false
 }
 
 func builtinVariableValueType(variable vimdata.Variable) ValueType {
@@ -1152,7 +1344,7 @@ func (state *typeState) binaryType(expression *syntax.Expression, scope *Scope) 
 func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) ValueType {
 	arguments := make([]ValueType, 0, len(expression.Parameters))
 	for _, parameter := range expression.Parameters {
-		typ := convertSyntaxType(parameter.Type)
+		typ := state.result.typeFromSyntax(parameter.Type, scope)
 		if isUnresolvedType(typ) {
 			typ = UnknownValueType
 		}
@@ -1175,7 +1367,7 @@ func (state *typeState) lambdaType(expression *syntax.Expression, scope *Scope) 
 	} else if len(expression.Children) > len(expression.Parameters) {
 		returnType = state.infer(expression.Children[len(expression.Parameters)], lambdaScope)
 	}
-	explicitType := convertSyntaxType(expression.ReturnType)
+	explicitType := state.result.typeFromSyntax(expression.ReturnType, lambdaScope)
 	if !isUnresolvedType(explicitType) {
 		if isUnresolvedType(returnType) || compatibleTypes(explicitType, returnType) {
 			returnType = explicitType
@@ -1226,6 +1418,9 @@ func (state *typeState) lambdaBodyReturnType(commands []syntax.Command, scope *S
 func compatibleTypes(expected, actual ValueType) bool {
 	if isUnknownType(expected) || isUnknownType(actual) {
 		return true
+	}
+	if expected.Nominal != (NominalType{}) || actual.Nominal != (NominalType{}) {
+		return compatibleNominalTypes(expected, actual)
 	}
 	if (expected.Name == "float" && actual.Name == "number") || (expected.Name == "bool" && actual.Name == "number") {
 		return true
@@ -1282,6 +1477,54 @@ func (state *typeState) commonElementType(children []*syntax.Expression, scope *
 		common = mergeTypes(common, state.infer(child, scope))
 	}
 	return common
+}
+
+func (result *FileAnalysis) typeFromSyntax(typeNode *syntax.Type, scope *Scope) ValueType {
+	if typeNode != nil && (typeNode.Kind == syntax.TypeOptional || typeNode.Kind == syntax.TypeVariadic) {
+		if len(typeNode.Arguments) == 0 {
+			return UnknownValueType
+		}
+		return result.typeFromSyntax(typeNode.Arguments[0], scope)
+	}
+	typ := convertSyntaxType(typeNode)
+	if typeNode == nil || typ.Name == "" {
+		return typ
+	}
+	for index, argument := range typeNode.Arguments {
+		typ.Arguments[index] = result.typeFromSyntax(argument, scope)
+	}
+	if typeNode.ReturnType != nil {
+		resolved := result.typeFromSyntax(typeNode.ReturnType, scope)
+		typ.Return = &resolved
+	}
+	if named, ok := result.namedTypes[typeNode.Name]; ok {
+		typ := FreezeDerivedType(named).ValueType()
+		typ.TypeValue = false
+		return typ
+	}
+	if result.importTypes.data == nil {
+		return typ
+	}
+	dot := strings.IndexByte(typeNode.Name, '.')
+	if dot <= 0 || dot == len(typeNode.Name)-1 {
+		return typ
+	}
+	alias, name := typeNode.Name[:dot], typeNode.Name[dot+1:]
+	declaration := resolve(scope, alias, typeNode.Span.Start, false, nil)
+	if declaration == nil || declaration.Kind != SymbolKindImport {
+		return typ
+	}
+	exports := result.importTypes.data.bindings[declaration.Span]
+	if exports == nil {
+		return typ
+	}
+	if named, ok := exports.named[name]; ok && named.Exported {
+		typ := named.Type.ValueType()
+		typ.TypeValue = false
+		markImportedType(&typ)
+		return typ
+	}
+	return typ
 }
 
 func convertSyntaxType(typeNode *syntax.Type) ValueType {
@@ -1460,8 +1703,12 @@ func mergeTypes(left, right ValueType) ValueType {
 	if left.Name != right.Name || len(left.Arguments) != len(right.Arguments) {
 		return ValueType{Name: ValueTypeAny, imported: left.imported || right.imported}
 	}
+	if left.Nominal != right.Nominal || left.TypeValue != right.TypeValue {
+		return ValueType{Name: ValueTypeAny, imported: left.imported || right.imported}
+	}
 	argumentCountKnown := left.ArgumentCountKnown && right.ArgumentCountKnown && left.RequiredArguments == right.RequiredArguments && left.Variadic == right.Variadic
-	result := ValueType{Name: left.Name, Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: argumentCountKnown, imported: left.imported || right.imported}
+	result := ValueType{Name: left.Name, Nominal: left.Nominal, NominalParents: append([]NominalType(nil), left.NominalParents...), TypeValue: left.TypeValue, EnumValues: slices.Clone(left.EnumValues), Return: left.Return, Arguments: append([]ValueType(nil), left.Arguments...), ArgumentCountKnown: argumentCountKnown, imported: left.imported || right.imported}
+	result.IncompleteParents = left.IncompleteParents || right.IncompleteParents
 	if argumentCountKnown {
 		result.RequiredArguments = left.RequiredArguments
 		result.Variadic = left.Variadic

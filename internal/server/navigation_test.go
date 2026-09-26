@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
@@ -1284,9 +1285,7 @@ func TestImportedVim9AggregateMemberUsesOpenOverlay(t *testing.T) {
 	source := "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box\necho box.Resize(1)\n"
 	instance, documentURI, targetURI := openWorkspaceFeatureRetryDocument(t, source)
 	overlay := "vim9script\nexport class Box\n\n  def Resize(width: number): number\n    return width\n  enddef\nendclass\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 2, Text: overlay}}); err != nil {
-		t.Fatal(err)
-	}
+	openIndexedNavigationOverlay(t, instance, targetURI, overlay)
 	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 3, Character: 12}}
 	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: params})
 	if err != nil {
@@ -2041,6 +2040,37 @@ func openWorkspaceFeatureRetryDocument(t *testing.T, source string) (*Server, ur
 		return graph.Ready() && graph.Has(mainPath)
 	})
 	return instance, documentURI, uri.File(libPath)
+}
+
+// Wait for the changed import type inputs to be installed before checking
+// overlay locations. Replacing these inputs during a request invalidates it.
+func openIndexedNavigationOverlay(t *testing.T, instance *Server, targetURI uri.URI, source string) {
+	t.Helper()
+	installed := make(chan struct{}, 1)
+	instance.analysisMu.Lock()
+	previous := instance.testHooks.afterAnalysisFinished
+	instance.testHooks.afterAnalysisFinished = func(documentURI string) {
+		if documentURI == targetURI.String() {
+			select {
+			case installed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	instance.analysisMu.Unlock()
+	defer func() {
+		instance.analysisMu.Lock()
+		instance.testHooks.afterAnalysisFinished = previous
+		instance.analysisMu.Unlock()
+	}()
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 2, Text: source}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-installed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("overlay analysis did not finish")
+	}
 }
 
 func openNavigationDocument(t *testing.T, encoding text.Encoding, source string) (*Server, uri.URI) {

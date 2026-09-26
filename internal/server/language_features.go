@@ -1552,10 +1552,19 @@ func (s *Server) importedFunctionSignatureHelp(ctx context.Context, params *prot
 			external = importedAggregateReferenceForReceiver(path, file, fileAnalysis, callable.Children[0], externalFacts)
 			aggregateMember = external != nil
 		}
-		if external == nil {
+		var nominal analysis.NominalType
+		if len(callable.Children) == 1 {
+			typ := fileAnalysis.TypeOf(callable.Children[0])
+			if typ.Nominal != (analysis.NominalType{}) && typ.Nominal.Path != path {
+				nominal = typ.Nominal
+				aggregateMember = true
+				aggregateClassReceiver = typ.TypeValue
+			}
+		}
+		if external == nil && nominal == (analysis.NominalType{}) {
 			return nil, s.structureCurrent(ctx, snapshot)
 		}
-		document := navigationDocument{server: s, snapshot: snapshot, encoding: encoding, analysis: fileAnalysis, occurrence: external.Span, external: external}
+		document := navigationDocument{server: s, snapshot: snapshot, encoding: encoding, analysis: fileAnalysis, occurrence: memberSpan, external: external, nominal: nominal}
 		state := s.captureWorkspaceNavigationState()
 		target, resolved := document.workspaceTargetInState(state)
 		if !resolved {

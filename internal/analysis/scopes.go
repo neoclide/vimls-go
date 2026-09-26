@@ -31,6 +31,7 @@ type FileAnalysis struct {
 	// spans in File.Source.
 	Diagnostics     []syntax.Diagnostic
 	expressionTypes map[*syntax.Expression]ValueType
+	namedTypes      map[string]ValueType
 	commandScopes   map[*syntax.Command]*Scope
 	lambdaScopes    map[*syntax.Expression]*Scope
 	lambdaBodies    map[*syntax.Expression]bool
@@ -44,6 +45,7 @@ type FileAnalysis struct {
 	superMemberExempt           map[syntax.Span]bool
 	classAliases                map[string]string
 	classes                     map[string]*syntax.Command
+	sourceIdentity              string
 }
 
 type NameDeclarationKind uint8
@@ -151,9 +153,10 @@ func AnalyzeWithYield(file *syntax.File, configFile bool, yield func() error) (*
 // Options supplies immutable external facts without introducing workspace or
 // process dependencies into analysis.
 type Options struct {
-	ConfigFile bool
-	Imports    ImportTypes
-	Yield      func() error
+	ConfigFile     bool
+	Imports        ImportTypes
+	SourceIdentity string
+	Yield          func() error
 }
 
 func AnalyzeWithOptions(file *syntax.File, options Options) (*FileAnalysis, error) {
@@ -163,6 +166,7 @@ func AnalyzeWithOptions(file *syntax.File, options Options) (*FileAnalysis, erro
 	}
 	result := newFileAnalysis(file, configFile)
 	result.importTypes = options.Imports
+	result.sourceIdentity = options.SourceIdentity
 	if yield != nil {
 		result.progress = &analysisProgress{yield: yield}
 		defer func() { result.progress = nil }()
@@ -1170,7 +1174,7 @@ func collectImplementedInterfaceMembersDiagnostics(result *FileAnalysis) {
 						})
 						return false
 					}
-					if methodSignaturesMismatch(required.Function, actual.Function) {
+					if methodSignaturesMismatch(result, required.Function, actual.Function) {
 						return false
 					}
 				}
@@ -3350,7 +3354,7 @@ func collectVariableTypeMismatchDiagnostics(result *FileAnalysis) {
 				if value == nil || expressionContainsMissing(value) {
 					continue
 				}
-				expected, actual := convertSyntaxType(binding.ParsedType), result.TypeOf(value)
+				expected, actual := aggregateBindingType(result, member, bindingIndex), result.TypeOf(value)
 				if isUnknownType(actual) || memberTypesCompatible(result, expected, actual) {
 					continue
 				}
@@ -3488,7 +3492,7 @@ func aggregateBindingType(result *FileAnalysis, command *syntax.Command, binding
 	}
 	binding := command.Declaration.Bindings[bindingIndex]
 	if binding.ParsedType != nil {
-		return convertSyntaxType(binding.ParsedType)
+		return result.typeFromSyntax(binding.ParsedType, result.commandScopes[command])
 	}
 	value := initializerElement(command.Declaration.Initializer, bindingIndex, len(command.Declaration.Bindings))
 	return result.TypeOf(value)
@@ -3588,6 +3592,9 @@ func memberTypesCompatible(result *FileAnalysis, expected, actual ValueType) boo
 	if isUnknownType(expected) || isUnknownType(actual) {
 		return true
 	}
+	if expected.Nominal != (NominalType{}) || actual.Nominal != (NominalType{}) {
+		return compatibleNominalTypes(expected, actual)
+	}
 	if expected.Name == "float" && actual.Name == "number" || expected.Name == "bool" && actual.Name == "number" {
 		return true
 	}
@@ -3669,7 +3676,7 @@ func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
 				if expected == nil {
 					continue
 				}
-				if methodSignaturesMismatch(expected.Function, method.Function) {
+				if methodSignaturesMismatch(result, expected.Function, method.Function) {
 					appendMethodTypeMismatchDiagnostic(result, class, name, expected.Function, method.Function)
 					reported[name] = true
 				}
@@ -3696,7 +3703,7 @@ func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
 					continue
 				}
 				actual := objectMethodInClassHierarchy(file, result.classes, class, name)
-				if actual != nil && methodSignaturesMismatch(required.Function, actual.Function) {
+				if actual != nil && methodSignaturesMismatch(result, required.Function, actual.Function) {
 					appendMethodTypeMismatchDiagnostic(result, class, name, required.Function, actual.Function)
 					reported[name] = true
 				}
@@ -3729,7 +3736,7 @@ func collectMethodTypeMismatchDiagnostics(result *FileAnalysis) {
 			case "string":
 				expected = builtinObjectMethodSignature("string")
 			}
-			if expected != nil && methodSignaturesMismatch(expected, method.Function) {
+			if expected != nil && methodSignaturesMismatch(result, expected, method.Function) {
 				appendMethodTypeMismatchDiagnostic(result, class, name, expected, method.Function)
 			}
 		}
@@ -3750,7 +3757,7 @@ func objectMethodInClassHierarchy(file *syntax.File, classes map[string]*syntax.
 	return nil
 }
 
-func methodSignaturesMismatch(expected, actual *syntax.Function) bool {
+func methodSignaturesMismatch(result *FileAnalysis, expected, actual *syntax.Function) bool {
 	if expected == nil || actual == nil || len(expected.TypeParameters) > 0 || len(actual.TypeParameters) > 0 {
 		return false
 	}
@@ -3759,21 +3766,27 @@ func methodSignaturesMismatch(expected, actual *syntax.Function) bool {
 		return true
 	}
 	for index := range expected.Parameters {
-		if !sameMethodType(convertSyntaxType(expected.Parameters[index].Type), convertSyntaxType(actual.Parameters[index].Type)) {
+		if !sameMethodType(result.typeFromSyntax(expected.Parameters[index].Type, result.Root), result.typeFromSyntax(actual.Parameters[index].Type, result.Root)) {
 			return true
 		}
 	}
 	expectedReturn, actualReturn := ValueType{Name: "void"}, ValueType{Name: "void"}
 	if expected.ReturnType != nil {
-		expectedReturn = convertSyntaxType(expected.ReturnType)
+		expectedReturn = result.typeFromSyntax(expected.ReturnType, result.Root)
 	}
 	if actual.ReturnType != nil {
-		actualReturn = convertSyntaxType(actual.ReturnType)
+		actualReturn = result.typeFromSyntax(actual.ReturnType, result.Root)
 	}
 	return !sameMethodType(expectedReturn, actualReturn)
 }
 
 func sameMethodType(expected, actual ValueType) bool {
+	if expected.Nominal != (NominalType{}) || actual.Nominal != (NominalType{}) {
+		if expected.Nominal == (NominalType{}) || actual.Nominal == (NominalType{}) {
+			return compatibleNominalTypes(expected, actual)
+		}
+		return expected.Nominal == actual.Nominal && expected.TypeValue == actual.TypeValue
+	}
 	if expected.Name != actual.Name || len(expected.Arguments) != len(actual.Arguments) || expected.ArgumentCountKnown != actual.ArgumentCountKnown ||
 		expected.RequiredArguments != actual.RequiredArguments || expected.Variadic != actual.Variadic || (expected.Return == nil) != (actual.Return == nil) {
 		return false
@@ -5968,11 +5981,11 @@ func collectDeclarationTypeMismatchDiagnostic(result *FileAnalysis, command *syn
 		return
 	}
 	if declaration.Target != nil && (declaration.Target.Kind == syntax.ExpressionList || declaration.Target.Kind == syntax.ExpressionTuple) {
-		appendDestructuringTypeMismatchDiagnostic(result, nil, declaration.Target, declaration.Initializer, declaration.Bindings)
+		appendDestructuringTypeMismatchDiagnostic(result, result.commandScopes[command], declaration.Target, declaration.Initializer, declaration.Bindings)
 		return
 	}
 	for index, binding := range declaration.Bindings {
-		expected := convertSyntaxType(binding.ParsedType)
+		expected := result.typeFromSyntax(binding.ParsedType, result.commandScopes[command])
 		if isUnknownType(expected) {
 			continue
 		}
@@ -6052,7 +6065,7 @@ func collectForTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, comman
 	actual := indexedType(result.TypeOf(loop.Iterable))
 	destructures := forLoopDestructures(result.File, command)
 	for index, binding := range loop.Bindings {
-		expected := convertSyntaxType(binding.ParsedType)
+		expected := result.typeFromSyntax(binding.ParsedType, scope)
 		if isUnknownType(expected) || ignoredDestructuringBinding(result.File, command, binding.Name) {
 			continue
 		}
@@ -6120,7 +6133,7 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		return
 	}
 	if expression.Kind == syntax.ExpressionCast && expression.CastType != nil && len(expression.Children) > 0 {
-		appendTypeMismatchDiagnostic(result, convertSyntaxType(expression.CastType), expression.Children[0])
+		appendTypeMismatchDiagnostic(result, result.TypeOf(expression), expression.Children[0])
 	}
 	if expression.Kind == syntax.ExpressionBinary && (expression.Value == "&&" || expression.Value == "||") && scopeUsesDefTypeRules(scope) {
 		collectLogicalTypeMismatchDiagnostic(result, expression)
@@ -6221,7 +6234,7 @@ func compiledMemberReceiverType(result *FileAnalysis, scope *Scope, expression *
 	}
 	receiver := resolvedExpressionType(result, scope, receiverExpression)
 	interfaces := localAggregates(result.File, syntax.BlockInterface)
-	invalid := !isUnknownType(receiver) && receiver.Name != "dict" && receiver.Name != "object" && result.classes[receiver.Name] == nil &&
+	invalid := !isUnknownType(receiver) && receiver.Nominal == (NominalType{}) && receiver.Name != "dict" && receiver.Name != "object" && result.classes[receiver.Name] == nil &&
 		result.classAliases[receiver.Name] == "" && interfaces[receiver.Name] == nil && receiver.Name != "enum" && localEnum(result.File, receiver.Name) == nil &&
 		(declaration == nil || declaration.Kind != SymbolKindClass && declaration.Kind != SymbolKindInterface && declaration.Kind != SymbolKindEnum && declaration.Kind != SymbolKindTypeAlias)
 	return receiver, invalid
@@ -6256,7 +6269,7 @@ func appendDestructuringTypeMismatchDiagnostic(result *FileAnalysis, scope *Scop
 		}
 		expected := UnknownValueType
 		if len(bindings) > index && bindings[index].ParsedType != nil {
-			expected = convertSyntaxType(bindings[index].ParsedType)
+			expected = result.typeFromSyntax(bindings[index].ParsedType, scope)
 		} else if scope != nil {
 			expected = assignmentTargetType(result, scope, targetItem)
 		}
@@ -6351,7 +6364,7 @@ func scopeUsesDefTypeRules(scope *Scope) bool {
 }
 
 func collectLambdaReturnTypeMismatchDiagnostic(result *FileAnalysis, expression *syntax.Expression) {
-	expected := convertSyntaxType(expression.ReturnType)
+	expected := result.typeFromSyntax(expression.ReturnType, result.lambdaScopes[expression])
 	if isUnknownType(expected) {
 		return
 	}
@@ -6565,6 +6578,9 @@ func assignmentTypesCompatible(expected, actual ValueType) bool {
 	if isUnknownType(expected) || isUnknownType(actual) {
 		return true
 	}
+	if expected.Nominal != (NominalType{}) || actual.Nominal != (NominalType{}) {
+		return compatibleNominalTypes(expected, actual)
+	}
 	if !knownAssignmentType(expected) || !knownAssignmentType(actual) {
 		return true
 	}
@@ -6597,6 +6613,21 @@ func knownAssignmentType(typ ValueType) bool {
 	default:
 		return false
 	}
+}
+
+// A missing nominal identity can be an unresolved annotation or the generic
+// object/class type of a null value. Neither establishes a distinct class.
+func compatibleNominalTypes(expected, actual ValueType) bool {
+	if expected.Nominal == (NominalType{}) {
+		return !knownAssignmentType(expected) || expected.Name == "object" && !actual.TypeValue || expected.Name == "class" && actual.TypeValue
+	}
+	if actual.Nominal == (NominalType{}) {
+		return !knownAssignmentType(actual) || actual.Name == "object" && !expected.TypeValue || actual.Name == "class" && expected.TypeValue
+	}
+	if expected.TypeValue != actual.TypeValue {
+		return false
+	}
+	return actual.HasNominal(expected.Nominal) || actual.IncompleteParents && (expected.Nominal.Kind == SymbolKindClass || expected.Nominal.Kind == SymbolKindInterface)
 }
 
 func collectOpaqueEnumDeclarations(result *FileAnalysis, commands []syntax.Command, blocks []syntax.Block) {

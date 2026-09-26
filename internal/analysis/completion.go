@@ -13,14 +13,15 @@ import (
 // The caller owns the result; it shares only the immutable syntax tree with
 // concurrent full analysis.
 func CollectCompletionFacts(file *syntax.File) *FileAnalysis {
-	return CollectCompletionFactsWithImports(file, ImportTypes{})
+	return CollectCompletionFactsWithOptions(file, Options{})
 }
 
-// CollectCompletionFactsWithImports retains immutable inputs for request-owned
-// type queries, without running inference or diagnostics.
-func CollectCompletionFactsWithImports(file *syntax.File, imports ImportTypes) *FileAnalysis {
-	result := newFileAnalysis(file, false)
-	result.importTypes = imports
+// CollectCompletionFactsWithOptions keeps request-local completion inference
+// aligned with full analysis when canonical source identity is available.
+func CollectCompletionFactsWithOptions(file *syntax.File, options Options) *FileAnalysis {
+	result := newFileAnalysis(file, options.ConfigFile)
+	result.importTypes = options.Imports
+	result.sourceIdentity = options.SourceIdentity
 	if file == nil {
 		return result
 	}
@@ -32,6 +33,7 @@ func CollectCompletionFactsWithImports(file *syntax.File, imports ImportTypes) *
 	sortDeclarations(result)
 	state := newTypeState(result)
 	state.collectFacts()
+	state.attachNominalParents()
 	// Some declaration collectors also flag malformed declaration sites.
 	// Those diagnostics belong exclusively to the full analysis result.
 	result.Diagnostics = nil

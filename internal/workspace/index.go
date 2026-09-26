@@ -169,6 +169,7 @@ type GlobalNameFact struct {
 
 type indexedFile struct {
 	exportTypes        *analysis.ExportTypes
+	exportTypeInput    *ExportTypeInput
 	bytes              int
 	source             string
 	facts              []SymbolFact
@@ -351,7 +352,8 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	}
 	functions := functionFacts(file)
 	facts := collectFileSymbolFacts(normalized, file, functions)
-	exportTypes := collectExportTypes(file, result, facts)
+	exportTypeInput := newExportTypeInput(normalized, file, facts)
+	exportTypes := collectExportTypes(exportTypeInput, facts)
 	functionParameters := make(map[syntax.Span][]string, len(functions))
 	for span, function := range functions {
 		functionParameters[span] = function.parameters
@@ -364,7 +366,7 @@ func (i *Index) ReplaceWithAnalysis(path string, file *syntax.File, result *anal
 	types := CollectTypeRelationFacts(normalized, file)
 	aliases := CollectTypeAliasFacts(normalized, file)
 	calls := CollectCallFactsFromAnalysis(normalized, file, result)
-	indexed := indexedFile{exportTypes: exportTypes, bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, augroups: augroups, globals: globals, types: types, aliases: aliases, calls: calls}
+	indexed := indexedFile{exportTypes: exportTypes, exportTypeInput: exportTypeInput, bytes: len(file.Source), source: strings.Clone(file.Source), facts: facts, functionParameters: functionParameters, references: references, commands: commands, augroups: augroups, globals: globals, types: types, aliases: aliases, calls: calls}
 	return i.replaceIndexedFile(normalized, indexed)
 }
 

@@ -232,7 +232,21 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 			}
 		}
 		if contextKind == completionContextMember {
-			items, deep := completionObjectMembers(file, analysisResult, offset)
+			path, _ := workspaceURIPath(uri.URI(snapshot.URI()))
+			items, deep, state, target := s.completionObjectMembers(file, analysisResult, offset, path)
+			if state != nil {
+				document := navigationDocument{server: s, snapshot: snapshot, analysis: analysisResult}
+				current, err := document.workspaceNavigationCurrent(ctx, *state, target)
+				if err != nil {
+					return nil, err
+				}
+				if !current {
+					if attempt == 1 {
+						return nil, protocol.ErrContentModified
+					}
+					continue
+				}
+			}
 			result := s.completionList(snapshot, encoding, selection, completionCandidates(items, 9000, completionSourceLocal))
 			if ctx.Err() != nil {
 				return nil, protocol.ErrRequestCancelled
@@ -1657,17 +1671,36 @@ func importPathKind(directory bool) protocol.CompletionItemKind {
 	return protocol.CompletionItemKindFile
 }
 
-func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, offset int) (protocol.CompletionItemSlice, bool) {
+func (s *Server) completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, offset int, path string) (protocol.CompletionItemSlice, bool, *workspaceNavigationSnapshot, workspaceNavigationTarget) {
+	var state *workspaceNavigationSnapshot
+	var target workspaceNavigationTarget
 	member := completionMemberAt(file, offset)
 	if member == nil || len(member.Children) == 0 || member.Children[0] == nil {
-		return nil, false
+		return nil, false, state, target
 	}
 	types := analysis.NewCompletionTypes(result)
 	typ := types.TypeOf(member.Children[0], member.Children[0].Span.Start)
 	if typ.Name == "" || typ.Name == analysis.ValueTypeAny || typ.Name == "dict" || typ.Name == "list" {
-		return nil, false
+		return nil, false, state, target
 	}
 	var container *analysis.Symbol
+	memberFile := file
+	var symbols []*analysis.Symbol
+	if typ.Nominal != (analysis.NominalType{}) && typ.Nominal.Path != path {
+		captured := s.captureWorkspaceNavigationState()
+		state = &captured
+		var ok bool
+		target, ok = s.workspaceTargetForNominal(captured, typ.Nominal)
+		if !ok {
+			return nil, false, state, target
+		}
+		memberFile = s.fileForWorkspaceTarget(target)
+		if memberFile == nil {
+			return nil, false, state, target
+		}
+		symbols = analysis.CollectSymbols(memberFile)
+		container = symbolForWorkspaceTarget(symbols, target.match.Fact)
+	}
 	var find func([]*analysis.Symbol)
 	find = func(symbols []*analysis.Symbol) {
 		for _, symbol := range symbols {
@@ -1678,12 +1711,23 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 			find(symbol.Children)
 		}
 	}
-	symbols := analysis.CollectSymbols(file)
-	find(symbols)
-	if container == nil {
-		return nil, false
+	if symbols == nil {
+		symbols = analysis.CollectSymbols(file)
 	}
-	members := completionObjectMemberSymbols(file, symbols, container)
+	if container == nil && state == nil {
+		find(symbols)
+	}
+	if container == nil {
+		return nil, false, state, target
+	}
+	members := completionObjectMemberSymbols(memberFile, symbols, container)
+	var externalFacts map[syntax.Span]workspace.SymbolFact
+	if state != nil {
+		externalFacts = make(map[syntax.Span]workspace.SymbolFact)
+		for _, fact := range workspace.CollectSymbolFacts(target.match.Fact.Path, memberFile) {
+			externalFacts[fact.SelectionRange] = fact
+		}
+	}
 	items := make(protocol.CompletionItemSlice, 0, len(members))
 	declarations := make(map[syntax.Span]*analysis.Declaration, len(result.Declarations))
 	for _, declaration := range result.Declarations {
@@ -1691,6 +1735,14 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 	}
 	deep := 0
 	for _, symbol := range members {
+		name := strings.TrimPrefix(symbol.Name, container.Name+".")
+		if state != nil {
+			fact := externalFacts[symbol.SelectionRange]
+			classMember := fact.Static || symbol.Kind == analysis.SymbolKindConstructor || symbol.Kind == analysis.SymbolKindEnumMember
+			if strings.HasPrefix(name, "_") || classMember != typ.TypeValue {
+				continue
+			}
+		}
 		kind := protocol.CompletionItemKindField
 		switch symbol.Kind {
 		case analysis.SymbolKindMethod, analysis.SymbolKindFunction, analysis.SymbolKindConstructor:
@@ -1698,7 +1750,10 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 		case analysis.SymbolKindEnumMember, analysis.SymbolKindConstant:
 			kind = protocol.CompletionItemKindConstant
 		}
-		items = append(items, protocol.CompletionItem{Label: strings.TrimPrefix(symbol.Name, container.Name+"."), Kind: kind, Detail: protocol.NewOptional(symbol.Detail)})
+		items = append(items, protocol.CompletionItem{Label: name, Kind: kind, Detail: protocol.NewOptional(symbol.Detail)})
+		if state != nil {
+			continue
+		}
 		declaration := declarations[symbol.SelectionRange]
 		if declaration == nil || deep == 3 {
 			continue
@@ -1719,7 +1774,7 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 			deep++
 		}
 	}
-	return items, deep > 0
+	return items, deep > 0, state, target
 }
 
 func completionObjectMemberSymbols(file *syntax.File, symbols []*analysis.Symbol, container *analysis.Symbol) []*analysis.Symbol {
