@@ -21,6 +21,10 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
+Variable-name positions after `let`, `var`, `const` and `final` return no
+completion candidates. Type annotations and initializer expressions retain
+their respective completions.
+
 Linked editing covers the declaration and its references in the current file.
 It is offered only for symbols whose rename is a single-file edit: script-local
 and local variables, function parameters, non-exported Vim9 symbols and

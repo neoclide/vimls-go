@@ -190,6 +190,25 @@ func TestAdvertisedCompletionTriggersReturnContextualItems(t *testing.T) {
 	}
 }
 
+func TestCompletionVariableDeclarationNamesAreEmpty(t *testing.T) {
+	for _, source := range []string{"let ", "let strl", "vim9script\nvar ", "vim9script\nvar strl", "vim9script\nconst ", "vim9script\nconst strl"} {
+		t.Run(source, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+			line := strings.Count(source, "\n")
+			column := len(source) - strings.LastIndex(source, "\n") - 1
+			result, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: uint32(line), Character: uint32(column)},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if items := completionItems(t, result); len(items) != 0 {
+				t.Fatalf("declaration name returned %d completion items", len(items))
+			}
+		})
+	}
+}
+
 func TestCompletionUsesCommandAndExpressionContexts(t *testing.T) {
 	instance, documentURI := openNavigationDocument(t, text.UTF16, "vim9script\nvar value: number = 1\necho value\n\n")
 	commandResult, err := instance.Completion(context.Background(), &protocol.CompletionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{

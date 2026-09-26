@@ -23,6 +23,8 @@ quotes inside filenames, and does not accept extra adjacent path expressions.
 Import expressions omit namespace-only candidates. Type completion uses the
 current text to insert required spacing, even when a client repeats a trigger.
 Incomplete lambda parameter types recover without crashing the parser.
+Variable declaration names return empty completion results, while type
+annotations and initializer expressions retain their completion contexts.
 
 Plain literal imports without `as` introduce the filename-derived namespace:
 `import 'libs.vim'` makes exported members available as `libs.Two`. Scope

@@ -261,6 +261,9 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		}
 	}
 	walkCommands(file.Commands, func(command *syntax.Command) {
+		if completionDeclarationNameAt(file, command, offset) {
+			rejected = true
+		}
 		if command.Autocmd != nil && command.Autocmd.Pattern.Start < command.Autocmd.Pattern.End &&
 			offset > command.Autocmd.Pattern.End && offset <= command.Span.End {
 			noteEmbeddedCommandBody(command.Dialect, command.Span.End-command.Span.Start)
@@ -522,6 +525,36 @@ func completionContextAt(file *syntax.File, offset int) completionContext {
 		return completionContextCommand
 	}
 	return completionContextNone
+}
+
+func completionDeclarationNameAt(file *syntax.File, command *syntax.Command, offset int) bool {
+	switch command.Canonical {
+	case "let", "var", "const", "final":
+	default:
+		return false
+	}
+	if offset <= command.Name.End {
+		return false
+	}
+	if strings.Trim(file.Source[command.Name.End:offset], " \t") == "" {
+		return true
+	}
+	declaration := command.Declaration
+	if declaration == nil || declaration.Assignment.Start < declaration.Assignment.End && offset > declaration.Assignment.Start {
+		return false
+	}
+	if declaration.Name.Start < declaration.Name.End {
+		switch file.Source[declaration.Name.Start] {
+		case '&', '$', '@':
+			return false
+		}
+	}
+	for _, binding := range declaration.Bindings {
+		if binding.Name.Start <= offset && offset <= binding.Name.End {
+			return true
+		}
+	}
+	return declaration.Name.End <= offset && strings.Trim(file.Source[declaration.Name.End:offset], " \t") == ""
 }
 
 func completionTypeContextAt(file *syntax.File, command *syntax.Command, offset int) bool {
