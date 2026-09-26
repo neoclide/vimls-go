@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.6 — unreleased
+## v0.1.6
 
 - Refine Vim9 receiver completion inside supported `type()` and
   `instanceof(value, LocalClass)` guards, without changing compiled type checks.
