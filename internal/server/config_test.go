@@ -67,6 +67,12 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
+	// Child processes only run the synchronous Vim stub above. GORACE is read
+	// at process startup, so this skips their one-second exit delay while
+	// preserving the parent test process's race configuration.
+	if err := os.Setenv("GORACE", os.Getenv("GORACE")+" atexit_sleep_ms=0"); err != nil {
+		panic(err)
+	}
 	directory, err := os.MkdirTemp("", "vimls-test-vim-")
 	if err != nil {
 		panic(err)

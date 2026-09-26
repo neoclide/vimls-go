@@ -434,7 +434,7 @@ func TestImportTypesBackgroundRetryFinishesPendingIndex(t *testing.T) {
 	s := initializeWorkspaceServer(t, root)
 	snapshot := s.documents.Open(uri.File(main).String(), 1, source)
 	entered, release := make(chan struct{}), make(chan struct{})
-	finished := make(chan struct{}, 4)
+	finished := make(chan struct{}, 1)
 	var once sync.Once
 	s.testHooks.beforeAnalyze = func(file *syntax.File) {
 		if file.Source == source {
@@ -443,7 +443,12 @@ func TestImportTypesBackgroundRetryFinishesPendingIndex(t *testing.T) {
 	}
 	s.testHooks.afterAnalysisFinished = func(documentURI string) {
 		if documentURI == snapshot.URI() {
-			finished <- struct{}{}
+			// Notifications only wake the state check; they must not block
+			// worker shutdown after the test stops receiving them.
+			select {
+			case finished <- struct{}{}:
+			default:
+			}
 		}
 	}
 	s.publishMu.Lock()
@@ -453,6 +458,7 @@ func TestImportTypesBackgroundRetryFinishesPendingIndex(t *testing.T) {
 	<-entered
 	installImportTypeTarget(t, s, target, "vim9script\nexport var Value = 's'\n")
 	close(release)
+	deadline := time.After(5 * time.Second)
 	for {
 		select {
 		case <-finished:
@@ -471,9 +477,15 @@ func TestImportTypesBackgroundRetryFinishesPendingIndex(t *testing.T) {
 			if pending != 0 {
 				t.Fatalf("retry stranded %d pending files", pending)
 			}
+			s.analysisMu.Lock()
+			retrying := len(s.analysisPending) != 0 || len(s.analysisRunning) != 0
+			s.analysisMu.Unlock()
+			if retrying {
+				continue
+			}
 			return
-		case <-time.After(5 * time.Second):
-			t.Fatal("dependency retry did not finish")
+		case <-deadline:
+			t.Fatal("dependency retry did not settle")
 		}
 	}
 }

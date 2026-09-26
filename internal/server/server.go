@@ -1332,7 +1332,7 @@ func (s *Server) analyzeDocument(documentURI string) {
 		s.scheduleSemanticTokensRefresh()
 		s.scheduleInlayHintRefresh()
 		s.scheduleCodeLensRefresh()
-	} else if work.Context.Err() == nil {
+	} else if !ok && work.Context.Err() == nil {
 		// A dependency may change without changing this document. Dropping its
 		// result must not strand its pending index entry: retry through the
 		// existing coalescing queue, not a recursive analysis or a new worker.
@@ -1489,6 +1489,8 @@ func (s *Server) configFileRoleForURI(documentURI string) bool {
 	return s.IsConfigFile(path)
 }
 
+// publishSyntax returns whether the initial analysis needs feature refreshes.
+// Stale workspace data is requeued here before returning.
 func (s *Server) publishSyntax(analysis workspace.Analysis, file *syntax.File, identity workspaceIdentity) bool {
 	s.mu.Lock()
 	encoding := s.encoding
