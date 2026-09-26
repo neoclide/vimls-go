@@ -553,9 +553,11 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 			if className, ok := state.constructorObjectClass(expression, scope); ok {
 				typ = ValueType{Name: className}
 			} else if builtin, arguments, ok := builtinCallArguments(state.result.File, expression); ok {
+				// The callee and every child were inferred above. builtinCallArguments
+				// only selects and reorders those already-visited expressions.
 				argumentTypes := make([]ValueType, 0, len(arguments))
 				for _, argument := range arguments {
-					argumentTypes = append(argumentTypes, state.infer(argument, scope))
+					argumentTypes = append(argumentTypes, state.result.TypeOf(argument))
 				}
 				typ = builtinReturnValueType(builtin, argumentTypes, arguments)
 			} else if callee.Name == "func" && callee.Return != nil {

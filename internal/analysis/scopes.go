@@ -186,9 +186,8 @@ func AnalyzeWithOptions(file *syntax.File, options Options) (*FileAnalysis, erro
 		// walking so a function can be referenced before its definition, as Vim
 		// permits, without making variables forward-visible.
 		func() { collectEmbeddedDeclarations(result, root, file.Commands) },
-		func() { collectLambdaDeclarations(result, file.Commands) },
-		func() { collectLegacyFunctionOverwriteRiskDiagnostics(result, file.Commands) },
-		func() { collectUserCommandOverwriteRiskDiagnostics(result, file.Commands) },
+		func() { collectLambdaDeclarations(result) },
+		func() { collectOverwriteRiskDiagnostics(result, file.Commands) },
 		func() { collectNameDeclarationConflictDiagnostics(result) },
 		func() { collectVim9ScriptFunctionDeletionDiagnostics(result, file.Commands, root) },
 		func() { collectVim9LegacyScriptVariableDiagnostics(result) },
@@ -351,8 +350,8 @@ func newFileAnalysis(file *syntax.File, configFile bool) *FileAnalysis {
 	result.typeAliasExempt = make(map[syntax.Span]bool)
 	result.classValueExempt = make(map[syntax.Span]bool)
 	result.superMemberExempt = make(map[syntax.Span]bool)
-	result.classAliases = localClassAliases(file)
 	result.classes = localAggregates(file, syntax.BlockClass)
+	result.classAliases = localClassAliases(file, result.classes)
 	return result
 }
 
@@ -554,7 +553,7 @@ func vim9ScriptFunctionDeclaration(result *FileAnalysis, declaration *Declaratio
 	return false
 }
 
-func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {
+func collectOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {
 	if result == nil || result.File == nil {
 		return
 	}
@@ -563,22 +562,38 @@ func collectLegacyFunctionOverwriteRiskDiagnostics(result *FileAnalysis, command
 		s := syntax.DiagnosticHint
 		severity = &s
 	}
-	for index := range commands {
-		command := &commands[index]
-		if command.Canonical == "function" && command.Function != nil && emptySyntaxSpan(command.Bang) &&
-			!emptySyntaxSpan(command.Function.Name) {
-			name := result.File.Text(command.Function.Name)
-			if command.Dialect == syntax.Legacy || strings.HasPrefix(name, "g:") {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E122", Message: "Function " + name + " may already exist when this script is sourced again; add ! to replace it", Span: command.Function.Name,
-					Severity: severity,
-				})
+	// E122 historically runs as a complete phase before E174. Keep E174 local
+	// until this shared walk is complete so that phase ordering remains intact.
+	var userCommandDiagnostics []syntax.Diagnostic
+	var collect func([]syntax.Command)
+	collect = func(list []syntax.Command) {
+		for index := range list {
+			command := &list[index]
+			if command.Canonical == "function" && command.Function != nil && emptySyntaxSpan(command.Bang) &&
+				!emptySyntaxSpan(command.Function.Name) {
+				name := result.File.Text(command.Function.Name)
+				if command.Dialect == syntax.Legacy || strings.HasPrefix(name, "g:") {
+					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+						Code: "vim/E122", Message: "Function " + name + " may already exist when this script is sourced again; add ! to replace it", Span: command.Function.Name,
+						Severity: severity,
+					})
+				}
+			}
+			if command.Canonical == "command" && emptySyntaxSpan(command.Bang) {
+				if name, span, _, definition := syntax.DefinedUserCommand(result.File, command); definition {
+					userCommandDiagnostics = append(userCommandDiagnostics, syntax.Diagnostic{
+						Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
+						Severity: severity,
+					})
+				}
+			}
+			if command.Embedded != nil {
+				collect(command.Embedded.Commands)
 			}
 		}
-		if command.Embedded != nil {
-			collectLegacyFunctionOverwriteRiskDiagnostics(result, command.Embedded.Commands)
-		}
 	}
+	collect(commands)
+	result.Diagnostics = append(result.Diagnostics, userCommandDiagnostics...)
 }
 
 // unconditionalAt reports whether the command at index in list runs
@@ -613,31 +628,6 @@ func rootScopedCommand(list []syntax.Command, blocks []syntax.Block, index int) 
 		return false
 	}
 	return true
-}
-
-func collectUserCommandOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Command) {
-	if result == nil || result.File == nil {
-		return
-	}
-	var severity *syntax.DiagnosticSeverity
-	if result.configFile {
-		s := syntax.DiagnosticHint
-		severity = &s
-	}
-	for index := range commands {
-		command := &commands[index]
-		if command.Canonical == "command" && emptySyntaxSpan(command.Bang) {
-			if name, span, _, definition := syntax.DefinedUserCommand(result.File, command); definition {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
-					Severity: severity,
-				})
-			}
-		}
-		if command.Embedded != nil {
-			collectUserCommandOverwriteRiskDiagnostics(result, command.Embedded.Commands)
-		}
-	}
 }
 
 // UserCommandDiagnostics warns about abbreviated or unknown user-command calls
@@ -1929,7 +1919,7 @@ func collectDuplicateTypeAliasDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localAggregates(file, syntax.BlockClass)
+	classes := result.classes
 	seen := make(map[string]bool)
 	classAliases := make(map[string]bool)
 	for index := range file.Commands {
@@ -2013,7 +2003,7 @@ func collectPublicProtectedMemberNameDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localAggregates(file, syntax.BlockClass)
+	classes := result.classes
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass {
@@ -2285,6 +2275,7 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 		dialect    syntax.Dialect
 	}
 	var expressions []scopedExpression
+	var assignments []scopedExpression
 	candidates := make(map[*Declaration]bool)
 	seenLambdas := make(map[*syntax.Expression]bool)
 	var collectCommands func([]syntax.Command, *Scope)
@@ -2294,16 +2285,22 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			return
 		}
 		expressionScope := scope
-		if expression.Kind == syntax.ExpressionLambda && !seenLambdas[expression] {
-			seenLambdas[expression] = true
+		if expression.Kind == syntax.ExpressionLambda {
 			lambdaScope := result.lambdaScopes[expression]
 			if lambdaScope == nil {
 				lambdaScope = scope
 			}
 			expressionScope = lambdaScope
-			if expression.LambdaBody != nil {
+			first := !seenLambdas[expression]
+			if first {
+				seenLambdas[expression] = true
+			}
+			if first && expression.LambdaBody != nil {
 				collectCommands(expression.LambdaBody.Commands, lambdaScope)
 			}
+		}
+		if expression.Kind == syntax.ExpressionAssignment {
+			assignments = append(assignments, scopedExpression{expression: expression, scope: expressionScope})
 		}
 		for index, child := range expression.Children {
 			if expression.Kind != syntax.ExpressionLambda || index >= len(expression.Parameters) {
@@ -2374,42 +2371,26 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 	}
 	collectCommands(file.Commands, result.Root)
 
-	var invalidateAssignments func(*syntax.Expression, *Scope)
-	invalidateAssignments = func(expression *syntax.Expression, scope *Scope) {
-		if expression == nil || scope == nil {
+	// Apply writes after collecting every candidate, so discovering another
+	// candidate cannot undo an earlier assignment's invalidation.
+	var invalidateTarget func(*syntax.Expression, *Scope)
+	invalidateTarget = func(target *syntax.Expression, scope *Scope) {
+		if target == nil || scope == nil {
 			return
 		}
-		if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) > 0 {
-			var invalidateTarget func(*syntax.Expression)
-			invalidateTarget = func(target *syntax.Expression) {
-				if target == nil {
-					return
-				}
-				switch target.Kind {
-				case syntax.ExpressionIdentifier:
-					delete(candidates, resolve(scope, target.Value, target.Span.Start, false, nil))
-				case syntax.ExpressionList, syntax.ExpressionTuple, syntax.ExpressionParenthesized:
-					for _, child := range target.Children {
-						invalidateTarget(child)
-					}
-				}
-			}
-			invalidateTarget(expression.Children[0])
-		}
-		expressionScope := scope
-		if expression.Kind == syntax.ExpressionLambda {
-			if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
-				expressionScope = lambdaScope
-			}
-		}
-		for index, child := range expression.Children {
-			if expression.Kind != syntax.ExpressionLambda || index >= len(expression.Parameters) {
-				invalidateAssignments(child, expressionScope)
+		switch target.Kind {
+		case syntax.ExpressionIdentifier:
+			delete(candidates, resolve(scope, target.Value, target.Span.Start, false, nil))
+		case syntax.ExpressionList, syntax.ExpressionTuple, syntax.ExpressionParenthesized:
+			for _, child := range target.Children {
+				invalidateTarget(child, scope)
 			}
 		}
 	}
-	for _, item := range expressions {
-		invalidateAssignments(item.expression, item.scope)
+	for _, assignment := range assignments {
+		if len(assignment.expression.Children) > 0 {
+			invalidateTarget(assignment.expression.Children[0], assignment.scope)
+		}
 	}
 
 	seenExpressions := make(map[*syntax.Expression]bool)
@@ -2490,7 +2471,7 @@ func collectDuplicateClassVariableDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localAggregates(file, syntax.BlockClass)
+	classes := result.classes
 	for index := range file.Commands {
 		aggregate := &file.Commands[index]
 		if aggregate.Dialect != syntax.Vim9 || aggregate.Aggregate == nil ||
@@ -2758,7 +2739,7 @@ func collectGenericMethodOverrideDiagnostics(result *FileAnalysis) {
 		return
 	}
 	file := result.File
-	classes := localAggregates(file, syntax.BlockClass)
+	classes := result.classes
 	for index := range file.Commands {
 		class := &file.Commands[index]
 		if class.Dialect != syntax.Vim9 || class.Aggregate == nil || class.Aggregate.Kind != syntax.BlockClass || len(class.Aggregate.Extends) == 0 ||
@@ -6428,67 +6409,21 @@ func collectLambdaScopes(result *FileAnalysis, parent *Scope, expression *syntax
 	}
 }
 
-func collectLambdaDeclarations(result *FileAnalysis, commands []syntax.Command) {
+func collectLambdaDeclarations(result *FileAnalysis) {
 	if result == nil {
 		return
 	}
-	for index := range commands {
-		command := &commands[index]
-		collectLambdaDeclarationsExpressions(result, command.Expressions)
-		if command.Mapping != nil {
-			collectLambdaDeclarationsExpression(result, command.Mapping.RHSExpression)
+	for _, scope := range result.Scopes {
+		if !result.analysisStep() {
+			return
 		}
-		collectLambdaDeclarationsExpressions(result, command.Targets)
-		if command.Declaration != nil {
-			collectLambdaDeclarationsExpression(result, command.Declaration.Initializer)
+		lambda := scope.Lambda
+		if lambda == nil || lambda.LambdaBody == nil || result.lambdaBodies[lambda] {
+			continue
 		}
-		if command.For != nil {
-			collectLambdaDeclarationsExpression(result, command.For.Iterable)
-		}
-		if command.Import != nil {
-			collectLambdaDeclarationsExpression(result, command.Import.Path)
-		}
-		for _, value := range command.EnumValues {
-			collectLambdaDeclarationsExpression(result, value.Initializer)
-			collectLambdaDeclarationsExpressions(result, value.Arguments)
-		}
-		if command.Function != nil {
-			for _, parameter := range command.Function.Parameters {
-				collectLambdaDeclarationsExpression(result, parameter.Default)
-			}
-		}
-		if command.Embedded != nil {
-			collectLambdaDeclarations(result, command.Embedded.Commands)
-		}
-	}
-}
-
-func collectLambdaDeclarationsExpressions(result *FileAnalysis, expressions []*syntax.Expression) {
-	for _, expression := range expressions {
-		collectLambdaDeclarationsExpression(result, expression)
-	}
-}
-
-func collectLambdaDeclarationsExpression(result *FileAnalysis, expression *syntax.Expression) {
-	if expression == nil {
-		return
-	}
-	if expression.Kind == syntax.ExpressionLambda {
-		if scope := result.lambdaScopes[expression]; scope != nil && expression.LambdaBody != nil && !result.lambdaBodies[expression] {
-			result.lambdaBodies[expression] = true
-			collectEmbeddedDeclarations(result, scope, expression.LambdaBody.Commands)
-			collectOpaqueEnumDeclarations(result, expression.LambdaBody.Commands, expression.LambdaBody.Blocks)
-			collectLambdaDeclarations(result, expression.LambdaBody.Commands)
-		}
-		for index, child := range expression.Children {
-			if index >= len(expression.Parameters) {
-				collectLambdaDeclarationsExpression(result, child)
-			}
-		}
-		return
-	}
-	for _, child := range expression.Children {
-		collectLambdaDeclarationsExpression(result, child)
+		result.lambdaBodies[lambda] = true
+		collectEmbeddedDeclarations(result, scope, lambda.LambdaBody.Commands)
+		collectOpaqueEnumDeclarations(result, lambda.LambdaBody.Commands, lambda.LambdaBody.Blocks)
 	}
 }
 
@@ -6848,8 +6783,10 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 			if strings.HasPrefix(expression.Value, "&") {
 				appendUnknownOptionDiagnostic(result, expression.Value, expression.Span, scope)
 			}
-			declaration := resolve(scope, expression.Value, expression.Span.Start, preferFunction, skipped)
-			if !preferFunction {
+			var declaration *Declaration
+			if preferFunction {
+				declaration = resolve(scope, expression.Value, expression.Span.Start, true, skipped)
+			} else {
 				declaration = resolveValue(scope, expression.Value, expression.Span.Start, skipped, dialect)
 			}
 			result.References = append(result.References, &Reference{
@@ -7389,7 +7326,7 @@ func appendAbstractSuperMethodDiagnostic(result *FileAnalysis, file *syntax.File
 	if class == nil || class.Aggregate == nil || len(class.Aggregate.Extends) == 0 {
 		return
 	}
-	classes := localAggregates(file, syntax.BlockClass)
+	classes := result.classes
 	seen := make(map[*syntax.Command]bool)
 	for current := classes[file.Text(class.Aggregate.Extends[0])]; current != nil; current = extendedClass(file, classes, current) {
 		if seen[current] {
@@ -7410,8 +7347,7 @@ func appendAbstractSuperMethodDiagnostic(result *FileAnalysis, file *syntax.File
 	}
 }
 
-func localClassAliases(file *syntax.File) map[string]string {
-	classes := localAggregates(file, syntax.BlockClass)
+func localClassAliases(file *syntax.File, classes map[string]*syntax.Command) map[string]string {
 	targets := make(map[string]string)
 	for index := range file.Commands {
 		alias := file.Commands[index].TypeAlias

@@ -15,8 +15,53 @@ func collectStyleDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil || len(result.File.Diagnostics) != 0 || !onlyUnusedVariableDiagnostics(result.Diagnostics) {
 		return
 	}
-	collectStyleCommandDiagnostics(result, result.File, result.File.Commands, result.File.Blocks, false)
-	result.Diagnostics = SuppressKnownAugroupEventDiagnostics(result.File, result.Diagnostics, nil)
+	facts := augroupEventDiagnostics{}
+	collectStyleCommandDiagnostics(result, result.File, result.File.Commands, result.File.Blocks, false, &facts)
+	result.Diagnostics = facts.filter(result.Diagnostics)
+}
+
+type augroupEventDiagnostics struct {
+	active     map[string]bool
+	candidates map[syntax.Span]string
+}
+
+func (facts *augroupEventDiagnostics) record(file *syntax.File, command *syntax.Command) {
+	if command.Canonical == "augroup" {
+		name := strings.TrimSpace(file.Text(command.Augroup))
+		if name != "" && !strings.EqualFold(name, "END") {
+			if command.Bang.Start < command.Bang.End {
+				delete(facts.active, name)
+			} else {
+				if facts.active == nil {
+					facts.active = make(map[string]bool)
+				}
+				facts.active[name] = true
+			}
+		}
+	}
+	name, span, ok := AutocmdAugroupReference(file, command)
+	if !ok || command.Autocmd.Group.Start != command.Autocmd.Group.End || name == "" || name[0] < 'a' || name[0] > 'z' {
+		return
+	}
+	if facts.candidates == nil {
+		facts.candidates = make(map[syntax.Span]string)
+	}
+	facts.candidates[span] = name
+}
+
+func (facts *augroupEventDiagnostics) filter(diagnostics []syntax.Diagnostic) []syntax.Diagnostic {
+	if len(facts.active) == 0 || len(facts.candidates) == 0 {
+		return diagnostics
+	}
+	kept := diagnostics[:0]
+	for _, diagnostic := range diagnostics {
+		name, candidate := facts.candidates[diagnostic.Span]
+		if diagnostic.Code == "vimls/unknown-autocmd-event" && candidate && facts.active[name] {
+			continue
+		}
+		kept = append(kept, diagnostic)
+	}
+	return kept
 }
 
 // AugroupDefinition is a statically named :augroup definition that remains
@@ -106,43 +151,28 @@ func SuppressKnownAugroupEventDiagnostics(file *syntax.File, diagnostics []synta
 	if file == nil || len(diagnostics) == 0 {
 		return diagnostics
 	}
-	known := make(map[string]bool, len(workspaceNames))
-	for _, name := range workspaceNames {
-		known[name] = true
-	}
-	for _, name := range CollectAugroupNames(file) {
-		known[name] = true
-	}
-	if len(known) == 0 {
-		return diagnostics
-	}
-	groupSpans := make(map[syntax.Span]bool)
+	facts := augroupEventDiagnostics{}
 	var collect func([]syntax.Command)
 	collect = func(commands []syntax.Command) {
 		for index := range commands {
 			command := &commands[index]
-			if name, span, ok := AutocmdAugroupReference(file, command); ok && command.Autocmd.Group.Start == command.Autocmd.Group.End {
-				if name != "" && name[0] >= 'a' && name[0] <= 'z' && known[name] {
-					groupSpans[span] = true
-				}
-			}
+			facts.record(file, command)
 			if command.Embedded != nil {
 				collect(command.Embedded.Commands)
 			}
 		}
 	}
 	collect(file.Commands)
-	if len(groupSpans) == 0 {
-		return diagnostics
-	}
-	kept := diagnostics[:0]
-	for _, diagnostic := range diagnostics {
-		if diagnostic.Code == "vimls/unknown-autocmd-event" && groupSpans[diagnostic.Span] {
+	for _, name := range workspaceNames {
+		if name == "" {
 			continue
 		}
-		kept = append(kept, diagnostic)
+		if facts.active == nil {
+			facts.active = make(map[string]bool)
+		}
+		facts.active[name] = true
 	}
-	return kept
+	return facts.filter(diagnostics)
 }
 
 func onlyUnusedVariableDiagnostics(diagnostics []syntax.Diagnostic) bool {
@@ -322,7 +352,7 @@ func autocmdTargetsLocal(file *syntax.File, events []syntax.Span) bool {
 	return true
 }
 
-func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, commands []syntax.Command, blocks []syntax.Block, autocmdContext bool) {
+func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, commands []syntax.Command, blocks []syntax.Block, autocmdContext bool, facts *augroupEventDiagnostics) {
 	groups := make(map[string]*augroupTracking)
 	activeGroup := ""
 	dynamicAutocmd := false
@@ -359,6 +389,7 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 	}
 	for index := range commands {
 		command := &commands[index]
+		facts.record(file, command)
 		if command.Canonical == "augroup" {
 			name := file.Text(command.Augroup)
 			if name != "" && !strings.EqualFold(name, "END") && command.Bang.Start == command.Bang.End {
@@ -504,7 +535,7 @@ func collectStyleCommandDiagnostics(result *FileAnalysis, file *syntax.File, com
 			if command.Autocmd != nil {
 				embeddedAutocmdContext = autocmdTargetsLocal(file, command.Autocmd.Events)
 			}
-			collectStyleCommandDiagnostics(result, file, command.Embedded.Commands, command.Embedded.Blocks, embeddedAutocmdContext)
+			collectStyleCommandDiagnostics(result, file, command.Embedded.Commands, command.Embedded.Blocks, embeddedAutocmdContext, facts)
 		}
 	}
 	for _, tracking := range groups {

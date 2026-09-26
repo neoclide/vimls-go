@@ -166,14 +166,25 @@ For diagnostic traversal changes, use the focused analysis workloads:
 
 ```sh
 go test -mod=readonly -p 1 ./internal/analysis -run '^$' \
-  -bench '^(BenchmarkDiagnosticAnalysis|BenchmarkConfigDiagnostics|BenchmarkNestedAssignmentDiagnostics)$' \
+  -bench '^(BenchmarkDiagnosticAnalysis|BenchmarkTraversalAnalysis|BenchmarkConfigDiagnostics|BenchmarkNestedAssignmentDiagnostics)$' \
   -benchmem -benchtime=1s -count=20
 ```
 
 These benchmarks parse outside the timed loop. `BenchmarkDiagnosticAnalysis`
 covers small files, configuration files, embedded commands, calls and long
-expressions. The two collector benchmarks isolate configuration checks and
-nested assignment validation; their improvements do not represent end-to-end
+expressions. `BenchmarkTraversalAnalysis` covers nested builtin calls, lambda
+bodies, null receivers and augroups. `BenchmarkRuntimeAnalysis` accepts a fixed
+source file through `VIMLS_BENCH_SOURCE` and skips when that variable is unset:
+
+```sh
+VIMLS_BENCH_SOURCE=/path/to/fixed-runtime.vim go test -mod=readonly -p 1 \
+  ./internal/analysis -run '^$' -bench '^BenchmarkRuntimeAnalysis$' \
+  -benchmem -benchtime=1s -count=20
+```
+
+Record the runtime source revision and use identical bytes for both runs. The
+two collector benchmarks isolate configuration checks and nested assignment
+validation; their improvements do not represent end-to-end
 editor latency. Keep `GOMAXPROCS` identical when comparing runs.
 
 ## Event documentation

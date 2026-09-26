@@ -24,7 +24,14 @@ func stringConversionDiagnostic(typ ValueType, span syntax.Span) (syntax.Diagnos
 }
 
 func knownObjectExpression(result *FileAnalysis, scope *Scope, expression *syntax.Expression) bool {
-	if result == nil || expression == nil || expressionContainsMissing(expression) {
+	if result == nil || expression == nil {
+		return false
+	}
+	name := result.TypeOf(expression).Name
+	if name != "object" && result.classes[name] == nil {
+		return false
+	}
+	if expressionContainsMissing(expression) {
 		return false
 	}
 	if expression.Kind == syntax.ExpressionIdentifier {
@@ -32,8 +39,7 @@ func knownObjectExpression(result *FileAnalysis, scope *Scope, expression *synta
 			return false
 		}
 	}
-	name := result.TypeOf(expression).Name
-	return name == "object" || result.classes[name] != nil
+	return true
 }
 
 func objectAsNumberDiagnostic(result *FileAnalysis, scope *Scope, expression *syntax.Expression) (syntax.Diagnostic, bool) {
@@ -118,7 +124,10 @@ func stringAsNumberDiagnostic(result *FileAnalysis, expression *syntax.Expressio
 }
 
 func stringAsBoolDiagnostic(result *FileAnalysis, expression *syntax.Expression) (syntax.Diagnostic, bool) {
-	if result == nil || expression == nil || expressionContainsMissing(expression) || result.TypeOf(expression).Name != "string" {
+	if result == nil || expression == nil || result.TypeOf(expression).Name != "string" {
+		return syntax.Diagnostic{}, false
+	}
+	if expressionContainsMissing(expression) {
 		return syntax.Diagnostic{}, false
 	}
 	message := "Using a String as a Bool"
@@ -135,7 +144,10 @@ func stringAsBoolDiagnostic(result *FileAnalysis, expression *syntax.Expression)
 }
 
 func boolAsNumberDiagnostic(typ ValueType, expression *syntax.Expression) (syntax.Diagnostic, bool) {
-	if expression == nil || expressionContainsMissing(expression) || typ.Name != "bool" {
+	if expression == nil || typ.Name != "bool" {
+		return syntax.Diagnostic{}, false
+	}
+	if expressionContainsMissing(expression) {
 		return syntax.Diagnostic{}, false
 	}
 	return syntax.Diagnostic{Code: "vim/E1138", Message: "Using a Bool as a Number", Span: expression.Span}, true
@@ -944,7 +956,7 @@ func objectCompoundAssignment(result *FileAnalysis, scope *Scope, expression *sy
 		return nil, false
 	}
 	className := assignmentTargetType(result, scope, target).Name
-	if localAggregates(result.File, syntax.BlockClass)[className] == nil || !declarationCanHoldObjectClass(result.File, declaration, className) {
+	if result.classes[className] == nil || !declarationCanHoldObjectClass(result.File, declaration, className) {
 		return nil, false
 	}
 	return target, true

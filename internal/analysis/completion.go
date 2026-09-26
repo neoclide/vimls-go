@@ -26,7 +26,7 @@ func CollectCompletionFactsWithImports(file *syntax.File, imports ImportTypes) *
 	collectCommandScopes(result, result.Root, file.Commands, file.Blocks, nil)
 	collectLambdaScopesCommands(result, result.Root, file.Commands)
 	collectEmbeddedDeclarations(result, result.Root, file.Commands)
-	collectLambdaDeclarations(result, file.Commands)
+	collectLambdaDeclarations(result)
 	collectOpaqueEnumDeclarations(result, file.Commands, file.Blocks)
 	sortDeclarations(result)
 	state := newTypeState(result)

@@ -185,10 +185,24 @@ the scan so a later marker assignment is still visible. Conditional mapping
 removals continue to invalidate previously certain definitions.
 
 Assignment validation computes the file-wide dynamic `execute` fact once and
-passes it into embedded-command and lambda-body validation. Operator validation
-passes proven expression completeness down to children, avoiding repeated
-missing-node scans of complete subtrees without adding a cache to the AST.
+passes it into embedded-command and lambda-body validation. Operator and builtin
+argument validation pass proven expression completeness down to children,
+avoiding repeated missing-node scans of complete subtrees without adding a cache
+to the AST.
 These diagnostic walks use the existing cooperative cancellation checkpoints.
+
+Builtin return inference reuses argument types from the same call's first
+visit without making unknown types permanent across inference passes. Class
+checks reuse the file's existing class index, and lambda declarations use the
+previously collected scopes instead of searching every expression again.
+Reference binding chooses the appropriate value or function lookup once.
+
+Null-receiver checking records assignment targets while discovering lambda
+bodies, then applies those writes after all null candidates have been collected.
+Function and user-command overwrite warnings share one command walk while
+retaining their diagnostic phase order. Style checks collect final augroup
+names and ambiguous references during their command walk; workspace names
+remain available to the separate public suppression entry point.
 
 Declaration indexing, reference binding and type inference remain separate
 phases. Post-inference diagnostic order also remains significant: some checks

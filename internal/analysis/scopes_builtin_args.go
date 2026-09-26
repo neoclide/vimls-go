@@ -457,13 +457,17 @@ func illegalVariableNameBuiltinDiagnostic(function vimdata.BuiltinFunction, argu
 func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope) {
 	seen := make(map[*syntax.Expression]bool)
 	var walkCommands func([]syntax.Command, *Scope)
-	var walk func(*syntax.Expression, *Scope, syntax.Dialect)
-	walk = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
-		if expression == nil || seen[expression] {
+	var walk func(*syntax.Expression, *Scope, syntax.Dialect, bool)
+	walk = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect, complete bool) {
+		if !result.analysisStep() || expression == nil || seen[expression] {
 			return
 		}
 		seen[expression] = true
-		if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
+		if !complete && expression.Kind == syntax.ExpressionCall {
+			// Completeness covers Children, not commands in a LambdaBody.
+			complete = !expressionContainsMissing(expression)
+		}
+		if expression.Kind == syntax.ExpressionCall && complete && !syntaxDiagnosticTouchesCall(result.File.Diagnostics, expression.Span) {
 			builtin, arguments, builtinCall := builtinCallArguments(result.File, expression)
 			callee := (*syntax.Expression)(nil)
 			if len(expression.Children) > 0 {
@@ -749,39 +753,42 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 			}
 			for index, child := range expression.Children {
 				if index >= len(expression.Parameters) {
-					walk(child, lambdaScope, dialect)
+					walk(child, lambdaScope, dialect, complete)
 				}
 			}
 			return
 		}
 		for _, child := range expression.Children {
-			walk(child, scope, dialect)
+			walk(child, scope, dialect, complete)
 		}
 	}
 	walkCommands = func(list []syntax.Command, fallback *Scope) {
 		for index := range list {
+			if !result.analysisStep() {
+				return
+			}
 			command := &list[index]
 			scope := result.commandScopes[command]
 			if scope == nil {
 				scope = fallback
 			}
 			for _, expression := range command.Expressions {
-				walk(expression, scope, command.Dialect)
+				walk(expression, scope, command.Dialect, false)
 			}
 			if command.Mapping != nil {
-				walk(command.Mapping.RHSExpression, scope, command.Dialect)
+				walk(command.Mapping.RHSExpression, scope, command.Dialect, false)
 			}
 			for _, expression := range command.Targets {
-				walk(expression, scope, command.Dialect)
+				walk(expression, scope, command.Dialect, false)
 			}
 			if command.Declaration != nil {
-				walk(command.Declaration.Initializer, scope, command.Dialect)
+				walk(command.Declaration.Initializer, scope, command.Dialect, false)
 			}
 			if command.For != nil {
-				walk(command.For.Iterable, scope, command.Dialect)
+				walk(command.For.Iterable, scope, command.Dialect, false)
 			}
 			if command.Import != nil {
-				walk(command.Import.Path, scope, command.Dialect)
+				walk(command.Import.Path, scope, command.Dialect, false)
 			}
 			if command.Embedded != nil {
 				walkCommands(command.Embedded.Commands, scope)

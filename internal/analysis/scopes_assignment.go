@@ -1009,7 +1009,7 @@ func readOnlyClassMemberAssignment(result *FileAnalysis, scope *Scope, target *s
 		return "", "", false
 	}
 	file := result.File
-	classes := localAggregates(file, syntax.BlockClass)
+	classes := result.classes
 	var class *syntax.Command
 	static := false
 	if target.Kind == syntax.ExpressionIdentifier {
