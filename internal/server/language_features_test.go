@@ -977,9 +977,7 @@ func TestSignatureHelpForStaticImportedFunction(t *testing.T) {
 	}
 
 	overlay := "vim9script\nexport def Run(value: string, fallback: bool = false): string\n  return value\nenddef\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: targetURI, Version: 2, Text: overlay}}); err != nil {
-		t.Fatal(err)
-	}
+	openIndexedNavigationOverlay(t, instance, targetURI, overlay)
 	help, err = instance.SignatureHelp(context.Background(), params)
 	if err != nil || help == nil || help.Signatures[0].Label != "Run(value: string, fallback: bool = false): string" {
 		t.Fatalf("open imported signature = %#v, %v", help, err)
