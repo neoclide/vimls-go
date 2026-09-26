@@ -212,6 +212,11 @@ Null-receiver checking records assignment targets while discovering lambda
 bodies, then applies those writes after all null candidates have been collected.
 This remains a conservative check: any reassignment leaves a variable's null
 state unknown, without tracking execution order or calls to deferred bodies.
+The final diagnostic walk uses command blocks to suppress E1360 within supported
+Vim9 null-guard branches. It respects declaration identity and resets guards at
+deferred execution boundaries. This changes diagnostics only; it adds no static
+type narrowing, short-circuit inference or propagation past a branch. See
+[diagnostics](diagnostics.md) for the condition whitelist and limitations.
 Function and user-command overwrite warnings share one cancellable command walk
 while retaining their diagnostic phase order. Style checks collect final augroup
 names and ambiguous references during their command walk; workspace names

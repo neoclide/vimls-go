@@ -70,6 +70,24 @@ function, lambda or user-command bodies. These checks do not model execution
 order or whether those bodies run, so an unexecuted assignment can suppress a
 null-receiver diagnostic.
 
+In Vim9, a direct `if` or `elseif` condition can suppress E1360 for the same
+variable inside its guarded branch. The supported non-null conditions are
+`x != null_object`, `x isnot null_object`, `x != null`, and `instanceof(x, C)`
+with exactly one statically known local class `C`. An `else` paired with an
+`if` using `x == null_object`, `x is null_object`, or `x == null` also protects
+the variable, provided there is no `elseif`. Parentheses, reversed comparisons
+and logical negation are supported. `x is null`, `x isnot null`, and
+`instanceof` with `null_class`, multiple classes, aliases, interfaces or imported
+classes do not establish a guard.
+Malformed conditional headers and unclosed `if` blocks do not establish guards.
+
+Guards follow declaration identity, apply only inside the branch, and do not
+carry into deferred function, lambda, user-command, autocommand or mapping
+bodies. There is no inference from short-circuit expressions, loops or early
+returns, and no tracking of dynamic rebinding through `execute` or unresolved
+calls. This only suppresses null-receiver diagnostics: declared types, member
+lookup, completion, and compiled E1325/E1013 checks remain unchanged.
+
 ## Option assignment errors
 
 These diagnostics follow Vim v9.2.1015 for direct option assignments, except

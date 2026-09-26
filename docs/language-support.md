@@ -65,8 +65,11 @@ through symbolic-link parent directories remain supported.
 Types are inferred from known values and function return types in both dialects.
 In `def` functions and Vim9 lambdas, `type()` guards preserve compiled types:
 copying an `any` value inside the guarded branch still infers `any`.
+Vim9 null comparisons and direct `instanceof` guards can suppress E1360 within
+their non-null branch; they do not narrow the variable's static type.
 Uncertain dynamic behavior may leave types or references unresolved. See
-[diagnostics](diagnostics.md) for diagnostic coverage and warning policies.
+[diagnostics](diagnostics.md) for supported guard conditions, diagnostic coverage
+and warning policies.
 
 LF, CRLF and CR line endings are supported. Formatting and rename preserve
 existing line endings.

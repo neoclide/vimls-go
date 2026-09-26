@@ -2275,16 +2275,14 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 	type scopedExpression struct {
 		expression *syntax.Expression
 		scope      *Scope
-		dialect    syntax.Dialect
 	}
-	var expressions []scopedExpression
 	var assignments []scopedExpression
 	candidates := make(map[*Declaration]bool)
 	seenLambdas := make(map[*syntax.Expression]bool)
 	var collectCommands func([]syntax.Command, *Scope)
 	var collectLambdaBodies func(*syntax.Expression, *Scope)
 	collectLambdaBodies = func(expression *syntax.Expression, scope *Scope) {
-		if expression == nil {
+		if expression == nil || !result.analysisStep() {
 			return
 		}
 		expressionScope := scope
@@ -2313,6 +2311,9 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 	}
 	collectCommands = func(commands []syntax.Command, fallback *Scope) {
 		for index := range commands {
+			if !result.analysisStep() {
+				return
+			}
 			command := &commands[index]
 			scope := result.commandScopes[command]
 			if scope == nil {
@@ -2332,39 +2333,33 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 					}
 				}
 			}
-			appendExpression := func(expression *syntax.Expression) {
-				if expression != nil {
-					expressions = append(expressions, scopedExpression{expression: expression, scope: scope, dialect: command.Dialect})
-					collectLambdaBodies(expression, scope)
-				}
-			}
 			for _, expression := range command.Expressions {
-				appendExpression(expression)
+				collectLambdaBodies(expression, scope)
 			}
 			for _, expression := range command.Targets {
-				appendExpression(expression)
+				collectLambdaBodies(expression, scope)
 			}
 			if command.Mapping != nil {
-				appendExpression(command.Mapping.RHSExpression)
+				collectLambdaBodies(command.Mapping.RHSExpression, scope)
 			}
 			if command.Declaration != nil {
-				appendExpression(command.Declaration.Initializer)
+				collectLambdaBodies(command.Declaration.Initializer, scope)
 			}
 			if command.For != nil {
-				appendExpression(command.For.Iterable)
+				collectLambdaBodies(command.For.Iterable, scope)
 			}
 			if command.Import != nil {
-				appendExpression(command.Import.Path)
+				collectLambdaBodies(command.Import.Path, scope)
 			}
 			for _, value := range command.EnumValues {
-				appendExpression(value.Initializer)
+				collectLambdaBodies(value.Initializer, scope)
 				for _, argument := range value.Arguments {
-					appendExpression(argument)
+					collectLambdaBodies(argument, scope)
 				}
 			}
 			if command.Function != nil {
 				for _, parameter := range command.Function.Parameters {
-					appendExpression(parameter.Default)
+					collectLambdaBodies(parameter.Default, scope)
 				}
 			}
 			if command.Embedded != nil {
@@ -2396,10 +2391,145 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 		}
 	}
 
+	// The candidate set deliberately remains file-wide: any visible write,
+	// including a later or deferred one, makes a declaration ineligible. The
+	// environment below only suppresses that existing E1360 in a directly
+	// proven branch; it is not an assignment or type-flow tracker.
+	type nullGuard struct {
+		declaration *Declaration
+		whenTrue    bool
+	}
 	seenExpressions := make(map[*syntax.Expression]bool)
+	active := make(map[*Declaration]int)
 	var appendDiagnostics func(*syntax.Expression, *Scope, syntax.Dialect)
+	var walkCommands func([]syntax.Command, []syntax.Block, *Scope, bool)
+	var walkSequence func([]syntax.Command, []syntax.Block, int, int, *Scope)
+
+	unwrapParenthesized := func(expression *syntax.Expression) *syntax.Expression {
+		for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+			if !result.analysisStep() {
+				return nil
+			}
+			expression = expression.Children[0]
+		}
+		return expression
+	}
+	identifier := func(expression *syntax.Expression, scope *Scope) *Declaration {
+		expression = unwrapParenthesized(expression)
+		if expression == nil || expression.Kind != syntax.ExpressionIdentifier {
+			return nil
+		}
+		declaration := resolve(scope, expression.Value, expression.Span.Start, false, nil)
+		if !candidates[declaration] {
+			return nil
+		}
+		return declaration
+	}
+	nullLiteral := func(expression *syntax.Expression, name string) bool {
+		expression = unwrapParenthesized(expression)
+		return expression != nil && expression.Kind == syntax.ExpressionIdentifier && expression.Value == name
+	}
+	headerComplete := func(command *syntax.Command) bool {
+		if syntaxDiagnosticOverlaps(file.Diagnostics, command.Span) {
+			return false
+		}
+		if command.Canonical != "else" && command.Canonical != "endif" {
+			return true
+		}
+		argument := strings.TrimSpace(file.Text(command.Argument))
+		return argument == "" || strings.HasPrefix(argument, "#")
+	}
+	guardFor := func(expression *syntax.Expression, scope *Scope) nullGuard {
+		if expression == nil || scope == nil || !result.analysisStep() {
+			return nullGuard{}
+		}
+		negated := false
+		for {
+			if !result.analysisStep() {
+				return nullGuard{}
+			}
+			if expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+				expression = expression.Children[0]
+				continue
+			}
+			if expression.Kind == syntax.ExpressionUnary && expression.Value == "!" && len(expression.Children) == 1 {
+				negated = !negated
+				expression = expression.Children[0]
+				continue
+			}
+			break
+		}
+		if expression == nil {
+			return nullGuard{}
+		}
+		if expression.Kind == syntax.ExpressionBinary && len(expression.Children) == 2 {
+			left, right := expression.Children[0], expression.Children[1]
+			declaration := identifier(left, scope)
+			nullName := ""
+			if declaration != nil {
+				if nullLiteral(right, "null_object") {
+					nullName = "null_object"
+				} else if nullLiteral(right, "null") {
+					nullName = "null"
+				}
+			} else {
+				declaration = identifier(right, scope)
+				if declaration != nil {
+					if nullLiteral(left, "null_object") {
+						nullName = "null_object"
+					} else if nullLiteral(left, "null") {
+						nullName = "null"
+					}
+				}
+			}
+			if declaration == nil || nullName == "" {
+				return nullGuard{}
+			}
+			whenTrue := false
+			switch expression.Value {
+			case "!=":
+				whenTrue = true
+			case "==":
+				whenTrue = false
+			case "isnot":
+				if nullName != "null_object" {
+					return nullGuard{}
+				}
+				whenTrue = true
+			case "is":
+				if nullName != "null_object" {
+					return nullGuard{}
+				}
+				whenTrue = false
+			default:
+				return nullGuard{}
+			}
+			if negated {
+				whenTrue = !whenTrue
+			}
+			return nullGuard{declaration: declaration, whenTrue: whenTrue}
+		}
+		if expression.Kind != syntax.ExpressionCall || expression.Value != "" || len(expression.Children) != 3 ||
+			expression.Children[0] == nil || expression.Children[0].Kind != syntax.ExpressionIdentifier || expression.Children[0].Value != "instanceof" {
+			return nullGuard{}
+		}
+		if resolve(scope, "instanceof", expression.Children[0].Span.Start, true, nil) != nil {
+			return nullGuard{}
+		}
+		declaration := identifier(expression.Children[1], scope)
+		className := expression.Children[2]
+		if declaration == nil || className == nil || className.Kind != syntax.ExpressionIdentifier {
+			return nullGuard{}
+		}
+		classDeclaration := resolve(scope, className.Value, className.Span.Start, false, nil)
+		class := result.classes[className.Value]
+		if classDeclaration == nil || classDeclaration.Kind != SymbolKindClass || class == nil || class.Aggregate == nil || class.Aggregate.Name != classDeclaration.Span {
+			return nullGuard{}
+		}
+		return nullGuard{declaration: declaration, whenTrue: !negated}
+	}
 	appendDiagnostics = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
-		if expression == nil || scope == nil || seenExpressions[expression] {
+		if expression == nil || scope == nil || seenExpressions[expression] || !result.analysisStep() {
 			return
 		}
 		seenExpressions[expression] = true
@@ -2414,7 +2544,8 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			} else {
 				null := isNullObject(receiver)
 				if !null && receiver.Kind == syntax.ExpressionIdentifier {
-					null = candidates[resolve(scope, receiver.Value, receiver.Span.Start, false, nil)]
+					declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
+					null = candidates[declaration] && active[declaration] == 0
 				}
 				if null {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -2428,6 +2559,14 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
 				expressionScope = lambdaScope
 			}
+			if len(active) != 0 {
+				saved := active
+				active = make(map[*Declaration]int)
+				defer func() { active = saved }()
+			}
+			if expression.LambdaBody != nil {
+				walkCommands(expression.LambdaBody.Commands, expression.LambdaBody.Blocks, expressionScope, false)
+			}
 		}
 		for index, child := range expression.Children {
 			if expression.Kind != syntax.ExpressionLambda || index >= len(expression.Parameters) {
@@ -2435,9 +2574,165 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			}
 		}
 	}
-	for _, item := range expressions {
-		appendDiagnostics(item.expression, item.scope, item.dialect)
+	walkCommandExpressions := func(command *syntax.Command, scope *Scope) {
+		if command == nil || scope == nil || !result.analysisStep() {
+			return
+		}
+		if command.Mapping != nil && len(active) != 0 {
+			saved := active
+			active = make(map[*Declaration]int)
+			defer func() { active = saved }()
+		}
+		for _, expression := range command.Expressions {
+			appendDiagnostics(expression, scope, command.Dialect)
+		}
+		for _, expression := range command.Targets {
+			appendDiagnostics(expression, scope, command.Dialect)
+		}
+		if command.Mapping != nil {
+			appendDiagnostics(command.Mapping.RHSExpression, scope, command.Dialect)
+		}
+		if command.Declaration != nil {
+			appendDiagnostics(command.Declaration.Initializer, scope, command.Dialect)
+		}
+		if command.For != nil {
+			appendDiagnostics(command.For.Iterable, scope, command.Dialect)
+		}
+		if command.Import != nil {
+			appendDiagnostics(command.Import.Path, scope, command.Dialect)
+		}
+		for _, value := range command.EnumValues {
+			appendDiagnostics(value.Initializer, scope, command.Dialect)
+			for _, argument := range value.Arguments {
+				appendDiagnostics(argument, scope, command.Dialect)
+			}
+		}
+		if command.Function != nil {
+			saved := active
+			resetDefaults := len(active) != 0
+			if resetDefaults {
+				active = make(map[*Declaration]int)
+			}
+			for _, parameter := range command.Function.Parameters {
+				appendDiagnostics(parameter.Default, scope, command.Dialect)
+			}
+			if resetDefaults {
+				active = saved
+			}
+		}
+		if command.Embedded != nil {
+			walkCommands(command.Embedded.Commands, command.Embedded.Blocks, scope, command.UserCommand != nil || command.Autocmd != nil)
+		}
 	}
+	walkSequence = func(commands []syntax.Command, blocks []syntax.Block, start, end int, fallback *Scope) {
+		for index := start; index < end; {
+			if !result.analysisStep() {
+				return
+			}
+			command := &commands[index]
+			scope := result.commandScopes[command]
+			if scope == nil {
+				scope = fallback
+			}
+			if !isBlockHeader(blocks, index, command.Block) {
+				walkCommandExpressions(command, scope)
+				index++
+				continue
+			}
+			block := blocks[command.Block]
+			resetsGuard := block.Kind == syntax.BlockDef || block.Kind == syntax.BlockFunction || block.Kind == syntax.BlockClass || block.Kind == syntax.BlockInterface || block.Kind == syntax.BlockEnum || block.Kind == syntax.BlockCommand
+			if block.Kind != syntax.BlockIf {
+				if !resetsGuard {
+					walkCommandExpressions(command, scope)
+					index++
+					continue
+				}
+				saved := active
+				if len(active) != 0 {
+					active = make(map[*Declaration]int)
+				}
+				walkCommandExpressions(command, scope)
+				if block.End > index && block.End < len(commands) {
+					walkSequence(commands, blocks, index+1, block.End, scope)
+					index = block.End
+				} else {
+					walkSequence(commands, blocks, index+1, end, scope)
+					index = end
+				}
+				active = saved
+				continue
+			}
+			valid := block.End > index && block.End < len(commands) && commands[block.End].Canonical == "endif" && headerComplete(command) && headerComplete(&commands[block.End])
+			for branchIndex, branchHeader := range block.Branches {
+				if !result.analysisStep() {
+					return
+				}
+				if branchHeader < 0 || branchHeader >= block.End || !headerComplete(&commands[branchHeader]) ||
+					commands[branchHeader].Canonical != "elseif" && commands[branchHeader].Canonical != "else" ||
+					commands[branchHeader].Canonical == "else" && branchIndex != len(block.Branches)-1 {
+					valid = false
+					break
+				}
+			}
+			if !valid {
+				walkCommandExpressions(command, scope)
+				index++
+				continue
+			}
+			branchHeader := index
+			for branchIndex := 0; ; branchIndex++ {
+				branch := &commands[branchHeader]
+				branchScope := result.commandScopes[branch]
+				if branchScope == nil {
+					branchScope = scope
+				}
+				walkCommandExpressions(branch, branchScope)
+				branchEnd := block.End
+				if branchIndex < len(block.Branches) {
+					branchEnd = block.Branches[branchIndex]
+				}
+				guard := nullGuard{}
+				if branch.Canonical == "if" || branch.Canonical == "elseif" {
+					if branch.Dialect == syntax.Vim9 && len(branch.Expressions) == 1 {
+						guard = guardFor(branch.Expressions[0], branchScope)
+					}
+				} else if len(block.Branches) == 1 && commands[block.Branches[0]].Canonical == "else" && len(commands[index].Expressions) == 1 && commands[index].Dialect == syntax.Vim9 {
+					guard = guardFor(commands[index].Expressions[0], scope)
+					guard.whenTrue = !guard.whenTrue
+				}
+				if guard.declaration != nil && guard.whenTrue {
+					active[guard.declaration]++
+				}
+				walkSequence(commands, blocks, branchHeader+1, branchEnd, branchScope)
+				if guard.declaration != nil && guard.whenTrue {
+					active[guard.declaration]--
+					if active[guard.declaration] == 0 {
+						delete(active, guard.declaration)
+					}
+				}
+				if branchIndex == len(block.Branches) {
+					break
+				}
+				branchHeader = block.Branches[branchIndex]
+			}
+			index = block.End
+			continue
+		}
+	}
+	walkCommands = func(commands []syntax.Command, blocks []syntax.Block, fallback *Scope, reset bool) {
+		if fallback == nil {
+			fallback = result.Root
+		}
+		if reset {
+			if len(active) != 0 {
+				saved := active
+				active = make(map[*Declaration]int)
+				defer func() { active = saved }()
+			}
+		}
+		walkSequence(commands, blocks, 0, len(commands), fallback)
+	}
+	walkCommands(file.Commands, file.Blocks, result.Root, false)
 }
 
 func completedAggregateMethodSpan(file *syntax.File, aggregate, method *syntax.Command) (syntax.Span, bool) {
