@@ -121,8 +121,7 @@ parent directories remain supported.
 
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
-- Improve type information for values imported into Legacy code and for code
-  whose type becomes more specific after a condition.
+- Improve type information for values imported into Legacy code.
   Ordinary imports now propagate file-local exported variable/constant types,
   with dependency-aware semantic caching. Transitive re-export inference,
   cross-file named type identities, and autoload value inference remain deferred.
