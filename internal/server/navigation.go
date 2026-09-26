@@ -742,14 +742,10 @@ func (s *Server) linkedEditingRanges(ctx context.Context, documentURI string, po
 	if name := document.declaration.Name; len(name) > 2 && name[1] == ':' && strings.ContainsRune("gbwtv", rune(name[0])) {
 		return withhold()
 	}
-	// Type annotations are not bound references yet, including their import
-	// namespace qualifiers. Expression occurrences cannot prove a complete
-	// rename of either a type name or an explicit import alias.
-	switch document.declaration.Kind {
-	case analysis.SymbolKindClass, analysis.SymbolKindInterface, analysis.SymbolKindEnum, analysis.SymbolKindTypeAlias, analysis.SymbolKindImport:
+	if _, _, workspaceVisible := document.workspaceLocalTarget(); workspaceVisible {
 		return withhold()
 	}
-	if _, _, workspaceVisible := document.workspaceLocalTarget(); workspaceVisible {
+	if document.hasUnresolvedTypeReference() {
 		return withhold()
 	}
 	spans := document.occurrences(true)
@@ -786,6 +782,25 @@ func sameNavigationURI(left, right uri.URI) bool {
 		return sameWorkspacePath(leftPath, rightPath)
 	}
 	return left == right
+}
+
+// A deferred body can use a type or import alias declared later. Until those
+// references are bound, renaming only the resolved occurrences is incomplete.
+func (document *navigationDocument) hasUnresolvedTypeReference() bool {
+	if document.declaration == nil {
+		return false
+	}
+	switch document.declaration.Kind {
+	case analysis.SymbolKindClass, analysis.SymbolKindInterface, analysis.SymbolKindEnum, analysis.SymbolKindTypeAlias, analysis.SymbolKindImport:
+	default:
+		return false
+	}
+	for _, reference := range document.analysis.References {
+		if reference.Declaration == nil && reference.Name == document.declaration.Name {
+			return true
+		}
+	}
+	return false
 }
 
 func (document *navigationDocument) occurrences(includeDeclaration bool) []syntax.Span {

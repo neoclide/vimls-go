@@ -252,12 +252,6 @@ func TestWillRenameFilesWithholdsUnprovableNamespace(t *testing.T) {
 			source: "vim9script\nimport './lib.vim'\n# see lib.Two\necho lib.Two()\n",
 		},
 		{
-			// A type annotation is not a bound reference, so the bound
-			// references alone cannot be proven to be every use site.
-			name:   "type annotation",
-			source: "vim9script\nimport './lib.vim'\nvar value: lib.MyType\n",
-		},
-		{
 			// A script-local spelling does not bind to the import declaration,
 			// so replacing the new name alone would drop its prefix.
 			name:   "script local spelling",
@@ -277,6 +271,23 @@ func TestWillRenameFilesWithholdsUnprovableNamespace(t *testing.T) {
 				t.Fatalf("document changes = %#v", edit.DocumentChanges)
 			}
 		})
+	}
+}
+
+func TestWillRenameFilesRewritesDerivedNamespaceTypeAnnotations(t *testing.T) {
+	root := t.TempDir()
+	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport class Widget\nendclass\n")
+	source := "vim9script\nimport './lib.vim'\nvar value: list<lib.Widget> = [lib.Widget.new()]\n"
+	mainPath := writeWorkspaceFile(t, root, "main.vim", source)
+	instance := initializeWorkspaceServer(t, root)
+	edit, err := instance.WillRenameFiles(context.Background(), renameFileParams(libPath, filepath.Join(root, "util.vim")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := applyRenameEdits(t, edit, map[string]string{mainPath: source})
+	want := "vim9script\nimport './util.vim'\nvar value: list<util.Widget> = [util.Widget.new()]\n"
+	if updated[mainPath] != want {
+		t.Fatalf("main.vim = %q, want %q", updated[mainPath], want)
 	}
 }
 

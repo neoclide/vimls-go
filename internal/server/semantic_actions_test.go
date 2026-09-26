@@ -424,7 +424,7 @@ func TestSemanticTokensClassifyVim9TypesEnumsAndMembers(t *testing.T) {
 	assertSemanticToken(t, tokens.Data, 4, 5, semanticEnum, semanticDeclaration|semanticReadonly)
 	assertSemanticToken(t, tokens.Data, 5, 2, semanticEnumMember, semanticDeclaration|semanticReadonly)
 	assertSemanticToken(t, tokens.Data, 7, 5, semanticTypeName, semanticDeclaration|semanticReadonly)
-	assertSemanticToken(t, tokens.Data, 8, 11, semanticTypeName, 0)
+	assertSemanticToken(t, tokens.Data, 8, 11, semanticInterface, semanticReadonly)
 	assertSemanticToken(t, tokens.Data, 9, 6, semanticMethod, 0)
 }
 
@@ -436,7 +436,7 @@ func TestSemanticTokensClassifyImportedTypesAndMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertSemanticToken(t, tokens.Data, 1, 20, semanticNamespace, semanticDeclaration|semanticReadonly)
-	assertSemanticToken(t, tokens.Data, 2, 10, semanticNamespace, 0)
+	assertSemanticToken(t, tokens.Data, 2, 10, semanticNamespace, semanticReadonly)
 	assertSemanticToken(t, tokens.Data, 2, 14, semanticTypeName, 0)
 	assertSemanticToken(t, tokens.Data, 3, 0, semanticNamespace, semanticReadonly)
 	assertSemanticToken(t, tokens.Data, 3, 4, semanticMethod, 0)

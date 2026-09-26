@@ -36,11 +36,14 @@ and global symbols, for class and interface members, and for symbols declared in
 another file, because editing only the open document would leave the rest of the
 workspace inconsistent. Explicit `g:`, `b:`, `w:`, `t:` and `v:` names are withheld
 at every scope, including declarations inside functions: these scopes are shared
-with other scripts. Class, interface, enum and type-alias names, as well as all
-import aliases (including explicit `as` aliases), are also withheld until type
-annotation references are included. A reference spelled differently from the
-declaration, such as `<SID>name` beside `s:name`, is withheld as well, because
-linked ranges must carry identical text.
+with other scripts. Non-exported class, interface, enum and type-alias names,
+and explicit `as` import aliases, include their type annotation references.
+Local type or explicit alias rename and linked editing are withheld when a
+same-named reference remains unresolved, including a function body that uses
+a class or import declared later.
+Filename-derived import aliases require a file rename instead. A reference
+spelled differently from the declaration, such as `<SID>name` beside `s:name`,
+is withheld as well, because linked ranges must carry identical text.
 
 Renaming a file through the client's file operation rewrites the Vim9 `:import`
 statements that name it, and also the relative imports of the renamed files
@@ -49,7 +52,8 @@ original form: a relative path stays relative to the importing script, an
 absolute path stays absolute, and a `runtimepath` import stays below the same
 `import/` or `autoload/` directory. A `:import` without an `as` alias derives its
 namespace from the filename, so the derived declaration and every bound
-reference are rewritten together for plain single- or double-quoted literals.
+reference, including namespace qualifiers in type annotations, are rewritten
+together for plain single- or double-quoted literals.
 The proposed path is checked against the whole file rename batch and the
 runtimepath search order; a path that would resolve to another script is
 withheld. An import is left alone, and its document is skipped rather than partly
@@ -57,7 +61,7 @@ edited, when the new location cannot be expressed in the original form, when
 the new filename is not a valid Vim identifier, when the
 document's content cannot be verified against the indexed source, or when the
 derived namespace has a textual occurrence that the analysis does not bind, such
-as a type annotation or a comment. A rename is never refused for these reasons.
+as a comment or opaque code. A rename is never refused for these reasons.
 
 A rename batch whose source or existing destination is itself a symbolic link
 produces no import edits. Moving or replacing the link must not be treated as

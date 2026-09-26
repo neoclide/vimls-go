@@ -7024,6 +7024,34 @@ func walkCommand(result *FileAnalysis, file *syntax.File, command *syntax.Comman
 	if command == nil || scope == nil {
 		return
 	}
+	if command.Declaration != nil {
+		for _, binding := range command.Declaration.Bindings {
+			walkTypeReference(result, file, binding.ParsedType, scope, command.Dialect, nil)
+		}
+	}
+	if command.For != nil {
+		for _, binding := range command.For.Bindings {
+			walkTypeReference(result, file, binding.ParsedType, scope, command.Dialect, nil)
+		}
+	}
+	if command.Function != nil {
+		typeParameters := command.Function.TypeParameters
+		for _, parameter := range command.Function.Parameters {
+			walkTypeReference(result, file, parameter.Type, scope, command.Dialect, typeParameters)
+		}
+		walkTypeReference(result, file, command.Function.ReturnType, scope, command.Dialect, typeParameters)
+	}
+	if command.TypeAlias != nil {
+		walkTypeReference(result, file, command.TypeAlias.Type, scope, command.Dialect, nil)
+	}
+	if command.Aggregate != nil {
+		for _, span := range command.Aggregate.Extends {
+			walkTypeNameReference(result, file, file.Text(span), span, scope, command.Dialect, nil)
+		}
+		for _, span := range command.Aggregate.Implements {
+			walkTypeNameReference(result, file, file.Text(span), span, scope, command.Dialect, nil)
+		}
+	}
 	invalidUnderscoreDeclaration := false
 	if command.Dialect == syntax.Vim9 && command.Declaration != nil &&
 		(command.Canonical == "var" || command.Canonical == "const" || command.Canonical == "final") &&
@@ -7116,6 +7144,10 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 	if expression == nil || scope == nil || file == nil {
 		return
 	}
+	for _, typeArgument := range expression.TypeArguments {
+		walkTypeReference(result, file, typeArgument, scope, dialect, nil)
+	}
+	walkTypeReference(result, file, expression.CastType, scope, dialect, nil)
 	switch expression.Kind {
 	case syntax.ExpressionInterpolatedString:
 		for _, child := range expression.Children {
@@ -7281,6 +7313,10 @@ func walkExpression(result *FileAnalysis, file *syntax.File, expression *syntax.
 		if lambdaScope == nil {
 			lambdaScope = scope
 		}
+		for _, parameter := range expression.Parameters {
+			walkTypeReference(result, file, parameter.Type, lambdaScope, dialect, nil)
+		}
+		walkTypeReference(result, file, expression.ReturnType, lambdaScope, dialect, nil)
 		if expression.LambdaBody != nil {
 			for index := range expression.LambdaBody.Commands {
 				command := &expression.LambdaBody.Commands[index]

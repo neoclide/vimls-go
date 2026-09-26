@@ -33,6 +33,9 @@ func (s *Server) PrepareRename(ctx context.Context, params *protocol.PrepareRena
 		if document.memberConstructor || document.filenameImportNamespace() {
 			return nil, document.checkCurrent(ctx)
 		}
+		if document.hasUnresolvedTypeReference() {
+			return nil, document.checkCurrent(ctx)
+		}
 		_, _, workspaceAttempt := document.workspaceLocalTarget()
 		workspaceAttempt = workspaceAttempt || document.external != nil
 		workspaceTargetResolved := false
@@ -149,6 +152,9 @@ func (s *Server) Rename(ctx context.Context, params *protocol.RenameParams) (*pr
 			return nil, err
 		}
 		if document.memberConstructor || document.filenameImportNamespace() {
+			return nil, unsafeRenameError()
+		}
+		if document.hasUnresolvedTypeReference() {
 			return nil, unsafeRenameError()
 		}
 		_, _, workspaceAttempt := document.workspaceLocalTarget()

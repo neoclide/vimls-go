@@ -84,10 +84,13 @@ including declarations inside functions, because their scopes are shared with
 other scripts.
 Extending it to those symbols needs a client that applies edits across documents
 while typing.
-Class, interface, enum and type-alias names, as well as all import aliases, are
-withheld until the analysis records their type annotation references. Explicit
-`as` aliases are not exempt: expression occurrences alone can leave variable,
-parameter, return and nested type annotations naming the old namespace.
+Non-exported class, interface, enum and type-alias names and explicit `as` import
+aliases include their bound type annotation references. These cover variable,
+parameter, return and nested types, casts, generic call arguments and aggregate
+inheritance clauses. Filename-derived import aliases still require a file rename.
+Local type or explicit alias rename and linked editing remain withheld when a
+same-named reference is unresolved, such as an earlier function body referring
+to a later class or import.
 
 Renaming a member of an exported aggregate uses the same workspace reference
 search from its declaration and from an importing use site. The search includes
@@ -102,10 +105,9 @@ in its own form, and the relative imports of the renamed files are recomputed fo
 their new location. The derived namespace of an import without an `as` alias is
 rewritten together with its bound references, and only when the namespace has no
 textual occurrence outside the literal that the analysis does not bind. That
-completeness rule is what withholds a document whose namespace appears in a type
-annotation or a comment: `analysis.References` records neither, so the bound
-references alone cannot be proven to be every use site. Teaching the analysis to
-bind namespaced type names would let those documents be rewritten too.
+completeness rule still withholds a document whose namespace appears in a comment
+or opaque code. Namespace qualifiers in type annotations are bound references
+and are rewritten with their expression uses.
 Plain single- and double-quoted imports both preserve their quoting, including
 imports without an alias. Proposed paths are resolved against the prospective
 file set for the entire rename batch, preserving runtimepath precedence and

@@ -108,6 +108,63 @@ func TestPrepareRenameAndRenameBoundSymbol(t *testing.T) {
 	}
 }
 
+func TestRenameLocalClassIncludesTypeAnnotations(t *testing.T) {
+	source := "\ufeffvim9script\r\n# prefix\r\nclass Widget\r\nendclass\r\necho \"🧩e\u0301\" | var value: Widget = Widget.new()\r\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: protocol.Position{Line: 2, Character: 8}}
+	edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: "Gadget"})
+	if err != nil || edit == nil || len(edit.DocumentChanges) != 1 {
+		t.Fatalf("rename = %#v, %v", edit, err)
+	}
+	documentEdit := edit.DocumentChanges[0].(*protocol.TextDocumentEdit)
+	if got, want := applyTextEdits(t, source, documentEdit.Edits), strings.ReplaceAll(source, "Widget", "Gadget"); got != want {
+		t.Fatalf("renamed source = %q, want %q", got, want)
+	}
+}
+
+func TestRenameExportedClassIncludesClosedImporterTypeAnnotations(t *testing.T) {
+	root := t.TempDir()
+	libSource := "vim9script\nexport class Widget\nendclass\n"
+	libPath := writeWorkspaceFile(t, root, "lib.vim", libSource)
+	mainSource := "vim9script\nimport './lib.vim' as lib\nvar value: list<lib.Widget> = [lib.Widget.new()]\n"
+	mainPath := writeWorkspaceFile(t, root, "main.vim", mainSource)
+	instance := initializeWorkspaceServer(t, root)
+	libURI := uri.File(libPath)
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: libURI, Version: 3, Text: libSource}}); err != nil {
+		t.Fatal(err)
+	}
+	params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: libURI}, Position: protocol.Position{Line: 1, Character: 14}}
+	edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: "Gadget"})
+	if err != nil || edit == nil {
+		t.Fatalf("rename = %#v, %v", edit, err)
+	}
+	updated := applyRenameEdits(t, edit, map[string]string{libPath: libSource, mainPath: mainSource})
+	if got, want := updated[mainPath], strings.ReplaceAll(mainSource, "Widget", "Gadget"); got != want {
+		t.Fatalf("main.vim = %q, want %q", got, want)
+	}
+}
+
+func TestRenameWithholdsUnresolvedEarlierTypeUse(t *testing.T) {
+	for _, test := range []struct {
+		name, source, replacement string
+		position                  protocol.Position
+	}{
+		{"class", "vim9script\ndef Make(): any\n  var value: Later = Later.new()\n  return value\nenddef\nclass Later\nendclass\nvar ready: Later = Later.new()\nMake()\n", "Ready", protocol.Position{Line: 5, Character: 8}},
+		{"import alias", "vim9script\ndef Make(): any\n  var value: types.Widget\n  return value\nenddef\nimport './types.vim' as types\nvar ready: types.Widget\n", "models", protocol.Position{Line: 5, Character: 24}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}, Position: test.position}
+			if prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: params}); err != nil || prepared != nil {
+				t.Fatalf("prepare rename = %#v, %v", prepared, err)
+			}
+			if edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: test.replacement}); err == nil || edit != nil {
+				t.Fatalf("rename = %#v, %v", edit, err)
+			}
+		})
+	}
+}
+
 func TestRenameStaticImportAcrossClosedAndOpenDocuments(t *testing.T) {
 	root := t.TempDir()
 	libPath := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport def Run()\n  return Run()\nenddef\n")

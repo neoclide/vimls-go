@@ -14,9 +14,7 @@ import (
 	"go.lsp.dev/uri"
 )
 
-// An expression reference must not enable a partial rename of an import alias
-// while its variable, parameter, return or nested type references are omitted.
-func TestLinkedEditingRangeWithholdsExplicitImportAliases(t *testing.T) {
+func TestLinkedEditingRangeIncludesExplicitImportAliasTypeReferences(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
 	}{
@@ -24,7 +22,6 @@ func TestLinkedEditingRangeWithholdsExplicitImportAliases(t *testing.T) {
 		{"parameter type", "def Use(value: types.Widget)\n  echo types.Widget.new()\nenddef\n"},
 		{"return type", "def Make(): types.Widget\n  return types.Widget.new()\nenddef\n"},
 		{"nested type", "var values: list<types.Widget> = [types.Widget.new()]\n"},
-		// This is deliberately conservative until type-name binding is complete.
 		{"expression only", "var value = types.Widget.new()\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -34,7 +31,7 @@ func TestLinkedEditingRangeWithholdsExplicitImportAliases(t *testing.T) {
 				strings.Index(source, "as types") + len("as "),
 				strings.LastIndex(source, "types.Widget.new()"),
 			} {
-				checkLinkedEditingSafetyAt(t, instance, documentURI, source, "types", offset, false)
+				checkLinkedEditingSafetyAt(t, instance, documentURI, source, "types", offset, true)
 			}
 		})
 	}

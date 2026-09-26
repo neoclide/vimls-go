@@ -159,16 +159,40 @@ func linkedEditingRanges(t *testing.T, instance *Server, documentURI uri.URI, po
 	return ranges
 }
 
-// Type annotations are not included in analysis.References. Preserve the
-// original reproducer, where a constructor reference would otherwise enable
-// linked editing while leaving the annotation with the old class name.
-func TestLinkedEditingRangeWithholdsTypeNames(t *testing.T) {
+func TestLinkedEditingRangeIncludesTypeNames(t *testing.T) {
 	source := "vim9script\nclass Widget\nendclass\nvar x: Widget = Widget.new()\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
 	for _, position := range []protocol.Position{{Line: 1, Character: 8}, {Line: 3, Character: 18}} {
 		ranges := linkedEditingRanges(t, instance, documentURI, position)
-		if ranges != nil {
-			t.Fatalf("ranges at %+v = %#v, want nil until type references are complete", position, ranges)
+		want := []protocol.Range{navigationRange(1, 6, 12), navigationRange(3, 7, 13), navigationRange(3, 16, 22)}
+		if ranges == nil || !slices.Equal(ranges.Ranges, want) {
+			t.Fatalf("ranges at %+v = %#v, want %#v", position, ranges, want)
 		}
+	}
+}
+
+func TestLinkedEditingRangeTypeNamesPreservesUTF16BOMCRLFOffsets(t *testing.T) {
+	source := "\ufeffvim9script\r\n# prefix\r\nclass Widget\r\nendclass\r\necho \"🧩e\u0301\" | var value: Widget = Widget.new()\r\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	ranges := linkedEditingRanges(t, instance, documentURI, protocol.Position{Line: 4, Character: 26})
+	want := []protocol.Range{navigationRange(2, 6, 12), navigationRange(4, 25, 31), navigationRange(4, 34, 40)}
+	if ranges == nil || !slices.Equal(ranges.Ranges, want) {
+		t.Fatalf("ranges = %#v, want %#v", ranges, want)
+	}
+}
+
+func TestLinkedEditingRangeWithholdsUnresolvedEarlierTypeUse(t *testing.T) {
+	source := "vim9script\ndef Make(): any\n  var value: Later = Later.new()\n  return value\nenddef\nclass Later\nendclass\nvar ready: Later = Later.new()\nMake()\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	if ranges := linkedEditingRanges(t, instance, documentURI, protocol.Position{Line: 5, Character: 8}); ranges != nil {
+		t.Fatalf("ranges = %#v, want nil while earlier Later uses are unresolved", ranges)
+	}
+}
+
+func TestLinkedEditingRangeWithholdsUnresolvedEarlierImportTypeUse(t *testing.T) {
+	source := "vim9script\ndef Make(): any\n  var value: types.Widget\n  return value\nenddef\nimport './types.vim' as types\nvar ready: types.Widget\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	if ranges := linkedEditingRanges(t, instance, documentURI, protocol.Position{Line: 5, Character: 24}); ranges != nil {
+		t.Fatalf("ranges = %#v, want nil while earlier types use is unresolved", ranges)
 	}
 }
