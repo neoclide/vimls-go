@@ -95,11 +95,15 @@ func (document *navigationDocument) workspaceLocalTarget() (workspaceNavigationT
 	if !ok {
 		return workspaceNavigationTarget{}, false, false
 	}
-	for _, fact := range workspace.CollectSymbolFacts(path, document.analysis.File) {
+	facts := workspace.CollectSymbolFacts(path, document.analysis.File)
+	for _, fact := range facts {
 		if fact.SelectionRange != document.declaration.Span || fact.Name != document.declaration.Name {
 			continue
 		}
 		if fact.Exported {
+			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, false, true
+		}
+		if aggregateMemberDeclaration(document.declaration) && exportedAggregateMemberFact(facts, fact) {
 			return workspaceNavigationTarget{match: workspace.SymbolMatch{Fact: fact, Source: document.snapshot.Text()}, openSnapshot: document.snapshot}, false, true
 		}
 		if document.analysis.File.Dialect == syntax.Legacy && fact.TopLevel && fact.Dialect == syntax.Legacy && !strings.HasPrefix(fact.Name, "s:") &&
@@ -111,6 +115,18 @@ func (document *navigationDocument) workspaceLocalTarget() (workspaceNavigationT
 		}
 	}
 	return workspaceNavigationTarget{}, false, false
+}
+
+func exportedAggregateMemberFact(facts []workspace.SymbolFact, member workspace.SymbolFact) bool {
+	if strings.HasPrefix(member.Name, "_") || member.OwnerSelectionRange.Start >= member.OwnerSelectionRange.End {
+		return false
+	}
+	for _, owner := range facts {
+		if owner.SelectionRange == member.OwnerSelectionRange {
+			return owner.Exported && owner.TopLevel && aggregateHierarchyKind(owner.Kind)
+		}
+	}
+	return false
 }
 
 func (s *Server) captureWorkspaceNavigationState() workspaceNavigationSnapshot {
@@ -311,7 +327,7 @@ func (document *navigationDocument) workspaceNavigationCurrent(ctx context.Conte
 }
 
 func (document *navigationDocument) workspaceReferencesInState(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
-	if document.externalMember != "" {
+	if document.externalMember != "" || document.memberTarget == target.match.Fact.SelectionRange {
 		return document.workspaceMemberReferencesInState(ctx, state, target, includeDeclaration)
 	}
 	if state.resolver == nil || state.index == nil {
@@ -404,14 +420,26 @@ func (document *navigationDocument) workspaceReferencesInState(ctx context.Conte
 }
 
 func (document *navigationDocument) workspaceMemberReferencesInState(ctx context.Context, state workspaceNavigationSnapshot, target workspaceNavigationTarget, includeDeclaration bool) ([]protocol.Location, error) {
-	if state.resolver == nil || state.index == nil || document.external == nil || document.externalMember == "" {
+	memberName := document.externalMember
+	if memberName == "" && document.memberTarget == target.match.Fact.SelectionRange {
+		memberName = target.match.Fact.Name
+	}
+	if state.resolver == nil || state.index == nil || memberName == "" {
 		return []protocol.Location{}, document.checkCurrent(ctx)
 	}
 	sources := map[string]string{target.match.Fact.Path: target.match.Source}
 	if path, ok := workspaceURIPath(uri.URI(document.snapshot.URI())); ok {
 		sources[path] = document.snapshot.Text()
 	}
-	names := []string{document.external.Name}
+	names := make([]string, 0, 2)
+	if document.external != nil {
+		names = append(names, document.external.Name)
+	}
+	for _, path := range state.graph.ReverseDependents(target.match.Fact.Path) {
+		if source, ok := state.index.Source(path); ok {
+			sources[path] = source
+		}
+	}
 	targetFile := document.server.fileForWorkspaceTarget(target)
 	if targetFile != nil {
 		symbols := analysis.CollectSymbols(targetFile)
@@ -468,7 +496,7 @@ func (document *navigationDocument) workspaceMemberReferencesInState(ctx context
 		facts := workspace.CollectExternalReferencesFromAnalysis(path, file, result)
 		walkCommands(file.Commands, func(command *syntax.Command) {
 			walkCommandExpressions(command, func(expression *syntax.Expression) {
-				if expression.Kind != syntax.ExpressionMember || expression.Value != document.externalMember || len(expression.Children) != 1 {
+				if expression.Kind != syntax.ExpressionMember || expression.Value != memberName || len(expression.Children) != 1 {
 					return
 				}
 				matched := false

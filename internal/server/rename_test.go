@@ -154,6 +154,145 @@ func TestRenameStaticImportAcrossClosedAndOpenDocuments(t *testing.T) {
 	}
 }
 
+func TestRenameExportedAggregateMemberDeclarationAcrossClosedImporters(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		member    string
+		newName   string
+		position  protocol.Position
+		wantEdits map[string][]protocol.Range
+	}{
+		{
+			name:     "method",
+			member:   "Resize",
+			newName:  "Scale",
+			position: protocol.Position{Line: 3, Character: 6},
+			wantEdits: map[string][]protocol.Range{
+				"lib.vim":     {navigationRange(3, 6, 12)},
+				"direct.vim":  {navigationRange(3, 9, 15)},
+				"factory.vim": {navigationRange(2, 16, 22)},
+			},
+		},
+		{
+			name:     "field",
+			member:   "value",
+			newName:  "size",
+			position: protocol.Position{Line: 2, Character: 6},
+			wantEdits: map[string][]protocol.Range{
+				"lib.vim":     {navigationRange(2, 6, 11)},
+				"direct.vim":  {navigationRange(4, 9, 14)},
+				"factory.vim": {navigationRange(3, 16, 21)},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			libSource := "vim9script\nexport class Box\n  var value: number\n  def Resize(width: number): number\n    return width\n  enddef\nendclass\nexport class Other\n  var value: number\n  def Resize(width: number): number\n    return width\n  enddef\nendclass\nexport def Make(): Box\n  return Box.new()\nenddef\n"
+			libPath := writeWorkspaceFile(t, root, "lib.vim", libSource)
+			directSource := "vim9script\nimport './lib.vim' as lib\nvar box: lib.Box = lib.Make()\necho box.Resize(1)\necho box.value\n"
+			directPath := writeWorkspaceFile(t, root, "direct.vim", directSource)
+			writeWorkspaceFile(t, root, "factory.vim", "vim9script\nimport './lib.vim' as lib\necho lib.Make().Resize(1)\necho lib.Make().value\n")
+			unrelatedPath := writeWorkspaceFile(t, root, "unrelated.vim", "vim9script\nimport './lib.vim' as lib\nvar other = lib.Other.new()\necho other.Resize(1)\necho other.value\n")
+			instance := initializeWorkspaceServer(t, root)
+			libURI := uri.File(libPath)
+			if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: libURI, Version: 3, Text: libSource}}); err != nil {
+				t.Fatal(err)
+			}
+
+			params := protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: libURI}, Position: test.position}
+			prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: params})
+			if err != nil || prepared == nil {
+				t.Fatalf("prepare %s declaration = %#v, %v", test.member, prepared, err)
+			}
+			edit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: test.newName})
+			if err != nil || edit == nil {
+				t.Fatalf("rename %s declaration = %#v, %v", test.member, edit, err)
+			}
+			gotPaths := make(map[uri.URI]bool)
+			for _, change := range edit.DocumentChanges {
+				documentEdit := change.(*protocol.TextDocumentEdit)
+				gotPaths[documentEdit.TextDocument.URI] = true
+				path, ok := workspaceURIPath(documentEdit.TextDocument.URI)
+				if !ok {
+					t.Fatalf("workspace path for %s", documentEdit.TextDocument.URI)
+				}
+				name := filepath.Base(path)
+				want, ok := test.wantEdits[name]
+				if !ok || len(documentEdit.Edits) != len(want) {
+					t.Fatalf("edits for %s = %#v, want %#v", name, documentEdit.Edits, want)
+				}
+				for index, expected := range want {
+					textEdit := documentEdit.Edits[index].(*protocol.TextEdit)
+					if textEdit.Range != expected || textEdit.NewText != test.newName {
+						t.Errorf("edit %d for %s = %#v, want range %#v and %q", index, name, textEdit, expected, test.newName)
+					}
+				}
+			}
+			if gotPaths[canonicalTestURI(t, unrelatedPath)] {
+				t.Fatalf("same-name member on unrelated class was edited: %#v", edit.DocumentChanges)
+			}
+			if len(gotPaths) != len(test.wantEdits) {
+				t.Fatalf("edited documents = %#v, want %#v", gotPaths, test.wantEdits)
+			}
+
+			directURI := uri.File(directPath)
+			if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: directURI, Version: 5, Text: directSource}}); err != nil {
+				t.Fatal(err)
+			}
+			useLine := uint32(3)
+			if test.member == "value" {
+				useLine = 4
+			}
+			useEdit, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{TextDocument: protocol.TextDocumentIdentifier{URI: directURI}, Position: protocol.Position{Line: useLine, Character: 10}}, NewName: test.newName})
+			if err != nil || useEdit == nil || len(useEdit.DocumentChanges) != len(edit.DocumentChanges) {
+				t.Fatalf("rename %s use site = %#v, %v", test.member, useEdit, err)
+			}
+			for index, change := range edit.DocumentChanges {
+				declarationEdit := change.(*protocol.TextDocumentEdit)
+				useSiteEdit := useEdit.DocumentChanges[index].(*protocol.TextDocumentEdit)
+				if !sameNavigationURI(declarationEdit.TextDocument.URI, useSiteEdit.TextDocument.URI) || len(declarationEdit.Edits) != len(useSiteEdit.Edits) {
+					t.Fatalf("declaration/use edits differ at %d: %#v != %#v", index, declarationEdit, useSiteEdit)
+				}
+				for editIndex, declarationElement := range declarationEdit.Edits {
+					declarationText := declarationElement.(*protocol.TextEdit)
+					useSiteText := useSiteEdit.Edits[editIndex].(*protocol.TextEdit)
+					if declarationText.Range != useSiteText.Range || declarationText.NewText != useSiteText.NewText {
+						t.Fatalf("declaration/use text edit %d differs: %#v != %#v", editIndex, declarationText, useSiteText)
+					}
+				}
+			}
+
+			checks := 0
+			instance.testHooks.beforeWorkspaceIdentityCheck = func() {
+				checks++
+				if checks == 1 {
+					instance.workspaceMu.Lock()
+					instance.workspaceRevision++
+					instance.workspaceMu.Unlock()
+				}
+			}
+			references, err := instance.References(context.Background(), &protocol.ReferenceParams{TextDocumentPositionParams: params, Context: protocol.ReferenceContext{IncludeDeclaration: true}})
+			if err != nil || len(references) != len(test.wantEdits) || checks != 3 {
+				t.Fatalf("references %s declaration retry = %#v, checks=%d, %v", test.member, references, checks, err)
+			}
+
+			checks = 0
+			if retry, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: test.newName}); err != nil || retry == nil || checks != 3 {
+				t.Fatalf("rename %s declaration retry = %#v, checks=%d, %v", test.member, retry, checks, err)
+			}
+			instance.testHooks.beforeWorkspaceIdentityCheck = nil
+
+			instance.workspaceIndex.SetComplete(false)
+			if prepared, err := instance.PrepareRename(context.Background(), &protocol.PrepareRenameParams{TextDocumentPositionParams: params}); err != nil || prepared != nil {
+				t.Fatalf("prepare %s declaration with incomplete index = %#v, %v", test.member, prepared, err)
+			}
+			if incomplete, err := instance.Rename(context.Background(), &protocol.RenameParams{TextDocumentPositionParams: params, NewName: test.newName}); err == nil || incomplete != nil {
+				t.Fatalf("rename %s declaration with incomplete index = %#v, %v", test.member, incomplete, err)
+			}
+		})
+	}
+}
+
 func TestRenameRejectsStaleClosedFile(t *testing.T) {
 	for _, change := range []string{"insert line", "delete", "grow", "open overlay"} {
 		t.Run(change, func(t *testing.T) {

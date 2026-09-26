@@ -77,18 +77,18 @@ Explicit `g:`, `b:`, `w:`, `t:` and `v:` names are withheld at every scope,
 including declarations inside functions, because their scopes are shared with
 other scripts.
 Extending it to those symbols needs a client that applies edits across documents
-while typing; members additionally need the rename scope described below.
+while typing.
 Class, interface, enum and type-alias names, as well as all import aliases, are
 withheld until the analysis records their type annotation references. Explicit
 `as` aliases are not exempt: expression occurrences alone can leave variable,
 parameter, return and nested type annotations naming the old namespace.
 
-Renaming a member from its declaration currently edits only the declaring file.
-The same symbol renamed from a use site in an importing file edits both files, so
-the two entry points disagree and the declaration-side result is incomplete. A
-member of an exported aggregate is reachable from other files, but
-`CollectSymbolFacts` reports the member itself as unexported, so
-`workspaceLocalTarget` does not select the workspace path.
+Renaming a member of an exported aggregate uses the same workspace reference
+search from its declaration and from an importing use site. The search includes
+closed importing files and direct calls to a statically resolved exported
+factory function used as receivers. Members of unrelated aggregates with the
+same spelling are left alone. Linked editing still withholds members because
+its ranges cannot cover multiple documents.
 
 A renamed file rewrites the `:import` statements that name it, using the import
 graph's reverse edges to find the importing documents. Each import is rewritten

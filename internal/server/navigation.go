@@ -572,6 +572,9 @@ func (s *Server) References(ctx context.Context, params *protocol.ReferenceParam
 					return locations, err
 				}
 				locations, err := document.workspaceReferencesInState(ctx, state, target, params.Context.IncludeDeclaration)
+				if errors.Is(err, protocol.ErrContentModified) && attempt == 0 {
+					continue
+				}
 				if err != nil {
 					return nil, err
 				}

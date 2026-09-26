@@ -21,6 +21,9 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
+Renaming a member of an exported aggregate includes its statically resolved
+references in importing files, whether started at the declaration or a use site.
+
 Variable-name positions after `let`, `var`, `const` and `final` return no
 completion candidates. Type annotations and initializer expressions retain
 their respective completions.
