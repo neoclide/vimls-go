@@ -1,6 +1,9 @@
 package syntax
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Mapping semantics follow Vim v9.2.1015 runtime/doc/map.txt and the command
 // handling in src/map.c. The parser keeps the raw RHS span, exposing an
@@ -281,5 +284,119 @@ func TestMappingCommandRHSAST(t *testing.T) {
 	}
 	if got := file.Text(command.Embedded.Commands[0].Argument); got != "CocActionAsync('rangeSelect', visualmode(), v:true)" {
 		t.Fatalf("embedded call argument = %q", got)
+	}
+}
+
+func TestMappingCommandEscapedBarRHSAST(t *testing.T) {
+	source := "\ufeffnnoremap <F5> :call First('中\u0301😀')\\|call Second('<Bar>')<bAr>call Third(\"\\\\|\")<CR>\r\n"
+	file := Parse(source)
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 1 {
+		t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+	}
+	mapping := file.Commands[0].Mapping
+	if mapping == nil || file.Text(mapping.RHS) != ":call First('中\u0301😀')\\|call Second('<Bar>')<bAr>call Third(\"\\\\|\")<CR>" {
+		t.Fatalf("mapping = %#v rhs=%q", mapping, file.Text(mapping.RHS))
+	}
+	list := file.Commands[0].Embedded
+	if list == nil || len(list.Commands) != 3 {
+		t.Fatalf("embedded = %#v", list)
+	}
+	for index, name := range []string{"First", "Second", "Third"} {
+		command := &list.Commands[index]
+		if command.Canonical != "call" || len(command.Expressions) != 1 || command.Expressions[0].Kind != ExpressionCall || !strings.HasPrefix(file.Text(command.Expressions[0].Span), name+"(") {
+			t.Fatalf("command %d = %#v", index, command)
+		}
+		if text := file.Text(command.Expressions[0].Span); text == "" || command.Expressions[0].Span.Start < mapping.RHS.Start || command.Expressions[0].Span.End > mapping.RHS.End {
+			t.Fatalf("call %s span=%#v text=%q rhs=%#v", name, command.Expressions[0].Span, text, mapping.RHS)
+		}
+	}
+	if got := file.Text(list.Commands[0].Argument); got != "First('中\u0301😀')" {
+		t.Fatalf("first argument = %q", got)
+	}
+	if got := file.Text(list.Commands[1].Argument); got != "Second('<Bar>')" {
+		t.Fatalf("second argument = %q", got)
+	}
+	if got := file.Text(list.Commands[2].Argument); got != `Third("\\|")` {
+		t.Fatalf("third argument = %q", got)
+	}
+}
+
+func TestMappingCommandEscapedBarConservativeKeys(t *testing.T) {
+	for _, source := range []string{
+		"nnoremap <F5> :call First()\\|<BS>call Second()<CR>\n",
+		"nnoremap <F5> :call First()\\|<C-U>call Second()<CR>\n",
+		"nnoremap <F5> :call First()\\|<C-V><Bar>call Second()<CR>\n",
+		"nnoremap <F5> :call First()\\|\x16<Bar>call Second()<CR>\n",
+		"nnoremap <F5> :call First()\\|\x15call Second()<CR>\n",
+		"nnoremap <F5> :call First()\\|\x7fcall Second()<CR>\n",
+	} {
+		file := Parse(source)
+		mapping := file.Commands[0].Mapping
+		if mapping == nil || mapping.RHS == (Span{}) {
+			t.Fatalf("mapping = %#v", mapping)
+		}
+		if file.Commands[0].Embedded != nil {
+			t.Fatalf("dynamic mapping key exposed embedded commands: %q", source)
+		}
+	}
+}
+
+func TestMappingCommandEscapesInsideStrings(t *testing.T) {
+	for _, test := range []struct{ raw, decoded string }{
+		{`'\|'`, `'|'`},
+		{`'<bAr>'`, `'|'`},
+		{`'\<Bar>'`, `'\|'`},
+		{`'\\<Bar>'`, `'\\|'`},
+		{`'\\|'`, `'\|'`},
+		{`"<Bar>"`, `"|"`},
+	} {
+		t.Run(test.raw, func(t *testing.T) {
+			file := Parse("nnoremap <F5> :echo " + test.raw + "<CR>\n")
+			list := file.Commands[0].Embedded
+			if list == nil || len(list.Commands) != 1 || len(list.Commands[0].Expressions) != 1 {
+				t.Fatalf("embedded = %#v", list)
+			}
+			expression := list.Commands[0].Expressions[0]
+			if expression.Kind != ExpressionString || expression.Value != test.decoded || file.Text(expression.Span) != test.raw {
+				t.Fatalf("expression = %#v, source = %q", expression, file.Text(expression.Span))
+			}
+		})
+	}
+}
+
+func TestMappingCommandEscapesNestedUserCommandSpans(t *testing.T) {
+	file := Parse("nnoremap <F5> :echo 'x<Bar>y'\r\n      \\ <Bar>command! -nargs=0 Invoke call Next()<CR>\r\n")
+	list := file.Commands[0].Embedded
+	if list == nil || len(list.Commands) != 2 {
+		t.Fatalf("embedded = %#v", list)
+	}
+	command := list.Commands[1]
+	definition := command.UserCommand
+	if definition == nil || file.Text(definition.Name) != "Invoke" || file.Text(definition.Body) != "call Next()" || len(definition.Attributes) != 1 {
+		t.Fatalf("user command = %#v", definition)
+	}
+	attribute := definition.Attributes[0]
+	if file.Text(attribute.Span) != "-nargs=0" || file.Text(attribute.Name) != "nargs" || file.Text(attribute.Equal) != "=" || file.Text(attribute.Value) != "0" {
+		t.Fatalf("user command attribute = %#v", attribute)
+	}
+	if command.Embedded == nil || len(command.Embedded.Commands) != 1 {
+		t.Fatalf("user command body = %#v", command.Embedded)
+	}
+	call := command.Embedded.Commands[0]
+	if file.Text(call.Name) != "call" || len(call.Expressions) != 1 || file.Text(call.Expressions[0].Children[0].Span) != "Next" {
+		t.Fatalf("nested call = %#v", call)
+	}
+}
+
+func TestMappingCommandEscapesIncompleteBody(t *testing.T) {
+	for _, tail := range []string{"", "call Later", "call Later("} {
+		file := Parse("nnoremap <F5> :call First()\\|" + tail + "\necho 'after'\n")
+		if len(file.Diagnostics) != 0 || len(file.Commands) != 2 || file.Commands[1].Canonical != "echo" {
+			t.Fatalf("tail %q: commands = %#v, diagnostics = %#v", tail, file.Commands, file.Diagnostics)
+		}
+		list := file.Commands[0].Embedded
+		if list == nil || len(list.Commands) == 0 || file.Text(list.Commands[0].Argument) != "First()" {
+			t.Fatalf("tail %q: embedded = %#v", tail, list)
+		}
 	}
 }

@@ -146,6 +146,17 @@ References are followed in supported autocommand bodies, expression mappings,
 `<Cmd>` bodies and static function-name callback options. Generated code is
 not executed or analyzed.
 
+Colon-led mapping bodies (`:...<CR>` and `:<C-U>...<CR>`) in Normal, Visual,
+Select and Operator-pending modes decode `\|` and case-insensitive `<Bar>`
+using Vim's default `cpoptions` rules. This includes separators inside strings;
+the decoded Ex parser decides whether a bar separates commands or is string
+content. Navigation, rename, completion, hover, signature help and semantic
+highlighting retain the original source positions, including continued lines.
+Other key notation and command-line editing keys remain outside this decoded
+path, except for the existing `<SID>` reference support. Custom `cpoptions`
+and arbitrary key execution are not modeled. This does not extend the existing
+`<Cmd>`, `<ScriptCmd>` or expression-register parsing.
+
 Vimrc-style files receive different style suggestions from plugin files.
 See [editing configuration files](userconfig.md).
 

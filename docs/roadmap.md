@@ -133,10 +133,16 @@ files, aliases and known inheritance relationships. Dependency changes invalidat
 the consuming type results; unresolved imports and circular inference remain
 conservative. Autoload diagnostics use indexed source without executing scripts.
 
+Colon-led mapping command bodies now decode `\|` and `<Bar>` under the default
+`cpoptions` rules. Editor features preserve the original source positions,
+including continued mappings and multibyte text. See
+[mapping support](language-support.md#mappings-and-configuration-files) for the
+supported forms and key-notation limits.
+
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
-- Decode more escaped command and mapping payloads where the original source
-  locations can be preserved reliably.
+- Extend escaped payload parsing beyond the supported colon-led mapping bodies
+  where the original source locations can be preserved reliably.
 - Add more option-value checks where Vim's source gives a clear rule.
   Build-dependent and runtime-dependent values still need conservative handling.
 - Extend the [reviewed Neovim option compatibility rules](neovim.md#option-compatibility).

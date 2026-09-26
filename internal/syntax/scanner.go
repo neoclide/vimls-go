@@ -4023,8 +4023,17 @@ func parseMapping(file *File, command *Command, depth int) {
 	command.Mapping = mapping
 	hasPrompt := parseMappingRegisterExpressions(file, command)
 	if body, ok := mappingCommandBodySpan(file.Source, command, hasPrompt); ok {
+		view, escaped, opaque := mappingCommandBodyView(file.Source, body)
+		if opaque {
+			// Other mapping keys can edit the command line before Ex parses it.
+			return
+		}
 		diagnostics := len(file.Diagnostics)
-		command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
+		if escaped {
+			command.Embedded = parseMappedEmbeddedCommandList(file, &view, command.Dialect, depth)
+		} else {
+			command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
+		}
 		// Mapping key notation is decoded only when the mapping executes. The
 		// embedded tree supports editor features, but cannot prove compile
 		// diagnostics against the undecoded source text.
@@ -4083,13 +4092,53 @@ func mappingCommandBodySpan(source string, command *Command, hasPrompt bool) (Sp
 			break
 		}
 	}
-	// A backslash-escaped bar is decoded by the mapping engine before the Ex
-	// command runs. Keep such multi-command RHS text opaque until that decoded
-	// view can be represented without losing source spans.
-	if strings.Contains(source[start:end], `\|`) {
-		return Span{}, false
-	}
 	return Span{Start: start, End: end}, true
+}
+
+// mappingCommandBodyView decodes mapping spellings of a bar before Ex parsing.
+// With default cpoptions, separate_nextcmd removes the slash in \| and
+// replace_termcodes expands <Bar>, even inside strings. Each decoded byte
+// retains the complete source span of its spelling for editor-facing nodes.
+func mappingCommandBodyView(source string, body Span) (view logicalView, escaped, opaque bool) {
+	// Most command-line mappings have no encoded separator. Avoid constructing
+	// a view for those unchanged bodies.
+	hasEscape := false
+	for position := body.Start; position < body.End; position++ {
+		if (source[position] == '\\' && position+1 < body.End && source[position+1] == '|') ||
+			(position+len("<Bar>") <= body.End && strings.EqualFold(source[position:position+len("<Bar>")], "<Bar>")) {
+			hasEscape = true
+			break
+		}
+	}
+	if !hasEscape {
+		return logicalView{}, false, false
+	}
+	for position := body.Start; position < body.End; {
+		key, size := mappingExpressionKeyAt(source, position, body.End)
+		if len(key) > 1 && key != "<bar>" && key != "<sid>" || source[position] < ' ' && !isSpace(source[position]) || source[position] == '\x7f' {
+			return logicalView{}, false, true
+		}
+		position += size
+	}
+	view = logicalView{Source: body}
+	var text strings.Builder
+	for position := body.Start; position < body.End; {
+		size := 1
+		if source[position] == '\\' && position+1 < body.End && source[position+1] == '|' {
+			size = 2
+		} else if position+len("<Bar>") <= body.End && strings.EqualFold(source[position:position+len("<Bar>")], "<Bar>") {
+			size = len("<Bar>")
+		}
+		if size == 1 {
+			text.WriteByte(source[position])
+		} else {
+			text.WriteByte('|')
+		}
+		view.appendSegment(Span{Start: text.Len() - 1, End: text.Len()}, Span{Start: position, End: position + size})
+		position += size
+	}
+	view.Text = text.String()
+	return view, true, false
 }
 
 func mappingModifierAt(source string, start, end int) (string, int) {
@@ -4595,6 +4644,25 @@ func parseEmbeddedCommandList(file *File, span Span, dialect Dialect, depth int)
 	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	list.Commands = embedded.Commands
 	list.Blocks = embedded.Blocks
+	return list
+}
+
+// parseMappedEmbeddedCommandList parses a detached mapping view, then maps all
+// syntax back to the raw mapping RHS. It is used only when mapping key notation
+// changed the Ex text before execution.
+func parseMappedEmbeddedCommandList(file *File, view *logicalView, dialect Dialect, depth int) *CommandList {
+	embedded := &File{Dialect: dialect, Source: view.Text}
+	list := parseEmbeddedCommandList(embedded, Span{End: len(view.Text)}, dialect, depth)
+	mapper := logicalSpanMapper{
+		view: view, source: file.Source,
+		expressions: make(map[*Expression]bool), types: make(map[*Type]bool),
+		files: make(map[*File]bool), lists: make(map[*CommandList]bool),
+	}
+	mapper.commandList(list)
+	for index := range embedded.Diagnostics {
+		embedded.Diagnostics[index].Span = mapper.span(embedded.Diagnostics[index].Span)
+	}
+	file.Diagnostics = append(file.Diagnostics, embedded.Diagnostics...)
 	return list
 }
 

@@ -407,6 +407,25 @@ func TestAnalyzeOrdinaryMappingDoesNotCreateReferences(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMappingEscapedBarCommandsBindDeclarations(t *testing.T) {
+	for _, prefix := range []string{
+		"function First()\nendfunction\nfunction Second(value)\nendfunction\n",
+		"vim9script\ndef First()\nenddef\ndef Second(value: string)\nenddef\n",
+	} {
+		source := prefix + "nnoremap <F5> :call First()\\|call Second('<Bar>First()')<CR>\n"
+		result := Analyze(syntax.Parse(source))
+		if len(result.References) != 2 {
+			t.Fatalf("mapping references = %#v", result.References)
+		}
+		for index, name := range []string{"First", "Second"} {
+			reference := result.References[index]
+			if reference.Name != name || reference.Declaration == nil || reference.Declaration.Name != name || source[reference.Span.Start:reference.Span.End] != name {
+				t.Fatalf("reference %d = %#v", index, reference)
+			}
+		}
+	}
+}
+
 func TestMappingResultConversionBoundary(t *testing.T) {
 	// Pinned map.c:eval_map_expr -> eval.c:typval2string ->
 	// typval.c:tv_get_string_buf_chk_strict. Mapping results are not
