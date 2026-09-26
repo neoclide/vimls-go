@@ -10110,10 +10110,6 @@ func TestAnalyzeE1360NullObjectDiagnostics(t *testing.T) {
 			source: "vim9script\n" + class + "var o: C\no = C.new()\no.Foo()\n",
 		},
 		{
-			name:   "later assignment keeps flow unknown",
-			source: "vim9script\n" + class + "var o: C\no.Foo()\no = C.new()\n",
-		},
-		{
 			name:   "lambda parameter shadows null candidate",
 			source: "vim9script\n" + class + "var o: C\nvar Callback = (o: C) => o.Foo()\n",
 		},

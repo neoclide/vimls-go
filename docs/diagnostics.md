@@ -64,11 +64,19 @@ Builtin calls in default parameter values and enum constructor arguments receive
 the same argument type checks as other calls in their Vim9 context.
 
 Null-receiver checks (`vim/E1360`) cover literal null objects and variables
-known to hold null objects without reassignment. Any visible assignment makes
-the variable's null state unknown, including later writes and writes in deferred
-function, lambda or user-command bodies. These checks do not model execution
-order or whether those bodies run, so an unexecuted assignment can suppress a
-null-receiver diagnostic.
+known to hold null objects without reassignment. For variables with visible
+writes, a limited source-order check also catches reads after their null
+declaration and before a write or an operation that could change their value.
+Later assignments and merely defining a function, lambda or user command do not
+erase an earlier null read. Assignment checks its reads before invalidating the
+target's null state.
+
+This source-order check does not follow calls or merge branch states. Calls,
+loops, exception handling and commands with unmodeled effects discard its
+temporary facts. Deferred bodies start without the enclosing sequence's
+temporary facts; a captured variable with any visible write remains unknown
+there. Assignments do not establish new null or non-null facts, and these checks
+do not change inferred types.
 
 In Vim9, a direct `if` or `elseif` condition can suppress E1360 for the same
 variable inside its guarded branch. The supported non-null conditions are

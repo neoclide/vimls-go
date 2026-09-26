@@ -68,6 +68,12 @@ in `def` functions and Vim9 lambdas. A copy of an `any` value remains `any`,
 avoiding false E1012 diagnostics on later assignments. Interpreted script and
 Legacy guard inference retain their existing behavior.
 
+E1360 checks also recognize an initial null value before a later assignment or
+an uncalled deferred writer. This is limited to source order within an execution
+sequence: calls, loops and unmodeled effects discard temporary null facts, and
+captured mutable values remain conservative. Assignment and general control-flow
+type inference remain outside this check.
+
 Linked editing reports the declaration and its references in the current file so
 a client can rename the symbol by typing. It is offered only where a
 single-document edit is provably complete, so exported, autoload and global
@@ -209,13 +215,12 @@ previously collected scopes instead of searching every expression again.
 Reference binding chooses the appropriate value or function lookup once.
 
 Null-receiver checking records assignment targets while discovering lambda
-bodies, then applies those writes after all null candidates have been collected.
-This remains a conservative check: any reassignment leaves a variable's null
-state unknown, without tracking execution order or calls to deferred bodies.
-The final diagnostic walk uses command blocks to suppress E1360 within supported
-Vim9 null-guard branches. It respects declaration identity and resets guards at
-deferred execution boundaries. This changes diagnostics only; it adds no static
-type narrowing, short-circuit inference or propagation past a branch. See
+bodies. The final diagnostic walk retains initial null facts until a write or
+an execution barrier and uses command blocks to suppress E1360 within supported
+Vim9 null-guard branches. It respects declaration identity and isolates temporary
+facts and guards at deferred execution boundaries. This changes diagnostics only;
+it adds no static type narrowing, short-circuit inference or propagation of
+branch guards past a branch. See
 [diagnostics](diagnostics.md) for the condition whitelist and limitations.
 Function and user-command overwrite warnings share one cancellable command walk
 while retaining their diagnostic phase order. Style checks collect final augroup

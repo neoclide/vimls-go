@@ -2278,6 +2278,7 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 	}
 	var assignments []scopedExpression
 	candidates := make(map[*Declaration]bool)
+	written := make(map[*Declaration]bool)
 	seenLambdas := make(map[*syntax.Expression]bool)
 	var collectCommands func([]syntax.Command, *Scope)
 	var collectLambdaBodies func(*syntax.Expression, *Scope)
@@ -2369,38 +2370,41 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 	}
 	collectCommands(file.Commands, result.Root)
 
-	// Apply writes after collecting every candidate, so discovering another
-	// candidate cannot undo an earlier assignment's invalidation.
-	var invalidateTarget func(*syntax.Expression, *Scope)
-	invalidateTarget = func(target *syntax.Expression, scope *Scope) {
+	// Preserve initial null declarations while marking any visible write. The
+	// write-free subset remains the stable candidate baseline; the final walk
+	// adds only source-ordered facts for declarations that are later written.
+	var markWrittenTarget func(*syntax.Expression, *Scope)
+	markWrittenTarget = func(target *syntax.Expression, scope *Scope) {
 		if target == nil || scope == nil {
 			return
 		}
 		switch target.Kind {
 		case syntax.ExpressionIdentifier:
-			delete(candidates, resolve(scope, target.Value, target.Span.Start, false, nil))
+			if declaration := resolve(scope, target.Value, target.Span.Start, false, nil); candidates[declaration] {
+				written[declaration] = true
+			}
 		case syntax.ExpressionList, syntax.ExpressionTuple, syntax.ExpressionParenthesized:
 			for _, child := range target.Children {
-				invalidateTarget(child, scope)
+				markWrittenTarget(child, scope)
 			}
 		}
 	}
 	for _, assignment := range assignments {
 		if len(assignment.expression.Children) > 0 {
-			invalidateTarget(assignment.expression.Children[0], assignment.scope)
+			markWrittenTarget(assignment.expression.Children[0], assignment.scope)
 		}
 	}
 
-	// The candidate set deliberately remains file-wide: any visible write,
-	// including a later or deferred one, makes a declaration ineligible. The
-	// environment below only suppresses that existing E1360 in a directly
-	// proven branch; it is not an assignment or type-flow tracker.
+	// Write-free candidates remain stable across the file. The environment below
+	// additionally tracks initial null declarations with writes in source order;
+	// it does not infer non-null assignments or change types.
 	type nullGuard struct {
 		declaration *Declaration
 		whenTrue    bool
 	}
 	seenExpressions := make(map[*syntax.Expression]bool)
 	active := make(map[*Declaration]int)
+	known := make(map[*Declaration]bool)
 	var appendDiagnostics func(*syntax.Expression, *Scope, syntax.Dialect)
 	var walkCommands func([]syntax.Command, []syntax.Block, *Scope, bool)
 	var walkSequence func([]syntax.Command, []syntax.Block, int, int, *Scope)
@@ -2528,6 +2532,37 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 		}
 		return nullGuard{declaration: declaration, whenTrue: !negated}
 	}
+	var invalidateKnownTarget func(*syntax.Expression, *Scope)
+	invalidateKnownTarget = func(target *syntax.Expression, scope *Scope) {
+		if target == nil || scope == nil {
+			return
+		}
+		switch target.Kind {
+		case syntax.ExpressionIdentifier:
+			delete(known, resolve(scope, target.Value, target.Span.Start, false, nil))
+		case syntax.ExpressionList, syntax.ExpressionTuple, syntax.ExpressionParenthesized:
+			for _, child := range target.Children {
+				invalidateKnownTarget(child, scope)
+			}
+		}
+	}
+	commandKeepsKnown := func(command *syntax.Command) bool {
+		if command.Kind == syntax.CommandBlockEnd {
+			return true
+		}
+		if command.Autocmd != nil {
+			return true
+		}
+		if command.Canonical == "" {
+			return command.Kind == syntax.CommandExpression
+		}
+		switch command.Canonical {
+		case "vim9script", "var", "const", "final", "echo", "if", "elseif", "else", "endif", "def", "enddef", "function", "endfunction", "class", "endclass", "interface", "endinterface", "enum", "endenum", "command", "augroup", "endaugroup":
+			return true
+		default:
+			return false
+		}
+	}
 	appendDiagnostics = func(expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
 		if expression == nil || scope == nil || seenExpressions[expression] || !result.analysisStep() {
 			return
@@ -2545,7 +2580,7 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 				null := isNullObject(receiver)
 				if !null && receiver.Kind == syntax.ExpressionIdentifier {
 					declaration := resolve(scope, receiver.Value, receiver.Span.Start, false, nil)
-					null = candidates[declaration] && active[declaration] == 0
+					null = (candidates[declaration] && !written[declaration] || known[declaration]) && active[declaration] == 0
 				}
 				if null {
 					result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
@@ -2559,11 +2594,13 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
 				expressionScope = lambdaScope
 			}
-			if len(active) != 0 {
-				saved := active
-				active = make(map[*Declaration]int)
-				defer func() { active = saved }()
-			}
+			savedActive, savedKnown := active, known
+			active = make(map[*Declaration]int)
+			known = make(map[*Declaration]bool)
+			defer func() {
+				active = savedActive
+				known = savedKnown
+			}()
 			if expression.LambdaBody != nil {
 				walkCommands(expression.LambdaBody.Commands, expression.LambdaBody.Blocks, expressionScope, false)
 			}
@@ -2573,15 +2610,25 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 				appendDiagnostics(child, expressionScope, dialect)
 			}
 		}
+		if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) > 0 {
+			invalidateKnownTarget(expression.Children[0], expressionScope)
+		}
+		if expression.Kind == syntax.ExpressionCall {
+			clear(known)
+		}
 	}
 	walkCommandExpressions := func(command *syntax.Command, scope *Scope) {
 		if command == nil || scope == nil || !result.analysisStep() {
 			return
 		}
-		if command.Mapping != nil && len(active) != 0 {
-			saved := active
+		if command.Mapping != nil {
+			savedActive, savedKnown := active, known
 			active = make(map[*Declaration]int)
-			defer func() { active = saved }()
+			known = make(map[*Declaration]bool)
+			defer func() {
+				active = savedActive
+				known = savedKnown
+			}()
 		}
 		for _, expression := range command.Expressions {
 			appendDiagnostics(expression, scope, command.Dialect)
@@ -2594,6 +2641,11 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 		}
 		if command.Declaration != nil {
 			appendDiagnostics(command.Declaration.Initializer, scope, command.Dialect)
+			if len(command.Declaration.Bindings) == 1 {
+				if declaration := declarations[command.Declaration.Bindings[0].Name]; candidates[declaration] && written[declaration] {
+					known[declaration] = true
+				}
+			}
 		}
 		if command.For != nil {
 			appendDiagnostics(command.For.Iterable, scope, command.Dialect)
@@ -2608,20 +2660,24 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			}
 		}
 		if command.Function != nil {
-			saved := active
-			resetDefaults := len(active) != 0
-			if resetDefaults {
-				active = make(map[*Declaration]int)
-			}
+			savedActive, savedKnown := active, known
+			active = make(map[*Declaration]int)
+			known = make(map[*Declaration]bool)
 			for _, parameter := range command.Function.Parameters {
 				appendDiagnostics(parameter.Default, scope, command.Dialect)
 			}
-			if resetDefaults {
-				active = saved
-			}
+			active = savedActive
+			known = savedKnown
 		}
+		keepsKnown := commandKeepsKnown(command)
 		if command.Embedded != nil {
+			if !keepsKnown {
+				clear(known)
+			}
 			walkCommands(command.Embedded.Commands, command.Embedded.Blocks, scope, command.UserCommand != nil || command.Autocmd != nil)
+		}
+		if !keepsKnown {
+			clear(known)
 		}
 	}
 	walkSequence = func(commands []syntax.Command, blocks []syntax.Block, start, end int, fallback *Scope) {
@@ -2642,15 +2698,28 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			block := blocks[command.Block]
 			resetsGuard := block.Kind == syntax.BlockDef || block.Kind == syntax.BlockFunction || block.Kind == syntax.BlockClass || block.Kind == syntax.BlockInterface || block.Kind == syntax.BlockEnum || block.Kind == syntax.BlockCommand
 			if block.Kind != syntax.BlockIf {
+				if block.Kind == syntax.BlockFor || block.Kind == syntax.BlockWhile || block.Kind == syntax.BlockTry {
+					clear(known)
+					walkCommandExpressions(command, scope)
+					if block.End > index && block.End < len(commands) {
+						walkSequence(commands, blocks, index+1, block.End, scope)
+						clear(known)
+						index = block.End
+					} else {
+						walkSequence(commands, blocks, index+1, end, scope)
+						clear(known)
+						index = end
+					}
+					continue
+				}
 				if !resetsGuard {
 					walkCommandExpressions(command, scope)
 					index++
 					continue
 				}
-				saved := active
-				if len(active) != 0 {
-					active = make(map[*Declaration]int)
-				}
+				savedActive, savedKnown := active, known
+				active = make(map[*Declaration]int)
+				known = make(map[*Declaration]bool)
 				walkCommandExpressions(command, scope)
 				if block.End > index && block.End < len(commands) {
 					walkSequence(commands, blocks, index+1, block.End, scope)
@@ -2659,7 +2728,11 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 					walkSequence(commands, blocks, index+1, end, scope)
 					index = end
 				}
-				active = saved
+				active = savedActive
+				if block.Kind == syntax.BlockClass || block.Kind == syntax.BlockInterface || block.Kind == syntax.BlockEnum {
+					clear(savedKnown)
+				}
+				known = savedKnown
 				continue
 			}
 			valid := block.End > index && block.End < len(commands) && commands[block.End].Canonical == "endif" && headerComplete(command) && headerComplete(&commands[block.End])
@@ -2724,11 +2797,13 @@ func collectNullReceiverDiagnostics(result *FileAnalysis) {
 			fallback = result.Root
 		}
 		if reset {
-			if len(active) != 0 {
-				saved := active
-				active = make(map[*Declaration]int)
-				defer func() { active = saved }()
-			}
+			savedActive, savedKnown := active, known
+			active = make(map[*Declaration]int)
+			known = make(map[*Declaration]bool)
+			defer func() {
+				active = savedActive
+				known = savedKnown
+			}()
 		}
 		walkSequence(commands, blocks, 0, len(commands), fallback)
 	}

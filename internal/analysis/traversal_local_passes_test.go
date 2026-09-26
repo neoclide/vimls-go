@@ -160,10 +160,18 @@ func TestNullReceiverAssignmentsUseLambdaAndEmbeddedScopes(t *testing.T) {
 		t.Fatalf("lambda = %#v", lambda)
 	}
 	file.Commands[len(file.Commands)-1].Expressions = append(file.Commands[len(file.Commands)-1].Expressions, lambda)
+	var got []syntax.Span
 	for _, diagnostic := range Analyze(file).Diagnostics {
 		if diagnostic.Code == "vim/E1360" {
-			t.Fatalf("assignment left a null receiver candidate: %#v", diagnostic)
+			got = append(got, diagnostic.Span)
 		}
+	}
+	want := []syntax.Span{
+		{Start: strings.Index(source, "local.Foo()"), End: strings.Index(source, "local.Foo()") + len("local")},
+		{Start: strings.Index(source, "top.Foo()"), End: strings.Index(source, "top.Foo()") + len("top")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("E1360 receiver spans = %#v, want %#v", got, want)
 	}
 }
 
