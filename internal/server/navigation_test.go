@@ -1712,9 +1712,7 @@ func TestCrossFileNavigationHandlesCyclicAndAmbiguousImports(t *testing.T) {
 	duplicateMain := writeWorkspaceFile(t, root, "duplicate-main.vim", "vim9script\nimport './duplicate.vim' as duplicate\necho duplicate.Same()\n")
 	instance := initializeWorkspaceServer(t, root)
 	aURI := uri.File(aPath)
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: aURI, Version: 1, Text: aSource}}); err != nil {
-		t.Fatal(err)
-	}
+	openIndexedNavigationOverlay(t, instance, aURI, aSource)
 	definition, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: aURI}, Position: protocol.Position{Line: 3, Character: 11},
 	}})
@@ -1727,11 +1725,7 @@ func TestCrossFileNavigationHandlesCyclicAndAmbiguousImports(t *testing.T) {
 	}
 
 	duplicateURI := uri.File(duplicateMain)
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
-		URI: duplicateURI, Version: 1, Text: "vim9script\nimport './duplicate.vim' as duplicate\necho duplicate.Same()\n",
-	}}); err != nil {
-		t.Fatal(err)
-	}
+	openIndexedNavigationOverlay(t, instance, duplicateURI, "vim9script\nimport './duplicate.vim' as duplicate\necho duplicate.Same()\n")
 	ambiguous, err := instance.Definition(context.Background(), &protocol.DefinitionParams{TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 		TextDocument: protocol.TextDocumentIdentifier{URI: duplicateURI}, Position: protocol.Position{Line: 2, Character: 17},
 	}})

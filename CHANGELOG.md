@@ -2,7 +2,17 @@
 
 ## v0.1.6 — unreleased
 
-- Type propagation capability of exported var/const.
+- Refine Vim9 receiver completion inside supported `type()` and
+  `instanceof(value, LocalClass)` guards, without changing compiled type checks.
+- Propagate exported `var`, `const`, and `final` types through ordinary and
+  autoload import chains, including re-exported values, for inference,
+  completion and static type checks without executing user scripts.
+- Preserve cross-file type identities for classes, interfaces, enums and type
+  aliases, respecting known inheritance and interface relationships.
+- Decode `\|` and case-insensitive `<Bar>` in `:...<CR>` and `:<C-U>...<CR>`
+  mappings under default `cpoptions`. Preserve original source positions for
+  navigation, rename, hover, completion, signature help and semantic highlighting,
+  including continued mappings.
 - Add diagnostics `vimls/encoding-after-scriptencoding`, `vimls/implicit-string-case`,
   `vimls/abbreviated-option`, `vimls/substitute-empty-pattern`, `vimls/set-nomagic`,
   `vimls/substitute-gdefault` and `vimls/global-empty-pattern`.

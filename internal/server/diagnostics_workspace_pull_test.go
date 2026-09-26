@@ -233,7 +233,9 @@ func TestDiagnosticWorkspaceRemovalReports(t *testing.T) {
 				}
 			}
 			client := &workspaceDiagnosticProgressClient{}
+			instance.mu.Lock()
 			instance.client = client
+			instance.mu.Unlock()
 			report, err := instance.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{
 				PreviousResultIds:   []protocol.PreviousResultId{{URI: original.URI, Value: *original.ResultID}, {URI: uri.File(filepath.Join(root, "never-reported.vim")), Value: "foreign"}},
 				PartialResultParams: protocol.PartialResultParams{PartialResultToken: protocol.String("removals")},
