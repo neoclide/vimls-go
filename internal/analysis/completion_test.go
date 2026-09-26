@@ -87,7 +87,7 @@ func TestCompletionTypesAreDemandDrivenAndDoNotMutateSharedFacts(t *testing.T) {
 	}
 }
 
-func TestCompletionTypesDoNotNarrowCompiledTypeGuards(t *testing.T) {
+func TestCompletionTypesRefineGuardedQueriesWithoutChangingDeclarations(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F(x: any)\n  if type(x) == v:t_string\n    var y = x\n    y = 1\n  endif\nenddef\n")
 	facts := CollectCompletionFacts(file)
 	if len(facts.References) != 0 {
@@ -116,8 +116,8 @@ func TestCompletionTypesDoNotNarrowCompiledTypeGuards(t *testing.T) {
 	if typ := query.DeclarationType(declaration); typ.Name != "any" {
 		t.Fatalf("y declaration type = %#v, want any", typ)
 	}
-	if typ := NewCompletionTypes(facts).TypeOf(initializer, initializer.Span.Start); typ.Name != "any" {
-		t.Fatalf("y initializer type = %#v, want any", typ)
+	if typ := NewCompletionTypes(facts).TypeOf(initializer, initializer.Span.Start); typ.Name != "string" {
+		t.Fatalf("y initializer type = %#v, want string", typ)
 	}
 
 	lambdaFile := syntax.Parse("vim9script\nvar value: any = 'hello'\nif type(value) == v:t_string\n  var Callback = () => value\nendif\n")

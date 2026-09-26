@@ -94,7 +94,8 @@ carry into deferred function, lambda, user-command, autocommand or mapping
 bodies. There is no inference from short-circuit expressions, loops or early
 returns, and no tracking of dynamic rebinding through `execute` or unresolved
 calls. This only suppresses null-receiver diagnostics: declared types, member
-lookup, completion, and compiled E1325/E1013 checks remain unchanged.
+lookup, and compiled E1325/E1013 checks remain unchanged. Completion separately
+uses branch-local type facts as described in [language support](language-support.md).
 
 ## Option assignment errors
 

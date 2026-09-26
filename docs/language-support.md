@@ -73,7 +73,29 @@ Types are inferred from known values and function return types in both dialects.
 In `def` functions and Vim9 lambdas, `type()` guards preserve compiled types:
 copying an `any` value inside the guarded branch still infers `any`.
 Vim9 null comparisons and direct `instanceof` guards can suppress E1360 within
-their non-null branch; they do not narrow the variable's static type.
+their non-null branch; they do not narrow the variable's declared or compiled type.
+
+Completion additionally uses a more specific type for a direct variable receiver
+inside a proven Vim9 guard branch. A `type(value)` comparison can specialize the
+receiver's basic type and filter incompatible builtin `->` candidates;
+`instanceof(value, LocalClass)` offers that class's members, including inherited
+members. This applies inside `def` functions and Vim9 lambdas as well as at
+script level. It does not change the variable's declared type or Vim's compiled
+member and argument checks, so
+accessing a derived-only member through a base-typed variable may still require
+an explicit cast.
+
+Supported branches are direct `if`/`elseif` conditions and the `else` of a
+negated guard with no `elseif`. Parentheses, reversed `type()` comparisons and
+logical negation are supported. A complete guard header can help completion
+while its closing `endif` is still missing; malformed headers cannot.
+These completion facts apply only within the guarded branch. Writes, calls,
+loops and unknown command effects invalidate them; they do not carry into
+deferred bodies or through copied variables. Compound guards, imported classes,
+class aliases, interfaces, and multiple-class `instanceof` checks are not used
+for completion narrowing. Unknown receiver types and argument checkers keep
+their existing builtin candidates; custom function candidates remain available.
+
 Uncertain dynamic behavior may leave types or references unresolved. See
 [diagnostics](diagnostics.md) for supported guard conditions, diagnostic coverage
 and warning policies.

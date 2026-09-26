@@ -354,7 +354,7 @@ enddef
 	completion := NewCompletionTypes(facts)
 	completionDeclarations := declarationsByName(facts)
 	completionValue, completionCopied := completionDeclarations["value"], completionDeclarations["copied"]
-	if completionValue == nil || completionCopied == nil || completion.DeclarationType(completionValue).Name != "Base" || completion.DeclarationType(completionCopied).Name != "Base" || completion.TypeOf(initializer, initializer.Span.Start).Name != "Base" {
+	if completionValue == nil || completionCopied == nil || completion.DeclarationType(completionValue).Name != "Base" || completion.DeclarationType(completionCopied).Name != "Base" || completion.TypeOf(initializer, initializer.Span.Start).Name != "Derived" {
 		t.Fatalf("completion types = value %#v copied %#v initializer %#v", completion.DeclarationType(completionValue), completion.DeclarationType(completionCopied), completion.TypeOf(initializer, initializer.Span.Start))
 	}
 }

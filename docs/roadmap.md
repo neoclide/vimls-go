@@ -63,10 +63,18 @@ flow-sensitive checking remains outside this warning's current scope.
 third argument in both dialects, including method calls. Dynamic flags remain
 unknown.
 
-Type inference and completion preserve compiled types inside `type()` guards
+Type inference preserves compiled types inside `type()` guards
 in `def` functions and Vim9 lambdas. A copy of an `any` value remains `any`,
 avoiding false E1012 diagnostics on later assignments. Interpreted script and
 Legacy guard inference retain their existing behavior.
+
+Vim9 completion queries use branch-local type facts for direct variable
+receivers. Basic `type()` guards filter incompatible builtin method candidates,
+and `instanceof(value, LocalClass)` enables that class's member candidates.
+These facts stop at writes, calls and execution boundaries and do not alter
+compiled diagnostics or shared declaration types. Completion still uses its
+request-owned type query rather than waiting for full analysis. See
+[language support](language-support.md) for the supported scope.
 
 E1360 checks also recognize an initial null value before a later assignment or
 an uncalled deferred writer. This is limited to source order within an execution

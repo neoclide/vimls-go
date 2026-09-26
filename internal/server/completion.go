@@ -395,6 +395,12 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 		} else if contextKind == completionContextExpression || contextKind == completionContextMethod || contextKind == completionContextVim9Statement {
 			inImport := isImportCommandAt(file, offset)
 			methodCall := contextKind == completionContextMethod
+			methodReceiverType := analysis.UnknownValueType
+			if methodCall && commandDialect == syntax.Vim9 {
+				if receiver := completionMethodReceiverAt(file, offset); receiver != nil {
+					methodReceiverType = analysis.NewCompletionTypes(analysisResult).TypeOf(receiver, receiver.Span.Start)
+				}
+			}
 			scopePrefix := completionScopePrefixAt(snapshot.Text(), selection.start)
 			insideCallable := completionInsideCallable(analysisResult, offset)
 			if !methodCall && scopePrefix != "" {
@@ -557,6 +563,9 @@ func (s *Server) Completion(ctx context.Context, params *protocol.CompletionPara
 						continue
 					}
 					if !completionTextMatches(selection.prefix, function.Name) {
+						continue
+					}
+					if methodCall && commandDialect == syntax.Vim9 && !analysis.BuiltinMethodAcceptsReceiver(function, methodReceiverType) {
 						continue
 					}
 					item := protocol.CompletionItem{Label: function.Name, Kind: protocol.CompletionItemKindFunction, Data: completionResolveTargetData(completionResolveBuiltinFunction, function.Name)}
@@ -1654,7 +1663,7 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 		return nil, false
 	}
 	types := analysis.NewCompletionTypes(result)
-	typ := types.TypeOf(member.Children[0], offset)
+	typ := types.TypeOf(member.Children[0], member.Children[0].Span.Start)
 	if typ.Name == "" || typ.Name == analysis.ValueTypeAny || typ.Name == "dict" || typ.Name == "list" {
 		return nil, false
 	}
@@ -1674,13 +1683,14 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 	if container == nil {
 		return nil, false
 	}
-	items := make(protocol.CompletionItemSlice, 0, len(container.Children))
+	members := completionObjectMemberSymbols(file, symbols, container)
+	items := make(protocol.CompletionItemSlice, 0, len(members))
 	declarations := make(map[syntax.Span]*analysis.Declaration, len(result.Declarations))
 	for _, declaration := range result.Declarations {
 		declarations[declaration.Span] = declaration
 	}
 	deep := 0
-	for _, symbol := range container.Children {
+	for _, symbol := range members {
 		kind := protocol.CompletionItemKindField
 		switch symbol.Kind {
 		case analysis.SymbolKindMethod, analysis.SymbolKindFunction, analysis.SymbolKindConstructor:
@@ -1710,6 +1720,29 @@ func completionObjectMembers(file *syntax.File, result *analysis.FileAnalysis, o
 		}
 	}
 	return items, deep > 0
+}
+
+func completionObjectMemberSymbols(file *syntax.File, symbols []*analysis.Symbol, container *analysis.Symbol) []*analysis.Symbol {
+	seenContainers := make(map[string]bool)
+	seenMembers := make(map[string]bool)
+	var members []*analysis.Symbol
+	for container != nil && !seenContainers[container.Name] {
+		seenContainers[container.Name] = true
+		for _, member := range container.Children {
+			name := strings.TrimPrefix(member.Name, container.Name+".")
+			if seenMembers[name] {
+				continue
+			}
+			seenMembers[name] = true
+			members = append(members, member)
+		}
+		aggregate := commandForAggregateSpan(file.Commands, container.SelectionRange)
+		if aggregate == nil || aggregate.Aggregate == nil || len(aggregate.Aggregate.Extends) == 0 {
+			break
+		}
+		container = completionContainer(symbols, file.Text(aggregate.Aggregate.Extends[0]))
+	}
+	return members
 }
 
 func completionStaticType(typ analysis.ValueType) bool {

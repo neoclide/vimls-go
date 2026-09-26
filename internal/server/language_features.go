@@ -1165,6 +1165,31 @@ func completionMethodCallableSpanAt(file *syntax.File, offset int) (syntax.Span,
 	return result, found
 }
 
+func completionMethodReceiverAt(file *syntax.File, offset int) *syntax.Expression {
+	var receiver *syntax.Expression
+	spanSize := len(file.Source) + 1
+	walkCommands(file.Commands, func(command *syntax.Command) {
+		if offset < command.Span.Start || offset > command.Span.End {
+			return
+		}
+		walkCommandExpressions(command, func(expression *syntax.Expression) {
+			span, ok := completionMethodCallableSpan(file, expression, offset)
+			if !ok || span.End-span.Start >= spanSize {
+				return
+			}
+			if expression.Kind == syntax.ExpressionMember && file.Text(expression.Operator) == "->" && len(expression.Children) > 0 {
+				receiver = expression.Children[0]
+				spanSize = span.End - span.Start
+			}
+			if expression.Kind == syntax.ExpressionCall && expression.Value == "->" && len(expression.Children) > 1 {
+				receiver = expression.Children[1]
+				spanSize = span.End - span.Start
+			}
+		})
+	})
+	return receiver
+}
+
 func completionMethodCallableSpan(file *syntax.File, expression *syntax.Expression, offset int) (syntax.Span, bool) {
 	if expression == nil {
 		return syntax.Span{}, false

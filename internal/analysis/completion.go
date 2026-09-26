@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 // CollectCompletionFacts collects current lexical declarations and explicit
@@ -174,13 +175,38 @@ func (query *CompletionTypes) TypeOf(expression *syntax.Expression, offset int) 
 	if query.state == nil {
 		return UnknownValueType
 	}
+	identifier := unwrapParenthesizedExpression(expression)
+	if identifier != nil && identifier.Kind == syntax.ExpressionIdentifier {
+		offset = identifier.Span.Start
+	}
 	scope := query.state.result.Root
 	for _, candidate := range query.state.result.Scopes {
 		if candidate.Span.Start <= offset && offset <= candidate.Span.End && candidate.Span.End-candidate.Span.Start < scope.Span.End-scope.Span.Start {
 			scope = candidate
 		}
 	}
+	if identifier != nil && identifier.Kind == syntax.ExpressionIdentifier && query.completionExpressionDialect(identifier) == syntax.Vim9 {
+		if declaration := resolve(scope, identifier.Value, identifier.Span.Start, false, nil); declaration != nil {
+			ordinary := query.DeclarationType(declaration)
+			if guarded, ok := query.guardedCompletionType(declaration, scope, identifier.Span.Start, ordinary); ok {
+				return guarded
+			}
+			return ordinary
+		}
+	}
 	return query.state.infer(expression, scope)
+}
+
+func (query *CompletionTypes) completionExpressionDialect(expression *syntax.Expression) syntax.Dialect {
+	dialect := query.state.result.File.Dialect
+	spanSize := len(query.state.result.File.Source) + 1
+	for command := range query.state.commandScopes {
+		if command.Span.Start <= expression.Span.Start && expression.Span.End <= command.Span.End && command.Span.End-command.Span.Start < spanSize {
+			dialect = command.Dialect
+			spanSize = command.Span.End - command.Span.Start
+		}
+	}
+	return dialect
 }
 
 func (state *typeState) typeOfDeclaration(declaration *Declaration) ValueType {
@@ -188,6 +214,26 @@ func (state *typeState) typeOfDeclaration(declaration *Declaration) ValueType {
 		return state.completion.DeclarationType(declaration)
 	}
 	return declaration.Type
+}
+
+// BuiltinMethodAcceptsReceiver rejects only a method receiver whose known broad
+// value category contradicts Vim's checker. It leaves unknown, dependent, and
+// element/function-signature checks available to completion.
+func BuiltinMethodAcceptsReceiver(function vimdata.BuiltinFunction, receiver ValueType) bool {
+	index := function.MethodArgument - 1
+	if index < 0 || index >= len(function.ArgumentChecks) || isUnknownType(receiver) {
+		return true
+	}
+	expected, ok := builtinArgumentExpectation(function.ArgumentChecks[index], nil, index)
+	if !ok {
+		return true
+	}
+	kind := builtinValueTypeKind(receiver)
+	if kind == 0 || expected.kinds&kind != 0 {
+		return true
+	}
+	// Vim accepts 0 and 1 where a boolean is expected.
+	return kind == builtinNumber && expected.kinds&builtinBool != 0
 }
 
 // Full analysis already records function-callee resolution in References.
