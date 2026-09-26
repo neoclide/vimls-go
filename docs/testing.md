@@ -25,10 +25,10 @@ make
 test suite. Keep `-count=1`: integration tests build a server subprocess, and
 Go's test cache does not track every source change that affects it.
 
-The root `VERSION` file contains one version without a leading `v` (currently
-`0.1.3`). Local `make` builds append `-dev`, producing `vimls 0.1.3-dev`, even
-without Git metadata. This affects `vimls -version` and LSP server info. Direct
-`go build` without linker flags retains the source default `dev`.
+The root [`VERSION`](../VERSION) file contains the base version without a leading
+`v`. Local `make` builds append `-dev` to that value, even without Git metadata.
+This affects `vimls -version` and LSP server info. Direct `go build` without
+linker flags retains the source default `dev`.
 Release builds embed the matching release tag, including its leading `v`.
 
 `make incr` increases the patch number in `VERSION` and commits only that file
