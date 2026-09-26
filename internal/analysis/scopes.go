@@ -272,10 +272,7 @@ func AnalyzeWithOptions(file *syntax.File, options Options) (*FileAnalysis, erro
 		return nil, err
 	}
 	if result.configFile {
-		collectConfigLeaderOrderDiagnostics(result)
-		collectConfigDuplicateMappingDiagnostics(result)
-		collectConfigLoadedGuardDiagnostics(result)
-		collectConfigEncodingAfterScriptencodingDiagnostics(result)
+		collectConfigFileDiagnostics(result)
 	}
 	suppressUnexpandedBodyDiagnostics(result)
 	sort.SliceStable(result.Diagnostics, func(i, j int) bool {

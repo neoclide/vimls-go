@@ -2,59 +2,231 @@ package analysis
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
-// collectConfigLeaderOrderDiagnostics reports vimls/config-mapleader-order for
-// user configuration files (§5.2). g:mapleader and g:maplocalleader are
-// expanded when a mapping is *defined*, so assigning the leader after a
-// mapping that already used <Leader>/<LocalLeader> has no effect on it. Only
-// a provable straight-line order (unconditional top-level commands in source
-// order) and a statically literal later assignment are reported; dynamic
-// assignments, conditional blocks, and function bodies stay unknown.
-func collectConfigLeaderOrderDiagnostics(result *FileAnalysis) {
+// collectConfigFileDiagnostics applies the four configuration-only rules in
+// one source-order walk. Later rules buffer their output to retain the previous
+// rule order for diagnostics at identical spans after the final stable sort.
+func collectConfigFileDiagnostics(result *FileAnalysis) {
 	file := result.File
 	if file == nil || len(file.Diagnostics) != 0 {
 		return
 	}
-	leaderState := map[string]*leaderOrderState{
-		"mapleader":      {},
-		"maplocalleader": {},
+	var mapLeader, mapLocalLeader leaderOrderState
+	records := make(map[configMappingKey]*configMappingRecord)
+	markers := make(map[string]bool)
+	type guardCandidate struct {
+		name     string
+		span     syntax.Span
+		block    int
+		finished bool
 	}
+	var guards []guardCandidate
+	activeGuard := -1
+	vim9 := file.Dialect == syntax.Vim9
+	seenVim9script, vim9NoClear := false, false
+	seenScriptencoding := false
+	var duplicateDiagnostics, guardDiagnostics []syntax.Diagnostic
+	var encodingSpans []syntax.Span
+
 	for index := range file.Commands {
-		if !unconditionalAt(file.Commands, file.Blocks, index) {
-			continue
+		if !result.analysisStep() {
+			return
 		}
 		command := &file.Commands[index]
-		if command.Mapping != nil && command.Mapping.RHS.Start > command.Mapping.LHS.Start {
-			text := strings.ToLower(file.Text(syntax.Span{Start: command.Mapping.LHS.Start, End: command.Mapping.RHS.End}))
-			if strings.Contains(text, "<leader>") {
-				leaderState["mapleader"].noteMapping(command)
+		unconditional := unconditionalAt(file.Commands, file.Blocks, index)
+
+		if unconditional {
+			if command.Mapping != nil && command.Mapping.RHS.Start > command.Mapping.LHS.Start {
+				text := strings.ToLower(file.Text(syntax.Span{Start: command.Mapping.LHS.Start, End: command.Mapping.RHS.End}))
+				if strings.Contains(text, "<leader>") {
+					mapLeader.noteMapping(command)
+				}
+				if strings.Contains(text, "<localleader>") {
+					mapLocalLeader.noteMapping(command)
+				}
 			}
-			if strings.Contains(text, "<localleader>") {
-				leaderState["maplocalleader"].noteMapping(command)
+			var rawName string
+			var targetSpan syntax.Span
+			var initializer *syntax.Expression
+			if command.Declaration != nil && command.Declaration.Name.Start < command.Declaration.Name.End {
+				rawName = file.Text(command.Declaration.Name)
+				targetSpan = command.Declaration.Name
+				initializer = command.Declaration.Initializer
+			} else if len(command.Expressions) == 1 && command.Expressions[0].Kind == syntax.ExpressionAssignment && len(command.Expressions[0].Children) == 2 && file.Text(command.Expressions[0].Operator) == "=" {
+				assignment := command.Expressions[0]
+				target := assignment.Children[0]
+				if target != nil && target.Kind == syntax.ExpressionIdentifier {
+					rawName = file.Text(target.Span)
+					targetSpan = target.Span
+					initializer = assignment.Children[1]
+				}
 			}
-		}
-		if command.Declaration != nil && command.Declaration.Name.Start < command.Declaration.Name.End {
-			rawName := file.Text(command.Declaration.Name)
-			name := strings.TrimPrefix(strings.ToLower(rawName), "g:")
-			if state, ok := leaderState[name]; ok {
-				state.noteAssignment(result, rawName, command.Declaration.Name, command.Declaration.Initializer)
-			}
-		} else if len(command.Expressions) == 1 && command.Expressions[0].Kind == syntax.ExpressionAssignment && len(command.Expressions[0].Children) == 2 && file.Text(command.Expressions[0].Operator) == "=" {
-			assignment := command.Expressions[0]
-			target := assignment.Children[0]
-			if target != nil && target.Kind == syntax.ExpressionIdentifier {
-				rawName := file.Text(target.Span)
-				name := strings.TrimPrefix(strings.ToLower(rawName), "g:")
-				if state, ok := leaderState[name]; ok {
-					state.noteAssignment(result, rawName, target.Span, assignment.Children[1])
+			switch strings.TrimPrefix(strings.ToLower(rawName), "g:") {
+			case "mapleader":
+				if !mapLeader.noteAssignment(result, rawName, targetSpan, initializer) {
+					return
+				}
+			case "maplocalleader":
+				if !mapLocalLeader.noteAssignment(result, rawName, targetSpan, initializer) {
+					return
 				}
 			}
 		}
+
+		// Even conditional and dynamic removals invalidate a previously certain
+		// definition; only new definitions require an unconditional command.
+		if command.Canonical == "execute" && dynamicMappingMutationText(file.Text(command.Argument)) {
+			clear(records)
+		} else if mapping := command.Mapping; mapping != nil {
+			if mapping.Kind == syntax.MappingClear {
+				for key, existing := range records {
+					if !result.analysisStep() {
+						return
+					}
+					if key.buffer == mapping.Buffer && key.abbreviation == mapping.Abbreviation && existing.modes&mapping.Mode != 0 {
+						existing.clearModes(mapping.Mode)
+						if existing.modes == 0 {
+							delete(records, key)
+						}
+					}
+				}
+			} else if !mapping.Query && mapping.LHS.Start != mapping.LHS.End {
+				key := configMappingKey{lhs: file.Text(mapping.LHS), buffer: mapping.Buffer, abbreviation: mapping.Abbreviation}
+				if mapping.Kind == syntax.MappingUnmap {
+					if record := records[key]; record != nil {
+						record.clearModes(mapping.Mode)
+						if record.modes == 0 {
+							delete(records, key)
+						}
+					}
+				} else if unconditional {
+					switch mapping.Kind {
+					case syntax.MappingDefine, syntax.MappingNoremap:
+						record := records[key]
+						if record != nil && record.modes&mapping.Mode != 0 {
+							earlier := record.overlappingDefinition(record.modes & mapping.Mode)
+							if earlier == nil {
+								break
+							}
+							duplicateDiagnostics = append(duplicateDiagnostics, syntax.Diagnostic{
+								Code:    "vimls/duplicate-mapping",
+								Message: "mapping for " + key.lhs + " is defined again; the later definition overwrites the earlier one",
+								Span:    mapping.LHS,
+								Related: syntax.RelatedDiagnostic{Message: "earlier definition of " + key.lhs, Span: earlier.Mapping.LHS},
+							})
+						}
+						if record == nil {
+							record = &configMappingRecord{}
+							records[key] = record
+						}
+						record.noteDefinition(command, mapping.Mode)
+					}
+				}
+			}
+		}
+
+		if activeGuard >= 0 && command.Block == guards[activeGuard].block {
+			switch command.Canonical {
+			case "finish":
+				guards[activeGuard].finished = true
+				activeGuard = -1
+			case "elseif", "else", "endif":
+				activeGuard = -1
+			}
+		}
+		if command.Canonical == "vim9script" && !seenVim9script {
+			seenVim9script = true
+			vim9NoClear = strings.Contains(strings.ToLower(file.Text(command.Argument)), "noclear")
+		}
+		if !vim9 && command.Declaration != nil && rootScopedCommand(file.Commands, file.Blocks, index) && command.Declaration.Assignment.Start != command.Declaration.Assignment.End && command.Declaration.Initializer != nil && command.Declaration.Initializer.Kind != syntax.ExpressionMissing {
+			name := file.Text(command.Declaration.Name)
+			if strings.HasPrefix(name, "g:loaded_") {
+				markers[name] = true
+			}
+		}
+		if command.Canonical == "if" && rootScopedCommand(file.Commands, file.Blocks, index) && command.Block >= 0 && command.Block < len(file.Blocks) {
+			if name, ok := loadedGuardVariable(file.Text(command.Argument)); ok {
+				guards = append(guards, guardCandidate{name: name, span: command.Argument, block: command.Block})
+				activeGuard = len(guards) - 1
+			}
+		}
+
+		if !isTopLevelConfigCommand(command, file.Blocks) {
+			continue
+		}
+		if command.Canonical == "scriptencoding" {
+			seenScriptencoding = true
+			continue
+		}
+		if !seenScriptencoding {
+			continue
+		}
+		if command.Set != nil {
+			for _, option := range command.Set.Options {
+				if !result.analysisStep() {
+					return
+				}
+				if isEncodingOption(file.Text(option.Name)) {
+					isAssignment := (option.Operator.Start < option.Operator.End && file.Text(option.Operator) != "?") || option.Prefix.Start < option.Prefix.End
+					if isAssignment {
+						span := option.Name
+						if span.Start == span.End {
+							span = option.Span
+						}
+						encodingSpans = append(encodingSpans, span)
+					}
+				}
+			}
+			continue
+		}
+		if command.Declaration != nil && command.Declaration.Name.Start < command.Declaration.Name.End {
+			name := file.Text(command.Declaration.Name)
+			if isEncodingOption(name) && command.Declaration.Assignment.Start < command.Declaration.Assignment.End {
+				encodingSpans = append(encodingSpans, command.Declaration.Name)
+				continue
+			}
+		}
+		if len(command.Expressions) > 0 && command.Expressions[0].Kind == syntax.ExpressionAssignment && len(command.Expressions[0].Children) == 2 {
+			target := command.Expressions[0].Children[0]
+			if target != nil && target.Kind == syntax.ExpressionIdentifier && isEncodingOption(target.Value) {
+				encodingSpans = append(encodingSpans, target.Span)
+			}
+		}
+	}
+
+	if !vim9 || !vim9NoClear {
+		for _, guard := range guards {
+			if !result.analysisStep() {
+				return
+			}
+			if !guard.finished || (!vim9 && !markers[guard.name]) {
+				continue
+			}
+			message := "a loaded guard for " + guard.name + " skips the rest of the file on a later :source; edits below may not take effect"
+			if vim9 {
+				message = "a loaded guard for " + guard.name + " skips the rest of the file; Vim9 reload already cleared script-local items, so the file may stay half-initialized"
+			}
+			guardDiagnostics = append(guardDiagnostics, syntax.Diagnostic{Code: "vimls/config-loaded-guard", Message: message, Span: guard.span})
+		}
+	}
+	result.Diagnostics = slices.Grow(result.Diagnostics, len(duplicateDiagnostics)+len(guardDiagnostics)+len(encodingSpans))
+	result.Diagnostics = append(result.Diagnostics, duplicateDiagnostics...)
+	result.Diagnostics = append(result.Diagnostics, guardDiagnostics...)
+	for _, span := range encodingSpans {
+		if !result.analysisStep() {
+			return
+		}
+		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+			Code:    "vimls/encoding-after-scriptencoding",
+			Message: "set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion",
+			Span:    span,
+		})
 	}
 }
 
@@ -62,7 +234,6 @@ func collectConfigLeaderOrderDiagnostics(result *FileAnalysis) {
 type leaderOrderState struct {
 	assigned bool
 	mappings []*syntax.Command
-	reported map[*syntax.Command]bool
 }
 
 func (state *leaderOrderState) noteMapping(command *syntax.Command) {
@@ -72,9 +243,9 @@ func (state *leaderOrderState) noteMapping(command *syntax.Command) {
 	state.mappings = append(state.mappings, command)
 }
 
-func (state *leaderOrderState) noteAssignment(result *FileAnalysis, targetName string, targetSpan syntax.Span, initializer *syntax.Expression) {
+func (state *leaderOrderState) noteAssignment(result *FileAnalysis, targetName string, targetSpan syntax.Span, initializer *syntax.Expression) bool {
 	if state.assigned {
-		return
+		return true
 	}
 	// A statically literal assignment makes the ordering problem visible: the
 	// mapping that ran earlier expanded the old (or default) leader. A dynamic
@@ -82,13 +253,9 @@ func (state *leaderOrderState) noteAssignment(result *FileAnalysis, targetName s
 	static := initializer != nil && initializer.Kind == syntax.ExpressionString
 	if static {
 		for _, mapping := range state.mappings {
-			if state.reported == nil {
-				state.reported = make(map[*syntax.Command]bool)
+			if !result.analysisStep() {
+				return false
 			}
-			if state.reported[mapping] {
-				continue
-			}
-			state.reported[mapping] = true
 			leader := strings.TrimSpace(targetName)
 			if !strings.HasPrefix(leader, "g:") {
 				leader = "g:" + leader
@@ -106,15 +273,21 @@ func (state *leaderOrderState) noteAssignment(result *FileAnalysis, targetName s
 	}
 	state.mappings = nil
 	state.assigned = true
+	return true
 }
 
 // configMappingRecord tracks one mapping key that is statically active while a
-// configuration file is sourced (§5.1 duplicate-mapping).
+// configuration file is sourced (§5.1 duplicate-mapping). The array positions
+// correspond to the current eight syntax.MappingMode bits, Normal to Langmap.
 type configMappingRecord struct {
-	scope        string
+	modes       syntax.MappingMode
+	definitions [8]*syntax.Command
+}
+
+type configMappingKey struct {
+	lhs          string
+	buffer       bool
 	abbreviation bool
-	modes        syntax.MappingMode
-	definitions  map[syntax.MappingMode]*syntax.Command
 }
 
 func dynamicMappingMutationText(source string) bool {
@@ -131,39 +304,21 @@ func dynamicMappingMutationText(source string) bool {
 	return false
 }
 
-func configMappingScope(mapping *syntax.Mapping) string {
-	if mapping.Buffer {
-		return "buffer"
-	}
-	return "global"
-}
-
-// configMappingRecordKey identifies a mapping by its category (mapping vs
-// abbreviation), its local/global scope, and its literal LHS spelling.
-func configMappingRecordKey(file *syntax.File, mapping *syntax.Mapping) string {
-	category := "map"
-	if mapping.Abbreviation {
-		category = "abbreviation"
-	}
-	return category + "\x00" + configMappingScope(mapping) + "\x00" + file.Text(mapping.LHS)
-}
-
 func (record *configMappingRecord) clearModes(modes syntax.MappingMode) {
 	record.modes &^= modes
-	for mode := syntax.MappingModeNormal; mode <= syntax.MappingModeLangmap; mode <<= 1 {
+	for index := range record.definitions {
+		mode := syntax.MappingModeNormal << index
 		if modes&mode != 0 {
-			delete(record.definitions, mode)
+			record.definitions[index] = nil
 		}
 	}
 }
 
 func (record *configMappingRecord) noteDefinition(command *syntax.Command, modes syntax.MappingMode) {
-	if record.definitions == nil {
-		record.definitions = make(map[syntax.MappingMode]*syntax.Command)
-	}
-	for mode := syntax.MappingModeNormal; mode <= syntax.MappingModeLangmap; mode <<= 1 {
+	for index := range record.definitions {
+		mode := syntax.MappingModeNormal << index
 		if modes&mode != 0 {
-			record.definitions[mode] = command
+			record.definitions[index] = command
 		}
 	}
 	record.modes |= modes
@@ -171,8 +326,8 @@ func (record *configMappingRecord) noteDefinition(command *syntax.Command, modes
 
 func (record *configMappingRecord) overlappingDefinition(modes syntax.MappingMode) *syntax.Command {
 	var latest *syntax.Command
-	for mode := syntax.MappingModeNormal; mode <= syntax.MappingModeLangmap; mode <<= 1 {
-		definition := record.definitions[mode]
+	for index, definition := range record.definitions {
+		mode := syntax.MappingModeNormal << index
 		if modes&mode != 0 && definition != nil && (latest == nil || definition.Span.Start > latest.Span.Start) {
 			latest = definition
 		}
@@ -180,156 +335,9 @@ func (record *configMappingRecord) overlappingDefinition(modes syntax.MappingMod
 	return latest
 }
 
-// collectConfigDuplicateMappingDiagnostics reports vimls/duplicate-mapping for
-// configuration files (§5.1): when a later mapping definition overwrites an
-// earlier definition of the same key (same LHS spelling, same local/global
-// scope, same category) in overlapping modes on the same provable execution
-// path. :unmap and :mapclear terminate earlier definitions. Mutually exclusive
-// or dynamic contexts are not tracked, so no conflict is invented.
-func collectConfigDuplicateMappingDiagnostics(result *FileAnalysis) {
-	file := result.File
-	if file == nil || len(file.Diagnostics) != 0 {
-		return
-	}
-	records := make(map[string]*configMappingRecord)
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		if command.Canonical == "execute" && dynamicMappingMutationText(file.Text(command.Argument)) {
-			// The command text is evaluated at runtime, so a mapping mutation in
-			// it may have changed any tracked mapping. Forget the state rather
-			// than reporting a later overwrite as certain.
-			clear(records)
-			continue
-		}
-		mapping := command.Mapping
-		if mapping == nil {
-			continue
-		}
-		if mapping.Kind == syntax.MappingClear {
-			// A conditional or dynamic clear makes prior state unknown too: do
-			// not retain it and later claim an overwrite is certain. :mapclear
-			// and :abclear have distinct categories.
-			scope := configMappingScope(mapping)
-			for existingKey, existing := range records {
-				if existing.scope == scope && existing.abbreviation == mapping.Abbreviation && existing.modes&mapping.Mode != 0 {
-					existing.clearModes(mapping.Mode)
-					if existing.modes == 0 {
-						delete(records, existingKey)
-					}
-				}
-			}
-			continue
-		}
-		if mapping.Query || mapping.LHS.Start == mapping.LHS.End {
-			continue
-		}
-		key := configMappingRecordKey(file, mapping)
-		if mapping.Kind == syntax.MappingUnmap {
-			// As above, a mutation that is not statically guaranteed to run
-			// invalidates certainty rather than preserving a possible stale map.
-			if record := records[key]; record != nil {
-				record.clearModes(mapping.Mode)
-				if record.modes == 0 {
-					delete(records, key)
-				}
-			}
-			continue
-		}
-		if !unconditionalAt(file.Commands, file.Blocks, index) {
-			continue
-		}
-		switch mapping.Kind {
-		case syntax.MappingDefine, syntax.MappingNoremap:
-			record := records[key]
-			if record != nil && record.modes&mapping.Mode != 0 {
-				earlier := record.overlappingDefinition(record.modes & mapping.Mode)
-				if earlier == nil {
-					continue
-				}
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code:    "vimls/duplicate-mapping",
-					Message: "mapping for " + file.Text(mapping.LHS) + " is defined again; the later definition overwrites the earlier one",
-					Span:    mapping.LHS,
-					Related: syntax.RelatedDiagnostic{
-						Message: "earlier definition of " + file.Text(mapping.LHS),
-						Span:    earlier.Mapping.LHS,
-					},
-				})
-			}
-			if record == nil {
-				record = &configMappingRecord{scope: configMappingScope(mapping), abbreviation: mapping.Abbreviation}
-				records[key] = record
-			}
-			record.noteDefinition(command, mapping.Mode)
-		}
-	}
-}
-
 // loadedGuardPattern matches an if condition that is exactly one exists()
 // call testing a g:loaded_* variable, e.g. exists('g:loaded_my_vimrc').
 var loadedGuardPattern = regexp.MustCompile(`(?is)^\s*exists\s*\(\s*['"]g:loaded_([a-z0-9_]+)['"]\s*\)\s*$`)
-
-// collectConfigLoadedGuardDiagnostics reports vimls/config-loaded-guard (§4.4)
-// for configuration files whose top-level plugin-style loaded guard prevents a
-// later :source from reaching the remainder of the file.
-func collectConfigLoadedGuardDiagnostics(result *FileAnalysis) {
-	file := result.File
-	if file == nil || len(file.Diagnostics) != 0 {
-		return
-	}
-	// vim9script noclear is an explicit single-load design and is exempt.
-	vim9 := file.Dialect == syntax.Vim9
-	if vim9 && hasVim9NoClear(file) {
-		return
-	}
-	var markers map[string]bool
-	if !vim9 {
-		markers = configLoadedMarkers(result)
-	}
-	for index := range file.Commands {
-		if !rootScopedCommand(file.Commands, file.Blocks, index) {
-			continue
-		}
-		command := &file.Commands[index]
-		if command.Canonical != "if" {
-			continue
-		}
-		guardName, ok := loadedGuardVariable(file.Text(command.Argument))
-		if !ok {
-			continue
-		}
-		if markers != nil {
-			if _, marked := markers[guardName]; !marked {
-				continue
-			}
-		}
-		if !guardFinishesBlock(command, file.Commands, file.Blocks, index) {
-			continue
-		}
-		message := "a loaded guard for " + guardName + " skips the rest of the file on a later :source; edits below may not take effect"
-		if vim9 {
-			message = "a loaded guard for " + guardName + " skips the rest of the file; Vim9 reload already cleared script-local items, so the file may stay half-initialized"
-		}
-		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-			Code: "vimls/config-loaded-guard", Message: message,
-			Span: syntax.Span{Start: command.Argument.Start, End: command.Argument.End},
-		})
-	}
-}
-
-// hasVim9NoClear reports whether a Vim9 root file starts with
-// "vim9script noclear", the explicit single-load design.
-func hasVim9NoClear(file *syntax.File) bool {
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		if command.Canonical != "vim9script" {
-			continue
-		}
-		text := strings.ToLower(file.Text(command.Argument))
-		return strings.Contains(text, "noclear")
-	}
-	return false
-}
 
 // loadedGuardVariable extracts the g:loaded_* variable tested by a candidate
 // guard condition. Reject exists() arguments that address functions ('*...'),
@@ -341,112 +349,6 @@ func loadedGuardVariable(argument string) (string, bool) {
 		return "", false
 	}
 	return "g:loaded_" + match[1], true
-}
-
-// guardFinishesBlock reports whether the then-part of the if at index directly
-// contains a :finish before any elseif/else at the same level.
-func guardFinishesBlock(guard *syntax.Command, commands []syntax.Command, blocks []syntax.Block, index int) bool {
-	blockIndex := guard.Block
-	if blockIndex < 0 || blockIndex >= len(blocks) {
-		return false
-	}
-	for next := index + 1; next < len(commands); next++ {
-		if commands[next].Block != blockIndex {
-			continue
-		}
-		switch commands[next].Canonical {
-		case "finish":
-			return true
-		case "elseif", "else", "endif":
-			return false
-		}
-	}
-	return false
-}
-
-// configLoadedMarkers collects the g:loaded_* variables assigned at the root
-// level of a configuration file.
-func configLoadedMarkers(result *FileAnalysis) map[string]bool {
-	file := result.File
-	markers := make(map[string]bool)
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		if command.Declaration == nil || !rootScopedCommand(file.Commands, file.Blocks, index) || command.Declaration.Assignment.Start == command.Declaration.Assignment.End || command.Declaration.Initializer == nil || command.Declaration.Initializer.Kind == syntax.ExpressionMissing {
-			continue
-		}
-		name := file.Text(command.Declaration.Name)
-		if strings.HasPrefix(name, "g:loaded_") {
-			markers[name] = true
-		}
-	}
-	return markers
-}
-
-// collectConfigEncodingAfterScriptencodingDiagnostics reports
-// vimls/encoding-after-scriptencoding for user configuration files.
-// :scriptencoding informs Vim how to convert subsequent script bytes from
-// the script's encoding to Vim's internal 'encoding'. Setting 'encoding'
-// after :scriptencoding breaks the conversion and can corrupt text.
-func collectConfigEncodingAfterScriptencodingDiagnostics(result *FileAnalysis) {
-	file := result.File
-	if file == nil || len(file.Diagnostics) != 0 {
-		return
-	}
-	seenScriptencoding := false
-	for index := range file.Commands {
-		command := &file.Commands[index]
-		if !isTopLevelConfigCommand(command, file.Blocks) {
-			continue
-		}
-		if command.Canonical == "scriptencoding" {
-			seenScriptencoding = true
-			continue
-		}
-		if !seenScriptencoding {
-			continue
-		}
-		if command.Set != nil {
-			for _, option := range command.Set.Options {
-				name := file.Text(option.Name)
-				if isEncodingOption(name) {
-					isAssignment := (option.Operator.Start < option.Operator.End && file.Text(option.Operator) != "?") || option.Prefix.Start < option.Prefix.End
-					if isAssignment {
-						span := option.Name
-						if span.Start == span.End {
-							span = option.Span
-						}
-						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-							Code:    "vimls/encoding-after-scriptencoding",
-							Message: "set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion",
-							Span:    span,
-						})
-					}
-				}
-			}
-			continue
-		}
-		if command.Declaration != nil && command.Declaration.Name.Start < command.Declaration.Name.End {
-			name := file.Text(command.Declaration.Name)
-			if isEncodingOption(name) && command.Declaration.Assignment.Start < command.Declaration.Assignment.End {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code:    "vimls/encoding-after-scriptencoding",
-					Message: "set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion",
-					Span:    command.Declaration.Name,
-				})
-				continue
-			}
-		}
-		if len(command.Expressions) > 0 && command.Expressions[0].Kind == syntax.ExpressionAssignment && len(command.Expressions[0].Children) == 2 {
-			target := command.Expressions[0].Children[0]
-			if target != nil && target.Kind == syntax.ExpressionIdentifier && isEncodingOption(target.Value) {
-				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
-					Code:    "vimls/encoding-after-scriptencoding",
-					Message: "set 'encoding' before ':scriptencoding'; setting 'encoding' after ':scriptencoding' may corrupt character conversion",
-					Span:    target.Span,
-				})
-			}
-		}
-	}
 }
 
 func isTopLevelConfigCommand(command *syntax.Command, blocks []syntax.Block) bool {

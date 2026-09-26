@@ -162,6 +162,20 @@ change. P95 here describes benchmark sample means, not individual requests.
 For comparison with go-vimlparser and parser-only profiling, follow
 [tools/benchlegacy](../tools/benchlegacy/README.md).
 
+For diagnostic traversal changes, use the focused analysis workloads:
+
+```sh
+go test -mod=readonly -p 1 ./internal/analysis -run '^$' \
+  -bench '^(BenchmarkDiagnosticAnalysis|BenchmarkConfigDiagnostics|BenchmarkNestedAssignmentDiagnostics)$' \
+  -benchmem -benchtime=1s -count=20
+```
+
+These benchmarks parse outside the timed loop. `BenchmarkDiagnosticAnalysis`
+covers small files, configuration files, embedded commands, calls and long
+expressions. The two collector benchmarks isolate configuration checks and
+nested assignment validation; their improvements do not represent end-to-end
+editor latency. Keep `GOMAXPROCS` identical when comparing runs.
+
 ## Event documentation
 
 For the merged Vim and Neovim event documentation, regeneration commands and

@@ -248,6 +248,9 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 	var expressionUsesExecute func(*syntax.Expression) bool
 	var commandsUseExecute func([]syntax.Command) bool
 	expressionUsesExecute = func(expression *syntax.Expression) bool {
+		if !result.analysisStep() {
+			return false
+		}
 		if expression == nil {
 			return false
 		}
@@ -262,6 +265,9 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 	}
 	commandsUseExecute = func(commands []syntax.Command) bool {
 		for index := range commands {
+			if !result.analysisStep() {
+				return false
+			}
 			command := &commands[index]
 			if command.Canonical == "execute" {
 				return true
@@ -282,11 +288,23 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 		}
 		return false
 	}
+	// execute can create a variable anywhere in the file, including nested bodies.
 	dynamicVariableCreation := commandsUseExecute(result.File.Commands)
+	if !result.analysisStep() {
+		return
+	}
+	collectAssignmentCommandDiagnostics(result, commands, parent, dynamicVariableCreation)
+}
+
+func collectAssignmentCommandDiagnostics(result *FileAnalysis, commands []syntax.Command, parent *Scope, dynamicVariableCreation bool) {
+	// Adjacency and recent assignments belong only to this command list.
 	var previous *syntax.Command
 	var previousScope *Scope
 	recentGlobalAssignments := make(map[string]*syntax.Expression)
 	for index := range commands {
+		if !result.analysisStep() {
+			return
+		}
 		command := &commands[index]
 		scope := result.commandScopes[command]
 		if scope == nil {
@@ -516,11 +534,11 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			}
 		}
 		if command.Declaration != nil && command.Declaration.Initializer != nil && command.Declaration.Initializer.Kind == syntax.ExpressionLambda {
-			collectAssignmentExpressionDiagnostics(result, scope, command.Declaration.Initializer, command.Dialect)
+			collectAssignmentExpressionDiagnostics(result, scope, command.Declaration.Initializer, command.Dialect, dynamicVariableCreation)
 		}
 		if command.Declaration == nil || command.Dialect == syntax.Legacy && command.Canonical == "let" {
 			for _, expression := range command.Expressions {
-				collectAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect)
+				collectAssignmentExpressionDiagnostics(result, scope, expression, command.Dialect, dynamicVariableCreation)
 			}
 		}
 		recordedGlobalAssignment := false
@@ -544,7 +562,7 @@ func collectAssignmentDiagnostics(result *FileAnalysis, commands []syntax.Comman
 			clear(recentGlobalAssignments)
 		}
 		if command.Embedded != nil {
-			collectAssignmentDiagnostics(result, command.Embedded.Commands, scope)
+			collectAssignmentCommandDiagnostics(result, command.Embedded.Commands, scope, dynamicVariableCreation)
 		}
 	}
 }
@@ -625,7 +643,10 @@ func appendClassVariableLockDiagnostic(result *FileAnalysis, scope *Scope, targe
 	return true
 }
 
-func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect) {
+func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, expression *syntax.Expression, dialect syntax.Dialect, dynamicVariableCreation bool) {
+	if !result.analysisStep() {
+		return
+	}
 	if expression == nil || scope == nil {
 		return
 	}
@@ -635,11 +656,11 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 			lambdaScope = scope
 		}
 		if expression.LambdaBody != nil {
-			collectAssignmentDiagnostics(result, expression.LambdaBody.Commands, lambdaScope)
+			collectAssignmentCommandDiagnostics(result, expression.LambdaBody.Commands, lambdaScope, dynamicVariableCreation)
 		}
 		for index, child := range expression.Children {
 			if index >= len(expression.Parameters) {
-				collectAssignmentExpressionDiagnostics(result, lambdaScope, child, dialect)
+				collectAssignmentExpressionDiagnostics(result, lambdaScope, child, dialect, dynamicVariableCreation)
 			}
 		}
 		return
@@ -777,7 +798,7 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 		}
 	}
 	for _, child := range expression.Children {
-		collectAssignmentExpressionDiagnostics(result, scope, child, dialect)
+		collectAssignmentExpressionDiagnostics(result, scope, child, dialect, dynamicVariableCreation)
 	}
 }
 

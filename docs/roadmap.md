@@ -178,32 +178,26 @@ rendering separately; neither is preempted by this scheduling.
 
 ### Incremental analysis pass consolidation
 
-Diagnostic collection currently balances modular rule definitions against AST
-traversal overhead. While phase boundaries between declaration indexing,
-reference binding, type inference, and post-inference validation remain strictly
-necessary, multiple passes within the same phase traverse the command list and
-expression trees independently. Planned consolidation follows an incremental
-strategy:
+Configuration-only diagnostics share one source-order command scan. Leader
+ordering, mapping replacement, loaded guards and encoding order retain their
+individual scope rules and diagnostic order. Loaded guards are resolved after
+the scan so a later marker assignment is still visible. Conditional mapping
+removals continue to invalidate previously certain definitions.
 
-- **Consolidate user-configuration checks**: Merge the independent top-level passes
-  (`collectConfigLeaderOrderDiagnostics`, `collectConfigDuplicateMappingDiagnostics`,
-  `collectConfigLoadedGuardDiagnostics`, and
-  `collectConfigEncodingAfterScriptencodingDiagnostics`) into a single top-level
-  command loop in `collectConfigFileDiagnostics`. Individual check logic remains
-  modular state trackers fed by the unified loop, reducing four command scans to one.
-- **Unify syntax and style expression traversals**: Keep syntax and style lint
-  rules (such as `vimls/abbreviated-option`, `vimls/implicit-string-case`,
-  `vimls/function-without-abort`, and `vimls/implicit-pattern-case`) batched
-  inside `collectStyleDiagnostics` and `visitStyleExpression`. New lint checks
-  hook into this shared walk rather than adding isolated file-level passes.
-- **Batched post-inference expression validation**: Group post-inference checks
-  that inspect expression subtrees (operator compatibility, assignment types,
-  type mismatches, and builtin argument types) into coordinated command walks to
-  reduce redundant recursive expression traversal and stack overhead.
-- **Preserve phase dependencies and cancellation boundaries**: Retain strict phase
-  barriers where semantic state is established, and maintain cooperative `yield`
-  checkpoints during batch processing so long-running analyses remain cancelable
-  without stalling completion requests.
+Assignment validation computes the file-wide dynamic `execute` fact once and
+passes it into embedded-command and lambda-body validation. Operator validation
+passes proven expression completeness down to children, avoiding repeated
+missing-node scans of complete subtrees without adding a cache to the AST.
+These diagnostic walks use the existing cooperative cancellation checkpoints.
+
+Declaration indexing, reference binding and type inference remain separate
+phases. Post-inference diagnostic order also remains significant: some checks
+suppress or replace diagnostics emitted by earlier checks. Further traversal
+consolidation must preserve those dependencies, rule-specific subtree pruning,
+scope and dialect changes, and shared expression nodes. Syntax and style lint
+rules already share `collectStyleDiagnostics` and `visitStyleExpression`; new
+lint checks should reuse those walks. Focused analysis benchmarks are described
+in [testing](testing.md#ci-and-additional-checks).
 
 Text indexing and parsing now agree on LF, CRLF and CR physical lines.
 Formatting and rename preserve their original byte spelling.

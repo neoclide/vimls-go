@@ -258,6 +258,9 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 	}
 	staticInitializers := make(map[*Declaration]*syntax.Expression)
 	for index := range commands {
+		if !result.analysisStep() {
+			return
+		}
 		command := &commands[index]
 		if command.Declaration == nil || len(command.Declaration.Bindings) != 1 || command.Declaration.Initializer == nil {
 			continue
@@ -279,18 +282,29 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 		}
 	}
 	for index := range commands {
+		if !result.analysisStep() {
+			return
+		}
 		command := &commands[index]
 		scope := result.commandScopes[command]
 		if scope == nil {
 			scope = parent
 		}
 		seen := make(map[*syntax.Expression]bool)
-		var walk func(*syntax.Expression, *Scope)
-		walk = func(expression *syntax.Expression, expressionScope *Scope) {
-			if expression == nil || seen[expression] {
+		var walk func(*syntax.Expression, *Scope, bool)
+		walk = func(expression *syntax.Expression, expressionScope *Scope, complete bool) {
+			if !result.analysisStep() || expression == nil || seen[expression] {
 				return
 			}
 			seen[expression] = true
+			if !complete {
+				switch expression.Kind {
+				case syntax.ExpressionCall, syntax.ExpressionBinary, syntax.ExpressionAssignment, syntax.ExpressionUnary,
+					syntax.ExpressionTernary, syntax.ExpressionIndex, syntax.ExpressionSlice:
+					// Completeness covers Children, not commands in a LambdaBody.
+					complete = !expressionContainsMissing(expression)
+				}
+			}
 			if expression.Kind == syntax.ExpressionLambda {
 				if lambdaScope := result.lambdaScopes[expression]; lambdaScope != nil {
 					expressionScope = lambdaScope
@@ -306,7 +320,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				appendClassVariableThroughObjectDiagnostic(result, expressionScope, expression)
 				appendClassMethodThroughObjectDiagnostic(result, expressionScope, expression)
 			}
-			if expression.Kind == syntax.ExpressionCall && !expressionContainsMissing(expression) &&
+			if expression.Kind == syntax.ExpressionCall && complete &&
 				!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 				builtin, arguments, ok := builtinCallArguments(result.File, expression)
 				if ok && (builtin.Name == "extend" || builtin.Name == "extendnew") {
@@ -324,7 +338,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 			if option, ok := optionAssignment(expression); ok {
 				appendOptionAssignmentTypeDiagnostic(result, expressionScope, expression, command.Dialect, option)
 				for _, child := range expression.Children {
-					walk(child, expressionScope)
+					walk(child, expressionScope, complete)
 				}
 				return
 			}
@@ -340,7 +354,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					op = result.File.Text(expression.Operator)
 				}
 				if expression.Kind == syntax.ExpressionBinary && command.Dialect == syntax.Vim9 &&
-					len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					len(expression.Children) >= 2 && complete {
 					base := strings.TrimRight(op, "#?")
 					comparison := base == "==" || base == "!=" || base == "=~" || base == "!~" || base == "is" || base == "isnot" ||
 						base == ">" || base == ">=" || base == "<" || base == "<="
@@ -377,7 +391,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 				if expression.Kind == syntax.ExpressionBinary && command.Dialect == syntax.Vim9 &&
-					(op == "is" || op == "isnot") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+					(op == "is" || op == "isnot") && len(expression.Children) >= 2 && complete {
 					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
 					leftCategory, rightCategory := valueTypeCategory(left), valueTypeCategory(right)
 					if leftCategory == rightCategory && (leftCategory == "bool" || leftCategory == ValueTypeSpecial || leftCategory == "number" || leftCategory == "float") {
@@ -387,7 +401,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 				compoundTypeError := false
-				if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+				if expression.Kind == syntax.ExpressionAssignment && len(expression.Children) >= 2 && complete {
 					targetType := assignmentTargetType(result, expressionScope, expression.Children[0])
 					rightType := result.TypeOf(expression.Children[1])
 					numericCompound := op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%="
@@ -420,7 +434,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 				compiled := command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)
-				if compiled && !expressionContainsMissing(expression) && len(expression.Children) >= 2 {
+				if compiled && complete && len(expression.Children) >= 2 {
 					if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") {
 						for _, operand := range expression.Children[:2] {
 							if diagnostic, ok := strictStringConversionDiagnostic(result, expressionScope, operand, false); ok {
@@ -434,13 +448,13 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						}
 					}
 				}
-				if expression.Kind == syntax.ExpressionBinary && (op == "<<" || op == ">>") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+				if expression.Kind == syntax.ExpressionBinary && (op == "<<" || op == ">>") && len(expression.Children) >= 2 && complete {
 					leftShift := expression.Children[0]
 					for leftShift.Kind == syntax.ExpressionParenthesized && len(leftShift.Children) == 1 {
 						leftShift = leftShift.Children[0]
 					}
 					if leftShift.Kind == syntax.ExpressionBinary && (leftShift.Value == "<<" || leftShift.Value == ">>") {
-						walk(leftShift, expressionScope)
+						walk(leftShift, expressionScope, complete)
 						for _, diagnostic := range result.Diagnostics {
 							if (diagnostic.Code == "vim/E1282" || diagnostic.Code == "vim/E1283" || diagnostic.Code == "vim/E1012") &&
 								diagnostic.Span.Start >= leftShift.Span.Start && diagnostic.Span.End <= leftShift.Span.End {
@@ -500,7 +514,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						return
 					}
 				}
-				if !compoundTypeError && (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) {
+				if !compoundTypeError && (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" || op == "+=" || op == "-=" || op == "*=" || op == "/=" || op == "%=") && len(expression.Children) >= 2 && complete {
 					left, right := result.TypeOf(expression.Children[0]), result.TypeOf(expression.Children[1])
 					if expression.Kind == syntax.ExpressionAssignment {
 						left = assignmentTargetType(result, expressionScope, expression.Children[0])
@@ -591,7 +605,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						}
 					}
 				}
-				if expression.Kind == syntax.ExpressionBinary && (op == "&&" || op == "||") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&
+				if expression.Kind == syntax.ExpressionBinary && (op == "&&" || op == "||") && len(expression.Children) >= 2 && complete &&
 					!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 					left, right := expression.Children[0], expression.Children[1]
 					if command.Dialect == syntax.Vim9 {
@@ -626,7 +640,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 						result.Diagnostics = append(result.Diagnostics, diagnostic)
 					}
 				}
-				if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") && len(expression.Children) >= 2 && !expressionContainsMissing(expression) &&
+				if expression.Kind == syntax.ExpressionBinary && (op == "." || op == "..") && len(expression.Children) >= 2 && complete &&
 					!(command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope)) {
 					left, right := expression.Children[0], expression.Children[1]
 					leftType, rightType := result.TypeOf(left), result.TypeOf(right)
@@ -656,7 +670,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					}
 				}
 			}
-			if expression.Kind == syntax.ExpressionUnary && (expression.Value == "+" || expression.Value == "-") && len(expression.Children) == 1 && !expressionContainsMissing(expression) {
+			if expression.Kind == syntax.ExpressionUnary && (expression.Value == "+" || expression.Value == "-") && len(expression.Children) == 1 && complete {
 				operand := expression.Children[0]
 				if command.Dialect == syntax.Vim9 {
 					diagnostic, ok := syntax.Diagnostic{}, false
@@ -676,7 +690,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 					})
 				}
 			}
-			if expression.Kind == syntax.ExpressionTernary && len(expression.Children) == 3 && !expressionContainsMissing(expression) {
+			if expression.Kind == syntax.ExpressionTernary && len(expression.Children) == 3 && complete {
 				condition := expression.Children[0]
 				if command.Dialect == syntax.Vim9 {
 					if diagnostic, ok := stringAsBoolDiagnostic(result, condition); ok {
@@ -722,7 +736,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 			}
 			if expression.Kind == syntax.ExpressionIndex && len(expression.Children) >= 2 &&
-				!expressionContainsMissing(expression) && !syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
+				complete && !syntaxDiagnosticOverlaps(result.File.Diagnostics, expression.Span) {
 				receiver := expression.Children[0]
 				literal := receiver
 				for literal.Kind == syntax.ExpressionParenthesized && len(literal.Children) == 1 {
@@ -771,7 +785,7 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 			}
 			if (expression.Kind == syntax.ExpressionIndex || expression.Kind == syntax.ExpressionSlice) && len(expression.Children) >= 2 &&
-				command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) && !expressionContainsMissing(expression) {
+				command.Dialect == syntax.Vim9 && scopeUsesDefTypeRules(expressionScope) && complete {
 				receiver := expression.Children[0]
 				receiverType := resolvedExpressionType(result, expressionScope, receiver)
 				candidate := receiver
@@ -859,17 +873,17 @@ func collectOperatorDiagnostics(result *FileAnalysis, commands []syntax.Command,
 				}
 			}
 			for _, child := range expression.Children {
-				walk(child, expressionScope)
+				walk(child, expressionScope, complete)
 			}
 		}
 		for _, expression := range command.Expressions {
-			walk(expression, scope)
+			walk(expression, scope, false)
 		}
 		for _, expression := range command.Targets {
-			walk(expression, scope)
+			walk(expression, scope, false)
 		}
 		if command.Declaration != nil {
-			walk(command.Declaration.Initializer, scope)
+			walk(command.Declaration.Initializer, scope, false)
 		}
 		if command.Mapping != nil {
 			// Vim v9.2.1015 map.c:eval_map_expr uses eval_to_string,
