@@ -568,6 +568,9 @@ func collectOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Com
 	var collect func([]syntax.Command)
 	collect = func(list []syntax.Command) {
 		for index := range list {
+			if !result.analysisStep() {
+				return
+			}
 			command := &list[index]
 			if command.Canonical == "function" && command.Function != nil && emptySyntaxSpan(command.Bang) &&
 				!emptySyntaxSpan(command.Function.Name) {

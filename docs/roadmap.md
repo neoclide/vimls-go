@@ -190,6 +190,8 @@ argument validation pass proven expression completeness down to children,
 avoiding repeated missing-node scans of complete subtrees without adding a cache
 to the AST.
 These diagnostic walks use the existing cooperative cancellation checkpoints.
+Builtin argument validation also covers function parameter defaults and enum
+value initializers, visiting shared enum argument expressions only once.
 
 Builtin return inference reuses argument types from the same call's first
 visit without making unknown types permanent across inference passes. Class
@@ -199,8 +201,10 @@ Reference binding chooses the appropriate value or function lookup once.
 
 Null-receiver checking records assignment targets while discovering lambda
 bodies, then applies those writes after all null candidates have been collected.
-Function and user-command overwrite warnings share one command walk while
-retaining their diagnostic phase order. Style checks collect final augroup
+This remains a conservative check: any reassignment leaves a variable's null
+state unknown, without tracking execution order or calls to deferred bodies.
+Function and user-command overwrite warnings share one cancellable command walk
+while retaining their diagnostic phase order. Style checks collect final augroup
 names and ambiguous references during their command walk; workspace names
 remain available to the separate public suppression entry point.
 

@@ -790,6 +790,19 @@ func collectBuiltinArgumentTypeDiagnostics(result *FileAnalysis, commands []synt
 			if command.Import != nil {
 				walk(command.Import.Path, scope, command.Dialect, false)
 			}
+			if command.Function != nil {
+				for _, parameter := range command.Function.Parameters {
+					walk(parameter.Default, scope, command.Dialect, false)
+				}
+			}
+			for _, value := range command.EnumValues {
+				walk(value.Initializer, scope, command.Dialect, false)
+				if value.Initializer == nil {
+					for _, argument := range value.Arguments {
+						walk(argument, scope, command.Dialect, false)
+					}
+				}
+			}
 			if command.Embedded != nil {
 				walkCommands(command.Embedded.Commands, scope)
 			}

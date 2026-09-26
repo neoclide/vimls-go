@@ -38,6 +38,7 @@ func (facts *augroupEventDiagnostics) record(file *syntax.File, command *syntax.
 				facts.active[name] = true
 			}
 		}
+		return
 	}
 	name, span, ok := AutocmdAugroupReference(file, command)
 	if !ok || command.Autocmd.Group.Start != command.Autocmd.Group.End || name == "" || name[0] < 'a' || name[0] > 'z' {
@@ -147,6 +148,8 @@ func AutocmdAugroupReference(file *syntax.File, command *syntax.Command) (string
 // `:autocmd[!] name` form when a matching lower-case augroup is known. Vim
 // treats that single argument as a group name; event lists and definitions
 // with a pattern remain event syntax and are not suppressed.
+// It may reuse and modify diagnostics' backing array while filtering;
+// callers that need to retain diagnostics must pass a copy.
 func SuppressKnownAugroupEventDiagnostics(file *syntax.File, diagnostics []syntax.Diagnostic, workspaceNames []string) []syntax.Diagnostic {
 	if file == nil || len(diagnostics) == 0 {
 		return diagnostics

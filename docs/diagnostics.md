@@ -54,6 +54,16 @@ ordinary imports once their targets are indexed. Missing or ambiguous targets
 remain unknown. Autoload value types and types requiring transitive import
 inference do not add hard type errors.
 
+Builtin calls in default parameter values and enum constructor arguments receive
+the same argument type checks as other calls in their Vim9 context.
+
+Null-receiver checks (`vim/E1360`) cover literal null objects and variables
+known to hold null objects without reassignment. Any visible assignment makes
+the variable's null state unknown, including later writes and writes in deferred
+function, lambda or user-command bodies. These checks do not model execution
+order or whether those bodies run, so an unexecuted assignment can suppress a
+null-receiver diagnostic.
+
 ## Option assignment errors
 
 These diagnostics follow Vim v9.2.1015 for direct option assignments, except

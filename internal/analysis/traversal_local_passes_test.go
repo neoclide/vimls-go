@@ -86,6 +86,62 @@ func TestBuiltinCompletenessTraversalChecksSingleExpressionCancellation(t *testi
 	}
 }
 
+func TestBuiltinArgumentTraversalCoversFunctionDefaultsAndEnumArguments(t *testing.T) {
+	for _, test := range []struct {
+		name, source, code, span string
+	}{
+		{
+			name:   "bad function default",
+			source: "vim9script\ndef Default(value: number = abs('bad'))\nenddef\n",
+			code:   "vim/E1013",
+			span:   "'bad'",
+		},
+		{
+			name:   "good function default",
+			source: "vim9script\ndef Default(value: number = abs(-1))\nenddef\n",
+		},
+		{
+			name:   "bad enum argument",
+			source: "vim9script\nenum Sample\n  Bad(abs('bad'))\n  var value: number\n  def new(value: number)\n    this.value = value\n  enddef\nendenum\n",
+			code:   "vim/E1219",
+			span:   "'bad'",
+		},
+		{
+			name:   "good enum argument",
+			source: "vim9script\nenum Sample\n  Good(abs(-1))\n  var value: number\n  def new(value: number)\n    this.value = value\n  enddef\nendenum\n",
+		},
+		{
+			name:   "function default arity once",
+			source: "vim9script\ndef Default(value: number = abs(1, 2))\nenddef\n",
+			code:   "vim/E118",
+			span:   "abs",
+		},
+		{
+			name:   "enum argument arity once",
+			source: "vim9script\nenum Sample\n  Bad(abs(1, 2))\n  var value: number\n  def new(value: number)\n    this.value = value\n  enddef\nendenum\n",
+			code:   "vim/E118",
+			span:   "abs",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			diagnostics := Analyze(file).Diagnostics
+			if test.code == "" {
+				if len(diagnostics) != 0 {
+					t.Fatalf("diagnostics = %#v", diagnostics)
+				}
+				return
+			}
+			if len(diagnostics) != 1 || diagnostics[0].Code != test.code || file.Text(diagnostics[0].Span) != test.span {
+				t.Fatalf("diagnostics = %#v, want one %s on %q", diagnostics, test.code, test.span)
+			}
+		})
+	}
+}
+
 func TestNullReceiverAssignmentsUseLambdaAndEmbeddedScopes(t *testing.T) {
 	source := "vim9script\nclass C\n  def Foo()\n  enddef\nendclass\nvar top: C\nvar Callback = () => {\n  var local: C\n  local.Foo()\n  local = C.new()\n}\ncommand Fix {\n  top = C.new()\n}\ntop.Foo()\necho Callback\n"
 	file := syntax.Parse(source)
@@ -128,6 +184,51 @@ func TestOverwriteRiskDiagnosticsRetainPhaseOrderAndConfigSeverity(t *testing.T)
 	want := []string{"vim/E122", "vim/E122", "vim/E174", "vim/E174"}
 	if !reflect.DeepEqual(codes, want) {
 		t.Fatalf("diagnostic phase order = %#v, want %#v", codes, want)
+	}
+}
+
+func TestOverwriteRiskDiagnosticsStopAtProgressCancellation(t *testing.T) {
+	file := syntax.Parse(strings.Repeat("function F()\nendfunction\n", 128))
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("parse diagnostics = %#v", file.Diagnostics)
+	}
+	definitions := make([]syntax.Command, 0, 128)
+	for _, command := range file.Commands {
+		if command.Canonical == "function" {
+			definitions = append(definitions, command)
+		}
+	}
+	if len(definitions) != 128 {
+		t.Fatalf("function definitions = %d", len(definitions))
+	}
+	deep := definitions
+	for range 64 {
+		deep = []syntax.Command{{Embedded: &syntax.CommandList{Commands: deep}}}
+	}
+	wide := make([]syntax.Command, 4)
+	for index := range wide {
+		wide[index].Embedded = &syntax.CommandList{Commands: definitions[index*32 : (index+1)*32]}
+	}
+	for _, test := range []struct {
+		name     string
+		commands []syntax.Command
+	}{
+		{name: "top level", commands: definitions},
+		{name: "deep embedded", commands: deep},
+		{name: "wide embedded", commands: wide},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := newFileAnalysis(file, false)
+			calls := 0
+			result.progress = &analysisProgress{yield: func() error {
+				calls++
+				return context.Canceled
+			}}
+			collectOverwriteRiskDiagnostics(result, test.commands)
+			if calls != 1 || !errors.Is(result.progress.err, context.Canceled) || len(result.Diagnostics) >= len(definitions) {
+				t.Fatalf("cancellation: calls=%d err=%v diagnostics=%d", calls, result.progress.err, len(result.Diagnostics))
+			}
+		})
 	}
 }
 
