@@ -12,6 +12,21 @@ func TestEditorContextBranches(t *testing.T) {
 		yes, no   EditorContext
 	}{
 		{"has('nvim')", EditorNeovim, EditorVim},
+		{"has('nvim-0.7')", EditorNeovim, EditorUnknown},
+		{"has(\"nvim-0.10.1\")", EditorNeovim, EditorUnknown},
+		{"has('nvim-1')", EditorNeovim, EditorUnknown},
+		{"!has('nvim-0.7')", EditorUnknown, EditorNeovim},
+		{"has('nvim-0.7') == 1", EditorNeovim, EditorUnknown},
+		{"has('nvim-0.7') == 0", EditorUnknown, EditorNeovim},
+		{"has('nvim-0.7') && other", EditorNeovim, EditorUnknown},
+		{"has('nvim-0.7') || other", EditorUnknown, EditorUnknown},
+		{"has('nvim') && !has('nvim-0.7')", EditorNeovim, EditorUnknown},
+		{"has('nvim-')", EditorUnknown, EditorUnknown},
+		{"has('nvim-foo')", EditorUnknown, EditorUnknown},
+		{"has('nvim-0..7')", EditorUnknown, EditorUnknown},
+		{"has('nvim-0.7.')", EditorUnknown, EditorUnknown},
+		{"has('nvim-0.7.1.2')", EditorUnknown, EditorUnknown},
+		{"has('nvim-' . version)", EditorUnknown, EditorUnknown},
 		{"has('gui_macvim')", EditorMacVim, 4},
 		{"!has('nvim') && has('gui_macvim')", EditorMacVim, 4},
 		{"has('nvim') && has('gui_macvim')", EditorUnreachable, EditorUnknown},
@@ -210,6 +225,8 @@ func TestEditorContextFinishFallthrough(t *testing.T) {
 		want  EditorContext
 	}{
 		{"if !has('nvim') | finish | endif", EditorNeovim},
+		{"if !has('nvim-0.7') | finish | endif", EditorNeovim},
+		{"if has('nvim-0.7') | finish | endif", EditorUnknown},
 		{"if has('nvim') | finish | endif", EditorVim},
 		{"if !has('gui_macvim') | finish | endif", EditorMacVim},
 		{"if has('gui_macvim') | finish | endif", 4},

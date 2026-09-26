@@ -120,6 +120,8 @@ parent directories remain supported.
   now shares the parser context and setting diagnostics, with semantic
   highlighting and hover documentation for MacVim and Neovim-only options.
   Direct script `finish` guards narrow the context of subsequent commands.
+  Numeric `has('nvim-…')` version guards establish Neovim on the true path;
+  their false path remains unknown because older Neovim versions also take it.
   Editor conditions are now recorded on commands and expressions; future
   Neovim function checks can consume that context without another guard walker.
 

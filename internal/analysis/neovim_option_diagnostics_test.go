@@ -127,6 +127,34 @@ func TestNeovimOptionGuardDoesNotLeak(t *testing.T) {
 	}
 }
 
+func TestNeovimVersionGuardOptionDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+		hints        int
+	}{
+		{"issue 7", "if has('nvim-0.7')\nset laststatus=3\nendif\n", 0},
+		{"else and following code", "if has('nvim-0.7')\nset laststatus=3\nelse\nset laststatus=3\nendif\nset laststatus=3\n", 2},
+		{"old Neovim", "if has('nvim') && !has('nvim-0.7')\nset laststatus=3\nendif\n", 0},
+		{"negative guard", "if !has('nvim-0.7')\nset laststatus=3\nelse\nset laststatus=3\nendif\n", 1},
+		{"finish", "if !has('nvim-0.7') | finish | endif\nset laststatus=3\n", 0},
+		{"positive finish", "if has('nvim-0.7') | finish | endif\nset laststatus=3\n", 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, config := range []bool{false, true} {
+				diagnostics := compatibilityDiagnostics(test.source, config)
+				if len(diagnostics) != test.hints {
+					t.Fatalf("config=%v diagnostics=%#v, want %d hints", config, diagnostics, test.hints)
+				}
+				for _, diagnostic := range diagnostics {
+					if diagnostic.Code != "vimls/neovim-only-option" {
+						t.Fatalf("unexpected diagnostic: %#v", diagnostic)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestEditorFinishOptionDiagnostics(t *testing.T) {
 	for _, test := range []struct {
 		source, code string

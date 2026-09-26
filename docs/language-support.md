@@ -116,7 +116,8 @@ See [editing configuration files](userconfig.md).
 
 Some Neovim names are recognized, but full Neovim API completion and type
 checking are not provided. Neovim-only option settings receive a Hint unless
-protected by `has('nvim')`. See [Neovim compatibility](neovim.md#option-compatibility).
+protected by `has('nvim')` or a version guard such as `has('nvim-0.7')`.
+See [Neovim compatibility](neovim.md#option-compatibility).
 
 ## MacVim option compatibility
 

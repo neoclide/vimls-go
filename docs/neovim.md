@@ -108,6 +108,12 @@ Finish propagation through loops, try blocks or deferred bodies, variables
 containing `has()` results, and `return` flow remain unsupported.
 Contradictory guards do not suppress errors.
 
+Version guards such as `has('nvim-0.7')` and `has("nvim-0.10.1")` also protect
+Neovim-only settings. Literal numeric major, major.minor and major.minor.patch
+forms are recognized. A false version check can mean an older Neovim, so its
+`else` branch does not imply Vim. These guards identify the editor; they do not
+check which Neovim version introduced an option or value.
+
 Reviewed value differences cover `signcolumn`, `foldcolumn`, `cmdheight`,
 `laststatus`, `completeopt`, `fillchars`, `jumpoptions` and `cpoptions`.
 Known Neovim-only options such as `inccommand`, `pumblend`, `winblend`,

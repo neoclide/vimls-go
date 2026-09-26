@@ -1,5 +1,7 @@
 package syntax
 
+import "strings"
+
 // EditorContext describes the editors in which a syntax node may execute.
 // The zero value makes no assumption. Contradictory conditions are retained,
 // but do not license suppressing diagnostics in their bodies.
@@ -225,6 +227,12 @@ func (a *editorContextAnnotator) condition(expression *Expression) editorConditi
 					condition = editorCondition{yes: EditorNeovim, no: EditorVim, boolean: true}
 				case "'gui_macvim'", "\"gui_macvim\"":
 					condition = editorCondition{yes: EditorMacVim, no: 4, boolean: true}
+				default:
+					if isNeovimVersionFeature(argument.Value) {
+						// False can also mean an older Neovim, so it does not
+						// establish a Vim-only context.
+						condition = editorCondition{yes: EditorNeovim, boolean: true}
+					}
 				}
 			}
 		}
@@ -269,4 +277,29 @@ func (a *editorContextAnnotator) condition(expression *Expression) editorConditi
 	}
 	a.conditions[expression] = condition
 	return condition
+}
+
+// Recognize literal nvim-{major}[.{minor}[.{patch}]] feature checks.
+// This identifies the editor, without evaluating a particular runtime version.
+func isNeovimVersionFeature(literal string) bool {
+	if len(literal) < 2 || (literal[0] != '\'' && literal[0] != '"') || literal[len(literal)-1] != literal[0] {
+		return false
+	}
+	version, ok := strings.CutPrefix(literal[1:len(literal)-1], "nvim-")
+	if !ok {
+		return false
+	}
+	parts := 0
+	for part := range strings.SplitSeq(version, ".") {
+		parts++
+		if part == "" || parts > 3 {
+			return false
+		}
+		for index := range len(part) {
+			if part[index] < '0' || part[index] > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
