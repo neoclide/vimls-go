@@ -1986,8 +1986,6 @@ func TestWorkspaceIndexProgressDoesNotBlockOnUncooperativeClient(t *testing.T) {
 		events:       make(chan string, 2),
 	}
 	instance := New(nil, nil, io.Discard)
-	instance.setWorkspaceRoots([]string{root})
-	instance.setRuntimePaths([]string{root})
 	instance.client = progress
 	instance.workspaceProgress = true
 	instance.workspaceDelay = 0
@@ -1999,6 +1997,9 @@ func TestWorkspaceIndexProgressDoesNotBlockOnUncooperativeClient(t *testing.T) {
 		instance.stopAnalysis()
 	})
 
+	// Configure the client before setRuntimePaths starts the help worker.
+	instance.setWorkspaceRoots([]string{root})
+	instance.setRuntimePaths([]string{root})
 	instance.scheduleWorkspaceRebuild()
 	waitForServerRace(t, progress.beginStarted, "blocking workspace progress begin")
 	done := make(chan struct{})
@@ -2054,8 +2055,6 @@ func TestWorkspaceIndexProgressReportDoesNotArriveAfterEnd(t *testing.T) {
 		}
 	}
 	instance := New(nil, nil, io.Discard)
-	instance.setWorkspaceRoots([]string{root})
-	instance.setRuntimePaths([]string{root})
 	instance.client = progress
 	instance.workspaceProgress = true
 	instance.workspaceDelay = 0
@@ -2065,6 +2064,9 @@ func TestWorkspaceIndexProgressReportDoesNotArriveAfterEnd(t *testing.T) {
 		instance.stopAnalysis()
 	})
 
+	// Configure the client before setRuntimePaths starts the help worker.
+	instance.setWorkspaceRoots([]string{root})
+	instance.setRuntimePaths([]string{root})
 	instance.scheduleWorkspaceRebuild()
 	begin := waitForWorkspaceProgress(t, progress.updates)
 	var beginValue protocol.WorkDoneProgressBegin

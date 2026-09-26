@@ -63,6 +63,8 @@ cannot be proven by canonical file identities alone. Regular files reached
 through symbolic-link parent directories remain supported.
 
 Types are inferred from known values and function return types in both dialects.
+In `def` functions and Vim9 lambdas, `type()` guards preserve compiled types:
+copying an `any` value inside the guarded branch still infers `any`.
 Uncertain dynamic behavior may leave types or references unresolved. See
 [diagnostics](diagnostics.md) for diagnostic coverage and warning policies.
 

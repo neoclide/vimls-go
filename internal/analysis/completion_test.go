@@ -87,6 +87,57 @@ func TestCompletionTypesAreDemandDrivenAndDoNotMutateSharedFacts(t *testing.T) {
 	}
 }
 
+func TestCompletionTypesDoNotNarrowCompiledTypeGuards(t *testing.T) {
+	file := syntax.Parse("vim9script\ndef F(x: any)\n  if type(x) == v:t_string\n    var y = x\n    y = 1\n  endif\nenddef\n")
+	facts := CollectCompletionFacts(file)
+	if len(facts.References) != 0 {
+		t.Fatalf("completion collected references: %#v", facts.References)
+	}
+	declaration := declarationsByName(facts)["y"]
+	if declaration == nil {
+		t.Fatal("missing y declaration")
+	}
+	var initializer *syntax.Expression
+	for index := range file.Commands {
+		command := &file.Commands[index]
+		if command.Declaration == nil || command.Declaration.Initializer == nil {
+			continue
+		}
+		for _, binding := range command.Declaration.Bindings {
+			if file.Text(binding.Name) == "y" {
+				initializer = command.Declaration.Initializer
+			}
+		}
+	}
+	if initializer == nil {
+		t.Fatal("missing y initializer")
+	}
+	query := NewCompletionTypes(facts)
+	if typ := query.DeclarationType(declaration); typ.Name != "any" {
+		t.Fatalf("y declaration type = %#v, want any", typ)
+	}
+	if typ := NewCompletionTypes(facts).TypeOf(initializer, initializer.Span.Start); typ.Name != "any" {
+		t.Fatalf("y initializer type = %#v, want any", typ)
+	}
+
+	lambdaFile := syntax.Parse("vim9script\nvar value: any = 'hello'\nif type(value) == v:t_string\n  var Callback = () => value\nendif\n")
+	lambdaFacts := CollectCompletionFacts(lambdaFile)
+	if len(lambdaFacts.References) != 0 {
+		t.Fatalf("lambda completion collected references: %#v", lambdaFacts.References)
+	}
+	callback := declarationsByName(lambdaFacts)["Callback"]
+	if callback == nil {
+		t.Fatal("missing Callback declaration")
+	}
+	callbackInitializer := lambdaFile.Commands[3].Declaration.Initializer
+	lambdaQuery := NewCompletionTypes(lambdaFacts)
+	for _, typ := range []ValueType{lambdaQuery.DeclarationType(callback), NewCompletionTypes(lambdaFacts).TypeOf(callbackInitializer, callbackInitializer.Span.Start)} {
+		if typ.Name != "func" || typ.Return == nil || typ.Return.Name != "any" {
+			t.Fatalf("Callback type = %#v, want func(): any", typ)
+		}
+	}
+}
+
 func TestAnalyzeYieldAbandonsPrivatePartialResult(t *testing.T) {
 	file := syntax.Parse("vim9script\nvar count: number = 'wrong'\necho count\n")
 	for _, stopAt := range []int{1, 8, 42} {

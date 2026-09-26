@@ -650,6 +650,17 @@ func (state *typeState) guardedIdentifierType(expression *syntax.Expression, sco
 	if state == nil || state.result == nil || state.result.File == nil || expression == nil || expression.Kind != syntax.ExpressionIdentifier {
 		return UnknownValueType, false
 	}
+	// Check the nearest callable before accepting an enclosing if guard: def
+	// bodies and => lambdas use declared types, while a -> lambda keeps the
+	// interpreted type() behavior.
+	for current := scope; current != nil; current = current.Parent {
+		if current.Kind == syntax.BlockDef || (current.Lambda != nil && state.result.File.Text(current.Lambda.Operator) == "=>") {
+			return UnknownValueType, false
+		}
+		if current.Kind == syntax.BlockFunction || current.Lambda != nil {
+			break
+		}
+	}
 	for current := scope; current != nil; current = current.Parent {
 		if current.Kind != syntax.BlockIf || current.Block < 0 {
 			continue

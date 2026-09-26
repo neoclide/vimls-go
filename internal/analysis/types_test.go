@@ -307,6 +307,96 @@ func TestAnalyzeLegacyTypeGuardAssignmentInvalidatesNarrowing(t *testing.T) {
 	}
 }
 
+func TestTypeGuardsDoNotNarrowCompiledCallableValues(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+		declaration  string
+		want         string
+		e1012        bool
+	}{
+		{
+			name:   "def",
+			source: "vim9script\ndef F(x: any)\n  if type(x) == v:t_string\n    var y = x\n    y = 1\n  endif\nenddef\n",
+			want:   "any",
+		},
+		{
+			name:   "block lambda",
+			source: "vim9script\nvar F = (x: any) => {\n  if type(x) == v:t_string\n    var y = x\n    y = 1\n  endif\n}\n",
+			want:   "any",
+		},
+		{
+			name:   "def in legacy root",
+			source: "def F(x: any)\n  if type(x) == v:t_string\n    var y = x\n    y = 1\n  endif\nenddef\n",
+			want:   "any",
+		},
+		{
+			name:   "top-level Vim9",
+			source: "vim9script\nvar x: any = 'text'\nif type(x) == v:t_string\n  var y = x\n  y = 1\nendif\n",
+			want:   "string",
+			e1012:  true,
+		},
+		{
+			name:        "legacy",
+			source:      "let x = 'text'\nif type(x) == v:t_string\n  let narrowed = x\nendif\n",
+			declaration: "narrowed",
+			want:        "string",
+		},
+		{
+			name:        "nested legacy function",
+			source:      "vim9script\ndef Outer()\n  function g:NestedLegacy(x) abort\n    if type(a:x) == v:t_string\n      let narrowed = a:x\n    endif\n  endfunction\nenddef\n",
+			declaration: "narrowed",
+			want:        "string",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			result := Analyze(file)
+			name := test.declaration
+			if name == "" {
+				name = "y"
+			}
+			declaration := declarationsByName(result)[name]
+			if declaration == nil || declaration.Type.Name != test.want {
+				t.Fatalf("y = %#v, want %s", declaration, test.want)
+			}
+			foundE1012 := false
+			for _, diagnostic := range CombinedDiagnostics(file, result) {
+				if diagnostic.Code == "vim/E1012" {
+					foundE1012 = true
+				}
+			}
+			if foundE1012 != test.e1012 {
+				t.Fatalf("E1012 = %t, want %t", foundE1012, test.e1012)
+			}
+		})
+	}
+}
+
+func TestTypeGuardsRespectLambdaDialect(t *testing.T) {
+	for _, test := range []struct {
+		name, source, want string
+	}{
+		{
+			name:   "Vim9",
+			source: "vim9script\nvar value: any = 'hello'\nif type(value) == v:t_string\n  var Callback = () => value\nendif\n",
+			want:   "any",
+		},
+		{
+			name:   "legacy",
+			source: "let value = {}\nif type(value) == v:t_string\n  let Callback = { -> value }\nendif\n",
+			want:   "string",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := Analyze(syntax.Parse(test.source))
+			callback := declarationsByName(result)["Callback"]
+			if callback == nil || callback.Type.Name != "func" || callback.Type.Return == nil || callback.Type.Return.Name != test.want {
+				t.Fatalf("Callback type = %#v, want func(): %s", callback, test.want)
+			}
+		})
+	}
+}
+
 func TestAnalyzeInfersForDestructuredBindingTypes(t *testing.T) {
 	source := "for [s:kind, s:body] in [[\"Style\", '@markoCSS'], [\"Script\", '@markoTS']]\n  echo s:kind . s:body\nendfor\n"
 	result := Analyze(syntax.Parse(source))

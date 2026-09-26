@@ -63,6 +63,11 @@ flow-sensitive checking remains outside this warning's current scope.
 third argument in both dialects, including method calls. Dynamic flags remain
 unknown.
 
+Type inference and completion preserve compiled types inside `type()` guards
+in `def` functions and Vim9 lambdas. A copy of an `any` value remains `any`,
+avoiding false E1012 diagnostics on later assignments. Interpreted script and
+Legacy guard inference retain their existing behavior.
+
 Linked editing reports the declaration and its references in the current file so
 a client can rename the symbol by typing. It is offered only where a
 single-document edit is provably complete, so exported, autoload and global

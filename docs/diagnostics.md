@@ -54,6 +54,12 @@ ordinary imports once their targets are indexed. Missing or ambiguous targets
 remain unknown. Autoload value types and types requiring transitive import
 inference do not add hard type errors.
 
+In `def` functions and Vim9 lambdas, a `type(value) == v:t_string` guard does
+not change an `any` value's compiled type. A variable initialized from that
+value remains `any`, so assigning a number to the copy does not cause E1012.
+Interpreted Vim9 script and Legacy guard inference retain their runtime-value
+rules; a script-level copy of a string can still receive E1012 on reassignment.
+
 Builtin calls in default parameter values and enum constructor arguments receive
 the same argument type checks as other calls in their Vim9 context.
 
