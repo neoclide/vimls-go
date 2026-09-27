@@ -1,16 +1,22 @@
 # Official Vim test fixtures
 
-These files come from Vim tag **v9.2.1015**, commit
-`5ab969f719bb09555e90e8dff8c94fc37bcbf2ae`. They let ordinary Go tests use
+The current corpus comes from Vim tag **v9.2.1132**, commit
+`f3dc0fee778439ac8ff8680b42552f7f13d47396`. It lets ordinary Go tests use
 Vim's test inputs without downloading or executing Vim.
 
 | File | Purpose |
 | --- | --- |
-| `v9.2.1015-test-files.json.gz` | A lossless copy of the tracked Vim scripts under `src/testdir`. |
-| `v9.2.1015-parser-corpus.json.gz` | Embedded scripts extracted from selected parser and evaluator tests. |
-| `v9.2.1015-helper-inventory.json.gz` | An inventory of upstream helper calls, including reasons a call could not be used. |
-| `v9.2.1015-parser-files.json` | The reviewed list of upstream files used for parser-case migration. |
-| `v9.2.1015-parser-cases.json.gz` | Extracted parser inputs and expectations, tied to the reviewed list by a hash. |
+| `v9.2.1132-test-files.json.gz` | A lossless copy of the 362 tracked Vim scripts under `src/testdir`. |
+| `v9.2.1132-parser-corpus.json.gz` | Embedded scripts extracted from selected parser and evaluator tests. |
+| `v9.2.1132-helper-inventory.json.gz` | An inventory of upstream helper calls, including reasons a call could not be used. |
+| `v9.2.1132-parser-files.json` | The reviewed parser migration allowlist, with an explicit reason for each selection or exclusion. |
+| `v9.2.1132-parser-cases.json.gz` | Extracted parser inputs and expectations, tied to the allowlist by the SHA-256 of `json.Marshal` on its typed manifest. |
+
+The `v9.2.1015-*` files are historical archives for the original migration
+from commit `5ab969f719bb09555e90e8dff8c94fc37bcbf2ae`. They remain byte-for-byte
+preserved so older handwritten regression provenance can still be traced to its
+recorded source. Existing handwritten compile regressions retain that original
+source unless their own provenance comment records a newer revision.
 
 ## What the tests prove
 
@@ -27,10 +33,23 @@ Compile diagnostics are kept as readable Vim snippets in
 `official_compile_cases_e*_test.go` files. Each case retains its upstream
 location, identifier and expected error code.
 
-## Updating the fixtures
+## Updating the current corpus
 
-Keep the version pin, reviewed file list and generated artifacts consistent.
+The generator reads only Git objects for the fixed tag and refuses a checkout
+where that tag resolves to another commit. Run:
+
+```sh
+go run ./tools/genofficial -vim-root /path/to/vim
+```
+
+`-output-dir` selects where the four generated gzip artifacts are written and
+`-manifest` selects the reviewed parser-file manifest. The generator writes
+deterministic gzip streams; their timestamp is zero and their OS byte is 255.
 Every selected helper call must produce a case or keep an explicit skip reason.
+`make official-refresh VIM_SOURCE=/path/to/vim` refreshes the current files.
+`make official-check VIM_SOURCE=/path/to/vim` regenerates them in a temporary
+directory and compares all four artifacts. It also rebuilds parser cases from
+the committed manifest, including its typed-manifest hash check.
 
 Maintain compile-diagnostic cases one error code at a time in the owning test
 file. Keep at most ten deterministic cases per code, covering compiled and

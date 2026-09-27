@@ -11,10 +11,10 @@ import (
 
 const (
 	officialCorpusFileCount       = 17
-	officialCorpusCaseCount       = 3267
-	officialCorpusSuccessCount    = 1088
-	officialCorpusFailureCount    = 1620
-	officialCorpusStructuralCount = 559
+	officialCorpusCaseCount       = 3273
+	officialCorpusSuccessCount    = 1090
+	officialCorpusFailureCount    = 1623
+	officialCorpusStructuralCount = 560
 )
 
 type generatedOfficialCorpus struct {
@@ -32,7 +32,7 @@ type generatedOfficialCorpusCase struct {
 
 func TestGeneratedOfficialVimEmbeddedCorpus(t *testing.T) {
 	corpus := readGeneratedOfficialCorpus(t)
-	if corpus.Tag != officialVimTag || corpus.Commit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" || len(corpus.Files) != officialCorpusFileCount || len(corpus.Cases) != officialCorpusCaseCount {
+	if corpus.Tag != officialVimTag || corpus.Commit != officialVimCommit || len(corpus.Files) != officialCorpusFileCount || len(corpus.Cases) != officialCorpusCaseCount {
 		t.Fatalf("unexpected corpus provenance: tag = %q, commit = %q, files = %d, cases = %d", corpus.Tag, corpus.Commit, len(corpus.Files), len(corpus.Cases))
 	}
 	if !sort.StringsAreSorted(corpus.Files) {
@@ -127,7 +127,7 @@ func (stats *officialParseStatistics) add(file *File) {
 
 func readGeneratedOfficialCorpus(t *testing.T) generatedOfficialCorpus {
 	t.Helper()
-	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1015-parser-corpus.json.gz")
+	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-parser-corpus.json.gz")
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)

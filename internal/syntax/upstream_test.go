@@ -2,7 +2,7 @@ package syntax
 
 import "testing"
 
-const officialVimTag = "v9.2.1015"
+const officialVimTag = "v9.2.1132"
 
 func assertFileSpans(t *testing.T, file *File) {
 	t.Helper()

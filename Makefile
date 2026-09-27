@@ -7,7 +7,7 @@ NEOVIM_SOURCE ?=
 RELEASE_REMOTE ?= origin
 export RELEASE_REMOTE
 
-.PHONY: build check clean client-smoke client-tools coverage eventdocs-check eventdocs-refresh format-check incr metadata-check metadata-refresh oracle race release test vet
+.PHONY: build check clean client-smoke client-tools coverage eventdocs-check eventdocs-refresh format-check incr metadata-check metadata-refresh official-check official-refresh oracle race release test vet
 
 build:
 	mkdir -p bin
@@ -56,6 +56,21 @@ metadata-check: eventdocs-check
 	cmp internal/vimdata/options_set_generated.vim "$$metadata_tmp/options_set_generated.vim"; \
 	cmp internal/vimdata/variables_generated.go "$$metadata_tmp/variables_generated.go"
 	$(GO) test $(GO_MOD) -count=1 ./internal/vimdata ./tools/genmetadata ./tools/geneventdocs ./internal/vimhelp
+
+official-refresh:
+	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
+	$(GO) run $(GO_MOD) ./tools/genofficial -vim-root "$(VIM_SOURCE)"
+
+official-check:
+	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
+	@set -eu; \
+	official_tmp="$$(mktemp -d)"; \
+	trap 'rm -rf "$$official_tmp"' EXIT; \
+	$(GO) run $(GO_MOD) ./tools/genofficial -vim-root "$(VIM_SOURCE)" -output-dir "$$official_tmp"; \
+	cmp testdata/official/v9.2.1132-parser-corpus.json.gz "$$official_tmp/v9.2.1132-parser-corpus.json.gz"; \
+	cmp testdata/official/v9.2.1132-test-files.json.gz "$$official_tmp/v9.2.1132-test-files.json.gz"; \
+	cmp testdata/official/v9.2.1132-helper-inventory.json.gz "$$official_tmp/v9.2.1132-helper-inventory.json.gz"; \
+	cmp testdata/official/v9.2.1132-parser-cases.json.gz "$$official_tmp/v9.2.1132-parser-cases.json.gz"
 
 eventdocs-refresh:
 	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
