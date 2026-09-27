@@ -62,6 +62,7 @@ func TestHelperScannerPreservesLexicalCases(t *testing.T) {
 }
 
 func TestPinnedHelperInventoryArtifact(t *testing.T) {
+	lock := readReviewedCorpusLock(t)
 	wantHelpers := []string{
 		"CheckDefAndScriptFailure", "CheckDefAndScriptSuccess", "CheckDefCompileSuccess", "CheckDefExecAndScriptFailure", "CheckDefExecFailure", "CheckDefFailure", "CheckDefSuccess",
 		"CheckLegacyAndVim9Failure", "CheckLegacyAndVim9Success", "CheckLegacyFailure", "CheckLegacySuccess", "CheckScriptFailure", "CheckScriptFailureList", "CheckScriptSuccess",
@@ -89,15 +90,10 @@ func TestPinnedHelperInventoryArtifact(t *testing.T) {
 	if !reflect.DeepEqual(inventory.HelperNames, wantHelpers) {
 		t.Fatalf("helper names = %#v, want %#v", inventory.HelperNames, wantHelpers)
 	}
-	if len(inventory.Records) != expectedHelperLexemes {
+	if len(inventory.HelperNames) != lock.HelperInventory.HelperNames || len(inventory.Records) != lock.HelperInventory.Records {
 		t.Fatalf("records = %d", len(inventory.Records))
 	}
-	if inventory.Summary.KnownHelperCalls != 5288 || inventory.Summary.QualifiedCalls != 5255 || inventory.Summary.UtilityBareCalls != 33 ||
-		inventory.Summary.KnownDefinitions != 37 || inventory.Summary.KnownComments != 10 || inventory.Summary.NonV9Calls != 343 ||
-		inventory.Summary.NonV9Definitions != 91 || inventory.Summary.NonV9Strings != 13 || inventory.Summary.NonV9Comments != 1 ||
-		inventory.Summary.IdentifierArguments != 3179 || inventory.Summary.ListArguments != 2043 || inventory.Summary.ExpressionArguments != 66 ||
-		inventory.Summary.QualifiedIdentifier != 3161 || inventory.Summary.QualifiedList != 2043 || inventory.Summary.QualifiedExpression != 51 ||
-		inventory.Summary.BareIdentifier != 18 || inventory.Summary.BareExpression != 15 {
+	if inventory.Summary != lock.HelperInventory.Summary {
 		t.Fatalf("summary = %#v", inventory.Summary)
 	}
 	fullPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("test-files"))
@@ -114,7 +110,7 @@ func TestPinnedHelperInventoryArtifact(t *testing.T) {
 	if err := json.NewDecoder(fullReader).Decode(&full); err != nil {
 		t.Fatal(err)
 	}
-	if full.Tag != vimTag || full.Commit != vimCommit || len(full.Files) != expectedTestFileCount {
+	if full.Tag != vimTag || full.Commit != vimCommit || len(full.Files) != lock.TestFiles.Files {
 		t.Fatalf("full corpus provenance = %#v", full)
 	}
 	sources := make(map[string][]byte, len(full.Files))
@@ -247,7 +243,8 @@ func TestSelectTestFilesUsesAllPinnedVim9Tests(t *testing.T) {
 
 func TestSelectAllTestFilesSortsAndDeduplicatesTrackedVimFiles(t *testing.T) {
 	var manifest strings.Builder
-	for index := range expectedTestFileCount {
+	const fileCount = 3
+	for index := range fileCount {
 		fmt.Fprintf(&manifest, "src/testdir/test_%03d.vim\n", index)
 	}
 	manifest.WriteString("src/testdir/test_000.vim\n")
@@ -256,7 +253,7 @@ func TestSelectAllTestFilesSortsAndDeduplicatesTrackedVimFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != expectedTestFileCount || !sort.StringsAreSorted(files) {
+	if len(files) != fileCount || !sort.StringsAreSorted(files) {
 		t.Fatalf("files = %#v", files)
 	}
 	for index := 1; index < len(files); index++ {
@@ -264,6 +261,15 @@ func TestSelectAllTestFilesSortsAndDeduplicatesTrackedVimFiles(t *testing.T) {
 			t.Fatalf("duplicate file %q", files[index])
 		}
 	}
+}
+
+func readReviewedCorpusLock(t *testing.T) corpusLock {
+	t.Helper()
+	lock, err := readCorpusLock(filepath.Join("..", "..", "testdata", "official", vimTag+"-corpus-lock.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return lock
 }
 
 func TestOfficialOutcomeIgnoresMutatedHeredoc(t *testing.T) {

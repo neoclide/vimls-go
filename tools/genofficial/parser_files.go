@@ -72,3 +72,41 @@ func selectParserMigrationFiles(corpus testFilesCorpus, manifest parserFileManif
 	}
 	return files, nil
 }
+
+func summarizeParserFiles(corpus testFilesCorpus, inventory helperInventory, manifest parserFileManifest) (parserFilesLock, error) {
+	summary := parserFilesLock{Entries: len(manifest.Files)}
+	allPaths := make(map[string]struct{}, len(corpus.Files))
+	for _, file := range corpus.Files {
+		allPaths[file.Path] = struct{}{}
+	}
+	qualifiedCalls := make(map[string]int)
+	for _, record := range inventory.Records {
+		if record.Disposition == "pending-extraction" {
+			qualifiedCalls[record.Path]++
+		}
+	}
+	dispositions := make(map[string]parserFileRecord, len(manifest.Files))
+	for _, file := range manifest.Files {
+		if _, ok := allPaths[file.Path]; !ok {
+			return summary, fmt.Errorf("parser file manifest path is absent from pinned corpus: %q", file.Path)
+		}
+		dispositions[file.Path] = file
+		if file.Disposition == "include" {
+			summary.IncludedFiles++
+			summary.IncludedCalls += qualifiedCalls[file.Path]
+		} else {
+			summary.ExcludedFiles++
+		}
+	}
+	for path, calls := range qualifiedCalls {
+		file, ok := dispositions[path]
+		if !ok {
+			return summary, fmt.Errorf("qualified helper file %q with %d calls lacks an explicit disposition", path, calls)
+		}
+		if file.Disposition != "include" {
+			summary.ExcludedCalls += calls
+		}
+	}
+	summary.ImplicitExcludes = len(corpus.Files) - summary.IncludedFiles - summary.ExcludedFiles
+	return summary, nil
+}

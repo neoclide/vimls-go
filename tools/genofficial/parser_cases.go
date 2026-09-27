@@ -79,20 +79,6 @@ type helperSourceIndex struct {
 	Assignments []helperSourceAssignment
 }
 
-const pinnedParserFileManifestSHA256 = "8c262a41082a8a3dc684cbe350d18d31d3d5cdbc8b368428c79be79d3a691e1d"
-
-func validatePinnedParserCaseCorpus(corpus parserCaseCorpus) error {
-	want := parserCaseSummary{
-		Calls: 3856, ExtractedCalls: 3814, SkippedCalls: 42,
-		Cases: 5273, AcceptedCases: 1765, UnclassifiedCases: 3508,
-		DirectLists: 878, Heredocs: 2888, ListAssignments: 2, ListConcats: 46,
-	}
-	if corpus.SchemaVersion != 1 || corpus.Tag != vimTag || corpus.Commit != vimCommit || corpus.Manifest != parserFileManifestName || corpus.ManifestHash != pinnedParserFileManifestSHA256 || len(corpus.Files) != 44 || len(corpus.Records) != want.Calls || corpus.Summary != want {
-		return fmt.Errorf("unexpected pinned parser case corpus: files=%d records=%d summary=%+v", len(corpus.Files), len(corpus.Records), corpus.Summary)
-	}
-	return nil
-}
-
 func buildParserCaseCorpus(files testFilesCorpus, inventory helperInventory, manifest parserFileManifest) (parserCaseCorpus, error) {
 	result := parserCaseCorpus{SchemaVersion: 1, Tag: files.Tag, Commit: files.Commit, Manifest: parserFileManifestName}
 	if files.Tag != vimTag || files.Commit != vimCommit || inventory.Tag != vimTag || inventory.Commit != vimCommit || manifest.Tag != vimTag || manifest.Commit != vimCommit {

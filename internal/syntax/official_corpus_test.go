@@ -11,13 +11,28 @@ import (
 	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
-const (
-	officialCorpusFileCount       = 17
-	officialCorpusCaseCount       = 3273
-	officialCorpusSuccessCount    = 1090
-	officialCorpusFailureCount    = 1623
-	officialCorpusStructuralCount = 560
-)
+type officialCorpusLock struct {
+	SchemaVersion  int    `json:"schemaVersion"`
+	Tag            string `json:"tag"`
+	Commit         string `json:"commit"`
+	ManifestSHA256 string `json:"manifestSHA256"`
+	Embedded       struct {
+		Files      int `json:"files"`
+		Cases      int `json:"cases"`
+		Successes  int `json:"successes"`
+		Failures   int `json:"failures"`
+		Structural int `json:"structural"`
+	} `json:"embedded"`
+	TestFiles struct {
+		Files    int `json:"files"`
+		RawBytes int `json:"rawBytes"`
+	} `json:"testFiles"`
+	ParserCases struct {
+		Files   int                       `json:"files"`
+		Records int                       `json:"records"`
+		Summary officialParserCaseSummary `json:"summary"`
+	} `json:"parserCases"`
+}
 
 type generatedOfficialCorpus struct {
 	Tag    string                        `json:"tag"`
@@ -33,8 +48,9 @@ type generatedOfficialCorpusCase struct {
 }
 
 func TestGeneratedOfficialVimEmbeddedCorpus(t *testing.T) {
+	lock := readOfficialCorpusLock(t)
 	corpus := readGeneratedOfficialCorpus(t)
-	if corpus.Tag != officialVimTag || corpus.Commit != officialVimCommit || len(corpus.Files) != officialCorpusFileCount || len(corpus.Cases) != officialCorpusCaseCount {
+	if corpus.Tag != lock.Tag || corpus.Commit != lock.Commit || len(corpus.Files) != lock.Embedded.Files || len(corpus.Cases) != lock.Embedded.Cases {
 		t.Fatalf("unexpected corpus provenance: tag = %q, commit = %q, files = %d, cases = %d", corpus.Tag, corpus.Commit, len(corpus.Files), len(corpus.Cases))
 	}
 	if !sort.StringsAreSorted(corpus.Files) {
@@ -84,7 +100,7 @@ func TestGeneratedOfficialVimEmbeddedCorpus(t *testing.T) {
 			structural++
 		}
 	}
-	if successes != officialCorpusSuccessCount || failures != officialCorpusFailureCount || structural != officialCorpusStructuralCount {
+	if successes != lock.Embedded.Successes || failures != lock.Embedded.Failures || structural != lock.Embedded.Structural {
 		t.Fatalf("official outcome metadata changed: successes = %d, failures = %d, structural = %d", successes, failures, structural)
 	}
 	for index, stats := range statistics {
@@ -93,6 +109,23 @@ func TestGeneratedOfficialVimEmbeddedCorpus(t *testing.T) {
 			t.Fatalf("%s parser did not retain the expected breadth of official syntax: %#v", parsers[index].name, stats)
 		}
 	}
+}
+
+func readOfficialCorpusLock(t *testing.T) officialCorpusLock {
+	t.Helper()
+	path := filepath.Join("..", "..", "testdata", "official", vimdata.VimSourceTag+"-corpus-lock.json")
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lock officialCorpusLock
+	if err := json.Unmarshal(source, &lock); err != nil {
+		t.Fatal(err)
+	}
+	if lock.SchemaVersion != 1 || lock.Tag != officialVimTag || lock.Commit != vimdata.VimSourceCommit || lock.ManifestSHA256 == "" {
+		t.Fatalf("unexpected official corpus lock: %#v", lock)
+	}
+	return lock
 }
 
 type officialParseStatistics struct {

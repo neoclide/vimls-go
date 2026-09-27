@@ -12,12 +12,6 @@ import (
 	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
-const (
-	officialTestFilesCount = 362
-	officialTestFilesBytes = 8641665
-	officialVimCommit      = vimdata.VimSourceCommit
-)
-
 type generatedOfficialTestFiles struct {
 	Tag    string                      `json:"tag"`
 	Commit string                      `json:"commit"`
@@ -30,8 +24,9 @@ type generatedOfficialTestFile struct {
 }
 
 func TestGeneratedOfficialVimTestFiles(t *testing.T) {
+	lock := readOfficialCorpusLock(t)
 	corpus := readGeneratedOfficialTestFiles(t)
-	if corpus.Tag != officialVimTag || corpus.Commit != officialVimCommit || len(corpus.Files) != officialTestFilesCount {
+	if corpus.Tag != lock.Tag || corpus.Commit != lock.Commit || len(corpus.Files) != lock.TestFiles.Files {
 		t.Fatalf("unexpected official test-file provenance: tag = %q, commit = %q, files = %d", corpus.Tag, corpus.Commit, len(corpus.Files))
 	}
 	paths := make([]string, len(corpus.Files))
@@ -48,8 +43,8 @@ func TestGeneratedOfficialVimTestFiles(t *testing.T) {
 			t.Fatalf("official test-file manifest contains duplicate %q", paths[index])
 		}
 	}
-	if rawBytes != officialTestFilesBytes {
-		t.Fatalf("official test-file corpus has %d raw bytes, want %d", rawBytes, officialTestFilesBytes)
+	if rawBytes != lock.TestFiles.RawBytes {
+		t.Fatalf("official test-file corpus has %d raw bytes, want %d", rawBytes, lock.TestFiles.RawBytes)
 	}
 
 	var commands atomic.Int64

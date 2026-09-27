@@ -87,6 +87,7 @@ func TestHelperAssignmentOperatorIgnoresStringsAndComments(t *testing.T) {
 }
 
 func TestBuildPinnedParserCaseCorpus(t *testing.T) {
+	lock := readReviewedCorpusLock(t)
 	files := readPinnedTestFiles(t)
 	inventory := readPinnedHelperInventory(t)
 	manifest, err := readParserFileManifest(filepath.Join("..", "..", "testdata", "official", parserFileManifestName))
@@ -97,8 +98,13 @@ func TestBuildPinnedParserCaseCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validatePinnedParserCaseCorpus(corpus); err != nil {
+	embedded := readPinnedEmbeddedCorpus(t)
+	candidate, err := buildCorpusLock(embedded, files, inventory, manifest, corpus)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if candidate.ParserFiles != lock.ParserFiles || candidate.ParserCases != lock.ParserCases || candidate.ManifestSHA256 != lock.ManifestSHA256 {
+		t.Fatalf("parser corpus lock = %#v, want %#v", candidate, lock)
 	}
 	selected, err := selectParserMigrationFiles(files, manifest)
 	if err != nil {
@@ -229,6 +235,13 @@ func readPinnedTestFiles(t *testing.T) testFilesCorpus {
 	var corpus testFilesCorpus
 	readPinnedGzipJSON(t, officialArtifactName("test-files"), &corpus)
 	return corpus
+}
+
+func readPinnedEmbeddedCorpus(t *testing.T) corpus {
+	t.Helper()
+	var embedded corpus
+	readPinnedGzipJSON(t, officialArtifactName("parser-corpus"), &embedded)
+	return embedded
 }
 
 func readPinnedHelperInventory(t *testing.T) helperInventory {

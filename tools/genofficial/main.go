@@ -19,12 +19,6 @@ const (
 	vimTag                 = vimdata.VimSourceTag
 	vimCommit              = vimdata.VimSourceCommit
 	parserFileManifestName = vimTag + "-parser-files.json"
-	expectedFileCount      = 17
-	expectedCorpusCount    = 3273
-	expectedTestFileCount  = 362
-	expectedTestRawBytes   = 8641665
-	expectedHelperLexemes  = 5783
-	expectedHelperCalls    = 5288
 )
 
 func officialArtifactName(kind string) string {
@@ -107,6 +101,8 @@ func main() {
 	vimRoot := flag.String("vim-root", "", "read-only Vim Git checkout containing "+vimTag)
 	outputDir := flag.String("output-dir", "testdata/official", "directory for generated official corpus artifacts")
 	manifestPath := flag.String("manifest", filepath.Join("testdata", "official", parserFileManifestName), "reviewed parser test-file allowlist")
+	lockPath := flag.String("lock", filepath.Join("testdata", "official", vimTag+"-corpus-lock.json"), "reviewed corpus lock")
+	printLock := flag.Bool("print-lock", false, "print the computed corpus lock without writing artifacts")
 	flag.Parse()
 	if *vimRoot == "" || flag.NArg() != 0 {
 		fatal(fmt.Errorf("require -vim-root"))
@@ -119,6 +115,13 @@ func main() {
 	resolvedCommit := strings.TrimSpace(string(commit))
 	if resolvedCommit != vimCommit {
 		fatal(fmt.Errorf("%s resolves to %s, want pinned commit %s", vimTag, resolvedCommit, vimCommit))
+	}
+	var reviewed corpusLock
+	if !*printLock {
+		reviewed, err = readCorpusLock(*lockPath)
+		if err != nil {
+			fatal(err)
+		}
 	}
 	testFiles, err := listTestFiles(*vimRoot)
 	if err != nil {
@@ -136,13 +139,6 @@ func main() {
 		}
 		testCorpus.Files = append(testCorpus.Files, testFileRecord{Path: path, Source: contents})
 	}
-	rawBytes := 0
-	for _, file := range testCorpus.Files {
-		rawBytes += len(file.Source)
-	}
-	if rawBytes != expectedTestRawBytes {
-		fatal(fmt.Errorf("read %d raw bytes from official Vim test files, want %d from pinned source", rawBytes, expectedTestRawBytes))
-	}
 	result := corpus{Tag: vimTag, Commit: resolvedCommit, Files: testFiles}
 	for _, path := range testFiles {
 		contents, err := gitOutput(*vimRoot, "show", vimTag+":"+path)
@@ -150,9 +146,6 @@ func main() {
 			fatal(err)
 		}
 		result.Cases = append(result.Cases, extract(path, string(contents))...)
-	}
-	if len(result.Cases) != expectedCorpusCount {
-		fatal(fmt.Errorf("extracted %d official scripts, want %d from pinned source", len(result.Cases), expectedCorpusCount))
 	}
 	inventory, err := buildHelperInventory(testCorpus)
 	if err != nil {
@@ -166,7 +159,19 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	if err := validatePinnedParserCaseCorpus(parserCases); err != nil {
+	candidate, err := buildCorpusLock(result, testCorpus, inventory, parserManifest, parserCases)
+	if err != nil {
+		fatal(err)
+	}
+	if *printLock {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(candidate); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	if err := validateCorpusLock(reviewed, candidate); err != nil {
 		fatal(err)
 	}
 	if err := writeJSONGzip(filepath.Join(*outputDir, officialArtifactName("parser-corpus")), result); err != nil {
@@ -181,7 +186,7 @@ func main() {
 	if err := writeJSONGzip(filepath.Join(*outputDir, officialArtifactName("parser-cases")), parserCases); err != nil {
 		fatal(err)
 	}
-	fmt.Printf("wrote %d scripts, %d test files (%d bytes), %d helper lexemes, and %d parser cases from %s (%s) to %s\n", len(result.Cases), len(testCorpus.Files), rawBytes, len(inventory.Records), parserCases.Summary.Cases, vimTag, resolvedCommit, *outputDir)
+	fmt.Printf("wrote %d scripts, %d test files (%d bytes), %d helper lexemes, and %d parser cases from %s (%s) to %s\n", len(result.Cases), len(testCorpus.Files), candidate.TestFiles.RawBytes, len(inventory.Records), parserCases.Summary.Cases, vimTag, resolvedCommit, *outputDir)
 }
 
 func listTestFiles(root string) ([]string, error) {
@@ -201,9 +206,6 @@ func selectTestFiles(output []byte) ([]string, error) {
 		}
 	}
 	sort.Strings(files)
-	if len(files) != expectedFileCount {
-		return nil, fmt.Errorf("found %d Vim9 parser test files at %s, want %d", len(files), vimTag, expectedFileCount)
-	}
 	return files, nil
 }
 
@@ -227,9 +229,6 @@ func selectAllTestFiles(output []byte) ([]string, error) {
 		files = append(files, path)
 	}
 	sort.Strings(files)
-	if len(files) != expectedTestFileCount {
-		return nil, fmt.Errorf("found %d tracked .vim test files at %s, want %d", len(files), vimTag, expectedTestFileCount)
-	}
 	return files, nil
 }
 
@@ -416,8 +415,8 @@ func buildHelperInventory(files testFilesCorpus) (helperInventory, error) {
 			break
 		}
 	}
-	if len(result.HelperNames) != 37 {
-		return result, fmt.Errorf("found %d exported Check helpers, want 37", len(result.HelperNames))
+	if len(result.HelperNames) == 0 {
+		return result, fmt.Errorf("found no exported Check helpers")
 	}
 	known := make(map[string]struct{}, len(result.HelperNames))
 	for _, name := range result.HelperNames {
@@ -425,9 +424,6 @@ func buildHelperInventory(files testFilesCorpus) (helperInventory, error) {
 	}
 	for _, file := range files.Files {
 		result.Records = append(result.Records, scanHelperFile(file.Path, file.Source, known)...)
-	}
-	if len(result.Records) != expectedHelperLexemes {
-		return result, fmt.Errorf("found %d Check lexemes, want %d from pinned source", len(result.Records), expectedHelperLexemes)
 	}
 	for index := range result.Records {
 		if index > 0 && (result.Records[index-1].Path > result.Records[index].Path ||
@@ -437,15 +433,6 @@ func buildHelperInventory(files testFilesCorpus) (helperInventory, error) {
 		if err := addHelperSummary(&result.Summary, result.Records[index]); err != nil {
 			return result, err
 		}
-	}
-	if result.Summary.KnownHelperCalls != expectedHelperCalls || result.Summary.QualifiedCalls != 5255 || result.Summary.UtilityBareCalls != 33 ||
-		result.Summary.KnownDefinitions != 37 || result.Summary.KnownComments != 10 || result.Summary.NonV9Calls != 343 ||
-		result.Summary.NonV9Definitions != 91 || result.Summary.NonV9Strings != 13 || result.Summary.NonV9Comments != 1 ||
-		result.Summary.IdentifierArguments != 3179 || result.Summary.ListArguments != 2043 || result.Summary.ExpressionArguments != 66 {
-		return result, fmt.Errorf("unexpected Check inventory summary: %+v", result.Summary)
-	}
-	if result.Summary.QualifiedIdentifier != 3161 || result.Summary.QualifiedList != 2043 || result.Summary.QualifiedExpression != 51 || result.Summary.BareIdentifier != 18 || result.Summary.BareExpression != 15 {
-		return result, fmt.Errorf("unexpected Check argument split: %+v", result.Summary)
 	}
 	return result, nil
 }

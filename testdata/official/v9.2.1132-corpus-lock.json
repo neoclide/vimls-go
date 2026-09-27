@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "tag": "v9.2.1132",
+  "commit": "f3dc0fee778439ac8ff8680b42552f7f13d47396",
+  "manifestSHA256": "8c262a41082a8a3dc684cbe350d18d31d3d5cdbc8b368428c79be79d3a691e1d",
+  "embedded": {
+    "files": 17,
+    "cases": 3273,
+    "successes": 1090,
+    "failures": 1623,
+    "structural": 560
+  },
+  "testFiles": {
+    "files": 362,
+    "rawBytes": 8641665
+  },
+  "helperInventory": {
+    "helperNames": 37,
+    "records": 5783,
+    "summary": {
+      "lexemes": 5783,
+      "knownHelperCalls": 5288,
+      "qualifiedCalls": 5255,
+      "utilityBareCalls": 33,
+      "knownDefinitions": 37,
+      "knownComments": 10,
+      "nonV9Calls": 343,
+      "nonV9Definitions": 91,
+      "nonV9Strings": 13,
+      "nonV9Comments": 1,
+      "identifierArguments": 3179,
+      "listLiteralArguments": 2043,
+      "expressionArguments": 66,
+      "qualifiedIdentifierArguments": 3161,
+      "qualifiedListLiteralArguments": 2043,
+      "qualifiedExpressionArguments": 51,
+      "bareIdentifierArguments": 18,
+      "bareExpressionArguments": 15
+    }
+  },
+  "heredocs": {
+    "total": 4967,
+    "evaluated": 42
+  },
+  "parserFiles": {
+    "entries": 68,
+    "includedFiles": 44,
+    "excludedFiles": 24,
+    "includedCalls": 3856,
+    "excludedCalls": 1399,
+    "implicitExcludes": 294
+  },
+  "parserCases": {
+    "files": 44,
+    "records": 3856,
+    "summary": {
+      "calls": 3856,
+      "extractedCalls": 3814,
+      "skippedCalls": 42,
+      "cases": 5273,
+      "acceptedCases": 1765,
+      "unclassifiedCases": 3508,
+      "directLists": 878,
+      "heredocs": 2888,
+      "listAssignments": 2,
+      "listConcats": 46
+    }
+  }
+}

@@ -9,15 +9,12 @@ import (
 )
 
 func TestPinnedParserFileManifest(t *testing.T) {
+	lock := readReviewedCorpusLock(t)
 	manifestPath := filepath.Join("..", "..", "testdata", "official", parserFileManifestName)
 	manifest, err := readParserFileManifest(manifestPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Files) != 68 {
-		t.Fatalf("manifest records = %d, want 68", len(manifest.Files))
-	}
-
 	corpusPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("test-files"))
 	corpusFile, err := os.Open(corpusPath)
 	if err != nil {
@@ -33,19 +30,12 @@ func TestPinnedParserFileManifest(t *testing.T) {
 	if err := json.NewDecoder(corpusReader).Decode(&corpus); err != nil {
 		t.Fatal(err)
 	}
-	if len(corpus.Files) != 362 {
-		t.Fatalf("pinned test files = %d, want 362", len(corpus.Files))
-	}
-	allPaths := make(map[string]bool, len(corpus.Files))
-	for _, file := range corpus.Files {
-		allPaths[file.Path] = true
-	}
 	selected, err := selectParserMigrationFiles(corpus, manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(selected) != 44 {
-		t.Fatalf("selected parser migration files = %d, want 44", len(selected))
+	if len(selected) != lock.ParserFiles.IncludedFiles {
+		t.Fatalf("selected parser migration files = %d, want %d", len(selected), lock.ParserFiles.IncludedFiles)
 	}
 
 	inventoryPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("helper-inventory"))
@@ -64,44 +54,12 @@ func TestPinnedParserFileManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	qualifiedByPath := make(map[string]int)
-	for _, record := range inventory.Records {
-		if record.Disposition == "pending-extraction" {
-			qualifiedByPath[record.Path]++
-		}
+	summary, err := summarizeParserFiles(corpus, inventory, manifest)
+	if err != nil {
+		t.Fatal(err)
 	}
-	manifestByPath := make(map[string]parserFileRecord, len(manifest.Files))
-	includedFiles := 0
-	explicitlyExcludedFiles := 0
-	includedCalls := 0
-	excludedCalls := 0
-	for _, file := range manifest.Files {
-		if !allPaths[file.Path] {
-			t.Fatalf("manifest path is absent from pinned corpus: %q", file.Path)
-		}
-		manifestByPath[file.Path] = file
-		if file.Disposition == "include" {
-			includedFiles++
-			includedCalls += qualifiedByPath[file.Path]
-		} else {
-			explicitlyExcludedFiles++
-		}
-	}
-	for path, calls := range qualifiedByPath {
-		if _, ok := manifestByPath[path]; !ok {
-			t.Fatalf("qualified helper file %q with %d calls lacks an explicit disposition", path, calls)
-		}
-	}
-	for path, calls := range qualifiedByPath {
-		if manifestByPath[path].Disposition != "include" {
-			excludedCalls += calls
-		}
-	}
-	if includedFiles != 44 || explicitlyExcludedFiles != 24 || includedCalls != 3856 || excludedCalls != 1399 {
-		t.Fatalf("manifest summary: included files=%d calls=%d, explicit excludes=%d, excluded calls=%d", includedFiles, includedCalls, explicitlyExcludedFiles, excludedCalls)
-	}
-	if implicitExcluded := len(corpus.Files) - includedFiles - explicitlyExcludedFiles; implicitExcluded != 294 {
-		t.Fatalf("implicit default excludes = %d, want 294", implicitExcluded)
+	if summary != lock.ParserFiles {
+		t.Fatalf("manifest summary = %#v, want %#v", summary, lock.ParserFiles)
 	}
 }
 

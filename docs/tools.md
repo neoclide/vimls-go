@@ -188,15 +188,18 @@ and refuses a checkout whose tag resolves to another commit.
 
 The reviewed parser-file manifest selected from the current pin determines
 parser migration files. The generator writes four deterministic gzip artifacts:
-parser corpus, full test files, helper inventory and parser cases. Parser cases
-carry the SHA-256 of `json.Marshal` on the typed manifest, rather than a hash
-of its raw file bytes.
+parser corpus, full test files, helper inventory and parser cases. The current
+`<tag>-corpus-lock.json` records their reviewed source-derived totals and the
+typed-manifest SHA-256. Parser cases carry the SHA-256 of `json.Marshal` on the
+typed manifest, rather than a hash of its raw file bytes.
 
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-vim-root <dir>` | `""` | Read-only official Vim Git checkout (required). |
 | `-output-dir <dir>` | `testdata/official` | Destination for the four generated gzip artifacts. |
 | `-manifest <file>` | Current pin's parser-file manifest | Reviewed parser-file manifest. |
+| `-lock <file>` | Current pin's corpus lock | Reviewed provenance and inventory totals. |
+| `-print-lock` | `false` | Print a candidate lock without writing artifacts or a lock file. |
 
 ```sh
 go run ./tools/genofficial -vim-root /path/to/vim
@@ -208,7 +211,9 @@ make official-check VIM_SOURCE=/path/to/vim
 artifacts. The v9.2.1015 corpus remains archived, and handwritten compile
 regressions keep their original provenance. See
 [the official corpus guide](../testdata/official/README.md) for its full
-maintenance rules.
+maintenance rules. During a deliberate source update, review a candidate with
+`go run ./tools/genofficial -vim-root /path/to/vim -print-lock`; ordinary
+generation verifies the reviewed lock and never updates it.
 
 ### `tools/vimsource`
 

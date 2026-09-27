@@ -20,14 +20,6 @@ import (
 const (
 	officialParserCasesSchemaVersion = 1
 	officialParserCasesManifest      = vimdata.VimSourceTag + "-parser-files.json"
-	officialParserCasesManifestHash  = "8c262a41082a8a3dc684cbe350d18d31d3d5cdbc8b368428c79be79d3a691e1d"
-	officialParserCasesFileCount     = 44
-	officialParserCasesRecordCount   = 3856
-	officialParserCasesExtracted     = 3814
-	officialParserCasesSkipped       = 42
-	officialParserCasesCount         = 5273
-	officialParserCasesAcceptCount   = 1765
-	officialParserCasesUnclassified  = 3508
 )
 
 var (
@@ -101,8 +93,9 @@ type officialParserCase struct {
 }
 
 func TestOfficialVimParserCases(t *testing.T) {
+	lock := readOfficialCorpusLock(t)
 	corpus := readOfficialParserCases(t)
-	checkOfficialParserCaseCorpus(t, corpus)
+	checkOfficialParserCaseCorpus(t, corpus, lock)
 
 	accepted := 0
 	unclassified := 0
@@ -164,7 +157,7 @@ func TestOfficialVimParserCases(t *testing.T) {
 	if extracted != corpus.Summary.ExtractedCalls || skipped != corpus.Summary.SkippedCalls || cases != corpus.Summary.Cases || accepted != corpus.Summary.AcceptedCases || unclassified != corpus.Summary.UnclassifiedCases {
 		t.Fatalf("official parser-case summary does not match records: extracted = %d, skipped = %d, cases = %d, accepted = %d, unclassified = %d; summary = %#v", extracted, skipped, cases, accepted, unclassified, corpus.Summary)
 	}
-	if accepted != officialParserCasesAcceptCount || unclassified != officialParserCasesUnclassified {
+	if accepted != lock.ParserCases.Summary.AcceptedCases || unclassified != lock.ParserCases.Summary.UnclassifiedCases {
 		t.Fatalf("official parser-case expectations changed: accepted = %d, unclassified = %d", accepted, unclassified)
 	}
 }
@@ -1285,7 +1278,7 @@ func TestOfficialVimParserMigrationReport(t *testing.T) {
 		"src/testdir/test_vim9_enum.vim":      "D",
 	}
 	corpus := readOfficialParserCases(t)
-	checkOfficialParserCaseCorpus(t, corpus)
+	checkOfficialParserCaseCorpus(t, corpus, readOfficialCorpusLock(t))
 	counts := map[string]int{"A": 0, "B": 0, "C": 0, "D": 0}
 	seen := make(map[string]struct{}, len(expected))
 	for _, record := range corpus.Records {
@@ -1411,12 +1404,12 @@ func readOfficialParserCases(t *testing.T) officialParserCaseCorpus {
 	return corpus
 }
 
-func checkOfficialParserCaseCorpus(t *testing.T, corpus officialParserCaseCorpus) {
+func checkOfficialParserCaseCorpus(t *testing.T, corpus officialParserCaseCorpus, lock officialCorpusLock) {
 	t.Helper()
-	if corpus.SchemaVersion != officialParserCasesSchemaVersion || corpus.Tag != officialVimTag || corpus.Commit != officialVimCommit {
+	if corpus.SchemaVersion != officialParserCasesSchemaVersion || corpus.Tag != lock.Tag || corpus.Commit != lock.Commit {
 		t.Fatalf("unexpected official parser-case provenance: schema = %d, tag = %q, commit = %q", corpus.SchemaVersion, corpus.Tag, corpus.Commit)
 	}
-	if corpus.Manifest != officialParserCasesManifest || corpus.ManifestSHA256 != officialParserCasesManifestHash {
+	if corpus.Manifest != officialParserCasesManifest || corpus.ManifestSHA256 != lock.ManifestSHA256 {
 		t.Fatalf("unexpected parser-case manifest: name = %q, sha256 = %q", corpus.Manifest, corpus.ManifestSHA256)
 	}
 	manifestPath := filepath.Join("..", "..", "testdata", "official", corpus.Manifest)
@@ -1435,7 +1428,7 @@ func checkOfficialParserCaseCorpus(t *testing.T, corpus officialParserCaseCorpus
 	if got := fmt.Sprintf("%x", sha256.Sum256(encodedManifest)); got != corpus.ManifestSHA256 {
 		t.Fatalf("parser-case manifest typed hash = %s, want %s", got, corpus.ManifestSHA256)
 	}
-	if len(corpus.Files) != officialParserCasesFileCount || !sort.StringsAreSorted(corpus.Files) {
+	if len(corpus.Files) != lock.ParserCases.Files || !sort.StringsAreSorted(corpus.Files) {
 		t.Fatalf("unexpected parser-case files: count = %d, sorted = %t", len(corpus.Files), sort.StringsAreSorted(corpus.Files))
 	}
 	for index := 1; index < len(corpus.Files); index++ {
@@ -1443,15 +1436,10 @@ func checkOfficialParserCaseCorpus(t *testing.T, corpus officialParserCaseCorpus
 			t.Fatalf("duplicate parser-case file %q", corpus.Files[index])
 		}
 	}
-	if len(corpus.Records) != officialParserCasesRecordCount {
+	if len(corpus.Records) != lock.ParserCases.Records {
 		t.Fatalf("unexpected parser-case records: %d", len(corpus.Records))
 	}
-	wantSummary := officialParserCaseSummary{
-		Calls: officialParserCasesRecordCount, ExtractedCalls: officialParserCasesExtracted, SkippedCalls: officialParserCasesSkipped,
-		Cases: officialParserCasesCount, AcceptedCases: officialParserCasesAcceptCount, UnclassifiedCases: officialParserCasesUnclassified,
-		DirectLists: 878, Heredocs: 2888, ListAssignments: 2, ListConcats: 46,
-	}
-	if corpus.Summary != wantSummary {
+	if corpus.Summary != lock.ParserCases.Summary {
 		t.Fatalf("unexpected parser-case summary: %#v", corpus.Summary)
 	}
 }

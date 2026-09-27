@@ -6,11 +6,15 @@ Vim.
 
 | File | Purpose |
 | --- | --- |
-| `v9.2.1132-test-files.json.gz` | A lossless copy of the 362 tracked Vim scripts under `src/testdir`. |
-| `v9.2.1132-parser-corpus.json.gz` | Embedded scripts extracted from selected parser and evaluator tests. |
-| `v9.2.1132-helper-inventory.json.gz` | An inventory of upstream helper calls, including reasons a call could not be used. |
-| `v9.2.1132-parser-files.json` | The reviewed parser migration allowlist, with an explicit reason for each selection or exclusion. |
-| `v9.2.1132-parser-cases.json.gz` | Extracted parser inputs and expectations, tied to the allowlist by the SHA-256 of `json.Marshal` on its typed manifest. |
+| `<tag>-test-files.json.gz` | A lossless copy of tracked Vim scripts under `src/testdir`. |
+| `<tag>-parser-corpus.json.gz` | Embedded scripts extracted from selected parser and evaluator tests. |
+| `<tag>-helper-inventory.json.gz` | An inventory of upstream helper calls, including reasons a call could not be used. |
+| `<tag>-parser-files.json` | The reviewed parser migration allowlist, with an explicit reason for each selection or exclusion. |
+| `<tag>-parser-cases.json.gz` | Extracted parser inputs and expectations, tied to the allowlist by the SHA-256 of `json.Marshal` on its typed manifest. |
+| `<tag>-corpus-lock.json` | The reviewed provenance, manifest hash and source-derived inventory totals for the active corpus. |
+
+`<tag>` is the active pin. The current lock is the authoritative reviewed count
+record; generated artifacts retain their own tag and commit provenance.
 
 The `v9.2.1015-*` files are historical archives for the original migration
 from commit `5ab969f719bb09555e90e8dff8c94fc37bcbf2ae`. They remain byte-for-byte
@@ -42,8 +46,12 @@ where that tag resolves to another commit. Run:
 go run ./tools/genofficial -vim-root /path/to/vim
 ```
 
-`-output-dir` selects where the four generated gzip artifacts are written and
-`-manifest` selects the reviewed parser-file manifest. The generator writes
+`-output-dir` selects where the four generated gzip artifacts are written,
+`-manifest` selects the reviewed parser-file manifest, and `-lock` selects the
+reviewed corpus lock. The generator compares the complete computed inventory to
+that lock before writing artifacts. `-print-lock` prints a deterministic
+candidate lock to standard output without writing artifacts or a lock file; use
+it only while reviewing a deliberate source update. The generator writes
 deterministic gzip streams; their timestamp is zero and their OS byte is 255.
 Every selected helper call must produce a case or keep an explicit skip reason.
 `make official-refresh VIM_SOURCE=/path/to/vim` refreshes the current files.

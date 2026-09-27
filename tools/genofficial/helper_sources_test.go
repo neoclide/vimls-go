@@ -138,6 +138,7 @@ func TestScanHelperHeredocsRecoversUnclosedBodyAtEOF(t *testing.T) {
 }
 
 func TestPinnedHelperHeredocScan(t *testing.T) {
+	lock := readReviewedCorpusLock(t)
 	path := filepath.Join("..", "..", "testdata", "official", officialArtifactName("test-files"))
 	file, err := os.Open(path)
 	if err != nil {
@@ -172,8 +173,8 @@ func TestPinnedHelperHeredocScan(t *testing.T) {
 		}
 		total += len(heredocs)
 	}
-	if total != 4967 || evaluated != 42 {
-		t.Fatalf("official heredocs: total=%d evaluated=%d, want 4967 and 42", total, evaluated)
+	if total != lock.Heredocs.Total || evaluated != lock.Heredocs.Evaluated {
+		t.Fatalf("official heredocs: total=%d evaluated=%d, want %#v", total, evaluated, lock.Heredocs)
 	}
 
 	inventoryPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("helper-inventory"))
@@ -201,7 +202,7 @@ func TestPinnedHelperHeredocScan(t *testing.T) {
 			t.Fatalf("%s:%d helper call is embedded in heredoc %q: %#v", record.Path, record.Line, heredoc.Name, record)
 		}
 	}
-	if pending != 5255 {
-		t.Fatalf("pending helper calls = %d, want 5255", pending)
+	if pending != lock.HelperInventory.Summary.QualifiedCalls {
+		t.Fatalf("pending helper calls = %d, want %d", pending, lock.HelperInventory.Summary.QualifiedCalls)
 	}
 }

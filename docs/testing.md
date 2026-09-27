@@ -145,6 +145,11 @@ To update the baseline, change the active source pin once in
 source there. Regenerate metadata and the official corpus, inspect semantic and
 license changes, and update the current source text in the support guide and
 documentation notice. Do not replace historical provenance across the tree.
+For an official corpus source change, print and review a candidate
+`<tag>-corpus-lock.json` with `go run ./tools/genofficial -vim-root /path/to/vim -print-lock`;
+normal generation verifies that reviewed lock before writing the
+four artifacts. The lock contains source-derived totals and the typed manifest
+SHA-256, not parser diagnostic assertions.
 Finish with `make vim-check`; it already runs formatting, metadata and corpus
 checks, the external oracle, the uncached Go suite, vet, and the client smoke
 test, so do not rerun those stages manually after it succeeds.
