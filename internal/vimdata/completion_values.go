@@ -224,7 +224,7 @@ xsmp_interact
 xterm_clipboard
 xterm_save
 X11
-:tearoff`), "Recognized by has() in Vim v9.2.1132; availability depends on the Vim build and runtime state.")
+:tearoff`), "Recognized by has() in Vim "+ManualVimTag+"; availability depends on the Vim build and runtime state.")
 
 // dynamicHasFeatures are the fixed spellings handled before has_list[]. The
 // patch entry records the pinned ceiling instead of guessing later patches.
