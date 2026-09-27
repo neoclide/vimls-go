@@ -87,8 +87,8 @@ eventdocs-check:
 	cmp internal/vimdata/autocmd_docs_generated.go "$$eventdocs_tmp"
 
 oracle:
-	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim v9.2.1015 binary" >&2; exit 1)
-	VIM_EXECUTABLE="$(VIM_EXECUTABLE)" $(GO) test $(GO_MOD) -v ./test/oracle
+	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary" >&2; exit 1)
+	VIM_EXECUTABLE="$(VIM_EXECUTABLE)" $(GO) test $(GO_MOD) -count=1 -v ./test/oracle
 
 client-tools:
 	./test/clients/setup-vim-lsp.sh

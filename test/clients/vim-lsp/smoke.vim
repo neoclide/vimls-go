@@ -16,8 +16,8 @@ function! s:shutdown_response(response) abort
 endfunction
 
 try
-  if v:version != 902 || !has('patch-9.2.1015') || has('patch-9.2.1016')
-    call add(v:errors, 'expected exact Vim patch v9.2.1015')
+  if v:version != 902 || !has('patch-9.2.1132') || has('patch-9.2.1133')
+    call add(v:errors, 'expected exact Vim patch v9.2.1132')
   endif
   execute 'edit ' .. fnameescape($VIMLS_CLIENT_WORKSPACE .. '/legacy.vim')
   call assert_equal('vim', &filetype)
@@ -69,8 +69,9 @@ endtry
 
 call writefile([
       \ 'version=' .. execute('version')->split("\n")[0],
-      \ 'patch-9.2.1015=' .. has('patch-9.2.1015'),
-      \ 'patch-9.2.1016=' .. has('patch-9.2.1016'),
+      \ 'v:version=' .. v:version,
+      \ 'patch-9.2.1132=' .. has('patch-9.2.1132'),
+      \ 'patch-9.2.1133=' .. has('patch-9.2.1133'),
       \ 'running_status=' .. s:running_status,
       \ 'legacy_diagnostics=' .. string(s:legacy_counts),
       \ 'legacy_formatted=' .. s:legacy_formatted,

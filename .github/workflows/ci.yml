@@ -68,10 +68,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: vim/vim
-          ref: v9.2.1015
+          ref: v9.2.1132
           path: .test-tools/vim
-      - name: Fetch Vim metadata revision
-        run: git fetch --depth=1 origin tag v9.2.1132
+      - name: Verify Vim revision
+        run: test "$(git rev-parse HEAD)" = f3dc0fee778439ac8ff8680b42552f7f13d47396
         working-directory: .test-tools/vim
       - uses: actions/checkout@v4
         with:
@@ -79,6 +79,7 @@ jobs:
           ref: 73923b0dd85bb936ba2f63ee916dabaa0603340d
           path: .test-tools/neovim
       - run: make metadata-check VIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/vim" NEOVIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/neovim"
+      - run: make official-check VIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/vim"
       - run: sudo apt-get update && sudo apt-get install -y libncurses-dev
       - run: ./configure --with-features=huge --enable-gui=no --without-x && make -j2
         working-directory: .test-tools/vim

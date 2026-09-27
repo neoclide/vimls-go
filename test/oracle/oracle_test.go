@@ -19,8 +19,8 @@ const vimOracleTimeout = 5 * time.Second
 
 const oracleDriver = `set nomore
 let v:errors = []
-if v:version != 902 || !has('patch-9.2.1015') || has('patch-9.2.1016')
-  call add(v:errors, 'expected exact Vim patch v9.2.1015')
+if v:version != 902 || !has('patch-9.2.1132') || has('patch-9.2.1133')
+  call add(v:errors, 'expected exact Vim patch v9.2.1132')
 endif
 if !has('eval') || exists(':vim9script') != 2
   call add(v:errors, 'required +eval/Vim9 support is missing')
@@ -35,12 +35,12 @@ let s:messages = substitute(execute('messages'), "\n", '\\n', 'g')
 call writefile([
       \ 'version=' .. s:version,
       \ 'v:version=' .. v:version,
-      \ 'patch-9.2.1015=' .. has('patch-9.2.1015'),
-      \ 'patch-9.2.1016=' .. has('patch-9.2.1016'),
-	      \ 'v:errors=' .. string(v:errors),
-	      \ 'unsupported_options=' .. string(get(g:, 'vimls_unsupported_options', [])),
-	      \ 'missing_features=' .. string(get(g:, 'vimls_missing_features', [])),
-	      \ 'messages=' .. s:messages,
+      \ 'patch-9.2.1132=' .. has('patch-9.2.1132'),
+      \ 'patch-9.2.1133=' .. has('patch-9.2.1133'),
+      \ 'v:errors=' .. string(v:errors),
+      \ 'unsupported_options=' .. string(get(g:, 'vimls_unsupported_options', [])),
+      \ 'missing_features=' .. string(get(g:, 'vimls_missing_features', [])),
+      \ 'messages=' .. s:messages,
       \ ], $VIMLS_ORACLE_OUTPUT)
 if !empty(v:errors)
   cquit 1
@@ -51,8 +51,8 @@ qa!
 const formattingOracleDriver = `set nocompatible
 set nomore
 let v:errors = []
-if v:version != 902 || !has('patch-9.2.1015') || has('patch-9.2.1016')
-  call add(v:errors, 'expected exact Vim patch v9.2.1015')
+if v:version != 902 || !has('patch-9.2.1132') || has('patch-9.2.1133')
+  call add(v:errors, 'expected exact Vim patch v9.2.1132')
 endif
 try
   filetype indent on
@@ -70,8 +70,8 @@ endtry
 call writefile([
       \ 'version=' .. split(execute('version'), "\n")[0],
       \ 'v:version=' .. v:version,
-      \ 'patch-9.2.1015=' .. has('patch-9.2.1015'),
-      \ 'patch-9.2.1016=' .. has('patch-9.2.1016'),
+      \ 'patch-9.2.1132=' .. has('patch-9.2.1132'),
+      \ 'patch-9.2.1133=' .. has('patch-9.2.1133'),
       \ 'v:errors=' .. string(v:errors),
       \ 'messages=' .. substitute(execute('messages'), "\n", '\\n', 'g'),
       \ ], $VIMLS_ORACLE_OUTPUT)
@@ -84,7 +84,7 @@ qa!
 func TestPinnedVimOracle(t *testing.T) {
 	vim := os.Getenv("VIM_EXECUTABLE")
 	if vim == "" {
-		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1015 binary")
+		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary")
 	}
 	vim, err := filepath.Abs(vim)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestPinnedVimOracle(t *testing.T) {
 			if readErr != nil {
 				t.Fatalf("read oracle record: %v", readErr)
 			}
-			for _, want := range []string{"v:version=902", "patch-9.2.1015=1", "patch-9.2.1016=0", "v:errors=[]"} {
+			for _, want := range []string{"v:version=902", "patch-9.2.1132=1", "patch-9.2.1133=0", "v:errors=[]"} {
 				if !strings.Contains(string(record), want+"\n") {
 					t.Errorf("record does not contain %q", want)
 				}
@@ -146,7 +146,7 @@ func TestPinnedVimOracle(t *testing.T) {
 func TestPinnedVimFormattingOracle(t *testing.T) {
 	vim := os.Getenv("VIM_EXECUTABLE")
 	if vim == "" {
-		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1015 binary")
+		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary")
 	}
 	var err error
 	vim, err = filepath.Abs(vim)
@@ -210,7 +210,7 @@ func TestPinnedVimFormattingOracle(t *testing.T) {
 				got = got[:edit.Span.Start] + edit.NewText + got[edit.Span.End:]
 			}
 			if got != want {
-				t.Fatalf("vimls-go formatting:\n%s\nVim v9.2.1015 formatting:\n%s", got, want)
+				t.Fatalf("vimls-go formatting:\n%s\nVim v9.2.1132 formatting:\n%s", got, want)
 			}
 		})
 	}
@@ -244,8 +244,16 @@ func runFormattingOracle(t *testing.T, vim, source string) string {
 	if recordErr != nil {
 		t.Fatalf("read formatting oracle record: %v; run=%v stdout=%q stderr=%q", recordErr, runErr, stdout.String(), stderr.String())
 	}
-	t.Logf("exit=%v stdout=%q stderr=%q\n%s", runErr, stdout.String(), stderr.String(), record)
-	if runErr != nil || !strings.Contains(string(record), "patch-9.2.1015=1\n") || !strings.Contains(string(record), "patch-9.2.1016=0\n") || !strings.Contains(string(record), "v:errors=[]\n") {
+	exitStatus := 0
+	if runErr != nil {
+		var exitError *exec.ExitError
+		if !errors.As(runErr, &exitError) {
+			t.Fatal(runErr)
+		}
+		exitStatus = exitError.ExitCode()
+	}
+	t.Logf("exit_status=%d stdout=%q stderr=%q\n%s", exitStatus, stdout.String(), stderr.String(), record)
+	if exitStatus != 0 || !strings.Contains(string(record), "patch-9.2.1132=1\n") || !strings.Contains(string(record), "patch-9.2.1133=0\n") || !strings.Contains(string(record), "v:errors=[]\n") {
 		t.Fatalf("formatting oracle failed: %v\n%s", runErr, record)
 	}
 	formatted, err := os.ReadFile(output)

@@ -76,12 +76,14 @@ should not be repeated for every editor feature.
 
 ## Comparing behavior with Vim
 
-Use only curated fixtures and **Vim v9.2.1015**. A newer Vim can accept different
+Use only curated fixtures and **Vim v9.2.1132**. A newer Vim can accept different
 syntax, so its result does not automatically apply to this server.
 
 ```sh
-make oracle VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
-make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1015/src/vim
+VIMRUNTIME=/path/to/vim-v9.2.1132/runtime \
+  make oracle VIM_EXECUTABLE=/path/to/vim-v9.2.1132/src/vim
+VIMRUNTIME=/path/to/vim-v9.2.1132/runtime \
+  make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1132/src/vim
 ```
 
 The oracle records the Vim version and patch probes, `v:errors`, `:messages`,
@@ -103,7 +105,7 @@ To inspect selected official parser failures:
 ```sh
 go test -mod=readonly ./internal/syntax \
   -run '^TestOfficialVimParserFailureTriage$' -count=1 -v \
-  -args -official-case='4170:120710,4171:120781'
+  -args -official-case='test_vim9_assign.vim:1623:40054'
 ```
 
 The filter matches case identifiers in the committed artifact. Use the matching
@@ -111,14 +113,15 @@ The filter matches case identifiers in the committed artifact. Use the matching
 
 ## Generated metadata
 
-The generators read pinned Vim and Neovim sources. Both upstream checkouts are
-read-only; their current HEAD need not be the pinned revision. `genmetadata`
-requires Vim v9.2.1132; event documentation and Vim oracle checks still use
-v9.2.1015. The Vim checkout must contain both revisions. CI fetches the metadata
-tag separately while building the oracle revision.
+The generators, oracle and client smoke checks use Vim v9.2.1132,
+`f3dc0fee778439ac8ff8680b42552f7f13d47396`. The Vim and Neovim upstream
+checkouts are read-only; their current HEAD may be newer than the pinned object.
+Neovim remains independently pinned at
+`73923b0dd85bb936ba2f63ee916dabaa0603340d`.
 
 ```sh
 make metadata-check VIM_SOURCE=/path/to/vim NEOVIM_SOURCE=/path/to/neovim
+make official-check VIM_SOURCE=/path/to/vim
 ```
 
 When deliberately updating generated metadata, use `make metadata-refresh`
@@ -132,6 +135,14 @@ original source attribution and license references in regenerated output.
 Do not edit generated tables
 to hide a mismatch. Official compile-diagnostic fixtures are maintained one
 error code at a time in `internal/analysis/official_compile_cases_e*_test.go`.
+
+`make official-refresh VIM_SOURCE=/path/to/vim` regenerates the current official
+Vim corpus. `make official-check` regenerates it into a temporary directory and
+compares the four generated artifacts. The v9.2.1015 corpus files remain
+historical archives, and handwritten compile regressions retain their recorded
+source provenance unless their own comment names a newer revision. The corpus
+checks recovery and range handling; it does not establish full Vim syntax
+coverage.
 
 ## CI and additional checks
 

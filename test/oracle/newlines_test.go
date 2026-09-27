@@ -16,7 +16,7 @@ import (
 func TestPinnedVimBufferNewlines(t *testing.T) {
 	vim := os.Getenv("VIM_EXECUTABLE")
 	if vim == "" {
-		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1015 binary")
+		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary")
 	}
 	vim, err := filepath.Abs(vim)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestPinnedVimBufferNewlines(t *testing.T) {
 			if runErr != nil || readErr != nil {
 				t.Fatalf("oracle run=%v record=%v", runErr, readErr)
 			}
-			for _, want := range []string{"v:version=902", "patch-9.2.1015=1", "patch-9.2.1016=0", "v:errors=[]"} {
+			for _, want := range []string{"v:version=902", "patch-9.2.1132=1", "patch-9.2.1133=0", "v:errors=[]"} {
 				if !strings.Contains(string(record), want+"\n") {
 					t.Errorf("record lacks %q", want)
 				}
