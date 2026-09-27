@@ -10,6 +10,9 @@ The items below are remaining work, not promises for a particular release.
 
 ## Language support
 
+Pattern-case hints respect the command dialect: Vim9 `=~` and `!~` comparisons
+do not depend on `ignorecase`; Legacy comparisons retain the hint.
+
 Generated command, function, option and `v:` variable metadata now uses Vim
 v9.2.1132. The reviewed `fillchars` helper fingerprint includes the v9.2.1119
 default vertical separator change; static option validation rules are unchanged.

@@ -279,6 +279,55 @@ func TestAdditionalStyleDiagnostics(t *testing.T) {
 	}
 }
 
+func TestPatternMatchStyleDiagnosticsRespectDialect(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         []string
+	}{
+		{
+			name:   "legacy =~",
+			source: "if 'text' =~ 'text.*'\nendif\n",
+			want:   []string{"vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+		},
+		{
+			name:   "legacy !~",
+			source: "if 'text' !~ 'text.*'\nendif\n",
+			want:   []string{"vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+		},
+		{
+			name:   "vim9script =~",
+			source: "vim9script\necho 'AA' =~ 'aa'\n",
+		},
+		{
+			name:   "vim9cmd =~",
+			source: "vim9cmd echo 'text' =~ 'text.*'\n",
+			want:   []string{"vimls/implicit-regex-magic"},
+		},
+		{
+			name:   "vim9cmd !~",
+			source: "vim9cmd echo 'text' !~ 'text.*'\n",
+			want:   []string{"vimls/implicit-regex-magic"},
+		},
+		{
+			name:   "legacy command in vim9script",
+			source: "vim9script\nlegacy echo 'text' =~ 'text.*'\n",
+			want:   []string{"vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			got := collectCodes(Analyze(file).Diagnostics)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("style diagnostics = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestConfigurationOverwriteSkipsSelfPreservingGet(t *testing.T) {
 	tests := []struct {
 		name, source string

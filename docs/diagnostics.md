@@ -216,7 +216,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/function-without-abort` | Hint | The Legacy function does not use `abort`. |
 | `vimls/global-empty-pattern` | Warning | An empty pattern in `:global` or `:vglobal` reuses the previous search pattern from interactive history. |
 | `vimls/global-internal-state` | Hint | A short global variable looks like internal plugin state. |
-| `vimls/implicit-pattern-case` | Hint | Pattern matching depends on the user's `ignorecase` option. |
+| `vimls/implicit-pattern-case` | Hint | Pattern matching depends on the user's `ignorecase` option; Vim9 `=~` and `!~` comparisons are exempt. |
 | `vimls/implicit-regex-magic` | Hint | Pattern interpretation depends on the user's `magic` option. |
 | `vimls/implicit-string-case` | Hint | String comparison depends on the user's `ignorecase` option. |
 | `vimls/mapping-script-local-reference` | Warning | A script-local name may not be available when the mapping runs. |

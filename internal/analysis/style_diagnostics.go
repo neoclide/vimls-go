@@ -665,7 +665,9 @@ func visitStyleExpression(result *FileAnalysis, file *syntax.File, expression *s
 			appendStyleDiagnostic(result, "vimls/implicit-string-case", "string comparison depends on 'ignorecase'; consider an explicit case operator", expression.Operator)
 		}
 		if (operator == "=~" || operator == "!~") && right.Kind == syntax.ExpressionString {
-			appendStyleDiagnostic(result, "vimls/implicit-pattern-case", "pattern match depends on 'ignorecase'; consider an explicit case operator", expression.Operator)
+			if dialect == syntax.Legacy {
+				appendStyleDiagnostic(result, "vimls/implicit-pattern-case", "pattern match depends on 'ignorecase'; consider an explicit case operator", expression.Operator)
+			}
 			pattern := strings.Trim(file.Text(right.Span), "'\"")
 			if !strings.HasPrefix(pattern, "\\v") && !strings.HasPrefix(pattern, "\\m") && !strings.HasPrefix(pattern, "\\M") && !strings.HasPrefix(pattern, "\\V") && strings.ContainsAny(pattern, ".*+?(){}") {
 				appendStyleDiagnostic(result, "vimls/implicit-regex-magic", "pattern relies on Vim's magic setting; consider an explicit magic prefix", right.Span)
