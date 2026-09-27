@@ -7,6 +7,66 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+// Vim v9.2.1132 src/testdir/test_vim9_assign.vim Test_assign_string_only(),
+// introduced by patch v9.2.1130 (12ff5ce7fdb210c0ba35832159d8e7095ec8d9f0).
+func TestVim921130StringOnlyAssignments(t *testing.T) {
+	for _, context := range []struct{ name, prefix, suffix string }{
+		{"script", "vim9script\n", "\n"},
+		{"def", "vim9script\ndef Check()\n", "\nenddef\n"},
+		{"vim9cmd", "vim9cmd ", "\n"},
+	} {
+		for _, target := range []string{"$XSTRING_ONLY", "@a", "v:errmsg"} {
+			for _, assignment := range []struct{ text, value, typ string }{
+				{" = 123", "123", "number"},
+				{" ..= 123", "123", "number"},
+				{" = true", "true", "bool"},
+			} {
+				t.Run(context.name+"/"+target+assignment.text, func(t *testing.T) {
+					file := syntax.Parse(context.prefix + target + assignment.text + context.suffix)
+					diagnostics := CombinedDiagnostics(file, Analyze(file))
+					if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1012" || file.Text(diagnostics[0].Span) != assignment.value ||
+						diagnostics[0].Message != "Type mismatch; expected string but got "+assignment.typ {
+						t.Fatalf("diagnostics = %#v", diagnostics)
+					}
+				})
+			}
+		}
+		for _, test := range []struct{ source, span string }{
+			{"[$XSTRING_ONLY, @a] = [1, 2]", "1"},
+			{"@# ..= 1", "1"},
+			{"[@#, @a] = [bufnr(), 2]", "2"},
+		} {
+			t.Run(context.name+"/"+test.source, func(t *testing.T) {
+				file := syntax.Parse(context.prefix + test.source + context.suffix)
+				diagnostics := CombinedDiagnostics(file, Analyze(file))
+				if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E1012" || file.Text(diagnostics[0].Span) != test.span {
+					t.Fatalf("diagnostics = %#v", diagnostics)
+				}
+			})
+		}
+		for _, source := range []string{"@# = bufnr()", "[@#, @a] = [bufnr(), 'ok']", "$XSTRING_ONLY = 'ok'", "@a ..= 'ok'", "v:errmsg ..= 'ok'", "$XSTRING_ONLY = g:unknown", "@a ..= g:unknown"} {
+			t.Run(context.name+"/valid/"+source, func(t *testing.T) {
+				file := syntax.Parse(context.prefix + source + context.suffix)
+				if diagnostics := CombinedDiagnostics(file, Analyze(file)); len(diagnostics) != 0 {
+					t.Fatalf("diagnostics = %#v", diagnostics)
+				}
+			})
+		}
+	}
+	for _, prefix := range []string{"let ", "vim9script\nlegacy let ", "vim9script\ndef Check()\nlegacy let "} {
+		for _, assignment := range []string{"$XSTRING_ONLY = 123", "@a = 456", "v:errmsg = 789", "[$XSTRING_ONLY, @a] = [1, 2]"} {
+			source := prefix + assignment + "\n"
+			if strings.Contains(prefix, "def Check()") {
+				source += "enddef\n"
+			}
+			file := syntax.Parse(source)
+			if diagnostics := CombinedDiagnostics(file, Analyze(file)); len(diagnostics) != 0 {
+				t.Errorf("Legacy source %q: %#v", source, diagnostics)
+			}
+		}
+	}
+}
+
 func TestOfficialVimCompileCasesE1000(t *testing.T) {
 	cases := []struct {
 		ID     string

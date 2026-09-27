@@ -50,6 +50,11 @@ vimls-go follows **Vim v9.2.1015** plus the targeted
 [v9.2.1132 compatibility updates](language-support.md). Help from another
 version can describe different rules.
 
+Vim9 environment variables, registers and writable string `v:` variables require
+string values for plain and concatenating assignments. Known incompatible types
+report E1012, including in destructuring assignments; `@# = bufnr()` is allowed.
+Legacy assignments retain their conversions.
+
 Builtin return-value inference also uses the corrections recorded in Vim
 v9.2.1104, checked against v9.2.1132, for functions already in the pinned metadata.
 For example, assigning `match()` to a string produces E1012, while

@@ -5,6 +5,35 @@ import (
 	"testing"
 )
 
+func TestVim9ModifierPreservesEnvironmentAssignment(t *testing.T) {
+	for _, prefix := range []string{"vim9cmd ", "silent vim9cmd ", "vim9script\nsilent "} {
+		following := "let following = 1\n"
+		if strings.HasPrefix(prefix, "vim9script") {
+			following = "var following = 1\n"
+		}
+		file := Parse(prefix + "$XSTRING_ONLY = 'ok'\n" + following)
+		assertFileSpans(t, file)
+		if len(file.Diagnostics) != 0 {
+			t.Fatalf("diagnostics = %#v", file.Diagnostics)
+		}
+		var assignment *Command
+		for index := range file.Commands {
+			command := &file.Commands[index]
+			if len(command.Expressions) == 1 && command.Expressions[0].Kind == ExpressionAssignment {
+				assignment = command
+				break
+			}
+		}
+		if assignment == nil || assignment.Range != (Span{}) || assignment.Dialect != Vim9 ||
+			file.Text(assignment.Expressions[0].Children[0].Span) != "$XSTRING_ONLY" {
+			t.Fatalf("source %q: commands = %#v", file.Source, file.Commands)
+		}
+		if !strings.HasPrefix(prefix, "vim9script") && file.Commands[len(file.Commands)-1].Dialect != Legacy {
+			t.Fatalf("vim9cmd changed the next command's dialect: %#v", file.Commands)
+		}
+	}
+}
+
 func TestSearchRangeTrailingEscapeStopsAtLineEnd(t *testing.T) {
 	for _, parser := range []struct {
 		name  string

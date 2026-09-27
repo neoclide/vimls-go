@@ -1290,7 +1290,10 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 				start = skipSpaceToken(file, start+1, end)
 			}
 			rangeStart = start
-			start = scanRange(file.Source, start, end)
+			rangeEnd := scanRange(file.Source, start, end)
+			if dialect == Legacy || hasRangeColon || vim9ModifierRangeRequiresColon(file.Source, start, rangeEnd, end) {
+				start = rangeEnd
+			}
 			if start > rangeStart {
 				commandRange = Span{Start: rangeStart, End: start}
 				file.Tokens = append(file.Tokens, Token{Kind: TokenRange, Span: commandRange})

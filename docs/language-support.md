@@ -10,6 +10,10 @@ v9.2.1015, with these targeted updates checked against v9.2.1132:
 
 - Builtin return types follow patch 1104, including argument-dependent helpers
   and nested lists.
+- Vim9 string-only assignment targets follow patch 1130: environment variables,
+  registers and writable string `v:` variables require strings for `=` and
+  `..=`, including destructuring. Plain `@# = number` remains valid. Legacy
+  conversions are retained.
 
 Other metadata records its own source revision.
 

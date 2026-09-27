@@ -6190,6 +6190,10 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		}
 		if !isReadOnlyVimVariableTarget(target) {
 			if expected := assignmentTargetType(result, scope, target); !isUnknownType(expected) {
+				// @# accepts a buffer number with plain assignment only.
+				if target.Kind == syntax.ExpressionIdentifier && target.Value == "@#" && result.TypeOf(expression.Children[1]).Name == "number" {
+					expected = ValueType{Name: "number"}
+				}
 				if !scopeUsesDefTypeRules(scope) && expected.Name == "string" && target.Kind == syntax.ExpressionIdentifier && strings.HasPrefix(target.Value, "&") && result.TypeOf(expression.Children[1]).Name == "list" {
 					diagnostic, _ := stringConversionDiagnostic(result.TypeOf(expression.Children[1]), expression.Children[1].Span)
 					result.Diagnostics = append(result.Diagnostics, diagnostic)
@@ -6209,7 +6213,9 @@ func collectAssignmentTypeMismatchDiagnostics(result *FileAnalysis, scope *Scope
 		// target.  Keep compound member/index assignments opaque: their
 		// container type does not prove the assignable member's type.
 		if target != nil && target.Kind == syntax.ExpressionIdentifier {
-			if targetType := assignmentTargetType(result, scope, target); !isUnknownType(targetType) && targetType.Name != "string" {
+			if stringOnlyAssignmentTarget(target) {
+				appendTypeMismatchDiagnostic(result, ValueType{Name: "string"}, expression.Children[1])
+			} else if targetType := assignmentTargetType(result, scope, target); !isUnknownType(targetType) && targetType.Name != "string" {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E1019", Message: "Can only concatenate to string", Span: target.Span,
 				})
@@ -6283,12 +6289,20 @@ func appendDestructuringTypeMismatchDiagnostic(result *FileAnalysis, scope *Scop
 		} else if rhsType.Name == "tuple" && index < len(rhsType.Arguments) {
 			actual = rhsType.Arguments[index]
 		}
+		if targetItem.Kind == syntax.ExpressionIdentifier && targetItem.Value == "@#" && actual.Name == "number" {
+			continue
+		}
 		if isUnknownType(expected) || isUnknownType(actual) || assignmentTypesCompatible(expected, actual) {
 			continue
 		}
-		result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+		diagnostic := syntax.Diagnostic{
 			Code: "vim/E1163", Message: "Variable " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: span,
-		})
+		}
+		if stringOnlyAssignmentTarget(targetItem) {
+			diagnostic.Code = "vim/E1012"
+			diagnostic.Message = "Type mismatch; expected string but got " + valueTypeDisplay(actual)
+		}
+		result.Diagnostics = append(result.Diagnostics, diagnostic)
 		return true
 	}
 	return false
@@ -6423,6 +6437,18 @@ func collectIndexTypeMismatchDiagnostic(result *FileAnalysis, scope *Scope, expr
 			return
 		}
 	}
+}
+
+// Vim v9.2.1130 requires strings for these external targets, including ..=.
+func stringOnlyAssignmentTarget(target *syntax.Expression) bool {
+	if target == nil || target.Kind != syntax.ExpressionIdentifier {
+		return false
+	}
+	if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") {
+		return true
+	}
+	variable, ok := vimdata.LookupVariable(target.Value)
+	return ok && variable.Type == "string" && variable.Flags&vimdata.VariableReadOnly == 0
 }
 
 func assignmentTargetType(result *FileAnalysis, scope *Scope, target *syntax.Expression) ValueType {
