@@ -136,7 +136,9 @@ func rebaseParserAssertions(fromPath, toPath, assertionsPath, outputPath string,
 		}
 		usedTargets[target.ID] = assertion.key
 		report.Mappings = append(report.Mappings, rebaseMapping{OldID: assertion.key, NewID: target.ID, Diagnostic: assertion.value, Method: method})
-		changes = append(changes, assertionKeyChange{start: assertion.start, end: assertion.end, value: target.ID})
+		if assertion.key != target.ID {
+			changes = append(changes, assertionKeyChange{start: assertion.start, end: assertion.end, value: target.ID})
+		}
 		switch method {
 		case "unique":
 			report.Unique++
@@ -158,17 +160,21 @@ func rebaseParserAssertions(fromPath, toPath, assertionsPath, outputPath string,
 	if outputPath == "" {
 		return report, nil
 	}
-	updated := append([]byte(nil), assertions.source...)
-	sort.Slice(changes, func(i, j int) bool { return changes[i].start > changes[j].start })
-	for _, change := range changes {
-		replacement := []byte(strconv.Quote(change.value))
-		updated = append(append(append([]byte(nil), updated[:change.start]...), replacement...), updated[change.end:]...)
+	output := assertions.source
+	if len(changes) != 0 {
+		updated := append([]byte(nil), assertions.source...)
+		sort.Slice(changes, func(i, j int) bool { return changes[i].start > changes[j].start })
+		for _, change := range changes {
+			replacement := []byte(strconv.Quote(change.value))
+			updated = append(append(append([]byte(nil), updated[:change.start]...), replacement...), updated[change.end:]...)
+		}
+		var err error
+		output, err = format.Source(updated)
+		if err != nil {
+			return report, fmt.Errorf("format assertion preview: %w", err)
+		}
 	}
-	formatted, err := format.Source(updated)
-	if err != nil {
-		return report, fmt.Errorf("format assertion preview: %w", err)
-	}
-	if err := os.WriteFile(outputPath, formatted, 0o644); err != nil {
+	if err := os.WriteFile(outputPath, output, 0o644); err != nil {
 		return report, fmt.Errorf("write -rebase-output: %w", err)
 	}
 	return report, nil

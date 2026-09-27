@@ -55,6 +55,41 @@ func TestRebaseCurrentCorpusIsByteIdentical(t *testing.T) {
 	}
 }
 
+func TestRebaseNoOpPreservesInputBytes(t *testing.T) {
+	raw := "package syntax\n\nfunc officialParserExpectedFailures() map[string]string {\n\treturn map[string]string{\n\t\t`old:1:1/case` : \"vim/E1\", // intentionally not gofmt\n\t}\n}\n"
+	for _, testCase := range []struct {
+		name  string
+		input string
+	}{
+		{name: "lf", input: raw},
+		{name: "crlf", input: strings.ReplaceAll(raw, "\n", "\r\n")},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			directory := t.TempDir()
+			corpusPath := writeRebaseCorpus(t, directory, "corpus.json.gz", rebaseCorpus("current", rebaseRecord("old:1:1", "source", "", "case")))
+			assertionsPath := filepath.Join(directory, "assertions.go")
+			if err := os.WriteFile(assertionsPath, []byte(testCase.input), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			outputPath := filepath.Join(directory, "preview.go")
+			report, err := rebaseParserAssertions(corpusPath, corpusPath, assertionsPath, outputPath, nil)
+			if err != nil || report.Total != 1 || report.Unique != 1 || report.Unresolved != 0 || len(report.Mappings) != 1 {
+				t.Fatalf("report = %#v, err = %v", report, err)
+			}
+			if report.Mappings[0].OldID != "old:1:1/case" || report.Mappings[0].NewID != "old:1:1/case" {
+				t.Fatalf("mapping = %#v", report.Mappings[0])
+			}
+			output, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(output) != testCase.input {
+				t.Fatalf("no-op preview changed bytes:\n%s", output)
+			}
+		})
+	}
+}
+
 func TestRebaseParserAssertionsOrdersMatchingDuplicateGroups(t *testing.T) {
 	directory := t.TempDir()
 	fromPath := writeRebaseCorpus(t, directory, "from.json.gz", rebaseCorpus("old", rebaseRecord("old:1:1", "source", "", "case"), rebaseRecord("old:2:2", "source", "", "case")))
