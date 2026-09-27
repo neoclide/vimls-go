@@ -49,6 +49,13 @@ For Vim's explanation of an error, run `:help E117` with the relevant number.
 vimls-go follows **Vim v9.2.1015**; help from another version can describe
 different rules.
 
+Builtin return-value inference also uses the corrections recorded in Vim
+v9.2.1104, checked against v9.2.1132, for functions already in the pinned metadata.
+For example, assigning `match()` to a string produces E1012, while
+`submatch(0, true)` is accepted as `list<string>`. A default value alone does not
+establish the type of `get()`: unknown elements or a different default type keep
+the result unknown and avoid an unsupported type-mismatch diagnostic.
+
 Type checks also use statically known exported variable and constant types from
 ordinary and autoload imports once their targets are indexed, including values
 re-exported through other files. Named types are distinguished by their defining

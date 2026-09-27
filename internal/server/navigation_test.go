@@ -566,7 +566,7 @@ func TestHoverShowsVariableTypes(t *testing.T) {
 	}
 }
 
-func TestHoverShowsExpandVariableType(t *testing.T) {
+func TestHoverShowsBuiltinVariableType(t *testing.T) {
 	for _, test := range []struct{ expression, want string }{
 		{"expand('~/vim-dev')", "string"},
 		{"expand('~/vim-dev', 1)", "string"},
@@ -578,6 +578,16 @@ func TestHoverShowsExpandVariableType(t *testing.T) {
 		{"'~/vim-dev'->expand()", "string"},
 		{"'~/vim-dev'->expand(0, 1)", "list<string>"},
 		{"'~/vim-dev'->expand(0, g:flag)", "unknown"},
+		{"abs(-2.5)", "float"},
+		{"match('abc', 'b')", "number"},
+		{"reltime()", "list<number>"},
+		{"searchcount()", "dict<number>"},
+		{"matchfuzzypos(['alpha'], 'a')", "list<list<?>>"},
+		{"submatch(0, true)", "list<string>"},
+		{"'*'->globpath('.', 0, 1)", "list<string>"},
+		{"get({count: 1}, 'count')", "number"},
+		{"get({count: 1}, 'count', 'fallback')", "unknown"},
+		{"get(g:, 'count', 1)", "unknown"},
 	} {
 		for _, prefix := range []string{"", "vim9script\n"} {
 			t.Run(prefix+test.expression, func(t *testing.T) {

@@ -70,6 +70,15 @@ cannot be proven by canonical file identities alone. Regular files reached
 through symbolic-link parent directories remain supported.
 
 Types are inferred from known values and function return types in both dialects.
+Builtin call inference supplements broad metadata with known return-value rules,
+including the corrections recorded in Vim v9.2.1104 and checked against
+v9.2.1132. Numeric and container results retain their known types. For `expand()`,
+`glob()`, `globpath()` and `submatch()`, an omitted or literal list flag determines
+whether the result is a string or `list<string>`; a dynamic flag remains unknown.
+`get()` infers an element type only when it agrees with the default's type
+(number when omitted). Unknown container elements or conflicting defaults,
+including null defaults, keep the result unknown.
+
 In `def` functions and Vim9 lambdas, `type()` guards preserve compiled types:
 copying an `any` value inside the guarded branch still infers `any`.
 Vim9 null comparisons and direct `instanceof` guards can suppress E1360 within

@@ -1178,37 +1178,58 @@ func optionAcceptsCompatibleType(name string, typ ValueType) bool {
 }
 
 func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType, expressions []*syntax.Expression) ValueType {
-	// Vim v9.2.1015 builtin.txt: expand() returns a String unless {list}
-	// is true. evalfunc.c uses ret_any, so the broad metadata cannot express it.
-	if function.Name == "expand" && len(expressions) >= 1 && len(expressions) <= 3 {
+	// These rules describe runtime behavior already present in Vim v9.2.1015.
+	// Vim v9.2.1132 src/evalfunc.c records the corresponding compiler types,
+	// while the pinned generated metadata still cannot express each branch.
+	switch function.Name {
+	case "autocmd_add", "autocmd_delete":
+		return ValueType{Name: "bool"}
+	case "match":
+		return ValueType{Name: "number"}
+	case "reltime":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "number"}}}
+	case "searchcount":
+		return ValueType{Name: "dict", Arguments: []ValueType{{Name: "number"}}}
+	case "matchfuzzypos":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "list", Arguments: []ValueType{UnknownValueType}}}}
+	case "abs":
+		if len(arguments) > 0 && (arguments[0].Name == "number" || arguments[0].Name == "float") {
+			return ValueType{Name: arguments[0].Name}
+		}
+		return UnknownValueType
+	case "sign_define":
+		if len(arguments) > 0 {
+			switch arguments[0].Name {
+			case "string":
+				return ValueType{Name: "number"}
+			case "list":
+				return ValueType{Name: "list", Arguments: []ValueType{{Name: "number"}}}
+			}
+		}
+		return UnknownValueType
+	case "diff":
+		if len(expressions) == 2 {
+			return ValueType{Name: "string"}
+		}
+		return UnknownValueType
+	case "finddir", "findfile":
 		if len(expressions) < 3 {
 			return ValueType{Name: "string"}
 		}
-		flag := expressions[2]
-		for flag != nil && flag.Kind == syntax.ExpressionParenthesized && len(flag.Children) == 1 {
-			flag = flag.Children[0]
-		}
-		value, known := staticNumberValue(flag)
-		if flag != nil && flag.Kind == syntax.ExpressionIdentifier {
-			switch flag.Value {
-			case "true", "v:true":
-				value, known = 1, true
-			case "false", "v:false":
-				value, known = 0, true
-			}
-		}
-		if known {
-			if value != 0 {
-				return ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}
-			}
+		return UnknownValueType
+	case "serverlist":
+		if len(expressions) == 0 {
 			return ValueType{Name: "string"}
 		}
-	}
-	if function.Name == "get" && len(arguments) == 3 {
-		if isSpecialType(arguments[2]) {
-			return indexedType(arguments[0])
-		}
-		return arguments[2]
+		return UnknownValueType
+	case "expand", "glob":
+		return stringOrListReturnType(expressions, 2)
+	case "submatch":
+		return stringOrListReturnType(expressions, 1)
+	case "globpath":
+		return stringOrListReturnType(expressions, 3)
+	case "get":
+		return getReturnValueType(arguments)
 	}
 	switch function.ReturnHelper {
 	case "ret_first_arg", "ret_extend", "ret_slice":
@@ -1277,6 +1298,82 @@ func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueT
 	default:
 		return UnknownValueType
 	}
+}
+
+// stringOrListReturnType handles builtins whose optional boolean selects a
+// list<string>.  A dynamic flag changes the result at runtime, so it cannot
+// safely retain either concrete return type.
+func stringOrListReturnType(expressions []*syntax.Expression, flagIndex int) ValueType {
+	if len(expressions) <= flagIndex {
+		return ValueType{Name: "string"}
+	}
+	flag := expressions[flagIndex]
+	for flag != nil && flag.Kind == syntax.ExpressionParenthesized && len(flag.Children) == 1 {
+		flag = flag.Children[0]
+	}
+	value, known := staticNumberValue(flag)
+	if flag != nil && flag.Kind == syntax.ExpressionIdentifier {
+		switch flag.Value {
+		case "true", "v:true":
+			value, known = 1, true
+		case "false", "v:false":
+			value, known = 0, true
+		}
+	}
+	if !known {
+		return UnknownValueType
+	}
+	if value == 0 {
+		return ValueType{Name: "string"}
+	}
+	return ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}
+}
+
+// getReturnValueType follows evalfunc.c ret_get: a container element type is
+// retained only when its fallback has exactly the same type.  An omitted
+// fallback has type number, whether the runtime value is zero or a blob's -1.
+func getReturnValueType(arguments []ValueType) ValueType {
+	if len(arguments) < 2 {
+		return UnknownValueType
+	}
+	container := arguments[0]
+	if container.Name != "list" && container.Name != "dict" && container.Name != "blob" {
+		return UnknownValueType
+	}
+	item := indexedType(container)
+	if container.Name == "blob" {
+		item = ValueType{Name: "number"}
+	}
+	if isUnknownType(item) {
+		return UnknownValueType
+	}
+	fallback := ValueType{Name: "number"}
+	if len(arguments) >= 3 {
+		fallback = arguments[2]
+	}
+	if valueTypesEqual(item, fallback) {
+		return item
+	}
+	return UnknownValueType
+}
+
+// Unlike assignment or method compatibility, get() needs identical types for
+// both possible results, including nested types and nominal identities.
+func valueTypesEqual(left, right ValueType) bool {
+	if left.Name != right.Name || left.Nominal != right.Nominal || left.TypeValue != right.TypeValue ||
+		left.ArgumentCountKnown != right.ArgumentCountKnown || left.RequiredArguments != right.RequiredArguments ||
+		left.Variadic != right.Variadic || len(left.Arguments) != len(right.Arguments) {
+		return false
+	}
+	for index := range left.Arguments {
+		if !valueTypesEqual(left.Arguments[index], right.Arguments[index]) {
+			return false
+		}
+	}
+	if left.Return == nil || right.Return == nil {
+		return left.Return == nil && right.Return == nil
+	}
+	return valueTypesEqual(*left.Return, *right.Return)
 }
 
 func legacyImplicitArgumentType(scope *Scope, name string) (ValueType, bool) {

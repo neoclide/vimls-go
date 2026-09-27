@@ -505,7 +505,7 @@ var noneValue = v:none
 	}
 }
 
-func TestAnalyzeInfersGetDefaultType(t *testing.T) {
+func TestAnalyzeKeepsGetOnUnknownContainerConservative(t *testing.T) {
 	source := `vim9script
 var maxEditCount = get(g:, 'coc_edits_maximum_count', 200)
 var label = get(g:, 'label', 'fallback')
@@ -518,22 +518,14 @@ var unknown = get(g:, 'missing')
 	for _, declaration := range result.Root.Declarations {
 		declarations[declaration.Name] = declaration
 	}
-	for name, want := range map[string]string{
-		"maxEditCount": "number",
-		"label":        "string",
-		"methodCount":  "number",
-		"enabled":      "bool",
-	} {
-		if declarations[name] == nil || declarations[name].Type.Name != want {
-			t.Fatalf("%s type = %#v, want %s", name, declarations[name], want)
+	for _, name := range []string{"maxEditCount", "label", "methodCount", "enabled", "unknown"} {
+		if declarations[name] == nil || !isUnresolvedType(declarations[name].Type) {
+			t.Fatalf("%s type = %#v, want unresolved", name, declarations[name])
 		}
-	}
-	if declarations["unknown"] == nil || !isUnresolvedType(declarations["unknown"].Type) {
-		t.Fatalf("unknown type = %#v, want unresolved", declarations["unknown"])
 	}
 }
 
-func TestAnalyzeGetWithSpecialDefaultUsesContainerElementType(t *testing.T) {
+func TestAnalyzeGetWithSpecialDefaultDoesNotAssumeContainerElementType(t *testing.T) {
 	source := `vim9script
 const nullDefault = get(g:, 'null_default', null)
 const vNullDefault = get(g:, 'v_null_default', v:null)
@@ -561,8 +553,8 @@ enddef
 		}
 	}
 	info := declarations["info"]
-	if info == nil || info.Type.Name != "dict" || len(info.Type.Arguments) != 1 || !isUnresolvedType(info.Type.Arguments[0]) {
-		t.Fatalf("info type = %#v, want dict<any>", info)
+	if info == nil || !isUnresolvedType(info.Type) {
+		t.Fatalf("info type = %#v, want unresolved", info)
 	}
 }
 

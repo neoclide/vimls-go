@@ -59,9 +59,14 @@ Legacy variable type-change warnings now cover straight-line simple assignments.
 They discard unknown types and stop at calls and control-flow boundaries; broader
 flow-sensitive checking remains outside this warning's current scope.
 
-`expand()` initializer types now distinguish strings from lists using a static
-third argument in both dialects, including method calls. Dynamic flags remain
-unknown.
+Builtin return-value inference now covers the corrections recorded in Vim
+v9.2.1104 and checked against v9.2.1132, while the generated metadata retains its
+recorded source version. Fixed results and known numeric or container arguments
+give more precise types. `expand()`, `glob()`, `globpath()` and `submatch()`
+distinguish strings from lists using a static list flag in both dialects,
+including method calls. Dynamic flags remain unknown. `get()` requires the
+element and default types to agree; a default on an unknown dictionary, or a
+conflicting null or scalar default, does not establish the result type.
 
 Type inference preserves compiled types inside `type()` guards
 in `def` functions and Vim9 lambdas. A copy of an `any` value remains `any`,
