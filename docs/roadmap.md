@@ -23,6 +23,8 @@ without treating them as a new command.
 Leading user-command placeholders such as `:<line1>` no longer receive the
 whitespace diagnostic for the `<` shift command before expansion.
 Vim9 `echowindow` accepts a numeric prefix for the message-window height.
+Mapping script-local warnings require an `s:name` identifier boundary, avoiding
+literal abbreviation text such as `align-items: center;`.
 
 Generated command, function, option and `v:` variable metadata now uses Vim
 v9.2.1132. The reviewed `fillchars` helper fingerprint includes the v9.2.1119

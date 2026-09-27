@@ -222,7 +222,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/implicit-pattern-case` | Hint | Pattern matching depends on the user's `ignorecase` option; Vim9 `=~` and `!~` comparisons are exempt. |
 | `vimls/implicit-regex-magic` | Hint | Pattern interpretation depends on the user's `magic` option. |
 | `vimls/implicit-string-case` | Hint | String comparison depends on the user's `ignorecase` option. |
-| `vimls/mapping-script-local-reference` | Warning | A script-local name may not be available when the mapping runs. |
+| `vimls/mapping-script-local-reference` | Warning | An `s:name` identifier in a mapping may not be available when it runs; literal substrings such as `align-items:` are ignored. |
 | `vimls/mapping-without-unique` | Hint | The mapping may replace an existing mapping. |
 | `vimls/match-command` | Hint | `:match` uses shared slots; plugin code may prefer `matchadd()`. |
 | `vimls/missing-option-value` | Warning | In configuration files, a bare `:set option` displays the current value of a number or string option; it does not assign a new one. |

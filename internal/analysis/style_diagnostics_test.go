@@ -110,6 +110,48 @@ func TestNoremapStyleDiagnostics(t *testing.T) {
 	}
 }
 
+func TestMappingScriptLocalReferenceStyleDiagnostic(t *testing.T) {
+	tests := []struct {
+		name, source string
+		want         int
+	}{
+		{
+			name:   "abbreviation CSS value",
+			source: "inoreabbrev <buffer> aic align-items: center;\n",
+		},
+		{
+			name:   "script-local call",
+			source: "function! s:Func() abort\nendfunction\nnnoremap <leader>x :call s:Func()<CR>\n",
+			want:   1,
+		},
+		{
+			name:   "bare prefix",
+			source: "nnoremap <F1> :echo 's:'<CR>\n",
+		},
+		{
+			name:   "whitespace after prefix",
+			source: "nnoremap <F1> :echo 's: Func'<CR>\n",
+		},
+		{
+			name:   "Unicode identifier adjacency",
+			source: "nnoremap <F1> :echo 'és:Func'<CR>\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			count := 0
+			for _, diagnostic := range Analyze(syntax.Parse(test.source)).Diagnostics {
+				if diagnostic.Code == "vimls/mapping-script-local-reference" {
+					count++
+				}
+			}
+			if count != test.want {
+				t.Fatalf("mapping script-local diagnostics = %d, want %d", count, test.want)
+			}
+		})
+	}
+}
+
 func TestPlugMappingDoesNotReportMappingWithoutUnique(t *testing.T) {
 	sources := []string{
 		"nnoremap <silent> <Plug>(coc-diagnostic-next-error) :<C-u>call CocActionAsync('diagnosticNext', 'error')<CR>\n",

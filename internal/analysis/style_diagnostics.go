@@ -733,10 +733,12 @@ func collectMappingStyleDiagnostics(result *FileAnalysis, file *syntax.File, com
 			appendStyleDiagnostic(result, "vimls/mapping-without-unique", "mapping may overwrite an existing mapping; consider <unique>", mapping.LHS)
 		}
 	}
-	if strings.Contains(strings.ToLower(rhs), "s:") && !strings.Contains(strings.ToLower(rhs), "<sid>") {
+	if mappingScriptLocalReferencePattern.MatchString(rhs) && !strings.Contains(strings.ToLower(rhs), "<sid>") {
 		appendStyleDiagnostic(result, "vimls/mapping-script-local-reference", "mapping references s: directly; use <SID> or an autoload function", mapping.RHS)
 	}
 }
+
+var mappingScriptLocalReferencePattern = regexp.MustCompile(`(?i)(?:^|[^\p{L}\p{N}\p{M}_])s:[\p{L}_]`)
 
 var mapcheckCallPattern = regexp.MustCompile(`(?i)\b(mapcheck|maparg)\s*\(`)
 
