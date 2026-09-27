@@ -10840,6 +10840,11 @@ func TestAnalyzeE1017VariableRedeclaration(t *testing.T) {
 			text:   "x",
 		},
 		{
+			name:   "nested for binding",
+			source: "vim9script\ndef F()\n  for x in [1]\n    for x in [2]\n    endfor\n  endfor\nenddef\nvar after = 1\n",
+			text:   "x",
+		},
+		{
 			name:   "script compound target",
 			source: "vim9script\nvar dd = {one: 1}\nvar dd.one = 2\nvar after = 1\n",
 			text:   "dd",
@@ -11020,6 +11025,9 @@ func TestAnalyzeE1041ScriptItemRedefinition(t *testing.T) {
 		want                          int
 	}{
 		{"official for binding", "vim9script\nvar x = 5\nfor x in range(5)\nendfor\n", "x", "vim/E1017", 1},
+		{"sequential loop bindings", "vim9script\nfor item in [1]\n  echo item\nendfor\nfor item in [2]\n  echo item\nendfor\n", "", "", 0},
+		{"loop binding then script variable", "vim9script\nfor item in [1]\nendfor\nvar item = 2\n", "", "", 0},
+		{"loop body variable then script variable", "vim9script\nfor item in [1]\n  var value = item\nendfor\nvar value = 2\n", "", "", 0},
 		{"script variables", "vim9script\nvar x = 1\nvar x = 2\n", "x", "vim/E1017", 1},
 		{"legacy guard", "var x = 1\nvar x = 2\n", "x", "", 0},
 		{"def local uses E1017", "vim9script\ndef F()\n  var x = 1\n  var x = 2\nenddef\n", "x", "", 0},
@@ -11054,6 +11062,19 @@ func TestAnalyzeE1041ScriptItemRedefinition(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAnalyzeSequentialLoopBindingsRemainScoped(t *testing.T) {
+	result := Analyze(syntax.Parse("vim9script\nfor item in [1]\n  echo item\nendfor\nfor item in [2]\n  echo item\nendfor\n"))
+	var references []*Reference
+	for _, reference := range result.References {
+		if reference.Name == "item" {
+			references = append(references, reference)
+		}
+	}
+	if len(references) != 2 || references[0].Declaration == nil || references[1].Declaration == nil || references[0].Declaration == references[1].Declaration {
+		t.Fatalf("loop references = %#v", references)
 	}
 }
 

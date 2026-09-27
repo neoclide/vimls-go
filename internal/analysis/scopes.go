@@ -5500,8 +5500,7 @@ func collectVim9ScriptItemRedefinitionDiagnostics(result *FileAnalysis, commands
 	// Declarations are sorted by source position by the collector's caller;
 	// use the source order explicitly since duplicate reporting must point at
 	// the later item.
-	seen := make(map[string]bool)
-	seenKind := make(map[string]SymbolKind)
+	seen := make(map[string]*Declaration)
 	declarations := append([]*Declaration(nil), result.Declarations...)
 	sort.SliceStable(declarations, func(i, j int) bool { return declarations[i].Span.Start < declarations[j].Span.Start })
 	importRedefinitions := make(map[string]bool)
@@ -5524,19 +5523,18 @@ func collectVim9ScriptItemRedefinitionDiagnostics(result *FileAnalysis, commands
 		if !topLevel {
 			continue
 		}
-		previousKind := seenKind[declaration.Name]
+		previous := seen[declaration.Name]
 		isFunction := functionSymbolKind(declaration.Kind)
-		if seen[declaration.Name] && !(isFunction && functionSymbolKind(previousKind)) &&
-			!(declaration.Kind == SymbolKindTypeAlias && previousKind == SymbolKindTypeAlias) {
+		if previous != nil && previous.Scope.Span.Start <= declaration.Span.Start && declaration.Span.End <= previous.Scope.Span.End &&
+			!(isFunction && functionSymbolKind(previous.Kind)) &&
+			!(declaration.Kind == SymbolKindTypeAlias && previous.Kind == SymbolKindTypeAlias) {
 			if importRedefinitions[declaration.Name] {
-				seen[declaration.Name] = true
-				seenKind[declaration.Name] = declaration.Kind
+				seen[declaration.Name] = declaration
 				continue
 			}
 			result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{Code: "vim/E1041", Message: `Redefining script item: "` + declaration.Name + `"`, Span: declaration.Span})
 		}
-		seen[declaration.Name] = true
-		seenKind[declaration.Name] = declaration.Kind
+		seen[declaration.Name] = declaration
 	}
 	rootNames := make(map[string]bool)
 	for _, declaration := range result.Root.Declarations {
