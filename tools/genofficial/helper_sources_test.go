@@ -138,7 +138,7 @@ func TestScanHelperHeredocsRecoversUnclosedBodyAtEOF(t *testing.T) {
 }
 
 func TestPinnedHelperHeredocScan(t *testing.T) {
-	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-test-files.json.gz")
+	path := filepath.Join("..", "..", "testdata", "official", officialArtifactName("test-files"))
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestPinnedHelperHeredocScan(t *testing.T) {
 		t.Fatalf("official heredocs: total=%d evaluated=%d, want 4967 and 42", total, evaluated)
 	}
 
-	inventoryPath := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-helper-inventory.json.gz")
+	inventoryPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("helper-inventory"))
 	inventoryFile, err := os.Open(inventoryPath)
 	if err != nil {
 		t.Fatal(err)

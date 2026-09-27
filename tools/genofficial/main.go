@@ -11,18 +11,25 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 const (
-	vimTag                = "v9.2.1132"
-	vimCommit             = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
-	expectedFileCount     = 17
-	expectedCorpusCount   = 3273
-	expectedTestFileCount = 362
-	expectedTestRawBytes  = 8641665
-	expectedHelperLexemes = 5783
-	expectedHelperCalls   = 5288
+	vimTag                 = vimdata.VimSourceTag
+	vimCommit              = vimdata.VimSourceCommit
+	parserFileManifestName = vimTag + "-parser-files.json"
+	expectedFileCount      = 17
+	expectedCorpusCount    = 3273
+	expectedTestFileCount  = 362
+	expectedTestRawBytes   = 8641665
+	expectedHelperLexemes  = 5783
+	expectedHelperCalls    = 5288
 )
+
+func officialArtifactName(kind string) string {
+	return vimTag + "-" + kind + ".json.gz"
+}
 
 type corpus struct {
 	Tag    string       `json:"tag"`
@@ -99,7 +106,7 @@ type helperInventorySummary struct {
 func main() {
 	vimRoot := flag.String("vim-root", "", "read-only Vim Git checkout containing "+vimTag)
 	outputDir := flag.String("output-dir", "testdata/official", "directory for generated official corpus artifacts")
-	manifestPath := flag.String("manifest", "testdata/official/"+vimTag+"-parser-files.json", "reviewed parser test-file allowlist")
+	manifestPath := flag.String("manifest", filepath.Join("testdata", "official", parserFileManifestName), "reviewed parser test-file allowlist")
 	flag.Parse()
 	if *vimRoot == "" || flag.NArg() != 0 {
 		fatal(fmt.Errorf("require -vim-root"))
@@ -162,16 +169,16 @@ func main() {
 	if err := validatePinnedParserCaseCorpus(parserCases); err != nil {
 		fatal(err)
 	}
-	if err := writeJSONGzip(filepath.Join(*outputDir, vimTag+"-parser-corpus.json.gz"), result); err != nil {
+	if err := writeJSONGzip(filepath.Join(*outputDir, officialArtifactName("parser-corpus")), result); err != nil {
 		fatal(err)
 	}
-	if err := writeJSONGzip(filepath.Join(*outputDir, vimTag+"-test-files.json.gz"), testCorpus); err != nil {
+	if err := writeJSONGzip(filepath.Join(*outputDir, officialArtifactName("test-files")), testCorpus); err != nil {
 		fatal(err)
 	}
-	if err := writeJSONGzip(filepath.Join(*outputDir, vimTag+"-helper-inventory.json.gz"), inventory); err != nil {
+	if err := writeJSONGzip(filepath.Join(*outputDir, officialArtifactName("helper-inventory")), inventory); err != nil {
 		fatal(err)
 	}
-	if err := writeJSONGzip(filepath.Join(*outputDir, vimTag+"-parser-cases.json.gz"), parserCases); err != nil {
+	if err := writeJSONGzip(filepath.Join(*outputDir, officialArtifactName("parser-cases")), parserCases); err != nil {
 		fatal(err)
 	}
 	fmt.Printf("wrote %d scripts, %d test files (%d bytes), %d helper lexemes, and %d parser cases from %s (%s) to %s\n", len(result.Cases), len(testCorpus.Files), rawBytes, len(inventory.Records), parserCases.Summary.Cases, vimTag, resolvedCommit, *outputDir)

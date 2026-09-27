@@ -95,8 +95,8 @@ because their message boundaries cannot be recovered safely.
 Follow [testing](testing.md) for commands and fixtures. Timing-sensitive tests
 should use channels or barriers to force the relevant ordering.
 
-Language rules come from the pinned
-[Vim v9.2.1132 source and tests](https://github.com/vim/vim/tree/v9.2.1132).
+Language rules come from the current pinned Vim source and tests identified in
+[language support](language-support.md).
 Protocol behavior follows
 [LSP 3.18](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/)
 and [JSON-RPC 2.0](https://www.jsonrpc.org/specification).

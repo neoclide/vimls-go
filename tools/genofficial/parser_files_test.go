@@ -9,7 +9,7 @@ import (
 )
 
 func TestPinnedParserFileManifest(t *testing.T) {
-	manifestPath := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-parser-files.json")
+	manifestPath := filepath.Join("..", "..", "testdata", "official", parserFileManifestName)
 	manifest, err := readParserFileManifest(manifestPath)
 	if err != nil {
 		t.Fatal(err)
@@ -18,7 +18,7 @@ func TestPinnedParserFileManifest(t *testing.T) {
 		t.Fatalf("manifest records = %d, want 68", len(manifest.Files))
 	}
 
-	corpusPath := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-test-files.json.gz")
+	corpusPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("test-files"))
 	corpusFile, err := os.Open(corpusPath)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func TestPinnedParserFileManifest(t *testing.T) {
 		t.Fatalf("selected parser migration files = %d, want 44", len(selected))
 	}
 
-	inventoryPath := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-helper-inventory.json.gz")
+	inventoryPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("helper-inventory"))
 	file, err := os.Open(inventoryPath)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestPinnedParserFileManifest(t *testing.T) {
 
 func TestParserFileManifestRejectsInvalidRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "manifest.json")
-	source := `{"schemaVersion":1,"tag":"v9.2.1132","commit":"f3dc0fee778439ac8ff8680b42552f7f13d47396","scope":"test","defaultDisposition":"exclude","files":[{"path":"b","disposition":"include","reason":"ok"},{"path":"a","disposition":"unknown","reason":""}]}`
+	source := `{"schemaVersion":1,"tag":"` + vimTag + `","commit":"` + vimCommit + `","scope":"test","defaultDisposition":"exclude","files":[{"path":"b","disposition":"include","reason":"ok"},{"path":"a","disposition":"unknown","reason":""}]}`
 	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}

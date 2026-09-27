@@ -20,9 +20,8 @@ It's designed to be fast and featured, while not execute any vim script.
 - Renames resolved symbols, updates imports when you rename a file, and formats
   indentation.
 
-Both dialects can share a workspace. The supported syntax goes through
-**Vim v9.2.1132**. See [language support](docs/language-support.md) for the
-features and their limits.
+Both dialects can share a workspace. See [language support](docs/language-support.md)
+for the current pinned Vim baseline, features and limits.
 
 The server reads your scripts without sourcing or executing them. It runs as a
 single executable; core analysis needs neither Node.js nor an installed Vim.

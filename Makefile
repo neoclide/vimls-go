@@ -7,7 +7,7 @@ NEOVIM_SOURCE ?=
 RELEASE_REMOTE ?= origin
 export RELEASE_REMOTE
 
-.PHONY: build check clean client-smoke client-tools coverage eventdocs-check eventdocs-refresh format-check incr metadata-check metadata-refresh official-check official-refresh oracle race release test vet
+.PHONY: build check clean client-smoke client-tools coverage eventdocs-check eventdocs-refresh format-check incr metadata-check metadata-refresh official-check official-refresh oracle race release test vet vim-check
 
 build:
 	mkdir -p bin
@@ -67,10 +67,11 @@ official-check:
 	official_tmp="$$(mktemp -d)"; \
 	trap 'rm -rf "$$official_tmp"' EXIT; \
 	$(GO) run $(GO_MOD) ./tools/genofficial -vim-root "$(VIM_SOURCE)" -output-dir "$$official_tmp"; \
-	cmp testdata/official/v9.2.1132-parser-corpus.json.gz "$$official_tmp/v9.2.1132-parser-corpus.json.gz"; \
-	cmp testdata/official/v9.2.1132-test-files.json.gz "$$official_tmp/v9.2.1132-test-files.json.gz"; \
-	cmp testdata/official/v9.2.1132-helper-inventory.json.gz "$$official_tmp/v9.2.1132-helper-inventory.json.gz"; \
-	cmp testdata/official/v9.2.1132-parser-cases.json.gz "$$official_tmp/v9.2.1132-parser-cases.json.gz"
+	set -- "$$official_tmp"/*.json.gz; \
+	test "$$#" -eq 4; \
+	for artifact; do \
+		cmp "$$artifact" "testdata/official/$${artifact##*/}"; \
+	done
 
 eventdocs-refresh:
 	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
@@ -87,7 +88,7 @@ eventdocs-check:
 	cmp internal/vimdata/autocmd_docs_generated.go "$$eventdocs_tmp"
 
 oracle:
-	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary" >&2; exit 1)
+	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim binary" >&2; exit 1)
 	VIM_EXECUTABLE="$(VIM_EXECUTABLE)" $(GO) test $(GO_MOD) -count=1 -v ./test/oracle
 
 client-tools:
@@ -97,8 +98,9 @@ client-smoke: build client-tools
 	@set -eu; \
 	client_tmp="$$(mktemp -d)"; \
 	trap 'rm -rf "$$client_tmp"' EXIT; \
+	pin_env="$$( $(GO) run $(GO_MOD) ./tools/vimsource )"; \
 	client_status=0; \
-	VIMLS_BINARY="$(CURDIR)/bin/vimls" \
+	env $$pin_env VIMLS_BINARY="$(CURDIR)/bin/vimls" \
 	VIMLS_VIM_LSP="$(CURDIR)/.test-tools/vim-lsp" \
 	VIMLS_CLIENT_WORKSPACE="$(CURDIR)/test/clients/vim-lsp/workspace" \
 	VIMLS_CLIENT_RESULT="$$client_tmp/result.txt" \
@@ -107,6 +109,18 @@ client-smoke: build client-tools
 	test ! -f "$$client_tmp/result.txt" || cat "$$client_tmp/result.txt"; \
 	if test $$client_status -ne 0; then test ! -f "$$client_tmp/vim-lsp.log" || cat "$$client_tmp/vim-lsp.log"; fi; \
 	test $$client_status -eq 0
+
+vim-check:
+	@test -n "$(VIM_SOURCE)" || (echo "set VIM_SOURCE to the official Vim checkout" >&2; exit 1)
+	@test -n "$(NEOVIM_SOURCE)" || (echo "set NEOVIM_SOURCE to the official Neovim checkout" >&2; exit 1)
+	@test -n "$(VIM_EXECUTABLE)" || (echo "set VIM_EXECUTABLE to the pinned Vim binary" >&2; exit 1)
+	$(MAKE) format-check
+	$(MAKE) metadata-check VIM_SOURCE="$(VIM_SOURCE)" NEOVIM_SOURCE="$(NEOVIM_SOURCE)"
+	$(MAKE) official-check VIM_SOURCE="$(VIM_SOURCE)"
+	$(MAKE) oracle VIM_EXECUTABLE="$(VIM_EXECUTABLE)"
+	$(MAKE) test VIM_EXECUTABLE=
+	$(MAKE) vet
+	$(MAKE) client-smoke VIM_EXECUTABLE="$(VIM_EXECUTABLE)"
 
 coverage:
 	$(GO) test $(GO_MOD) -coverpkg=./internal/... -coverprofile=coverage.out ./...

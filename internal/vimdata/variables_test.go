@@ -6,7 +6,7 @@ import (
 )
 
 func TestLookupVariableMetadata(t *testing.T) {
-	if VariableVimTag != "v9.2.1132" || VariableVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
+	if VariableVimTag != VimSourceTag || VariableVimCommit != VimSourceCommit {
 		t.Fatalf("variable provenance = %s/%s", VariableVimTag, VariableVimCommit)
 	}
 	tests := []struct {

@@ -11,6 +11,7 @@ purposes, invocation options, and integration with `Makefile` and CI workflows.
 | `tools/genmetadata` | `main` | Extracts Vim runtime metadata into Go data tables | Makefile | `make metadata-refresh`, `make metadata-check` |
 | `tools/geneventdocs` | `main` | Merges Vim and Neovim autocmd event documentation | Makefile | `make eventdocs-refresh`, `make eventdocs-check` |
 | `tools/genofficial` | `main` | Builds the pinned official Vim parser corpus | Makefile | `make official-refresh`, `make official-check` |
+| `tools/vimsource` | `main` | Prints current Vim and Neovim pin values for automation | CI / Make | `go run ./tools/vimsource` |
 | `tools/release` | `main` | Validates changelog and builds multi-platform release archives | Makefile / CI | `make release`, `.github/workflows/release.yml` |
 | `tools/helpdoc` | `main` | Measures and exports runtime help extraction as Markdown & JSON | Manual | Help extraction benchmarks & diagnostics |
 | `tools/diagnosticscan` | `main` | Batch-scans runtimepaths for error-level vimls-go diagnostics | Manual | Ecosystem triage & batch analysis |
@@ -67,9 +68,8 @@ go run ./tools/covercheck -profile coverage.out -min 90
 
 ### 2. `tools/genmetadata`
 
-Generates internal Go data tables and Vim option validation scripts from a
-pinned official Vim checkout (`v9.2.1132`, commit
-`f3dc0fee778439ac8ff8680b42552f7f13d47396`).
+Generates internal Go data tables and Vim option validation scripts from the
+[current pinned Vim baseline](language-support.md).
 
 #### Generated files
 
@@ -114,7 +114,7 @@ metadata-check: eventdocs-check
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-vim-root <dir>` | `$VIM_SOURCE` | Path to the official Vim Git checkout. Must contain tag `v9.2.1132`. |
+| `-vim-root <dir>` | `$VIM_SOURCE` | Path to the official Vim Git checkout at the current baseline. |
 | `-output-dir <dir>` | `internal/vimdata` | Directory where generated files are written. |
 
 #### Direct invocation
@@ -137,10 +137,10 @@ Neovim source repositories and merges them into unified Go metadata.
 
 #### Pinned upstream revisions
 
-- **Vim**: `v9.2.1132` (`f3dc0fee778439ac8ff8680b42552f7f13d47396`), reading
+- **Vim**: [current pinned baseline](language-support.md), reading
   `src/autocmd.c` and `runtime/doc/autocmd.txt`.
-- **Neovim**: `v0.12.0-2035-g73923b0dd8` (`73923b0dd85bb936ba2f63ee916dabaa0603340d`),
-  reading `src/nvim/auevents.lua` and help docs.
+- **Neovim**: independent pin reported by `tools/vimsource`, reading
+  `src/nvim/auevents.lua` and help docs.
 
 #### Makefile usage
 
@@ -182,21 +182,21 @@ go run ./tools/geneventdocs -vim-root /path/to/vim -neovim-root /path/to/neovim
 
 ### 4. `tools/genofficial`
 
-Builds the official parser corpus from Vim `v9.2.1132`, commit
-`f3dc0fee778439ac8ff8680b42552f7f13d47396`. It reads only Git objects and
-refuses a checkout whose tag resolves to another commit.
+Builds the official parser corpus from the
+[current pinned Vim baseline](language-support.md). It reads only Git objects
+and refuses a checkout whose tag resolves to another commit.
 
-The reviewed `v9.2.1132-parser-files.json` manifest selects parser migration
-files. The generator writes four deterministic gzip artifacts: parser corpus,
-full test files, helper inventory and parser cases. Parser cases carry the
-SHA-256 of `json.Marshal` on the typed manifest, rather than a hash of its raw
-file bytes.
+The reviewed parser-file manifest selected from the current pin determines
+parser migration files. The generator writes four deterministic gzip artifacts:
+parser corpus, full test files, helper inventory and parser cases. Parser cases
+carry the SHA-256 of `json.Marshal` on the typed manifest, rather than a hash
+of its raw file bytes.
 
 | Flag | Default | Description |
 | --- | --- | --- |
 | `-vim-root <dir>` | `""` | Read-only official Vim Git checkout (required). |
 | `-output-dir <dir>` | `testdata/official` | Destination for the four generated gzip artifacts. |
-| `-manifest <file>` | `testdata/official/v9.2.1132-parser-files.json` | Reviewed parser-file manifest. |
+| `-manifest <file>` | Current pin's parser-file manifest | Reviewed parser-file manifest. |
 
 ```sh
 go run ./tools/genofficial -vim-root /path/to/vim
@@ -209,6 +209,17 @@ artifacts. The v9.2.1015 corpus remains archived, and handwritten compile
 regressions keep their original provenance. See
 [the official corpus guide](../testdata/official/README.md) for its full
 maintenance rules.
+
+### `tools/vimsource`
+
+Prints the active Vim tag and commit, independent Neovim commit, parsed Vim
+version, next patch and `v:version` value as six `VIMLS_*=value` lines. CI
+appends the output to `$GITHUB_OUTPUT`; Make passes the values to the Vimscript
+smoke probe without evaluating its output. It has no flags:
+
+```sh
+go run ./tools/vimsource
+```
 
 ---
 

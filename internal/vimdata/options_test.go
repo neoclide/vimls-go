@@ -3,7 +3,7 @@ package vimdata
 import "testing"
 
 func TestLookupOptionMetadata(t *testing.T) {
-	if OptionVimTag != "v9.2.1132" || OptionVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
+	if OptionVimTag != VimSourceTag || OptionVimCommit != VimSourceCommit {
 		t.Fatalf("option provenance = %s/%s", OptionVimTag, OptionVimCommit)
 	}
 	tests := []struct {

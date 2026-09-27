@@ -1,12 +1,12 @@
 package vimdata
 
 const (
-	ModifierVimTag    = "v9.2.1132"
-	ModifierVimCommit = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
+	ModifierVimTag    = ManualVimTag
+	ModifierVimCommit = ManualVimCommit
 )
 
-// Modifier is an Ex command modifier from Vim tag v9.2.1132 commit
-// f3dc0fee778439ac8ff8680b42552f7f13d47396 src/ex_docmd.c. The four Vim9
+// Modifier is an Ex command modifier from ManualVimTag and ManualVimCommit,
+// from src/ex_docmd.c. The four Vim9
 // aggregate members are parser-only.
 type Modifier struct {
 	Name       string

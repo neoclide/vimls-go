@@ -6,10 +6,10 @@ There is no runtime JSON or source-checkout dependency. Event hover reads this
 data directly; completion includes the merged event names and loads each
 selected event's documentation through `completionItem/resolve`.
 
-| Editor | Pinned revision | Inventory |
+| Editor | Source | Inventory |
 | --- | --- | --- |
-| Vim `v9.2.1132` | `f3dc0fee778439ac8ff8680b42552f7f13d47396` | `src/autocmd.c` |
-| Neovim `v0.12.0-2035-g73923b0dd8` | `73923b0dd85bb936ba2f63ee916dabaa0603340d` | `src/nvim/auevents.lua` |
+| Vim | [Current pinned Vim baseline](../../docs/language-support.md) | `src/autocmd.c` |
+| Neovim | Independent pin from `tools/vimsource` | `src/nvim/auevents.lua` |
 
 The Neovim revision is a development snapshot from the supplied local checkout,
 not a stable release or an extension of the project's pinned Vim syntax.

@@ -65,18 +65,20 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26.x"
+      - id: vim-source
+        run: go run ./tools/vimsource >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: vim/vim
-          ref: v9.2.1132
+          ref: ${{ steps.vim-source.outputs.VIMLS_VIM_TAG }}
           path: .test-tools/vim
       - name: Verify Vim revision
-        run: test "$(git rev-parse HEAD)" = f3dc0fee778439ac8ff8680b42552f7f13d47396
+        run: test "$(git rev-parse HEAD)" = "${{ steps.vim-source.outputs.VIMLS_VIM_COMMIT }}"
         working-directory: .test-tools/vim
       - uses: actions/checkout@v4
         with:
           repository: neovim/neovim
-          ref: 73923b0dd85bb936ba2f63ee916dabaa0603340d
+          ref: ${{ steps.vim-source.outputs.VIMLS_NEOVIM_COMMIT }}
           path: .test-tools/neovim
       - run: make metadata-check VIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/vim" NEOVIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/neovim"
       - run: make official-check VIM_SOURCE="$GITHUB_WORKSPACE/.test-tools/vim"

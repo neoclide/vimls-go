@@ -89,7 +89,7 @@ func TestHelperAssignmentOperatorIgnoresStringsAndComments(t *testing.T) {
 func TestBuildPinnedParserCaseCorpus(t *testing.T) {
 	files := readPinnedTestFiles(t)
 	inventory := readPinnedHelperInventory(t)
-	manifest, err := readParserFileManifest(filepath.Join("..", "..", "testdata", "official", "v9.2.1132-parser-files.json"))
+	manifest, err := readParserFileManifest(filepath.Join("..", "..", "testdata", "official", parserFileManifestName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,10 +208,10 @@ func TestBuildPinnedParserCaseCorpus(t *testing.T) {
 
 func TestPinnedParserCaseArtifact(t *testing.T) {
 	var artifact parserCaseCorpus
-	readPinnedGzipJSON(t, "v9.2.1132-parser-cases.json.gz", &artifact)
+	readPinnedGzipJSON(t, officialArtifactName("parser-cases"), &artifact)
 	files := readPinnedTestFiles(t)
 	inventory := readPinnedHelperInventory(t)
-	manifest, err := readParserFileManifest(filepath.Join("..", "..", "testdata", "official", "v9.2.1132-parser-files.json"))
+	manifest, err := readParserFileManifest(filepath.Join("..", "..", "testdata", "official", parserFileManifestName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,14 +227,14 @@ func TestPinnedParserCaseArtifact(t *testing.T) {
 func readPinnedTestFiles(t *testing.T) testFilesCorpus {
 	t.Helper()
 	var corpus testFilesCorpus
-	readPinnedGzipJSON(t, "v9.2.1132-test-files.json.gz", &corpus)
+	readPinnedGzipJSON(t, officialArtifactName("test-files"), &corpus)
 	return corpus
 }
 
 func readPinnedHelperInventory(t *testing.T) helperInventory {
 	t.Helper()
 	var inventory helperInventory
-	readPinnedGzipJSON(t, "v9.2.1132-helper-inventory.json.gz", &inventory)
+	readPinnedGzipJSON(t, officialArtifactName("helper-inventory"), &inventory)
 	return inventory
 }
 

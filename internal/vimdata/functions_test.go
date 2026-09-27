@@ -6,7 +6,7 @@ import (
 )
 
 func TestLookupFunctionMetadata(t *testing.T) {
-	if BuiltinVimTag != "v9.2.1132" || BuiltinVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
+	if BuiltinVimTag != VimSourceTag || BuiltinVimCommit != VimSourceCommit {
 		t.Fatalf("builtin provenance = %s/%s", BuiltinVimTag, BuiltinVimCommit)
 	}
 	tests := []struct {

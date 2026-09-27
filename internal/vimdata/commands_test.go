@@ -74,7 +74,7 @@ func TestCommandTableContracts(t *testing.T) {
 		}
 
 	}
-	if CommandVimTag != "v9.2.1132" || CommandVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
+	if CommandVimTag != VimSourceTag || CommandVimCommit != VimSourceCommit {
 		t.Fatalf("command provenance = %s %s", CommandVimTag, CommandVimCommit)
 	}
 

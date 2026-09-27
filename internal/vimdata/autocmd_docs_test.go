@@ -20,12 +20,12 @@ func TestAutocmdDocumentationInventory(t *testing.T) {
 		seen[name] = true
 		if e.Editor == "Vim" {
 			vimCount++
-			if e.Revision != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
+			if e.Revision != VimSourceCommit {
 				t.Fatalf("Vim revision = %s", e.Revision)
 			}
 		} else if e.Editor == "Neovim" {
 			nvimCount++
-			if e.Revision != "73923b0dd85bb936ba2f63ee916dabaa0603340d" {
+			if e.Revision != NeovimSourceCommit {
 				t.Fatalf("Neovim revision = %s", e.Revision)
 			}
 		} else {

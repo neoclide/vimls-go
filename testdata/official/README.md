@@ -1,8 +1,8 @@
 # Official Vim test fixtures
 
-The current corpus comes from Vim tag **v9.2.1132**, commit
-`f3dc0fee778439ac8ff8680b42552f7f13d47396`. It lets ordinary Go tests use
-Vim's test inputs without downloading or executing Vim.
+The current corpus comes from the [pinned Vim baseline](../../docs/language-support.md).
+It lets ordinary Go tests use Vim's test inputs without downloading or executing
+Vim.
 
 | File | Purpose |
 | --- | --- |

@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	CompletionValueVimTag    = "v9.2.1132"
-	CompletionValueVimCommit = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
+	CompletionValueVimTag    = ManualVimTag
+	CompletionValueVimCommit = ManualVimCommit
 )
 
 type CompletionValue struct {
@@ -15,7 +15,8 @@ type CompletionValue struct {
 	Documentation string
 }
 
-// sourceHasFeatures mirrors evalfunc.c's has_list[] at CompletionValueVimTag.
+// sourceHasFeatures mirrors ManualVimTag and ManualVimCommit's
+// src/evalfunc.c has_list[].
 var sourceHasFeatures = completionValues(strings.Fields(`amiga
 android
 arp
@@ -237,7 +238,7 @@ var dynamicHasFeatures = []CompletionValue{
 	{Name: "multi_byte_encoding", Documentation: "Whether Vim is currently using a multibyte encoding."},
 	{Name: "netbeans_enabled", Documentation: "Whether the NetBeans interface is currently active."},
 	{Name: "nvim", Documentation: "Whether the editor is Neovim."},
-	{Name: "patch-9.2.1132", Documentation: "Whether Vim includes patch 9.2.1132, the language metadata ceiling used by this server."},
+	{Name: "patch-" + strings.TrimPrefix(VimSourceTag, "v"), Documentation: "Whether Vim includes patch " + strings.TrimPrefix(VimSourceTag, "v") + ", the language metadata ceiling used by this server."},
 	{Name: "syntax_items", Documentation: "Whether syntax highlighting items exist in the current buffer."},
 	{Name: "ttyin", Documentation: "Whether Vim's input is connected to a terminal."},
 	{Name: "ttyout", Documentation: "Whether Vim's output is connected to a terminal."},

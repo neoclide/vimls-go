@@ -3,12 +3,12 @@ package vimdata
 import "strings"
 
 const (
-	UserCommandAttributeVimTag    = "v9.2.1132"
-	UserCommandAttributeVimCommit = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
+	UserCommandAttributeVimTag    = ManualVimTag
+	UserCommandAttributeVimCommit = ManualVimCommit
 )
 
-// User command attribute help is adapted from Vim tag v9.2.1132 commit
-// f3dc0fee778439ac8ff8680b42552f7f13d47396 runtime/doc/map.txt.
+// User command attribute help is adapted from ManualVimTag and ManualVimCommit,
+// from runtime/doc/map.txt.
 
 type UserCommandAttribute struct {
 	Name          string

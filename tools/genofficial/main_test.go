@@ -69,7 +69,7 @@ func TestPinnedHelperInventoryArtifact(t *testing.T) {
 		"CheckSourceFailure", "CheckSourceFailureList", "CheckSourceLegacyAndVim9Failure", "CheckSourceLegacyAndVim9Success", "CheckSourceLegacyFailure", "CheckSourceLegacySuccess", "CheckSourceScriptFailure", "CheckSourceScriptFailureList", "CheckSourceScriptSuccess", "CheckSourceSuccess",
 		"CheckSourceTransDefSuccess", "CheckSourceTransLegacySuccess", "CheckSourceTransVim9Success", "CheckTransDefSuccess", "CheckTransLegacySuccess", "CheckTransVim9Success",
 	}
-	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-helper-inventory.json.gz")
+	path := filepath.Join("..", "..", "testdata", "official", officialArtifactName("helper-inventory"))
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestPinnedHelperInventoryArtifact(t *testing.T) {
 		inventory.Summary.BareIdentifier != 18 || inventory.Summary.BareExpression != 15 {
 		t.Fatalf("summary = %#v", inventory.Summary)
 	}
-	fullPath := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-test-files.json.gz")
+	fullPath := filepath.Join("..", "..", "testdata", "official", officialArtifactName("test-files"))
 	fullFile, err := os.Open(fullPath)
 	if err != nil {
 		t.Fatal(err)

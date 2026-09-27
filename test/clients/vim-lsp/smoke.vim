@@ -6,6 +6,8 @@ let s:stopped_status = ''
 let s:shutdown_done = 0
 let s:legacy_formatted = 0
 let s:vim9_formatted = 0
+let s:vim_patch = 'patch-' .. $VIMLS_VIM_VERSION
+let s:vim_next_patch = 'patch-' .. $VIMLS_VIM_NEXT_PATCH
 
 function! s:has_error_diagnostic() abort
   return get(lsp#get_buffer_diagnostics_counts(), 'error', 0) > 0
@@ -16,8 +18,8 @@ function! s:shutdown_response(response) abort
 endfunction
 
 try
-  if v:version != 902 || !has('patch-9.2.1132') || has('patch-9.2.1133')
-    call add(v:errors, 'expected exact Vim patch v9.2.1132')
+  if v:version != str2nr($VIMLS_VIM_VVERSION) || !has(s:vim_patch) || has(s:vim_next_patch)
+    call add(v:errors, 'expected exact Vim patch ' .. $VIMLS_VIM_TAG)
   endif
   execute 'edit ' .. fnameescape($VIMLS_CLIENT_WORKSPACE .. '/legacy.vim')
   call assert_equal('vim', &filetype)
@@ -70,8 +72,8 @@ endtry
 call writefile([
       \ 'version=' .. execute('version')->split("\n")[0],
       \ 'v:version=' .. v:version,
-      \ 'patch-9.2.1132=' .. has('patch-9.2.1132'),
-      \ 'patch-9.2.1133=' .. has('patch-9.2.1133'),
+      \ s:vim_patch .. '=' .. has(s:vim_patch),
+      \ s:vim_next_patch .. '=' .. has(s:vim_next_patch),
       \ 'running_status=' .. s:running_status,
       \ 'legacy_diagnostics=' .. string(s:legacy_counts),
       \ 'legacy_formatted=' .. s:legacy_formatted,

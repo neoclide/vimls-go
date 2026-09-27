@@ -1,8 +1,12 @@
 package syntax
 
-import "testing"
+import (
+	"testing"
 
-const officialVimTag = "v9.2.1132"
+	"github.com/neoclide/vimls-go/internal/vimdata"
+)
+
+const officialVimTag = vimdata.VimSourceTag
 
 func assertFileSpans(t *testing.T, file *File) {
 	t.Helper()

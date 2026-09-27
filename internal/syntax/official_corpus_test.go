@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 const (
@@ -127,7 +129,7 @@ func (stats *officialParseStatistics) add(file *File) {
 
 func readGeneratedOfficialCorpus(t *testing.T) generatedOfficialCorpus {
 	t.Helper()
-	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-parser-corpus.json.gz")
+	path := filepath.Join("..", "..", "testdata", "official", vimdata.VimSourceTag+"-parser-corpus.json.gz")
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)

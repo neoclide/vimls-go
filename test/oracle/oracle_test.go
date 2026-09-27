@@ -8,19 +8,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/neoclide/vimls-go/internal/syntax"
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 const vimOracleTimeout = 5 * time.Second
 
 const oracleDriver = `set nomore
 let v:errors = []
-if v:version != 902 || !has('patch-9.2.1132') || has('patch-9.2.1133')
-  call add(v:errors, 'expected exact Vim patch v9.2.1132')
+let s:vim_patch = 'patch-' .. $VIMLS_VIM_VERSION
+let s:vim_next_patch = 'patch-' .. $VIMLS_VIM_NEXT_PATCH
+if v:version != str2nr($VIMLS_VIM_VVERSION) || !has(s:vim_patch) || has(s:vim_next_patch)
+  call add(v:errors, 'expected exact Vim patch ' .. $VIMLS_VIM_TAG)
 endif
 if !has('eval') || exists(':vim9script') != 2
   call add(v:errors, 'required +eval/Vim9 support is missing')
@@ -35,8 +39,8 @@ let s:messages = substitute(execute('messages'), "\n", '\\n', 'g')
 call writefile([
       \ 'version=' .. s:version,
       \ 'v:version=' .. v:version,
-      \ 'patch-9.2.1132=' .. has('patch-9.2.1132'),
-      \ 'patch-9.2.1133=' .. has('patch-9.2.1133'),
+      \ s:vim_patch .. '=' .. has(s:vim_patch),
+      \ s:vim_next_patch .. '=' .. has(s:vim_next_patch),
       \ 'v:errors=' .. string(v:errors),
       \ 'unsupported_options=' .. string(get(g:, 'vimls_unsupported_options', [])),
       \ 'missing_features=' .. string(get(g:, 'vimls_missing_features', [])),
@@ -51,8 +55,10 @@ qa!
 const formattingOracleDriver = `set nocompatible
 set nomore
 let v:errors = []
-if v:version != 902 || !has('patch-9.2.1132') || has('patch-9.2.1133')
-  call add(v:errors, 'expected exact Vim patch v9.2.1132')
+let s:vim_patch = 'patch-' .. $VIMLS_VIM_VERSION
+let s:vim_next_patch = 'patch-' .. $VIMLS_VIM_NEXT_PATCH
+if v:version != str2nr($VIMLS_VIM_VVERSION) || !has(s:vim_patch) || has(s:vim_next_patch)
+  call add(v:errors, 'expected exact Vim patch ' .. $VIMLS_VIM_TAG)
 endif
 try
   filetype indent on
@@ -70,8 +76,8 @@ endtry
 call writefile([
       \ 'version=' .. split(execute('version'), "\n")[0],
       \ 'v:version=' .. v:version,
-      \ 'patch-9.2.1132=' .. has('patch-9.2.1132'),
-      \ 'patch-9.2.1133=' .. has('patch-9.2.1133'),
+      \ s:vim_patch .. '=' .. has(s:vim_patch),
+      \ s:vim_next_patch .. '=' .. has(s:vim_next_patch),
       \ 'v:errors=' .. string(v:errors),
       \ 'messages=' .. substitute(execute('messages'), "\n", '\\n', 'g'),
       \ ], $VIMLS_ORACLE_OUTPUT)
@@ -84,7 +90,7 @@ qa!
 func TestPinnedVimOracle(t *testing.T) {
 	vim := os.Getenv("VIM_EXECUTABLE")
 	if vim == "" {
-		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary")
+		t.Skip("set VIM_EXECUTABLE to the pinned Vim binary")
 	}
 	vim, err := filepath.Abs(vim)
 	if err != nil {
@@ -111,7 +117,7 @@ func TestPinnedVimOracle(t *testing.T) {
 			defer cancel()
 			command := exec.CommandContext(ctx, vim, "-Nu", "NONE", "-U", "NONE", "-n", "-es", "-X", "-i", "NONE", "-S", driver)
 			command.Dir = temporary
-			command.Env = append(os.Environ(), "VIMLS_ORACLE_FIXTURE="+fixturePath, "VIMLS_ORACLE_OUTPUT="+recordPath)
+			command.Env = append(append(os.Environ(), vimOracleEnvironment()...), "VIMLS_ORACLE_FIXTURE="+fixturePath, "VIMLS_ORACLE_OUTPUT="+recordPath)
 			var stdout, stderr bytes.Buffer
 			command.Stdout, command.Stderr = &stdout, &stderr
 			runErr := command.Run()
@@ -131,7 +137,7 @@ func TestPinnedVimOracle(t *testing.T) {
 			if readErr != nil {
 				t.Fatalf("read oracle record: %v", readErr)
 			}
-			for _, want := range []string{"v:version=902", "patch-9.2.1132=1", "patch-9.2.1133=0", "v:errors=[]"} {
+			for _, want := range vimOracleEvidence() {
 				if !strings.Contains(string(record), want+"\n") {
 					t.Errorf("record does not contain %q", want)
 				}
@@ -146,7 +152,7 @@ func TestPinnedVimOracle(t *testing.T) {
 func TestPinnedVimFormattingOracle(t *testing.T) {
 	vim := os.Getenv("VIM_EXECUTABLE")
 	if vim == "" {
-		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary")
+		t.Skip("set VIM_EXECUTABLE to the pinned Vim binary")
 	}
 	var err error
 	vim, err = filepath.Abs(vim)
@@ -210,7 +216,7 @@ func TestPinnedVimFormattingOracle(t *testing.T) {
 				got = got[:edit.Span.Start] + edit.NewText + got[edit.Span.End:]
 			}
 			if got != want {
-				t.Fatalf("vimls-go formatting:\n%s\nVim v9.2.1132 formatting:\n%s", got, want)
+				t.Fatalf("vimls-go formatting:\n%s\nVim %s formatting:\n%s", got, vimdata.VimSourceTag, want)
 			}
 		})
 	}
@@ -233,7 +239,7 @@ func runFormattingOracle(t *testing.T, vim, source string) string {
 	defer cancel()
 	command := exec.CommandContext(ctx, vim, "-Nu", "NONE", "-U", "NONE", "-n", "-es", "-X", "-i", "NONE", "-S", driver)
 	command.Dir = temporary
-	command.Env = append(os.Environ(), "VIMLS_FORMAT_INPUT="+input, "VIMLS_FORMAT_OUTPUT="+output, "VIMLS_ORACLE_OUTPUT="+recordPath)
+	command.Env = append(append(os.Environ(), vimOracleEnvironment()...), "VIMLS_FORMAT_INPUT="+input, "VIMLS_FORMAT_OUTPUT="+output, "VIMLS_ORACLE_OUTPUT="+recordPath)
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	runErr := command.Run()
@@ -253,12 +259,44 @@ func runFormattingOracle(t *testing.T, vim, source string) string {
 		exitStatus = exitError.ExitCode()
 	}
 	t.Logf("exit_status=%d stdout=%q stderr=%q\n%s", exitStatus, stdout.String(), stderr.String(), record)
-	if exitStatus != 0 || !strings.Contains(string(record), "patch-9.2.1132=1\n") || !strings.Contains(string(record), "patch-9.2.1133=0\n") || !strings.Contains(string(record), "v:errors=[]\n") {
+	if exitStatus != 0 {
 		t.Fatalf("formatting oracle failed: %v\n%s", runErr, record)
+	}
+	for _, want := range vimOracleEvidence() {
+		if !strings.Contains(string(record), want+"\n") {
+			t.Fatalf("formatting oracle record lacks %q: %s", want, record)
+		}
 	}
 	formatted, err := os.ReadFile(output)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return string(formatted)
+}
+
+func vimOracleEnvironment() []string {
+	version, next := oracleVimVersions()
+	return []string{
+		"VIMLS_VIM_TAG=" + vimdata.VimSourceTag,
+		"VIMLS_VIM_VERSION=" + version.String(),
+		"VIMLS_VIM_NEXT_PATCH=" + next.String(),
+		"VIMLS_VIM_VVERSION=" + strconv.Itoa(version.Major*100+version.Minor),
+	}
+}
+
+func vimOracleEvidence() []string {
+	version, next := oracleVimVersions()
+	return []string{
+		"v:version=" + strconv.Itoa(version.Major*100+version.Minor),
+		"patch-" + version.String() + "=1",
+		"patch-" + next.String() + "=0",
+		"v:errors=[]",
+	}
+}
+
+func oracleVimVersions() (vimdata.VimVersion, vimdata.VimVersion) {
+	version, _ := vimdata.ParseVimVersion(vimdata.VimSourceTag)
+	next := version
+	next.Patch++
+	return version, next
 }

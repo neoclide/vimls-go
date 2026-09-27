@@ -76,14 +76,15 @@ should not be repeated for every editor feature.
 
 ## Comparing behavior with Vim
 
-Use only curated fixtures and **Vim v9.2.1132**. A newer Vim can accept different
-syntax, so its result does not automatically apply to this server.
+Use only curated fixtures and the current [pinned Vim baseline](language-support.md).
+A newer Vim can accept different syntax, so its result does not automatically
+apply to this server.
 
 ```sh
-VIMRUNTIME=/path/to/vim-v9.2.1132/runtime \
-  make oracle VIM_EXECUTABLE=/path/to/vim-v9.2.1132/src/vim
-VIMRUNTIME=/path/to/vim-v9.2.1132/runtime \
-  make client-smoke VIM_EXECUTABLE=/path/to/vim-v9.2.1132/src/vim
+VIMRUNTIME=/path/to/vim/runtime \
+  make oracle VIM_EXECUTABLE=/path/to/vim/src/vim
+VIMRUNTIME=/path/to/vim/runtime \
+  make client-smoke VIM_EXECUTABLE=/path/to/vim/src/vim
 ```
 
 The oracle records the Vim version and patch probes, `v:errors`, `:messages`,
@@ -113,15 +114,18 @@ The filter matches case identifiers in the committed artifact. Use the matching
 
 ## Generated metadata
 
-The generators, oracle and client smoke checks use Vim v9.2.1132,
-`f3dc0fee778439ac8ff8680b42552f7f13d47396`. The Vim and Neovim upstream
+The generators, oracle and client smoke checks use the current
+[pinned Vim baseline](language-support.md). `tools/vimsource` is the machine
+readable source for CI, Make and Vimscript probes. The Vim and Neovim upstream
 checkouts are read-only; their current HEAD may be newer than the pinned object.
-Neovim remains independently pinned at
-`73923b0dd85bb936ba2f63ee916dabaa0603340d`.
+Neovim remains independently pinned.
 
 ```sh
 make metadata-check VIM_SOURCE=/path/to/vim NEOVIM_SOURCE=/path/to/neovim
 make official-check VIM_SOURCE=/path/to/vim
+VIMRUNTIME=/path/to/vim/runtime \
+  make vim-check VIM_SOURCE=/path/to/vim NEOVIM_SOURCE=/path/to/neovim \
+    VIM_EXECUTABLE=/path/to/vim/src/vim
 ```
 
 When deliberately updating generated metadata, use `make metadata-refresh`
@@ -135,6 +139,15 @@ original source attribution and license references in regenerated output.
 Do not edit generated tables
 to hide a mismatch. Official compile-diagnostic fixtures are maintained one
 error code at a time in `internal/analysis/official_compile_cases_e*_test.go`.
+
+To update the baseline, change the active source pin once in
+`internal/vimdata/source.go`, then separately review and update the manual Vim
+source there. Regenerate metadata and the official corpus, inspect semantic and
+license changes, and update the current source text in the support guide and
+documentation notice. Do not replace historical provenance across the tree.
+Finish with `make vim-check`; it already runs formatting, metadata and corpus
+checks, the external oracle, the uncached Go suite, vet, and the client smoke
+test, so do not rerun those stages manually after it succeeds.
 
 `make official-refresh VIM_SOURCE=/path/to/vim` regenerates the current official
 Vim corpus. `make official-check` regenerates it into a temporary directory and

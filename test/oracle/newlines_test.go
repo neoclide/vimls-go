@@ -16,7 +16,7 @@ import (
 func TestPinnedVimBufferNewlines(t *testing.T) {
 	vim := os.Getenv("VIM_EXECUTABLE")
 	if vim == "" {
-		t.Skip("set VIM_EXECUTABLE to the pinned Vim v9.2.1132 binary")
+		t.Skip("set VIM_EXECUTABLE to the pinned Vim binary")
 	}
 	vim, err := filepath.Abs(vim)
 	if err != nil {
@@ -47,7 +47,7 @@ func TestPinnedVimBufferNewlines(t *testing.T) {
 			defer cancel()
 			command := exec.CommandContext(ctx, vim, "-Nu", "NONE", "-U", "NONE", "-n", "-es", "-X", "-i", "NONE", "-S", driver)
 			command.Dir = temporary
-			command.Env = append(os.Environ(), "VIMLS_ORACLE_FIXTURE="+fixture, "VIMLS_ORACLE_OUTPUT="+recordPath, "VIMLS_ORACLE_FF="+test.format)
+			command.Env = append(append(os.Environ(), vimOracleEnvironment()...), "VIMLS_ORACLE_FIXTURE="+fixture, "VIMLS_ORACLE_OUTPUT="+recordPath, "VIMLS_ORACLE_FF="+test.format)
 			output, runErr := command.CombinedOutput()
 			record, readErr := os.ReadFile(recordPath)
 			exit := -1
@@ -58,7 +58,7 @@ func TestPinnedVimBufferNewlines(t *testing.T) {
 			if runErr != nil || readErr != nil {
 				t.Fatalf("oracle run=%v record=%v", runErr, readErr)
 			}
-			for _, want := range []string{"v:version=902", "patch-9.2.1132=1", "patch-9.2.1133=0", "v:errors=[]"} {
+			for _, want := range vimOracleEvidence() {
 				if !strings.Contains(string(record), want+"\n") {
 					t.Errorf("record lacks %q", want)
 				}

@@ -13,11 +13,13 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 const (
 	officialParserCasesSchemaVersion = 1
-	officialParserCasesManifest      = "v9.2.1132-parser-files.json"
+	officialParserCasesManifest      = vimdata.VimSourceTag + "-parser-files.json"
 	officialParserCasesManifestHash  = "8c262a41082a8a3dc684cbe350d18d31d3d5cdbc8b368428c79be79d3a691e1d"
 	officialParserCasesFileCount     = 44
 	officialParserCasesRecordCount   = 3856
@@ -1391,7 +1393,7 @@ func officialParserSourcePreview(source string) string {
 
 func readOfficialParserCases(t *testing.T) officialParserCaseCorpus {
 	t.Helper()
-	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-parser-cases.json.gz")
+	path := filepath.Join("..", "..", "testdata", "official", vimdata.VimSourceTag+"-parser-cases.json.gz")
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)

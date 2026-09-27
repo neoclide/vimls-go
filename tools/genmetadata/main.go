@@ -7,11 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 const (
-	vimTag    = "v9.2.1132"
-	vimCommit = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
+	vimTag    = vimdata.VimSourceTag
+	vimCommit = vimdata.VimSourceCommit
 )
 
 func main() {

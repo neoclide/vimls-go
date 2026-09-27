@@ -8,12 +8,14 @@ import (
 	"sort"
 	"sync/atomic"
 	"testing"
+
+	"github.com/neoclide/vimls-go/internal/vimdata"
 )
 
 const (
 	officialTestFilesCount = 362
 	officialTestFilesBytes = 8641665
-	officialVimCommit      = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
+	officialVimCommit      = vimdata.VimSourceCommit
 )
 
 type generatedOfficialTestFiles struct {
@@ -74,7 +76,7 @@ func TestGeneratedOfficialVimTestFiles(t *testing.T) {
 
 func readGeneratedOfficialTestFiles(t *testing.T) generatedOfficialTestFiles {
 	t.Helper()
-	path := filepath.Join("..", "..", "testdata", "official", "v9.2.1132-test-files.json.gz")
+	path := filepath.Join("..", "..", "testdata", "official", vimdata.VimSourceTag+"-test-files.json.gz")
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)

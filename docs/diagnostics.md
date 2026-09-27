@@ -49,8 +49,8 @@ A single definition is safe to reload from the same script and receives no hint.
 | `vim/E492` | The command is invalid or its name is not known. Unknown uppercase user commands are warnings. |
 
 For Vim's explanation of an error, run `:help E117` with the relevant number.
-vimls-go follows **Vim v9.2.1132**. Help from another version can describe
-different rules.
+vimls-go follows the current [Vim baseline](language-support.md). Help from
+another version can describe different rules.
 
 Vim9 environment variables, registers and writable string `v:` variables require
 string values for plain and concatenating assignments. Known incompatible types
@@ -126,8 +126,9 @@ uses branch-local type facts as described in [language support](language-support
 
 ## Option assignment errors
 
-These diagnostics follow Vim v9.2.1132 for direct option assignments, except
-for the simplified boolean compound-assignment policy below.
+These diagnostics follow the current [Vim baseline](language-support.md) for
+direct option assignments, except for the simplified boolean
+compound-assignment policy below.
 Known options are assumed to exist regardless of build-feature conditions.
 Unknown RHS types and Vim9 `any` skip type checks; value-dependent errors require
 statically known values.

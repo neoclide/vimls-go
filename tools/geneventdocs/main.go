@@ -12,12 +12,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/neoclide/vimls-go/internal/vimdata"
 	"github.com/neoclide/vimls-go/internal/vimhelp"
 )
 
-const vimTag = "v9.2.1132"
-const vimRevision = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
-const neovimRevision = "73923b0dd85bb936ba2f63ee916dabaa0603340d"
+const vimTag = vimdata.VimSourceTag
+const vimRevision = vimdata.VimSourceCommit
+const neovimRevision = vimdata.NeovimSourceCommit
 
 type entry struct {
 	name, alias, editor, revision string
