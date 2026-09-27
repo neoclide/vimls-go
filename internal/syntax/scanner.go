@@ -3064,7 +3064,22 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 					return
 				}
 			}
+			diagnosticsStart := len(file.Diagnostics)
 			command.Embedded = parseEmbeddedCommandList(file, body, command.Dialect, depth)
+			if len(command.Embedded.Commands) > 0 {
+				first := command.Embedded.Commands[0]
+				// A leading replacement such as <line1> is not the shift command
+				// that the scanner sees before user-command expansion.
+				if _, ok := userCommandReplacementEnd(file.Source, first.Name.Start, body.End); ok {
+					for diagnosticIndex := diagnosticsStart; diagnosticIndex < len(file.Diagnostics); diagnosticIndex++ {
+						diagnostic := file.Diagnostics[diagnosticIndex]
+						if diagnostic.Code == "vim/E1144" && diagnostic.Span == (Span{Start: first.Name.End, End: first.Name.End}) {
+							file.Diagnostics = append(file.Diagnostics[:diagnosticIndex], file.Diagnostics[diagnosticIndex+1:]...)
+							break
+						}
+					}
+				}
+			}
 		}
 		return
 	}

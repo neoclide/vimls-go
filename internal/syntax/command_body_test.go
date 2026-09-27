@@ -113,6 +113,41 @@ func TestUserCommandReplacementBody(t *testing.T) {
 	}
 }
 
+func TestVim9UserCommandReplacementAtBodyStartDoesNotReportE1144(t *testing.T) {
+	file := Parse("vim9script\ncommand -range=% Bash :<line1>,<line2>write !bash\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 {
+		t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+	}
+	command := file.Commands[1]
+	if command.UserCommand == nil || command.Embedded == nil || file.Text(command.Embedded.Span) != ":<line1>,<line2>write !bash" {
+		t.Fatalf("command = %#v", command)
+	}
+}
+
+func TestVim9UserCommandReplacementDoesNotSuppressOtherE1144(t *testing.T) {
+	for _, test := range []struct {
+		source, message string
+	}{
+		{source: "vim9script\n:<line1>\n"},
+		{source: "vim9script\nautocmd BufEnter * :<line1>\n"},
+		{source: "vim9script\ncommand -range=% Bash :<oops>write !bash\n"},
+		{source: "vim9script\ncommand -range=% Bash :<line1>,<line2>write !bash\necho123\n", message: "Command \"echo\" is not followed by white space: echo123"},
+	} {
+		file := Parse(test.source)
+		count := 0
+		message := false
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == "vim/E1144" {
+				count++
+				message = message || diagnostic.Message == test.message
+			}
+		}
+		if count != 1 || test.message != "" && !message {
+			t.Fatalf("source %q: diagnostics = %#v", test.source, file.Diagnostics)
+		}
+	}
+}
+
 func TestUserCommandHeaderAndAugroupSyntax(t *testing.T) {
 	file := Parse("command -nargs=* -complete=custom,Complete Build echo <args>\naugroup Project\n")
 	command := &file.Commands[0]
