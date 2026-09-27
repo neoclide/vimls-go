@@ -584,6 +584,7 @@ func TestHoverShowsBuiltinVariableType(t *testing.T) {
 		{"searchcount()", "dict<number>"},
 		{"matchfuzzypos(['alpha'], 'a')", "list<list<?>>"},
 		{"submatch(0, true)", "list<string>"},
+		{"submatch(0, v:true)", "list<string>"},
 		{"'*'->globpath('.', 0, 1)", "list<string>"},
 		{"get({count: 1}, 'count')", "number"},
 		{"get({count: 1}, 'count', 'fallback')", "unknown"},
@@ -609,8 +610,12 @@ func TestHoverShowsBuiltinVariableType(t *testing.T) {
 					if err != nil || hover == nil {
 						t.Fatalf("hover = %#v, error = %v", hover, err)
 					}
+					wantType := test.want
+					if prefix == "" && test.expression == "submatch(0, true)" {
+						wantType = "unknown"
+					}
 					content, ok := hover.Contents.(*protocol.MarkupContent)
-					want := fmt.Sprintf("**%s** %s %s variable.", name, titleArticle(test.want), test.want)
+					want := fmt.Sprintf("**%s** %s %s variable.", name, titleArticle(wantType), wantType)
 					if !ok || content.Value != want {
 						t.Fatalf("hover contents = %#v, want %q", hover.Contents, want)
 					}

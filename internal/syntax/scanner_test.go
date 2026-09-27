@@ -388,6 +388,17 @@ func TestOfficialUnnamedRegisterAssignmentCommand(t *testing.T) {
 	}
 }
 
+func TestOfficialDestructuringRegisterAssignment(t *testing.T) {
+	file := Parse("vim9script\n[@@, @a] = ['bar', 'baz']\n")
+	if len(file.Diagnostics) != 0 {
+		t.Fatalf("diagnostics = %#v", file.Diagnostics)
+	}
+	invalid := Parse("vim9script\n[@%, @a] = ['bar', 'baz']\n")
+	if len(invalid.Diagnostics) != 1 || invalid.Diagnostics[0].Code != "vim/E354" {
+		t.Fatalf("diagnostics = %#v", invalid.Diagnostics)
+	}
+}
+
 func TestOfficialModifierNamedVariableAssignment(t *testing.T) {
 	// v9.2.1015 src/testdir/test_vim9_assign.vim
 	// Test_assign_command_modifier.

@@ -113,13 +113,19 @@ echo expanded globbed matched paths legacyPaths
 }
 
 func TestBuiltinReturnTypesInLegacyScript(t *testing.T) {
-	result := Analyze(syntax.Parse("let s:legacy_paths = globpath('.', '*', 0, 1)\nlet s:legacy_match = match('text', 't')\n"))
+	result := Analyze(syntax.Parse("let s:legacy_paths = globpath('.', '*', 0, 1)\nlet s:legacy_match = match('text', 't')\nlet true = 0\nlet s:legacy_glob_true = glob('*.txt', 0, true)\nlet s:legacy_glob_vtrue = glob('*.txt', 0, v:true)\n"))
 	declarations := declarationsByName(result)
 	if got := declarations["s:legacy_paths"]; got == nil || got.Type.Name != "list" || len(got.Type.Arguments) != 1 || got.Type.Arguments[0].Name != "string" {
 		t.Fatalf("legacy globpath type = %#v, want list<string>", got)
 	}
 	if got := declarations["s:legacy_match"]; got == nil || got.Type.Name != "number" {
 		t.Fatalf("legacy match type = %#v, want number", got)
+	}
+	if got := declarations["s:legacy_glob_vtrue"]; got == nil || got.Type.Name != "list" || len(got.Type.Arguments) != 1 || got.Type.Arguments[0].Name != "string" {
+		t.Fatalf("legacy glob v:true type = %#v, want list<string>", got)
+	}
+	if got := declarations["s:legacy_glob_true"]; got == nil || got.Type.Name != "" {
+		t.Fatalf("legacy glob bare true type = %#v, want unknown", got)
 	}
 	if diagnostics := CombinedDiagnostics(result.File, result); len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", diagnostics)

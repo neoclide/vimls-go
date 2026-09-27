@@ -133,3 +133,29 @@ func TestCompletionFiltersBuiltinMethodReceiversByCommandDialect(t *testing.T) {
 		})
 	}
 }
+
+func TestCompletionUsesCommandDialectForBuiltinReturnTypes(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{
+			name:   "vim9cmd in legacy root",
+			source: "vim9cmd echo glob('*', false, true)->str2<cursor>\n",
+		},
+		{
+			name:   "def in legacy root",
+			source: "def F()\n  echo glob('*', false, true)->str2<cursor>\nenddef\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			items := guardCompletionItems(t, strings.Replace(test.source, "str2<cursor>", "<cursor>", 1))
+			if !hasCompletionLabel(items, "join") {
+				t.Fatalf("join missing for list<string> receiver: %#v", items)
+			}
+			items = guardCompletionItems(t, test.source)
+			if hasCompletionLabel(items, "str2nr") {
+				t.Fatalf("str2nr offered for list<string> receiver: %#v", items)
+			}
+		})
+	}
+}

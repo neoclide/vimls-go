@@ -96,6 +96,9 @@ including the corrections recorded in Vim v9.2.1104 and checked against
 v9.2.1132. Numeric and container results retain their known types. For `expand()`,
 `glob()`, `globpath()` and `submatch()`, an omitted or literal list flag determines
 whether the result is a string or `list<string>`; a dynamic flag remains unknown.
+Bare `true` and `false` count as literal flags only in Vim9 command contexts,
+including `def` bodies and `vim9cmd`. In Legacy commands they remain dynamic
+names; `v:true`, `v:false`, `0` and `1` work in both dialects.
 `get()` infers an element type only when it agrees with the default's type
 (number when omitted). Unknown container elements or conflicting defaults,
 including null defaults, keep the result unknown.

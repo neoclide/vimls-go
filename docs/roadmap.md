@@ -18,6 +18,9 @@ v9.2.1132 compatibility now covers builtin return helpers, string-only
 assignment targets, underscore command errors, `source ++dryrun` file links
 and diagnostics in statically skipped command/autocommand blocks. Broader
 grammar migration remains separate; see the [support guide](language-support.md).
+Destructuring assignments to read-only registers preserve Vim v9.2.1132's
+diagnostic order: known incompatible values report E1012 in Vim9 scripts and
+`vim9cmd`, while `def` reports E354 before checking the value.
 
 Option diagnostics now include feature-gated options, treating known options as
 available without inspecting the user's Vim build.
@@ -76,6 +79,8 @@ distinguish strings from lists using a static list flag in both dialects,
 including method calls. Dynamic flags remain unknown. `get()` requires the
 element and default types to agree; a default on an unknown dictionary, or a
 conflicting null or scalar default, does not establish the result type.
+Completion resolves literal flags using the enclosing command's dialect,
+including `vim9cmd` and `def` bodies in Legacy files.
 
 Type inference preserves compiled types inside `type()` guards
 in `def` functions and Vim9 lambdas. A copy of an `any` value remains `any`,

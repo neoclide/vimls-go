@@ -53,6 +53,9 @@ version can describe different rules.
 Vim9 environment variables, registers and writable string `v:` variables require
 string values for plain and concatenating assignments. Known incompatible types
 report E1012, including in destructuring assignments; `@# = bufnr()` is allowed.
+For `[@%] = [1]`, Vim9 scripts and `vim9cmd` report E1012 before checking register
+writability, while `def` reports E354. A string value such as `[@%] = ['ok']`
+reports E354 in all three contexts.
 Legacy assignments retain their conversions. Invalid Vim9 command names such
 as `ch_log` report E492 at script level and E476 inside `def`.
 

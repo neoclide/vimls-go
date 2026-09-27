@@ -850,7 +850,7 @@ func (p *expressionParser) parsePrefix() *Expression {
 				p.diagnostics = append(p.diagnostics, Diagnostic{Code: "vim/E1002", Message: "Syntax error at @", Span: token.span})
 			} else {
 				name, size := utf8.DecodeRuneInString(token.text[1:])
-				if !validRegisterName(name) {
+				if !ValidRegisterName(name) {
 					p.diagnostics = append(p.diagnostics, Diagnostic{
 						Code: "vim/E354", Message: "Invalid register name: '" + string(name) + "'",
 						Span: Span{Start: token.span.Start + 1, End: token.span.Start + 1 + size},
@@ -923,7 +923,7 @@ func (p *expressionParser) parsePrefix() *Expression {
 	return &Expression{Kind: ExpressionMissing, Span: token.span}
 }
 
-func validRegisterName(name rune) bool {
+func ValidRegisterName(name rune) bool {
 	return name >= 'A' && name <= 'Z' || name >= 'a' && name <= 'z' || name >= '0' && name <= '9' || strings.ContainsRune(`"-_/#.%:=*+~`, name)
 }
 

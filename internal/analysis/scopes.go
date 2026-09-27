@@ -37,7 +37,7 @@ type FileAnalysis struct {
 	lambdaBodies    map[*syntax.Expression]bool
 	unknownOptions  map[syntax.Span]bool
 	// suppressedSyntaxDiagnostics contains provisional parser diagnostics that
-	// Vim replaces after resolving an import namespace.
+	// Vim replaces after resolving names or types.
 	suppressedSyntaxDiagnostics map[syntax.Diagnostic]bool
 	enumValueExempt             map[syntax.Span]bool
 	typeAliasExempt             map[syntax.Span]bool
@@ -4082,7 +4082,7 @@ func commandInSkippedBranch(index int, commands []syntax.Command, blocks []synta
 }
 
 // CombinedDiagnostics returns parser and semantic diagnostics with the narrow
-// semantic replacements that require resolved names. It does not mutate file.
+// semantic replacements that require resolved names or types. It does not mutate file.
 func CombinedDiagnostics(file *syntax.File, result *FileAnalysis) []syntax.Diagnostic {
 	if file == nil {
 		return nil
@@ -6347,9 +6347,32 @@ func appendDestructuringTypeMismatchDiagnostic(result *FileAnalysis, scope *Scop
 		if targetItem == nil || targetItem.Kind == syntax.ExpressionIdentifier && targetItem.Value == "_" {
 			continue
 		}
+		// Interpreted Vim9 checks the string value before writing a register;
+		// compiled code rejects a read-only register before checking the value.
+		var invalidRegister *syntax.Diagnostic
+		invalidSyntax := false
+		for diagnosticIndex := range result.File.Diagnostics {
+			diagnostic := &result.File.Diagnostics[diagnosticIndex]
+			if diagnostic.Span.Start > targetItem.Span.End || diagnostic.Span.End < targetItem.Span.Start {
+				continue
+			}
+			if !scopeUsesDefTypeRules(scope) && targetItem.Kind == syntax.ExpressionIdentifier && len(targetItem.Value) == 2 &&
+				targetItem.Value[0] == '@' && strings.ContainsRune(".%:~", rune(targetItem.Value[1])) && diagnostic.Code == "vim/E354" &&
+				diagnostic.Span == (syntax.Span{Start: targetItem.Span.Start + 1, End: targetItem.Span.End}) {
+				invalidRegister = diagnostic
+				continue
+			}
+			invalidSyntax = true
+			break
+		}
+		if invalidSyntax {
+			continue
+		}
 		expected := UnknownValueType
 		if len(bindings) > index && bindings[index].ParsedType != nil {
 			expected = result.typeFromSyntax(bindings[index].ParsedType, scope)
+		} else if invalidRegister != nil {
+			expected = ValueType{Name: "string"}
 		} else if scope != nil {
 			expected = assignmentTargetType(result, scope, targetItem)
 		}
@@ -6372,9 +6395,12 @@ func appendDestructuringTypeMismatchDiagnostic(result *FileAnalysis, scope *Scop
 		diagnostic := syntax.Diagnostic{
 			Code: "vim/E1163", Message: "Variable " + strconv.Itoa(index+1) + ": type mismatch, expected " + valueTypeDisplay(expected) + " but got " + valueTypeDisplay(actual), Span: span,
 		}
-		if stringOnlyAssignmentTarget(targetItem) {
+		if stringOnlyAssignmentTarget(targetItem) || invalidRegister != nil {
 			diagnostic.Code = "vim/E1012"
 			diagnostic.Message = "Type mismatch; expected string but got " + valueTypeDisplay(actual)
+		}
+		if invalidRegister != nil {
+			result.suppressedSyntaxDiagnostics[*invalidRegister] = true
 		}
 		result.Diagnostics = append(result.Diagnostics, diagnostic)
 		return true
@@ -6518,8 +6544,12 @@ func stringOnlyAssignmentTarget(target *syntax.Expression) bool {
 	if target == nil || target.Kind != syntax.ExpressionIdentifier {
 		return false
 	}
-	if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") {
+	if strings.HasPrefix(target.Value, "$") {
 		return true
+	}
+	if strings.HasPrefix(target.Value, "@") {
+		name, size := utf8.DecodeRuneInString(target.Value[1:])
+		return size > 0 && 1+size == len(target.Value) && (name == '@' || syntax.ValidRegisterName(name) && !strings.ContainsRune(".%:~", name))
 	}
 	variable, ok := vimdata.LookupVariable(target.Value)
 	return ok && variable.Type == "string" && variable.Flags&vimdata.VariableReadOnly == 0
@@ -6543,7 +6573,7 @@ func assignmentTargetType(result *FileAnalysis, scope *Scope, target *syntax.Exp
 			}
 			return typ
 		}
-		if strings.HasPrefix(target.Value, "$") || strings.HasPrefix(target.Value, "@") {
+		if stringOnlyAssignmentTarget(target) {
 			return ValueType{Name: "string"}
 		}
 		if variable, ok := vimdata.LookupVariable(target.Value); ok {

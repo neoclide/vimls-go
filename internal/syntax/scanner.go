@@ -3205,10 +3205,13 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			} else {
 				left, leftDiagnostics = parseExpressionWithVersion(leftSource, command.Argument.Start, command.Dialect, command.ScriptVersion)
 			}
-			if command.Dialect == Vim9 && left != nil && left.Kind == ExpressionIdentifier && strings.HasPrefix(left.Value, "@") {
-				name, size := utf8.DecodeRuneInString(left.Value[1:])
-				if size > 0 && 1+size == len(left.Value) {
-					nameSpan := Span{Start: left.Span.Start + 1, End: left.Span.Start + 1 + size}
+			validateRegister := func(target *Expression) {
+				if target == nil || target.Kind != ExpressionIdentifier || !strings.HasPrefix(target.Value, "@") {
+					return
+				}
+				name, size := utf8.DecodeRuneInString(target.Value[1:])
+				if size > 0 && 1+size == len(target.Value) {
+					nameSpan := Span{Start: target.Span.Start + 1, End: target.Span.Start + 1 + size}
 					if name == '@' {
 						// @@ is the assignment-only alias for the unnamed register.
 						// Keep it invalid in the ordinary register-read parser.
@@ -3219,7 +3222,7 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 							}
 						}
 						leftDiagnostics = kept
-					} else if !validRegisterName(name) || strings.ContainsRune(".%:~", name) {
+					} else if !ValidRegisterName(name) || strings.ContainsRune(".%:~", name) {
 						diagnosed := false
 						for _, diagnostic := range leftDiagnostics {
 							diagnosed = diagnosed || diagnostic.Code == "vim/E354" && diagnostic.Span == nameSpan
@@ -3229,6 +3232,15 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 								Code: "vim/E354", Message: "Invalid register name: '" + string(name) + "'", Span: nameSpan,
 							})
 						}
+					}
+				}
+			}
+			if command.Dialect == Vim9 && left != nil {
+				if left.Kind == ExpressionIdentifier && strings.HasPrefix(left.Value, "@") {
+					validateRegister(left)
+				} else if left.Kind == ExpressionList || left.Kind == ExpressionTuple {
+					for _, child := range left.Children {
+						validateRegister(child)
 					}
 				}
 			}
@@ -5372,7 +5384,7 @@ func parseDeclarationTarget(file *File, command *Command, declaration *Declarati
 				span := Span{Start: command.Argument.Start + start, End: command.Argument.Start + start + 1 + size}
 				nameSpan := Span{Start: span.Start + 1, End: span.End}
 				target := &Expression{Kind: ExpressionIdentifier, Span: span, Value: file.Text(span)}
-				readOnly := strings.ContainsRune(".%:~", name) || !validRegisterName(name)
+				readOnly := strings.ContainsRune(".%:~", name) || !ValidRegisterName(name)
 				registerDiagnostic := Diagnostic{Code: "vim/E1066", Message: "Cannot declare a register: " + string(name), Span: nameSpan}
 				for block := command.Block; block >= 0 && block < len(file.Blocks); block = file.Blocks[block].Parent {
 					if file.Blocks[block].Kind == BlockDef && readOnly {

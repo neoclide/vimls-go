@@ -87,6 +87,48 @@ func TestCompletionTypesAreDemandDrivenAndDoNotMutateSharedFacts(t *testing.T) {
 	}
 }
 
+func TestCompletionTypesTypeOfUsesExpressionDialect(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		source      string
+		expressions func(*syntax.File) []*syntax.Expression
+		want        []string
+	}{
+		{
+			name:   "vim9cmd in legacy root",
+			source: "let true = 0\nvim9cmd echo glob('*', 0, true)\necho glob('*', 0, true)\nvim9cmd echo glob('*', 0, true)\n",
+			expressions: func(file *syntax.File) []*syntax.Expression {
+				return []*syntax.Expression{file.Commands[1].Expressions[0], file.Commands[2].Expressions[0], file.Commands[3].Expressions[0]}
+			},
+			want: []string{"list", "", "list"},
+		},
+		{
+			name:   "legacy command in vim9 root",
+			source: "vim9script\nlegacy let true = 0\nlegacy let first = glob('*', 0, true)\necho glob('*', 0, true)\nlegacy let second = glob('*', 0, true)\n",
+			expressions: func(file *syntax.File) []*syntax.Expression {
+				return []*syntax.Expression{file.Commands[2].Declaration.Initializer, file.Commands[3].Expressions[0], file.Commands[4].Declaration.Initializer}
+			},
+			want: []string{"", "list", ""},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			query := NewCompletionTypes(CollectCompletionFacts(file))
+			for index, expression := range test.expressions(file) {
+				if expression == nil {
+					t.Fatalf("missing expression %d", index)
+				}
+				if typ := query.TypeOf(expression, expression.Span.Start); typ.Name != test.want[index] {
+					t.Fatalf("expression %d type = %#v, want %q", index, typ, test.want[index])
+				}
+			}
+			if typ := query.TypeOf(nil, 0); !isUnknownType(typ) {
+				t.Fatalf("nil type = %#v", typ)
+			}
+		})
+	}
+}
+
 func TestCompletionTypesRefineGuardedQueriesWithoutChangingDeclarations(t *testing.T) {
 	file := syntax.Parse("vim9script\ndef F(x: any)\n  if type(x) == v:t_string\n    var y = x\n    y = 1\n  endif\nenddef\n")
 	facts := CollectCompletionFacts(file)

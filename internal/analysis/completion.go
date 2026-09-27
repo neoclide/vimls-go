@@ -70,8 +70,11 @@ func NewCompletionTypes(facts *FileAnalysis) *CompletionTypes {
 	view := *facts
 	view.expressionTypes = make(map[*syntax.Expression]ValueType)
 	query.state = &typeState{
-		result: &view, completion: query, commandScopes: facts.commandScopes,
-		references: make(map[syntax.Span]*Reference),
+		result:         &view,
+		currentDialect: facts.File.Dialect,
+		completion:     query,
+		commandScopes:  facts.commandScopes,
+		references:     make(map[syntax.Span]*Reference),
 	}
 	for _, reference := range facts.References {
 		query.state.references[reference.Span] = reference
@@ -137,6 +140,11 @@ func (query *CompletionTypes) DeclarationType(declaration *Declaration) ValueTyp
 	}
 	state := query.state
 	command := source.command
+	if command != nil {
+		previousDialect := state.currentDialect
+		state.currentDialect = command.Dialect
+		defer func() { state.currentDialect = previousDialect }()
+	}
 	switch {
 	case source.parameter != nil:
 		typ = state.infer(source.parameter.Default, declaration.Scope)
@@ -177,6 +185,11 @@ func (query *CompletionTypes) TypeOf(expression *syntax.Expression, offset int) 
 	if query.state == nil {
 		return UnknownValueType
 	}
+	if expression != nil {
+		previousDialect := query.state.currentDialect
+		query.state.currentDialect = query.completionExpressionDialect(expression)
+		defer func() { query.state.currentDialect = previousDialect }()
+	}
 	identifier := unwrapParenthesizedExpression(expression)
 	if identifier != nil && identifier.Kind == syntax.ExpressionIdentifier {
 		offset = identifier.Span.Start
@@ -187,7 +200,7 @@ func (query *CompletionTypes) TypeOf(expression *syntax.Expression, offset int) 
 			scope = candidate
 		}
 	}
-	if identifier != nil && identifier.Kind == syntax.ExpressionIdentifier && query.completionExpressionDialect(identifier) == syntax.Vim9 {
+	if identifier != nil && identifier.Kind == syntax.ExpressionIdentifier && query.state.currentDialect == syntax.Vim9 {
 		if declaration := resolve(scope, identifier.Value, identifier.Span.Start, false, nil); declaration != nil {
 			ordinary := query.DeclarationType(declaration)
 			if guarded, ok := query.guardedCompletionType(declaration, scope, identifier.Span.Start, ordinary); ok {

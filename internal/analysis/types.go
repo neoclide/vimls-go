@@ -66,14 +66,15 @@ func (analysis *FileAnalysis) TypeOf(expression *syntax.Expression) ValueType {
 }
 
 type typeState struct {
-	importedTypes map[StaticType]ValueType
-	result        *FileAnalysis
-	declarations  map[syntax.Span]*Declaration
-	explicitTypes map[syntax.Span]bool
-	references    map[syntax.Span]*Reference
-	commandScopes map[*syntax.Command]*Scope
-	commandBodies []syntax.Span
-	completion    *CompletionTypes
+	importedTypes  map[StaticType]ValueType
+	result         *FileAnalysis
+	currentDialect syntax.Dialect
+	declarations   map[syntax.Span]*Declaration
+	explicitTypes  map[syntax.Span]bool
+	references     map[syntax.Span]*Reference
+	commandScopes  map[*syntax.Command]*Scope
+	commandBodies  []syntax.Span
+	completion     *CompletionTypes
 }
 
 func inferTypes(result *FileAnalysis) {
@@ -198,11 +199,12 @@ func addNominalParents(typ *ValueType, parents map[NominalType][]NominalType, in
 func newTypeState(result *FileAnalysis) *typeState {
 	result.expressionTypes = make(map[*syntax.Expression]ValueType)
 	state := &typeState{
-		result:        result,
-		declarations:  make(map[syntax.Span]*Declaration),
-		explicitTypes: make(map[syntax.Span]bool),
-		references:    make(map[syntax.Span]*Reference),
-		commandScopes: result.commandScopes,
+		result:         result,
+		currentDialect: result.File.Dialect,
+		declarations:   make(map[syntax.Span]*Declaration),
+		explicitTypes:  make(map[syntax.Span]bool),
+		references:     make(map[syntax.Span]*Reference),
+		commandScopes:  result.commandScopes,
 	}
 	state.collectNamedTypes(result.File.Commands)
 	state.collectUserCommandBodies(result.File.Commands, result.File.Blocks)
@@ -408,6 +410,8 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 			return
 		}
 		command := &commands[index]
+		previousDialect := state.currentDialect
+		state.currentDialect = command.Dialect
 		scope := state.commandScopes[command]
 		if scope == nil {
 			scope = state.result.Root
@@ -482,6 +486,7 @@ func (state *typeState) walkCommandList(commands []syntax.Command) {
 			state.walkLambdaExpression(value.Initializer)
 			state.walkLambdaExpressions(value.Arguments)
 		}
+		state.currentDialect = previousDialect
 	}
 }
 
@@ -554,7 +559,10 @@ func (state *typeState) inferFunctionReturn(commands []syntax.Command, index int
 			hasValueReturn = true
 			current := ValueType{Name: "number"} // Legacy bare return yields zero.
 			if len(body.Expressions) > 0 {
+				previousDialect := state.currentDialect
+				state.currentDialect = body.Dialect
 				current = state.infer(body.Expressions[0], state.commandScopes[body])
+				state.currentDialect = previousDialect
 			}
 			if isUnresolvedType(inferred) {
 				current.imported = current.imported || inferred.imported
@@ -747,7 +755,7 @@ func (state *typeState) infer(expression *syntax.Expression, scope *Scope) Value
 				for _, argument := range arguments {
 					argumentTypes = append(argumentTypes, state.result.TypeOf(argument))
 				}
-				typ = builtinReturnValueType(builtin, argumentTypes, arguments)
+				typ = builtinReturnValueType(builtin, argumentTypes, arguments, state.currentDialect)
 			} else if callee.Name == "func" && callee.Return != nil {
 				typ = *callee.Return
 			} else {
@@ -1182,15 +1190,15 @@ func optionAcceptsCompatibleType(name string, typ ValueType) bool {
 		(typ.Name == builtinOptionValueType(compat.Vim).Name || typ.Name == builtinOptionValueType(compat.Variant).Name)
 }
 
-func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType, expressions []*syntax.Expression) ValueType {
+func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType, expressions []*syntax.Expression, dialect syntax.Dialect) ValueType {
 	// Literal flags refine Vim v9.2.1132's broad string-or-any helpers.
 	switch function.Name {
 	case "expand", "glob":
-		return stringOrListReturnType(expressions, 2)
+		return stringOrListReturnType(dialect, expressions, 2)
 	case "submatch":
-		return stringOrListReturnType(expressions, 1)
+		return stringOrListReturnType(dialect, expressions, 1)
 	case "globpath":
-		return stringOrListReturnType(expressions, 3)
+		return stringOrListReturnType(dialect, expressions, 3)
 	}
 	switch function.ReturnHelper {
 	case "ret_abs":
@@ -1303,7 +1311,7 @@ func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueT
 // stringOrListReturnType handles builtins whose optional boolean selects a
 // list<string>.  A dynamic flag changes the result at runtime, so it cannot
 // safely retain either concrete return type.
-func stringOrListReturnType(expressions []*syntax.Expression, flagIndex int) ValueType {
+func stringOrListReturnType(dialect syntax.Dialect, expressions []*syntax.Expression, flagIndex int) ValueType {
 	if len(expressions) <= flagIndex {
 		return ValueType{Name: "string"}
 	}
@@ -1314,10 +1322,18 @@ func stringOrListReturnType(expressions []*syntax.Expression, flagIndex int) Val
 	value, known := staticNumberValue(flag)
 	if flag != nil && flag.Kind == syntax.ExpressionIdentifier {
 		switch flag.Value {
-		case "true", "v:true":
+		case "v:true":
 			value, known = 1, true
-		case "false", "v:false":
+		case "v:false":
 			value, known = 0, true
+		case "true":
+			if dialect == syntax.Vim9 {
+				value, known = 1, true
+			}
+		case "false":
+			if dialect == syntax.Vim9 {
+				value, known = 0, true
+			}
 		}
 	}
 	if !known {

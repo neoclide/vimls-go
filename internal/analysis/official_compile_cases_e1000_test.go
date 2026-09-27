@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestVim921130StringOnlyAssignments(t *testing.T) {
 				}
 			})
 		}
-		for _, source := range []string{"@# = bufnr()", "[@#, @a] = [bufnr(), 'ok']", "$XSTRING_ONLY = 'ok'", "@a ..= 'ok'", "v:errmsg ..= 'ok'", "$XSTRING_ONLY = g:unknown", "@a ..= g:unknown"} {
+		for _, source := range []string{"@# = bufnr()", "[@#, @a] = [bufnr(), 'ok']", "$XSTRING_ONLY = 'ok'", "@a ..= 'ok'", "v:errmsg ..= 'ok'", "$XSTRING_ONLY = g:unknown", "@a ..= g:unknown", "[@@, @a] = ['ok', 'ok']"} {
 			t.Run(context.name+"/valid/"+source, func(t *testing.T) {
 				file := syntax.Parse(context.prefix + source + context.suffix)
 				if diagnostics := CombinedDiagnostics(file, Analyze(file)); len(diagnostics) != 0 {
@@ -52,6 +53,62 @@ func TestVim921130StringOnlyAssignments(t *testing.T) {
 				}
 			})
 		}
+		for _, source := range []string{"[@%] = ['ok']", "[@.] = ['ok']", "[@:] = ['ok']", "[@~] = ['ok']", "[@%, @a] = ['ok', 'ok']"} {
+			t.Run(context.name+"/readonly_register/"+source, func(t *testing.T) {
+				file := syntax.Parse(context.prefix + source + context.suffix)
+				diagnostics := CombinedDiagnostics(file, Analyze(file))
+				if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E354" || file.Text(diagnostics[0].Span) != source[2:3] {
+					t.Fatalf("source %q diagnostics = %#v, want E354", source, diagnostics)
+				}
+			})
+		}
+		wantCode := "vim/E1012"
+		if context.name == "def" {
+			wantCode = "vim/E354"
+		}
+		t.Run(context.name+"/readonly_register/type_mismatch", func(t *testing.T) {
+			file := syntax.Parse(context.prefix + "[@%] = [1]" + context.suffix)
+			before := append([]syntax.Diagnostic(nil), file.Diagnostics...)
+			diagnostics := CombinedDiagnostics(file, Analyze(file))
+			if !reflect.DeepEqual(file.Diagnostics, before) {
+				t.Fatalf("syntax diagnostics mutated: %#v, want %#v", file.Diagnostics, before)
+			}
+			if len(diagnostics) != 1 || diagnostics[0].Code != wantCode {
+				t.Fatalf("diagnostics = %#v, want one %s", diagnostics, wantCode)
+			}
+			span := "%"
+			if wantCode == "vim/E1012" {
+				span = "1"
+			}
+			if file.Text(diagnostics[0].Span) != span {
+				t.Fatalf("diagnostic span = %q, want %q", file.Text(diagnostics[0].Span), span)
+			}
+		})
+		t.Run(context.name+"/readonly_register/unknown_value", func(t *testing.T) {
+			file := syntax.Parse(context.prefix + "[@%] = [g:unknown]" + context.suffix)
+			diagnostics := CombinedDiagnostics(file, Analyze(file))
+			if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E354" || file.Text(diagnostics[0].Span) != "%" {
+				t.Fatalf("diagnostics = %#v, want E354 on %%", diagnostics)
+			}
+		})
+		t.Run(context.name+"/readonly_register/known_list_value", func(t *testing.T) {
+			source := context.prefix + "var values = [1]\n[@%] = values" + context.suffix
+			if context.name == "vim9cmd" {
+				source = "vim9cmd var values = [1]\nvim9cmd [@%] = values\n"
+			}
+			file := syntax.Parse(source)
+			diagnostics := CombinedDiagnostics(file, Analyze(file))
+			if len(diagnostics) != 1 || diagnostics[0].Code != wantCode {
+				t.Fatalf("diagnostics = %#v, want one %s", diagnostics, wantCode)
+			}
+			span := "%"
+			if wantCode == "vim/E1012" {
+				span = "values"
+			}
+			if file.Text(diagnostics[0].Span) != span {
+				t.Fatalf("diagnostic span = %q, want %q", file.Text(diagnostics[0].Span), span)
+			}
+		})
 	}
 	for _, prefix := range []string{"let ", "vim9script\nlegacy let ", "vim9script\ndef Check()\nlegacy let "} {
 		for _, assignment := range []string{"$XSTRING_ONLY = 123", "@a = 456", "v:errmsg = 789", "[$XSTRING_ONLY, @a] = [1, 2]"} {
