@@ -585,17 +585,9 @@ func TestCodeActionRepairsStyleDiagnostics(t *testing.T) {
 		},
 		{
 			name:        "command bang",
-			source:      "command MyCmd echo 1\n",
+			source:      "command MyCmd echo 1\ncommand MyCmd echo 2\n",
 			code:        "vim/E174",
-			diagnostic:  navigationRange(0, 8, 13),
-			wantTitles:  []string{"Use :command!"},
-			wantNewText: []string{"!"},
-		},
-		{
-			name:        "embedded command bang",
-			source:      "command! Outer command Inner echo 1\n",
-			code:        "vim/E174",
-			diagnostic:  navigationRange(0, 23, 28),
+			diagnostic:  navigationRange(1, 8, 13),
 			wantTitles:  []string{"Use :command!"},
 			wantNewText: []string{"!"},
 		},
@@ -815,6 +807,18 @@ func TestCodeActionRejectsStaleDiagnostics(t *testing.T) {
 		name, source, code string
 		diagnostic         protocol.Range
 	}{
+		{
+			name:       "single user command definition",
+			source:     "command MyCmd echo 1\n",
+			code:       "vim/E174",
+			diagnostic: navigationRange(0, 8, 13),
+		},
+		{
+			name:       "deferred user command definition",
+			source:     "command! Outer command Inner echo 1\n",
+			code:       "vim/E174",
+			diagnostic: navigationRange(0, 23, 28),
+		},
 		{
 			name:       "syntax diagnostic",
 			source:     "echo 1\n",
