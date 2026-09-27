@@ -1540,4 +1540,8 @@ func TestVim9ExpressionNameIsIndependentFromExCommandName(t *testing.T) {
 			t.Fatalf("command %d = %#v", index, file.Commands[index])
 		}
 	}
+	attached := (Vim9Parser{}).Parse("vim9script\ns_before_after_ | echo 'after'\n")
+	if len(attached.Diagnostics) != 0 || len(attached.Commands) != 3 || attached.Commands[1].Canonical != "substitute" || attached.Text(attached.Commands[1].Argument) != "_before_after_" {
+		t.Fatalf("attached delimiter: commands = %#v, diagnostics = %#v", attached.Commands, attached.Diagnostics)
+	}
 }

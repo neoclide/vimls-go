@@ -7,6 +7,32 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 )
 
+// Vim v9.2.1132 src/testdir/test_vim9_script.vim
+// Test_white_space_after_command(), changed by patch v9.2.1094.
+func TestVim921094UnderscoreCommands(t *testing.T) {
+	for _, context := range []struct{ name, prefix, suffix, code string }{
+		{"script", "vim9script\n", "\necho 'after'\n", "vim/E492"},
+		{"def", "vim9script\ndef Check()\n", "\necho 'after'\nenddef\n", "vim/E476"},
+	} {
+		for _, source := range []string{"ch_log", "ch_log \"message\"", "echo_x", "Foo_bar", "exit_cb: Func})"} {
+			t.Run(context.name+"/"+source, func(t *testing.T) {
+				file := syntax.Parse(context.prefix + source + context.suffix)
+				diagnostics := CombinedDiagnostics(file, Analyze(file))
+				if len(diagnostics) != 1 || diagnostics[0].Code != context.code || file.Text(diagnostics[0].Span) != source {
+					t.Fatalf("diagnostics = %#v", diagnostics)
+				}
+				index := len(file.Commands) - 1
+				if context.name == "def" {
+					index--
+				}
+				if file.Commands[index].Canonical != "echo" {
+					t.Fatalf("following command = %#v", file.Commands[index])
+				}
+			})
+		}
+	}
+}
+
 func TestOfficialVimCompileCasesE0000(t *testing.T) {
 	cases := []struct {
 		ID     string

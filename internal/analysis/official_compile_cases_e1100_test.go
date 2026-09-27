@@ -852,18 +852,6 @@ enddef
 defcompile
 `,
 		},
-		// Vim: src/testdir/test_vim9_script.vim:4795:107577
-		{
-			ID:   "src/testdir/test_vim9_script.vim:4795:107577/def",
-			Code: "vim/E1144",
-			Source: `def Func()
-# comment
-exit_cb: Func})
-#comment
-enddef
-defcompile
-`,
-		},
 		// Vim: src/testdir/test_vim9_script.vim:4800:107662
 		{
 			ID:   "src/testdir/test_vim9_script.vim:4800:107662/def",
@@ -874,14 +862,6 @@ e#
 #comment
 enddef
 defcompile
-`,
-		},
-		// Vim: src/testdir/test_vim9_script.vim:4795:107577
-		{
-			ID:   "src/testdir/test_vim9_script.vim:4795:107577/vim9-script",
-			Code: "vim/E1144",
-			Source: `vim9script
-exit_cb: Func})
 `,
 		},
 		// Vim: src/testdir/test_vim9_script.vim:4800:107662

@@ -14,6 +14,8 @@ v9.2.1015, with these targeted updates checked against v9.2.1132:
   registers and writable string `v:` variables require strings for `=` and
   `..=`, including destructuring. Plain `@# = number` remains valid. Legacy
   conversions are retained.
+- Invalid Vim9 command names containing underscores follow patch 1094: E492
+  at script level and E476 inside `def`.
 
 Other metadata records its own source revision.
 

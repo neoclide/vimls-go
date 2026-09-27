@@ -53,7 +53,8 @@ version can describe different rules.
 Vim9 environment variables, registers and writable string `v:` variables require
 string values for plain and concatenating assignments. Known incompatible types
 report E1012, including in destructuring assignments; `@# = bufnr()` is allowed.
-Legacy assignments retain their conversions.
+Legacy assignments retain their conversions. Invalid Vim9 command names such
+as `ch_log` report E492 at script level and E476 inside `def`.
 
 Builtin return-value inference also uses the corrections recorded in Vim
 v9.2.1104, checked against v9.2.1132, for functions already in the pinned metadata.

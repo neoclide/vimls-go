@@ -154,7 +154,8 @@ func TestOfficialVimParserCases(t *testing.T) {
 func officialParserExpectedFailures() map[string]string {
 	// These failures are statically decided by the v9.2.1015 parser. Keep
 	// execution, type-checking, and other unclassified failures out of this
-	// allowlist until their parser phase is proven independently.
+	// allowlist until their parser phase is proven independently. The archived
+	// exit_cb source is unchanged; patch v9.2.1094 changed its error code.
 	return map[string]string{
 		"src/testdir/test_vim9_func.vim:99:2271/script":            "vim/E1267",
 		"src/testdir/test_vim9_func.vim:107:2406/script":           "vim/E1267",
@@ -181,8 +182,8 @@ func officialParserExpectedFailures() map[string]string {
 		"src/testdir/test_vim9_cmd.vim:1904:39418/def":             "vim/E488",
 		"src/testdir/test_vim9_cmd.vim:472:10765/def":              "vim/E488",
 		"src/testdir/test_vim9_cmd.vim:472:10765/vim9-script":      "vim/E488",
-		"src/testdir/test_vim9_script.vim:4795:107577/def":         "vim/E1144",
-		"src/testdir/test_vim9_script.vim:4795:107577/vim9-script": "vim/E1144",
+		"src/testdir/test_vim9_script.vim:4795:107577/def":         "vim/E476",
+		"src/testdir/test_vim9_script.vim:4795:107577/vim9-script": "vim/E492",
 		"src/testdir/test_vim9_import.vim:3151:77235/script":       "vim/E461",
 		"src/testdir/test_vim9_script.vim:3131:66338/def":          "vim/E461",
 		"src/testdir/test_vim9_script.vim:3139:66506/def":          "vim/E461",

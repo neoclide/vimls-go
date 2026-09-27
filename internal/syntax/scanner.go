@@ -649,7 +649,8 @@ func diagnoseInvalidCommand(file *File, command *Command) {
 	invalid := command.Dialect == Legacy && command.Kind == CommandUnknown && len(command.TypedName) > 0 &&
 		command.TypedName[0] >= 'a' && command.TypedName[0] <= 'z'
 	if command.Dialect == Vim9 && (command.Kind == CommandUnknown && command.TypedName == "ka" ||
-		command.Kind == CommandBuiltin && command.Canonical == "mode") {
+		command.Kind == CommandBuiltin && command.Canonical == "mode" ||
+		(command.Kind == CommandUnknown || command.Kind == CommandUser) && strings.Contains(command.TypedName, "_")) {
 		invalid = true
 	}
 	if !invalid {
@@ -1413,6 +1414,17 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		}
 		typedName := file.Source[nameStart:nameEnd]
 		metadata, builtIn := vimdata.Lookup(":" + typedName)
+		// Since Vim 9.2.1094, ch_log is an invalid command rather than :change
+		// with an attached argument. Commands that allow attached arguments
+		// still own the underscore (e.g. the delimiter in :s_before_after_).
+		underscoreCommand := dialect == Vim9 && nameEnd < end && file.Source[nameEnd] == '_' &&
+			metadata.Flags&vimdata.AllowNonWhite == 0 &&
+			!(builtIn && metadata.Flags&vimdata.ExactInVim9 != 0 && typedName != metadata.Name)
+		if underscoreCommand {
+			nameEnd = scanWord(file.Source, nameStart, end)
+			typedName = file.Source[nameStart:nameEnd]
+			metadata, builtIn = vimdata.Command{}, false
+		}
 		// Legacy Vim recognizes a deliberately narrow set of alphabetic bytes
 		// after the one-byte :s command before it performs normal command lookup.
 		// This is what makes :sge2 a repeat command without turning an unknown
@@ -1450,11 +1462,8 @@ func scanCommandsWithContext(file *File, start, end int, baseDialect Dialect, di
 		}
 		if !builtIn || expressionNameEnd > nameEnd {
 			nameExpression = looksLikeVim9Expression(file.Source, expressionNameEnd, end)
-			// A colon after an identifier that extends a built-in command name is
-			// not a standalone typed declaration.  Vim falls back to the Ex
-			// command boundary and requires whitespace after that command, e.g.
-			// "exit_cb: Func})" is :exit followed by an attached argument.
-			if builtIn && expressionNameEnd > nameEnd && expressionNameEnd < end && file.Source[expressionNameEnd] == ':' {
+			// A colon does not make exit_cb: Func}) a typed declaration.
+			if (underscoreCommand || builtIn && expressionNameEnd > nameEnd) && expressionNameEnd < end && file.Source[expressionNameEnd] == ':' {
 				nameExpression = false
 			}
 		} else if !malformedDeclaration {
