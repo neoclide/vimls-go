@@ -58,6 +58,45 @@ func TestDocumentLinkReturnsOnlyStaticResolvedFiles(t *testing.T) {
 	}
 }
 
+func TestDocumentLinkSourceDryrun(t *testing.T) {
+	for _, header := range []string{"\" Legacy", "vim9script"} {
+		t.Run(header, func(t *testing.T) {
+			root := t.TempDir()
+			targetPath := writeWorkspaceFile(t, root, "𐐀 name.vim", "vim9script\n")
+			source := header + "\r\n" +
+				"source ++dryrun ./𐐀\\ name.vim | echo 'after'\r\n" +
+				"source ++dryrun\r\n" +
+				"  \\ ./𐐀\\ name.vim\r\n" +
+				"source ++dryrun\r\n" +
+				"source ++dryrun $DYNAMIC\r\n" +
+				"source ++dryrunx ./𐐀\\ name.vim\r\n" +
+				"autocmd BufRead *.vim {\r\n" +
+				"  source ++dryrun ./𐐀\\ name.vim\r\n" +
+				"}\r\n"
+			mainPath := writeWorkspaceFile(t, root, "main.vim", source)
+			instance := initializeWorkspaceServer(t, root)
+			documentURI := uri.File(mainPath)
+			instance.documents.Open(documentURI.String(), 1, source)
+			links, err := instance.DocumentLink(context.Background(), &protocol.DocumentLinkParams{TextDocument: protocol.TextDocumentIdentifier{URI: documentURI}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			realpath, err := filepath.EvalSymlinks(targetPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(links) != 3 {
+				t.Fatalf("links = %#v", links)
+			}
+			for index, want := range []protocol.Range{navigationRange(1, 16, 30), navigationRange(3, 4, 18), navigationRange(8, 18, 32)} {
+				if links[index].Target == nil || *links[index].Target != uri.File(realpath) || links[index].Range != want {
+					t.Errorf("link %d = %#v, want range %#v", index, links[index], want)
+				}
+			}
+		})
+	}
+}
+
 func TestDeprecatedVim9DeclarationsReachLanguageFeatures(t *testing.T) {
 	source := "vim9script\n# deprecated use NewValue\nvar OldValue = 1\n# @DEPRECATED use NewFunc\ndef OldFunc()\nenddef\necho OldValue\n"
 	instance, documentURI := openNavigationDocument(t, text.UTF16, source)

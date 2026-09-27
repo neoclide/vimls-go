@@ -1827,6 +1827,7 @@ func (s *lambdaRebaseState) command(command *Command, source string, offset int)
 	command.Bang = shiftLambdaOptionalSpan(command.Bang, offset)
 	command.Count = shiftLambdaOptionalSpan(command.Count, offset)
 	command.Argument = shiftLambdaSpan(command.Argument, offset)
+	command.SourcePath = shiftLambdaOptionalSpan(command.SourcePath, offset)
 	for index := range command.Modifiers {
 		modifier := &command.Modifiers[index]
 		modifier.Span = shiftLambdaSpan(modifier.Span, offset)

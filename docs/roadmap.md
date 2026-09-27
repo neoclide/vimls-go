@@ -15,7 +15,7 @@ v9.2.1132. The reviewed `fillchars` helper fingerprint includes the v9.2.1119
 default vertical separator change; static option validation rules are unchanged.
 The general grammar and Vim oracle suite remain based on v9.2.1015. Targeted
 v9.2.1132 compatibility now covers builtin return helpers, string-only
-assignment targets and underscore command errors. Broader
+assignment targets, underscore command errors and `source ++dryrun` file links. Broader
 grammar migration remains separate; see the [support guide](language-support.md).
 
 Option diagnostics now include feature-gated options, treating known options as

@@ -16,6 +16,8 @@ v9.2.1015, with these targeted updates checked against v9.2.1132:
   conversions are retained.
 - Invalid Vim9 command names containing underscores follow patch 1094: E492
   at script level and E476 inside `def`.
+- `source ++dryrun` (patch 1084) links the filename without including the
+  option. Filename escapes and continuation spans are preserved.
 
 Other metadata records its own source revision.
 

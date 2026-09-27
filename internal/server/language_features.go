@@ -81,11 +81,12 @@ func (s *Server) DocumentLink(ctx context.Context, params *protocol.DocumentLink
 					}
 					span, target = command.Import.PathSpan, resolution.Path
 				case command.Canonical == "source":
-					resolution := state.resolver.ResolveSource(path, file.Text(command.Argument))
+					span = command.SourcePath
+					resolution := state.resolver.ResolveSource(path, file.Text(span))
 					if resolution.Dynamic || resolution.Path == "" {
 						return
 					}
-					span, target = command.Argument, resolution.Path
+					target = resolution.Path
 				default:
 					return
 				}

@@ -641,6 +641,40 @@ func TestOfficialRangesExplicitContinuationAndExpressionQuotes(t *testing.T) {
 	}
 }
 
+func TestSourceDryrunPathSpan(t *testing.T) {
+	for _, prefix := range []string{"", "vim9script\n"} {
+		for _, test := range []struct{ argument, path string }{
+			{"++dryrun ./target.vim", "./target.vim"},
+			{"++dryrun  \tpath\\ with\\ spaces.vim | echo 'after'", "path\\ with\\ spaces.vim"},
+			{"++dryrun", ""},
+			{"++dryrun   ", ""},
+			{"++dryrunx ./target.vim", "++dryrunx ./target.vim"},
+			{"++dryrun\t./target.vim", "++dryrun\t./target.vim"},
+			{"./++dryrun", "./++dryrun"},
+			{"++dryrun\n  \\ ./target.vim", "./target.vim"},
+		} {
+			source := prefix + "source " + test.argument + "\n"
+			file := Parse(source)
+			for index := range file.Commands {
+				command := &file.Commands[index]
+				if command.Canonical == "source" {
+					span := command.SourcePath
+					if got := file.Text(span); got != test.path || span.Start < command.Argument.Start || span.End > command.Argument.End {
+						t.Errorf("%q path = %q, span = %#v, want %q", source, got, span, test.path)
+					}
+				}
+			}
+			if len(file.Diagnostics) != 0 {
+				t.Errorf("%q diagnostics = %#v", source, file.Diagnostics)
+			}
+		}
+	}
+	malformed := Parse("vim9script\nsource ++dryrun `=filename\n")
+	if len(malformed.Diagnostics) != 1 || malformed.Diagnostics[0].Code != "vim/E1083" {
+		t.Fatalf("malformed filename diagnostics = %#v", malformed.Diagnostics)
+	}
+}
+
 func TestSourceUsesExFilenameGrammar(t *testing.T) {
 	legacy := Parse("source foo\"comment\nsource 'part|echo done\nsource trailing\\ \n")
 	if len(legacy.Commands) != 4 {

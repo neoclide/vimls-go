@@ -2885,6 +2885,19 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 			}
 		}
 	}
+	if command.Canonical == "source" {
+		command.SourcePath = command.Argument
+		// cmd_source() recognizes ++dryrun only before a space or the end.
+		// Keep the original filename span for navigation, including continuations.
+		const option = "++dryrun"
+		if strings.HasPrefix(file.Text(command.Argument), option) {
+			end := command.Argument.Start + len(option)
+			if end == command.Argument.End || file.Source[end] == ' ' {
+				command.SourcePath.Start = skipSpace(file.Source, end, command.Argument.End)
+			}
+		}
+		return
+	}
 	if command.Argument.Start >= command.Argument.End {
 		if command.Dialect == Vim9 && command.Canonical == "type" {
 			file.Diagnostics = append(file.Diagnostics, Diagnostic{

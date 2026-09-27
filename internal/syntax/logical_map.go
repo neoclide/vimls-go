@@ -72,6 +72,7 @@ func parseLogicalCommandDetails(file *File, command *Command) {
 	command.Expressions = temporaryCommand.Expressions
 	command.Targets = temporaryCommand.Targets
 	command.Count = temporaryCommand.Count
+	command.SourcePath = temporaryCommand.SourcePath
 	command.Function = temporaryCommand.Function
 	command.Aggregate = temporaryCommand.Aggregate
 	command.TypeAlias = temporaryCommand.TypeAlias
@@ -101,6 +102,7 @@ func (mapper *logicalSpanMapper) commandDetails(command *Command) {
 	if command == nil {
 		return
 	}
+	command.SourcePath = mapper.optional(command.SourcePath)
 	command.Augroup = mapper.optional(command.Augroup)
 	if definition := command.UserCommand; definition != nil {
 		definition.Name = mapper.optional(definition.Name)

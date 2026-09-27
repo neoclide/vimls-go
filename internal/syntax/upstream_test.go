@@ -30,6 +30,7 @@ func assertFileSpansAt(t *testing.T, file *File, origin string) {
 		check("command bang", command.Bang)
 		check("command count", command.Count)
 		check("command argument", command.Argument)
+		check("source path", command.SourcePath)
 		for _, modifier := range command.Modifiers {
 			check("modifier", modifier.Span)
 			check("modifier bang", modifier.Bang)
