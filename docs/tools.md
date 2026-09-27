@@ -187,9 +187,10 @@ Builds the official parser corpus from the
 and refuses a checkout whose tag resolves to another commit.
 
 The reviewed parser-file manifest selected from the current pin determines
-parser migration files. The generator writes four deterministic gzip artifacts:
-parser corpus, full test files, helper inventory and parser cases. The current
-`<tag>-corpus-lock.json` records their reviewed source-derived totals and the
+parser migration files. The generator writes four gzip artifacts reproducibly
+for a given Go toolchain: parser corpus, full test files, helper inventory and
+parser cases. The current `<tag>-corpus-lock.json` records their reviewed
+source-derived totals and the
 typed-manifest SHA-256. Parser cases carry the SHA-256 of `json.Marshal` on the
 typed manifest, rather than a hash of its raw file bytes.
 
@@ -203,7 +204,7 @@ typed manifest, rather than a hash of its raw file bytes.
 | `-rebase-from <file.gz>` | `""` | Historical parser-case artifact for assertion-ID migration. |
 | `-rebase-to <file.gz>` | `""` | New parser-case artifact for assertion-ID migration. |
 | `-rebase-assertions <file.go>` | `internal/syntax/official_parser_cases_test.go` | Go source containing the assertion map. |
-| `-rebase-output <file.go>` | `""` | Explicit path for a fully resolved formatted preview. |
+| `-rebase-output <file.go>` | `""` | Explicit path for a fully resolved preview. |
 | `-rebase-review OLD_ID=NEW_ID` | none | Manually reviewed mapping; may be repeated. |
 
 ```sh
@@ -212,9 +213,11 @@ make official-refresh VIM_SOURCE=/path/to/vim
 make official-check VIM_SOURCE=/path/to/vim
 ```
 
-`official-check` regenerates into a temporary directory and compares all four
-artifacts. The v9.2.1015 corpus remains archived, and handwritten compile
-regressions keep their original provenance. See
+`official-check` regenerates into a temporary directory and compares the
+decompressed bytes of all four artifacts. This accepts Go-version gzip encoding
+differences while rejecting corrupt streams and content changes. The v9.2.1015
+corpus remains archived, and handwritten compile regressions keep their
+original provenance. See
 [the official corpus guide](../testdata/official/README.md) for its full
 maintenance rules. During a deliberate source update, review a candidate with
 `go run ./tools/genofficial -vim-root /path/to/vim -print-lock`; ordinary
@@ -224,7 +227,8 @@ generation verifies the reviewed lock and never updates it.
 the full upstream case identity (including source and error argument), reports
 ambiguous or changed cases, and exits nonzero without writing a preview until
 every assertion is resolved. `-rebase-output` is never implied; review that
-explicit preview before applying it to the assertion source.
+explicit preview before applying it to the assertion source. When every ID is
+unchanged, the preview preserves the original assertion bytes.
 
 ### `tools/vimsource`
 

@@ -52,12 +52,14 @@ reviewed corpus lock. The generator compares the complete computed inventory to
 that lock before writing artifacts. `-print-lock` prints a deterministic
 candidate lock to standard output without writing artifacts or a lock file; use
 it only while reviewing a deliberate source update. The generator writes
-deterministic gzip streams; their timestamp is zero and their OS byte is 255.
+deterministic gzip streams with the same Go toolchain; their timestamp is zero
+and their OS byte is 255.
 Every selected helper call must produce a case or keep an explicit skip reason.
 `make official-refresh VIM_SOURCE=/path/to/vim` refreshes the current files.
 `make official-check VIM_SOURCE=/path/to/vim` regenerates them in a temporary
-directory and compares all four artifacts. It also rebuilds parser cases from
-the committed manifest, including its typed-manifest hash check.
+directory and compares the decompressed bytes of all four artifacts. It still
+fails for corrupt gzip streams or content differences, and rebuilds parser
+cases from the committed manifest, including its typed-manifest hash check.
 
 For parser assertion-ID migration between two parser-case artifacts, use the
 offline `-rebase-from`/`-rebase-to` report documented in

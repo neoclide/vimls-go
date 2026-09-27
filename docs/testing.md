@@ -183,7 +183,9 @@ test, so do not rerun those stages manually after it succeeds.
 
 `make official-refresh VIM_SOURCE=/path/to/vim` regenerates the current official
 Vim corpus. `make official-check` regenerates it into a temporary directory and
-compares the four generated artifacts. The v9.2.1015 corpus files remain
+compares the decompressed bytes of all four artifacts, so Go toolchain-specific
+gzip encoding does not affect the check; a corrupt gzip stream or content
+difference still fails. The v9.2.1015 corpus files remain
 historical archives, and handwritten compile regressions retain their recorded
 source provenance unless their own comment names a newer revision. The corpus
 checks recovery and range handling; it does not establish full Vim syntax

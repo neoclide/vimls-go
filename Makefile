@@ -70,7 +70,9 @@ official-check:
 	set -- "$$official_tmp"/*.json.gz; \
 	test "$$#" -eq 4; \
 	for artifact; do \
-		cmp "$$artifact" "testdata/official/$${artifact##*/}"; \
+		gzip -dc "$$artifact" > "$$official_tmp/generated.json"; \
+		gzip -dc "testdata/official/$${artifact##*/}" > "$$official_tmp/committed.json"; \
+		cmp "$$official_tmp/generated.json" "$$official_tmp/committed.json"; \
 	done
 
 eventdocs-refresh:
