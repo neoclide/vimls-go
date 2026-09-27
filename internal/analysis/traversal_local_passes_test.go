@@ -176,7 +176,7 @@ func TestNullReceiverAssignmentsUseLambdaAndEmbeddedScopes(t *testing.T) {
 }
 
 func TestOverwriteRiskDiagnosticsRetainPhaseOrderAndConfigSeverity(t *testing.T) {
-	file := syntax.Parse("command Outer command Nested echo 'value'\nfunction Legacy()\nendfunction\nfunction Other()\nendfunction\n")
+	file := syntax.Parse("command Outer echo 'one'\ncommand Outer echo 'two'\nfunction Legacy()\nendfunction\nfunction Other()\nendfunction\n")
 	if len(file.Diagnostics) != 0 {
 		t.Fatalf("parse diagnostics = %#v", file.Diagnostics)
 	}
@@ -189,7 +189,7 @@ func TestOverwriteRiskDiagnosticsRetainPhaseOrderAndConfigSeverity(t *testing.T)
 			t.Fatalf("diagnostic severity = %#v", diagnostic)
 		}
 	}
-	want := []string{"vim/E122", "vim/E122", "vim/E174", "vim/E174"}
+	want := []string{"vim/E122", "vim/E122", "vim/E174"}
 	if !reflect.DeepEqual(codes, want) {
 		t.Fatalf("diagnostic phase order = %#v, want %#v", codes, want)
 	}

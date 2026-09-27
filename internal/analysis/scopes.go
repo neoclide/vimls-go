@@ -566,9 +566,7 @@ func collectOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Com
 		s := syntax.DiagnosticHint
 		severity = &s
 	}
-	// E122 historically runs as a complete phase before E174. Keep E174 local
-	// until this shared walk is complete so that phase ordering remains intact.
-	var userCommandDiagnostics []syntax.Diagnostic
+	// E122 historically runs as a complete phase before E174.
 	var collect func([]syntax.Command)
 	collect = func(list []syntax.Command) {
 		for index := range list {
@@ -586,21 +584,55 @@ func collectOverwriteRiskDiagnostics(result *FileAnalysis, commands []syntax.Com
 					})
 				}
 			}
-			if command.Canonical == "command" && emptySyntaxSpan(command.Bang) {
-				if name, span, _, definition := syntax.DefinedUserCommand(result.File, command); definition {
-					userCommandDiagnostics = append(userCommandDiagnostics, syntax.Diagnostic{
-						Code: "vim/E174", Message: "Command " + name + " may already exist when this script is sourced again; add ! to replace it", Span: span,
-						Severity: severity,
-					})
-				}
-			}
 			if command.Embedded != nil {
 				collect(command.Embedded.Commands)
 			}
 		}
 	}
 	collect(commands)
-	result.Diagnostics = append(result.Diagnostics, userCommandDiagnostics...)
+
+	type userCommandKey struct {
+		name   string
+		buffer bool
+	}
+	defined := make(map[userCommandKey]bool)
+	for index := range commands {
+		if !result.analysisStep() {
+			return
+		}
+		command := &commands[index]
+		if !unconditionalAt(commands, result.File.Blocks, index) {
+			clear(defined)
+			continue
+		}
+		switch command.Canonical {
+		case "command":
+			name, span, buffer, ok := syntax.DefinedUserCommand(result.File, command)
+			if !ok {
+				clear(defined)
+				continue
+			}
+			key := userCommandKey{name: name, buffer: buffer}
+			if emptySyntaxSpan(command.Bang) && defined[key] {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E174", Message: "Command " + name + " may already exist in this source; add ! to replace it", Span: span,
+					Severity: severity,
+				})
+			}
+			defined[key] = true
+		case "delcommand":
+			arguments := strings.Fields(result.File.Text(command.Argument))
+			if len(arguments) == 1 {
+				delete(defined, userCommandKey{name: arguments[0]})
+			} else if len(arguments) == 2 && arguments[0] == "-buffer" {
+				delete(defined, userCommandKey{name: arguments[1], buffer: true})
+			} else {
+				clear(defined)
+			}
+		default:
+			clear(defined)
+		}
+	}
 }
 
 // unconditionalAt reports whether the command at index in list runs

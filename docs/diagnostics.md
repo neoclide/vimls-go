@@ -30,6 +30,9 @@ These are defaults. Your settings and the file's
 Vim errors use codes such as `vim/E117`. Server-specific suggestions use names
 such as `vimls/unused-variable`. Use the complete code when configuring them.
 
+`vim/E174` checks statically repeated user-command definitions without `!`.
+A single definition is safe to reload from the same script and receives no hint.
+
 ## Common problems
 
 | Code | What to check |

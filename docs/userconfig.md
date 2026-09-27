@@ -36,7 +36,8 @@ Other suggestions are adjusted:
 | --- | --- |
 | A recursive mapping | A hint, since reusing other mappings may be intentional. |
 | `:set` at the top of a vimrc | No `set-vs-setlocal` warning. That warning is kept for buffer/window autocommands. |
-| `function` or `command` without `!` | A reload-safety hint, using `vim/E122` or `vim/E174`. |
+| `function` without `!` | A reload-safety hint, using `vim/E122`. |
+| A repeated user-command definition without `!` | `vim/E174` when the earlier definition is statically known; reloading the same script is allowed. |
 | An augroup that may accumulate commands on reload | `vimls/autocmd-group-not-cleared`. |
 | A mapping defined before its leader assignment | `vimls/config-mapleader-order`. |
 | A clearly repeated mapping in the same file | `vimls/duplicate-mapping`. |

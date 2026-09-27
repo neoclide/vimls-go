@@ -10921,19 +10921,33 @@ func TestAnalyzeE122LegacyFunctionOverwriteRiskWarning(t *testing.T) {
 	}
 }
 
-func TestAnalyzeE174UserCommandOverwriteRiskWarning(t *testing.T) {
+func TestAnalyzeE174DuplicateUserCommandWarning(t *testing.T) {
 	tests := []struct {
-		name, source, span string
-		want               int
+		name, source string
+		want         []string
 	}{
-		{"legacy definition", "command Build echo 'value'\n", "Build", 1},
-		{"Vim9 definition", "vim9script\ncommand Build echo 'value'\n", "Build", 1},
-		{"legacy block definition", "command Build {\n  var value = 1\n}\n", "Build", 1},
-		{"nested definition", "command Define command Nested echo 'value'\n", "Define", 2},
-		{"forced definition", "command! Build echo 'value'\n", "", 0},
-		{"list commands", "command\n", "", 0},
-		{"query command", "command Build\n", "", 0},
-		{"filtered list", "command -nargs=* Build\n", "", 0},
+		{"legacy definition", "command Build echo 'value'\n", nil},
+		{"Vim9 definition", "vim9script\ncommand Build echo 'value'\n", nil},
+		{"legacy block definition", "command Build {\n  var value = 1\n}\n", nil},
+		{"same source duplicate", "command Build echo 'value'\ncommand Build echo 'other'\n", []string{"Build"}},
+		{"forced singleton", "command! Build echo 'value'\n", nil},
+		{"forced second definition", "command Build echo 'value'\ncommand! Build echo 'other'\n", nil},
+		{"forced then unforced definition", "command! Build echo 'value'\ncommand Build echo 'other'\n", []string{"Build"}},
+		{"global and buffer definitions", "command Build echo 'global'\ncommand -buffer Build echo 'buffer'\n", nil},
+		{"global and buffer duplicates", "command Build echo 'one'\ncommand -buffer Build echo 'one'\ncommand Build echo 'two'\ncommand -buffer Build echo 'two'\n", []string{"Build", "Build"}},
+		{"delcommand", "command Build echo 'value'\ndelcommand Build\ncommand Build echo 'other'\n", nil},
+		{"buffer delcommand", "command -buffer Build echo 'value'\ndelcommand -buffer Build\ncommand -buffer Build echo 'other'\n", nil},
+		{"comclear", "command Build echo 'value'\ncommand -buffer Other echo 'value'\ncomclear\ncommand Build echo 'other'\ncommand -buffer Other echo 'other'\n", nil},
+		{"conditional definition is uncertain", "command Build echo 'value'\nif has('feature')\n  command Build echo 'other'\nendif\ncommand Build echo 'third'\n", nil},
+		{"conditional delcommand clears certainty", "command Build echo 'value'\nif has('feature')\n  delcommand Build\nendif\ncommand Build echo 'other'\n", nil},
+		{"function body is deferred", "function Define()\n  command Build echo 'value'\nendfunction\ncommand Build echo 'other'\n", nil},
+		{"user command replacement is deferred", "command Define command Build echo 'value'\ncommand Build echo 'other'\n", nil},
+		{"call clears certainty", "command Build echo 'value'\ncall Reconfigure()\ncommand Build echo 'other'\n", nil},
+		{"execute clears certainty", "command Build echo 'value'\nexecute 'delcommand Build'\ncommand Build echo 'other'\n", nil},
+		{"unknown command clears certainty", "command Build echo 'value'\nUnknownCommand\ncommand Build echo 'other'\n", nil},
+		{"list commands", "command\n", nil},
+		{"query command", "command Build\n", nil},
+		{"filtered list", "command -nargs=* Build\n", nil},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -10944,13 +10958,25 @@ func TestAnalyzeE174UserCommandOverwriteRiskWarning(t *testing.T) {
 					got = append(got, diagnostic)
 				}
 			}
-			if len(got) != test.want {
+			if len(got) != len(test.want) {
 				t.Fatalf("E174 diagnostics = %#v; syntax diagnostics = %#v", got, file.Diagnostics)
 			}
-			if test.want > 0 {
-				message := "Command " + test.span + " may already exist when this script is sourced again; add ! to replace it"
-				if got[0].Message != message || file.Text(got[0].Span) != test.span {
-					t.Fatalf("E174 diagnostic = %#v on %q", got[0], file.Text(got[0].Span))
+			for index, name := range test.want {
+				message := "Command " + name + " may already exist in this source; add ! to replace it"
+				if got[index].Message != message || file.Text(got[index].Span) != name {
+					t.Fatalf("E174 diagnostic = %#v on %q", got[index], file.Text(got[index].Span))
+				}
+				foundEarlierDefinition := false
+				for commandIndex := range file.Commands {
+					command := &file.Commands[commandIndex]
+					definedName, span, _, ok := syntax.DefinedUserCommand(file, command)
+					if ok && definedName == name && span.Start < got[index].Span.Start {
+						foundEarlierDefinition = true
+						break
+					}
+				}
+				if !foundEarlierDefinition {
+					t.Fatalf("E174 diagnostic did not point at a later definition: %#v", got[index])
 				}
 			}
 		})

@@ -67,7 +67,7 @@ func TestDiagnosticCoverageMatrix(t *testing.T) {
 		},
 		{
 			name:   "user command may overwrite",
-			source: "command Existing echo 'one'\n",
+			source: "command Existing echo 'one'\ncommand Existing echo 'two'\n",
 			code:   "vim/E174",
 			span:   "Existing",
 		},
