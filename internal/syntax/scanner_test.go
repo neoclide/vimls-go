@@ -214,6 +214,38 @@ func TestExRangesModifiersBarsStringsAndComments(t *testing.T) {
 	}
 }
 
+func TestVim9EchowindowNumericRange(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\n:10 echowindow 123\n",
+		"def Show()\n  :10 echowindow 123\nenddef\n",
+	} {
+		file := Parse(source)
+		var command *Command
+		for index := range file.Commands {
+			if file.Commands[index].Canonical == "echowindow" {
+				command = &file.Commands[index]
+				break
+			}
+		}
+		if len(file.Diagnostics) != 0 || command == nil || file.Text(command.Range) != "10" || len(command.Expressions) != 1 || file.Text(command.Expressions[0].Span) != "123" {
+			t.Fatalf("source %q: diagnostics = %#v, commands = %#v", source, file.Diagnostics, file.Commands)
+		}
+	}
+
+	for _, test := range []struct {
+		source, code string
+	}{
+		{source: "vim9script\ndef Show()\n  :$echowindow 123\nenddef\n", code: "vim/E16"},
+		{source: "vim9script\ndef Show()\n  :%echowindow 123\nenddef\n", code: "vim/E16"},
+		{source: "vim9script\n:10 echo 123\n", code: "vim/E481"},
+	} {
+		file := Parse(test.source)
+		if len(file.Diagnostics) != 1 || file.Diagnostics[0].Code != test.code {
+			t.Fatalf("source %q: diagnostics = %#v", test.source, file.Diagnostics)
+		}
+	}
+}
+
 func TestCommentAfterColon(t *testing.T) {
 	legacy := (LegacyParser{}).Parse(":\" legacy comment\n")
 	if len(legacy.Diagnostics) != 0 || len(legacy.Commands) != 1 || legacy.Commands[0].Kind != CommandEmpty || countTokens(legacy, TokenComment) != 1 {
