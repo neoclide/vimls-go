@@ -46,8 +46,9 @@ such as `vimls/unused-variable`. Use the complete code when configuring them.
 | `vim/E492` | The command is invalid or its name is not known. Unknown uppercase user commands are warnings. |
 
 For Vim's explanation of an error, run `:help E117` with the relevant number.
-vimls-go follows **Vim v9.2.1015**; help from another version can describe
-different rules.
+vimls-go follows **Vim v9.2.1015** plus the targeted
+[v9.2.1132 compatibility updates](language-support.md). Help from another
+version can describe different rules.
 
 Builtin return-value inference also uses the corrections recorded in Vim
 v9.2.1104, checked against v9.2.1132, for functions already in the pinned metadata.

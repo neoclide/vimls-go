@@ -67,8 +67,8 @@ go run ./tools/covercheck -profile coverage.out -min 90
 ### 2. `tools/genmetadata`
 
 Generates internal Go data tables and Vim option validation scripts from a
-pinned official Vim checkout (`v9.2.1015`, commit
-`5ab969f719bb09555e90e8dff8c94fc37bcbf2ae`).
+pinned official Vim checkout (`v9.2.1132`, commit
+`f3dc0fee778439ac8ff8680b42552f7f13d47396`).
 
 #### Generated files
 
@@ -113,7 +113,7 @@ metadata-check: eventdocs-check
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-vim-root <dir>` | `$VIM_SOURCE` | Path to the official Vim Git checkout. Must contain tag `v9.2.1015`. |
+| `-vim-root <dir>` | `$VIM_SOURCE` | Path to the official Vim Git checkout. Must contain tag `v9.2.1132`. |
 | `-output-dir <dir>` | `internal/vimdata` | Directory where generated files are written. |
 
 #### Direct invocation

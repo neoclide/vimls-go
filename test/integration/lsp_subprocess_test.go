@@ -366,12 +366,12 @@ endfunction
 	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///builtin-signature.vim","languageId":"vim","version":1,"text":"vim9script\necho get([], 'x', 0)\necho []->get(0, 1)\nvar Callback: func(number, ?string): bool\necho Callback(1, 'x')\necho &number v:version\n"}}}`)
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":920,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":1,"character":19}}}`)
 	builtinSignature := readJSON(t, reader)
-	if string(builtinSignature["id"]) != "920" || !strings.Contains(string(builtinSignature["result"]), `get({list}, {idx} [, {default}]): any`) || !strings.Contains(string(builtinSignature["result"]), `"documentation":{"kind":"plaintext"`) || !strings.Contains(string(builtinSignature["result"]), `"activeParameter":2`) {
+	if string(builtinSignature["id"]) != "920" || !strings.Contains(string(builtinSignature["result"]), `"label":"get({list}, {idx} [, {default}]): any"`) || !strings.Contains(string(builtinSignature["result"]), `"documentation":{"kind":"plaintext"`) || !strings.Contains(string(builtinSignature["result"]), `"activeParameter":2`) {
 		t.Fatalf("builtin signature help = %s", builtinSignature)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":921,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":2,"character":18}}}`)
 	builtinMethodSignature := readJSON(t, reader)
-	if string(builtinMethodSignature["id"]) != "921" || !strings.Contains(string(builtinMethodSignature["result"]), `get({idx}, [{default}]): any`) || !strings.Contains(string(builtinMethodSignature["result"]), `"activeParameter":1`) {
+	if string(builtinMethodSignature["id"]) != "921" || !strings.Contains(string(builtinMethodSignature["result"]), `"label":"get({idx}, [{default}]): any"`) || !strings.Contains(string(builtinMethodSignature["result"]), `"activeParameter":1`) {
 		t.Fatalf("builtin method signature help = %s", builtinMethodSignature)
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":922,"method":"textDocument/signatureHelp","params":{"textDocument":{"uri":"file:///builtin-signature.vim"},"position":{"line":4,"character":20}}}`)

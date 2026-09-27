@@ -70,6 +70,9 @@ jobs:
           repository: vim/vim
           ref: v9.2.1015
           path: .test-tools/vim
+      - name: Fetch Vim metadata revision
+        run: git fetch --depth=1 origin tag v9.2.1132
+        working-directory: .test-tools/vim
       - uses: actions/checkout@v4
         with:
           repository: neovim/neovim

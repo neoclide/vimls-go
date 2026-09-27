@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	vimTag    = "v9.2.1015"
-	vimCommit = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
+	vimTag    = "v9.2.1132"
+	vimCommit = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
 )
 
 func main() {

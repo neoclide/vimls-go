@@ -962,7 +962,7 @@ func TestOptionBuildRequirementFormatting(t *testing.T) {
 		want      string
 	}{
 		{condition: "1", want: ""},
-		{condition: "0", want: "unavailable in Vim v9.2.1015"},
+		{condition: "0", want: "unavailable in Vim v9.2.1132"},
 		{condition: "defined(FEAT_AUTOCHDIR)", features: []string{"autochdir"}, want: "+autochdir"},
 		{condition: "defined(FEAT_X) && defined(FEAT_Y)", features: []string{"feat_x", "feat_y"}, want: "+feat_x, +feat_y"},
 		{condition: "defined(ELAPSED_FUNC)", want: ""},

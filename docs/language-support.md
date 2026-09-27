@@ -4,6 +4,15 @@ vimls-go supports Legacy Vim script and Vim9 script through **Vim v9.2.1015**,
 including classes, interfaces, enums and imports. Both dialects can be used in
 the same project. See the [changelog](../CHANGELOG.md) for release availability.
 
+Generated command, function, option and `v:` variable metadata comes from
+**Vim v9.2.1132**. The general grammar and oracle suite remain based on
+v9.2.1015, with these targeted updates checked against v9.2.1132:
+
+- Builtin return types follow patch 1104, including argument-dependent helpers
+  and nested lists.
+
+Other metadata records its own source revision.
+
 ## Editing features
 
 | Feature | Support |

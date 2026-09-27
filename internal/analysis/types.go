@@ -1178,26 +1178,22 @@ func optionAcceptsCompatibleType(name string, typ ValueType) bool {
 }
 
 func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueType, expressions []*syntax.Expression) ValueType {
-	// These rules describe runtime behavior already present in Vim v9.2.1015.
-	// Vim v9.2.1132 src/evalfunc.c records the corresponding compiler types,
-	// while the pinned generated metadata still cannot express each branch.
+	// Literal flags refine Vim v9.2.1132's broad string-or-any helpers.
 	switch function.Name {
-	case "autocmd_add", "autocmd_delete":
-		return ValueType{Name: "bool"}
-	case "match":
-		return ValueType{Name: "number"}
-	case "reltime":
-		return ValueType{Name: "list", Arguments: []ValueType{{Name: "number"}}}
-	case "searchcount":
-		return ValueType{Name: "dict", Arguments: []ValueType{{Name: "number"}}}
-	case "matchfuzzypos":
-		return ValueType{Name: "list", Arguments: []ValueType{{Name: "list", Arguments: []ValueType{UnknownValueType}}}}
-	case "abs":
+	case "expand", "glob":
+		return stringOrListReturnType(expressions, 2)
+	case "submatch":
+		return stringOrListReturnType(expressions, 1)
+	case "globpath":
+		return stringOrListReturnType(expressions, 3)
+	}
+	switch function.ReturnHelper {
+	case "ret_abs":
 		if len(arguments) > 0 && (arguments[0].Name == "number" || arguments[0].Name == "float") {
 			return ValueType{Name: arguments[0].Name}
 		}
 		return UnknownValueType
-	case "sign_define":
+	case "ret_sign_define":
 		if len(arguments) > 0 {
 			switch arguments[0].Name {
 			case "string":
@@ -1207,31 +1203,28 @@ func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueT
 			}
 		}
 		return UnknownValueType
-	case "diff":
-		if len(expressions) == 2 {
+	case "ret_string_or_any_1":
+		if len(arguments) < 1 {
 			return ValueType{Name: "string"}
 		}
 		return UnknownValueType
-	case "finddir", "findfile":
-		if len(expressions) < 3 {
+	case "ret_string_or_any_2":
+		if len(arguments) < 2 {
 			return ValueType{Name: "string"}
 		}
 		return UnknownValueType
-	case "serverlist":
-		if len(expressions) == 0 {
+	case "ret_string_or_any_3":
+		if len(arguments) < 3 {
 			return ValueType{Name: "string"}
 		}
 		return UnknownValueType
-	case "expand", "glob":
-		return stringOrListReturnType(expressions, 2)
-	case "submatch":
-		return stringOrListReturnType(expressions, 1)
-	case "globpath":
-		return stringOrListReturnType(expressions, 3)
-	case "get":
+	case "ret_string_or_any_4":
+		if len(arguments) < 4 {
+			return ValueType{Name: "string"}
+		}
+		return UnknownValueType
+	case "ret_get":
 		return getReturnValueType(arguments)
-	}
-	switch function.ReturnHelper {
 	case "ret_first_arg", "ret_extend", "ret_slice":
 		if len(arguments) > 0 {
 			return arguments[0]
@@ -1261,6 +1254,8 @@ func builtinReturnValueType(function vimdata.BuiltinFunction, arguments []ValueT
 		return ValueType{Name: "list", Arguments: []ValueType{{Name: "string"}}}
 	case "ret_list_dict_any":
 		return ValueType{Name: "list", Arguments: []ValueType{{Name: "dict", Arguments: []ValueType{UnknownValueType}}}}
+	case "ret_list_list_any":
+		return ValueType{Name: "list", Arguments: []ValueType{{Name: "list", Arguments: []ValueType{UnknownValueType}}}}
 	case "ret_list_any":
 		return ValueType{Name: "list", Arguments: []ValueType{UnknownValueType}}
 	case "ret_dict_number":

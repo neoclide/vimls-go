@@ -279,7 +279,10 @@ func parseArgumentChecks(source []byte) (map[string][]string, error) {
 
 func returnTypeName(helper string) string {
 	switch helper {
-	case "ret_any":
+	case "ret_any", "ret_abs", "ret_get", "ret_sign_define",
+		"ret_string_or_any_1", "ret_string_or_any_2", "ret_string_or_any_3", "ret_string_or_any_4":
+		// These reviewed helpers select a concrete type from the arguments.
+		// Keep the broad metadata as any; analysis refines individual calls.
 		return "ReturnAny"
 	case "ret_void":
 		return "ReturnVoid"
@@ -293,7 +296,7 @@ func returnTypeName(helper string) string {
 		return "ReturnString"
 	case "ret_blob":
 		return "ReturnBlob"
-	case "ret_list_any", "ret_list_number", "ret_list_string", "ret_list_dict_any", "ret_list_items", "ret_list_string_items", "ret_list_regionpos":
+	case "ret_list_any", "ret_list_number", "ret_list_string", "ret_list_dict_any", "ret_list_list_any", "ret_list_items", "ret_list_string_items", "ret_list_regionpos":
 		return "ReturnList"
 	case "ret_dict_any", "ret_dict_number", "ret_dict_string":
 		return "ReturnDict"

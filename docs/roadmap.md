@@ -10,6 +10,13 @@ The items below are remaining work, not promises for a particular release.
 
 ## Language support
 
+Generated command, function, option and `v:` variable metadata now uses Vim
+v9.2.1132. The reviewed `fillchars` helper fingerprint includes the v9.2.1119
+default vertical separator change; static option validation rules are unchanged.
+The general grammar and Vim oracle suite remain based on v9.2.1015. Targeted
+v9.2.1132 compatibility now covers builtin return helpers. Broader
+grammar migration remains separate; see the [support guide](language-support.md).
+
 Option diagnostics now include feature-gated options, treating known options as
 available without inspecting the user's Vim build.
 Compiled boolean option compound assignments now use E521 uniformly when the

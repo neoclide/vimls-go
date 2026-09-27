@@ -878,8 +878,10 @@ type structuredOptionEvidence struct {
 }
 
 const (
-	didSetCharsOptionFingerprint    = "d803c055cb29b64268999f922cbe83402792a16ce9f2334aa0248065888f3898"
-	setCharsOptionFingerprint       = "2f5f8f373532734e583f2155e3d3f472379a403ead1251a108fb351b166e794f"
+	didSetCharsOptionFingerprint = "d803c055cb29b64268999f922cbe83402792a16ce9f2334aa0248065888f3898"
+	// Reviewed through v9.2.1132: v9.2.1119 only changes the default
+	// fill_chars.vert from space to '|'; validation semantics are unchanged.
+	setCharsOptionFingerprint       = "523aabb07adff96034d72d2f61b0f63c89b13fc4217e204d219992e38861035e"
 	getEncodedCharAdvFingerprint    = "4cede8f66c769e544ad345600437028902ee708374bb43c9bcebc0561d9d43e5"
 	didSetStatuslineoptFingerprint  = "32a53f2f5a7d41b20620112e75fbf0ab1aeb0099ab5c8ef7002eb9b6d58df061"
 	statuslineoptChangedFingerprint = "52cf056bc4f53c056d2a2ffe81114118914d556d31df4bedd2539cda5bc0d6c2"

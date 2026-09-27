@@ -421,7 +421,7 @@ func cloneOption(option Option) Option {
 	return option
 }
 
-// OptionValues returns values extracted from Vim's fixed v9.2.1015 :set
+// OptionValues returns values extracted from the pinned Vim :set
 // completion arrays and flag strings. Dynamic values such as encodings,
 // paths, events and runtime names are deliberately excluded. Callers own the
 // returned slice.

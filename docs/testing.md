@@ -112,7 +112,10 @@ The filter matches case identifiers in the committed artifact. Use the matching
 ## Generated metadata
 
 The generators read pinned Vim and Neovim sources. Both upstream checkouts are
-read-only; their current HEAD need not be the pinned revision.
+read-only; their current HEAD need not be the pinned revision. `genmetadata`
+requires Vim v9.2.1132; event documentation and Vim oracle checks still use
+v9.2.1015. The Vim checkout must contain both revisions. CI fetches the metadata
+tag separately while building the oracle revision.
 
 ```sh
 make metadata-check VIM_SOURCE=/path/to/vim NEOVIM_SOURCE=/path/to/neovim
