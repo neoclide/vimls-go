@@ -18,6 +18,10 @@ v9.2.1015, with these targeted updates checked against v9.2.1132:
   at script level and E476 inside `def`.
 - `source ++dryrun` (patch 1084) links the filename without including the
   option. Filename escapes and continuation spans are preserved.
+- Stored command/autocommand bodies in branches proven false by literal
+  conditions avoid spurious diagnostics (patch 1132). Unknown conditions stay
+  conservative; missing block delimiters remain checked. User-command
+  placeholders in multiline blocks retain unknown types until expansion.
 
 Other metadata records its own source revision.
 

@@ -56,6 +56,12 @@ report E1012, including in destructuring assignments; `@# = bufnr()` is allowed.
 Legacy assignments retain their conversions. Invalid Vim9 command names such
 as `ch_log` report E492 at script level and E476 inside `def`.
 
+Command and autocommand bodies under literal false conditions (including
+`if 0` and `while 0`) do not produce expression/type errors from their skipped
+text. Unknown conditions retain diagnostics. Missing closing delimiters and
+following statements remain checked. In user-command templates, multiline
+`<q-args>` and other placeholders remain unknown until expansion.
+
 Builtin return-value inference also uses the corrections recorded in Vim
 v9.2.1104, checked against v9.2.1132, for functions already in the pinned metadata.
 For example, assigning `match()` to a string produces E1012, while

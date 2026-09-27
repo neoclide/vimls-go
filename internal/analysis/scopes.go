@@ -3925,6 +3925,7 @@ func aggregateEndSpan(file *syntax.File, command *syntax.Command) syntax.Span {
 
 // Expansion can change expression arity and even command boundaries. Retain
 // the raw AST for navigation, but do not diagnose unexpanded payloads as Vim.
+// Vim 9.2.1132 also discards command/autocmd blocks in a skipped branch.
 func suppressUnexpandedBodyDiagnostics(result *FileAnalysis) {
 	var opaque []syntax.Span
 	var uncertainArity []syntax.Span
@@ -3945,11 +3946,28 @@ func suppressUnexpandedBodyDiagnostics(result *FileAnalysis) {
 		}
 		return spans
 	}
-	var collect func([]syntax.Command, bool)
-	collect = func(commands []syntax.Command, userBody bool) {
+	var collect func([]syntax.Command, []syntax.Block, bool)
+	collect = func(commands []syntax.Command, blocks []syntax.Block, userBody bool) {
 		for index := range commands {
 			command := &commands[index]
-			if userBody {
+			if (command.Canonical == "command" || command.Canonical == "autocmd") && commandInSkippedBranch(index, commands, blocks) {
+				if command.Embedded != nil {
+					opaque = append(opaque, command.Embedded.Span)
+				} else if command.Block >= 0 && command.Block < len(blocks) && blocks[command.Block].Kind == syntax.BlockCommand {
+					block := blocks[command.Block]
+					if block.End >= 0 && block.End < len(commands) {
+						opaque = append(opaque, syntax.Span{Start: command.Span.End, End: commands[block.End].Name.Start})
+					}
+				}
+			}
+			inUserBody := userBody
+			for block := command.Block; block >= 0 && block < len(blocks); block = blocks[block].Parent {
+				if blocks[block].Kind == syntax.BlockCommand && blocks[block].Header != index && blocks[block].End != index {
+					inUserBody = true
+					break
+				}
+			}
+			if inUserBody {
 				spans := replacements(command.Argument)
 				if command.Set != nil {
 					// Static options in the same command remain independently
@@ -3973,11 +3991,11 @@ func suppressUnexpandedBodyDiagnostics(result *FileAnalysis) {
 						continue
 					}
 				}
-				collect(command.Embedded.Commands, userBody || command.Canonical == "command")
+				collect(command.Embedded.Commands, command.Embedded.Blocks, inUserBody || command.Canonical == "command")
 			}
 		}
 	}
-	collect(result.File.Commands, false)
+	collect(result.File.Commands, result.File.Blocks, false)
 	if len(opaque) == 0 {
 		return
 	}
@@ -4005,6 +4023,62 @@ func suppressUnexpandedBodyDiagnostics(result *FileAnalysis) {
 			result.suppressedSyntaxDiagnostics[diagnostic] = true
 		}
 	}
+}
+
+// Only literal conditions prove that Vim skips a stored command body. Stop at
+// a deferred definition: its outer condition is not its invocation context.
+func commandInSkippedBranch(index int, commands []syntax.Command, blocks []syntax.Block) bool {
+	condition := func(command *syntax.Command) (bool, bool) {
+		if len(command.Expressions) != 1 {
+			return false, false
+		}
+		expression := command.Expressions[0]
+		for expression != nil && expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1 {
+			expression = expression.Children[0]
+		}
+		if value, ok := staticNumberValue(expression); ok && (value == 0 || value == 1) {
+			return value != 0, true
+		}
+		if expression != nil && expression.Kind == syntax.ExpressionIdentifier {
+			switch expression.Value {
+			case "v:false":
+				return false, true
+			case "v:true":
+				return true, true
+			case "false", "true":
+				return expression.Value == "true", command.Dialect == syntax.Vim9
+			}
+		}
+		return false, false
+	}
+	for blockIndex := commands[index].Block; blockIndex >= 0 && blockIndex < len(blocks); blockIndex = blocks[blockIndex].Parent {
+		block := blocks[blockIndex]
+		if block.Header == index {
+			continue
+		}
+		switch block.Kind {
+		case syntax.BlockDef, syntax.BlockFunction, syntax.BlockCommand:
+			return false
+		case syntax.BlockIf, syntax.BlockWhile:
+			branch := block.Header
+			if branch < 0 || branch >= len(commands) {
+				continue
+			}
+			for _, next := range block.Branches {
+				if next < 0 || next >= index {
+					break
+				}
+				if value, known := condition(&commands[branch]); known && value {
+					return true
+				}
+				branch = next
+			}
+			if value, known := condition(&commands[branch]); known && !value {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CombinedDiagnostics returns parser and semantic diagnostics with the narrow

@@ -205,7 +205,7 @@ func newTypeState(result *FileAnalysis) *typeState {
 		commandScopes: result.commandScopes,
 	}
 	state.collectNamedTypes(result.File.Commands)
-	state.collectUserCommandBodies(result.File.Commands)
+	state.collectUserCommandBodies(result.File.Commands, result.File.Blocks)
 	for _, scope := range result.Scopes {
 		for _, declaration := range scope.Declarations {
 			state.declarations[declaration.Span] = declaration
@@ -384,14 +384,19 @@ func (state *typeState) walkCommands() {
 	state.walkCommandList(file.Commands)
 }
 
-func (state *typeState) collectUserCommandBodies(commands []syntax.Command) {
+func (state *typeState) collectUserCommandBodies(commands []syntax.Command, blocks []syntax.Block) {
+	for _, block := range blocks {
+		if block.Kind == syntax.BlockCommand && block.Header >= 0 && block.Header < len(commands) {
+			state.commandBodies = append(state.commandBodies, syntax.Span{Start: commands[block.Header].Span.End, End: block.Span.End})
+		}
+	}
 	for index := range commands {
 		command := &commands[index]
 		if command.Canonical == "command" && command.Embedded != nil {
 			state.commandBodies = append(state.commandBodies, command.Embedded.Span)
 		}
 		if command.Embedded != nil {
-			state.collectUserCommandBodies(command.Embedded.Commands)
+			state.collectUserCommandBodies(command.Embedded.Commands, command.Embedded.Blocks)
 		}
 	}
 }

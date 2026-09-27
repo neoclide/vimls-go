@@ -76,7 +76,7 @@ func NewCompletionTypes(facts *FileAnalysis) *CompletionTypes {
 	for _, reference := range facts.References {
 		query.state.references[reference.Span] = reference
 	}
-	query.state.collectUserCommandBodies(facts.File.Commands)
+	query.state.collectUserCommandBodies(facts.File.Commands, facts.File.Blocks)
 	query.collectSources(facts.File.Commands)
 	for _, scope := range facts.Scopes {
 		if scope.Lambda != nil && scope.Lambda.LambdaBody != nil {
