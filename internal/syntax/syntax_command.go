@@ -510,7 +510,11 @@ func (p *syntaxParser) parseInclude(node *SyntaxCommand) {
 // incomplete input cannot become another command.
 func scanXFileArgument(source string, start, end int, dialect Dialect, command vimdata.Command) (int, Span, Span, []*Expression, bool) {
 	var expressions []*Expression
-	for position := start; position < end; {
+	position := start
+	if vimgrepCommand(command.Name) {
+		position = scanVimgrepPatternEnd(source, start, end)
+	}
+	for position < end {
 		character := source[position]
 		switch character {
 		case '\x16': // Ctrl-V
@@ -561,6 +565,39 @@ func scanXFileArgument(source string, start, end int, dialect Dialect, command v
 		position++
 	}
 	return end, Span{}, Span{}, expressions, false
+}
+
+func vimgrepCommand(name string) bool {
+	switch name {
+	case "vimgrep", "vimgrepadd", "lvimgrep", "lvimgrepadd":
+		return true
+	default:
+		return false
+	}
+}
+
+// Vim's skip_vimgrep_pat() consumes the search pattern before Ex scans
+// filenames and command separators. An unfinished pattern owns the line.
+func scanVimgrepPatternEnd(source string, start, end int) int {
+	if start >= end {
+		return end
+	}
+	if isVimIdentifierByte(source[start]) {
+		position := start
+		for position < end && !isSpace(source[position]) {
+			position++
+		}
+		return position
+	}
+	closing := scanGlobalRegexpEnd(source, start+1, end, source[start])
+	if closing < 0 {
+		return end
+	}
+	position := closing + 1
+	for position < end && (source[position] == 'g' || source[position] == 'j' || source[position] == 'f') {
+		position++
+	}
+	return position
 }
 
 func (p *syntaxParser) parseMatch(node *SyntaxCommand) {

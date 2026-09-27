@@ -16,6 +16,8 @@ User-command E174 checks require a statically repeated definition, since Vim
 allows a command to be replaced when its defining script is sourced again.
 Vim9 script-item redefinition checks respect loop lifetimes, allowing successive
 loops to reuse a binding after `endfor`.
+The `vimgrep` command family keeps delimited and undelimited search patterns
+separate from filename arguments and following Ex commands.
 
 Generated command, function, option and `v:` variable metadata now uses Vim
 v9.2.1132. The reviewed `fillchars` helper fingerprint includes the v9.2.1119

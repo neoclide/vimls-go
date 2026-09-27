@@ -379,7 +379,11 @@ func scanLegacyFor(source string, start, end int, command vimdata.Command, scrip
 func scanLegacyOpaqueArgument(source string, start, end int, command vimdata.Command) (int, Span, Span) {
 	depth := 0
 	quote := byte(0)
-	for index := start; index < end; index++ {
+	index := start
+	if vimgrepCommand(command.Name) {
+		index = scanVimgrepPatternEnd(source, start, end)
+	}
+	for ; index < end; index++ {
 		character := source[index]
 		if quote != 0 {
 			if character == '\\' && quote == '"' {

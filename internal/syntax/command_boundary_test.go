@@ -58,6 +58,55 @@ func TestFileCommandPrefixFilterBoundaries(t *testing.T) {
 	}
 }
 
+func TestVimgrepPatternPrecedesFileArgumentBoundaries(t *testing.T) {
+	for _, dialect := range []struct {
+		name, prefix string
+	}{
+		{name: "legacy"},
+		{name: "vim9", prefix: "vim9script\n"},
+	} {
+		for _, command := range []string{"vimgrep", "vimgrepadd", "lvimgrep", "lvimgrepadd"} {
+			for _, argument := range []string{`/(\|{$/ %`, `/\v\(|\{$/ %`} {
+				t.Run(dialect.name+"/"+command+"/"+argument, func(t *testing.T) {
+					file := Parse(dialect.prefix + command + " " + argument + "\n")
+					index := 0
+					if dialect.prefix != "" {
+						index = 1
+					}
+					if len(file.Diagnostics) != 0 || len(file.Commands) != index+1 || file.Commands[index].Canonical != command || file.Text(file.Commands[index].Argument) != argument {
+						t.Fatalf("commands = %#v, diagnostics = %#v", file.Commands, file.Diagnostics)
+					}
+				})
+			}
+		}
+
+		for _, test := range []struct {
+			name, argument, wantArgument string
+			commands                     int
+			separators                   int
+		}{
+			{name: "escaped delimiter and flags", argument: `/foo\/bar/gjf %`, wantArgument: `/foo\/bar/gjf %`, commands: 1},
+			{name: "bar after filenames", argument: `/foo/ % | echo 1`, wantArgument: `/foo/ %`, commands: 2, separators: 1},
+			{name: "undelimited pattern bar", argument: `foo|bar %`, wantArgument: `foo|bar %`, commands: 1},
+			{name: "unfinished pattern", argument: `/foo | echo 1`, wantArgument: `/foo | echo 1`, commands: 1},
+		} {
+			t.Run(dialect.name+"/"+test.name, func(t *testing.T) {
+				file := Parse(dialect.prefix + "lvimgrep " + test.argument + "\n")
+				index := 0
+				if dialect.prefix != "" {
+					index = 1
+				}
+				if len(file.Diagnostics) != 0 || len(file.Commands) != index+test.commands || file.Commands[index].Canonical != "lvimgrep" || file.Text(file.Commands[index].Argument) != test.wantArgument || countTokens(file, TokenSeparator) != test.separators {
+					t.Fatalf("commands = %#v, diagnostics = %#v, tokens = %#v", file.Commands, file.Diagnostics, file.Tokens)
+				}
+				if test.commands == 2 && file.Commands[index+1].Canonical != "echo" {
+					t.Fatalf("following command = %#v", file.Commands[index+1])
+				}
+			})
+		}
+	}
+}
+
 func TestLegacyCommandBoundaryOneExpressionCommentsAndBars(t *testing.T) {
 	file := (LegacyParser{}).Parse("if !s:f() \" comment | not a command\n" +
 		"endif | while 1 \" comment | not a command\n" +
