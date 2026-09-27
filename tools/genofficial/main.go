@@ -103,7 +103,39 @@ func main() {
 	manifestPath := flag.String("manifest", filepath.Join("testdata", "official", parserFileManifestName), "reviewed parser test-file allowlist")
 	lockPath := flag.String("lock", filepath.Join("testdata", "official", vimTag+"-corpus-lock.json"), "reviewed corpus lock")
 	printLock := flag.Bool("print-lock", false, "print the computed corpus lock without writing artifacts")
+	rebaseFrom := flag.String("rebase-from", "", "old parser-case corpus artifact")
+	rebaseTo := flag.String("rebase-to", "", "new parser-case corpus artifact")
+	rebaseAssertions := flag.String("rebase-assertions", filepath.Join("internal", "syntax", "official_parser_cases_test.go"), "parser assertion source")
+	rebaseOutput := flag.String("rebase-output", "", "write a rebased assertion preview to this path")
+	var rebaseReviews []string
+	flag.Func("rebase-review", "reviewed OLD_ID=NEW_ID assertion mapping", func(value string) error {
+		rebaseReviews = append(rebaseReviews, value)
+		return nil
+	})
 	flag.Parse()
+	rebaseMode := false
+	flag.Visit(func(current *flag.Flag) {
+		if strings.HasPrefix(current.Name, "rebase-") {
+			rebaseMode = true
+		}
+	})
+	if rebaseMode {
+		if *rebaseFrom == "" || *rebaseTo == "" || *printLock || flag.NArg() != 0 {
+			fatal(fmt.Errorf("-rebase-from and -rebase-to are required and cannot be combined with -print-lock"))
+		}
+		report, err := rebaseParserAssertions(*rebaseFrom, *rebaseTo, *rebaseAssertions, *rebaseOutput, rebaseReviews)
+		if report.From.Tag != "" {
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(report); err != nil {
+				fatal(err)
+			}
+		}
+		if err != nil {
+			fatal(err)
+		}
+		return
+	}
 	if *vimRoot == "" || flag.NArg() != 0 {
 		fatal(fmt.Errorf("require -vim-root"))
 	}

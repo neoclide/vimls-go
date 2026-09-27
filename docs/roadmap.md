@@ -35,6 +35,9 @@ option validation rules are unchanged. Compatibility details retain the patch
 return helpers, 1130 string-only assignment targets, and 1132 diagnostics in
 statically skipped command/autocommand blocks; see the
 [support guide](language-support.md).
+Official corpus maintenance now records source-derived totals in a reviewed
+lock and can produce an offline assertion-ID migration report, while retaining
+manual review for changed source or diagnostics.
 Destructuring assignments to read-only registers preserve Vim v9.2.1132's
 diagnostic order: known incompatible values report E1012 in Vim9 scripts and
 `vim9cmd`, while `def` reports E354 before checking the value.

@@ -195,11 +195,16 @@ typed manifest, rather than a hash of its raw file bytes.
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `-vim-root <dir>` | `""` | Read-only official Vim Git checkout (required). |
+| `-vim-root <dir>` | `""` | Read-only official Vim Git checkout (required for corpus generation). |
 | `-output-dir <dir>` | `testdata/official` | Destination for the four generated gzip artifacts. |
 | `-manifest <file>` | Current pin's parser-file manifest | Reviewed parser-file manifest. |
 | `-lock <file>` | Current pin's corpus lock | Reviewed provenance and inventory totals. |
 | `-print-lock` | `false` | Print a candidate lock without writing artifacts or a lock file. |
+| `-rebase-from <file.gz>` | `""` | Historical parser-case artifact for assertion-ID migration. |
+| `-rebase-to <file.gz>` | `""` | New parser-case artifact for assertion-ID migration. |
+| `-rebase-assertions <file.go>` | `internal/syntax/official_parser_cases_test.go` | Go source containing the assertion map. |
+| `-rebase-output <file.go>` | `""` | Explicit path for a fully resolved formatted preview. |
+| `-rebase-review OLD_ID=NEW_ID` | none | Manually reviewed mapping; may be repeated. |
 
 ```sh
 go run ./tools/genofficial -vim-root /path/to/vim
@@ -214,6 +219,12 @@ regressions keep their original provenance. See
 maintenance rules. During a deliberate source update, review a candidate with
 `go run ./tools/genofficial -vim-root /path/to/vim -print-lock`; ordinary
 generation verifies the reviewed lock and never updates it.
+
+`-rebase-from` and `-rebase-to` run without a Vim checkout. The report matches
+the full upstream case identity (including source and error argument), reports
+ambiguous or changed cases, and exits nonzero without writing a preview until
+every assertion is resolved. `-rebase-output` is never implied; review that
+explicit preview before applying it to the assertion source.
 
 ### `tools/vimsource`
 

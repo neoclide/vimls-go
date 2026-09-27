@@ -140,17 +140,44 @@ Do not edit generated tables
 to hide a mismatch. Official compile-diagnostic fixtures are maintained one
 error code at a time in `internal/analysis/official_compile_cases_e*_test.go`.
 
-To update the baseline, change the active source pin once in
-`internal/vimdata/source.go`, then separately review and update the manual Vim
-source there. Regenerate metadata and the official corpus, inspect semantic and
-license changes, and update the current source text in the support guide and
-documentation notice. Do not replace historical provenance across the tree.
-For an official corpus source change, print and review a candidate
-`<tag>-corpus-lock.json` with `go run ./tools/genofficial -vim-root /path/to/vim -print-lock`;
-normal generation verifies that reviewed lock before writing the
-four artifacts. The lock contains source-derived totals and the typed manifest
-SHA-256, not parser diagnostic assertions.
-Finish with `make vim-check`; it already runs formatting, metadata and corpus
+To update the baseline, follow this single sequence:
+
+1. Record the old pin, then update the active source pin in
+   `internal/vimdata/source.go` and independently review the manual Vim source.
+2. Copy and review the new tag's parser-file manifest, including its provenance,
+   selections and exclusions.
+3. Print a candidate `<tag>-corpus-lock.json` with
+   `go run ./tools/genofficial -vim-root /path/to/vim -print-lock`; review it
+   and save it as the new lock.
+4. Run `make metadata-refresh` and `make official-refresh`, then generate a
+   parser-assertion report and explicit preview. Set `old_tag` and `new_tag`
+   to the actual old and new Vim tags:
+
+   ```sh
+   go run ./tools/genofficial \
+     -rebase-from "testdata/official/${old_tag}-parser-cases.json.gz" \
+     -rebase-to "testdata/official/${new_tag}-parser-cases.json.gz" \
+     -rebase-output /tmp/official_parser_cases_preview.go \
+     > /tmp/official_parser_cases_rebase.json
+   ```
+
+   Fully identical duplicate groups match in artifact order. A
+   `-rebase-review OLD_ID=NEW_ID` mapping is valid only when the input source
+   identity is unchanged; changed source or diagnostics still require manual
+   assertion maintenance.
+
+   For entries whose source changed or disappeared, first make a temporary
+   assertion-file copy, remove only those marked entries, and pass it with
+   `-rebase-assertions` to migrate the remaining assertions. Merge the changed
+   assertions back into the final preview by hand. Delete an assertion only
+   after confirming upstream removed its case, then inspect the final diff for
+   omissions.
+5. Update support, license and roadmap text for actual semantic changes. Do not
+   replace historical provenance across the tree. Finish with `make vim-check`.
+
+Normal official generation verifies the reviewed lock before writing the four
+artifacts. The lock contains source-derived totals and the typed manifest
+SHA-256, not parser diagnostic assertions. `make vim-check` runs formatting, metadata and corpus
 checks, the external oracle, the uncached Go suite, vet, and the client smoke
 test, so do not rerun those stages manually after it succeeds.
 

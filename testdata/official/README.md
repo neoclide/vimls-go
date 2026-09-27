@@ -59,6 +59,11 @@ Every selected helper call must produce a case or keep an explicit skip reason.
 directory and compares all four artifacts. It also rebuilds parser cases from
 the committed manifest, including its typed-manifest hash check.
 
+For parser assertion-ID migration between two parser-case artifacts, use the
+offline `-rebase-from`/`-rebase-to` report documented in
+[testing](../../docs/testing.md). It does not replace reviewed diagnostics or
+historical provenance.
+
 Maintain compile-diagnostic cases one error code at a time in the owning test
 file. Keep at most ten deterministic cases per code, covering compiled and
 script-level contexts where both are relevant. Do not replace these tests with
