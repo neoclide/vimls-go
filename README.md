@@ -21,7 +21,7 @@ It's designed to be fast and featured, while not execute any vim script.
   indentation.
 
 Both dialects can share a workspace. The supported syntax goes through
-**Vim v9.2.1015**. See [language support](docs/language-support.md) for the
+**Vim v9.2.1132**. See [language support](docs/language-support.md) for the
 features and their limits.
 
 The server reads your scripts without sourcing or executing them. It runs as a

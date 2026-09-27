@@ -63,7 +63,7 @@ that is already indexed, restart the server.
 
 ## Neovim-specific Vimscript
 
-The main language target is Vim v9.2.1015. A compatibility list recognizes
+The main language target is Vim v9.2.1132. A compatibility list recognizes
 some Neovim names, such as `nvim_buf_get_lines()`, `&shada` and `v:lua`, so
 they do not receive unknown-name warnings. This is not full Neovim API support:
 the list does not provide Neovim function signatures, type checking or a
@@ -137,7 +137,7 @@ this does not enable Neovim function diagnostics or API completion.
 Neovim-specific, even though Vim accepts the number without an error. Other
 numeric values of this permissive Vim option do not receive new range errors.
 
-Compatibility rules use Vim v9.2.1015 and the documented option contracts in
+Compatibility rules use Vim v9.2.1132 and the documented option contracts in
 [Neovim snapshot 73923b0dd8](https://github.com/neovim/neovim/blob/73923b0dd85bb936ba2f63ee916dabaa0603340d/runtime/doc/options.txt).
 They are a reviewed subset, not a complete version-by-version Neovim model.
 For example, the snapshot documents `completeopt=preselect`, while the locally

@@ -26,14 +26,15 @@ Vim9 `echowindow` accepts a numeric prefix for the message-window height.
 Mapping script-local warnings require an `s:name` identifier boundary, avoiding
 literal abbreviation text such as `align-items: center;`.
 
-Generated command, function, option and `v:` variable metadata now uses Vim
-v9.2.1132. The reviewed `fillchars` helper fingerprint includes the v9.2.1119
-default vertical separator change; static option validation rules are unchanged.
-The general grammar and Vim oracle suite remain based on v9.2.1015. Targeted
-v9.2.1132 compatibility now covers builtin return helpers, string-only
-assignment targets, underscore command errors, `source ++dryrun` file links
-and diagnostics in statically skipped command/autocommand blocks. Broader
-grammar migration remains separate; see the [support guide](language-support.md).
+The migration to the Vim v9.2.1132 language baseline is complete: generated
+and hand-maintained metadata, the reproducible official corpus and the
+exact-version Vim oracle use this revision. The reviewed `fillchars` helper
+fingerprint includes the v9.2.1119 default vertical separator change; static
+option validation rules are unchanged. Compatibility details retain the patch
+1084 `source ++dryrun` links, 1094 underscore command errors, 1104 builtin
+return helpers, 1130 string-only assignment targets, and 1132 diagnostics in
+statically skipped command/autocommand blocks; see the
+[support guide](language-support.md).
 Destructuring assignments to read-only registers preserve Vim v9.2.1132's
 diagnostic order: known incompatible values report E1012 in Vim9 scripts and
 `vim9cmd`, while `def` reports E354 before checking the value.

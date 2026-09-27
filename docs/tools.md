@@ -10,6 +10,7 @@ purposes, invocation options, and integration with `Makefile` and CI workflows.
 | `tools/covercheck` | `main` | Verifies statement test coverage percentage | Makefile | `make coverage`, `make check` |
 | `tools/genmetadata` | `main` | Extracts Vim runtime metadata into Go data tables | Makefile | `make metadata-refresh`, `make metadata-check` |
 | `tools/geneventdocs` | `main` | Merges Vim and Neovim autocmd event documentation | Makefile | `make eventdocs-refresh`, `make eventdocs-check` |
+| `tools/genofficial` | `main` | Builds the pinned official Vim parser corpus | Makefile | `make official-refresh`, `make official-check` |
 | `tools/release` | `main` | Validates changelog and builds multi-platform release archives | Makefile / CI | `make release`, `.github/workflows/release.yml` |
 | `tools/helpdoc` | `main` | Measures and exports runtime help extraction as Markdown & JSON | Manual | Help extraction benchmarks & diagnostics |
 | `tools/diagnosticscan` | `main` | Batch-scans runtimepaths for error-level vimls-go diagnostics | Manual | Ecosystem triage & batch analysis |
@@ -136,7 +137,7 @@ Neovim source repositories and merges them into unified Go metadata.
 
 #### Pinned upstream revisions
 
-- **Vim**: `v9.2.1015` (`5ab969f719bb09555e90e8dff8c94fc37bcbf2ae`), reading
+- **Vim**: `v9.2.1132` (`f3dc0fee778439ac8ff8680b42552f7f13d47396`), reading
   `src/autocmd.c` and `runtime/doc/autocmd.txt`.
 - **Neovim**: `v0.12.0-2035-g73923b0dd8` (`73923b0dd85bb936ba2f63ee916dabaa0603340d`),
   reading `src/nvim/auevents.lua` and help docs.
@@ -179,7 +180,39 @@ go run ./tools/geneventdocs -vim-root /path/to/vim -neovim-root /path/to/neovim
 
 ---
 
-### 4. `tools/release`
+### 4. `tools/genofficial`
+
+Builds the official parser corpus from Vim `v9.2.1132`, commit
+`f3dc0fee778439ac8ff8680b42552f7f13d47396`. It reads only Git objects and
+refuses a checkout whose tag resolves to another commit.
+
+The reviewed `v9.2.1132-parser-files.json` manifest selects parser migration
+files. The generator writes four deterministic gzip artifacts: parser corpus,
+full test files, helper inventory and parser cases. Parser cases carry the
+SHA-256 of `json.Marshal` on the typed manifest, rather than a hash of its raw
+file bytes.
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `-vim-root <dir>` | `""` | Read-only official Vim Git checkout (required). |
+| `-output-dir <dir>` | `testdata/official` | Destination for the four generated gzip artifacts. |
+| `-manifest <file>` | `testdata/official/v9.2.1132-parser-files.json` | Reviewed parser-file manifest. |
+
+```sh
+go run ./tools/genofficial -vim-root /path/to/vim
+make official-refresh VIM_SOURCE=/path/to/vim
+make official-check VIM_SOURCE=/path/to/vim
+```
+
+`official-check` regenerates into a temporary directory and compares all four
+artifacts. The v9.2.1015 corpus remains archived, and handwritten compile
+regressions keep their original provenance. See
+[the official corpus guide](../testdata/official/README.md) for its full
+maintenance rules.
+
+---
+
+### 5. `tools/release`
 
 A release packaging tool with two modes:
 1. **Changelog verification** (`-check-changelog`): Validates that `CHANGELOG.md`
@@ -249,7 +282,7 @@ go run ./tools/release -version v0.2.0 -epoch $(date +%s) -output-dir /tmp/dist
 
 ## Standalone tools
 
-### 5. `tools/helpdoc`
+### 6. `tools/helpdoc`
 
 Inspects and benchmarks runtime help extraction from `doc/*.txt` across
 directories on a Vim `runtimepath`.
@@ -284,7 +317,7 @@ go run ./tools/helpdoc \
 
 ---
 
-### 6. `tools/diagnosticscan`
+### 7. `tools/diagnosticscan`
 
 Scans Vim scripts across a given `runtimepath` and reports error-level
 vimls-go diagnostics.
@@ -317,7 +350,7 @@ go run ./tools/diagnosticscan \
 
 ---
 
-### 7. `tools/benchlegacy`
+### 8. `tools/benchlegacy`
 
 A standalone Go module (`tools/benchlegacy/go.mod`) designed to benchmark legacy
 Vim script parsing in `vimls-go` against [go-vimlparser](https://github.com/vim-jp/go-vimlparser).
@@ -358,7 +391,7 @@ For full details, see [`tools/benchlegacy/README.md`](../tools/benchlegacy/READM
 
 ---
 
-### 8. `tools/benchreport`
+### 9. `tools/benchreport`
 
 Parses Go benchmark outputs (`go test -bench`), calculates summary statistics
 (median, P95, allocations), and verifies that changes do not violate regression

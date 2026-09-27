@@ -96,7 +96,7 @@ Follow [testing](testing.md) for commands and fixtures. Timing-sensitive tests
 should use channels or barriers to force the relevant ordering.
 
 Language rules come from the pinned
-[Vim v9.2.1015 source and tests](https://github.com/vim/vim/tree/v9.2.1015).
+[Vim v9.2.1132 source and tests](https://github.com/vim/vim/tree/v9.2.1132).
 Protocol behavior follows
 [LSP 3.18](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/)
 and [JSON-RPC 2.0](https://www.jsonrpc.org/specification).

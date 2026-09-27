@@ -1,12 +1,14 @@
 # What vimls-go supports
 
-vimls-go supports Legacy Vim script and Vim9 script through **Vim v9.2.1015**,
-including classes, interfaces, enums and imports. Both dialects can be used in
-the same project. See the [changelog](../CHANGELOG.md) for release availability.
+vimls-go supports Legacy Vim script and Vim9 script through **Vim v9.2.1132**,
+commit `f3dc0fee778439ac8ff8680b42552f7f13d47396`, including classes,
+interfaces, enums and imports. Both dialects can be used in the same project.
+Generated and hand-maintained Vim metadata, the official corpus and the curated
+oracle use this revision. See the [changelog](../CHANGELOG.md) for release
+availability. Neovim compatibility and feature introduction history retain
+their independently recorded source revisions.
 
-Generated command, function, option and `v:` variable metadata comes from
-**Vim v9.2.1132**. The general grammar and oracle suite remain based on
-v9.2.1015, with these targeted updates checked against v9.2.1132:
+Version-sensitive behavior includes:
 
 - Builtin return types follow patch 1104, including argument-dependent helpers
   and nested lists.
@@ -198,7 +200,7 @@ See [editing configuration files](userconfig.md).
 - Dynamic code and loading order may leave types or references unresolved.
 - Mixed-dialect `def` and `function` bodies have incomplete analysis.
 - Call hierarchy excludes lambdas and deferred command bodies.
-- Embedded languages and syntax newer than Vim v9.2.1015 are not analyzed.
+- Embedded languages and syntax newer than Vim v9.2.1132 are not analyzed.
 - Files larger than 4 MiB are synchronized but not analyzed.
 
 ## Neovim compatibility

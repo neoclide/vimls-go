@@ -2,11 +2,11 @@
 
 ## Scope and source of truth
 
-Build a Go language server for legacy Vim script and Vim9 script, with grammar
-pinned to **Vim v9.2.1015**, plus the explicitly documented v9.2.1132
-compatibility updates in the support guide. Other later syntax is unsupported.
-`tools/genmetadata` pins command, function, option and `v:` variable metadata to
-**Vim v9.2.1132**; other metadata retains its recorded source revision.
+Build a Go language server for legacy Vim script and Vim9 script, pinned to
+**Vim v9.2.1132**. `tools/genmetadata`, `tools/geneventdocs`, generated and
+hand-maintained Vim metadata, the official corpus, and the curated Vim oracle
+use that revision; other metadata retains its recorded source revision. Syntax
+from later Vim versions is unsupported.
 The current contracts are [language support](docs/language-support.md),
 [diagnostics](docs/diagnostics.md), [configuration](docs/configuration.md) and
 [roadmap](docs/roadmap.md). Read the parts relevant to the task.
