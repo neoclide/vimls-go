@@ -119,6 +119,39 @@ func TestVim9AutomaticContinuation(t *testing.T) {
 	}
 }
 
+func TestVim9MultilineTernaryFalseBranchSigil(t *testing.T) {
+	file := Parse("vim9script\nconst shebang = &filetype == 'bash' ? '#!/bin/bash' :\n                &filetype == 'typescript' ? '#!/bin/env node' :\n                $'#!/bin/env/{&filetype}'\n")
+	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 || countTokens(file, TokenContinuation) != 2 {
+		t.Fatalf("diagnostics = %#v, commands = %#v, tokens = %#v", file.Diagnostics, file.Commands, file.Tokens)
+	}
+	declaration := file.Commands[1].Declaration
+	if declaration == nil || declaration.Initializer == nil || declaration.Initializer.Kind != ExpressionTernary || len(declaration.Initializer.Children) != 3 || declaration.Initializer.Children[2].Kind != ExpressionTernary {
+		t.Fatalf("declaration = %#v", declaration)
+	}
+}
+
+func TestVim9TernaryFalseBranchSigils(t *testing.T) {
+	for _, operand := range []string{"&filetype", "$SHELL", "@a"} {
+		file := Parse("vim9script\nconst value = true ? 1 :\n  " + operand + "\n")
+		declaration := file.Commands[1].Declaration
+		if len(file.Diagnostics) != 0 || len(file.Commands) != 2 || countTokens(file, TokenContinuation) != 1 || declaration == nil || declaration.Initializer == nil || declaration.Initializer.Kind != ExpressionTernary || len(declaration.Initializer.Children) != 3 {
+			t.Fatalf("operand %q: diagnostics = %#v, commands = %#v, tokens = %#v", operand, file.Diagnostics, file.Commands, file.Tokens)
+		}
+	}
+}
+
+func TestVim9IncompleteDeclarationRecoversAtNextCommand(t *testing.T) {
+	for _, source := range []string{
+		"vim9script\nconst value = true ? 1 :\nvar next = 2\n",
+		"vim9script\nconst value:\nvar next = 2\n",
+	} {
+		file := Parse(source)
+		if len(file.Commands) != 3 || file.Commands[2].Canonical != "var" || file.Commands[2].Declaration == nil || file.Text(file.Commands[2].Declaration.Name) != "next" || countTokens(file, TokenContinuation) != 0 {
+			t.Fatalf("commands = %#v, tokens = %#v", file.Commands, file.Tokens)
+		}
+	}
+}
+
 func TestOfficialVim9AutocmdCommandListContinuation(t *testing.T) {
 	// v9.2.1015 runtime/doc/vim9.txt *vim9-line-continuation*.
 	file := Parse("vim9script\nautocmd BufNewFile *.match if condition\n  | echo 'match'\n  | endif\nvar after = 1\n")

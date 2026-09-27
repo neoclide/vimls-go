@@ -260,6 +260,7 @@ func parseSourceContext(source string, initial Dialect, lambdaBody bool) *File {
 			!forTypeContinuation &&
 			!(vim9ContinuationState.depth > 0 && looksLikeVim9NamedItem(source, first, contentEnd)) &&
 			!continuesVim9FunctionSignature(file, vim9Continuation, vim9ContinuationState, source, first, contentEnd) &&
+			!(vim9ContinuationState.tailHasSuffix(":") && (source[first] == '&' || source[first] == '$' || source[first] == '@')) &&
 			!(source[first] == ':' && (len(vim9ContinuationState.ternaryDepth) > 0 || vim9ContinuationState.bracketDepth > 0)) {
 			// Static analysis must recover after an incomplete expression.  A
 			// clear statement boundary belongs to the following command even if
