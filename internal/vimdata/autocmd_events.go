@@ -3,12 +3,12 @@ package vimdata
 import "strings"
 
 const (
-	AutocmdEventVimTag    = "v9.2.1015"
-	AutocmdEventVimCommit = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
+	AutocmdEventVimTag    = "v9.2.1132"
+	AutocmdEventVimCommit = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
 )
 
-// AutocmdEvent is one entry from Vim tag v9.2.1015 commit
-// 5ab969f719bb09555e90e8dff8c94fc37bcbf2ae src/autocmd.c event_tab[].
+// AutocmdEvent is one entry from Vim tag v9.2.1132 commit
+// f3dc0fee778439ac8ff8680b42552f7f13d47396 src/autocmd.c event_tab[].
 // AliasOf identifies aliases represented by the same event key.
 type AutocmdEvent struct{ Name, AliasOf string }
 

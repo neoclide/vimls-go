@@ -8,13 +8,13 @@ The license is incorporated by reference as permitted by its section I.
 The pinned manuals do not elect either optional restriction in section VI.
 
 This distribution contains modified excerpts, not the original manuals.
-Compilation and modifications through 2026-09-27: chemzqm
+Compilation and modifications through 2026-09-28: chemzqm
 <chemzqm@gmail.com> and vimls-go contributors, https://github.com/neoclide/vimls-go.
 Modifications comprise selection and omission of surrounding sections,
 conversion of Vim help markup and examples to Markdown, whitespace and link
 normalization, manual adaptation of mapping help, merging event entries
 (preferring Vim for shared names), and packaging as Go metadata for hover
-and completion, and refreshing command, function, option and variable metadata
+and completion, and refreshing generated and hand-maintained Vim metadata
 against Vim v9.2.1132. No endorsement by the original authors is claimed or implied.
 Future changes to these excerpts must update the modification date and
 description here and retain source provenance and applicable notices.
@@ -28,6 +28,8 @@ https://github.com/vim/vim/blob/f3dc0fee778439ac8ff8680b42552f7f13d47396/runtime
 Vim v9.2.1015, commit 5ab969f719bb09555e90e8dff8c94fc37bcbf2ae:
 https://github.com/vim/vim/tree/5ab969f719bb09555e90e8dff8c94fc37bcbf2ae/runtime/doc
 https://github.com/vim/vim/blob/5ab969f719bb09555e90e8dff8c94fc37bcbf2ae/runtime/doc/usr_01.txt
+This is the historical source for the initial manual adaptations and existing
+excerpts; their current content was refreshed and reviewed against v9.2.1132.
 
 Neovim snapshot 73923b0dd85bb936ba2f63ee916dabaa0603340d:
 https://github.com/neovim/neovim/tree/73923b0dd85bb936ba2f63ee916dabaa0603340d/runtime/doc

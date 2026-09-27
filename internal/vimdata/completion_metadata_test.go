@@ -6,13 +6,18 @@ import (
 )
 
 func TestCompletionMetadataTables(t *testing.T) {
-	if ModifierVimTag != "v9.2.1015" || ModifierVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" ||
-		AutocmdEventVimTag != "v9.2.1015" || AutocmdEventVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" ||
-		CompletionValueVimTag != "v9.2.1015" || CompletionValueVimCommit != "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae" {
+	if ModifierVimTag != "v9.2.1132" || ModifierVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" ||
+		AutocmdEventVimTag != "v9.2.1132" || AutocmdEventVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" ||
+		CompletionValueVimTag != "v9.2.1132" || CompletionValueVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" ||
+		UserCommandAttributeVimTag != "v9.2.1132" || UserCommandAttributeVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" ||
+		MappingVimTag != "v9.2.1132" || MappingVimCommit != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
 		t.Fatal("completion metadata provenance changed")
 	}
 
 	features := HasFeatures()
+	if len(sourceHasFeatures) != 208 {
+		t.Fatalf("source has() features = %d, want 208", len(sourceHasFeatures))
+	}
 	if len(features) != 224 {
 		t.Fatalf("has() features = %d, want 224", len(features))
 	}
@@ -24,7 +29,7 @@ func TestCompletionMetadataTables(t *testing.T) {
 			t.Fatalf("has() features are not uniquely sorted at %q", feature.Name)
 		}
 	}
-	wantFeatures := map[string]bool{"all_builtin_terms": false, "clipboard_working": false, "gui_macvim": false, "nvim": false, "patch-9.2.1015": false, "vim9script": false, "X11": false, ":tearoff": false}
+	wantFeatures := map[string]bool{"all_builtin_terms": false, "clipboard_working": false, "gui_macvim": false, "nvim": false, "patch-9.2.1132": false, "vim9script": false, "X11": false, ":tearoff": false}
 	for _, feature := range features {
 		if _, ok := wantFeatures[feature.Name]; ok {
 			wantFeatures[feature.Name] = true

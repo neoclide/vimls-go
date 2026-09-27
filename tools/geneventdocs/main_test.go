@@ -8,6 +8,15 @@ import (
 	"testing"
 )
 
+func TestPinnedRevisions(t *testing.T) {
+	if vimTag != "v9.2.1132" || vimRevision != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
+		t.Fatalf("Vim pin = %s %s", vimTag, vimRevision)
+	}
+	if neovimRevision != "73923b0dd85bb936ba2f63ee916dabaa0603340d" {
+		t.Fatalf("Neovim pin = %s", neovimRevision)
+	}
+}
+
 func TestGitFileIncludesStderr(t *testing.T) {
 	_, err := gitFile(filepath.Join(t.TempDir(), "missing"), vimRevision, "runtime/doc/autocmd.txt")
 	var exitErr *exec.ExitError

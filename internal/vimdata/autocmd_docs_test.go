@@ -20,8 +20,14 @@ func TestAutocmdDocumentationInventory(t *testing.T) {
 		seen[name] = true
 		if e.Editor == "Vim" {
 			vimCount++
+			if e.Revision != "f3dc0fee778439ac8ff8680b42552f7f13d47396" {
+				t.Fatalf("Vim revision = %s", e.Revision)
+			}
 		} else if e.Editor == "Neovim" {
 			nvimCount++
+			if e.Revision != "73923b0dd85bb936ba2f63ee916dabaa0603340d" {
+				t.Fatalf("Neovim revision = %s", e.Revision)
+			}
 		} else {
 			t.Fatal(e.Editor)
 		}
@@ -52,7 +58,8 @@ func TestAutocmdDocumentationSourcesAndContent(t *testing.T) {
 		name, editor, path, contains string
 		line                         int
 	}{
-		{"FileType", "Vim", "runtime/doc/autocmd.txt", "pattern is matched against the filetype", 914},
+		{"FileType", "Vim", "runtime/doc/autocmd.txt", "pattern is matched against the filetype", 915},
+		{"DiffUpdated", "Vim", "runtime/doc/autocmd.txt", "not allowed to change the window layout", 810},
 		{"LspAttach", "Neovim", "runtime/doc/lsp.txt", "client/registerCapability", 735},
 		{"DiagnosticChanged", "Neovim", "runtime/doc/diagnostic.txt", "vim.api.nvim_create_autocmd", 423},
 		{"PackChanged", "Neovim", "runtime/doc/pack.txt", "PackChanged", 384},

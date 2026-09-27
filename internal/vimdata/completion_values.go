@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	CompletionValueVimTag    = "v9.2.1015"
-	CompletionValueVimCommit = "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae"
+	CompletionValueVimTag    = "v9.2.1132"
+	CompletionValueVimCommit = "f3dc0fee778439ac8ff8680b42552f7f13d47396"
 )
 
 type CompletionValue struct {
@@ -223,7 +223,7 @@ xsmp_interact
 xterm_clipboard
 xterm_save
 X11
-:tearoff`), "Recognized by has() in Vim v9.2.1015; availability depends on the Vim build and runtime state.")
+:tearoff`), "Recognized by has() in Vim v9.2.1132; availability depends on the Vim build and runtime state.")
 
 // dynamicHasFeatures are the fixed spellings handled before has_list[]. The
 // patch entry records the pinned ceiling instead of guessing later patches.
@@ -237,7 +237,7 @@ var dynamicHasFeatures = []CompletionValue{
 	{Name: "multi_byte_encoding", Documentation: "Whether Vim is currently using a multibyte encoding."},
 	{Name: "netbeans_enabled", Documentation: "Whether the NetBeans interface is currently active."},
 	{Name: "nvim", Documentation: "Whether the editor is Neovim."},
-	{Name: "patch-9.2.1015", Documentation: "Whether Vim includes patch 9.2.1015, the language metadata ceiling used by this server."},
+	{Name: "patch-9.2.1132", Documentation: "Whether Vim includes patch 9.2.1132, the language metadata ceiling used by this server."},
 	{Name: "syntax_items", Documentation: "Whether syntax highlighting items exist in the current buffer."},
 	{Name: "ttyin", Documentation: "Whether Vim's input is connected to a terminal."},
 	{Name: "ttyout", Documentation: "Whether Vim's output is connected to a terminal."},

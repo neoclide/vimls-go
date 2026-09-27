@@ -17,7 +17,7 @@ type OptionCompatibility struct {
 }
 
 // LookupOptionCompatibility resolves canonical names, short names and &g:/&l:
-// selectors. Evidence: Vim v9.2.1015 runtime/doc/options.txt and Neovim
+// selectors. Evidence: Vim v9.2.1132 runtime/doc/options.txt and Neovim
 // 73923b0dd85bb936ba2f63ee916dabaa0603340d runtime/doc/options.txt (option tags)
 // and runtime/doc/vim_diff.txt (Options). Later extensions need manual review.
 // ValidationNone deliberately retains conservative handling of runtime values.

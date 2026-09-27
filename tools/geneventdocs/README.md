@@ -8,7 +8,7 @@ selected event's documentation through `completionItem/resolve`.
 
 | Editor | Pinned revision | Inventory |
 | --- | --- | --- |
-| Vim `v9.2.1015` | `5ab969f719bb09555e90e8dff8c94fc37bcbf2ae` | `src/autocmd.c` |
+| Vim `v9.2.1132` | `f3dc0fee778439ac8ff8680b42552f7f13d47396` | `src/autocmd.c` |
 | Neovim `v0.12.0-2035-g73923b0dd8` | `73923b0dd85bb936ba2f63ee916dabaa0603340d` | `src/nvim/auevents.lua` |
 
 The Neovim revision is a development snapshot from the supplied local checkout,
