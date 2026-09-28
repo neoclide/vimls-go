@@ -11,7 +11,7 @@ import (
 
 func TestVersionDiagnosticsCommand(t *testing.T) {
 	file := syntax.Parse("defer Close()\n")
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	// defer was added in 9.0.0370
 	oldVersion, _ := vimdata.ParseVimVersion("9.0.0300")
@@ -34,7 +34,7 @@ func TestVersionDiagnosticsOption(t *testing.T) {
 	// smoothscroll was added in 9.0.0640
 	source := "set smoothscroll\nset sms\necho &smoothscroll\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0500")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)
@@ -62,7 +62,7 @@ func TestVersionDiagnosticsFunction(t *testing.T) {
 	// indexof was added in 9.0.0196
 	source := "vim9script\necho indexof([1, 2], 'v:val == 2')\necho [1, 2]->indexof('v:val == 2')\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0000")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)
@@ -87,7 +87,7 @@ func TestVersionDiagnosticsAutocmdEvent(t *testing.T) {
 	// WinResized was added in 9.0.0917
 	source := "autocmd WinResized * echo 1\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0500")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)
@@ -108,7 +108,7 @@ func TestVersionDiagnosticsAutocmdEvent(t *testing.T) {
 func TestVersionDiagnosticsUserDeclaredVariableNotConfusedWithFunction(t *testing.T) {
 	source := "let indexof = 1\necho indexof\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0000")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)
@@ -120,7 +120,7 @@ func TestVersionDiagnosticsUserDeclaredVariableNotConfusedWithFunction(t *testin
 func TestVersionDiagnosticsExternalVariableNotReportedAsFunction(t *testing.T) {
 	source := "echo g:indexof\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0000")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)
@@ -132,7 +132,7 @@ func TestVersionDiagnosticsExternalVariableNotReportedAsFunction(t *testing.T) {
 func TestVersionDiagnosticsLegacyOptionReadAfterAssignment(t *testing.T) {
 	source := "let &smoothscroll = 1\necho &smoothscroll\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0000")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)
@@ -150,7 +150,7 @@ func TestVersionDiagnosticsLegacyOptionReadAfterAssignment(t *testing.T) {
 func TestVersionDiagnosticsLambdaBodyCommands(t *testing.T) {
 	source := "vim9script\nvar F = () => {\n  set smoothscroll\n}\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0000")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)
@@ -165,7 +165,7 @@ func TestVersionDiagnosticsLambdaBodyCommands(t *testing.T) {
 func TestVersionDiagnosticsCommandModifier(t *testing.T) {
 	source := "horizontal wincmd =\n"
 	file := syntax.Parse(source)
-	analysisResult, _ := AnalyzeWithYield(file, false, nil)
+	analysisResult, _ := AnalyzeWithOptions(file, Options{})
 
 	targetVersion, _ := vimdata.ParseVimVersion("9.0.0000")
 	diags := VersionDiagnostics(file, analysisResult, targetVersion)

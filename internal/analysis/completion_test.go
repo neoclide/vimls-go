@@ -184,21 +184,22 @@ func TestAnalyzeYieldAbandonsPrivatePartialResult(t *testing.T) {
 	file := syntax.Parse("vim9script\nvar count: number = 'wrong'\necho count\n")
 	for _, stopAt := range []int{1, 8, 42} {
 		calls := 0
-		result, err := AnalyzeWithYield(file, false, func() error {
+		result, err := AnalyzeWithOptions(file, Options{Yield: func() error {
 			calls++
 			if calls == stopAt {
 				return context.Canceled
 			}
 			return nil
-		})
+		}})
 		if !errors.Is(err, context.Canceled) || result != nil || calls != stopAt {
 			t.Fatalf("stop at %d: result=%p err=%v calls=%d", stopAt, result, err, calls)
 		}
 	}
 	for _, configFile := range []bool{false, true} {
 		calls := 0
-		result, err := AnalyzeWithYield(file, configFile, func() error { calls++; return nil })
-		if err != nil || calls < 42 || !reflect.DeepEqual(result, analyzeWithRole(file, configFile)) {
+		result, err := AnalyzeWithOptions(file, Options{ConfigFile: configFile, Yield: func() error { calls++; return nil }})
+		expected, _ := AnalyzeWithOptions(file, Options{ConfigFile: configFile})
+		if err != nil || calls < 42 || !reflect.DeepEqual(result, expected) {
 			t.Fatalf("yielding changed full analysis: config=%t calls=%d err=%v", configFile, calls, err)
 		}
 	}

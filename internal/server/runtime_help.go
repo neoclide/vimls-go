@@ -84,7 +84,7 @@ func (s *Server) collectRuntimeHelpWorker() {
 			s.workspaceMu.Unlock()
 			s.publishMu.Unlock()
 			if refresh {
-				s.scheduleDiagnosticRefresh()
+				s.scheduleRefresh(refreshDiagnostic)
 				for _, snapshot := range s.documents.Snapshots() {
 					s.startAnalysis(snapshot.URI())
 				}

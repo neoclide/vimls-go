@@ -50,7 +50,7 @@ func TestTypeTraversalPausesContinuesAndCancels(t *testing.T) {
 			}
 		})
 	}
-	got, err := AnalyzeWithYield(file, false, func() error { return nil })
+	got, err := AnalyzeWithOptions(file, Options{Yield: func() error { return nil }})
 	if err != nil || got == nil || got.progress != nil {
 		t.Fatal("yielding changed complete analysis or retained callback")
 	}
@@ -78,19 +78,19 @@ func TestReferenceTraversalCancelsWithinOneExpression(t *testing.T) {
 func TestAnalysisCancellationDiscardsPartialResultsAcrossTraversal(t *testing.T) {
 	file := syntax.Parse("vim9script\nvar value: number = 'wrong'\ndef Read(): number\n" + strings.Repeat("  echo value + 1\n", 512) + "  return value\nenddef\n")
 	checkpoints := 0
-	complete, err := AnalyzeWithYield(file, false, func() error { checkpoints++; return nil })
+	complete, err := AnalyzeWithOptions(file, Options{Yield: func() error { checkpoints++; return nil }})
 	if err != nil || complete == nil || checkpoints < 100 {
 		t.Fatalf("large fixture: result=%p err=%v checkpoints=%d", complete, err, checkpoints)
 	}
 	for _, stop := range []int{1, checkpoints / 4, checkpoints / 2, checkpoints - 1, checkpoints} {
 		calls := 0
-		partial, err := AnalyzeWithYield(file, false, func() error {
+		partial, err := AnalyzeWithOptions(file, Options{Yield: func() error {
 			calls++
 			if calls == stop {
 				return context.Canceled
 			}
 			return nil
-		})
+		}})
 		if partial != nil || !errors.Is(err, context.Canceled) || calls != stop {
 			t.Fatalf("stop=%d: partial=%p err=%v calls=%d", stop, partial, err, calls)
 		}

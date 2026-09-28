@@ -75,7 +75,7 @@ func parseAndAnalyzeSources(ctx context.Context, sources []string, workers int, 
 					file := syntax.Parse(sources[index])
 					results[index].File = file
 					if analyze && ctx.Err() == nil {
-						result, err := analysis.AnalyzeWithYield(file, false, func() error {
+						result, err := analysis.AnalyzeWithOptions(file, analysis.Options{Yield: func() error {
 							if err := ctx.Err(); err != nil {
 								return err
 							}
@@ -83,7 +83,7 @@ func parseAndAnalyzeSources(ctx context.Context, sources []string, workers int, 
 								return yield(ctx)
 							}
 							return nil
-						})
+						}})
 						if err != nil {
 							results[index] = AnalyzedSource{}
 							cancel()

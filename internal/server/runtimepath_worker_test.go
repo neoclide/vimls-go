@@ -57,11 +57,11 @@ func TestWorkspaceAndRuntimepathHaveSeparateProgressAndRefresh(t *testing.T) {
 	client := &indexingClient{refresh: make(chan string, 16)}
 	s.client = client
 	s.workspaceProgress = true
-	s.diagnosticRefreshSupport = true
+	s.refreshes[refreshDiagnostic].supported = true
 	s.pullDiagnostics = true
-	s.semanticTokensRefreshSupport = true
-	s.inlayHintRefreshSupport = true
-	s.codeLensRefreshSupport = true
+	s.refreshes[refreshSemanticTokens].supported = true
+	s.refreshes[refreshInlayHint].supported = true
+	s.refreshes[refreshCodeLens].supported = true
 	s.setRuntimePaths([]string{external})
 	started, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once

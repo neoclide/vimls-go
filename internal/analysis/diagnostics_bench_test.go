@@ -46,7 +46,7 @@ func BenchmarkDiagnosticAnalysis(b *testing.B) {
 			}
 			b.ReportAllocs()
 			for b.Loop() {
-				benchmarkOptionAnalysis = analyzeWithRole(file, test.config)
+				benchmarkOptionAnalysis, _ = AnalyzeWithOptions(file, Options{ConfigFile: test.config})
 			}
 		})
 	}

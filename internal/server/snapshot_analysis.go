@@ -85,6 +85,7 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 		return nil, nil
 	}
 	key := analysisInFlightKey{parseInFlightKey: parseInFlightKey{uri: snapshot.URI(), contentID: snapshot.ContentID(), configFile: s.configFileRoleForURI(snapshot.URI())}, completion: completion}
+	// Load imported facts before looking up or registering analysis work.
 	s.publishMu.Lock()
 	cache := s.parsed[key.uri].imports
 	if cached := s.parsed[key.uri]; cached.file != file {
@@ -101,6 +102,7 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 		s.publishMu.Lock()
 	}
 	key.imports = imports
+	// Reuse a matching cached result or wait for matching shared work.
 	if cached := s.parsed[key.uri]; cached.file == file && cached.contentID == key.contentID && cached.configFile == key.configFile {
 		facts := cached.analysis
 		if facts != nil && facts.ImportTypes() != imports {
@@ -139,6 +141,7 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 			}
 		}
 	}
+	// Register computation after canceling obsolete work with different imports.
 	running := &inFlightAnalysis{file: file, done: make(chan struct{})}
 	if !completion {
 		running.context, running.cancel = context.WithCancel(s.analysisContext)
@@ -150,6 +153,7 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 	}
 	s.analysisInFlight[key] = running
 	s.publishMu.Unlock()
+	// Compute outside server locks.
 	sourceIdentity, _ := workspaceURIPath(uri.URI(snapshot.URI()))
 	if completion {
 		running.analysis = analysis.CollectCompletionFactsWithOptions(file, analysis.Options{Imports: imports, SourceIdentity: sourceIdentity})
@@ -182,17 +186,29 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 	if loadErr != nil || currentImports != imports || !cache.current(s, imports) {
 		running.analysis = nil
 	}
+	s.finishSnapshotFactsLocked(snapshot, key, running)
+	s.publishMu.Unlock()
+	if running.analysis == nil {
+		return nil, nil
+	}
+	return file, running.analysis
+}
+
+// finishSnapshotFactsLocked completes a registered analysis and installs its
+// result for the current snapshot. Caller holds publishMu and has revalidated
+// imports, clearing running.analysis when those facts are obsolete.
+func (s *Server) finishSnapshotFactsLocked(snapshot *text.Snapshot, key analysisInFlightKey, running *inFlightAnalysis) {
 	if s.analysisInFlight[key] == running {
 		delete(s.analysisInFlight, key)
 	}
 	if current, ok := s.documents.Snapshot(key.uri); ok && current == snapshot && s.analysisContext.Err() == nil {
 		cached := s.parsed[key.uri]
-		if cached.file == file && cached.contentID == key.contentID {
+		if cached.file == running.file && cached.contentID == key.contentID {
 			if cached.configFile != key.configFile {
 				cached.analysis, cached.completion = nil, nil
 				cached.configFile = key.configFile
 			}
-			if completion {
+			if key.completion {
 				cached.completion = running.analysis
 			} else {
 				cached.analysis = running.analysis
@@ -201,11 +217,6 @@ func (s *Server) snapshotFacts(ctx context.Context, snapshot *text.Snapshot, fil
 		}
 	}
 	close(running.done)
-	s.publishMu.Unlock()
-	if running.analysis == nil {
-		return nil, nil
-	}
-	return file, running.analysis
 }
 
 // Caller holds publishMu. Identical content may still share useful computation,

@@ -21,6 +21,9 @@ Dependencies flow from the server into the smaller packages. Parsing and
 analysis do not depend on the editor process or transport. Prefer changing
 the existing function or type before adding another layer.
 
+The [architecture improvement plan](architecture-improvement-plan.md) records
+the reviewed refactoring scope, sequence and validation requirements.
+
 ## From an edit to a result
 
 An edit creates a new document snapshot. Parsing and analysis work from that
@@ -60,6 +63,13 @@ Analysis collects declarations, resolves references and derives the types it
 can prove. Use `unknown` when runtime behavior could change the answer.
 In particular, do not offer rename edits based only on a matching name.
 
+[`analysis/scopes.go`](../internal/analysis/scopes.go) keeps the analysis model,
+entry points and ordered phases. Declaration collection and reference binding
+live in `scopes_declarations.go` and `scopes_references.go`. The
+`scopes_*_diagnostics.go` files group checks by name, aggregate, control flow,
+null receiver and type rules. File boundaries do not change phase order:
+later checks can suppress or replace earlier diagnostics.
+
 Workspace files and external runtime files are indexed separately. Runtime
 updates retain data for unchanged roots. External symbols remain available for
 completion and navigation, while workspace-symbol searches show only workspace
@@ -74,6 +84,55 @@ cache instead of waiting for disk reads.
 Only refresh features whose consumed data changed and whose client supports
 refresh. Keep incomplete indexes distinguishable from complete results,
 especially for references and reverse hierarchy queries.
+
+Import processing follows these ownership boundaries:
+
+| Owner | Responsibility |
+| --- | --- |
+| [analysis](../internal/analysis/import_types.go) | Single-file bindings and immutable imported/exported type facts, without workspace or process state. |
+| [workspace](../internal/workspace/export_types.go) | Export inputs and derivation from indexed source. |
+| [server import cache](../internal/server/import_types.go) | Per-parsed-document dependency identities, transitive derivation and invalidation. |
+| [server diagnostics](../internal/server/import_diagnostics.go) | Combines import facts and current workspace data into document diagnostics. |
+
+`snapshotFacts` loads the document's `importTypeCache`, which calls
+`workspace.DeriveExportTypes` using analysis types. The cache is owned by the
+parsed document, so editing or closing that document releases its source and
+dependency tables. Before installing analysis, the server revalidates consumed
+import facts and the document snapshot. Completion facts and full diagnostic
+analysis have separate cache slots.
+
+## Server state and background work
+
+Within `internal/server`, `workspace.go` owns workspace builds and index/graph
+installation. `runtimepath.go` handles runtime directory changes,
+`file_watching.go` handles watched-file batches and registration, and
+`workspace_progress.go` owns ordered progress notifications. Their methods
+still share `Server`: splitting files does not make index, graph, resolver and
+readiness state independently publishable.
+
+The lock order in [server.go](../internal/server/server.go) is authoritative.
+It is a partial order, not a list of locks that can all be acquired together.
+
+| Lock | Protected work or state |
+| --- | --- |
+| `mu` | Protocol state, client capabilities, refresh state and diagnostic settings. |
+| `publishMu` | Document cache installation and diagnostic/token result state. |
+| `workspaceMu` | Workspace/runtime roots, index and graph identity, readiness and runtime help state. |
+| `analysisMu` | Pending/running document analysis and worker admission. |
+| `configurationMu` | Configuration request generation, cancellation and response application. |
+| `watchMu` | Watch registration and watched-file batch admission. |
+
+Workspace and runtimepath installations keep their existing cross-lock commit
+boundaries. Runtimepath batches additionally serialize on `runtimepathRunMu`.
+Shutdown closes admission and cancels `analysisContext`; `stopAnalysis` waits
+for the analysis, workspace, runtimepath, help and watch worker groups, using
+the existing admission barriers before waiting.
+
+[`refresh.go`](../internal/server/refresh.go) shares one scheduling loop across
+four fixed refresh kinds, each with its own generation and running state.
+Client calls run outside server locks. Diagnostic refresh also requires pull
+diagnostics, and workspace-triggered Code Lens refresh requires a complete
+index. A waiting refresh coalesces later changes without blocking other kinds.
 
 ## Requests and shutdown
 

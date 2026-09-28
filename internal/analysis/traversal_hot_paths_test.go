@@ -15,15 +15,15 @@ func TestBuiltinUnknownCallTraversalStaysBounded(t *testing.T) {
 		t.Run(fmt.Sprintf("depth-%d", depth), func(t *testing.T) {
 			source := "vim9script\necho " + strings.Repeat("abs(", depth) + "1" + strings.Repeat(")", depth) + "\n"
 			checkpoints := 0
-			result, err := AnalyzeWithYield(syntax.Parse(source), false, func() error {
+			result, err := AnalyzeWithOptions(syntax.Parse(source), Options{Yield: func() error {
 				checkpoints++
 				if checkpoints > 128 {
 					return context.Canceled
 				}
 				return nil
-			})
+			}})
 			if err != nil || result == nil {
-				t.Fatalf("AnalyzeWithYield() = %p, %v", result, err)
+				t.Fatalf("AnalyzeWithOptions() = %p, %v", result, err)
 			}
 		})
 	}

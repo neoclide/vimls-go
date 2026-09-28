@@ -93,9 +93,9 @@ func (s *Server) analysisCheckpoint(ctx context.Context) error {
 }
 
 func (s *Server) analyzeFile(ctx context.Context, file *syntax.File, configFile bool) *analysis.FileAnalysis {
-	result, _ := analysis.AnalyzeWithYield(file, configFile, func() error {
+	result, _ := analysis.AnalyzeWithOptions(file, analysis.Options{ConfigFile: configFile, Yield: func() error {
 		return s.analysisCheckpoint(ctx)
-	})
+	}})
 	return result
 }
 

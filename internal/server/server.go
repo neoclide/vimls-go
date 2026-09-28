@@ -191,39 +191,30 @@ type Server struct {
 	log    io.Writer
 	logMu  sync.Mutex
 
-	mu                       sync.Mutex
-	state                    state
-	pendingWarning           string
-	client                   protocol.Client
-	workspaceProgress        bool
-	pullDiagnostics          bool
-	diagnosticRefreshSupport bool
+	// mu protects protocol state, capabilities, refreshes and diagnostic settings.
+	mu                sync.Mutex
+	state             state
+	pendingWarning    string
+	client            protocol.Client
+	workspaceProgress bool
+	pullDiagnostics   bool
+	refreshes         [refreshKindCount]refreshState
 
-	semanticTokensRefreshSupport    bool
-	semanticTokensRefreshGeneration uint64
-	semanticTokensRefreshRunning    bool
-
-	inlayHintRefreshSupport    bool
-	inlayHintRefreshGeneration uint64
-	inlayHintRefreshRunning    bool
-
-	codeLensRefreshSupport    bool
-	codeLensRefreshGeneration uint64
-	codeLensRefreshRunning    bool
-
-	workspaceProgressID         uint64
-	cancellations               map[jsonrpc2.ID]context.CancelFunc
-	documents                   *workspace.Documents
-	encoding                    text.Encoding
-	completion                  completionCapabilities
-	completionPriority          completionPriority
-	languageFeatures            languageFeatureCapabilities
-	exitOnce                    sync.Once
-	stopOnce                    sync.Once
-	exitCode                    chan int
-	analysisMu                  sync.Mutex
-	analysisContext             context.Context
-	analysisCancel              context.CancelFunc
+	workspaceProgressID uint64
+	cancellations       map[jsonrpc2.ID]context.CancelFunc
+	documents           *workspace.Documents
+	encoding            text.Encoding
+	completion          completionCapabilities
+	completionPriority  completionPriority
+	languageFeatures    languageFeatureCapabilities
+	exitOnce            sync.Once
+	stopOnce            sync.Once
+	exitCode            chan int
+	// analysisMu protects analysis queues and worker admission.
+	analysisMu      sync.Mutex
+	analysisContext context.Context
+	analysisCancel  context.CancelFunc
+	// Written under workspaceMu and analysisMu; readers hold either lock.
 	analysisStopped             bool
 	analysisWG                  sync.WaitGroup
 	analysisWake                chan struct{}
@@ -231,8 +222,8 @@ type Server struct {
 	analysisRunning             map[string]struct{}
 	analysisWorkers             int
 	testHooks                   serverTestHooks
-	diagnosticsSendMu           sync.Mutex
-	publishMu                   sync.Mutex
+	diagnosticsSendMu           sync.Mutex // serializes push diagnostic sends and clears
+	publishMu                   sync.Mutex // protects document caches and published/pull/token result state
 	parsed                      map[string]parsedDocument
 	parseInFlight               map[parseInFlightKey]*inFlightParse
 	analysisInFlight            map[analysisInFlightKey]*inFlightAnalysis
@@ -245,10 +236,8 @@ type Server struct {
 	semanticTokenResults        map[string]semanticTokenResult
 	nextSemanticTokenResultID   uint64
 	initialRefreshPending       map[string]struct{}
-	diagnosticRefreshGeneration uint64
-	diagnosticRefreshRunning    bool
-	workspaceMu                 sync.Mutex
-	configurationMu             sync.Mutex
+	workspaceMu                 sync.Mutex // protects roots, index/graph identity, readiness and runtime help
+	configurationMu             sync.Mutex // protects configuration generations, cancellation and response application
 	configurationGeneration     uint64
 	configurationCancel         context.CancelFunc
 	workspaceRoots              []string
@@ -286,7 +275,7 @@ type Server struct {
 	workspaceWG                 sync.WaitGroup
 	hierarchyLimit              int
 
-	watchMu                       sync.Mutex
+	watchMu                       sync.Mutex // protects registration and watched-file batch admission
 	watchDynamicRegistration      bool
 	watchRelativePatterns         bool
 	watchRegistered               bool
@@ -625,10 +614,10 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 	s.workspaceConfiguration = workspaceConfiguration
 	s.workspaceProgress = workspaceProgress
 	s.pullDiagnostics = pullDiagnostics
-	s.diagnosticRefreshSupport = diagnosticRefreshSupport
-	s.semanticTokensRefreshSupport = semanticTokensRefreshSupport
-	s.inlayHintRefreshSupport = inlayHintRefreshSupport
-	s.codeLensRefreshSupport = codeLensRefreshSupport
+	s.refreshes[refreshDiagnostic].supported = diagnosticRefreshSupport
+	s.refreshes[refreshSemanticTokens].supported = semanticTokensRefreshSupport
+	s.refreshes[refreshInlayHint].supported = inlayHintRefreshSupport
+	s.refreshes[refreshCodeLens].supported = codeLensRefreshSupport
 	s.documentChangesSupport = params.Capabilities.Workspace != nil && params.Capabilities.Workspace.WorkspaceEdit != nil && params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges != nil && *params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges
 	s.hierarchicalSymbolsSupport = params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.DocumentSymbol != nil && params.Capabilities.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport != nil && *params.Capabilities.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport
 	s.mu.Unlock()
@@ -1038,7 +1027,7 @@ func (s *Server) applyWorkspaceConfigurationGeneration(ctx context.Context, sett
 		}
 	}
 	if diagnosticsChanged {
-		s.scheduleDiagnosticRefresh()
+		s.scheduleRefresh(refreshDiagnostic)
 	}
 	return nil
 }
@@ -1329,9 +1318,9 @@ func (s *Server) analyzeDocument(documentURI string) {
 	}
 	file, identity, ok := s.computeDocumentDiagnostics(work)
 	if ok && s.publishSyntax(work, file, identity) {
-		s.scheduleSemanticTokensRefresh()
-		s.scheduleInlayHintRefresh()
-		s.scheduleCodeLensRefresh()
+		s.scheduleRefresh(refreshSemanticTokens)
+		s.scheduleRefresh(refreshInlayHint)
+		s.scheduleRefresh(refreshCodeLens)
 	} else if !ok && work.Context.Err() == nil {
 		// A dependency may change without changing this document. Dropping its
 		// result must not strand its pending index entry: retry through the
