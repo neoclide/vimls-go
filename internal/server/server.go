@@ -231,6 +231,7 @@ type Server struct {
 	pullDiagnosticResults       map[string]pullDiagnosticResult
 	workspaceDiagnosticReported map[string]string // publishMu; retained until removal is acknowledged
 	documentChangesSupport      bool
+	applyEditSupport            bool
 	hierarchicalSymbolsSupport  bool
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult
@@ -556,6 +557,7 @@ func implementedMethod(method string) bool {
 		protocol.MethodWorkspaceDidChangeWatchedFiles,
 		protocol.MethodWorkspaceSymbol,
 		protocol.MethodWorkspaceWillRenameFiles,
+		protocol.MethodWorkspaceExecuteCommand,
 		MethodDidChangeRuntimepath:
 		return true
 	default:
@@ -619,6 +621,8 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 	s.refreshes[refreshInlayHint].supported = inlayHintRefreshSupport
 	s.refreshes[refreshCodeLens].supported = codeLensRefreshSupport
 	s.documentChangesSupport = params.Capabilities.Workspace != nil && params.Capabilities.Workspace.WorkspaceEdit != nil && params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges != nil && *params.Capabilities.Workspace.WorkspaceEdit.DocumentChanges
+	applyEdit := params.Capabilities.Workspace != nil && params.Capabilities.Workspace.ApplyEdit != nil && *params.Capabilities.Workspace.ApplyEdit
+	s.applyEditSupport = applyEdit
 	s.hierarchicalSymbolsSupport = params.Capabilities.TextDocument != nil && params.Capabilities.TextDocument.DocumentSymbol != nil && params.Capabilities.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport != nil && *params.Capabilities.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport
 	s.mu.Unlock()
 	s.workspaceMu.Lock()
@@ -646,6 +650,10 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 	if codeActionLiterals {
 		codeActionProvider = &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}}
 	}
+	var executeCommandProvider protocol.ExecuteCommandOptions
+	if applyEdit {
+		executeCommandProvider.Commands = []string{CommandUpdateImportsOnRename}
+	}
 	workspaceOptions := &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
 		Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
 	}}
@@ -662,6 +670,7 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 		}
 	}
 	capabilities := protocol.ServerCapabilities{
+		ExecuteCommandProvider:          executeCommandProvider,
 		PositionEncoding:                protocolEncoding,
 		DocumentFormattingProvider:      protocol.Boolean(true),
 		DocumentRangeFormattingProvider: documentRangeFormattingProvider,

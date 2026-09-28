@@ -282,3 +282,43 @@ can receive workspace progress, runtime scan logs, and refresh requests for
 supported diagnostic, highlighting, inlay-hint and Code Lens features.
 Document and workspace pull diagnostics are supported; older clients receive
 push diagnostics.
+
+### Updating imports after a file rename
+
+For a rename detected after the filesystem operation, send
+[`workspace/executeCommand`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/#workspace_executeCommand)
+with command `vimls.updateImportsOnRename` and one `RenameFilesParams` argument:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 43,
+  "method": "workspace/executeCommand",
+  "params": {
+    "command": "vimls.updateImportsOnRename",
+    "arguments": [{
+      "files": [{
+        "oldUri": "file:///project/lib.vim",
+        "newUri": "file:///project/util.vim"
+      }]
+    }]
+  }
+}
+```
+
+The client must advertise `workspace.applyEdit: true`; the server then lists
+the command in `executeCommandProvider.commands`. The server computes a
+`WorkspaceEdit`, sends `workspace/applyEdit`, and returns the client's
+`ApplyWorkspaceEditResult`, including any refusal reason. With no safe edits,
+the command returns `null` without sending an apply request.
+
+Send each rename batch once, after its files have moved. Old paths must be
+absent and destinations must be regular files; directory and symbolic-link
+renames are unsupported. For moved open documents, synchronize their new URIs
+and current contents before invoking the command. Edits use the new URIs and
+open-document versions. The command works before or after the file watcher
+refreshes the index and uses the same [import rewrite checks](language-support.md)
+as `workspace/willRenameFiles`.
+
+For client-controlled renames, keep using `workspace/willRenameFiles` before
+the move; do not invoke this command for a batch already handled that way.

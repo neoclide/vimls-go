@@ -85,6 +85,9 @@ func TestImportGraphRemoveClearsIncidentEdges(t *testing.T) {
 	if len(imports) != 1 || imports[0].Target != "" || imports[0].Dynamic || imports[0].ImportPath != "'./b.vim'" {
 		t.Fatalf("incoming import was not retained as unresolved: %#v", imports)
 	}
+	if paths := snapshot.Importers(); len(paths) != 1 || !sameGraphPath(paths[0], a) {
+		t.Fatalf("importers after removing target = %#v", paths)
+	}
 }
 
 func TestImportGraphRetainsDynamicAndMissingImportsWithoutEdges(t *testing.T) {

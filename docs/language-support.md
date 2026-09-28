@@ -92,6 +92,12 @@ moving or replacing its target, and its effect on other files in the batch
 cannot be proven by canonical file identities alone. Regular files reached
 through symbolic-link parent directories remain supported.
 
+Clients that observe an already completed file rename can run
+[`vimls.updateImportsOnRename`](configuration.md#updating-imports-after-a-file-rename).
+It sends the import edits through `workspace/applyEdit`, using the files' new
+locations. The same path and namespace checks apply; directory renames are not
+supported.
+
 Types are inferred from known values and function return types in both dialects.
 Builtin call inference supplements broad metadata with known return-value rules,
 including the corrections recorded in Vim v9.2.1104 and checked against

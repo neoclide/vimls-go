@@ -213,6 +213,19 @@ func (s ImportGraphSnapshot) Imports(path string) []ImportFact {
 	return cloneImportFacts(s.imports[canonical])
 }
 
+// Importers includes scripts whose static targets are now missing, for example
+// after a file watcher has removed the old target of a completed rename.
+func (s ImportGraphSnapshot) Importers() []string {
+	var paths []string
+	for path, facts := range s.imports {
+		if len(facts) > 0 {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
 // ImportsAtCanonicalPath combines membership and import lookup after the caller
 // has resolved the path. Results remain independent of the immutable snapshot.
 func (s ImportGraphSnapshot) ImportsAtCanonicalPath(path string) ([]ImportFact, bool) {

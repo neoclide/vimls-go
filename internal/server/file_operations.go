@@ -39,11 +39,17 @@ func (s *Server) WillRenameFiles(ctx context.Context, params *protocol.RenameFil
 	if len(params.Files) == 0 {
 		return s.clientWorkspaceEdit(nil)
 	}
+	return s.renameFileWorkspaceEdit(ctx, params.Files, false)
+}
+
+// Both entry points use the same path and binding checks. afterRename switches
+// file lookup and edit URIs to the already completed operation.
+func (s *Server) renameFileWorkspaceEdit(ctx context.Context, files []protocol.FileRename, afterRename bool) (*protocol.WorkspaceEdit, error) {
 	if err := s.waitForWorkspaceIndex(ctx); err != nil {
 		return nil, err
 	}
 	for attempt := range 2 {
-		changes, retry, err := s.renameFileImportChanges(ctx, params.Files)
+		changes, retry, err := s.renameFileImportChanges(ctx, files, afterRename)
 		if err != nil {
 			return nil, err
 		}
@@ -62,7 +68,7 @@ func (s *Server) WillRenameFiles(ctx context.Context, params *protocol.RenameFil
 // renameFileImportChanges computes the import rewrites for one captured
 // workspace state. retry reports that the state was superseded while the edits
 // were being built, so a fresh capture may still produce a usable result.
-func (s *Server) renameFileImportChanges(ctx context.Context, files []protocol.FileRename) ([]protocol.DocumentChange, bool, error) {
+func (s *Server) renameFileImportChanges(ctx context.Context, files []protocol.FileRename, afterRename bool) ([]protocol.DocumentChange, bool, error) {
 	state := s.captureWorkspaceNavigationState()
 	if state.index == nil || !state.index.Complete() || !state.graph.Ready() {
 		// A superseded or partial file set cannot prove which documents import
@@ -73,16 +79,35 @@ func (s *Server) renameFileImportChanges(ctx context.Context, files []protocol.F
 	if len(renamed) == 0 {
 		return nil, false, nil
 	}
+	var restored map[string]string
+	if afterRename {
+		// Resolving with the inverse move reconstructs the old lookup order
+		// without retaining a stale index or touching the filesystem.
+		restored = make(map[string]string, len(renamed))
+		for oldPath, newPath := range renamed {
+			if _, err := os.Lstat(oldPath); !os.IsNotExist(err) {
+				return nil, false, nil
+			}
+			info, err := os.Lstat(newPath)
+			if err != nil || !info.Mode().IsRegular() {
+				return nil, false, nil
+			}
+			if _, duplicate := restored[newPath]; duplicate {
+				return nil, false, nil
+			}
+			restored[newPath] = oldPath
+		}
+	}
 	s.mu.Lock()
 	encoding := s.encoding
 	s.mu.Unlock()
-	importers := renameFileImporters(state, renamed)
+	importers := renameFileImporters(state, renamed, restored)
 	changes := make([]protocol.DocumentChange, 0, len(importers))
 	for _, importer := range importers {
 		if ctx.Err() != nil {
 			return nil, false, protocol.ErrRequestCancelled
 		}
-		change, err := s.renameFileImporterChange(ctx, state, encoding, importer, renamed)
+		change, err := s.renameFileImporterChange(ctx, state, encoding, importer, renamed, restored)
 		if err != nil {
 			if errors.Is(err, protocol.ErrRequestCancelled) {
 				return nil, false, err
@@ -148,7 +173,7 @@ func renameFileTargets(files []protocol.FileRename) map[string]string {
 // renameFileImporters returns every document whose imports may need rewriting:
 // the recorded importers of each renamed file, and the renamed files
 // themselves, whose relative imports move with them.
-func renameFileImporters(state workspaceNavigationSnapshot, renamed map[string]string) []string {
+func renameFileImporters(state workspaceNavigationSnapshot, renamed, restored map[string]string) []string {
 	seen := make(map[string]struct{}, len(renamed))
 	importers := make([]string, 0, len(renamed))
 	add := func(path string) {
@@ -164,11 +189,20 @@ func renameFileImporters(state workspaceNavigationSnapshot, renamed map[string]s
 			add(fact.Importer)
 		}
 	}
+	if restored != nil {
+		// Incoming edges may already have disappeared after a watch refresh.
+		for _, path := range state.graph.Importers() {
+			if previous, moved := restored[path]; moved {
+				path = previous
+			}
+			add(path)
+		}
+	}
 	sort.Strings(importers)
 	return importers
 }
 
-func (s *Server) renameFileImporterChange(ctx context.Context, state workspaceNavigationSnapshot, encoding text.Encoding, importer string, renamed map[string]string) (protocol.DocumentChange, error) {
+func (s *Server) renameFileImporterChange(ctx context.Context, state workspaceNavigationSnapshot, encoding text.Encoding, importer string, renamed, restored map[string]string) (protocol.DocumentChange, error) {
 	if state.resolver == nil {
 		return nil, nil
 	}
@@ -178,7 +212,11 @@ func (s *Server) renameFileImporterChange(ctx context.Context, state workspaceNa
 	if destination, moved := renamed[importer]; moved {
 		from = destination
 	}
-	snapshot, open, err := s.renameFileImporterSnapshot(state, importer)
+	current := importer
+	if restored != nil {
+		current = from
+	}
+	snapshot, open, err := s.renameFileImporterSnapshot(state, current, importer)
 	if err != nil || snapshot == nil {
 		return nil, err
 	}
@@ -197,7 +235,7 @@ func (s *Server) renameFileImporterChange(ctx context.Context, state workspaceNa
 			if command.Import != nil && !insideFunction {
 				// A function-local import is deferred until the function runs,
 				// so its path is not part of the script's load-time imports.
-				nodeEdits, nodeValid := renameFileImportNodeEdits(state, snapshot, file, result, encoding, importer, from, command.Import, renamed)
+				nodeEdits, nodeValid := renameFileImportNodeEdits(state, snapshot, file, result, encoding, importer, from, command.Import, renamed, restored)
 				if !nodeValid {
 					valid = false
 					return
@@ -227,7 +265,7 @@ func (s *Server) renameFileImporterChange(ctx context.Context, state workspaceNa
 	// Recheck after collecting edits and validating the proposed text. Closed
 	// files have no client version to reject an already-stale range.
 	if !open {
-		content, readable := readRegularWorkspaceFile(importer, maxFileBytes)
+		content, readable := readRegularWorkspaceFile(current, maxFileBytes)
 		if !readable || string(content) != snapshot.Text() {
 			return nil, protocol.ErrContentModified
 		}
@@ -239,7 +277,7 @@ func (s *Server) renameFileImporterChange(ctx context.Context, state workspaceNa
 	}
 	return &protocol.TextDocumentEdit{
 		TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(importer)},
+			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(current)},
 			Version:                versionPointer,
 		},
 		Edits: edits,
@@ -250,7 +288,7 @@ func (s *Server) renameFileImporterChange(ctx context.Context, state workspaceNa
 // computed from. An open document uses the client's own content; a closed
 // document is read back and compared with the indexed source, so a concurrent
 // write can never be edited from a stale reading.
-func (s *Server) renameFileImporterSnapshot(state workspaceNavigationSnapshot, importer string) (*text.Snapshot, bool, error) {
+func (s *Server) renameFileImporterSnapshot(state workspaceNavigationSnapshot, importer, previous string) (*text.Snapshot, bool, error) {
 	s.publishMu.Lock()
 	open, _, found := s.openWorkspaceSnapshotLocked(importer)
 	s.publishMu.Unlock()
@@ -258,6 +296,10 @@ func (s *Server) renameFileImporterSnapshot(state workspaceNavigationSnapshot, i
 		return open, true, nil
 	}
 	source, indexed := state.index.Source(importer)
+	if !indexed && previous != importer {
+		// The file has moved but its watcher update may not have arrived yet.
+		source, indexed = state.index.Source(previous)
+	}
 	if !indexed {
 		return nil, false, nil
 	}
@@ -270,9 +312,14 @@ func (s *Server) renameFileImporterSnapshot(state workspaceNavigationSnapshot, i
 
 // renameFileImportNodeEdits returns the edits for one import command, or
 // valid=false when the import cannot be rewritten without guessing.
-func renameFileImportNodeEdits(state workspaceNavigationSnapshot, snapshot *text.Snapshot, file *syntax.File, result *analysis.FileAnalysis, encoding text.Encoding, importer, from string, node *syntax.Import, renamed map[string]string) ([]protocol.TextDocumentEditElement, bool) {
+func renameFileImportNodeEdits(state workspaceNavigationSnapshot, snapshot *text.Snapshot, file *syntax.File, result *analysis.FileAnalysis, encoding text.Encoding, importer, from string, node *syntax.Import, renamed, restored map[string]string) ([]protocol.TextDocumentEditElement, bool) {
 	raw := file.Text(node.PathSpan)
-	resolution := state.resolver.ResolveImportPath(importer, raw, node.Autoload)
+	var resolution workspace.PathResolution
+	if restored == nil {
+		resolution = state.resolver.ResolveImportPath(importer, raw, node.Autoload)
+	} else {
+		resolution = state.resolver.ResolveImportPathAfterRenames(importer, raw, node.Autoload, restored)
+	}
 	if resolution.Dynamic || resolution.Path == "" {
 		return nil, true
 	}
@@ -295,7 +342,12 @@ func renameFileImportNodeEdits(state workspaceNavigationSnapshot, snapshot *text
 	}
 	// A spelling that fits the same lookup directory can still be shadowed
 	// by another runtimepath entry, including a destination in this batch.
-	prospective := state.resolver.ResolveImportPathAfterRenames(from, newRaw, node.Autoload, renamed)
+	var prospective workspace.PathResolution
+	if restored == nil {
+		prospective = state.resolver.ResolveImportPathAfterRenames(from, newRaw, node.Autoload, renamed)
+	} else {
+		prospective = state.resolver.ResolveImportPath(from, newRaw, node.Autoload)
+	}
 	if !sameWorkspacePath(prospective.Path, newTarget) {
 		return nil, false
 	}
