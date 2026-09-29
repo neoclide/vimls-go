@@ -3,25 +3,22 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
-	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
-type renameCommandClient struct {
+type renameFilesClient struct {
 	protocol.UnimplementedClient
 	requests []*protocol.ApplyWorkspaceEditParams
 	apply    func(context.Context) (*protocol.ApplyWorkspaceEditResult, error)
 }
 
-func (c *renameCommandClient) ApplyEdit(ctx context.Context, params *protocol.ApplyWorkspaceEditParams) (*protocol.ApplyWorkspaceEditResult, error) {
+func (c *renameFilesClient) ApplyEdit(ctx context.Context, params *protocol.ApplyWorkspaceEditParams) (*protocol.ApplyWorkspaceEditResult, error) {
 	c.requests = append(c.requests, params)
 	if c.apply != nil {
 		return c.apply(ctx)
@@ -29,11 +26,11 @@ func (c *renameCommandClient) ApplyEdit(ctx context.Context, params *protocol.Ap
 	return &protocol.ApplyWorkspaceEditResult{Applied: true}, nil
 }
 
-func initializeRenameCommandServer(t *testing.T, root string, runtimePaths ...string) (*Server, *renameCommandClient) {
+func initializeRenameFilesServer(t *testing.T, root string, runtimePaths ...string) (*Server, *renameFilesClient) {
 	t.Helper()
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
-	client := &renameCommandClient{}
+	client := &renameFilesClient{}
 	instance.client = client
 	rootURI := uri.File(root)
 	supported := true
@@ -62,34 +59,7 @@ func initializeRenameCommandServer(t *testing.T, root string, runtimePaths ...st
 	return instance, client
 }
 
-func renameCommandParams(t *testing.T, paths ...string) *protocol.ExecuteCommandParams {
-	t.Helper()
-	argument, err := protocol.Marshal(renameFileParams(paths...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &protocol.ExecuteCommandParams{Command: CommandUpdateImportsOnRename, Arguments: []protocol.LSPAny{argument}}
-}
-
-func TestRenameCommandCapability(t *testing.T) {
-	for _, supported := range []bool{false, true} {
-		instance := New(nil, nil, io.Discard)
-		t.Cleanup(instance.stopAnalysis)
-		result, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
-			Capabilities:          protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{ApplyEdit: &supported}},
-			InitializationOptions: protocol.LSPAny(`{"runtimepath":[]}`),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		provider := result.Capabilities.ExecuteCommandProvider
-		if !supported && len(provider.Commands) != 0 || supported && !slices.Equal(provider.Commands, []string{CommandUpdateImportsOnRename}) {
-			t.Fatalf("applyEdit=%t: provider = %#v", supported, provider)
-		}
-	}
-}
-
-func TestRenameCommandAfterFilesystemRename(t *testing.T) {
+func TestDidRenameFilesAfterFilesystemRename(t *testing.T) {
 	for _, indexState := range []string{"before watcher", "after watcher", "fresh index"} {
 		t.Run(indexState, func(t *testing.T) {
 			root := t.TempDir()
@@ -98,15 +68,15 @@ func TestRenameCommandAfterFilesystemRename(t *testing.T) {
 			source := "vim9script\nimport './lib.vim'\necho lib.Value\n"
 			main := writeWorkspaceFile(t, root, "main.vim", source)
 			var instance *Server
-			var client *renameCommandClient
+			var client *renameFilesClient
 			if indexState != "fresh index" {
-				instance, client = initializeRenameCommandServer(t, root)
+				instance, client = initializeRenameFilesServer(t, root)
 			}
 			if err := os.Rename(old, newPath); err != nil {
 				t.Fatal(err)
 			}
 			if indexState == "fresh index" {
-				instance, client = initializeRenameCommandServer(t, root)
+				instance, client = initializeRenameFilesServer(t, root)
 			} else if indexState == "after watcher" {
 				if err := instance.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{Changes: []protocol.FileEvent{
 					{URI: uri.File(old), Type: protocol.FileChangeTypeDeleted},
@@ -116,9 +86,9 @@ func TestRenameCommandAfterFilesystemRename(t *testing.T) {
 				}
 				instance.workspaceWG.Wait()
 			}
-			result, err := instance.ExecuteCommand(context.Background(), renameCommandParams(t, old, newPath))
-			if err != nil || string(result) != `{"applied":true}` || len(client.requests) != 1 {
-				t.Fatalf("result=%s error=%v requests=%d", result, err, len(client.requests))
+			err := instance.DidRenameFiles(context.Background(), renameFileParams(old, newPath))
+			if err != nil || len(client.requests) != 1 {
+				t.Fatalf("error=%v requests=%d", err, len(client.requests))
 			}
 			updated := applyRenameEdits(t, &client.requests[0].Edit, map[string]string{main: source})
 			if updated[main] != "vim9script\nimport './util.vim'\necho util.Value\n" {
@@ -128,7 +98,7 @@ func TestRenameCommandAfterFilesystemRename(t *testing.T) {
 	}
 }
 
-func TestRenameCommandEditsMovedImporterAtNewURI(t *testing.T) {
+func TestDidRenameFilesEditsMovedImporterAtNewURI(t *testing.T) {
 	for _, refresh := range []bool{false, true} {
 		for _, open := range []bool{false, true} {
 			root := t.TempDir()
@@ -137,7 +107,7 @@ func TestRenameCommandEditsMovedImporterAtNewURI(t *testing.T) {
 			source := "vim9script\r\nimport './lib.vim' as lib\r\necho lib.Value\r\n"
 			oldMain := writeWorkspaceFile(t, root, "main.vim", source)
 			newMain := filepath.Join(root, "sub", "main.vim")
-			instance, client := initializeRenameCommandServer(t, root)
+			instance, client := initializeRenameFilesServer(t, root)
 			if err := os.Mkdir(filepath.Dir(newMain), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -156,7 +126,7 @@ func TestRenameCommandEditsMovedImporterAtNewURI(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := instance.ExecuteCommand(context.Background(), renameCommandParams(t, oldLib, newLib, oldMain, newMain)); err != nil {
+			if err := instance.DidRenameFiles(context.Background(), renameFileParams(oldLib, newLib, oldMain, newMain)); err != nil {
 				t.Fatal(err)
 			}
 			if len(client.requests) != 1 {
@@ -179,7 +149,7 @@ func TestRenameCommandEditsMovedImporterAtNewURI(t *testing.T) {
 	}
 }
 
-func TestRenameCommandPreservesRuntimeLookupOrder(t *testing.T) {
+func TestDidRenameFilesPreservesRuntimeLookupOrder(t *testing.T) {
 	for _, shadow := range []bool{false, true} {
 		root := t.TempDir()
 		first, second := filepath.Join(root, "first"), filepath.Join(root, "second")
@@ -196,8 +166,8 @@ func TestRenameCommandPreservesRuntimeLookupOrder(t *testing.T) {
 		if err := os.Rename(old, newPath); err != nil {
 			t.Fatal(err)
 		}
-		instance, client := initializeRenameCommandServer(t, root, filepath.Join(root, "shadow"), first, second)
-		if _, err := instance.ExecuteCommand(context.Background(), renameCommandParams(t, old, newPath)); err != nil {
+		instance, client := initializeRenameFilesServer(t, root, filepath.Join(root, "shadow"), first, second)
+		if err := instance.DidRenameFiles(context.Background(), renameFileParams(old, newPath)); err != nil {
 			t.Fatal(err)
 		}
 		if shadow {
@@ -216,7 +186,7 @@ func TestRenameCommandPreservesRuntimeLookupOrder(t *testing.T) {
 	}
 }
 
-func TestRenameCommandSkipsUnverifiableEdits(t *testing.T) {
+func TestDidRenameFilesSkipsUnverifiableEdits(t *testing.T) {
 	for _, scenario := range []string{"not moved", "stale content", "incomplete index", "unbound namespace", "unrelated"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
@@ -229,7 +199,7 @@ func TestRenameCommandSkipsUnverifiableEdits(t *testing.T) {
 				source = "vim9script\n"
 			}
 			main := writeWorkspaceFile(t, root, "main.vim", source)
-			instance, client := initializeRenameCommandServer(t, root)
+			instance, client := initializeRenameFilesServer(t, root)
 			if scenario != "not moved" {
 				if err := os.Rename(old, newPath); err != nil {
 					t.Fatal(err)
@@ -242,79 +212,44 @@ func TestRenameCommandSkipsUnverifiableEdits(t *testing.T) {
 			} else if scenario == "incomplete index" {
 				instance.workspaceIndex.SetComplete(false)
 			}
-			result, err := instance.ExecuteCommand(context.Background(), renameCommandParams(t, old, newPath))
-			if err != nil || result != nil || len(client.requests) != 0 {
-				t.Fatalf("result=%s error=%v requests=%d", result, err, len(client.requests))
+			err := instance.DidRenameFiles(context.Background(), renameFileParams(old, newPath))
+			if err != nil || len(client.requests) != 0 {
+				t.Fatalf("error=%v requests=%d", err, len(client.requests))
 			}
 		})
 	}
 }
 
-func TestRenameCommandApplyResultAndCancellation(t *testing.T) {
+func TestDidRenameFilesFallbackEditAndCancellation(t *testing.T) {
 	root := t.TempDir()
 	old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
 	newPath := filepath.Join(root, "util.vim")
 	main := writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './lib.vim' as lib\n")
-	instance, client := initializeRenameCommandServer(t, root)
+	instance, client := initializeRenameFilesServer(t, root)
 	instance.mu.Lock()
 	instance.documentChangesSupport = false
 	instance.mu.Unlock()
 	if err := os.Rename(old, newPath); err != nil {
 		t.Fatal(err)
 	}
-	params := renameCommandParams(t, old, newPath)
-	reason := "user declined"
-	client.apply = func(context.Context) (*protocol.ApplyWorkspaceEditResult, error) {
-		return &protocol.ApplyWorkspaceEditResult{FailureReason: &reason}, nil
-	}
-	result, err := instance.ExecuteCommand(context.Background(), params)
-	if err != nil || string(result) != `{"applied":false,"failureReason":"user declined"}` {
-		t.Fatalf("result=%s error=%v", result, err)
+	params := renameFileParams(old, newPath)
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil || len(client.requests) != 1 {
+		t.Fatalf("error=%v requests=%d", err, len(client.requests))
 	}
 	edit := client.requests[0].Edit
 	if len(edit.DocumentChanges) != 0 || len(edit.Changes[uri.File(mustWorkspaceCanonicalPath(t, main))]) != 1 {
 		t.Fatalf("fallback edit = %#v", edit)
 	}
-	failure := errors.New("apply failed")
-	client.apply = func(context.Context) (*protocol.ApplyWorkspaceEditResult, error) { return nil, failure }
-	if _, err := instance.ExecuteCommand(context.Background(), params); !errors.Is(err, failure) {
-		t.Fatalf("apply failure = %v", err)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	client.apply = func(ctx context.Context) (*protocol.ApplyWorkspaceEditResult, error) {
 		cancel()
 		return nil, ctx.Err()
 	}
-	if _, err := instance.ExecuteCommand(ctx, params); !errors.Is(err, protocol.ErrRequestCancelled) {
-		t.Fatalf("apply cancellation = %v", err)
+	if err := instance.DidRenameFiles(ctx, params); err != nil || len(client.requests) != 2 {
+		t.Fatalf("apply cancellation: error=%v requests=%d", err, len(client.requests))
 	}
-	count := len(client.requests)
-	if _, err := instance.ExecuteCommand(ctx, params); !errors.Is(err, protocol.ErrRequestCancelled) || len(client.requests) != count {
-		t.Fatalf("cancelled request: error=%v calls=%d", err, len(client.requests))
-	}
-}
-
-func TestRenameCommandRejectsInvalidRequests(t *testing.T) {
-	instance, client := initializeRenameCommandServer(t, t.TempDir())
-	for _, params := range []*protocol.ExecuteCommandParams{
-		{Command: "unknown"},
-		{Command: CommandUpdateImportsOnRename},
-		{Command: CommandUpdateImportsOnRename, Arguments: []protocol.LSPAny{protocol.LSPAny(`null`)}},
-		{Command: CommandUpdateImportsOnRename, Arguments: []protocol.LSPAny{protocol.LSPAny(`{"files":[]}`)}},
-		{Command: CommandUpdateImportsOnRename, Arguments: []protocol.LSPAny{protocol.LSPAny(`{"files":[{"oldUri":"untitled:old","newUri":"file:///new.vim"}]}`)}},
-	} {
-		_, err := instance.ExecuteCommand(context.Background(), params)
-		var rpcError *jsonrpc2.Error
-		if !errors.As(err, &rpcError) || rpcError.Code != jsonrpc2.InvalidParams {
-			t.Fatalf("params=%#v error=%v", params, err)
-		}
-	}
-	instance.mu.Lock()
-	instance.applyEditSupport = false
-	instance.mu.Unlock()
-	_, err := instance.ExecuteCommand(context.Background(), renameCommandParams(t, "/old.vim", "/new.vim"))
-	var rpcError *jsonrpc2.Error
-	if !errors.As(err, &rpcError) || rpcError.Code != jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed) || len(client.requests) != 0 {
-		t.Fatalf("unsupported applyEdit: error=%v requests=%d", err, len(client.requests))
+	if err := instance.DidRenameFiles(ctx, params); err != nil || len(client.requests) != 2 {
+		t.Fatalf("cancelled notification: error=%v requests=%d", err, len(client.requests))
 	}
 }

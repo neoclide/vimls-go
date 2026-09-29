@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +17,177 @@ import (
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
+
+func TestDidRenameFilesCapability(t *testing.T) {
+	for _, applyEdit := range []bool{false, true} {
+		for _, didRename := range []bool{false, true} {
+			for _, willRename := range []bool{false, true} {
+				t.Run(fmt.Sprintf("apply=%t/did=%t/will=%t", applyEdit, didRename, willRename), func(t *testing.T) {
+					instance := New(nil, nil, io.Discard)
+					t.Cleanup(instance.stopAnalysis)
+					result, err := instance.Initialize(context.Background(), &protocol.InitializeParams{
+						Capabilities: protocol.ClientCapabilities{Workspace: &protocol.WorkspaceClientCapabilities{
+							ApplyEdit:      &applyEdit,
+							FileOperations: &protocol.FileOperationClientCapabilities{DidRename: &didRename, WillRename: &willRename},
+						}},
+						InitializationOptions: protocol.LSPAny(`{"runtimepath":[]}`),
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					operations := result.Capabilities.Workspace.FileOperations
+					wantDid := applyEdit && didRename
+					wantWill := willRename
+					if !wantDid && !wantWill {
+						if operations != nil {
+							t.Fatalf("unexpected registration: %#v", operations)
+						}
+						return
+					}
+					if operations == nil || (len(operations.DidRename.Filters) == 1) != wantDid || (len(operations.WillRename.Filters) == 1) != wantWill {
+						t.Fatalf("file operations = %#v", operations)
+					}
+					if wantDid {
+						filter := operations.DidRename.Filters[0]
+						if filter.Scheme == nil || *filter.Scheme != "file" || filter.Pattern.Glob != "**/*.vim" || filter.Pattern.Matches != protocol.FileOperationPatternKindFile {
+							t.Fatalf("filter = %#v", filter)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestDidRenameFilesSkipsWillRenameEdits(t *testing.T) {
+	root := t.TempDir()
+	first := writeWorkspaceFile(t, root, "first.vim", "vim9script\nexport var Value = 1\n")
+	second := writeWorkspaceFile(t, root, "second.vim", "vim9script\nexport var Value = 2\n")
+	firstNew, secondNew := filepath.Join(root, "one.vim"), filepath.Join(root, "two.vim")
+	source := "vim9script\nimport './first.vim' as first\nimport './second.vim' as second\n"
+	main := writeWorkspaceFile(t, root, "main.vim", source)
+	instance, client := initializeRenameFilesServer(t, root)
+	// Only the most recent pre-rename request is remembered.
+	for _, paths := range [][2]string{{first, firstNew}, {second, secondNew}} {
+		edit, err := instance.WillRenameFiles(context.Background(), renameFileParams(paths[:]...))
+		if err != nil || len(edit.DocumentChanges) == 0 {
+			t.Fatalf("willRenameFiles: edit=%#v error=%v", edit, err)
+		}
+		if err := os.Rename(paths[0], paths[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := instance.DidRenameFiles(context.Background(), renameFileParams(second, secondNew)); err != nil || len(client.requests) != 0 {
+		t.Fatalf("already handled: error=%v requests=%d", err, len(client.requests))
+	}
+	if err := instance.DidRenameFiles(context.Background(), renameFileParams(first, firstNew)); err != nil || len(client.requests) != 1 {
+		t.Fatalf("earlier rename: error=%v requests=%d", err, len(client.requests))
+	}
+	updated := applyRenameEdits(t, &client.requests[0].Edit, map[string]string{main: source})
+	if updated[main] != strings.Replace(source, "'./first.vim'", "'./one.vim'", 1) {
+		t.Fatalf("updated = %#v", updated)
+	}
+}
+
+func TestDidRenameFilesUsesSynchronizedDocument(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		for _, moved := range []bool{false, true} {
+			t.Run(fmt.Sprintf("refresh=%t/moved=%t", refresh, moved), func(t *testing.T) {
+				root := t.TempDir()
+				old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+				newPath := filepath.Join(root, "util.vim")
+				main := writeWorkspaceFile(t, root, "main.vim", "vim9script\n# no imports on disk\n")
+				instance, client := initializeRenameFilesServer(t, root)
+				params := renameFileParams(old, newPath)
+				if err := os.Rename(old, newPath); err != nil {
+					t.Fatal(err)
+				}
+				if moved {
+					newMain := filepath.Join(root, "sub", "main.vim")
+					if err := os.Mkdir(filepath.Dir(newMain), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Rename(main, newMain); err != nil {
+						t.Fatal(err)
+					}
+					params = renameFileParams(old, newPath, main, newMain)
+					main = newMain
+				}
+				if refresh {
+					instance.scheduleWorkspaceRebuild()
+					instance.workspaceWG.Wait()
+				}
+				if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+					URI: uri.File(main), Version: 6, Text: "vim9script\n",
+				}}); err != nil {
+					t.Fatal(err)
+				}
+				source := "# 😀é unsaved\r\nvim9script\r\nimport './lib.vim'\r\necho lib.Value\r\n"
+				if err := instance.DidChange(context.Background(), &protocol.DidChangeTextDocumentParams{
+					TextDocument:   protocol.VersionedTextDocumentIdentifier{TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri.File(main)}, Version: 7},
+					ContentChanges: []protocol.TextDocumentContentChangeEvent{&protocol.TextDocumentContentChangeWholeDocument{Text: source}},
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := instance.DidRenameFiles(context.Background(), params); err != nil {
+					t.Fatal(err)
+				}
+				if len(client.requests) != 1 {
+					t.Fatalf("apply requests = %d", len(client.requests))
+				}
+				edit := &client.requests[0].Edit
+				change := edit.DocumentChanges[0].(*protocol.TextDocumentEdit)
+				if change.TextDocument.Version == nil || *change.TextDocument.Version != 7 {
+					t.Fatalf("document version = %v", change.TextDocument.Version)
+				}
+				updated := applyRenameEdits(t, edit, map[string]string{main: source})
+				want := "# 😀é unsaved\r\nvim9script\r\nimport './util.vim'\r\necho util.Value\r\n"
+				if moved {
+					want = strings.Replace(want, "'./util.vim'", "'../util.vim'", 1)
+				}
+				if updated[main] != want {
+					t.Fatalf("updated = %#v", updated)
+				}
+			})
+		}
+	}
+}
+
+func TestDidRenameFilesNoEditsAndApplyFailure(t *testing.T) {
+	root := t.TempDir()
+	old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+	newPath := filepath.Join(root, "util.vim")
+	writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './lib.vim' as lib\n")
+	instance, client := initializeRenameFilesServer(t, root)
+	var logs bytes.Buffer
+	instance.log = &logs
+	params := renameFileParams(old, newPath)
+	for _, noEdit := range []*protocol.RenameFilesParams{{}, params} {
+		if err := instance.DidRenameFiles(context.Background(), noEdit); err != nil || len(client.requests) != 0 {
+			t.Fatalf("unchanged files: error=%v requests=%d", err, len(client.requests))
+		}
+	}
+	if err := os.Rename(old, newPath); err != nil {
+		t.Fatal(err)
+	}
+	reason := "user declined"
+	client.apply = func(context.Context) (*protocol.ApplyWorkspaceEditResult, error) {
+		return &protocol.ApplyWorkspaceEditResult{FailureReason: &reason}, nil
+	}
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil || !strings.Contains(logs.String(), reason) {
+		t.Fatalf("declined edit: error=%v logs=%q", err, logs.String())
+	}
+	failure := errors.New("apply failed")
+	client.apply = func(context.Context) (*protocol.ApplyWorkspaceEditResult, error) { return nil, failure }
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil || !strings.Contains(logs.String(), failure.Error()) {
+		t.Fatalf("failed edit: error=%v logs=%q", err, logs.String())
+	}
+	instance.applyEditSupport = false
+	count := len(client.requests)
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil || len(client.requests) != count {
+		t.Fatalf("unsupported client: error=%v requests=%d", err, len(client.requests))
+	}
+}
 
 func TestWillRenameFilesCapability(t *testing.T) {
 	for _, supported := range []bool{false, true} {
@@ -43,7 +217,7 @@ func TestWillRenameFilesCapability(t *testing.T) {
 				t.Fatalf("file operations = %#v", operations)
 			}
 			filter := operations.WillRename.Filters[0]
-			if filter.Scheme == nil || *filter.Scheme != "file" || filter.Pattern.Glob != willRenameImportGlob || filter.Pattern.Matches != protocol.FileOperationPatternKindFile {
+			if filter.Scheme == nil || *filter.Scheme != "file" || filter.Pattern.Glob != renameImportGlob || filter.Pattern.Matches != protocol.FileOperationPatternKindFile {
 				t.Fatalf("filter = %#v", filter)
 			}
 		})

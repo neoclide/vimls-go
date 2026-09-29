@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -11,15 +12,16 @@ import (
 	"github.com/neoclide/vimls-go/internal/syntax"
 	"github.com/neoclide/vimls-go/internal/text"
 	"github.com/neoclide/vimls-go/internal/workspace"
+	jsonrpc2 "go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )
 
-// willRenameImportGlob is the only file kind a Vim :import can name. Folder
+// renameImportGlob is the only file kind a Vim :import can name. Folder
 // renames are deliberately not registered: a folder operation reports the
 // folder alone, so the imports it affects cannot be enumerated from the
 // request.
-const willRenameImportGlob = "**/*.vim"
+const renameImportGlob = "**/*.vim"
 
 // WillRenameFiles rewrites the Vim9 :import statements that name a file being
 // renamed, including the imports of the renamed files themselves when their own
@@ -36,13 +38,78 @@ const willRenameImportGlob = "**/*.vim"
 // a file rename may need to update, and failing the whole operation would be
 // worse than leaving one import for the user to correct.
 func (s *Server) WillRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (*protocol.WorkspaceEdit, error) {
+	s.mu.Lock()
+	s.lastWillRenameFiles = slices.Clone(params.Files)
+	s.mu.Unlock()
 	if len(params.Files) == 0 {
 		return s.clientWorkspaceEdit(nil)
 	}
 	return s.renameFileWorkspaceEdit(ctx, params.Files, false)
 }
 
-// Both entry points use the same path and binding checks. afterRename switches
+// DidRenameFiles updates imports after the client observes a filesystem rename.
+func (s *Server) DidRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) error {
+	// Compare only with the most recent pre-rename request. Its edits have
+	// already been returned to the client before this notification arrives.
+	s.mu.Lock()
+	handled := slices.Equal(s.lastWillRenameFiles, params.Files)
+	s.mu.Unlock()
+	if handled || len(params.Files) == 0 {
+		return nil
+	}
+	// Keep the comparison ordered with incoming messages, then release the
+	// reader so it can receive the applyEdit reply and shutdown requests.
+	jsonrpc2.Async(ctx)
+	result, err := s.applyRenameFileImports(ctx, params.Files)
+	if err != nil {
+		if !errors.Is(err, protocol.ErrRequestCancelled) {
+			s.logf("vimls: update imports after file rename: %v", err)
+		}
+		return nil // Notifications have no response; failures are logged above.
+	}
+	if result != nil && !result.Applied {
+		reason := "client declined the edit"
+		if result.FailureReason != nil {
+			reason = *result.FailureReason
+		}
+		s.logf("vimls: update imports after file rename: %s", reason)
+	}
+	return nil
+}
+
+// applyRenameFileImports computes post-rename edits and sends them to the
+// client, cancelling any pending apply request when the server shuts down.
+func (s *Server) applyRenameFileImports(ctx context.Context, files []protocol.FileRename) (*protocol.ApplyWorkspaceEditResult, error) {
+	s.mu.Lock()
+	client, supported := s.client, s.applyEditSupport
+	s.mu.Unlock()
+	if !supported || client == nil {
+		return nil, jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "client does not support workspace/applyEdit")
+	}
+	// A pending client apply request must also end when the server shuts down.
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.analysisContext, cancel)
+	defer cancel()
+	defer stop()
+	edit, err := s.renameFileWorkspaceEdit(ctx, files, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(edit.DocumentChanges) == 0 && len(edit.Changes) == 0 {
+		return nil, nil
+	}
+	if ctx.Err() != nil || s.analysisContext.Err() != nil {
+		return nil, protocol.ErrRequestCancelled
+	}
+	label := "Update Vim imports after file rename"
+	result, err := client.ApplyEdit(ctx, &protocol.ApplyWorkspaceEditParams{Label: &label, Edit: *edit})
+	if ctx.Err() != nil {
+		return nil, protocol.ErrRequestCancelled
+	}
+	return result, err
+}
+
+// All entry points use the same path and binding checks. afterRename switches
 // file lookup and edit URIs to the already completed operation.
 func (s *Server) renameFileWorkspaceEdit(ctx context.Context, files []protocol.FileRename, afterRename bool) (*protocol.WorkspaceEdit, error) {
 	if err := s.waitForWorkspaceIndex(ctx); err != nil {

@@ -286,39 +286,45 @@ push diagnostics.
 ### Updating imports after a file rename
 
 For a rename detected after the filesystem operation, send
-[`workspace/executeCommand`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/#workspace_executeCommand)
-with command `vimls.updateImportsOnRename` and one `RenameFilesParams` argument:
+[`workspace/didRenameFiles`](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/#workspace_didRenameFiles)
+with the old and new file URIs:
 
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 43,
-  "method": "workspace/executeCommand",
+  "method": "workspace/didRenameFiles",
   "params": {
-    "command": "vimls.updateImportsOnRename",
-    "arguments": [{
-      "files": [{
-        "oldUri": "file:///project/lib.vim",
-        "newUri": "file:///project/util.vim"
-      }]
+    "files": [{
+      "oldUri": "file:///project/lib.vim",
+      "newUri": "file:///project/util.vim"
     }]
   }
 }
 ```
 
-The client must advertise `workspace.applyEdit: true`; the server then lists
-the command in `executeCommandProvider.commands`. The server computes a
-`WorkspaceEdit`, sends `workspace/applyEdit`, and returns the client's
-`ApplyWorkspaceEditResult`, including any refusal reason. With no safe edits,
-the command returns `null` without sending an apply request.
+Advertise both `workspace.fileOperations.didRename: true` and
+`workspace.applyEdit: true`. The server registers notifications for `file` URIs
+matching `**/*.vim` (files only). It computes Vim9 import edits and sends a
+`workspace/applyEdit` request; no request is sent when there are no safe edits.
+Client refusal reasons and apply failures are logged. External renames work
+when the client forwards their old/new URI pairs through this notification.
+
+`workspace/willRenameFiles` remains registered when the client supports it.
+The server remembers only the most recent `willRenameFiles` file list. A
+`didRenameFiles` notification with the same list, including order, skips edit
+calculation to avoid applying the rename twice. Other notifications use the
+post-rename calculation.
 
 Send each rename batch once, after its files have moved. Old paths must be
 absent and destinations must be regular files; directory and symbolic-link
 renames are unsupported. For moved open documents, synchronize their new URIs
-and current contents before invoking the command. Edits use the new URIs and
-open-document versions. The command works before or after the file watcher
-refreshes the index and uses the same [import rewrite checks](language-support.md)
+and current contents before sending the notification. Edits prefer
+the client's synchronized document content, including unsaved changes, and
+carry its version when the client supports `documentChanges`. Closed documents
+are read from disk and checked against the indexed source. Edits use the new
+URIs. The notification works before or after the file watcher refreshes the
+index and uses the same [import rewrite checks](language-support.md)
 as `workspace/willRenameFiles`.
 
-For client-controlled renames, keep using `workspace/willRenameFiles` before
-the move; do not invoke this command for a batch already handled that way.
+For client-controlled renames, use `workspace/willRenameFiles` before the move
+and `workspace/didRenameFiles` afterwards.

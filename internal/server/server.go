@@ -232,6 +232,7 @@ type Server struct {
 	workspaceDiagnosticReported map[string]string // publishMu; retained until removal is acknowledged
 	documentChangesSupport      bool
 	applyEditSupport            bool
+	lastWillRenameFiles         []protocol.FileRename
 	hierarchicalSymbolsSupport  bool
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult
@@ -418,7 +419,10 @@ func (s *Server) cancellationHandler(next jsonrpc2.Handler) jsonrpc2.Handler {
 		}
 		// Register first so a following $/cancelRequest cannot be handled before this request.
 		// Keep lifecycle calls ordered: later input may depend on initialize or shutdown completing.
-		if request.Method() != protocol.MethodInitialize && request.Method() != protocol.MethodShutdown && request.Method() != MethodDidChangeRuntimepath {
+		// Runtimepath and post-rename handlers release the reader themselves.
+		switch request.Method() {
+		case protocol.MethodInitialize, protocol.MethodShutdown, MethodDidChangeRuntimepath, protocol.MethodWorkspaceDidRenameFiles:
+		default:
 			jsonrpc2.Async(ctx)
 		}
 		defer func() {
@@ -557,7 +561,7 @@ func implementedMethod(method string) bool {
 		protocol.MethodWorkspaceDidChangeWatchedFiles,
 		protocol.MethodWorkspaceSymbol,
 		protocol.MethodWorkspaceWillRenameFiles,
-		protocol.MethodWorkspaceExecuteCommand,
+		protocol.MethodWorkspaceDidRenameFiles,
 		MethodDidChangeRuntimepath:
 		return true
 	default:
@@ -650,27 +654,29 @@ func (s *Server) Initialize(ctx context.Context, params *protocol.InitializePara
 	if codeActionLiterals {
 		codeActionProvider = &protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix}}
 	}
-	var executeCommandProvider protocol.ExecuteCommandOptions
-	if applyEdit {
-		executeCommandProvider.Commands = []string{CommandUpdateImportsOnRename}
-	}
 	workspaceOptions := &protocol.WorkspaceOptions{WorkspaceFolders: &protocol.WorkspaceFoldersServerCapabilities{
 		Supported: &workspaceFoldersSupported, ChangeNotifications: protocol.Boolean(true),
 	}}
-	if params.Capabilities.Workspace != nil && params.Capabilities.Workspace.FileOperations != nil &&
-		params.Capabilities.Workspace.FileOperations.WillRename != nil && *params.Capabilities.Workspace.FileOperations.WillRename {
+	if params.Capabilities.Workspace != nil && params.Capabilities.Workspace.FileOperations != nil {
 		// Only a literal :import path can be rewritten, and only for the file
 		// kind such a path can name.
 		fileScheme := "file"
-		workspaceOptions.FileOperations = &protocol.FileOperationOptions{
-			WillRename: protocol.FileOperationRegistrationOptions{Filters: []protocol.FileOperationFilter{{
-				Scheme:  &fileScheme,
-				Pattern: protocol.FileOperationPattern{Glob: willRenameImportGlob, Matches: protocol.FileOperationPatternKindFile},
-			}}},
+		registration := protocol.FileOperationRegistrationOptions{Filters: []protocol.FileOperationFilter{{
+			Scheme:  &fileScheme,
+			Pattern: protocol.FileOperationPattern{Glob: renameImportGlob, Matches: protocol.FileOperationPatternKindFile},
+		}}}
+		operations := params.Capabilities.Workspace.FileOperations
+		if applyEdit && operations.DidRename != nil && *operations.DidRename {
+			workspaceOptions.FileOperations = &protocol.FileOperationOptions{DidRename: registration}
+		}
+		if operations.WillRename != nil && *operations.WillRename {
+			if workspaceOptions.FileOperations == nil {
+				workspaceOptions.FileOperations = &protocol.FileOperationOptions{}
+			}
+			workspaceOptions.FileOperations.WillRename = registration
 		}
 	}
 	capabilities := protocol.ServerCapabilities{
-		ExecuteCommandProvider:          executeCommandProvider,
 		PositionEncoding:                protocolEncoding,
 		DocumentFormattingProvider:      protocol.Boolean(true),
 		DocumentRangeFormattingProvider: documentRangeFormattingProvider,
