@@ -234,6 +234,8 @@ type Server struct {
 	applyEditSupport            bool
 	lastWillRenameFiles         []protocol.FileRename
 	willRenameFilesGeneration   uint64
+	applyRenameCancels          map[uint64]context.CancelFunc
+	nextApplyRenameID           uint64
 	hierarchicalSymbolsSupport  bool
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult
@@ -1845,6 +1847,12 @@ func (s *Server) clearDiagnostics(documentURI string) {
 	}
 }
 
+func (s *Server) isShutdown() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state == stateShutdown
+}
+
 func (s *Server) cancelAnalysis() {
 	s.workspaceMu.Lock()
 	s.analysisMu.Lock()
@@ -1855,6 +1863,12 @@ func (s *Server) cancelAnalysis() {
 	clear(s.analysisPending)
 	s.analysisMu.Unlock()
 	s.workspaceMu.Unlock()
+	s.mu.Lock()
+	for _, cancel := range s.applyRenameCancels {
+		cancel()
+	}
+	clear(s.applyRenameCancels)
+	s.mu.Unlock()
 }
 
 func (s *Server) stopAnalysis() {

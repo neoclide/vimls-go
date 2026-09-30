@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"os"
 	"slices"
 	"sort"
@@ -82,17 +84,19 @@ func (s *Server) DidRenameFiles(ctx context.Context, params *protocol.RenameFile
 	jsonrpc2.Async(ctx)
 	result, err := s.applyRenameFileImports(ctx, params.Files)
 	if err != nil {
-		if !errors.Is(err, protocol.ErrRequestCancelled) {
+		if !errors.Is(err, protocol.ErrRequestCancelled) && !errors.Is(err, context.Canceled) && !isDisconnectError(err) && !s.isShutdown() && s.analysisContext.Err() == nil {
 			s.logf("vimls: update imports after file rename: %v", err)
 		}
 		return nil // Notifications have no response; failures are logged above.
 	}
 	if result != nil && !result.Applied {
-		reason := "client declined the edit"
-		if result.FailureReason != nil {
-			reason = *result.FailureReason
+		if !s.isShutdown() && s.analysisContext.Err() == nil {
+			reason := "client declined the edit"
+			if result.FailureReason != nil {
+				reason = *result.FailureReason
+			}
+			s.logf("vimls: update imports after file rename: %s", reason)
 		}
-		s.logf("vimls: update imports after file rename: %s", reason)
 	}
 	return nil
 }
@@ -102,15 +106,32 @@ func (s *Server) DidRenameFiles(ctx context.Context, params *protocol.RenameFile
 func (s *Server) applyRenameFileImports(ctx context.Context, files []protocol.FileRename) (*protocol.ApplyWorkspaceEditResult, error) {
 	s.mu.Lock()
 	client, supported := s.client, s.applyEditSupport
+	shutdown := s.state == stateShutdown
 	s.mu.Unlock()
 	if !supported || client == nil {
 		return nil, jsonrpc2.NewError(jsonrpc2.Code(protocol.LSPErrorCodesRequestFailed), "client does not support workspace/applyEdit")
 	}
+	if shutdown || s.analysisContext.Err() != nil {
+		return nil, protocol.ErrRequestCancelled
+	}
 	// A pending client apply request must also end when the server shuts down.
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(s.analysisContext, cancel)
-	defer cancel()
-	defer stop()
+	s.mu.Lock()
+	id := s.nextApplyRenameID
+	s.nextApplyRenameID++
+	if s.applyRenameCancels == nil {
+		s.applyRenameCancels = make(map[uint64]context.CancelFunc)
+	}
+	s.applyRenameCancels[id] = cancel
+	s.mu.Unlock()
+	defer func() {
+		stop()
+		cancel()
+		s.mu.Lock()
+		delete(s.applyRenameCancels, id)
+		s.mu.Unlock()
+	}()
 	edit, err := s.renameFileWorkspaceEdit(ctx, files, true)
 	if err != nil {
 		return nil, err
@@ -118,15 +139,24 @@ func (s *Server) applyRenameFileImports(ctx context.Context, files []protocol.Fi
 	if len(edit.DocumentChanges) == 0 && len(edit.Changes) == 0 {
 		return nil, nil
 	}
-	if ctx.Err() != nil || s.analysisContext.Err() != nil {
+	if ctx.Err() != nil || s.analysisContext.Err() != nil || s.isShutdown() {
 		return nil, protocol.ErrRequestCancelled
 	}
 	label := "Update Vim imports after file rename"
 	result, err := client.ApplyEdit(ctx, &protocol.ApplyWorkspaceEditParams{Label: &label, Edit: *edit})
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || s.analysisContext.Err() != nil || s.isShutdown() || errors.Is(err, context.Canceled) || isDisconnectError(err) {
 		return nil, protocol.ErrRequestCancelled
 	}
 	return result, err
+}
+
+func isDisconnectError(err error) bool {
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, jsonrpc2.ErrClientClosing) ||
+		errors.Is(err, jsonrpc2.ErrServerClosing)
 }
 
 // All entry points use the same path and binding checks. afterRename switches

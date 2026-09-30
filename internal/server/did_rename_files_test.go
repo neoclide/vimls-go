@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -395,5 +397,55 @@ func TestDidRenameFilesFallbackEditAndCancellation(t *testing.T) {
 	}
 	if err := instance.DidRenameFiles(ctx, params); err != nil || len(client.requests) != 2 {
 		t.Fatalf("cancelled notification: error=%v requests=%d", err, len(client.requests))
+	}
+}
+
+func TestDidRenameFilesShutdownCancelsPendingApplyEdit(t *testing.T) {
+	root := t.TempDir()
+	old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+	newPath := filepath.Join(root, "util.vim")
+	writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './lib.vim' as lib\n")
+	instance, client := initializeRenameFilesServer(t, root)
+	var logs bytes.Buffer
+	instance.log = &logs
+	if err := os.Rename(old, newPath); err != nil {
+		t.Fatal(err)
+	}
+	params := renameFileParams(old, newPath)
+	client.apply = func(ctx context.Context) (*protocol.ApplyWorkspaceEditResult, error) {
+		if err := instance.Shutdown(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		// Return EOF to simulate connection termination while applyEdit was in flight during shutdown.
+		return nil, io.EOF
+	}
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(logs.String(), "update imports after file rename:") {
+		t.Fatalf("unexpected rename error in logs: %q", logs.String())
+	}
+}
+
+func TestDidRenameFilesClientDisconnectDoesNotLogError(t *testing.T) {
+	root := t.TempDir()
+	old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+	newPath := filepath.Join(root, "util.vim")
+	writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './lib.vim' as lib\n")
+	instance, client := initializeRenameFilesServer(t, root)
+	var logs bytes.Buffer
+	instance.log = &logs
+	if err := os.Rename(old, newPath); err != nil {
+		t.Fatal(err)
+	}
+	params := renameFileParams(old, newPath)
+	client.apply = func(ctx context.Context) (*protocol.ApplyWorkspaceEditResult, error) {
+		return nil, io.EOF
+	}
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(logs.String(), "update imports after file rename:") {
+		t.Fatalf("unexpected rename error in logs: %q", logs.String())
 	}
 }
