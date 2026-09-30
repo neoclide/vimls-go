@@ -33,9 +33,6 @@ See [language support](language-support.md) for what works today and the
   incorrect edits. Add focused regression tests, and check unclear Vim behavior
   against the pinned version.
 - Validate release packages on supported platforms and in a real editor client.
-  Include watcher-driven file renames through
-  [`workspace/didRenameFiles`](configuration.md#updating-imports-after-a-file-rename),
-  including deduplication with `willRenameFiles` and unsaved document edits.
 - Prioritize crashes, lost edits and incorrect rename results.
 - Investigate delays in large files. Measure server parsing and editor rendering
   separately, and compare the same workload before and after performance changes.

@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.2.0
+
+- Rewrite Vim9 `:import` statements on `workspace/didRenameFiles` and
+  `workspace/willRenameFiles`, deduplicating overlapping requests. Add
+  `vimls.updateImportsOnRename` for clients that observe renames after the fact.
+- Update generated metadata and runtime help to Vim v9.2.1132.
+- Refine builtin return type inference for `match()`, `reltime()`, `abs()`,
+  `sign_define()`, `glob()`, `globpath()`, `submatch()` and `get()`.
+- Track command dialect context in mixed scripts for type inference and
+  completion; enforce Vim9 string-target assignment rules for `$ENV`, registers
+  and string `v:` variables including `..=` and destructuring.
+- Restrict `vim/E174` to proven same-source duplicate command definitions,
+  tracking `delcommand` and `-buffer` scope.
+- Respect loop lifetimes in `vim/E1041` script-item redefinition checks.
+- Exempt Vim9 `=~`/`!~` from `vimls/implicit-pattern-case`; require word
+  boundaries in `vimls/mapping-script-local-reference`.
+- Suppress diagnostics in `if 0`/`while 0` branches, unexpanded `<q-args>`
+  command bodies, and skipped class/interface/enum definitions.
+- Reject Vim9 underscore commands (`ch_log`, `echo_x`) per Vim 9.2.1094.
+- Fix `vimgrep` family pattern boundaries, multiline ternary sigil continuations,
+  user-command `:<line1>` range placeholders, `echowindow` numeric ranges, and
+  `:source ++dryrun` document link navigation.
+
 ## v0.1.6
 
 - Refine Vim9 receiver completion inside supported `type()` and
