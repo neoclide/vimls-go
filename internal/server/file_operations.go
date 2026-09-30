@@ -39,12 +39,29 @@ const renameImportGlob = "**/*.vim"
 // worse than leaving one import for the user to correct.
 func (s *Server) WillRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (*protocol.WorkspaceEdit, error) {
 	s.mu.Lock()
-	s.lastWillRenameFiles = slices.Clone(params.Files)
+	s.willRenameFilesGeneration++
+	generation := s.willRenameFilesGeneration
+	s.lastWillRenameFiles = nil
 	s.mu.Unlock()
 	if len(params.Files) == 0 {
 		return s.clientWorkspaceEdit(nil)
 	}
-	return s.renameFileWorkspaceEdit(ctx, params.Files, false)
+	edit, err := s.renameFileWorkspaceEdit(ctx, params.Files, false)
+	if err != nil {
+		return nil, err
+	}
+	// An incomplete index can produce an empty edit without checking ctx.
+	if ctx.Err() != nil {
+		return nil, protocol.ErrRequestCancelled
+	}
+	s.mu.Lock()
+	// Requests run asynchronously. A slow earlier request must not replace
+	// the state of a newer request, including one that failed or was empty.
+	if generation == s.willRenameFilesGeneration {
+		s.lastWillRenameFiles = slices.Clone(params.Files)
+	}
+	s.mu.Unlock()
+	return edit, nil
 }
 
 // DidRenameFiles updates imports after the client observes a filesystem rename.
@@ -53,6 +70,9 @@ func (s *Server) DidRenameFiles(ctx context.Context, params *protocol.RenameFile
 	// already been returned to the client before this notification arrives.
 	s.mu.Lock()
 	handled := slices.Equal(s.lastWillRenameFiles, params.Files)
+	if handled {
+		s.lastWillRenameFiles = nil
+	}
 	s.mu.Unlock()
 	if handled || len(params.Files) == 0 {
 		return nil

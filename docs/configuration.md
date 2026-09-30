@@ -310,10 +310,12 @@ Client refusal reasons and apply failures are logged. External renames work
 when the client forwards their old/new URI pairs through this notification.
 
 `workspace/willRenameFiles` remains registered when the client supports it.
-The server remembers only the most recent `willRenameFiles` file list. A
-`didRenameFiles` notification with the same list, including order, skips edit
-calculation to avoid applying the rename twice. Other notifications use the
-post-rename calculation.
+The server remembers the most recent `willRenameFiles` file list only after
+the request succeeds. A new request clears the previous record even if it
+fails or is cancelled. The first `didRenameFiles` notification with the same
+list, including order, consumes the record and skips edit calculation to avoid
+applying the rename twice. Later notifications use the post-rename calculation,
+including a subsequent rename with the same paths.
 
 Send each rename batch once, after its files have moved. Old paths must be
 absent and destinations must be regular files; directory and symbolic-link

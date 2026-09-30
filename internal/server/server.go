@@ -233,6 +233,7 @@ type Server struct {
 	documentChangesSupport      bool
 	applyEditSupport            bool
 	lastWillRenameFiles         []protocol.FileRename
+	willRenameFilesGeneration   uint64
 	hierarchicalSymbolsSupport  bool
 	nextDiagnosticResultID      uint64
 	semanticTokenResults        map[string]semanticTokenResult

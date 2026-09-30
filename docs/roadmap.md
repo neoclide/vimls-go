@@ -34,6 +34,8 @@ See [language support](language-support.md) for what works today and the
   against the pinned version.
 - Validate release packages on supported platforms and in a real editor client.
 - Prioritize crashes, lost edits and incorrect rename results.
+  Continue checking cancelled requests and repeated file operations for lost
+  import edits.
 - Investigate delays in large files. Measure server parsing and editor rendering
   separately, and compare the same workload before and after performance changes.
 - Reduce repeated analysis passes where measurements show a benefit. Preserve

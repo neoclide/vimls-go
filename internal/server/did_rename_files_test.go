@@ -3,9 +3,11 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"go.lsp.dev/protocol"
@@ -95,6 +97,148 @@ func TestDidRenameFilesAfterFilesystemRename(t *testing.T) {
 				t.Fatalf("updated = %#v", updated)
 			}
 		})
+	}
+}
+
+func TestDidRenameFilesAfterCancelledWillRenameFiles(t *testing.T) {
+	for _, scenario := range []string{"first request", "previous will", "incomplete index"} {
+		root := t.TempDir()
+		old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+		newPath := filepath.Join(root, "util.vim")
+		source := "vim9script\nimport './lib.vim'\necho lib.Value\n"
+		main := writeWorkspaceFile(t, root, "main.vim", source)
+		instance, client := initializeRenameFilesServer(t, root)
+		params := renameFileParams(old, newPath)
+		if scenario == "previous will" {
+			// A prior proposal that the client did not execute must not survive
+			// a failed pre-rename request for the same paths.
+			if _, err := instance.WillRenameFiles(context.Background(), params); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if scenario == "incomplete index" {
+			instance.workspaceIndex.SetComplete(false)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		edit, err := instance.WillRenameFiles(ctx, params)
+		if !errors.Is(err, protocol.ErrRequestCancelled) || edit != nil {
+			t.Fatalf("%s: edit=%#v error=%v", scenario, edit, err)
+		}
+		instance.workspaceIndex.SetComplete(true)
+		if err := os.Rename(old, newPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := instance.DidRenameFiles(context.Background(), params); err != nil {
+			t.Fatal(err)
+		}
+		if len(client.requests) != 1 {
+			t.Fatalf("%s: applyEdit requests=%d, want 1", scenario, len(client.requests))
+		}
+		updated := applyRenameEdits(t, &client.requests[0].Edit, map[string]string{main: source})
+		if updated[main] != "vim9script\nimport './util.vim'\necho util.Value\n" {
+			t.Fatalf("updated = %#v", updated)
+		}
+	}
+}
+
+func TestDidRenameFilesConsumesWillRenameFiles(t *testing.T) {
+	root := t.TempDir()
+	old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+	newPath := filepath.Join(root, "util.vim")
+	source := "vim9script\nimport './lib.vim'\necho lib.Value\n"
+	main := writeWorkspaceFile(t, root, "main.vim", source)
+	instance, client := initializeRenameFilesServer(t, root)
+	params := renameFileParams(old, newPath)
+	edit, err := instance.WillRenameFiles(context.Background(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := applyRenameEdits(t, edit, map[string]string{main: source})
+	if updated[main] != "vim9script\nimport './util.vim'\necho util.Value\n" {
+		t.Fatalf("updated = %#v", updated)
+	}
+	if err := os.WriteFile(main, []byte(updated[main]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(old, newPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 0 {
+		t.Fatal("matching didRenameFiles repeated the pre-rename edit")
+	}
+	// Restore the original files, as an external checkout could, then repeat
+	// the physical rename without a new willRenameFiles request.
+	if err := os.Rename(newPath, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(main, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	instance.scheduleWorkspaceRebuild()
+	instance.workspaceWG.Wait()
+	if err := os.Rename(old, newPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 1 {
+		t.Fatalf("repeated rename: applyEdit requests=%d, want 1", len(client.requests))
+	}
+	updated = applyRenameEdits(t, &client.requests[0].Edit, map[string]string{main: source})
+	if updated[main] != "vim9script\nimport './util.vim'\necho util.Value\n" {
+		t.Fatalf("updated = %#v", updated)
+	}
+}
+
+func TestWillRenameFilesKeepsNewerRequestState(t *testing.T) {
+	root := t.TempDir()
+	old := writeWorkspaceFile(t, root, "lib.vim", "vim9script\nexport var Value = 1\n")
+	writeWorkspaceFile(t, root, "main.vim", "vim9script\nimport './lib.vim'\necho lib.Value\n")
+	instance, client := initializeRenameFilesServer(t, root)
+	waiting, resume := make(chan struct{}), make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	t.Cleanup(release)
+	instance.testHooks.beforeWorkspaceIndexWait = func() {
+		close(waiting)
+		<-resume
+	}
+	instance.workspaceMu.Lock()
+	instance.workspacePending[old] = struct{}{}
+	instance.workspaceMu.Unlock()
+	older := make(chan error, 1)
+	go func() {
+		_, err := instance.WillRenameFiles(t.Context(), renameFileParams(old, filepath.Join(root, "first.vim")))
+		older <- err
+	}()
+	waitForServerRace(t, waiting, "older willRenameFiles waiting for index")
+	instance.workspaceMu.Lock()
+	delete(instance.workspacePending, old)
+	instance.notifyWorkspaceIndexChangedLocked()
+	instance.workspaceMu.Unlock()
+	newPath := filepath.Join(root, "second.vim")
+	params := renameFileParams(old, newPath)
+	if _, err := instance.WillRenameFiles(t.Context(), params); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-older; err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(old, newPath); err != nil {
+		t.Fatal(err)
+	}
+	// The client already received the newer pre-rename edit. A late result
+	// for different paths must not cause a second edit for this notification.
+	if err := instance.DidRenameFiles(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("applyEdit requests=%d, want 0", len(client.requests))
 	}
 }
 
