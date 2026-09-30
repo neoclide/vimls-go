@@ -6107,12 +6107,16 @@ func startsVim9RecoveryCommand(source string, start, end int) bool {
 		return true
 	}
 	switch source[start:wordEnd] {
+	case "function", "type":
+		// These Ex command names also name builtin functions. A call in a
+		// continued expression is not a statement recovery boundary.
+		return wordEnd == end || source[wordEnd] != '('
 	case "abstract", "break", "catch", "class", "const", "continue", "def", "defer",
 		"echo", "echoconsole", "echoerr", "echomsg", "echon", "echowindow",
 		"else", "elseif", "endclass", "enddef", "endenum", "endfor", "endfunction",
 		"endif", "endinterface", "endtry", "endwhile", "enum", "export", "final",
-		"finally", "for", "function", "if", "import", "interface", "legacy", "let",
-		"public", "return", "static", "throw", "try", "type", "var", "vim9cmd",
+		"finally", "for", "if", "import", "interface", "legacy", "let",
+		"public", "return", "static", "throw", "try", "var", "vim9cmd",
 		"vim9script", "while":
 		return true
 	default:

@@ -119,6 +119,63 @@ func TestVim9AutomaticContinuation(t *testing.T) {
 	}
 }
 
+func TestVim9ContinuationBuiltinCallsWithCommandNames(t *testing.T) {
+	// v9.2.1132 runtime/doc/vim9.txt *vim9-line-continuation* permits
+	// these breaks inside expressions; type() and function() are not Ex commands.
+	for _, test := range []struct {
+		name string
+		body string
+		kind ExpressionKind
+	}{
+		{"list", "var values = [\n  type(1),\n  type('text')\n]", ExpressionList},
+		{"dictionary", "var values = {kind:\n  type(1),\n}", ExpressionDictionary},
+		{"ternary", "const value = false ? 1 :\n  type('text')", ExpressionTernary},
+		{"call", "MyFunc(\n  function('len')\n)", ExpressionCall},
+		{"function list", "var Functions = [\n  function('len'),\n]", ExpressionList},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := "vim9script\n" + test.body + "\necho 'after'\n"
+			file := Parse(source)
+			if len(file.Diagnostics) != 0 || len(file.Commands) != 3 {
+				t.Fatalf("diagnostics = %#v, commands = %#v", file.Diagnostics, file.Commands)
+			}
+			if got := file.Text(file.Commands[1].Span); got != test.body {
+				t.Fatalf("continued command = %q, want %q", got, test.body)
+			}
+			if file.Commands[2].Canonical != "echo" || len(file.Commands[1].Expressions) == 0 {
+				t.Fatalf("commands = %#v", file.Commands)
+			}
+			expression := file.Commands[1].Expressions[0]
+			if declaration := file.Commands[1].Declaration; declaration != nil {
+				expression = declaration.Initializer
+			}
+			if expression == nil || expression.Kind != test.kind {
+				t.Fatalf("expression = %#v, want kind %v", expression, test.kind)
+			}
+			assertFileSpansAt(t, file, test.name)
+		})
+	}
+}
+
+func TestVim9ContinuationRecoversAtTypeAndFunctionCommands(t *testing.T) {
+	for _, test := range []struct {
+		body string
+		name string
+	}{
+		{"type Alias = number\n", "type"},
+		{"function! Legacy()\nendfunction\n", "function"},
+	} {
+		file := Parse("vim9script\nvar broken = [1,\n" + test.body + "echo 'after'\n")
+		if len(file.Diagnostics) == 0 || len(file.Commands) < 4 || file.Commands[2].Canonical != test.name ||
+			file.Commands[len(file.Commands)-1].Canonical != "echo" {
+			t.Fatalf("body %q: diagnostics = %#v, commands = %#v", test.body, file.Diagnostics, file.Commands)
+		}
+		if got := file.Text(file.Commands[1].Span); got != "var broken = [1," {
+			t.Fatalf("incomplete command = %q", got)
+		}
+	}
+}
+
 func TestVim9MultilineTernaryFalseBranchSigil(t *testing.T) {
 	file := Parse("vim9script\nconst shebang = &filetype == 'bash' ? '#!/bin/bash' :\n                &filetype == 'typescript' ? '#!/bin/env node' :\n                $'#!/bin/env/{&filetype}'\n")
 	if len(file.Diagnostics) != 0 || len(file.Commands) != 2 || countTokens(file, TokenContinuation) != 2 {

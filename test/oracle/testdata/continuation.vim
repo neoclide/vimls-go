@@ -47,3 +47,23 @@ var choice = true ?
   (false ? 1 : 2)
   : 3
 assert_equal(2, choice)
+
+var kinds = [
+  type(1),
+  type('text'),
+]
+assert_equal([v:t_number, v:t_string], kinds)
+var typed = {kind:
+  type(1),
+}
+assert_equal(v:t_number, typed.kind)
+const kind = false ? 1 :
+  type('text')
+assert_equal(v:t_string, kind)
+assert_equal(function('len'),
+  function('len')
+)
+var Functions = [
+  function('len'),
+]
+assert_equal(3, Functions[0]('abc'))

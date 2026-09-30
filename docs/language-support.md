@@ -44,6 +44,9 @@ The parser tolerates unfinished code. Formatting preserves expressions, line
 wrapping and embedded language bodies. Rename refuses ambiguous targets and
 changes that require renaming autoload files or namespaces.
 
+Vim9 automatic expression continuation supports builtin calls such as `type()`
+and `function()` in multiline lists, dictionaries, calls and ternary branches.
+
 Renaming a member of an exported aggregate includes its statically resolved
 references in importing files, whether started at the declaration or a use site.
 
