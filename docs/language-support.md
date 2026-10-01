@@ -47,6 +47,11 @@ changes that require renaming autoload files or namespaces.
 Vim9 automatic expression continuation supports builtin calls such as `type()`
 and `function()` in multiline lists, dictionaries, calls and ternary branches.
 
+Unused-name hints cover Vim9 variables and private `def` functions, Legacy
+function-local and `s:` variables, and Legacy `s:` functions. Shared namespaces
+and dynamic accesses remain conservative; see
+[names and unused code](diagnostics.md#names-and-unused-code).
+
 Renaming a member of an exported aggregate includes its statically resolved
 references in importing files, whether started at the declaration or a use site.
 

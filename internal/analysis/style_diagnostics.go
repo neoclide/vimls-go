@@ -12,7 +12,7 @@ import (
 )
 
 func collectStyleDiagnostics(result *FileAnalysis) {
-	if result == nil || result.File == nil || len(result.File.Diagnostics) != 0 || !onlyUnusedVariableDiagnostics(result.Diagnostics) {
+	if result == nil || result.File == nil || len(result.File.Diagnostics) != 0 || !onlyUnusedDiagnostics(result.Diagnostics) {
 		return
 	}
 	facts := augroupEventDiagnostics{}
@@ -178,12 +178,12 @@ func SuppressKnownAugroupEventDiagnostics(file *syntax.File, diagnostics []synta
 	return facts.filter(diagnostics)
 }
 
-func onlyUnusedVariableDiagnostics(diagnostics []syntax.Diagnostic) bool {
+func onlyUnusedDiagnostics(diagnostics []syntax.Diagnostic) bool {
 	for _, diagnostic := range diagnostics {
 		if diagnostic.Severity != nil && *diagnostic.Severity == syntax.DiagnosticHint {
 			continue
 		}
-		if diagnostic.Code != "vimls/unused-variable" {
+		if diagnostic.Code != "vimls/unused-variable" && diagnostic.Code != "vimls/unused-function" {
 			return false
 		}
 	}

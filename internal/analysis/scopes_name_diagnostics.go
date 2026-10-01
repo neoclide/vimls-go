@@ -46,7 +46,7 @@ func collectDeprecatedReferenceDiagnostics(result *FileAnalysis) {
 	}
 }
 
-func collectUnusedVariableDiagnostics(result *FileAnalysis) {
+func collectUnusedDiagnostics(result *FileAnalysis) {
 	if result == nil || result.File == nil || len(result.File.Diagnostics) != 0 {
 		return
 	}
@@ -69,6 +69,7 @@ func collectUnusedVariableDiagnostics(result *FileAnalysis) {
 			Code: "vimls/unused-variable", Message: declaration.Name + " is declared but never used", Span: declaration.Span,
 		})
 	}
+	collectUnusedBindingDiagnostics(result)
 }
 
 func staticNameDeclaration(file *syntax.File, span syntax.Span, dialect syntax.Dialect, kind NameDeclarationKind, insideFunction bool) (NameDeclarationEvent, bool) {

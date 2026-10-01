@@ -1696,7 +1696,7 @@ func protocolDiagnostics(snapshot *text.Snapshot, file *syntax.File, encoding te
 		switch item.Code {
 		case "vimls/deprecated":
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagDeprecated)
-		case "vimls/unused-variable":
+		case "vimls/unused-variable", "vimls/unused-function":
 			diagnostic.Tags = protocol.NewDiagnosticTags(protocol.DiagnosticTagUnnecessary)
 		}
 		if diagnosticRelatedInformation && item.Related.Message != "" && item.Related.Span.Start < item.Related.Span.End {

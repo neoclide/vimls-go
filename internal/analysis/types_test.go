@@ -538,6 +538,7 @@ def BufferLineCount(bufnr: number): number
   endif
   return info.loaded == 0 ? 0 : info.linecount
 enddef
+echo BufferLineCount(1)
 `
 	result := Analyze(syntax.Parse(source))
 	if len(result.Diagnostics) != 0 {

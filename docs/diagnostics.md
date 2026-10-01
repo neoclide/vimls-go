@@ -242,9 +242,29 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/autoload-function-not-found` | Warning | The autoload function was not found in indexed runtime files. |
 | `vimls/global-function-not-indexed` | Hint | The global function was not found in the workspace index. |
 | `vimls/unknown-autocmd-event` | Hint | The event name is not recognized. Dynamic groups and `User` events need special care. |
-| `vimls/unused-variable` | Hint | A Vim9 variable is declared but not used. |
+| `vimls/unused-function` | Hint | A private Vim9 or Legacy script-local function is declared but not used. |
+| `vimls/unused-variable` | Hint | A local or script-local variable is declared but not used. |
 | `vimls/variable-type-change` | Warning | Consecutive simple Legacy assignments change a variable's known basic type. |
 | `vimls/deprecated` | Hint | The referenced symbol is marked deprecated. |
+
+Unused-variable hints cover Vim9 script/function bindings and Legacy `s:`
+variables and function locals, including `l:` names and loop bindings. Legacy
+top-level names without a prefix are global and are excluded, as are explicit
+global, buffer, window and tab variables. Parameters, `_`, exported Vim9
+variables and aggregate members are excluded. Repeated Legacy assignments to
+one binding receive at most one hint, at the first declaration.
+
+Unused-function hints cover non-exported Vim9 `def` functions at script level
+and inside functions, and Legacy `s:` functions. Exported, global and autoload
+functions, class methods and interface methods are excluded. Direct calls,
+function values, `<SID>` calls, literal names in mappings, autocommands, user
+commands and callback strings count as uses; a direct self-recursive call alone
+does not. Nested Vim9 functions are matched by declaration identity; string
+callback names refer to script functions. Runtime evaluation, computed names
+and scope-dictionary access suppress hints for names whose use cannot be ruled
+out. These are conservative name-use checks, not dead-store or call-graph
+analysis. Both unused hints are withheld while parser or other semantic
+diagnostics (except deprecation hints) are present.
 
 `vimls/variable-type-change` marks the later assignment and links to the previous
 one. It compares basic types, so changing List or Dictionary element types does

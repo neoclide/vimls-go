@@ -170,28 +170,41 @@ func TestServerPublishesDeprecatedReferenceHint(t *testing.T) {
 	}
 }
 
-func TestServerPublishesUnusedVariableHint(t *testing.T) {
-	client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
-	instance := New(nil, nil, io.Discard)
-	t.Cleanup(instance.stopAnalysis)
-	instance.client = client
-	documentURI := uri.MustParse("file:///unused.vim")
-	source := "vim9script\nvar Unused = 1\n"
-	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
-		URI: documentURI, Version: 1, Text: source,
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	params := waitForDiagnostics(t, client.published)
-	if len(params.Diagnostics) != 1 {
-		t.Fatalf("unused variable diagnostics = %#v", params.Diagnostics)
-	}
-	diagnostic := params.Diagnostics[0]
-	tags := diagnostic.Tags.Slice()
-	if diagnostic.Code != protocol.String("vimls/unused-variable") || diagnostic.Severity != protocol.DiagnosticSeverityHint ||
-		diagnostic.Message != protocol.String("Unused is declared but never used") || len(tags) != 1 || tags[0] != protocol.DiagnosticTagUnnecessary ||
-		diagnostic.Range.Start.Line != 1 {
-		t.Fatalf("unused variable diagnostic = %#v tags=%#v", diagnostic, tags)
+func TestServerPublishesUnusedHints(t *testing.T) {
+	for _, test := range []struct {
+		name, source, code, symbol string
+		line, character            uint32
+	}{
+		{"Vim9 variable", "vim9script\nvar Unused = 1\n", "vimls/unused-variable", "Unused", 1, 4},
+		{"Vim9 script function", "vim9script\ndef Unused()\nenddef\n", "vimls/unused-function", "Unused", 1, 4},
+		{"Legacy script variable", "let s:unused = 1\n", "vimls/unused-variable", "s:unused", 0, 4},
+		{"Legacy local variable", "function! Public() abort\n  let l:unused = 1\nendfunction\n", "vimls/unused-variable", "l:unused", 1, 6},
+		{"Legacy script function", "function! s:unused() abort\nendfunction\n", "vimls/unused-function", "s:unused", 0, 10},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}
+			instance := New(nil, nil, io.Discard)
+			t.Cleanup(instance.stopAnalysis)
+			instance.client = client
+			documentURI := uri.MustParse("file:///unused.vim")
+			if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{
+				URI: documentURI, Version: 1, Text: test.source,
+			}}); err != nil {
+				t.Fatal(err)
+			}
+			params := waitForDiagnostics(t, client.published)
+			if len(params.Diagnostics) != 1 {
+				t.Fatalf("unused diagnostics = %#v", params.Diagnostics)
+			}
+			diagnostic := params.Diagnostics[0]
+			tags := diagnostic.Tags.Slice()
+			if diagnostic.Code != protocol.String(test.code) || diagnostic.Severity != protocol.DiagnosticSeverityHint ||
+				diagnostic.Message != protocol.String(test.symbol+" is declared but never used") || len(tags) != 1 || tags[0] != protocol.DiagnosticTagUnnecessary ||
+				diagnostic.Range.Start != (protocol.Position{Line: test.line, Character: test.character}) ||
+				diagnostic.Range.End != (protocol.Position{Line: test.line, Character: test.character + uint32(len(test.symbol))}) {
+				t.Fatalf("unused diagnostic = %#v tags=%#v", diagnostic, tags)
+			}
+		})
 	}
 }
 

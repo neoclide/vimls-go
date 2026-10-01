@@ -13,7 +13,7 @@ import (
 func TestVim921130StringOnlyAssignments(t *testing.T) {
 	for _, context := range []struct{ name, prefix, suffix string }{
 		{"script", "vim9script\n", "\n"},
-		{"def", "vim9script\ndef Check()\n", "\nenddef\n"},
+		{"def", "vim9script\ndef Check()\n", "\nenddef\nCheck()\n"},
 		{"vim9cmd", "vim9cmd ", "\n"},
 	} {
 		for _, target := range []string{"$XSTRING_ONLY", "@a", "v:errmsg"} {
@@ -114,7 +114,7 @@ func TestVim921130StringOnlyAssignments(t *testing.T) {
 		for _, assignment := range []string{"$XSTRING_ONLY = 123", "@a = 456", "v:errmsg = 789", "[$XSTRING_ONLY, @a] = [1, 2]"} {
 			source := prefix + assignment + "\n"
 			if strings.Contains(prefix, "def Check()") {
-				source += "enddef\n"
+				source += "enddef\nCheck()\n"
 			}
 			file := syntax.Parse(source)
 			if diagnostics := CombinedDiagnostics(file, Analyze(file)); len(diagnostics) != 0 {

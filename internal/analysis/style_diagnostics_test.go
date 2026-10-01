@@ -69,6 +69,7 @@ augroup StyleDiagnosticsTest
   autocmd BufEnter * call s:Run()
 augroup END
 command! Run call s:Run()
+call s:InstallOptions()
 `
 	result := Analyze(syntax.Parse(source))
 	for _, diagnostic := range result.Diagnostics {
@@ -79,7 +80,7 @@ command! Run call s:Run()
 }
 
 func TestStyleDiagnosticsWithUnusedVim9Variable(t *testing.T) {
-	result := Analyze(syntax.Parse("vim9script\ndef Run()\n  var item = 1\n  normal gg\nenddef\n"))
+	result := Analyze(syntax.Parse("vim9script\ndef Run()\n  var item = 1\n  normal gg\nenddef\nRun()\n"))
 	var got []string
 	for _, diagnostic := range result.Diagnostics {
 		if strings.HasPrefix(diagnostic.Code, "vimls/") {
@@ -87,6 +88,18 @@ func TestStyleDiagnosticsWithUnusedVim9Variable(t *testing.T) {
 		}
 	}
 	want := []string{"vimls/unused-variable", "vimls/normal-without-bang"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("style diagnostics = %#v, want %#v", got, want)
+	}
+}
+
+func TestStyleDiagnosticsWithUnusedLegacyFunction(t *testing.T) {
+	result := Analyze(syntax.Parse("function! s:Unused()\n  normal gg\nendfunction\n"))
+	var got []string
+	for _, diagnostic := range result.Diagnostics {
+		got = append(got, diagnostic.Code)
+	}
+	want := []string{"vimls/function-without-abort", "vimls/unused-function", "vimls/normal-without-bang"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("style diagnostics = %#v, want %#v", got, want)
 	}
@@ -292,7 +305,7 @@ func TestAdditionalStyleDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "explicit local scope",
-			source: "function! s:Run() abort\n  let item = 1\nendfunction\n",
+			source: "function! s:Run() abort\n  let item = 1\n  echo item\nendfunction\ncall s:Run()\n",
 			want:   []string{"vimls/explicit-local-scope"},
 		},
 		{

@@ -2540,7 +2540,7 @@ func TestTypedForDestructuringDiagnostics(t *testing.T) {
 		{"short row", "", "for [key: string, value: number] in [['x']]\necho key value\nendfor", "vim/E711", "['x']"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			file := syntax.Parse("vim9script\ndef Test(" + test.params + ")\n" + test.body + "\nenddef\n")
+			file := syntax.Parse("vim9script\ndef Test(" + test.params + ")\n" + test.body + "\nenddef\necho Test\n")
 			diagnostics := CombinedDiagnostics(file, Analyze(file))
 			if test.code == "" {
 				if len(diagnostics) != 0 {

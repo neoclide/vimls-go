@@ -234,7 +234,7 @@ func AnalyzeWithOptions(file *syntax.File, options Options) (*FileAnalysis, erro
 		func() { collectBuiltinArgumentTypeDiagnostics(result, file.Commands, root) },
 		func() { collectAssignmentDiagnostics(result, file.Commands, root) },
 		func() { collectNameOnlyExpressionDiagnostics(result, file.Commands, root) },
-		func() { collectUnusedVariableDiagnostics(result) },
+		func() { collectUnusedDiagnostics(result) },
 		func() { collectStyleDiagnostics(result) },
 		func() { collectVariableTypeChangeDiagnostics(result) },
 	); err != nil {

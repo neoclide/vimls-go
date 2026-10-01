@@ -26,6 +26,7 @@ for [key, value] in ((1, 'one'), (2, 'two'))
 endfor
 function! Dynamic(values) abort
   let l:unknown = a:values[0]
+  echo l:unknown
 endfunction
 `)
 	result := Analyze(file)

@@ -68,6 +68,7 @@ def AbsUnknown(value: any)
   var absAny = abs(value)
   echo absAny
 enddef
+AbsUnknown(g:unknown)
 echo dynamicAbs dynamicSign options counted listed expanded globbed matched paths
 `))
 	declarations := declarationsByName(result)
@@ -113,7 +114,7 @@ echo expanded globbed matched paths legacyPaths
 }
 
 func TestBuiltinReturnTypesInLegacyScript(t *testing.T) {
-	result := Analyze(syntax.Parse("let s:legacy_paths = globpath('.', '*', 0, 1)\nlet s:legacy_match = match('text', 't')\nlet true = 0\nlet s:legacy_glob_true = glob('*.txt', 0, true)\nlet s:legacy_glob_vtrue = glob('*.txt', 0, v:true)\n"))
+	result := Analyze(syntax.Parse("let s:legacy_paths = globpath('.', '*', 0, 1)\nlet s:legacy_match = match('text', 't')\nlet true = 0\nlet s:legacy_glob_true = glob('*.txt', 0, true)\nlet s:legacy_glob_vtrue = glob('*.txt', 0, v:true)\necho s:legacy_paths s:legacy_match s:legacy_glob_true s:legacy_glob_vtrue\n"))
 	declarations := declarationsByName(result)
 	if got := declarations["s:legacy_paths"]; got == nil || got.Type.Name != "list" || len(got.Type.Arguments) != 1 || got.Type.Arguments[0].Name != "string" {
 		t.Fatalf("legacy globpath type = %#v, want list<string>", got)

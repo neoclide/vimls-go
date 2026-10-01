@@ -11,7 +11,7 @@ func TestAnalyzeNeovimCompatNamesDoNotReportUnknown(t *testing.T) {
 	sources := []string{
 		// Direct Neovim API calls in both script and def contexts.
 		"vim9script\nnvim_buf_get_lines(0, 0, -1, false)\n",
-		"vim9script\ndef F()\n  nvim_buf_get_lines(0, 0, -1, false)\nenddef\n",
+		"vim9script\ndef F()\n  nvim_buf_get_lines(0, 0, -1, false)\nenddef\nF()\n",
 		"call nvim_buf_get_lines(0, 0, -1, 0)\n",
 		// Neovim-only options, variables, and commands from the compatibility
 		// lists.

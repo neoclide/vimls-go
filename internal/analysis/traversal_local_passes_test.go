@@ -98,7 +98,7 @@ func TestBuiltinArgumentTraversalCoversFunctionDefaultsAndEnumArguments(t *testi
 		},
 		{
 			name:   "good function default",
-			source: "vim9script\ndef Default(value: number = abs(-1))\nenddef\n",
+			source: "vim9script\ndef Default(value: number = abs(-1))\nenddef\nDefault()\n",
 		},
 		{
 			name:   "bad enum argument",

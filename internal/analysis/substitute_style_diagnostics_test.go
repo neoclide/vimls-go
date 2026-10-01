@@ -591,6 +591,7 @@ func TestSubstituteInFunctionsAndBlocks(t *testing.T) {
 	source := `function! s:Transform() abort
   s/foo/bar/
 endfunction
+call s:Transform()
 if 1
   s/foo.*bar/rep/g
 endif
