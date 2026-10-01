@@ -105,8 +105,9 @@ enddef
 			invalid: true,
 		},
 		{
-			name:   "dynamic command suppresses hints",
-			source: "def Used()\nenddef\nexecute 'Used()'\n",
+			name:   "literal command uses only its named function",
+			source: "def Used()\nenddef\ndef Unused()\nenddef\nexecute 'Used()'\n",
+			want:   []string{"Unused"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

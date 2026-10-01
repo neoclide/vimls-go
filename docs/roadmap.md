@@ -32,8 +32,8 @@ See [language support](language-support.md) for what works today and the
 - Test real plugin projects for false diagnostics, missing navigation and
   incorrect edits. Add focused regression tests, and check unclear Vim behavior
   against the pinned version. Include unused hints for Legacy local variables
-  and private Vim9 and Legacy functions, especially dynamic callbacks and scope
-  access.
+  and private Vim9 and Legacy functions, especially generated command templates,
+  string callbacks and scope access.
 - Validate release packages on supported platforms and in a real editor client.
 - Prioritize crashes, lost edits and incorrect rename results.
   Continue checking cancelled requests and repeated file operations for lost

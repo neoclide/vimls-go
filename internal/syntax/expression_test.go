@@ -329,6 +329,31 @@ func TestLegacyExpressionParserMatchesVimPrecedence(t *testing.T) {
 	}
 }
 
+func TestLegacyAdjacentStringConcatenation(t *testing.T) {
+	// Vim v9.2.1132 src/eval.c:handle_subscript() chooses dictionary lookup
+	// by the receiver type; a string literal/result uses concatenation.
+	for _, source := range []string{`'edit '.fname`, `('edit ').fname`, `('edit ' .. '').fname`, `'open '.file.' with '.name`} {
+		expression, diagnostics := (LegacyExpressionParser{}).Parse(source)
+		if len(diagnostics) != 0 || expression.Kind != ExpressionBinary || expression.Value != "." || len(expression.Children) != 2 {
+			t.Fatalf("%q: expression = %#v; diagnostics = %#v", source, expression, diagnostics)
+		}
+		right := expression.Children[1]
+		if right.Kind != ExpressionIdentifier || right.Value != source[right.Span.Start:right.Span.End] || right.Span.End != len(source) {
+			t.Fatalf("%q: concatenation operand = %#v", source, right)
+		}
+	}
+	for _, source := range []string{`dict.name`, `{'name': 1}.name`} {
+		expression, diagnostics := (LegacyExpressionParser{}).Parse(source)
+		if len(diagnostics) != 0 || expression.Kind != ExpressionMember || expression.Value != "name" {
+			t.Fatalf("%q: member = %#v; diagnostics = %#v", source, expression, diagnostics)
+		}
+	}
+	expression, diagnostics := (LegacyExpressionParser{ScriptVersion: 2}).Parse(`'edit '.fname`)
+	if len(diagnostics) != 0 || expression.Kind != ExpressionMember {
+		t.Fatalf("scriptversion 2: expression = %#v; diagnostics = %#v", expression, diagnostics)
+	}
+}
+
 func TestVim9TernarySyntaxDiagnostics(t *testing.T) {
 	expression, diagnostics := (Vim9ExpressionParser{}).Parse("1 ? 'one'")
 	if len(diagnostics) != 1 || diagnostics[0].Code != "vim/E109" || diagnostics[0].Message != "Missing ':' after '?'" || diagnostics[0].Span != (Span{Start: 9, End: 9}) {

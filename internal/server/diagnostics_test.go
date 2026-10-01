@@ -180,6 +180,8 @@ func TestServerPublishesUnusedHints(t *testing.T) {
 		{"Legacy script variable", "let s:unused = 1\n", "vimls/unused-variable", "s:unused", 0, 4},
 		{"Legacy local variable", "function! Public() abort\n  let l:unused = 1\nendfunction\n", "vimls/unused-variable", "l:unused", 1, 6},
 		{"Legacy script function", "function! s:unused() abort\nendfunction\n", "vimls/unused-function", "s:unused", 0, 10},
+		{"Legacy script variable with execute", "let s:unused = 1\nexecute 'edit ' . expand('%')\n", "vimls/unused-variable", "s:unused", 0, 4},
+		{"Legacy local variable with execute", "function! Public() abort\n  let l:unused = 1\n  for fname in ['file']\n    exe 'edit '.fname\n  endfor\nendfunction\n", "vimls/unused-variable", "l:unused", 1, 6},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &diagnosticClient{published: make(chan *protocol.PublishDiagnosticsParams, 1)}

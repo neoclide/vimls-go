@@ -14,6 +14,41 @@ type unusedBinding struct {
 	function bool
 }
 
+const unusedCodePlaceholder = "VimlsUnknownCodeFragment"
+
+// Keep the literal structure of generated code. Unknown substitutions remain
+// visible to the parser: an expression/name hole suppresses hints, whereas a
+// filename argument or text inside a quoted string does not read a binding.
+func unusedCodeTemplate(result *FileAnalysis, expression *syntax.Expression) string {
+	var code strings.Builder
+	var appendExpression func(*syntax.Expression)
+	appendExpression = func(expression *syntax.Expression) {
+		if !result.analysisStep() {
+			return
+		}
+		switch {
+		case expression.Kind == syntax.ExpressionString:
+			if value, ok := syntax.StaticDictionaryIndexKey(expression); ok {
+				code.WriteString(value)
+				return
+			}
+		case expression.Kind == syntax.ExpressionParenthesized && len(expression.Children) == 1:
+			appendExpression(expression.Children[0])
+			return
+		case expression.Kind == syntax.ExpressionBinary && (expression.Value == "." || expression.Value == ".."):
+			appendExpression(expression.Children[0])
+			appendExpression(expression.Children[1])
+			return
+		case result.TypeOf(expression).Name == "number":
+			code.WriteByte('0')
+			return
+		}
+		code.WriteString(unusedCodePlaceholder)
+	}
+	appendExpression(expression)
+	return code.String()
+}
+
 func legacyUnusedName(name string, scope *Scope, function bool) (unusedBinding, bool) {
 	if scriptName, ok := scriptLocalName(name); ok {
 		return unusedBinding{name: scriptName, function: function}, validScopeVariableName(scriptName) && (function || scriptName != "_")
@@ -135,8 +170,27 @@ func collectUnusedBindingDiagnostics(result *FileAnalysis) {
 			}
 		}
 	}
-	var inspectExpression func(*syntax.Expression, *Scope)
-	inspectExpression = func(expression *syntax.Expression, scope *Scope) {
+	var inspectExpression func(*syntax.File, *syntax.Expression, *Scope, syntax.Dialect)
+	var inspectCommand func(*syntax.File, *syntax.Command, *Scope)
+	inspectCode := func(source string, scope *Scope, dialect syntax.Dialect) {
+		if !result.analysisStep() {
+			return
+		}
+		var file *syntax.File
+		if dialect == syntax.Vim9 {
+			file = (syntax.Vim9Parser{}).Parse(source)
+		} else {
+			file = (syntax.LegacyParser{}).Parse(source)
+		}
+		if len(file.Diagnostics) != 0 {
+			markDynamic(scope)
+			return
+		}
+		for index := range file.Commands {
+			inspectCommand(file, &file.Commands[index], scope)
+		}
+	}
+	inspectExpression = func(file *syntax.File, expression *syntax.Expression, scope *Scope, dialect syntax.Dialect) {
 		if expression == nil || !result.analysisStep() {
 			return
 		}
@@ -144,6 +198,20 @@ func collectUnusedBindingDiagnostics(result *FileAnalysis) {
 		case syntax.ExpressionCurlyName:
 			markDynamic(scope)
 		case syntax.ExpressionIdentifier:
+			if file != result.File {
+				if strings.Contains(expression.Value, unusedCodePlaceholder) {
+					markDynamic(scope)
+				}
+				if key, ok := legacyUnusedName(expression.Value, scope, false); ok {
+					used[key] = true
+				}
+				markFunctionName(expression.Value)
+				if declaration := resolve(scope, expression.Value, scope.Span.End, true, nil); declaration != nil {
+					if key, ok := candidates[declaration.Span]; ok && key.function {
+						used[key] = true
+					}
+				}
+			}
 			if expression.Value == "s:" {
 				dynamicVariables[nil] = true
 			} else if expression.Value == "l:" {
@@ -159,17 +227,24 @@ func collectUnusedBindingDiagnostics(result *FileAnalysis) {
 				dynamicFunctions = true
 			}
 		case syntax.ExpressionCall:
-			if builtin, arguments, ok := builtinCallArguments(result.File, expression); ok {
+			if builtin, arguments, ok := builtinCallArguments(file, expression); ok {
 				switch builtin.Name {
 				case "eval", "execute":
-					markDynamic(scope)
+					if len(arguments) > 0 {
+						code := unusedCodeTemplate(result, arguments[0])
+						if builtin.Name == "eval" {
+							code = "echo " + code
+						}
+						inspectCode(code, scope, dialect)
+					}
 				case "map", "mapnew", "filter":
 					if len(arguments) > 1 && result.TypeOf(arguments[1]).Name != "func" {
-						markDynamic(scope)
+						inspectCode("echo "+unusedCodeTemplate(result, arguments[1]), scope, dialect)
 					}
 				case "substitute":
 					if len(arguments) > 2 && (arguments[2].Kind != syntax.ExpressionString || strings.Contains(arguments[2].Value, `\=`)) {
-						markDynamic(scope)
+						code := unusedCodeTemplate(result, arguments[2])
+						inspectCode("echo "+strings.TrimPrefix(code, `\=`), scope, dialect)
 					}
 				case "function", "funcref", "call":
 					if len(arguments) > 0 {
@@ -192,30 +267,42 @@ func collectUnusedBindingDiagnostics(result *FileAnalysis) {
 				}
 			}
 		case syntax.ExpressionLambda:
-			scope = result.lambdaScopes[expression]
+			if file == result.File {
+				scope = result.lambdaScopes[expression]
+			}
 		}
 		for _, child := range expression.Children {
-			inspectExpression(child, scope)
+			inspectExpression(file, child, scope, dialect)
 		}
 	}
-	for command, scope := range result.commandScopes {
+	inspectCommand = func(file *syntax.File, command *syntax.Command, scope *Scope) {
 		if !result.analysisStep() {
 			return
 		}
-		if command.Canonical == "execute" {
+		if file != result.File && strings.Contains(file.Text(command.Name), unusedCodePlaceholder) {
 			markDynamic(scope)
 		}
+		if command.Canonical == "execute" {
+			var parts []string
+			for _, expression := range command.Expressions {
+				parts = append(parts, unusedCodeTemplate(result, expression))
+			}
+			inspectCode(strings.Join(parts, " "), scope, command.Dialect)
+		}
 		for _, expression := range command.Expressions {
-			inspectExpression(expression, scope)
+			inspectExpression(file, expression, scope, command.Dialect)
 		}
 		for _, target := range command.Targets {
-			inspectExpression(target, scope)
+			inspectExpression(file, target, scope, command.Dialect)
 		}
 		if command.Mapping != nil {
-			inspectExpression(command.Mapping.RHSExpression, scope)
+			inspectExpression(file, command.Mapping.RHSExpression, scope, command.Dialect)
+			if file != result.File && strings.Contains(file.Text(command.Mapping.RHS), unusedCodePlaceholder) {
+				markDynamic(scope)
+			}
 			// Keycode-separated mapping bodies are not all parsed as commands.
 			// A literal script-local name there is still a possible use.
-			for _, name := range strings.FieldsFunc(result.File.Text(command.Mapping.RHS), func(character rune) bool {
+			for _, name := range strings.FieldsFunc(file.Text(command.Mapping.RHS), func(character rune) bool {
 				return !(character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
 					character >= '0' && character <= '9' || character >= 0x80 || strings.ContainsRune("_:<>", character))
 			}) {
@@ -239,9 +326,44 @@ func collectUnusedBindingDiagnostics(result *FileAnalysis) {
 		}
 		if command.Function != nil {
 			for _, parameter := range command.Function.Parameters {
-				inspectExpression(parameter.Default, scope)
+				inspectExpression(file, parameter.Default, scope, command.Dialect)
 			}
 		}
+		if command.UserCommand != nil {
+			for _, attribute := range command.UserCommand.Attributes {
+				if file.Text(attribute.Name) == "complete" {
+					kind, name, _ := strings.Cut(file.Text(attribute.Value), ",")
+					if kind == "custom" || kind == "customlist" {
+						if file != result.File && strings.Contains(name, unusedCodePlaceholder) {
+							dynamicFunctions = true
+						}
+						markFunctionName(name)
+					}
+				}
+			}
+		}
+		if file != result.File && command.Set != nil {
+			for _, option := range command.Set.Options {
+				if callbackFunctionOptions[normalizeOptionName(file.Text(option.Name))] {
+					name := file.Text(option.Value)
+					if strings.Contains(name, unusedCodePlaceholder) {
+						dynamicFunctions = true
+					}
+					markFunctionName(name)
+				}
+			}
+		}
+		if file != result.File && command.Embedded != nil {
+			for index := range command.Embedded.Commands {
+				inspectCommand(file, &command.Embedded.Commands[index], scope)
+			}
+		}
+	}
+	for command, scope := range result.commandScopes {
+		if !result.analysisStep() {
+			return
+		}
+		inspectCommand(result.File, command, scope)
 	}
 
 	reported := make(map[unusedBinding]bool)

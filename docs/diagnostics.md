@@ -260,10 +260,14 @@ functions, class methods and interface methods are excluded. Direct calls,
 function values, `<SID>` calls, literal names in mappings, autocommands, user
 commands and callback strings count as uses; a direct self-recursive call alone
 does not. Nested Vim9 functions are matched by declaration identity; string
-callback names refer to script functions. Runtime evaluation, computed names
-and scope-dictionary access suppress hints for names whose use cannot be ruled
-out. These are conservative name-use checks, not dead-store or call-graph
-analysis. Both unused hints are withheld while parser or other semantic
+callback names refer to script functions. Literal command and expression-string
+templates are inspected for name uses, so `execute 'edit ' . fname` and literal
+`map()` callbacks do not hide unrelated hints. Interpolated filename and quoted
+text arguments are treated as data; syntax injected by their runtime values is
+not reconstructed. Opaque evaluated expressions, computed names, unsupported
+escaped templates and scope-dictionary access still suppress hints for affected
+names. These are name-use checks, not dead-store or call-graph analysis.
+Both unused hints are withheld while parser or other semantic
 diagnostics (except deprecation hints) are present.
 
 `vimls/variable-type-change` marks the later assignment and links to the previous

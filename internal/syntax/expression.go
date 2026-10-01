@@ -2637,6 +2637,18 @@ func (p *expressionParser) peek(distance int) expressionToken {
 }
 
 func (p *expressionParser) isMember(left *Expression) bool {
+	// In scriptversion 1 a dot after a string is concatenation even without
+	// spaces. Dictionary lookup depends on the receiver's runtime type.
+	if p.dialect == Legacy && p.scriptVersion < 2 {
+		receiver := left
+		for receiver.Kind == ExpressionParenthesized && len(receiver.Children) == 1 {
+			receiver = receiver.Children[0]
+		}
+		if receiver.Kind == ExpressionString || receiver.Kind == ExpressionInterpolatedString ||
+			receiver.Kind == ExpressionBinary && (receiver.Value == "." || receiver.Value == "..") {
+			return false
+		}
+	}
 	if !p.adjacentOrContinuationLine(left.Span.End, p.current().span.Start) {
 		return false
 	}

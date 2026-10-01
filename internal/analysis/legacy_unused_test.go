@@ -130,6 +130,64 @@ endfunction
 			want: []string{"vimls/unused-variable:s:unused", "vimls/unused-variable:unused"},
 		},
 		{
+			name: "execute templates retain unrelated unused bindings",
+			source: `let s:unused = 1
+function! Public() abort
+  let l:unused = 3
+  let files = ['file']
+  for fname in files
+    exe 'edit '.fname
+  endfor
+  let nr = 1
+  exe nr . 'wincmd w'
+  execute 'wincmd p'
+endfunction
+`,
+			want: []string{"vimls/unused-variable:s:unused", "vimls/unused-variable:l:unused"},
+		},
+		{
+			name: "string callbacks retain unrelated unused bindings",
+			source: `let s:unused = 1
+let s:used = 2
+function! Public() abort
+  let unused = 3
+  let used = []
+  call map([1], 'extend(used, [v:val + s:used])')
+  call filter([1], 'index(used, v:val) >= 0')
+  call map([1], "substitute(v:val, '" . expand('~') . "/path', '', '')")
+endfunction
+`,
+			want: []string{"vimls/unused-variable:s:unused", "vimls/unused-variable:unused"},
+		},
+		{
+			name: "literal runtime expressions read only named bindings",
+			source: `let s:unused = 1
+let s:used = 2
+function! s:Unused() abort
+endfunction
+function! s:Used() abort
+endfunction
+function! Public() abort
+  let unused = 3
+  let used = 4
+  execute 'echo s:used used | call s:Used()'
+  echo execute('echo used')
+  echo eval('s:used + used')
+  echo substitute('x', 'x', '\=s:used + used', '')
+endfunction
+`,
+			want: []string{"vimls/unused-variable:s:unused", "vimls/unused-function:s:Unused", "vimls/unused-variable:unused"},
+		},
+		{
+			name: "adjacent string concatenation reads local variables",
+			source: `function! Public() abort
+  let file = 'file'
+  let name = 'name'
+  echo 'open '.file.' with '.name
+endfunction
+`,
+		},
+		{
 			name: "existence checks use the binding",
 			source: `if !exists('s:loaded')
   let s:loaded = 1
@@ -222,8 +280,12 @@ func TestLegacyUnusedRecognizesFunctionUses(t *testing.T) {
 		"nnoremap <expr> <unique> <Plug>(used) <SID>Used()",
 		"augroup UsedTest\n  autocmd!\n  autocmd User Used call s:Used()\naugroup END",
 		"command! Used call s:Used()",
+		"command! -nargs=* -complete=custom,s:Used Used echo <q-args>",
+		"command! -nargs=* -complete=customlist,<SID>Used Used echo <q-args>",
 		"set operatorfunc=s:Used",
 		"let &operatorfunc = '<SID>Used'",
+		"execute 'set operatorfunc=s:Used'",
+		"execute 'nnoremap x :call <SID>Used()<CR>'",
 	} {
 		t.Run(use, func(t *testing.T) {
 			source := "function! s:Used(...) abort\nendfunction\n" + use + "\n"
@@ -245,6 +307,11 @@ func TestLegacyUnusedDynamicAccess(t *testing.T) {
 		"execute a:expression",
 		"echo eval(a:expression)",
 		"echo execute(a:expression)",
+		"execute 'echo ' . a:expression",
+		"execute 'call s:' . a:expression . '()'",
+		"echo eval('s:' . a:expression)",
+		"call map([], 'v:val + ' . a:expression)",
+		"execute 'nnoremap x :echo ' . a:expression . '<CR>'",
 		"echo s: l:",
 		"echo s:{a:expression} l:{a:expression}",
 		"call map([], 's:item + item')",
