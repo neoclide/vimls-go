@@ -18,6 +18,9 @@ See [language support](language-support.md) for what works today and the
   reporting errors when validity depends on the user's build or runtime state.
 - Cover more [Neovim option differences](neovim.md#option-compatibility).
   Use the existing editor-condition tracking for future Neovim function checks.
+- Extend argument-scope assignment checks beyond direct writes to undeclared
+  named Legacy arguments (E461). Numbered and captured arguments require their
+  runtime arity and closure context to be known.
 
 ## Configuration and plugin projects
 

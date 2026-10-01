@@ -673,7 +673,7 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 		if dialect == syntax.Legacy && target != nil && (target.Kind == syntax.ExpressionMember || target.Kind == syntax.ExpressionIndex || target.Kind == syntax.ExpressionSlice) &&
 			len(target.Children) > 0 && target.Children[0] != nil && target.Children[0].Kind == syntax.ExpressionIdentifier {
 			receiver := target.Children[0]
-			if receiver.Value == "v:event" || (receiver.Value == "a:000" && isReadOnlyLegacyArgumentTarget(scope, receiver)) {
+			if receiver.Value == "v:event" || (receiver.Value == "a:000" && legacyArgumentAssignmentCode(scope, receiver) == "vim/E46") {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E742", Message: "Cannot change value of " + receiver.Value, Span: target.Span,
 				})
@@ -737,9 +737,17 @@ func collectAssignmentExpressionDiagnostics(result *FileAnalysis, scope *Scope, 
 				}
 			}
 		} else if target != nil && target.Kind == syntax.ExpressionIdentifier && validNameSpan(result.File, target.Span) {
-			if isReadOnlyVimVariableTarget(target) || dialect == syntax.Legacy && isReadOnlyLegacyArgumentTarget(scope, target) {
+			argumentCode := ""
+			if dialect == syntax.Legacy {
+				argumentCode = legacyArgumentAssignmentCode(scope, target)
+			}
+			if isReadOnlyVimVariableTarget(target) || argumentCode == "vim/E46" {
 				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 					Code: "vim/E46", Message: "Cannot change read-only variable \"" + target.Value + "\"", Span: target.Span,
+				})
+			} else if argumentCode == "vim/E461" && expression.Value == "=" {
+				result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+					Code: "vim/E461", Message: "Illegal variable name: " + target.Value, Span: target.Span,
 				})
 			} else if dialect == syntax.Vim9 && !strings.Contains(target.Value, ":") {
 				declaration := resolve(scope, target.Value, target.Span.Start, false, nil)
@@ -1093,14 +1101,14 @@ func isReadOnlyVimVariableTarget(target *syntax.Expression) bool {
 	return ok && variable.Flags&vimdata.VariableReadOnly != 0
 }
 
-func isReadOnlyLegacyArgumentTarget(scope *Scope, target *syntax.Expression) bool {
+func legacyArgumentAssignmentCode(scope *Scope, target *syntax.Expression) string {
 	if target == nil || target.Kind != syntax.ExpressionIdentifier || !strings.HasPrefix(target.Value, "a:") {
-		return false
+		return ""
 	}
 	var functionScope *Scope
 	for current := scope; current != nil; current = current.Parent {
 		if current.Kind == syntax.BlockDef {
-			return false
+			return ""
 		}
 		if current.Kind == syntax.BlockFunction {
 			functionScope = current
@@ -1108,19 +1116,29 @@ func isReadOnlyLegacyArgumentTarget(scope *Scope, target *syntax.Expression) boo
 		}
 	}
 	if functionScope == nil {
-		return false
+		return ""
 	}
 	name := strings.TrimPrefix(target.Value, "a:")
 	switch name {
 	case "0", "000", "firstline", "lastline":
-		return true
+		return "vim/E46"
 	}
-	for _, declaration := range functionScope.Declarations {
-		if declaration.Parameter && declaration.Name == name {
-			return true
+	for current := functionScope; current != nil; current = current.Parent {
+		for _, declaration := range current.Declarations {
+			if declaration.Parameter && declaration.Name == name {
+				if current == functionScope {
+					return "vim/E46"
+				}
+				// A closure may capture an argument from its enclosing function.
+				return ""
+			}
 		}
 	}
-	return false
+	// Numbered arguments depend on the call's arity, not just the signature.
+	if validScopeVariableName(name) {
+		return "vim/E461"
+	}
+	return ""
 }
 
 func scopeContainsDef(scope *Scope) bool {

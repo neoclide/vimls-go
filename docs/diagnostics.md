@@ -42,6 +42,7 @@ A single definition is safe to reload from the same script and receives no hint.
 | `vim/E118`, `vim/E119` | A function received too many or too few arguments. |
 | `vim/E1012` | The value's type does not match the expected type. |
 | `vim/E46`, `vim/E1018`, `vim/E741`, `vim/E742` | A read-only binding or locked value is being changed. The exact code depends on the context. |
+| `vim/E461` | The variable name is illegal. In Legacy functions, `let a:foo = value` cannot create a named argument that the function did not declare. Existing arguments remain read-only and report E46. |
 | `vim/E113`, `vim/E518` | The option name is unknown. |
 | `vim/E474`, `vim/E487`, `vim/E539` | A supported option-value check found an invalid value, number or flag. Dynamic values are not fully checked. |
 | `vim/E521`, `vim/E928`, `vim/E734` | An option assignment requires a number, requires a string, or uses an incompatible assignment operator. Known RHS types also receive the corresponding Vim conversion error; unknown and `any` RHS types are skipped. See [Option assignment errors](#option-assignment-errors) below. |

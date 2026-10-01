@@ -3400,6 +3400,11 @@ func TestAnalyzeE461IllegalVariableNameDiagnostics(t *testing.T) {
 		name, source, span, message string
 	}{
 		{"empty scope name", "let v:=5\n", "v:", "Illegal variable name: "},
+		{"undeclared variadic argument", "function! Func(...) abort\n  let a:foo = 3\nendfunction\n", "a:foo", "Illegal variable name: a:foo"},
+		// Vim v9.2.1132 src/testdir/test_let.vim: s:set_arg2 and Test_let_arg_fail.
+		{"undeclared named argument", "function! Func(value) abort\n  let a:foo = 3\nendfunction\n", "a:foo", "Illegal variable name: a:foo"},
+		{"undeclared argument in block", "function! Func() abort\n  if 1\n    let a:foo = 3\n  endif\nendfunction\n", "a:foo", "Illegal variable name: a:foo"},
+		{"legacy function in Vim9", "vim9script\nfunction! Func(...) abort\n  let a:foo = 3\nendfunction\n", "a:foo", "Illegal variable name: a:foo"},
 		{"scope dictionary index", "let g:[\"a;b\"] = 10\n", `"a;b"`, "Illegal variable name: a;b"},
 		{"extend scope dictionary", "call extend(g:, {'-!': 10})\n", "'-!'", "Illegal variable name: -!"},
 		{"setbufvar", "vim9script\nsetbufvar('%', '', 10)\n", "''", "Illegal variable name: "},
@@ -3431,6 +3436,14 @@ func TestAnalyzeE461IllegalVariableNameDiagnostics(t *testing.T) {
 		"call setbufvar(1, name, 1)\n",
 		"call setbufvar(1, '&syntax', 'vim')\n",
 		"let v:errmsg = ''\n",
+		"function! Func(foo) abort\n  let a:foo = 3\nendfunction\n",
+		"function! Func(...) abort\n  let a:1 = 3\nendfunction\n",
+		"function! Func(...) abort\n  let a:foo += 3\nendfunction\n",
+		"function! Func(...) abort\n  let a:foo =\nendfunction\n",
+		"function! Func(foo) abort\n  let a:foo[0] = 3\nendfunction\n",
+		"function! Func(foo) abort\n  let a:{a:foo} = 3\nendfunction\n",
+		"function! Outer(foo) abort\n  function! Inner() abort closure\n    let a:foo = 3\n  endfunction\nendfunction\n",
+		"function! Func(...) abort\n  let l:foo = 3\n  return l:foo\nendfunction\n",
 	} {
 		for _, diagnostic := range Analyze(syntax.Parse(source)).Diagnostics {
 			if diagnostic.Code == "vim/E461" {
@@ -7874,7 +7887,7 @@ func TestAnalyzeImmutableAssignmentDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "conservative exclusions",
-			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nv:errmsg = 'ok'\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [[7]]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\ndef Modern(value)\n  a:value = 1\nenddef\nfunction Legacy(value)\n  let a:missing = 1\n  let a:value[0] = 1\nendfunction\nlegacy let a:value = 1\n",
+			source: "vim9script\nconst fixed = [1]\nvar mutable = 1\nif true\n  var fixed = 2\n  fixed = 3\nendif\nmutable = 2\nv:errmsg = 'ok'\nlegacy fixed = 4\ns:fixed = 5\nfixed.member = 6\nfixed[0] = 6\n[fixed] = [[7]]\nfixed += 8\nfixed++\nfixed--\nmissing = 9\nfixed =\ndef Modern(value)\n  a:value = 1\nenddef\nfunction Legacy(value)\n  let a:value[0] = 1\nendfunction\nlegacy let a:value = 1\n",
 		},
 		{
 			name:   "embedded command",
