@@ -311,7 +311,7 @@ func TestAdditionalStyleDiagnostics(t *testing.T) {
 		{
 			name:   "implicit string and pattern settings",
 			source: "let name = 'Foo'\nif name == 'foo'\nendif\nif name =~ 'foo.*'\nendif\n",
-			want:   []string{"vimls/implicit-string-case", "vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+			want:   []string{"vimls/implicit-string-case", "vimls/implicit-pattern-case"},
 		},
 	}
 	for _, test := range tests {
@@ -342,31 +342,29 @@ func TestPatternMatchStyleDiagnosticsRespectDialect(t *testing.T) {
 		{
 			name:   "legacy =~",
 			source: "if 'text' =~ 'text.*'\nendif\n",
-			want:   []string{"vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+			want:   []string{"vimls/implicit-pattern-case"},
 		},
 		{
 			name:   "legacy !~",
 			source: "if 'text' !~ 'text.*'\nendif\n",
-			want:   []string{"vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+			want:   []string{"vimls/implicit-pattern-case"},
 		},
 		{
 			name:   "vim9script =~",
-			source: "vim9script\necho 'AA' =~ 'aa'\n",
+			source: "vim9script\necho 'AA' =~ 'a.*'\n",
 		},
 		{
 			name:   "vim9cmd =~",
 			source: "vim9cmd echo 'text' =~ 'text.*'\n",
-			want:   []string{"vimls/implicit-regex-magic"},
 		},
 		{
 			name:   "vim9cmd !~",
 			source: "vim9cmd echo 'text' !~ 'text.*'\n",
-			want:   []string{"vimls/implicit-regex-magic"},
 		},
 		{
 			name:   "legacy command in vim9script",
 			source: "vim9script\nlegacy echo 'text' =~ 'text.*'\n",
-			want:   []string{"vimls/implicit-pattern-case", "vimls/implicit-regex-magic"},
+			want:   []string{"vimls/implicit-pattern-case"},
 		},
 	}
 	for _, test := range tests {
@@ -379,6 +377,56 @@ func TestPatternMatchStyleDiagnosticsRespectDialect(t *testing.T) {
 			if !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("style diagnostics = %#v, want %#v", got, test.want)
 			}
+		})
+	}
+}
+
+func TestPatternMatchStyleDiagnosticsIgnoreMagicOption(t *testing.T) {
+	for _, test := range []struct {
+		option, operator string
+		wantCase         bool
+	}{
+		{option: "nomagic", operator: "=~", wantCase: true},
+		{option: "magic", operator: "!~", wantCase: true},
+		{option: "magic", operator: "=~#"},
+		{option: "nomagic", operator: "=~?"},
+		{option: "magic", operator: "!~?"},
+		{option: "nomagic", operator: "!~#"},
+	} {
+		t.Run(test.option+" "+test.operator, func(t *testing.T) {
+			file := syntax.Parse("set " + test.option + "\necho 'a' " + test.operator + " '.'\n")
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			var gotCase bool
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				switch diagnostic.Code {
+				case "vimls/implicit-regex-magic":
+					t.Fatalf("match operator depends on magic: %#v", diagnostic)
+				case "vimls/implicit-pattern-case":
+					gotCase = true
+				}
+			}
+			if gotCase != test.wantCase {
+				t.Fatalf("implicit-pattern-case = %v, want %v", gotCase, test.wantCase)
+			}
+		})
+	}
+}
+
+func TestExPatternStyleDiagnosticsRetainMagicWarning(t *testing.T) {
+	for _, source := range []string{"s/./x/\n", "g/./echo 'x'\n"} {
+		t.Run(strings.TrimSpace(source), func(t *testing.T) {
+			file := syntax.Parse(source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			for _, diagnostic := range Analyze(file).Diagnostics {
+				if diagnostic.Code == "vimls/implicit-regex-magic" {
+					return
+				}
+			}
+			t.Fatal("missing implicit-regex-magic for Ex pattern")
 		})
 	}
 }

@@ -221,7 +221,7 @@ some plugin-oriented suggestions, as described in [the vimrc guide](userconfig.m
 | `vimls/global-empty-pattern` | Warning | An empty pattern in `:global` or `:vglobal` reuses the previous search pattern from interactive history. |
 | `vimls/global-internal-state` | Hint | A short global variable looks like internal plugin state. |
 | `vimls/implicit-pattern-case` | Hint | Pattern matching depends on the user's `ignorecase` option; Vim9 `=~` and `!~` comparisons are exempt. |
-| `vimls/implicit-regex-magic` | Hint | Pattern interpretation depends on the user's `magic` option. |
+| `vimls/implicit-regex-magic` | Hint | A `:substitute`, `:global` or `:vglobal` pattern depends on the user's `magic` option. Expression comparisons (`=~`, `!~` and their case variants) always use magic and are exempt. |
 | `vimls/implicit-string-case` | Hint | String comparison depends on the user's `ignorecase` option. |
 | `vimls/mapping-script-local-reference` | Warning | An `s:name` identifier in a mapping may not be available when it runs; literal substrings such as `align-items:` are ignored. |
 | `vimls/mapping-without-unique` | Hint | The mapping may replace an existing mapping. |
