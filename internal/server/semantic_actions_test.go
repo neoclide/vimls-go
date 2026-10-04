@@ -931,6 +931,71 @@ func TestInlayHintShowsOnlySafelyInferredTypes(t *testing.T) {
 	}
 }
 
+func TestInlayHintSkipsExplicitParameterTypes(t *testing.T) {
+	for _, test := range []struct {
+		name, source string
+	}{
+		{"function defaults", "vim9script\ndef F(a: string, b: number = 5)\nenddef\n"},
+		{"compound and variadic", "vim9script\ndef F(values: dict<list<number>>, Callback: func(string): number, ...rest: list<string>)\nenddef\n"},
+		{"method", "vim9script\nclass Thing\n  def F(a: string, b: number = 5)\n  enddef\nendclass\n"},
+		{"lambda", "vim9script\nvar F: func(string): string = (a: string) => a\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := syntax.Parse(test.source)
+			if len(file.Diagnostics) != 0 {
+				t.Fatalf("syntax diagnostics = %#v", file.Diagnostics)
+			}
+			instance, documentURI := openNavigationDocument(t, text.UTF16, test.source)
+			hints, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Range:        protocol.Range{Start: protocol.Position{}, End: protocol.Position{Line: uint32(strings.Count(test.source, "\n"))}},
+			})
+			if err != nil || len(hints) != 0 {
+				t.Fatalf("inlay hints = %#v, error = %v", hints, err)
+			}
+		})
+	}
+}
+
+func TestInlayHintRetainsInferredParametersAndRequestRange(t *testing.T) {
+	source := "vim9script\ndef F(explicit: string, count = 5)\n  var local = count\nenddef\nvar global = 'x'\n"
+	instance, documentURI := openNavigationDocument(t, text.UTF16, source)
+	for _, test := range []struct {
+		name     string
+		span     protocol.Range
+		want     []protocol.Position
+		wantType []string
+	}{
+		{
+			name:     "whole document",
+			span:     protocol.Range{Start: protocol.Position{}, End: protocol.Position{Line: 5}},
+			want:     []protocol.Position{{Line: 1, Character: 29}, {Line: 2, Character: 11}, {Line: 4, Character: 10}},
+			wantType: []string{": number", ": number", ": string"},
+		},
+		{
+			name:     "local variable only",
+			span:     protocol.Range{Start: protocol.Position{Line: 2}, End: protocol.Position{Line: 3}},
+			want:     []protocol.Position{{Line: 2, Character: 11}},
+			wantType: []string{": number"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hints, err := instance.InlayHint(context.Background(), &protocol.InlayHintParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: documentURI},
+				Range:        test.span,
+			})
+			if err != nil || len(hints) != len(test.want) {
+				t.Fatalf("inlay hints = %#v, error = %v", hints, err)
+			}
+			for index, hint := range hints {
+				if hint.Position != test.want[index] || hint.Label != protocol.String(test.wantType[index]) || hint.Kind != protocol.InlayHintKindType {
+					t.Fatalf("inlay hint %d = %#v", index, hint)
+				}
+			}
+		})
+	}
+}
+
 func TestCodeActionUsesNegotiatedEncodingAtEndOfFile(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -1021,6 +1021,13 @@ func (s *Server) InlayHint(ctx context.Context, params *protocol.InlayHintParams
 func explicitTypeDeclarations(file *syntax.File) map[syntax.Span]bool {
 	result := make(map[syntax.Span]bool)
 	walkCommands(file.Commands, func(command *syntax.Command) {
+		if command.Function != nil {
+			for _, parameter := range command.Function.Parameters {
+				if parameter.Type != nil {
+					result[parameter.Name] = true
+				}
+			}
+		}
 		if command.Declaration != nil {
 			for _, binding := range command.Declaration.Bindings {
 				if binding.ParsedType != nil {
@@ -1035,6 +1042,13 @@ func explicitTypeDeclarations(file *syntax.File) map[syntax.Span]bool {
 				}
 			}
 		}
+		walkCommandExpressions(command, func(expression *syntax.Expression) {
+			for _, parameter := range expression.Parameters {
+				if parameter.Type != nil {
+					result[parameter.Name] = true
+				}
+			}
+		})
 	})
 	return result
 }

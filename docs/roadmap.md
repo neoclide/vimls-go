@@ -28,7 +28,8 @@ See [language support](language-support.md) for what works today and the
 - Consider watching plugin files outside the workspace if real projects need
   updates without restarting the server. Keep the number of watched directories
   and the cost of rescanning under control.
-- Consider parameter-name hints and clickable links in comments.
+- Consider parameter-name hints at call sites and clickable links in comments;
+  existing type hints omit explicitly typed function parameters.
 
 ## Before 1.0
 

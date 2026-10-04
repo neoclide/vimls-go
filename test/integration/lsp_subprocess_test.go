@@ -430,8 +430,21 @@ endfunction
 	}
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":96,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///symbols.vim"},"range":{"start":{"line":0,"character":0},"end":{"line":13,"character":0}}}}`)
 	inlayHints := readJSON(t, reader)
-	if string(inlayHints["id"]) != "96" || !strings.Contains(string(inlayHints["result"]), `": number"`) {
+	if string(inlayHints["id"]) != "96" || string(inlayHints["result"]) != "[]" {
 		t.Fatalf("inlay hints = %s", inlayHints)
+	}
+	writeJSON(t, writer, `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///inlay-inferred.vim","languageId":"vim","version":1,"text":"vim9script\nvar inferred = 1\n"}}}`)
+	readPublishedDiagnostic(t, reader, "file:///inlay-inferred.vim", "vimls/unused-variable")
+	writeJSON(t, writer, `{"jsonrpc":"2.0","id":961,"method":"textDocument/inlayHint","params":{"textDocument":{"uri":"file:///inlay-inferred.vim"},"range":{"start":{"line":0,"character":0},"end":{"line":2,"character":0}}}}`)
+	inferredInlayHints := readJSON(t, reader)
+	var inferredHints []struct {
+		Position protocol.Position      `json:"position"`
+		Label    string                 `json:"label"`
+		Kind     protocol.InlayHintKind `json:"kind"`
+	}
+	if string(inferredInlayHints["id"]) != "961" || json.Unmarshal(inferredInlayHints["result"], &inferredHints) != nil || len(inferredHints) != 1 ||
+		inferredHints[0].Position != (protocol.Position{Line: 1, Character: 12}) || inferredHints[0].Label != ": number" || inferredHints[0].Kind != protocol.InlayHintKindType {
+		t.Fatalf("inferred inlay hints = %s", inferredInlayHints)
 	}
 
 	writeJSON(t, writer, `{"jsonrpc":"2.0","id":99999,"method":"workspace/symbol","params":{"query":"RuntimeGlobal"}}`)

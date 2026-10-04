@@ -36,7 +36,7 @@ Other metadata records its own source revision.
 | Diagnostics | Syntax errors, unresolved names, invalid calls, Vim9 type errors and target Vim version checks. |
 | Navigation | Definitions, references, implementations, call hierarchy and workspace symbols. |
 | Editing | Rename, linked editing, selected quick fixes, folding and selection expansion. |
-| Inlay hints and Code Lens | Inferred Vim9 types, reference counts and implementation counts. |
+| Inlay hints and Code Lens | Inferred Vim9 types without repeating explicit variable or function parameter types, reference counts and implementation counts. |
 | Semantic highlighting | Types, functions, variables, parameters and modifiers. |
 | Formatting | Indentation for files, selections and supported typing events. |
 
