@@ -1,7 +1,7 @@
 # What vimls-go supports
 
-vimls-go supports Legacy Vim script and Vim9 script through **Vim v9.2.1132**,
-commit `f3dc0fee778439ac8ff8680b42552f7f13d47396`, including classes,
+vimls-go supports Legacy Vim script and Vim9 script through **Vim v9.2.1235**,
+commit `12d91ed7bb9c7276216670aed8e4fee264a13703`, including classes,
 interfaces, enums and imports. Both dialects can be used in the same project.
 Generated and hand-maintained Vim metadata, the official corpus and the curated
 oracle use this revision. See the [changelog](../CHANGELOG.md) for release
@@ -18,8 +18,12 @@ Version-sensitive behavior includes:
   conversions are retained.
 - Invalid Vim9 command names containing underscores follow patch 1094: E492
   at script level and E476 inside `def`.
-- `source ++dryrun` (patch 1084) links the filename without including the
-  option. Filename escapes and continuation spans are preserved.
+- `source ++dryrun` was removed in patch 1184. It is treated as filename text;
+  ordinary `source` paths retain filename escapes and continuation spans.
+- `try`/`catch` return-flow and unreachable-code checks follow patch 1155,
+  including patterned catches, terminating `finally`, and loop jumps.
+- Environment variable declarations report E1000 (patch 1232). Interface
+  implementations check generic method type-variable counts (E1438).
 - Stored command/autocommand bodies in branches proven false by literal
   conditions avoid spurious diagnostics (patch 1132). Unknown conditions stay
   conservative; missing block delimiters remain checked. User-command
@@ -109,7 +113,7 @@ supported.
 Types are inferred from known values and function return types in both dialects.
 Builtin call inference supplements broad metadata with known return-value rules,
 including the corrections recorded in Vim v9.2.1104 and checked against
-v9.2.1132. Numeric and container results retain their known types. For `expand()`,
+v9.2.1235. Numeric and container results retain their known types. For `expand()`,
 `glob()`, `globpath()` and `submatch()`, an omitted or literal list flag determines
 whether the result is a string or `list<string>`; a dynamic flag remains unknown.
 Bare `true` and `false` count as literal flags only in Vim9 command contexts,
@@ -215,7 +219,7 @@ See [editing configuration files](userconfig.md).
 - Dynamic code and loading order may leave types or references unresolved.
 - Mixed-dialect `def` and `function` bodies have incomplete analysis.
 - Call hierarchy excludes lambdas and deferred command bodies.
-- Embedded languages and syntax newer than Vim v9.2.1132 are not analyzed.
+- Embedded languages and syntax newer than Vim v9.2.1235 are not analyzed.
 - Files larger than 4 MiB are synchronized but not analyzed.
 
 ## Neovim compatibility

@@ -32,8 +32,8 @@ func generateVariables(vimRoot, output string) error {
 	if err != nil {
 		return fmt.Errorf("parse evalvars.c: %w", err)
 	}
-	if len(variables) != 118 {
-		return fmt.Errorf("found %d v: variables, want 118", len(variables))
+	if len(variables) != 119 {
+		return fmt.Errorf("found %d v: variables, want 119", len(variables))
 	}
 	if err := addVariableDocumentation(vimRoot, variables); err != nil {
 		return fmt.Errorf("read v: variable documentation: %w", err)

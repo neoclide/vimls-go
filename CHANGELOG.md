@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Update the Vim baseline, metadata, runtime help and official corpus to v9.2.1235.
+- Adopt Vim 9.2.1155's `try`/`catch` return-flow and unreachable-code checks,
+  including terminating `finally` and loop jumps (fixes #13).
+- Treat removed `source ++dryrun` as filename text, use E1000 for environment
+  variable declarations, and check generic interface method counts with E1438.
+- Accept method returns of implementing classes, skip type-name lookup in
+  unselected literal ternary casts, and preserve delimiters inside pattern-range
+  collections.
+
 ## v0.2.0
 
 - Rewrite Vim9 `:import` statements on `workspace/didRenameFiles` and

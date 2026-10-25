@@ -354,6 +354,8 @@ func collectUnreachableCodeDiagnostics(result *FileAnalysis) {
 					flow = functionFlowReturns
 				case "throw":
 					flow = functionFlowThrows
+				case "break", "continue":
+					flow = functionFlowJumps
 				}
 			}
 			if flow.terminates() {
@@ -403,11 +405,12 @@ const (
 	functionFlowFallsThrough functionFlow = iota
 	functionFlowReturns
 	functionFlowThrows
+	functionFlowJumps
 	functionFlowUnknown
 )
 
 func (flow functionFlow) terminates() bool {
-	return flow == functionFlowReturns || flow == functionFlowThrows
+	return flow == functionFlowReturns || flow == functionFlowThrows || flow == functionFlowJumps
 }
 
 func commandSequenceFlow(commands []syntax.Command, blocks []syntax.Block, start, end int) functionFlow {
@@ -422,6 +425,8 @@ func commandSequenceFlow(commands []syntax.Command, blocks []syntax.Block, start
 			return functionFlowReturns
 		case "throw":
 			return functionFlowThrows
+		case "break", "continue":
+			return functionFlowJumps
 		}
 		if isBlockHeader(blocks, index, command.Block) {
 			block := blocks[command.Block]
@@ -500,41 +505,36 @@ func tryBlockFlow(commands []syntax.Command, blocks []syntax.Block, block syntax
 			return functionFlowUnknown
 		}
 	}
-	lastBranch := block.Branches[len(block.Branches)-1]
-	if commands[lastBranch].Canonical == "finally" {
-		flow := commandSequenceFlow(commands, blocks, lastBranch+1, block.End)
-		if flow == functionFlowUnknown {
-			return functionFlowUnknown
-		}
-		if flow == functionFlowReturns {
+	// Vim v9.2.1155: a terminating finally overrides earlier paths. Otherwise
+	// every try/catch body must terminate; unmatched exceptions propagate even
+	// when the catch has a pattern. endtry records this as a return.
+	headers := append([]int{block.Header}, block.Branches...)
+	last := headers[len(headers)-1]
+	hasFinally := commands[last].Canonical == "finally"
+	if hasFinally {
+		flow := commandSequenceFlow(commands, blocks, last+1, block.End)
+		if flow.terminates() {
 			return functionFlowReturns
 		}
-		return functionFlowFallsThrough
+		if flow == functionFlowUnknown {
+			return flow
+		}
 	}
-	if commands[lastBranch].Canonical != "catch" || commands[lastBranch].Argument.Start < commands[lastBranch].Argument.End {
-		return functionFlowFallsThrough
-	}
-	headers := make([]int, 0, len(block.Branches)+1)
-	headers = append(headers, block.Header)
-	headers = append(headers, block.Branches...)
 	for index, header := range headers {
+		if hasFinally && index == len(headers)-1 {
+			break
+		}
 		end := block.End
 		if index+1 < len(headers) {
 			end = headers[index+1]
 		}
 		flow := commandSequenceFlow(commands, blocks, header+1, end)
 		if flow == functionFlowUnknown {
-			return functionFlowUnknown
+			return flow
 		}
-		if index+1 < len(headers) {
-			if flow != functionFlowReturns {
-				return functionFlowFallsThrough
-			}
-		} else if flow != functionFlowReturns {
+		if !flow.terminates() {
 			return functionFlowFallsThrough
-		} else {
-			return functionFlowReturns
 		}
 	}
-	return functionFlowFallsThrough
+	return functionFlowReturns
 }

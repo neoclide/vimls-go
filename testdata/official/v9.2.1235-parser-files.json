@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "tag": "v9.2.1015",
-  "commit": "5ab969f719bb09555e90e8dff8c94fc37bcbf2ae",
+  "tag": "v9.2.1235",
+  "commit": "12d91ed7bb9c7276216670aed8e4fee264a13703",
   "scope": "Pinned syntax-test allowlist; every unlisted src/testdir Vim file is permanently excluded from migration",
   "defaultDisposition": "exclude",
   "files": [

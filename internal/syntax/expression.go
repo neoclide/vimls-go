@@ -217,6 +217,44 @@ func parseExpressionPrefixWithVersion(source string, base int, dialect Dialect, 
 	return expression, diagnostics, parser.current().span.Start - base
 }
 
+// Only type-name lookup is skipped. Delimiters, missing operands, and type
+// grammar errors still belong to parsing even when an expression is unselected.
+func (p *expressionParser) suppressSkippedCastTypes(expression *Expression, start int) {
+	if len(p.diagnostics) == start {
+		return
+	}
+	spans := make([]Span, 0)
+	var walk func(*Expression)
+	walk = func(node *Expression) {
+		if node == nil {
+			return
+		}
+		if node.Kind == ExpressionCast && node.CastType != nil {
+			spans = append(spans, node.CastType.Span)
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	walk(expression)
+	kept := p.diagnostics[:start]
+	for _, diagnostic := range p.diagnostics[start:] {
+		skipped := false
+		if diagnostic.Code == "vim/E1010" && strings.HasPrefix(diagnostic.Message, "Type not recognized:") {
+			for _, span := range spans {
+				if diagnostic.Span.Start >= span.Start && diagnostic.Span.End <= span.End {
+					skipped = true
+					break
+				}
+			}
+		}
+		if !skipped {
+			kept = append(kept, diagnostic)
+		}
+	}
+	p.diagnostics = kept
+}
+
 func (p *expressionParser) parse(minimumBinding int) *Expression {
 	p.depth++
 	defer func() { p.depth-- }()
@@ -264,6 +302,20 @@ func (p *expressionParser) parse(minimumBinding int) *Expression {
 			p.validateBinarySpacing(p.current())
 			p.advance()
 			whenFalse := p.parse(0)
+			// eval9() skips type lookup in an unselected literal ternary arm
+			// (Vim v9.2.1200), while malformed expression syntax still recovers.
+			if p.dialect == Vim9 && left.Kind == ExpressionIdentifier {
+				var skipped *Expression
+				switch left.Value {
+				case "false", "v:false":
+					skipped = whenTrue
+				case "true", "v:true":
+					skipped = whenFalse
+				}
+				if skipped != nil {
+					p.suppressSkippedCastTypes(skipped, diagnosticsStart)
+				}
+			}
 			left = &Expression{Kind: ExpressionTernary, Span: Span{Start: left.Span.Start, End: whenFalse.Span.End}, Operator: token.span, Children: []*Expression{left, whenTrue, whenFalse}}
 			continue
 		}

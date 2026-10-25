@@ -49,8 +49,8 @@ func TestLookupFunctionMetadata(t *testing.T) {
 	if _, ok := LookupFunction("ABS"); ok {
 		t.Fatal("case-insensitive function resolved")
 	}
-	if len(builtinFunctions) != 591 {
-		t.Fatalf("len(builtinFunctions) = %d, want 591", len(builtinFunctions))
+	if len(builtinFunctions) != 595 {
+		t.Fatalf("len(builtinFunctions) = %d, want 595", len(builtinFunctions))
 	}
 	seen := make(map[string]BuiltinFunction, len(builtinFunctions))
 	for index, function := range builtinFunctions {

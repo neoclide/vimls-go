@@ -78,7 +78,7 @@ type Command struct {
 	Bang               Span
 	Count              Span
 	Argument           Span
-	SourcePath         Span // :source filename, excluding ++dryrun; empty for buffer sourcing
+	SourcePath         Span // :source filename; empty for buffer sourcing
 	Embedded           *CommandList
 	Declaration        *Declaration
 	Expressions        []*Expression

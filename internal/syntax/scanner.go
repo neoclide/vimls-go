@@ -2888,15 +2888,6 @@ func parseCommandDetailsDepth(file *File, command *Command, depth int) {
 	}
 	if command.Canonical == "source" {
 		command.SourcePath = command.Argument
-		// cmd_source() recognizes ++dryrun only before a space or the end.
-		// Keep the original filename span for navigation, including continuations.
-		const option = "++dryrun"
-		if strings.HasPrefix(file.Text(command.Argument), option) {
-			end := command.Argument.Start + len(option)
-			if end == command.Argument.End || file.Source[end] == ' ' {
-				command.SourcePath.Start = skipSpace(file.Source, end, command.Argument.End)
-			}
-		}
 		return
 	}
 	if command.Argument.Start >= command.Argument.End {
@@ -5716,7 +5707,7 @@ func vim9ScopeDeclarationDiagnostic(file *File, command *Command, name Span) (Di
 	}
 	if strings.HasPrefix(value, "$") {
 		return Diagnostic{
-			Code: "vim/E1016", Message: "Cannot declare an environment variable: " + value, Span: name,
+			Code: "vim/E1000", Message: "Cannot declare an environment variable: " + value, Span: name,
 		}, true
 	}
 	scope := ""
@@ -7014,19 +7005,11 @@ func scanRange(source string, start, end int) int {
 		case character == '\'' && index+1 < end:
 			index += 2
 		case character == '/' || character == '?':
-			delimiter := character
-			index++
-			for index < end {
-				// A trailing backslash has no escaped byte before the line end.
-				if source[index] == '\\' && index+1 < end {
-					index += 2
-				} else if source[index] == delimiter {
-					index++
-					break
-				} else {
-					index++
-				}
+			closing := scanGlobalRegexpEnd(source, index+1, end, character)
+			if closing < 0 {
+				return end
 			}
+			index = closing + 1
 		default:
 			return index
 		}
@@ -7103,18 +7086,11 @@ func rangeLineNumberOverflow(source string, span Span) (Span, bool) {
 				index++
 			}
 		case character == '/' || character == '?':
-			delimiter := character
-			index++
-			for index < span.End {
-				if source[index] == '\\' {
-					index += 2
-				} else if source[index] == delimiter {
-					index++
-					break
-				} else {
-					index++
-				}
+			closing := scanGlobalRegexpEnd(source, index+1, span.End, character)
+			if closing < 0 {
+				return Span{}, false
 			}
+			index = closing + 1
 			// A failed search stops before arithmetic; keep the state-unknown
 			// lower bound conservative.
 			haveBase, baseMinimum = true, 0

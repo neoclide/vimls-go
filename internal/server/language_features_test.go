@@ -58,20 +58,20 @@ func TestDocumentLinkReturnsOnlyStaticResolvedFiles(t *testing.T) {
 	}
 }
 
-func TestDocumentLinkSourceDryrun(t *testing.T) {
+func TestDocumentLinkSourcePathSpans(t *testing.T) {
 	for _, header := range []string{"\" Legacy", "vim9script"} {
 		t.Run(header, func(t *testing.T) {
 			root := t.TempDir()
 			targetPath := writeWorkspaceFile(t, root, "𐐀 name.vim", "vim9script\n")
 			source := header + "\r\n" +
-				"source ++dryrun ./𐐀\\ name.vim | echo 'after'\r\n" +
-				"source ++dryrun\r\n" +
+				"source ./𐐀\\ name.vim | echo 'after'\r\n" +
+				"source\r\n" +
 				"  \\ ./𐐀\\ name.vim\r\n" +
 				"source ++dryrun\r\n" +
 				"source ++dryrun $DYNAMIC\r\n" +
 				"source ++dryrunx ./𐐀\\ name.vim\r\n" +
 				"autocmd BufRead *.vim {\r\n" +
-				"  source ++dryrun ./𐐀\\ name.vim\r\n" +
+				"  source ./𐐀\\ name.vim\r\n" +
 				"}\r\n"
 			mainPath := writeWorkspaceFile(t, root, "main.vim", source)
 			instance := initializeWorkspaceServer(t, root)
@@ -88,7 +88,7 @@ func TestDocumentLinkSourceDryrun(t *testing.T) {
 			if len(links) != 3 {
 				t.Fatalf("links = %#v", links)
 			}
-			for index, want := range []protocol.Range{navigationRange(1, 16, 30), navigationRange(3, 4, 18), navigationRange(8, 18, 32)} {
+			for index, want := range []protocol.Range{navigationRange(1, 7, 21), navigationRange(3, 4, 18), navigationRange(8, 9, 23)} {
 				if links[index].Target == nil || *links[index].Target != uri.File(realpath) || links[index].Range != want {
 					t.Errorf("link %d = %#v, want range %#v", index, links[index], want)
 				}
@@ -414,7 +414,7 @@ func TestPinnedBuiltinStringCompletionIsCompleteAndDeterministic(t *testing.T) {
 		position  protocol.Position
 		itemCount int
 	}{
-		{source: "echo has('')\n", position: protocol.Position{Line: 0, Character: 10}, itemCount: 224},
+		{source: "echo has('')\n", position: protocol.Position{Line: 0, Character: 10}, itemCount: 220},
 		{source: "echo expand('')\n", position: protocol.Position{Line: 0, Character: 13}, itemCount: 16},
 	}
 	for _, test := range tests {
@@ -756,7 +756,7 @@ func TestSignatureHelpForBuiltinFunction(t *testing.T) {
 		t.Fatal("missing printf metadata")
 	}
 	label, parameters := formatBuiltinFunctionSignature(printf)
-	if label != "printf({fmt}, {expr1} ...): string" || len(parameters) != 3 || parameters[2].Label != protocol.String("...") {
+	if label != "printf({fmt} [, {expr1} ...]): string" || len(parameters) != 3 || parameters[2].Label != protocol.String("...") {
 		t.Fatalf("variadic signature = %q, %#v", label, parameters)
 	}
 	source := "vim9script\necho printf('%s%s', 'a', 'b')\n"

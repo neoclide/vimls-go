@@ -2,20 +2,21 @@ vim9script
 
 # Vim v9.2.1132, f3dc0fee778439ac8ff8680b42552f7f13d47396.
 # Sources: src/testdir/test_vim9_script.vim Test_white_space_after_command(),
-# test_vim9_assign.vim Test_assign_string_only(), and test_source.vim
-# Test_source_dryrun(). Skipped bodies come from test_usercommands.vim
+# test_vim9_assign.vim Test_assign_string_only().
+# Skipped bodies come from test_usercommands.vim
 # Test_command_block_skipped() and test_vim9_class.vim Test_class_body_skipped().
 # Builtin return types come from src/evalfunc.c ret_number(), ret_bool(), and
 # ret_list_number().
 # They cover the patch 1094 command whitespace, 1104 return helpers, 1130
 # string-only assignments, and 1132 skipped-body behaviors.
+# Rechecked at v9.2.1235; the removed ++dryrun checks no longer apply.
 
-def SourceFixture(lines: list<string>, dryrun = false): string
+def SourceFixture(lines: list<string>): string
   var path = tempname()
   writefile(lines, path)
   var exception = ''
   try
-    execute 'source' .. (dryrun ? ' ++dryrun ' : ' ') .. fnameescape(path)
+    execute 'source ' .. fnameescape(path)
   catch
     exception = v:exception
   finally
@@ -58,24 +59,6 @@ for source in [
       ]
   assert_match('E1012:', SourceFixture(['vim9script', 'def Negative()'] + source + ['enddef', 'defcompile']), 'builtin-return-type-' .. source[0])
 endfor
-
-unlet! g:vimls_dryrun_side_effect
-assert_equal('', SourceFixture([
-      'vim9script',
-      'g:vimls_dryrun_side_effect = true',
-      'def Good(): number',
-      '  return 1',
-      'enddef',
-      ], true), 'dryrun-good')
-assert_false(exists('g:vimls_dryrun_side_effect'))
-assert_match('E1012:', SourceFixture([
-      'vim9script',
-      'g:vimls_dryrun_side_effect = true',
-      'def Broken(): number',
-      '  return "wrong"',
-      'enddef',
-      ], true), 'dryrun-broken')
-assert_false(exists('g:vimls_dryrun_side_effect'))
 
 unlet! g:vimls_skipped_blocks
 assert_equal('', SourceFixture([

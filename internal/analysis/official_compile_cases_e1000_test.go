@@ -957,8 +957,9 @@ sort(l, (a: string, b: number) => 1)
 		// E1016
 		// Vim: src/testdir/test_vim9_assign.vim:1592:38807
 		{
+			// Environment declaration code updated to E1000 at Vim v9.2.1235.
 			ID:   "src/testdir/test_vim9_assign.vim:1592:38807/def",
-			Code: "vim/E1016",
+			Code: "vim/E1000",
 			Source: `def Func()
 # comment
 var $VAR = 5
@@ -1041,8 +1042,9 @@ defcompile
 		},
 		// Vim: src/testdir/test_vim9_assign.vim:217:5470
 		{
+			// Environment declaration code updated to E1000 at Vim v9.2.1235.
 			ID:   "src/testdir/test_vim9_assign.vim:217:5470/def",
-			Code: "vim/E1016",
+			Code: "vim/E1000",
 			Source: `def Func()
 # comment
 var $VAR: number

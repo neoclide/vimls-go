@@ -2599,3 +2599,22 @@ func TestVim9LambdaLegacyFlowControlDiagnostic(t *testing.T) {
 	}
 	assertFileSpans(t, file)
 }
+
+// Vim v9.2.1235 test_vim9_generics.vim Test_generic_type_cast_in_lambda().
+func TestVim921235SkippedCastType(t *testing.T) {
+	for _, test := range []struct {
+		source string
+		want   bool
+	}{
+		{"false ? <nosuch>1 : 2", false},
+		{"true ? 2 : <nosuch>1", false},
+		{"true ? <nosuch>1 : 2", true},
+		{"false ? 2 : <nosuch>1", true},
+		{"g:condition ? <nosuch>1 : 2", true},
+	} {
+		file := Parse("vim9script\necho " + test.source + "\n")
+		if hasDiagnostic(file, "vim/E1010") != test.want {
+			t.Fatalf("%s: %#v", test.source, file.Diagnostics)
+		}
+	}
+}

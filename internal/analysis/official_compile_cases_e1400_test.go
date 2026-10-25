@@ -235,3 +235,41 @@ var t: tuple<number, ...number> = (1, 2, 3)
 		})
 	}
 }
+
+// Vim v9.2.1235 src/testdir/test_vim9_generics.vim
+// Test_generic_interface_method_type_var_count(), patch v9.2.1209.
+func TestVim921235InterfaceGenericMethodCount(t *testing.T) {
+	for _, test := range []struct {
+		required, actual string
+		inherited        bool
+		want             bool
+	}{
+		{"<T>(t: T): T", "(t: number): number", false, true},
+		{"(t: number): number", "<T>(t: T): T", false, true},
+		{"<T>(t: T): T", "<X, Y>(t: X): X", false, true},
+		{"<T>(t: T): T", "<X, Y>(t: X): X", true, true},
+		{"<T>(t: T): T", "<X>(t: X): X", false, false},
+	} {
+		classHeader := "class A implements I\n"
+		suffix := ""
+		if test.inherited {
+			classHeader = "class Parent\n"
+			suffix = "class A extends Parent implements I\nendclass\n"
+		}
+		source := "vim9script\ninterface I\n def Fn" + test.required + "\nendinterface\n" + classHeader + " def Fn" + test.actual + "\n  return t\n enddef\nendclass\n" + suffix
+		file := syntax.Parse(source)
+		result := Analyze(file)
+		var got []syntax.Diagnostic
+		for _, d := range result.Diagnostics {
+			if d.Code == "vim/E1438" {
+				got = append(got, d)
+			}
+		}
+		if (len(got) == 1) != test.want || len(got) > 1 {
+			t.Fatalf("E1438=%#v; all=%#v\n%s", got, result.Diagnostics, source)
+		}
+		if len(got) == 1 && (got[0].Message != `Number of type variables of method "Fn" differs from interface "I"` || file.Text(got[0].Span) != "endclass") {
+			t.Fatalf("E1438=%#v", got)
+		}
+	}
+}

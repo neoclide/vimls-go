@@ -11,8 +11,10 @@ See [language support](language-support.md) for what works today and the
 
 - Resolve imported base-class members for precise inherited-member diagnostics;
   absence checks currently remain conservative across imported ancestors.
-- When updating the pinned Vim baseline, adopt patch 9.2.1155's return-flow
-  rules for `try`/`catch` (GitHub #13), together with its unreachable-code checks.
+- Extend generic type substitution through nested functions, lambdas and imported
+  or inherited methods; unresolved type variables currently remain conservative.
+- Align deeply nested type diagnostics with E1439, including alias expansion;
+  the parser currently retains its smaller nesting limit.
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
 - Parse more escaped command bodies, building on the supported

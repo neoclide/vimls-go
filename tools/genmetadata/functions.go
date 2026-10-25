@@ -45,8 +45,8 @@ func generateFunctions(vimRoot, output string) error {
 	if err != nil {
 		return fmt.Errorf("parse evalfunc.c: %w", err)
 	}
-	if len(functions) != 591 {
-		return fmt.Errorf("found %d builtin functions, want 591", len(functions))
+	if len(functions) != 595 {
+		return fmt.Errorf("found %d builtin functions, want 595", len(functions))
 	}
 	if err := addFunctionSignatures(vimRoot, functions); err != nil {
 		return fmt.Errorf("read builtin signatures: %w", err)

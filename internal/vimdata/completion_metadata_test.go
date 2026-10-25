@@ -15,11 +15,11 @@ func TestCompletionMetadataTables(t *testing.T) {
 	}
 
 	features := HasFeatures()
-	if len(sourceHasFeatures) != 208 {
-		t.Fatalf("source has() features = %d, want 208", len(sourceHasFeatures))
+	if len(sourceHasFeatures) != 204 {
+		t.Fatalf("source has() features = %d, want 204", len(sourceHasFeatures))
 	}
-	if len(features) != 224 {
-		t.Fatalf("has() features = %d, want 224", len(features))
+	if len(features) != 220 {
+		t.Fatalf("has() features = %d, want 220", len(features))
 	}
 	for index, feature := range features {
 		if feature.Name == "" || feature.Documentation == "" {
@@ -29,7 +29,7 @@ func TestCompletionMetadataTables(t *testing.T) {
 			t.Fatalf("has() features are not uniquely sorted at %q", feature.Name)
 		}
 	}
-	wantFeatures := map[string]bool{"all_builtin_terms": false, "clipboard_working": false, "gui_macvim": false, "nvim": false, "patch-" + strings.TrimPrefix(VimSourceTag, "v"): false, "vim9script": false, "X11": false, ":tearoff": false}
+	wantFeatures := map[string]bool{"all_builtin_terms": false, "clipboard_working": false, "gui_macvim": false, "nvim": false, "patch-" + strings.TrimPrefix(VimSourceTag, "v"): false, "vim9script": false, "image_popup": false, "X11": false, ":tearoff": false}
 	for _, feature := range features {
 		if _, ok := wantFeatures[feature.Name]; ok {
 			wantFeatures[feature.Name] = true

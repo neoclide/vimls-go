@@ -325,6 +325,12 @@ func collectImplementedInterfaceMembersDiagnostics(result *FileAnalysis) {
 						})
 						return false
 					}
+					if len(required.Function.TypeParameters) != len(actual.Function.TypeParameters) {
+						result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
+							Code: "vim/E1438", Message: `Number of type variables of method "` + name + `" differs from interface "` + directInterfaceName + `"`, Span: aggregateEndSpan(file, class),
+						})
+						return false
+					}
 					if methodSignaturesMismatch(result, required.Function, actual.Function) {
 						return false
 					}
@@ -1567,6 +1573,32 @@ func methodSignaturesMismatch(result *FileAnalysis, expected, actual *syntax.Fun
 	}
 	if actual.ReturnType != nil {
 		actualReturn = result.typeFromSyntax(actual.ReturnType, result.Root)
+	}
+	// A method may return its implementing/derived class where its interface
+	// or base class is expected (Vim v9.2.1206).
+	if expectedReturn.Nominal != (NominalType{}) && actualReturn.Nominal != (NominalType{}) {
+		return !compatibleNominalTypes(expectedReturn, actualReturn)
+	}
+	if actualClass := result.classes[actualReturn.Name]; actualClass != nil && expectedReturn.Name != actualReturn.Name {
+		interfaces := localAggregates(result.File, syntax.BlockInterface)
+		pending := []*syntax.Command{actualClass}
+		seen := make(map[*syntax.Command]bool)
+		for len(pending) > 0 {
+			current := pending[len(pending)-1]
+			pending = pending[:len(pending)-1]
+			if current == nil || current.Aggregate == nil || seen[current] {
+				continue
+			}
+			seen[current] = true
+			parents := append(append([]syntax.Span(nil), current.Aggregate.Extends...), current.Aggregate.Implements...)
+			for _, span := range parents {
+				name := result.File.Text(span)
+				if name == expectedReturn.Name {
+					return false
+				}
+				pending = append(pending, result.classes[name], interfaces[name])
+			}
+		}
 	}
 	return !sameMethodType(expectedReturn, actualReturn)
 }

@@ -684,17 +684,17 @@ func TestOfficialRangesExplicitContinuationAndExpressionQuotes(t *testing.T) {
 	}
 }
 
-func TestSourceDryrunPathSpan(t *testing.T) {
+func TestSourcePathSpan(t *testing.T) {
 	for _, prefix := range []string{"", "vim9script\n"} {
 		for _, test := range []struct{ argument, path string }{
-			{"++dryrun ./target.vim", "./target.vim"},
-			{"++dryrun  \tpath\\ with\\ spaces.vim | echo 'after'", "path\\ with\\ spaces.vim"},
-			{"++dryrun", ""},
-			{"++dryrun   ", ""},
+			{"++dryrun ./target.vim", "++dryrun ./target.vim"},
+			{"++dryrun  \tpath\\ with\\ spaces.vim | echo 'after'", "++dryrun  \tpath\\ with\\ spaces.vim"},
+			{"++dryrun", "++dryrun"},
+			{"++dryrun   ", "++dryrun"},
 			{"++dryrunx ./target.vim", "++dryrunx ./target.vim"},
 			{"++dryrun\t./target.vim", "++dryrun\t./target.vim"},
 			{"./++dryrun", "./++dryrun"},
-			{"++dryrun\n  \\ ./target.vim", "./target.vim"},
+			{"++dryrun\n  \\ ./target.vim", "++dryrun\n  \\ ./target.vim"},
 		} {
 			source := prefix + "source " + test.argument + "\n"
 			file := Parse(source)
@@ -1273,4 +1273,15 @@ func hasDiagnostic(file *File, code string) bool {
 
 func fileText(file *File, span Span) string {
 	return file.Text(span)
+}
+
+// Vim patch 9.2.1230: a range delimiter inside a collection is pattern text.
+func TestVim921235PatternRangeCollections(t *testing.T) {
+	for _, source := range []string{"/[a/b]/print", "?[a?b]?print", "/[[:alpha:]/]/print", "/[/]/+1print", "/[/+99999999999999999999]/print"} {
+		file := Parse(source + "\n")
+		if len(file.Diagnostics) != 0 || len(file.Commands) != 1 || file.Commands[0].Canonical != "print" {
+			t.Fatalf("%s: commands=%#v diagnostics=%#v", source, file.Commands, file.Diagnostics)
+		}
+		assertFileSpans(t, file)
+	}
 }

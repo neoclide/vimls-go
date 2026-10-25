@@ -69,7 +69,7 @@ following statements remain checked. In user-command templates, multiline
 `<q-args>` and other placeholders remain unknown until expansion.
 
 Builtin return-value inference also uses the corrections recorded in Vim
-v9.2.1104, checked against v9.2.1132, for functions already in the pinned metadata.
+v9.2.1104, checked against v9.2.1235, for functions already in the pinned metadata.
 For example, assigning `match()` to a string produces E1012, while
 `submatch(0, true)` is accepted as `list<string>`. A default value alone does not
 establish the type of `get()`: unknown elements or a different default type keep

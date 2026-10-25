@@ -104,11 +104,7 @@ gui_photon
 gui_win32
 iconv
 image
-image_cairo
-image_gdi
-image_gdk
-image_kitty
-image_sixel
+image_popup
 insert_expand
 ipv6
 job

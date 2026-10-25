@@ -11660,36 +11660,6 @@ func TestAnalyzeE1027MissingReturnStatement(t *testing.T) {
 			span:   "enddef",
 		},
 		{
-			name: "pattern catch is not exhaustive",
-			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch /x/\n" +
-				"    return 'caught'\n  endtry\nenddef\n",
-			span: "enddef",
-		},
-		{
-			name: "catch throw is cleared by endtry",
-			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch\n" +
-				"    throw 'failed'\n  endtry\nenddef\n",
-			span: "enddef",
-		},
-		{
-			name: "try throw is cleared by endtry",
-			source: "vim9script\ndef Missing(): string\n  try\n    throw 'failed'\n  catch\n" +
-				"    return 'caught'\n  endtry\nenddef\n",
-			span: "enddef",
-		},
-		{
-			name: "fallthrough finally clears earlier returns",
-			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch\n" +
-				"    return 'caught'\n  finally\n    echo 'done'\n  endtry\nenddef\n",
-			span: "enddef",
-		},
-		{
-			name: "finally throw is cleared by endtry",
-			source: "vim9script\ndef Missing(): string\n  try\n    echo 'work'\n  finally\n" +
-				"    throw 'failed'\n  endtry\nenddef\n",
-			span: "enddef",
-		},
-		{
 			name:   "Legacy root def still compiles",
 			source: "def Missing(): number\n  echo 'no return'\nenddef\n",
 			span:   "enddef",
@@ -11718,6 +11688,31 @@ func TestAnalyzeE1027MissingReturnStatement(t *testing.T) {
 	for _, test := range []struct {
 		name, source string
 	}{
+		{
+			name: "pattern catch propagates unmatched exceptions",
+			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch /x/\n" +
+				"    return 'caught'\n  endtry\nenddef\n",
+		},
+		{
+			name: "catch throw terminates",
+			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch\n" +
+				"    throw 'failed'\n  endtry\nenddef\n",
+		},
+		{
+			name: "try throw terminates",
+			source: "vim9script\ndef Missing(): string\n  try\n    throw 'failed'\n  catch\n" +
+				"    return 'caught'\n  endtry\nenddef\n",
+		},
+		{
+			name: "fallthrough finally preserves earlier returns",
+			source: "vim9script\ndef Missing(): string\n  try\n    return 'ok'\n  catch\n" +
+				"    return 'caught'\n  finally\n    echo 'done'\n  endtry\nenddef\n",
+		},
+		{
+			name: "finally throw terminates",
+			source: "vim9script\ndef Missing(): string\n  try\n    echo 'work'\n  finally\n" +
+				"    throw 'failed'\n  endtry\nenddef\n",
+		},
 		{name: "direct return", source: "vim9script\ndef Complete(): number\n  return 1\nenddef\n"},
 		{name: "direct throw", source: "vim9script\ndef Complete(): number\n  throw 'failed'\nenddef\n"},
 		{

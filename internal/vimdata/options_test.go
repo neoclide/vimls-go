@@ -46,8 +46,8 @@ func TestLookupOptionMetadata(t *testing.T) {
 	if IsTerminalOptionName("term") {
 		t.Fatal("IsTerminalOptionName(\"term\") = true")
 	}
-	if len(builtinOptions) != 562 {
-		t.Fatalf("len(builtinOptions) = %d, want 562", len(builtinOptions))
+	if len(builtinOptions) != 563 {
+		t.Fatalf("len(builtinOptions) = %d, want 563", len(builtinOptions))
 	}
 	seenCanonical := make(map[string]Option, len(builtinOptions))
 	seenShort := make(map[string]Option, len(builtinOptions))
@@ -130,14 +130,14 @@ func TestLookupOptionMetadata(t *testing.T) {
 			t.Fatalf("LookupOption(%q) = %#v, %v", option.ShortName, gotShort, ok)
 		}
 	}
-	if typeCounts[OptionBool] != 157 || typeCounts[OptionNumber] != 89 || typeCounts[OptionString] != 316 {
-		t.Fatalf("option type counts = %#v, want bool=157 number=89 string=316", typeCounts)
+	if typeCounts[OptionBool] != 157 || typeCounts[OptionNumber] != 89 || typeCounts[OptionString] != 317 {
+		t.Fatalf("option type counts = %#v, want bool=157 number=89 string=317", typeCounts)
 	}
 	if completionCount != 66 {
 		t.Fatalf("options with fixed completion values = %d, want 66", completionCount)
 	}
-	if callbackCount != 334 || validationCount != 48 {
-		t.Fatalf("callback/validation counts = %d/%d, want 334/48", callbackCount, validationCount)
+	if callbackCount != 335 || validationCount != 48 {
+		t.Fatalf("callback/validation counts = %d/%d, want 335/48", callbackCount, validationCount)
 	}
 }
 

@@ -29,7 +29,7 @@ type Type struct {
 }
 
 // Vim9TypeParser parses the type grammar used by declarations, functions,
-// tuples, classes, enums, aliases, and generic functions through Vim 9.2.1132.
+// tuples, classes, enums, aliases, and generic functions through Vim 9.2.1235 (subject to the nesting limit below).
 type Vim9TypeParser struct{}
 
 func (Vim9TypeParser) Parse(source string) (*Type, []Diagnostic) {

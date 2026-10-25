@@ -2101,7 +2101,11 @@ func TestVim9E1016ExplicitScopedDeclarations(t *testing.T) {
 	}
 	for index, test := range want {
 		diagnostic := file.Diagnostics[index]
-		if diagnostic.Code != "vim/E1016" || diagnostic.Message != test.message || file.Text(diagnostic.Span) != test.name {
+		code := "vim/E1016"
+		if test.name == "$ENV" {
+			code = "vim/E1000"
+		}
+		if diagnostic.Code != code || diagnostic.Message != test.message || file.Text(diagnostic.Span) != test.name {
 			t.Fatalf("diagnostic %d = %#v, want E1016 %q on %q", index, diagnostic, test.message, test.name)
 		}
 		command := file.Commands[index+1]

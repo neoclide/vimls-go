@@ -16,11 +16,9 @@ Vim.
 `<tag>` is the active pin. The current lock is the authoritative reviewed count
 record; generated artifacts retain their own tag and commit provenance.
 
-The `v9.2.1015-*` files are historical archives for the original migration
-from commit `5ab969f719bb09555e90e8dff8c94fc37bcbf2ae`. They remain byte-for-byte
-preserved so older handwritten regression provenance can still be traced to its
-recorded source. Existing handwritten compile regressions retain that original
-source unless their own provenance comment records a newer revision.
+Only the current pinned corpus is kept in this directory. Earlier corpora can
+be recovered from Git history. Handwritten compile regressions retain their
+recorded source revision unless their own provenance comment names a newer one.
 
 ## What the tests prove
 

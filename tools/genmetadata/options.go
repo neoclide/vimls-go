@@ -96,8 +96,8 @@ func generateOptions(root, output, oracleOutput string) error {
 	if err != nil {
 		return fmt.Errorf("parse optiondefs.h: %w", err)
 	}
-	if len(options) != 469 {
-		return fmt.Errorf("found %d ordinary options, want 469", len(options))
+	if len(options) != 470 {
+		return fmt.Errorf("found %d ordinary options, want 470", len(options))
 	}
 	terms, err := parseTerms(source)
 	if err != nil {
