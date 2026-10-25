@@ -9,6 +9,8 @@ See [language support](language-support.md) for what works today and the
 
 ## Language support
 
+- Resolve imported base-class members for precise inherited-member diagnostics;
+  absence checks currently remain conservative across imported ancestors.
 - Complete support for `def` functions in Legacy scripts and `function`
   blocks in Vim9 scripts.
 - Parse more escaped command bodies, building on the supported

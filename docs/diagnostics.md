@@ -183,6 +183,10 @@ source filename suffix: `foo#bar#Run` requires `/foo/bar.vim`, including under
 `plugin/`. Conditional and dynamic definitions are not checked. Vim9 `#`
 function names retain the separate `E1263` check.
 
+Missing method and object-variable diagnostics remain conservative when a local
+class inherits from an imported class, directly or through a local ancestor.
+The local analysis cannot prove that a member is absent from that imported base.
+
 ## Adjusting the messages
 
 Use `vim.diagnostic.disabled` to hide a code, or

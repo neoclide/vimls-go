@@ -1657,6 +1657,24 @@ func builtinObjectMethodSignature(returnType string) *syntax.Function {
 	return &syntax.Function{ReturnType: &syntax.Type{Kind: syntax.TypeNamed, Name: returnType}}
 }
 
+// A local-only lookup cannot prove absence beyond an imported base class.
+// Follow local ancestors too, and bound malformed inheritance cycles.
+func hasImportedBase(result *FileAnalysis, class *syntax.Command) bool {
+	seen := make(map[*syntax.Command]bool)
+	for class != nil && class.Aggregate != nil && len(class.Aggregate.Extends) > 0 && !seen[class] {
+		seen[class] = true
+		span := class.Aggregate.Extends[0]
+		name := result.File.Text(span)
+		if dot := strings.IndexByte(name, '.'); dot > 0 {
+			if decl := resolve(result.commandScopes[class], name[:dot], span.Start, false, nil); decl != nil && decl.Kind == SymbolKindImport {
+				return true
+			}
+		}
+		class = extendedClass(result.File, result.classes, class)
+	}
+	return false
+}
+
 func extendedClass(file *syntax.File, classes map[string]*syntax.Command, class *syntax.Command) *syntax.Command {
 	if file == nil || class == nil || class.Aggregate == nil || len(class.Aggregate.Extends) == 0 {
 		return nil
@@ -1934,6 +1952,9 @@ func appendMissingAggregateMethodDiagnostic(result *FileAnalysis, scope *Scope, 
 		}
 	}
 
+	if hasImportedBase(result, aggregate) {
+		return
+	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1325", Message: `Method "` + methodName + `" not found in class "` + className + `"`, Span: memberSpan,
 	})
@@ -1970,6 +1991,9 @@ func appendMissingObjectVariableDiagnostic(result *FileAnalysis, scope *Scope, m
 		if diagnostic.Span == memberNameSpan(file, member) && (diagnostic.Code == "vim/E1333" || diagnostic.Code == "vim/E1335" || diagnostic.Code == "vim/E1375" || diagnostic.Code == "vim/E1385" || diagnostic.Code == "vim/E1386" || diagnostic.Code == "vim/E1409") {
 			return
 		}
+	}
+	if hasImportedBase(result, aggregate) {
+		return
 	}
 	result.Diagnostics = append(result.Diagnostics, syntax.Diagnostic{
 		Code: "vim/E1326", Message: `Variable "` + name + `" not found in object "` + className + `"`, Span: memberNameSpan(file, member),

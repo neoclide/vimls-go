@@ -2337,6 +2337,31 @@ au User Outside lsp#Map()
 	}
 }
 
+func TestIssue14ImportedBaseDiagnostics(t *testing.T) {
+	for _, importKind := range []string{"", "autoload "} {
+		t.Run(importKind, func(t *testing.T) {
+			root := t.TempDir()
+			writeWorkspaceFile(t, root, "Foo.vim", "vim9script\nexport class Foo\n def Baz(s: string)\n  echomsg s\n enddef\nendclass\n")
+			instance, published := initializeWorkspaceDiagnosticServer(t, root)
+			documentURI := uri.File(filepath.Join(root, "Bar.vim"))
+			source := "vim9script\nimport " + importKind + "'./Foo.vim'\nclass Bar extends Foo.Foo\n def Qux()\n  this.Baz('here')\n enddef\nendclass\nvar v = Bar.new()\nv.Qux()\nclass Local\n def Run()\n  this.Missing()\n enddef\nendclass\n"
+			if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: source}}); err != nil {
+				t.Fatal(err)
+			}
+			params := waitForDiagnosticsForURI(t, published, documentURI)
+			var missing []protocol.Diagnostic
+			for _, d := range params.Diagnostics {
+				if d.Code == protocol.String("vim/E1325") {
+					missing = append(missing, d)
+				}
+			}
+			if len(missing) != 1 || missing[0].Message != protocol.String(`Method "Missing" not found in class "Local"`) {
+				t.Fatalf("diagnostics = %#v", params.Diagnostics)
+			}
+		})
+	}
+}
+
 func TestServerPublishesAutoloadFilenameMismatch(t *testing.T) {
 	root := t.TempDir()
 	instance, published := initializeWorkspaceDiagnosticServer(t, root)

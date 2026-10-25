@@ -162,7 +162,8 @@ and `final` types into local inference, completion details, and type checks,
 including values re-exported through other files and container element types.
 Named types retain their defining file, so aliases of the same type agree and
 unrelated classes with the same name stay distinct. Known inheritance and
-interface relationships are preserved.
+interface relationships are preserved. Missing-member checks on local subclasses
+remain conservative when an ancestor is imported.
 
 Autoload values receive the same static checks without executing or loading
 user scripts. Dynamic or unresolved imports remain unknown. Within an import

@@ -12875,3 +12875,15 @@ func TestIssue11LegacyConditionalFunction(t *testing.T) {
 		}
 	}
 }
+
+func TestIssue14ImportedBaseMembers(t *testing.T) {
+	for _, parent := range []string{"Lib.Base", "Middle"} {
+		source := "vim9script\nimport './lib.vim' as Lib\nclass Middle extends Lib.Base\nendclass\nclass Child extends " + parent + "\n def Run()\n  this.Baz()\n  echo this.value\n enddef\nendclass\n"
+		result := Analyze(syntax.Parse(source))
+		for _, d := range result.Diagnostics {
+			if d.Code == "vim/E1325" || d.Code == "vim/E1326" {
+				t.Fatalf("imported inheritance: %#v", result.Diagnostics)
+			}
+		}
+	}
+}
