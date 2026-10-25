@@ -1035,6 +1035,9 @@ func TestWorkspaceAutoloadFunctionNotFoundDiagnostics(t *testing.T) {
 	if err := index.Replace(targetPath, syntax.Parse("function foo#bar#Known() abort\nendfunction\n")); err != nil {
 		t.Fatal(err)
 	}
+	if err := index.Replace(filepath.Join(root, "plugin", "mylib.vim"), syntax.Parse("function! mylib#run() abort\nendfunction\n")); err != nil {
+		t.Fatal(err)
+	}
 	index.SetComplete(true)
 	instance := New(nil, nil, io.Discard)
 	t.Cleanup(instance.stopAnalysis)
@@ -1054,7 +1057,7 @@ func TestWorkspaceAutoloadFunctionNotFoundDiagnostics(t *testing.T) {
 	tests := []struct {
 		name, source string
 	}{
-		{name: "legacy", source: "call foo#bar#Known()\ncall foo#bar#Missing()\ncall absent#api#Run()\nlet value = g:foo#bar#Value\n"},
+		{name: "legacy", source: "call mylib#run()\ncall foo#bar#Known()\ncall foo#bar#Missing()\ncall absent#api#Run()\nlet value = g:foo#bar#Value\n"},
 		{name: "Vim9", source: "vim9script\nfoo#bar#Known()\nfoo#bar#Missing()\nabsent#api#Run()\n"},
 	}
 	for _, test := range tests {
@@ -2331,5 +2334,24 @@ au User Outside lsp#Map()
 	params := waitForDiagnosticsForURI(t, published, documentURI)
 	if len(params.Diagnostics) != 1 || params.Diagnostics[0].Code != protocol.String("vimls/autocmd-outside-augroup") || params.Diagnostics[0].Range.Start.Line != 8 {
 		t.Fatalf("diagnostics = %#v; want only the final ungrouped autocmd", params.Diagnostics)
+	}
+}
+
+func TestServerPublishesAutoloadFilenameMismatch(t *testing.T) {
+	root := t.TempDir()
+	instance, published := initializeWorkspaceDiagnosticServer(t, root)
+	documentURI := uri.File(filepath.Join(root, "other.vim"))
+	if err := instance.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: protocol.TextDocumentItem{URI: documentURI, Version: 1, Text: "function! mylib#run() abort\nendfunction\n"}}); err != nil {
+		t.Fatal(err)
+	}
+	params := waitForDiagnosticsForURI(t, published, documentURI)
+	var count int
+	for _, d := range params.Diagnostics {
+		if d.Code == protocol.String("vim/E746") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("diagnostics=%#v", params.Diagnostics)
 	}
 }

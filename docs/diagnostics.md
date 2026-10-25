@@ -174,6 +174,15 @@ Legacy functions declared inside control-flow branches remain visible in their
 containing script or function. Conditional execution is not proof that a
 function is absent.
 
+Legacy `#` functions declared in runtimepath `plugin/`
+scripts also satisfy the autoload-function lookup, including `after/plugin/`.
+Autoload files retain runtimepath precedence.
+
+`E746` checks literal, unconditional Legacy function definitions against the
+source filename suffix: `foo#bar#Run` requires `/foo/bar.vim`, including under
+`plugin/`. Conditional and dynamic definitions are not checked. Vim9 `#`
+function names retain the separate `E1263` check.
+
 ## Adjusting the messages
 
 Use `vim.diagnostic.disabled` to hide a code, or

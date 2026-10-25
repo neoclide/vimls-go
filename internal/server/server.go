@@ -1425,6 +1425,7 @@ func (s *Server) composeDocumentDiagnostics(ctx context.Context, snapshot *text.
 		file.Diagnostics = append(file.Diagnostics, analysis.UserCommandDiagnostics(file, workspaceSnapshot.userCommandNames)...)
 	}
 	file.Diagnostics = append(file.Diagnostics, workspaceSnapshot.globalDiagnostics...)
+	file.Diagnostics = append(file.Diagnostics, workspace.AutoloadNameDiagnostics(workspaceSnapshot.path, file)...)
 	s.mu.Lock()
 	targetVersion := s.targetVimVersion
 	s.mu.Unlock()

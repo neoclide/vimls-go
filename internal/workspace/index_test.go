@@ -1043,3 +1043,33 @@ func TestLeadingFunctionDocumentationPhysicalNewlines(t *testing.T) {
 		}
 	}
 }
+
+func TestIssue12PluginAutoloadFunctions(t *testing.T) {
+	root := t.TempDir()
+	index := NewIndex(20, 10000)
+	index.SetRuntimePaths([]string{root, filepath.Join(root, "after")})
+	for _, entry := range []struct{ path, source string }{
+		{"plugin/mylib.vim", "if exists('g:enabled')\nfunction! mylib#run() abort\nendfunction\nendif\n"},
+		{"after/plugin/extra.vim", "function! extra#run() abort\nendfunction\n"},
+		{"plugin/vim9.vim", "vim9script\nexport def Run()\nenddef\n"},
+		{"unrelated/other.vim", "function! other#run() abort\nendfunction\n"},
+	} {
+		if err := index.Replace(filepath.Join(root, entry.path), syntax.Parse(entry.source)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"mylib#run", "g:mylib#run", "extra#run"} {
+		if !index.HasAutoloadFunction(name) {
+			t.Errorf("missing plugin function %s", name)
+		}
+	}
+	for _, name := range []string{"other#run", "vim9#Run", "mylib#missing"} {
+		if index.HasAutoloadFunction(name) {
+			t.Errorf("unexpected function %s", name)
+		}
+	}
+	index.Remove(filepath.Join(root, "plugin/mylib.vim"))
+	if index.HasAutoloadFunction("mylib#run") {
+		t.Fatal("removed plugin function retained")
+	}
+}

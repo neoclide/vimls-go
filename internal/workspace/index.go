@@ -518,8 +518,9 @@ func (i *Index) RuntimeFile(relativePath string) (string, bool) {
 	return "", false
 }
 
-// HasAutoloadFunction reports whether the first matching runtimepath file
-// declares name as a legacy autoload function or a Vim9 exported function.
+// HasAutoloadFunction reports whether a runtime plugin declares a Legacy #
+// function, or the first matching autoload file declares a Legacy function
+// or Vim9 exported function.
 func (i *Index) HasAutoloadFunction(name string) bool {
 	relativePath, ok := AutoloadPath(name)
 	if !ok {
@@ -529,6 +530,29 @@ func (i *Index) HasAutoloadFunction(name string) bool {
 	baseName := name[strings.LastIndexByte(name, '#')+1:]
 	i.mu.RLock()
 	defer i.mu.RUnlock()
+	// Legacy # functions can be defined by eagerly loaded plugin scripts.
+	// Autoload files still follow first-runtimepath-match semantics below.
+	for _, global := range i.byGlobalName[name] {
+		if global.Kind != analysis.NameDeclarationFunction {
+			continue
+		}
+		plugin := false
+		for _, root := range i.runtimePaths {
+			relative, err := filepath.Rel(root, global.Path)
+			if err == nil && strings.HasPrefix(filepath.ToSlash(relative), "plugin/") {
+				plugin = true
+				break
+			}
+		}
+		if !plugin {
+			continue
+		}
+		for _, fact := range i.files[global.Path].facts {
+			if fact.SelectionRange == global.Span && fact.TopLevel && fact.Kind == analysis.SymbolKindFunction && fact.Dialect == syntax.Legacy {
+				return true
+			}
+		}
+	}
 	for index, files := range i.runtimeFiles {
 		if i.runtimeAfter[index] {
 			continue
