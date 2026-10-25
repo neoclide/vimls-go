@@ -170,6 +170,10 @@ reported as warnings. Missing-function checks wait for workspace and runtimepath
 source indexing. Unknown uppercase commands also wait for runtime help, whose
 command tags can establish a known name.
 
+Legacy functions declared inside control-flow branches remain visible in their
+containing script or function. Conditional execution is not proof that a
+function is absent.
+
 ## Adjusting the messages
 
 Use `vim.diagnostic.disabled` to hide a code, or

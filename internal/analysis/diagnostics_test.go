@@ -12856,3 +12856,22 @@ func TestUnknownUserCommandWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue11LegacyConditionalFunction(t *testing.T) {
+	for _, body := range []string{
+		"if v:version >= 704\nfunction! s:Wrap(name) abort\nreturn function(a:name)\nendfunction\nelse\nfunction! s:Wrap(name) abort\nreturn function(a:name)\nendfunction\nendif\n",
+		"if exists('g:enabled')\nfunction! s:Wrap(name) abort\nreturn function(a:name)\nendfunction\nendif\n",
+	} {
+		file := syntax.Parse(body + "call s:Wrap('tr')\ncall s:Missing()\n")
+		result := Analyze(file)
+		var missing []string
+		for _, d := range result.Diagnostics {
+			if d.Code == "vim/E117" {
+				missing = append(missing, file.Text(d.Span))
+			}
+		}
+		if !reflect.DeepEqual(missing, []string{"Missing"}) {
+			t.Fatalf("missing functions = %v; diagnostics=%#v", missing, result.Diagnostics)
+		}
+	}
+}

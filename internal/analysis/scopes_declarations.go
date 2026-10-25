@@ -222,6 +222,14 @@ func collectCommandDeclarations(result *FileAnalysis, command *syntax.Command, c
 				declarationScope = functionScope
 			}
 		}
+		// Legacy control blocks do not introduce a function namespace. Keep
+		// nested function boundaries, but expose conditional declarations to
+		// the containing script/function just like unconditional declarations.
+		if command.Canonical == "function" && command.Dialect == syntax.Legacy {
+			for declarationScope.Parent != nil && declarationScope.Kind != syntax.BlockFunction && declarationScope.Kind != syntax.BlockDef && declarationScope.Lambda == nil {
+				declarationScope = declarationScope.Parent
+			}
+		}
 		if !emptySyntaxSpan(command.Function.Name) {
 			declaration := addDeclaration(result, declarationScope, file, command.Function.Name, functionKind(file, command, declarationScope), false)
 			if declaration != nil {
